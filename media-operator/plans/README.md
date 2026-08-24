@@ -39,11 +39,6 @@ These plans are designed. Each keeps its number and moves to
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
   builds on the display of plan 07.
-* [15, Finished plays clean up](15-finished-plays-clean-up.md). A
-  `Finished` Play's pod goes on the pass that sees the terminal
-  phase, and the Play follows after `ttlSecondsAfterFinished`, a
-  spec field defaulting to five minutes, so a library app times its
-  continue-watching window with the same knob.
 
 ## Completed
 
@@ -124,6 +119,14 @@ These plans are designed. Each keeps its number and moves to
   animation needed the reply-await fix in 2026.08.24-008, because the
   revealed message was lost when the sidecar closed its socket before
   mpv's replies.
+* [15, Finished plays clean up](completed/15-finished-plays-clean-up.md).
+  Built, and drilled on `liken-1` on 2026-08-24 in release
+  2026.08.24-009. A `Finished` Play's pod and claim go on the first
+  pass that reads the terminal phase, and the Play follows after
+  `ttlSecondsAfterFinished`, a spec field defaulting to 300 seconds,
+  so a library app times its continue-watching window with the same
+  knob. The upgrade's first pass swept two lingering finished pods at
+  once, and both Plays deleted on their five-minute stamps.
 
 ## Open problems
 
