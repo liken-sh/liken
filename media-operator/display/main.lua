@@ -22,6 +22,20 @@ overlay.res_y = theme.canvas.h
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
+  -- The idle client draws the clock alone. mpv reports idle-active while it
+  -- holds a window with no file, which is the whole life of the idle pod and
+  -- never a moment of a Play. So the idle branch draws the clock at full
+  -- brightness on the black idle window and returns, and a Play never reaches
+  -- it. theme.fade scales every alpha for the OSD fade, so the branch sets it to
+  -- full, and the black window backs the text with no scrim. Assigning
+  -- overlay.data and updating replaces the surface in place, so the minute turns
+  -- with no clear-then-redraw flicker.
+  if mp.get_property_bool("idle-active") then
+    theme.set_fade(1)
+    overlay.data = clock.draw()
+    overlay:update()
+    return
+  end
   -- The logo overlay tracks the OSD. It shows while the OSD is up, and it hides
   -- when the OSD hides and while a chooser captures, so a corner logo never
   -- lingers over a plain frame or floats above the chooser's dim. overlay-add
@@ -173,6 +187,25 @@ mp.observe_property("osd-dimensions", "native", function()
 end)
 mp.observe_property("pause", "bool", function(_, value)
   focus.on_pause(value == true)
+end)
+
+-- The idle client redraws its clock once a second, so the minute turns on the
+-- screen. mpv pushes no property while it sits idle with no file, so the clock
+-- needs a timer of its own. A Play never enters idle-active, so this timer runs
+-- on the idle pod alone and adds no redraw to a playing pod. observe fires once
+-- at startup with the current value, so the idle pod arms the timer at once and
+-- a Play pod never arms it.
+local idle_clock_timer = nil
+mp.observe_property("idle-active", "bool", function(_, value)
+  if value then
+    if not idle_clock_timer then
+      idle_clock_timer = mp.add_periodic_timer(1, request_redraw)
+    end
+  elseif idle_clock_timer then
+    idle_clock_timer:kill()
+    idle_clock_timer = nil
+  end
+  request_redraw()
 end)
 
 -- The command sidecar hands the current item's presentation block to the

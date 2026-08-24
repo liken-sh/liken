@@ -54,6 +54,61 @@ func runPlayer(items []string) {
 	}
 }
 
+// runIdle builds the idle argument vector and execs mpv, so mpv becomes
+// the standing idle pod's own process. It draws the clock while no Play
+// runs. On any failure it writes the reason to stderr and exits nonzero,
+// which the kubelet reads as a pod that failed to start.
+func runIdle() {
+	argv, err := idleArgv()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "idle: %v\n", err)
+		os.Exit(1)
+	}
+	if err := syscall.Exec(argv[0], argv, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "idle: exec %s: %v\n", argv[0], err)
+		os.Exit(1)
+	}
+}
+
+// idleArgv builds mpv's arguments for the idle client. --idle=yes and
+// --force-window=yes hold a window with no file, so the display script
+// draws the clock on an empty surface. --no-audio because the clock is
+// silent, so the idle pod claims no sink. The gpu video output with the
+// Wayland EGL context and the display script match the playback shim, so
+// the idle client and a Play draw through the same stack on the same
+// screen. --osc=no turns off mpv's built-in on-screen controller,
+// because the display draws its own. The window's app-id routes the
+// surface to the shared screen when the display claim delivered one.
+//
+// There is no --input-ipc-server and no media path, because nothing
+// drives the idle client this milestone and it plays no file.
+//
+// argv[0] is the resolved binary path, so a test that points mpvBinary at
+// a stand-in reads back the path it set. exec.LookPath fails before mpv
+// runs when the image carries no mpv, which the shim reports rather than
+// execing nothing.
+func idleArgv() ([]string, error) {
+	path, err := exec.LookPath(mpvBinary)
+	if err != nil {
+		return nil, fmt.Errorf("find %s: %w", mpvBinary, err)
+	}
+	argv := []string{
+		path,
+		"--vo=gpu",
+		"--gpu-context=wayland",
+		"--fullscreen",
+		"--idle=yes",
+		"--force-window=yes",
+		"--no-audio",
+		"--script=" + displayScriptDir,
+		"--osc=no",
+	}
+	if applicationID := os.Getenv(displayAppIDVariable); applicationID != "" {
+		argv = append(argv, "--wayland-app-id="+applicationID)
+	}
+	return argv, nil
+}
+
 // playerArgv is the whole of how mpv is told to play. The gpu video
 // output with the Wayland EGL context, because the display claim
 // delivers a compositor socket and Debian's mpv segfaults in

@@ -5,12 +5,14 @@
 // on the hardware operators' devices, the pods that perform the work,
 // and the statuses a person reads.
 //
-// One binary, six roles, the way the audio operator's one image runs
+// One binary, seven roles, the way the audio operator's one image runs
 // in several roles. With no argument it is the operator: a Deployment
 // that watches Plays, Remotes, Players, and Keymaps, creates claims and
 // pods, publishes the compiled keymaps, and writes every status. As
 // `player` it is the playback pod's entrypoint shim: it appends the
-// display's app-id flag and execs mpv. As `remote` it is the standing
+// display's app-id flag and execs mpv. As `idle` it is the standing idle
+// pod: it runs mpv with no file and draws the clock while no Play runs,
+// so a Player between plays is not a dark screen. As `remote` it is the standing
 // remote pod: it reads a controller's input nodes and publishes each
 // event to the bus. As `command` it is the playback pod's command
 // sidecar: it owns mpv's IPC socket, runs each named command from the
@@ -36,6 +38,7 @@ import "os"
 // itself runs with no argument.
 const (
 	playerMode    = "player"
+	idleMode      = "idle"
 	remoteMode    = "remote"
 	commandMode   = "command"
 	translateMode = "translate"
@@ -47,6 +50,9 @@ func main() {
 		switch os.Args[1] {
 		case playerMode:
 			runPlayer(os.Args[2:])
+			return
+		case idleMode:
+			runIdle()
 			return
 		case remoteMode:
 			runReader()

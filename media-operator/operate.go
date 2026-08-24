@@ -30,6 +30,13 @@ import (
 // cluster that runs one bus needs no policy for the base.
 const (
 	playerImageVariable = "PLAYER_IMAGE"
+
+	// IDLE_DISPLAY_CLASS names the cluster's display-draw DeviceClass, the
+	// shareable draw companion a Player's idle pod claims. The class is
+	// cluster policy, so the Deployment sets it and the operator reads it
+	// here. An unset value turns the idle screen off, so reconcileIdle
+	// creates no idle claim and no idle pod.
+	idleDisplayClassVariable = "IDLE_DISPLAY_CLASS"
 )
 
 // backstopInterval is how often the loop reconciles with nothing to
@@ -74,8 +81,12 @@ type operator struct {
 	image      string
 	busAddress string
 	topicBase  string
-	bus        *Bus
-	reports    *reports
+	// idleDisplayClass is the display-draw DeviceClass a Player's idle pod
+	// claims. An empty value turns the idle screen off, so reconcileIdle
+	// builds nothing.
+	idleDisplayClass string
+	bus              *Bus
+	reports          *reports
 	// focus is the desk for the retained focus mark, built on the same
 	// wake as the report desk: a cycle request on the bus wakes the pass
 	// that arbitrates it.
@@ -135,6 +146,10 @@ func operate() {
 	if topicBase == "" {
 		topicBase = defaultTopicBase
 	}
+	// The idle display class is optional. An unset value turns the idle
+	// screen off, so the operator runs with no idle pods rather than
+	// exiting the way a missing image or broker does.
+	idleDisplayClass := os.Getenv(idleDisplayClassVariable)
 
 	client, err := InClusterClient()
 	if err != nil {
@@ -149,17 +164,18 @@ func operate() {
 	desk := newReports(wake)
 	focusDesk := newFocusDesk(wake)
 	media := &operator{
-		client:          client,
-		image:           image,
-		busAddress:      busAddress,
-		topicBase:       topicBase,
-		reports:         desk,
-		focus:           focusDesk,
-		positionWrites:  map[string]time.Time{},
-		keymapPublished: map[string]string{},
-		playReclaim:     map[string]time.Time{},
-		recreateBackoff: map[string]backoffState{},
-		wake:            wake,
+		client:           client,
+		image:            image,
+		busAddress:       busAddress,
+		topicBase:        topicBase,
+		idleDisplayClass: idleDisplayClass,
+		reports:          desk,
+		focus:            focusDesk,
+		positionWrites:   map[string]time.Time{},
+		keymapPublished:  map[string]string{},
+		playReclaim:      map[string]time.Time{},
+		recreateBackoff:  map[string]backoffState{},
+		wake:             wake,
 	}
 
 	// onConnect marks that a fresh broker session began, so the next pass
@@ -286,7 +302,14 @@ func (o *operator) pass() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
 	} else {
-		o.reconcilePlayers(players.Items, list.Items)
+		// The idle clock reads the household zone, one setting per cluster from
+		// the default MediaPreferences alone, so the pass resolves it once and
+		// hands it to every Player's idle pod.
+		var zone string
+		if defaults != nil {
+			zone = defaults.Spec.TimeZone
+		}
+		o.reconcilePlayers(players.Items, list.Items, zone)
 		o.reconcileFocus(list.Items, players.Items)
 	}
 	o.reconcileRemotes()
@@ -416,16 +439,23 @@ func (o *operator) reconcileKeymaps() {
 	}
 }
 
-// reconcilePlayers writes every Player's status from the Players and
-// Plays the pass already read. A Player's status is relational, derived
-// from the Plays that name it, so the pass lists the Players once and
-// hands the slice here and to reconcileFocus rather than listing twice.
-func (o *operator) reconcilePlayers(players []Player, plays []Play) {
+// reconcilePlayers writes every Player's status and ensures every
+// Player's standing idle pod, from the Players and Plays the pass already
+// read. A Player's status is relational, derived from the Plays that name
+// it, so the pass lists the Players once and hands the slice here and to
+// reconcileFocus rather than listing twice. The idle pod stands whether
+// or not a Play runs, so its reconcile is per Player and not derived from
+// the Plays.
+func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string) {
 	for index := range players {
 		player := &players[index]
 		desired := derivePlayerStatus(player, plays)
 		if err := writePlayerStatus(o.client, player, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
+				player.Metadata.Namespace, player.Metadata.Name, err)
+		}
+		if err := o.reconcileIdle(player, timeZone); err != nil {
+			fmt.Fprintf(os.Stderr, "reconciling idle for player %s/%s: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
 	}
