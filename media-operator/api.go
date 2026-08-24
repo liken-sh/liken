@@ -165,8 +165,8 @@ type DeviceParameters struct {
 }
 
 // A Play is one run of media on a Player, with a lifecycle analogous
-// to a Job: it runs once to completion and stays for its status
-// until deleted.
+// to a Job: it runs once to completion, and it stays for its status
+// until its ttlSecondsAfterFinished passes or a person deletes it.
 type Play struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`
@@ -189,6 +189,19 @@ type PlaySpec struct {
 	// padded, so the tile count cannot be read back. The Play declares the
 	// interval, and it defaults to 10s when this is empty.
 	TrickplayInterval string `json:"trickplayInterval,omitempty"`
+
+	// How long a Finished Play stands before the operator deletes it, in
+	// seconds. The field is a pointer because zero and absent mean
+	// different things: zero deletes the Play on the pass that sees it
+	// finished, and absent takes defaultTTLSecondsAfterFinished. A plain
+	// int64 would read an unset field as zero and delete every Play at
+	// once.
+	//
+	// The window is the Play's own affair and not operator configuration,
+	// because whoever creates a Play knows how long the record is worth
+	// keeping: a library app sets the window its continue-watching feature
+	// reads, and two apps on one cluster choose differently.
+	TTLSecondsAfterFinished *int64 `json:"ttlSecondsAfterFinished,omitempty"`
 
 	// The per-Play override of the language preferences, the most specific tier.
 	// A nil list, or an empty Subtitles, means this Play states nothing, so
@@ -245,6 +258,13 @@ type PlayStatus struct {
 	Duration string `json:"duration,omitempty"`
 	Pod      string `json:"pod,omitempty"`
 	Message  string `json:"message,omitempty"`
+
+	// When the operator first read this run's phase as Finished, in RFC
+	// 3339. The time-to-live after finishing counts from here and not from
+	// the Play's creation, so the window measures the end of the film. It
+	// lives on the status rather than in the operator's memory, so an
+	// operator that restarts reads the clock back from the API server.
+	FinishedAt string `json:"finishedAt,omitempty"`
 
 	// The preferences this run resolved, the console-parity record of what the
 	// three tiers settled on.

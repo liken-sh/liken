@@ -1,11 +1,16 @@
 # The Play API, declared to Kubernetes.
 #
 # A Play is one run of media on a Player, with a lifecycle analogous
-# to a Job: it runs once to completion and stays for its status until
-# deleted. The media operator reconciles a Play into one playback pod
-# and the claims that pod needs, all owned by the Play, so deleting
-# the Play is the whole teardown: the garbage collector takes the pod
-# and the claims with it.
+# to a Job: it runs once to completion, and it stays for its status
+# until ttlSecondsAfterFinished passes or a person deletes it. The
+# media operator reconciles a Play into one playback pod and the claims
+# that pod needs, all owned by the Play, so deleting the Play is the
+# whole teardown: the garbage collector takes the pod and the claims
+# with it.
+#
+# A Finished run leaves nothing running. The operator deletes the
+# playback pod and its claim as soon as the run finishes, and the Play
+# itself when its window passes.
 #
 # The spec is immutable, like a Job's template. A Play whose player
 # or media changed mid-run would describe a different run; delete the
@@ -197,6 +202,19 @@ spec:
                     duration like 10s. Jellyfin writes no manifest beside
                     the sheets, so the Play declares it. Omitted, it
                     defaults to 10s, the Jellyfin default.
+                ttlSecondsAfterFinished:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: >-
+                    How long this Play stands after it finishes, in
+                    seconds, the meaning a Job gives the name. While it
+                    stands, kubectl get plays still answers what just
+                    played and where it stopped; when it goes, that
+                    record goes with it. Omitted, it is 300 seconds.
+                    Zero deletes the Play as soon as it finishes. The
+                    playback pod does not wait for this window: it is
+                    deleted as soon as the run finishes.
                 audioLanguages:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -288,6 +306,16 @@ spec:
                     Why the phase is what it is, when a word is not
                     enough: the resolver refused a URI, the Player
                     does not exist, the pod failed.
+                finishedAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the operator first read this run's phase as
+                    Finished. The time-to-live after finishing counts
+                    from here and not from the Play's creation, so the
+                    window measures the end of the film. It is written
+                    here rather than held in the operator, so an
+                    operator that restarts reads the clock back.
                 audioLanguages:
                   type: array
                   x-kubernetes-list-type: atomic

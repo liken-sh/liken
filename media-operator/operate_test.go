@@ -105,6 +105,9 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			_ = json.NewDecoder(r.Body).Decode(pod)
 			f.pods[pod.Metadata.Name] = pod
 			_ = json.NewEncoder(w).Encode(pod)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/plays/"):
+			delete(f.plays, name)
+			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/pods/"):
 			delete(f.pods, name)
 			w.WriteHeader(http.StatusOK)
@@ -321,13 +324,18 @@ func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 	}
 }
 
-// A Play that reached a terminal phase is read and left alone; the pass
-// makes no request about the play itself, only the reads every pass makes:
-// the four collection lists and the default MediaPreferences.
-func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
+// A Play the operator already retired, still inside its window, is read
+// and left alone; the pass makes no request about the play itself, only the
+// reads every pass makes: the four collection lists and the default
+// MediaPreferences.
+func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
-	finished.Status = PlayStatus{Phase: phaseFinished, Pod: "movie-playback"}
+	finished.Status = PlayStatus{
+		Phase:      phaseFinished,
+		Pod:        "movie-playback",
+		FinishedAt: stampAgo(time.Minute),
+	}
 	cluster.plays["movie"] = finished
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
@@ -338,6 +346,174 @@ func TestATerminalPlayIsReadAndLeftAlone(t *testing.T) {
 		",GET " + playersPath + ",GET " + remotesAllPath + ",GET " + keymapsPath
 	if strings.Join(cluster.requests, ",") != want {
 		t.Errorf("requests = %v, want the collection lists and the default MediaPreferences", cluster.requests)
+	}
+}
+
+// stampAgo is a finishedAt the given time before now, in the form the
+// operator writes and reads back.
+func stampAgo(ago time.Duration) string {
+	return time.Now().Add(-ago).UTC().Format(time.RFC3339)
+}
+
+// ttlSeconds is a spec's ttlSecondsAfterFinished. The field is a pointer,
+// so a test that means zero says so with this and not with a nil.
+func ttlSeconds(seconds int64) *int64 {
+	return &seconds
+}
+
+// The film ended, so the playback pod and its claim go and the Play stands
+// with the record of what played. The first pass folds the run to Finished,
+// and the pass that reads that phase retires it.
+func TestAFinishedRunLosesItsPodAndItsClaimAndKeepsItsPlay(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	cluster.pods["movie-playback"].Status.Phase = podSucceeded
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+	media.pass()
+
+	if _, held := cluster.pods["movie-playback"]; held {
+		t.Errorf("a finished run kept its pod: %v", cluster.pods)
+	}
+	if _, held := cluster.claims["movie-devices"]; held {
+		t.Errorf("a finished run kept its claim: %v", cluster.claims)
+	}
+	play, held := cluster.plays["movie"]
+	if !held {
+		t.Fatal("the Play went with its pod, and the record of the run with it")
+	}
+	mustMatch(t, play.Status.Phase, phaseFinished)
+	mustMatch(t, play.Status.Pod, "movie-playback")
+	if play.Status.FinishedAt == "" {
+		t.Error("a retired Play carries no finishedAt, so its window has no clock")
+	}
+}
+
+// A Failed pod stands. Its log is the evidence a person debugs from, and
+// the run resumes rather than ends, so nothing about a Failed Play is
+// retired.
+func TestAFailedRunKeepsItsPod(t *testing.T) {
+	cluster := runningCluster(housePlayer())
+	cluster.pods["movie-playback"].Status.Phase = podFailed
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	// The run already recreated once, so the backoff holds the next
+	// recreate off and this pass leaves the dead pod where it is.
+	media.recreateBackoff[runKey("house", "movie")] = backoffState{
+		count: 1,
+		last:  time.Now(),
+		next:  time.Now().Add(time.Hour),
+	}
+
+	media.pass()
+
+	if _, held := cluster.pods["movie-playback"]; !held {
+		t.Error("a failed run lost the pod whose log is the evidence")
+	}
+	if got := countMethod(cluster.requests, http.MethodDelete); got != 0 {
+		t.Errorf("a failed run deleted objects: %d deletes in %v", got, cluster.requests)
+	}
+	status := cluster.plays["movie"].Status
+	mustMatch(t, status.Phase, phaseFailed)
+	mustMatch(t, status.FinishedAt, "")
+}
+
+// The stamp is written on the pass that first reads the Finished phase, and
+// every pass after it reads that stamp instead of writing a fresh one. The
+// window counts from the end of the film, so a stamp that moved would hold
+// a Finished Play forever.
+func TestTheFinishedStampIsWrittenOnceAndNotOverwritten(t *testing.T) {
+	cluster := newFakeCluster()
+	finished := housePlay("https://nas/film.mkv")
+	finished.Status = PlayStatus{Phase: phaseFinished, Pod: "movie-playback"}
+	cluster.plays["movie"] = finished
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	if cluster.plays["movie"].Status.FinishedAt == "" {
+		t.Fatal("the pass that read the Finished phase wrote no stamp")
+	}
+
+	stamped := stampAgo(time.Minute)
+	cluster.plays["movie"].Status.FinishedAt = stamped
+	media.pass()
+
+	mustMatch(t, cluster.plays["movie"].Status.FinishedAt, stamped)
+}
+
+// The window is the seconds the spec states, and 300 when it states none.
+// Zero is a value a spec may hold, so it reads as zero and not as absent.
+func TestThePlayWindowTakesTheSpecOverTheDefault(t *testing.T) {
+	cases := []struct {
+		name string
+		ttl  *int64
+		want time.Duration
+	}{
+		{name: "absent", ttl: nil, want: 300 * time.Second},
+		{name: "zero", ttl: ttlSeconds(0), want: 0},
+		{name: "an hour", ttl: ttlSeconds(3600), want: time.Hour},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			play := housePlay("https://nas/film.mkv")
+			play.Spec.TTLSecondsAfterFinished = testCase.ttl
+			mustMatch(t, playTTL(play), testCase.want)
+		})
+	}
+}
+
+// A window of zero has already passed the moment the run finishes, so the
+// Play and its pod go together on the pass that reads the Finished phase.
+func TestAWindowOfZeroDeletesThePlayOnThePassThatReadsItFinished(t *testing.T) {
+	cluster := newFakeCluster()
+	finished := housePlay("https://nas/film.mkv")
+	finished.Spec.TTLSecondsAfterFinished = ttlSeconds(0)
+	finished.Status = PlayStatus{Phase: phaseFinished, Pod: "movie-playback"}
+	cluster.plays["movie"] = finished
+	cluster.players["theater"] = housePlayer()
+	cluster.pods["movie-playback"] = housePlaybackPod()
+	cluster.claims["movie-devices"] = buildClaim(finished, housePlayer())
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	if _, held := cluster.plays["movie"]; held {
+		t.Error("a Play with a zero window stood after it finished")
+	}
+	if _, held := cluster.pods["movie-playback"]; held {
+		t.Error("the pod of a Play with a zero window stood")
+	}
+}
+
+// The window is measured from the finishedAt stamp. The two cases are the
+// same Play with the same spec, and only the stamp differs, so nothing but
+// the stamp puts one Play past its window and leaves the other inside it.
+func TestThePlayGoesOnceItsStampIsOlderThanItsWindow(t *testing.T) {
+	cases := []struct {
+		name     string
+		finished time.Duration
+		wantHeld bool
+	}{
+		{name: "inside the window", finished: 30 * time.Second, wantHeld: true},
+		{name: "past the window", finished: 10 * time.Minute, wantHeld: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			finished := housePlay("https://nas/film.mkv")
+			finished.Status = PlayStatus{
+				Phase:      phaseFinished,
+				Pod:        "movie-playback",
+				FinishedAt: stampAgo(testCase.finished),
+			}
+			cluster.plays["movie"] = finished
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+
+			media.pass()
+
+			_, held := cluster.plays["movie"]
+			mustMatch(t, held, testCase.wantHeld)
+		})
 	}
 }
 

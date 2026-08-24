@@ -3,9 +3,12 @@
 # the claims and pods a play becomes. It deletes a pod or a claim only
 # to replace a stale one: a running Play's pod after its Player reshaped
 # it, and a standing pod or claim that no longer matches the template
-# the current pass builds. Otherwise the teardown is the garbage
+# the current pass builds, and it deletes a finished run's pod and claim
+# because the run is over. Otherwise the teardown is the garbage
 # collector's, through the ownerReference every claim and pod carries,
 # and deleting the Play, the Player, or the Remote is the whole stop.
+# The one object a person created that it deletes is a Play that
+# finished and outlived its own window.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -21,9 +24,16 @@ rules:
   # media in whatever namespace it likes and the operator is one
   # Deployment for the cluster. The watch is the wake signal; every
   # pass re-reads with a list.
+  #
+  # The delete verb is the one place this operator deletes an object a
+  # person created, and it uses it in one state only: a Play that
+  # finished and whose ttlSecondsAfterFinished has passed. The window is
+  # the Play's own, so the record of what played stands for as long as
+  # whoever created the Play asked, and the list does not grow one entry
+  # per film forever.
   - apiGroups: [media.liken.sh]
     resources: [plays]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, delete]
   # Only the status half. The API server's subresource split is what
   # keeps this operator from ever rewriting a spec a person declared.
   - apiGroups: [media.liken.sh]

@@ -73,6 +73,14 @@ const positionWriteInterval = 8 * time.Second
 // a test drives the reclaim without waiting minutes.
 var playReclaimGrace = 2 * time.Minute
 
+// defaultTTLSecondsAfterFinished is how long a Finished Play stands when
+// its spec sets no ttlSecondsAfterFinished. Five minutes is the default
+// continue-watching window: while the Play stands, kubectl get plays still
+// answers what just played and where it stopped, and the record goes when
+// the Play does. A library app sets the field on each Play it creates when
+// its continue-watching feature reads a different window.
+const defaultTTLSecondsAfterFinished = 300
+
 // operator holds what every pass needs. The report desk and the bus
 // are fields rather than globals so a test builds an operator around a
 // desk it can inspect.
@@ -292,11 +300,14 @@ func (o *operator) pass() {
 	for index := range list.Items {
 		play := &list.Items[index]
 		live[runKey(play.Metadata.Namespace, play.Metadata.Name)] = true
-		// A Finished Play is over. Its pod and claims stay until the Play is
-		// deleted, when the garbage collector takes them through the
-		// ownerReferences they carry. A Failed Play is not over here, because
-		// the reconcile below resumes it, so only a Finished Play is skipped.
+		// A Finished Play is over, so the pass retires it in place of
+		// reconciling it. A Failed Play is not over here, because the
+		// reconcile below resumes it, so only a Finished Play is retired.
 		if finishedPhase(play.Status.Phase) {
+			if err := o.retire(play); err != nil {
+				fmt.Fprintf(os.Stderr, "retiring play %s/%s: %v\n",
+					play.Metadata.Namespace, play.Metadata.Name, err)
+			}
 			continue
 		}
 		if err := o.reconcile(play, defaults); err != nil {
@@ -403,6 +414,83 @@ func (o *operator) reestablishRetained() {
 	for key, play := range o.focus.snapshot() {
 		o.publishFocus(key, play)
 	}
+}
+
+// retire gives a Finished Play its two endings: the playback objects go at
+// once, and the Play itself goes when the window on its spec has passed.
+//
+// The pod holds nothing worth keeping after the film ends. The final
+// position is on the Play's status and the ending already traveled the bus,
+// so the pod and its claim go on the first pass that reads the Finished
+// phase. Only a Finished Play is retired. A Failed pod stands, because its
+// log is the evidence a person debugs from and the reconcile resumes the
+// run.
+//
+// The finishedAt stamp is what tells a Play this pass just retired from one
+// retired earlier, so the two deletes run once per Play and the passes that
+// follow only read the clock. Both deletes read an absent object as success,
+// so a retry after a failed status write deletes nothing twice.
+//
+// The deletion follows the pass cadence, so a Play goes at most one
+// backstopInterval, ten seconds, after its window ends.
+func (o *operator) retire(play *Play) error {
+	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	// A Play a person already deleted is on its way out, and the garbage
+	// collector takes the pod and the claim with it through their
+	// ownerReferences. Leave it alone, the way reconcileStanding leaves a
+	// standing object with a deletionTimestamp alone.
+	if play.Metadata.DeletionTimestamp != "" {
+		return nil
+	}
+	now := time.Now()
+	finished, stamped := finishedTime(play, now)
+	if !stamped {
+		if err := DeletePod(o.client, namespace, podName(name)); err != nil {
+			return err
+		}
+		if err := DeleteResourceClaim(o.client, namespace, claimName(name)); err != nil {
+			return err
+		}
+	}
+	// Deleting the Play is the whole teardown. The ownerReferences collect
+	// anything the two deletes above did not, and reclaimPlays clears the
+	// retained topics on the same terms as a Play a person deleted: the next
+	// pass reads the Play gone, so the run counts as stale and its grace
+	// begins.
+	if now.Sub(finished) >= playTTL(play) {
+		return DeletePlay(o.client, namespace, name)
+	}
+	if stamped {
+		return nil
+	}
+	status := play.Status
+	status.FinishedAt = finished.UTC().Format(time.RFC3339)
+	return writePlayStatus(o.client, play, status)
+}
+
+// playTTL is how long this Play stands after it finishes: the seconds its
+// spec states, or defaultTTLSecondsAfterFinished when it states none. The
+// pointer is what tells a spec that asked for zero from a spec that asked
+// for nothing, and zero deletes the Play on the pass that sees it finished.
+func playTTL(play *Play) time.Duration {
+	if play.Spec.TTLSecondsAfterFinished == nil {
+		return defaultTTLSecondsAfterFinished * time.Second
+	}
+	return time.Duration(*play.Spec.TTLSecondsAfterFinished) * time.Second
+}
+
+// finishedTime reads the moment this run finished from the status, and
+// reports whether the status carried a stamp at all. A Play with no stamp
+// finished as far as this operator can tell right now, so its window starts
+// at the time the caller passes in. A stamp this operator cannot parse
+// counts as no stamp, so a garbled value starts the window over rather than
+// holding a Finished Play forever.
+func finishedTime(play *Play, now time.Time) (time.Time, bool) {
+	stamped, err := time.Parse(time.RFC3339, play.Status.FinishedAt)
+	if err != nil {
+		return now, false
+	}
+	return stamped, true
 }
 
 // reclaimPlays clears the retained topics a deleted Play leaves on the

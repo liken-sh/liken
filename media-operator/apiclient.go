@@ -218,6 +218,18 @@ func GetPlay(c *Client, namespace, name string) (*Play, error) {
 	return play, nil
 }
 
+// DeletePlay removes one Play once its window after finishing has passed.
+// It is the one object a person created that this operator deletes, and it
+// deletes it only in that one state. An already-absent Play is success,
+// because a person may delete a Finished Play before its window ends.
+func DeletePlay(c *Client, namespace, name string) error {
+	err := c.RequestJSON(http.MethodDelete, playPath(namespace, name), nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 // ListPlayers answers a pass with one request across every
 // namespace, the same shape as ListPlays, because a Player's status
 // is derived from the Plays that name it and the pass already holds

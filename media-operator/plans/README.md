@@ -39,6 +39,11 @@ These plans are designed. Each keeps its number and moves to
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
   builds on the display of plan 07.
+* [15, Finished plays clean up](15-finished-plays-clean-up.md). A
+  `Finished` Play's pod goes on the pass that sees the terminal
+  phase, and the Play follows after `ttlSecondsAfterFinished`, a
+  spec field defaulting to five minutes, so a library app times its
+  continue-watching window with the same knob.
 
 ## Completed
 
