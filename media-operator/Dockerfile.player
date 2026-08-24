@@ -48,9 +48,12 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 # The full Noto CJK family reads better but is far larger, and this face is
 # enough to read.
 #
+# tzdata carries the zoneinfo database, so the display clock resolves the
+# household's TZ to a wall-clock time instead of UTC.
+#
 # The Snapshot line pins apt to the archive as it stood at one instant, so the
 # versions below stay fetchable after Ubuntu publishes newer ones. To move the
-# image forward, set a later serial and refresh the seven versions from a build
+# image forward, set a later serial and refresh the eight versions from a build
 # at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries
 # no certificate store, so the build installs ca-certificates from the default
 # archive first, then purges it after the pinned install so it leaves no trace
@@ -67,6 +70,7 @@ RUN apt-get update \
         fonts-adobe-sourcesans3=3.052+dfsg-2 \
         fonts-noto-core=20201225-2build1 \
         fonts-droid-fallback=1:8.1.0r7-1~1.gbp36536bbuild1 \
+        tzdata=2026c-0ubuntu0.26.04.1 \
     && apt-get purge -y ca-certificates \
     && apt-get autoremove -y --purge \
     && rm -rf /var/lib/apt/lists/*

@@ -77,3 +77,10 @@ spec:
                   description: >-
                     When subtitles show; on always, off never, auto
                     only when the audio that played is not the first choice.
+                timeZone:
+                  type: string
+                  # An IANA zone name, for example America/New_York. The display
+                  # clock reads it. One per cluster, with no Play or Player override.
+                  description: >-
+                    The household wall-clock zone as an IANA name, so the
+                    display clock shows local time instead of UTC.

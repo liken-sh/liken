@@ -50,6 +50,11 @@ const (
 	// shim splits them and appends each to mpv's argv.
 	playerOptionsVariable = "MEDIA_PLAYER_OPTIONS"
 
+	// TZ is the standard name libc and Lua os.date read, not a MEDIA_ variable.
+	// The player pod sets it, and the display clock reads it against the image's
+	// tz database to show the household's wall-clock zone.
+	timeZoneVariable = "TZ"
+
 	// The command sidecar carries every item's presentation block, baked
 	// into the pod when the operator creates it. The sidecar swaps to the
 	// current item's block as the playlist advances, so no block travels

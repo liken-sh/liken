@@ -319,6 +319,11 @@ type MediaPreferencesSpec struct {
 	AudioLanguages    []string `json:"audioLanguages,omitempty"`
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// The household wall-clock zone, an IANA name like America/New_York. One
+	// per cluster, with no per-Play or per-Player override. The player pod
+	// reads it as TZ, so the display clock shows local time.
+	TimeZone string `json:"timeZone,omitempty"`
 }
 
 type MediaPreferencesList struct {

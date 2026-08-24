@@ -91,6 +91,13 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 		container.Env = append(container.Env,
 			EnvVar{Name: playerOptionsVariable, Value: strings.Join(options, "\n")})
 	}
+	// The display clock reads TZ against the image's tz database. Set it only
+	// when the household stated a zone, so an unset zone leaves the pod
+	// unchanged and the clock stays on UTC.
+	if prefs.TimeZone != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: timeZoneVariable, Value: prefs.TimeZone})
+	}
 	// The player container holds every request the claim asks for,
 	// because the playback claim holds the player's roles alone.
 	for _, request := range claimRequests(claim) {

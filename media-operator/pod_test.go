@@ -421,3 +421,26 @@ func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
 		t.Errorf("%s = %q, want none", playerOptionsVariable, got)
 	}
 }
+
+// A resolved timezone reaches the player container as TZ, so the display clock
+// reads the household's wall-clock zone.
+func TestBuildPodCarriesTheResolvedTimeZone(t *testing.T) {
+	play := testPlay()
+	claim := buildClaim(play, testPlayer())
+	prefs := resolvedPreferences{TimeZone: "America/New_York"}
+	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, prefs)
+
+	got := envValue(pod.Spec.Containers[0], timeZoneVariable)
+	if got != "America/New_York" {
+		t.Errorf("%s = %q, want %q", timeZoneVariable, got, "America/New_York")
+	}
+}
+
+// A run with no timezone carries no TZ variable, so an ordinary pod is
+// unchanged.
+func TestBuildPodWithNoTimeZoneCarriesNoTZ(t *testing.T) {
+	pod := testPod(t)
+	if got := envValue(pod.Spec.Containers[0], timeZoneVariable); got != "" {
+		t.Errorf("%s = %q, want none", timeZoneVariable, got)
+	}
+}

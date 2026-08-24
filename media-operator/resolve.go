@@ -162,6 +162,8 @@ type resolvedPreferences struct {
 	AudioLanguages    []string
 	SubtitleLanguages []string
 	Subtitles         string
+	// The resolved wall-clock zone, from the default tier alone.
+	TimeZone string
 }
 
 // resolvePreferences settles each field on its own, Play then Player then the
@@ -185,10 +187,17 @@ func resolvePreferences(play *PlaySpec, player *PlayerSpec, defaults *MediaPrefe
 		subs = append(subs, defaults.SubtitleLanguages)
 		mode = append(mode, defaults.Subtitles)
 	}
+	// The timezone is a household setting, one per cluster, so it reads the
+	// default tier alone, not the Play or the Player.
+	var zone string
+	if defaults != nil {
+		zone = defaults.TimeZone
+	}
 	return resolvedPreferences{
 		AudioLanguages:    firstStatedList(audio),
 		SubtitleLanguages: firstStatedList(subs),
 		Subtitles:         firstStatedString(mode),
+		TimeZone:          zone,
 	}
 }
 

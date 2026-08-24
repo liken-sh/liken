@@ -412,3 +412,23 @@ func TestResolvePreferencesSkipsNilTiers(t *testing.T) {
 		t.Errorf("preferences = %+v, want %+v", got, want)
 	}
 }
+
+// The timezone is a household setting, so it resolves from the default tier
+// alone and reads nothing off the Play or the Player.
+func TestResolvePreferencesTimeZoneReadsTheDefaultTierOnly(t *testing.T) {
+	defaults := &MediaPreferencesSpec{TimeZone: "America/New_York"}
+
+	got := resolvePreferences(&PlaySpec{}, &PlayerSpec{}, defaults)
+	if got.TimeZone != "America/New_York" {
+		t.Errorf("timeZone = %q, want %q", got.TimeZone, "America/New_York")
+	}
+}
+
+// With no default MediaPreferences the timezone resolves to nothing, so the pod
+// gets no TZ.
+func TestResolvePreferencesTimeZoneUnsetWithoutDefaults(t *testing.T) {
+	got := resolvePreferences(&PlaySpec{}, &PlayerSpec{}, nil)
+	if got.TimeZone != "" {
+		t.Errorf("timeZone = %q, want empty", got.TimeZone)
+	}
+}
