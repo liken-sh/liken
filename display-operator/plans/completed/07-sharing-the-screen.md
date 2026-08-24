@@ -50,7 +50,7 @@ connector's control device and writes DDC/CI itself. The control
 device already exists for exactly this, a pod that drives the panel
 while it runs, and a prepared control claim delivers the wire and the
 operator performs no write for it. The media-operator's
-[plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/17-the-idle-screen-powers-the-panel.md)
+[plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/completed/17-the-idle-screen-powers-the-panel.md)
 builds that consumer and records why every shape that moved a power
 request through the Kubernetes API was set aside: a claim is never
 prepared without a consuming pod, a pod's claim list and a claim's
@@ -102,7 +102,7 @@ runs on it on `liken-1`: a standing idle pod and a `Play`'s pod held
 one screen at once, the film drew on top, and the idle surface returned
 when the film ended, through the media releases of 2026-08-24. The
 power half is proved by the media-operator's
-[plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/17-the-idle-screen-powers-the-panel.md)
+[plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/completed/17-the-idle-screen-powers-the-panel.md)
 drill, because the writes are the control-claim holder's: the backlight
 reads 0 over DDC after the quiet window, and reads restored after a
 press on the bus.
