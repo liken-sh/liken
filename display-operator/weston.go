@@ -128,8 +128,11 @@ renderer=gl
 # otherwise refuses to start when it finds no input device.
 require-input=false
 
-# 0 turns the idle timeout off. The default of 300 seconds fades the
-# screens to black, and with no input device nothing ever wakes them.
+# 0 turns the idle timeout off. Under desktop-shell the 300-second
+# default fades and sleeps the screens, and with no input device
+# nothing ever wakes them. The kiosk shell above registers no idle
+# listener, so the default would do nothing here; the 0 keeps that
+# true if the shell ever changes.
 idle-time=0
 `)
 	for _, output := range outputs {

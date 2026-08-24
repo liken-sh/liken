@@ -3,8 +3,9 @@
 An output publishes as one device that a single `ResourceClaim` holds.
 `weston` already draws many clients on one output, so a second client
 that wants to draw between films cannot get in. This plan publishes a
-draw device that many claims share, and it counts the claims that ask
-for panel power, so the panel sleeps only when the last one lets go.
+draw device that many claims share, and it settles where panel power
+lives for a screen a standing client holds: on the control device, in
+the hands of the one pod that holds the wire.
 
 The client that needs this is the media-operator's idle screen,
 [plan 09](https://github.com/liken-sh/media-operator/blob/main/plans/09-the-idle-screen.md).
@@ -32,37 +33,39 @@ and it must draw at the same time a film's claim may hold the output.
 Publish a second device for each connector, the draw device, and mark
 it `AllowMultipleAllocations` so many claims hold it at once. The draw
 device delivers the compositor socket and the app-id, the same container
-edits the output device already delivers (`cdi.go:133-142`), and it
-carries an optional panel-power request. It sets no mode. The output
-device stays single-allocation and keeps the mode.
+edits the output device already delivers (`cdi.go:133-142`). It sets no
+mode and carries no power.
 
 So the right to draw is shared, because a Wayland socket is shared, and
 the right to set the mode stays exclusive, because one panel runs one
-mode. Panel power is shared too, but counted: a request on the draw
-device or on the output device adds to the count on the connector. This
-mirrors the shape the operator already uses for the control device. The
-control device is a separate exclusive device for the one-writer i2c
-wire. The draw device is the separate shared device for the many-writer
-Wayland socket.
+mode. This mirrors the shape the operator already uses for the control
+device. The control device is a separate exclusive device for the
+one-writer i2c wire. The draw device is the separate shared device for
+the many-writer Wayland socket.
 
-### Panel power by a count of holders
+### Panel power goes through the control device
 
-Make the panel's power a reference count across holders. Today power is
-actuated per claim on prepare and reverted on unprepare, and the record
-is one slot per connector: `releasePower` puts a connector to standby
-when any claim that named it ends (`controls.go:586`, `controls.go:616`).
+The standing client that needs the panel dark and lit again holds the
+connector's control device and writes DDC/CI itself. The control
+device already exists for exactly this, a pod that drives the panel
+while it runs, and a prepared control claim delivers the wire and the
+operator performs no write for it. The media-operator's
+[plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/17-the-idle-screen-powers-the-panel.md)
+builds that consumer and records why every shape that moved a power
+request through the Kubernetes API was set aside: a claim is never
+prepared without a consuming pod, a pod's claim list and a claim's
+spec are immutable, the kubelet never redelivers a changed claim to a
+driver, and `resourceclaims` has no node-scoped field selector to
+watch.
 
-Change this so the panel is on while any prepared claim asks for power on
-the connector, and returns to standby only when the last such claim
-ends. This is the count the idle screen needs. It needs no
-`coordination.k8s.io` `Lease`: the set of prepared claims the operator
-already holds is the count, and it changes on prepare and unprepare,
-which are events, not a timer.
-
-A power change is a DDC write that does not restart `weston`. The
-delivery sets the panel controls before it sets the mode, and only the
-mode restarts the compositor (`dra.go:320` sets the controls,
-`dra.go:328` sets the mode). So the count changes with no screen blink.
+This operator's part is the rule, stated in the device reference: on a
+screen whose control device a pod holds, no claim states `power`. The
+power record is one slot per connector, and `releasePower` puts a
+connector to standby when any claim that named it ends
+(`controls.go:586`, `controls.go:616`), so a `power` claim ending
+would darken the panel under the standing holder. The rule keeps the
+two writers off one wire, and the one-slot record stays correct for
+the screens it was built for, a panel one exclusive claim runs.
 
 The mode is untouched. Each `Play` still selects its own resolution
 through its own output claim, as plans 05 and 06 describe.
@@ -78,24 +81,31 @@ panel to standby (`controls.go:616`) for the connector the other still
 holds. The draw device carries no mode, and its power is a count, not a
 setting, so many claims share it with nothing to contend over.
 
+**Panel power as a count of prepared claims.** The first draft of this
+plan counted the claims that ask for power and put the panel to standby
+when the last one ended. Set aside because the request could not move:
+a standing pod's claim list is immutable, a claim's spec is immutable,
+and the kubelet never redelivers a changed claim, so the count could
+only change by scheduling and ending pods. The control device already
+gave the standing holder the wire, so the count had nothing left to
+carry.
+
 **A `coordination.k8s.io` `Lease` per screen, powered down when no
 `Lease` holds it.** Set aside because a `Lease` renews on a timer, which
-is a polling shape, and the operator already holds the exact count it
-needs in its prepared claims. Count the allocations on an event, not a
-`Lease` on a timer.
+is a polling shape. Power follows the events the holder already has,
+the sleep window and the wake press, not a renewal clock.
 
 ## How the work is proved
 
-This plan is not built yet. The drill runs on `liken-1`. Allocate the
-draw device to a standing pod and the output device to a `Play` at the
-same time. Both draw on the one output, the `Play` on top. End the
-`Play`, and the standing pod's surface stays, and the panel stays on
-while the standing pod's power request stands. Drop the standing pod's
-power request, and the panel returns to standby.
-
-Measured on the metal: the panel power state after each step, read back
-from the panel over DDC. Read in the code: the branch that delivers the
-draw device with no mode, and the count that holds the connector on.
+The draw device is built and drilled. The media-operator's idle screen
+runs on it on `liken-1`: a standing idle pod and a `Play`'s pod held
+one screen at once, the film drew on top, and the idle surface returned
+when the film ended, through the media releases of 2026-08-24. The
+power half is proved by the media-operator's
+[plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/17-the-idle-screen-powers-the-panel.md)
+drill, because the writes are the control-claim holder's: the backlight
+reads 0 over DDC after the quiet window, and reads restored after a
+press on the bus.
 
 The related open problem "A control claim waits for the compositor"
 stays open. The draw device needs the compositor to serve its socket, so

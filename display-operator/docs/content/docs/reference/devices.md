@@ -348,6 +348,16 @@ monitor's identity block on every machine it ever plugs into, until
 someone reprograms the chip. Tools built for DDC/CI, such as
 `ddcutil`, stay on the right address.
 
+**One writer per wire.** The operator itself writes this bus when a
+claim on the same connector states `brightness` or `power`, at prepare
+and at unprepare, and the i2c layer does not arbitrate between two
+userspace writers. So on a screen whose control device a pod holds, no
+claim states `power`: the holder owns the panel's power for as long as
+it holds the wire. A claim may still state `brightness`. That write
+lands once at the claim's prepare, and a holder that dims the panel
+restores the value it last read from the panel, so the two writers
+never pull in opposite directions.
+
 The control device carries the output device's taints, whatever they
 are, so it is never claimable while the screen beside it can serve
 nobody. That includes the compositor-down case: a control claim today
