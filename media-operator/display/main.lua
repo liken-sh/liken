@@ -56,6 +56,12 @@ local function redraw()
     if block then
       idle_parts[#idle_parts + 1] = block
     end
+    -- The preview legend draws only when local-idle enabled the keys, so a
+    -- cluster's idle screen never carries it.
+    local legend = preview.draw()
+    if legend then
+      idle_parts[#idle_parts + 1] = legend
+    end
     overlay.data = table.concat(idle_parts, "\n")
     overlay:update()
     return

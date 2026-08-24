@@ -5,8 +5,13 @@
 -- the same handler, so the ramps, the dim, and the pulse can be seen before a
 -- release. Nothing here runs with the variable unset.
 local utils = require("mp.utils")
+local theme = require("theme")
 
 local preview = {}
+
+-- Whether enable has run. The legend draws only then, so the module can be
+-- required unconditionally and still draw nothing on a cluster.
+local enabled = false
 
 -- The parts come from the environment seed, which carries names and no kinds.
 -- The preview calls the last part the remote, because the parts read in the
@@ -77,6 +82,23 @@ function preview.enable(send_status, send_revealed)
   end)
 
   mp.msg.info("liken display preview keys: p starting, o playing, i idle, d presence")
+  enabled = true
+end
+
+-- The legend, one dim line at the bottom right, so the keys read on the screen
+-- itself and not only in this file. It draws only after enable ran, which only
+-- local-idle causes, so an idle pod on a cluster draws no legend. The an3
+-- alignment anchors the line at its bottom-right, mirroring the identity block's
+-- bottom-left across the screen.
+function preview.draw()
+  if not enabled then
+    return nil
+  end
+  local legend = "p play starts    o playing    i film ends    d presence    q quit"
+  return theme.text(
+    theme.canvas.w - theme.margin.x, theme.canvas.h - 90,
+    legend, theme.type.tiny, theme.color.muted, 3, theme.alpha.dim
+  )
 end
 
 return preview
