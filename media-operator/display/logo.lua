@@ -71,36 +71,113 @@ local function to_canvas_y(y)
   return theme.canvas.h / 2 + (y - BOX_CY) * SCALE
 end
 
--- Build each hexagon's static parts once: the ASS path in canvas coordinates,
--- the fill color, and the border width. The border is the SVG stroke, scaled
--- and drawn in the fill color, so the corners round the way the SVG rounds them.
--- The geometry never changes between frames, so only the alpha is left to the
--- draw.
+-- Each hexagon pulses in size about its own center, up to SWING at full energy.
+-- Ten percent is the figure the brand repository's motion.md states.
+local SWING = 0.10
+
+-- The golden ratio spreads the fourteen phases and rates over their range with
+-- no two values close together, which is what makes the mosaic read as fourteen
+-- independent parts rather than one pulsing block. The spread comes from the
+-- index alone, so the same moment renders the same frame on every run and on
+-- every screen.
+local PHI = 1.6180339887
+local TAU = 2 * math.pi
+
+-- The slowest and the fastest first-sine rate, in cycles per second at full
+-- energy. A pulse of about a third of a hertz reads as a slow swell, not as a
+-- flicker.
+local RATE_MIN = 0.22
+local RATE_SPAN = 0.18
+
+-- Build each hexagon's parts once: its six vertices in canvas coordinates, its
+-- center, the still ASS path, the fill color, the border width, and the two
+-- sine rates and offsets its motion runs on. The border is the SVG stroke,
+-- scaled and drawn in the fill color, so the corners round the way the SVG
+-- rounds them. The still path is kept because a resting idle screen draws it on
+-- every clock tick, and formatting fourteen paths again for a mark that does not
+-- move is work with no result on screen.
 local shapes = {}
-for _, hex in ipairs(HEXAGONS) do
+for index, hex in ipairs(HEXAGONS) do
+  local points = {}
   local segs = {}
-  for index, p in ipairs(hex.points) do
-    local verb = index == 1 and "m" or "l"
-    segs[#segs + 1] = string.format("%s %.2f %.2f", verb, to_canvas_x(p[1]), to_canvas_y(p[2]))
+  local sx, sy = 0, 0
+  for i, p in ipairs(hex.points) do
+    local x, y = to_canvas_x(p[1]), to_canvas_y(p[2])
+    points[i] = { x, y }
+    sx = sx + x
+    sy = sy + y
+    segs[#segs + 1] = string.format("%s %.2f %.2f", i == 1 and "m" or "l", x, y)
   end
+  local spread = (index * PHI) % 1
   shapes[#shapes + 1] = {
+    points = points,
+    -- The centroid of the six vertices. A regular hexagon's centroid is its
+    -- center, so a scale about this point grows and shrinks the shape in place.
+    cx = sx / #points,
+    cy = sy / #points,
     path = table.concat(segs, " "),
     color = ass_color(hex.fill),
     bord = hex.stroke * SCALE / 2,
+    rate1 = RATE_MIN + RATE_SPAN * spread,
+    -- The second rate is the first times the golden ratio, an irrational
+    -- multiple, so the sum of the two sines never repeats and the hexagon never
+    -- settles into a visible loop.
+    rate2 = (RATE_MIN + RATE_SPAN * spread) * PHI,
+    off1 = TAU * spread,
+    off2 = TAU * ((index * PHI * PHI) % 1),
   }
+end
+
+-- The scale factor for one hexagon at one moment. The mean of two sines stays
+-- within -1 and 1, so the size runs from SWING below to SWING above the still
+-- size at full energy, and the energy scales that swing down to nothing at rest.
+local function scale_at(s, level, phase)
+  local swing = 0.5
+    * (
+      math.sin(TAU * s.rate1 * phase + s.off1)
+      + math.sin(TAU * s.rate2 * phase + s.off2)
+    )
+  return 1 + SWING * level * swing
+end
+
+-- The ASS path for one hexagon scaled about its own center. Only the vertices
+-- move. The border width stays as it is, because a border that grew with the
+-- shape would read as a change of weight rather than a change of size.
+local function scaled_path(s, level, phase)
+  local k = scale_at(s, level, phase)
+  local segs = {}
+  for i, p in ipairs(s.points) do
+    segs[i] = string.format(
+      "%s %.2f %.2f",
+      i == 1 and "m" or "l",
+      s.cx + (p[1] - s.cx) * k,
+      s.cy + (p[2] - s.cy) * k
+    )
+  end
+  return table.concat(segs, " ")
 end
 
 -- logo.draw returns the ASS for the whole mark, one drawing per hexagon. The
 -- points are absolute canvas coordinates, so each shape anchors at the origin
 -- with an7 and pos(0,0). The mark draws opaque, and theme.faded_alpha scales
 -- that alpha by the OSD fade so the mark fades with the rest of the screen.
-function logo.draw()
+--
+-- level is the energy, from 0 at rest to 1 at full swing, and phase is the
+-- animation clock the energy module advances. At level 0, and for a caller that
+-- passes neither, every hexagon draws its still path, so a resting mark renders
+-- exactly the drawing this module produced before it could move.
+function logo.draw(level, phase)
   local alpha = theme.faded_alpha(theme.alpha.opaque)
+  local moving = level ~= nil and level > 0 and phase ~= nil
   local parts = {}
   for _, s in ipairs(shapes) do
+    local path = s.path
+    if moving then
+      path = scaled_path(s, level, phase)
+    end
     parts[#parts + 1] = string.format(
       "{\\an7\\pos(0,0)\\bord%.2f\\3c%s\\3a%s\\shad0\\1c%s\\1a%s\\p1}%s{\\p0}",
-      s.bord, s.color, alpha, s.color, alpha, s.path
+      s.bord, s.color, alpha, s.color, alpha, path
     )
   end
   return table.concat(parts, "\n")

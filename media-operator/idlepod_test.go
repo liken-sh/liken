@@ -205,6 +205,7 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 	wantEnv := map[string]string{
 		busAddressVariable:          testBusAddress,
 		playerCommandsTopicVariable: playerCommandsTopic(testTopicBase, "house", "theater"),
+		playerStatusTopicVariable:   playerStatusTopic(testTopicBase, "house", "theater"),
 	}
 	if !reflect.DeepEqual(env, wantEnv) {
 		t.Errorf("sidecar env = %+v, want %+v", env, wantEnv)

@@ -39,6 +39,11 @@ These plans are designed. Each keeps its number and moves to
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
   builds on the display of plan 07.
+* [12, The idle screen reads the bus](12-the-idle-screen-reads-the-bus.md).
+  The idle screen becomes a live client of the bus: a retained status
+  per `Player`, controller presence from the standing remote pod, and
+  the `liken` mark in motion as the loading indicator around a `Play`.
+  Nothing restarts to show a change.
 
 ## Completed
 

@@ -41,6 +41,28 @@ var inputNodePattern = "/dev/input/event*"
 // scans again every two seconds until the nodes appear.
 var nodePollDelay = 2 * time.Second
 
+// remotePresence is the whole of what the standing pod says about its
+// controller: whether the controller's event nodes are open right now. The
+// Remote it belongs to is named by the topic, not by the body, the way a
+// Play's report is.
+type remotePresence struct {
+	Connected bool `json:"connected"`
+}
+
+// reader holds the standing pod's bus client, the three topics it
+// publishes, and the presence it last published. The bus calls onConnect
+// on its own goroutine and the node loop publishes on the pod's, so a
+// mutex guards the flag the two share.
+type reader struct {
+	bus               *Bus
+	eventsTopic       string
+	presenceTopic     string
+	availabilityTopic string
+
+	mutex     sync.Mutex
+	connected bool
+}
+
 // runReader finds the controller, connects to the bus, and publishes
 // each event to the Remote's events topic. Setup that cannot succeed
 // ends the process, so a pod the operator built wrong shows the failure
@@ -59,7 +81,6 @@ func runReader() {
 	if base == "" {
 		base = defaultTopicBase
 	}
-	eventsTopic := remoteEventsTopic(base, namespace, name)
 
 	// This process is its container's PID 1, and the kernel runs no
 	// default action for a signal sent to PID 1, so the kubelet's
@@ -68,15 +89,52 @@ func runReader() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	// The reader only publishes: no Last Will, no connect callback, and
-	// no inbound handler. The Bus manages its own connection and
-	// reconnects with backoff, so a broker restart costs a gap in events
-	// and not the reader.
-	bus := newBus(busAddress, "remote-"+namespace+"-"+name, nil, nil, nil)
-	go bus.Run(ctx)
+	r := &reader{
+		eventsTopic:       remoteEventsTopic(base, namespace, name),
+		presenceTopic:     remotePresenceTopic(base, namespace, name),
+		availabilityTopic: remoteAvailabilityTopic(base, namespace, name),
+	}
+	// The reader reads nothing off the bus, so it names no inbound
+	// handler. It does name a Last Will on its availability topic, the
+	// pattern the playback sidecar uses: the broker publishes offline on
+	// any disconnect this pod does not make cleanly, so a pod the kubelet
+	// killed leaves no retained presence that reads as a connected
+	// controller. The Bus manages its own connection and reconnects with
+	// backoff, so a broker restart costs a gap in events and not the
+	// reader.
+	r.bus = newBus(busAddress, "remote-"+namespace+"-"+name,
+		&busWill{Topic: r.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
+		r.onConnect, nil)
+	go r.bus.Run(ctx)
 
-	publishEvents(ctx, bus, eventsTopic)
+	r.publishEvents(ctx)
 	os.Exit(0)
+}
+
+// onConnect refills the broker the moment a session reaches a CONNACK. The
+// Bus remembers subscriptions across a reconnect but not publishes, and a
+// fresh broker session holds none of the retained state this pod owns, so
+// the availability and the current presence both go out again here.
+func (r *reader) onConnect(bus *Bus) {
+	bus.Publish(r.availabilityTopic, []byte(availabilityOnline), true)
+	r.mutex.Lock()
+	connected := r.connected
+	r.mutex.Unlock()
+	r.publishPresence(connected)
+}
+
+// publishPresence writes the controller's connected flag to the retained
+// presence topic and records it, so a later reconnect republishes the same
+// value. A pod that has not yet found its controller's nodes publishes
+// false, which is the truth: the pod runs and the controller is away.
+func (r *reader) publishPresence(connected bool) {
+	r.mutex.Lock()
+	r.connected = connected
+	r.mutex.Unlock()
+	// A struct of one bool marshals unconditionally, so the error is
+	// dropped.
+	payload, _ := json.Marshal(remotePresence{Connected: connected})
+	r.bus.Publish(r.presenceTopic, payload, true)
 }
 
 // publishEvents is the standing pod's outer loop. It waits for the
@@ -84,13 +142,21 @@ func runReader() {
 // vanish, then waits again. The nodes vanish when the controller sleeps
 // and return when it wakes, and the pod keeps running across both, so
 // only ctx ending stops this loop.
-func publishEvents(ctx context.Context, bus *Bus, topic string) {
+//
+// The two edges of that loop are the controller's presence: nodes that
+// open are a controller that connected, and a node batch that ends is a
+// controller that disconnected. Each edge publishes the retained presence,
+// so the operator folds a live flag into the Player status the idle screen
+// draws.
+func (r *reader) publishEvents(ctx context.Context) {
 	for ctx.Err() == nil {
 		nodes, err := awaitNodes(ctx)
 		if err != nil {
 			return
 		}
-		readAndPublish(ctx, bus, topic, nodes)
+		r.publishPresence(true)
+		r.readAndPublish(ctx, nodes)
+		r.publishPresence(false)
 	}
 }
 
@@ -148,7 +214,7 @@ func closeNodes(nodes []*os.File) {
 // bindable event to the events topic. It returns when the nodes vanish,
 // which is the controller going to sleep, so the outer loop waits for
 // the next connect. The process keeps running.
-func readAndPublish(ctx context.Context, bus *Bus, topic string, nodes []*os.File) {
+func (r *reader) readAndPublish(ctx context.Context, nodes []*os.File) {
 	defer closeNodes(nodes)
 
 	reading, stopReading := context.WithCancel(ctx)
@@ -175,7 +241,7 @@ func readAndPublish(ctx context.Context, bus *Bus, topic string, nodes []*os.Fil
 			// The events are not retained, because a press is an event
 			// and not a state, so a subscriber that joins later reads no
 			// stale press.
-			bus.Publish(topic, payload, false)
+			r.bus.Publish(r.eventsTopic, payload, false)
 		}
 	}
 }

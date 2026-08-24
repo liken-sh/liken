@@ -101,4 +101,10 @@ const (
 	// it whole, the way it hands a translator its focus topic, so the
 	// sidecar subscribes to one exact topic and parses nothing.
 	playerCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
+
+	// The player-status topic the same sidecar reads the unit's presentable
+	// state from. The operator builds it the same way and the topic is
+	// retained, so a freshly started idle pod reads the current state on
+	// subscribe and asks for nothing.
+	playerStatusTopicVariable = "MEDIA_PLAYER_STATUS_TOPIC"
 )

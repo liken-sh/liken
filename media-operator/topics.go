@@ -36,6 +36,16 @@ const (
 	playAvailabilityKind = "availability"
 )
 
+// The kind at the end of the two remotes topics the operator reads for a
+// controller's presence. They are separate constants from the plays kinds
+// above, because the two trees carry different payloads under the same two
+// words: a plays status is one run's report, and a remotes presence is one
+// controller's connected flag.
+const (
+	remotePresenceKind     = "presence"
+	remoteAvailabilityKind = "availability"
+)
+
 // remoteEventsTopic carries one Remote's raw button and axis events.
 // The standing remote pod publishes to it, not retained, because a
 // press is an event and not a state. The keymap stays off this topic,
@@ -75,6 +85,70 @@ func remoteFocusFilter(base string) string {
 // four-level focus filter.
 func remoteFocusCycleFilter(base string) string {
 	return base + "/remotes/+/+/focus/cycle"
+}
+
+// remotePresenceTopic carries whether one controller is connected right
+// now, as {"connected": true} or false. The standing remote pod publishes
+// it retained, because presence is a state and not an event, so the
+// operator reads the current value the instant it subscribes. The pod
+// senses the controller first-hand: its evdev nodes open when the
+// controller connects and vanish when it disconnects, so the signal
+// starts where it is read and no Kubernetes watch carries it.
+func remotePresenceTopic(base, namespace, name string) string {
+	return base + "/remotes/" + namespace + "/" + name + "/" + remotePresenceKind
+}
+
+// remoteAvailabilityTopic carries online or offline for the standing
+// remote pod itself, the same two words the plays availability uses. The
+// pod names this topic as its MQTT Last Will, so a pod the kubelet killed
+// reads offline and the retained presence it left behind does not stand as
+// a connected controller.
+func remoteAvailabilityTopic(base, namespace, name string) string {
+	return base + "/remotes/" + namespace + "/" + name + "/" + remoteAvailabilityKind
+}
+
+// remotePresenceFilter is the operator's subscription that reaches every
+// controller's presence. The operator folds each message into the Player
+// status it publishes, so the idle pod reads one topic and no more.
+func remotePresenceFilter(base string) string {
+	return base + "/remotes/+/+/" + remotePresenceKind
+}
+
+// remoteAvailabilityFilter is the operator's subscription that reaches
+// every standing remote pod's availability signal.
+func remoteAvailabilityFilter(base string) string {
+	return base + "/remotes/+/+/" + remoteAvailabilityKind
+}
+
+// parseRemotePresenceTopic maps a presence topic back to the controller it
+// names.
+func parseRemotePresenceTopic(base, topic string) (namespace, name string, ok bool) {
+	return parseRemoteTopic(base, topic, remotePresenceKind)
+}
+
+// parseRemoteAvailabilityTopic maps an availability topic back to the
+// controller whose pod it names.
+func parseRemoteAvailabilityTopic(base, topic string) (namespace, name string, ok bool) {
+	return parseRemoteTopic(base, topic, remoteAvailabilityKind)
+}
+
+// parseRemoteTopic maps one three-segment remotes topic back to the
+// controller it names, for the kind its last segment carries. It matches
+// the segment count as well as the kind, so a cycle topic, which carries a
+// fourth segment, matches no three-segment kind.
+func parseRemoteTopic(base, topic, kind string) (namespace, name string, ok bool) {
+	prefix := base + "/remotes/"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
+	if len(parts) != 3 || parts[2] != kind {
+		return "", "", false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // parseRemoteFocusTopic maps a focus topic back to the controller it
@@ -132,6 +206,17 @@ func playCommandsTopic(base, namespace, name string) string {
 // sends.
 func playerCommandsTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/commands"
+}
+
+// playerStatusTopic carries one unit's presentable state: its friendly
+// name, what it is doing, the Play it runs, and its parts with the
+// presence of each. The operator is the only writer, and the topic is
+// retained, so an idle pod that just started paints the live state the
+// broker already holds and asks for nothing. It stays off the plays tree
+// because it describes the equipment, which stands whether or not a Play
+// runs.
+func playerStatusTopic(base, namespace, name string) string {
+	return base + "/players/" + namespace + "/" + name + "/status"
 }
 
 // keymapTopic carries one Keymap's compiled table. It drops the

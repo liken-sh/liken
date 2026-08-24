@@ -39,8 +39,10 @@ func TestIdleCommandClientIDDerivesFromTheTopic(t *testing.T) {
 	mustMatch(t, idleCommandClientID(topic), "idle-command-liken-media-players-house-theater-commands")
 }
 
-// A re-present message dials the idle mpv and writes the two force-window
-// sets, so the clock shows again after a Play ends.
+// A re-present message dials the idle mpv, writes the two force-window
+// sets, and then says the surface is on screen, so the clock shows again
+// after a Play ends and the display starts the mark in motion on the frame
+// it came back into view.
 func TestIdleCommandHandleRecreatesTheSurfaceOnRePresent(t *testing.T) {
 	fastTeardown(t)
 	useDialDelay(t, time.Millisecond)
@@ -62,10 +64,40 @@ func TestIdleCommandHandleRecreatesTheSurfaceOnRePresent(t *testing.T) {
 	mustSucceed(t, err)
 	t.Cleanup(func() { conn.Close() })
 
-	got := readLines(t, conn, 2)
+	got := readLines(t, conn, 3)
 	want := []string{
 		`{"command":["set","force-window","no"]}`,
 		`{"command":["set","force-window","yes"]}`,
+		`{"command":["script-message","revealed"]}`,
+	}
+	mustMatchAll(t, got, want)
+}
+
+// A status message reaches the display script as one script-message with
+// the operator's JSON as its single argument, so the Lua decodes what the
+// operator published and this sidecar reads none of it.
+func TestIdleCommandHandleForwardsTheStatusToTheDisplay(t *testing.T) {
+	useDialDelay(t, time.Millisecond)
+	path := filepath.Join(t.TempDir(), "mpv.sock")
+	useSocket(t, path)
+	listener, err := net.Listen("unix", path)
+	mustSucceed(t, err)
+	t.Cleanup(func() { listener.Close() })
+
+	ic := &idleCommander{
+		commandsTopic: playerCommandsTopic(defaultTopicBase, "house", "theater"),
+		statusTopic:   playerStatusTopic(defaultTopicBase, "house", "theater"),
+		runCtx:        context.Background(),
+	}
+	go ic.handle(ic.statusTopic, []byte(`{"displayName":"Studio Lab","activity":"Idle"}`))
+
+	conn, err := listener.Accept()
+	mustSucceed(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	got := readLines(t, conn, 1)
+	want := []string{
+		`{"command":["script-message","player-status","{\"displayName\":\"Studio Lab\",\"activity\":\"Idle\"}"]}`,
 	}
 	mustMatchAll(t, got, want)
 }

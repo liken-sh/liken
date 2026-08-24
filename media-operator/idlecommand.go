@@ -1,9 +1,11 @@
 package main
 
-// The idle command sidecar recreates the idle mpv's Wayland surface when
-// a Play on the same Player ends. It is a native sidecar beside the idle
-// mpv, subscribing to the Player's commands topic and driving mpv through
-// the JSON IPC socket the two containers share on the pod's ipc volume.
+// The idle command sidecar is the idle screen's one path to the bus. It
+// recreates the idle mpv's Wayland surface when a Play on the same Player
+// ends, and it forwards the unit's live state into the display script. It
+// is a native sidecar beside the idle mpv, subscribing to the Player's
+// commands and status topics and driving mpv through the JSON IPC socket
+// the two containers share on the pod's ipc volume.
 //
 // The recreate is the whole fix for a seatless compositor. Weston's
 // kiosk-shell reveals a lower surface only along a code path gated on a
@@ -46,22 +48,34 @@ var surfaceTeardownGap = 200 * time.Millisecond
 // the bus reader is not held on a socket that is not coming back.
 var idleDialTimeout = 5 * time.Second
 
-// idleCommander holds the idle command sidecar's one input, the commands
-// topic it subscribes to, and the run context every re-present dials mpv
-// under.
+// The two script messages the sidecar broadcasts into the idle display
+// script. player-status carries one status payload as its single argument,
+// and revealed says the idle surface is on screen again, which is the
+// frame the display starts the mark's ramp-down from.
+const (
+	playerStatusMessage = "player-status"
+	revealedMessage     = "revealed"
+)
+
+// idleCommander holds the idle command sidecar's two inputs, the commands
+// and status topics it subscribes to, and the run context every write to
+// mpv dials under.
 type idleCommander struct {
 	commandsTopic string
+	statusTopic   string
 	runCtx        context.Context
 }
 
 // runIdleCommand connects to the bus, subscribes to the Player's commands
-// topic, and recreates the idle surface on each re-present. It returns on
-// the kubelet's grace signal. The topic is pre-built and carries the
-// Player's identity, so the sidecar subscribes to one exact topic and
-// parses nothing.
+// and status topics, recreates the idle surface on each re-present, and
+// forwards each status into the display script. It returns on the
+// kubelet's grace signal. Both topics are pre-built and carry the Player's
+// identity, so the sidecar subscribes to two exact topics and parses
+// nothing.
 func runIdleCommand() {
 	busAddress := os.Getenv(busAddressVariable)
 	commandsTopic := os.Getenv(playerCommandsTopicVariable)
+	statusTopic := os.Getenv(playerStatusTopicVariable)
 
 	// The idle command sidecar is its container's PID 1, so the signal
 	// context ends the run on the kubelet's SIGTERM. Every re-present dials
@@ -69,12 +83,15 @@ func runIdleCommand() {
 	runCtx, stopRun := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stopRun()
 
-	ic := &idleCommander{commandsTopic: commandsTopic, runCtx: runCtx}
+	ic := &idleCommander{commandsTopic: commandsTopic, statusTopic: statusTopic, runCtx: runCtx}
 	bus := newBus(busAddress, idleCommandClientID(commandsTopic), nil, nil, ic.handle)
-	// The subscription is made once. The Bus remembers the filter and
-	// re-sends it on every reconnect, so a broker restart does not need the
-	// sidecar to subscribe again.
+	// Each subscription is made once. The Bus remembers the filters and
+	// re-sends them on every reconnect, so a broker restart does not need
+	// the sidecar to subscribe again. The status topic is retained, so the
+	// broker delivers the current state on this subscribe and a pod that
+	// just started paints live state with no request of its own.
 	bus.Subscribe(commandsTopic)
+	bus.Subscribe(statusTopic)
 	bus.Run(runCtx)
 }
 
@@ -86,12 +103,22 @@ func idleCommandClientID(commandsTopic string) string {
 	return "idle-command-" + strings.ReplaceAll(commandsTopic, "/", "-")
 }
 
-// handle turns one commands message into a re-present. The topic is
-// fixed, so the payload alone matters: it decodes to a named command, and
-// only the re-present action recreates the surface. A payload that does
-// not decode, or any other action, does nothing, so a newer command on
-// the topic has no effect rather than a crash.
+// handle folds one message from either subscription. The two topics carry
+// different messages, so the topic says which this is: the status topic
+// carries the unit's state, and the commands topic carries a named
+// command, of which only the re-present acts. A payload that does not
+// decode, or any other action, does nothing, so a newer command on the
+// topic has no effect rather than a crash.
+//
+// The Bus calls this on its reader goroutine, so the two topics are served
+// in the order the broker delivered them. The operator publishes a Player's
+// status before the re-present that follows it, so the display reads the
+// Idle status before the reveal and animates the return.
 func (ic *idleCommander) handle(topic string, payload []byte) {
+	if topic == ic.statusTopic {
+		ic.forwardStatus(payload)
+		return
+	}
 	var command mediaCommand
 	if err := json.Unmarshal(payload, &command); err != nil {
 		return
@@ -102,10 +129,36 @@ func (ic *idleCommander) handle(topic string, payload []byte) {
 	ic.represent()
 }
 
-// represent dials the idle mpv and recreates its surface. A dial that
-// does not connect within idleDialTimeout writes nothing, so a re-present
-// that lands while the idle mpv restarts does not hold the bus reader.
+// forwardStatus hands one status message to the display script as the
+// player-status script message. The payload travels as one string
+// argument, so the Lua decodes the same JSON the operator published and
+// this sidecar reads none of it: a field the display starts drawing needs
+// no change here.
+func (ic *idleCommander) forwardStatus(payload []byte) {
+	ic.withMPV("forward the player status", func(conn io.Writer) error {
+		return sendCommand(conn, []any{"script-message", playerStatusMessage, string(payload)})
+	})
+}
+
+// represent recreates the idle surface and then reports that it is on
+// screen. The reveal goes out on the same connection and after the second
+// force-window set succeeds, so the display starts the mark in
+// motion on the frame the surface came back into view.
 func (ic *idleCommander) represent() {
+	ic.withMPV("recreate the idle surface", func(conn io.Writer) error {
+		if err := recreateSurface(conn); err != nil {
+			return err
+		}
+		return sendCommand(conn, []any{"script-message", revealedMessage})
+	})
+}
+
+// withMPV dials the idle mpv and runs one write against it. A dial that
+// does not connect within idleDialTimeout writes nothing, so a message
+// that lands while the idle mpv restarts does not hold the bus reader.
+// The what argument names the write in the failure line, because every
+// caller reaches mpv the same way and only the write differs.
+func (ic *idleCommander) withMPV(what string, write func(conn io.Writer) error) {
 	ctx, cancel := context.WithTimeout(ic.runCtx, idleDialTimeout)
 	defer cancel()
 	conn, err := dialMPV(ctx, mpvSocketPath)
@@ -114,8 +167,8 @@ func (ic *idleCommander) represent() {
 		return
 	}
 	defer conn.Close()
-	if err := recreateSurface(conn); err != nil {
-		fmt.Fprintf(os.Stderr, "idle-command: recreate the idle surface: %v\n", err)
+	if err := write(conn); err != nil {
+		fmt.Fprintf(os.Stderr, "idle-command: %s: %v\n", what, err)
 	}
 }
 

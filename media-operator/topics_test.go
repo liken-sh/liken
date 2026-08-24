@@ -16,6 +16,11 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "remote events", got: remoteEventsTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/events"},
 		{name: "remote focus", got: remoteFocusTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/focus"},
 		{name: "remote focus cycle", got: remoteFocusCycleTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/focus/cycle"},
+		{name: "remote presence", got: remotePresenceTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/presence"},
+		{name: "remote availability", got: remoteAvailabilityTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/availability"},
+		{name: "remote presence filter", got: remotePresenceFilter(base), want: "liken/media/remotes/+/+/presence"},
+		{name: "remote availability filter", got: remoteAvailabilityFilter(base), want: "liken/media/remotes/+/+/availability"},
+		{name: "player status", got: playerStatusTopic(base, "house", "theater"), want: "liken/media/players/house/theater/status"},
 		{name: "focus filter", got: remoteFocusFilter(base), want: "liken/media/remotes/+/+/focus"},
 		{name: "focus cycle filter", got: remoteFocusCycleFilter(base), want: "liken/media/remotes/+/+/focus/cycle"},
 		{name: "play status", got: playStatusTopic(base, "house", "movie"), want: "liken/media/plays/house/movie/status"},
@@ -110,5 +115,41 @@ func TestTheFocusParsersDoNotCrossMatch(t *testing.T) {
 	}
 	if _, _, ok := parseRemoteFocusCycleTopic(base, events); ok {
 		t.Errorf("the cycle parser matched the events topic %q", events)
+	}
+}
+
+// The presence parser matches only a presence topic and the availability
+// parser only an availability topic. Each of the four remotes parsers keys
+// on its own kind, so the operator folds each message down one path.
+func TestThePresenceParsersMatchTheirOwnTopicAlone(t *testing.T) {
+	base := defaultTopicBase
+	presence := remotePresenceTopic(base, "house", "sofa")
+	availability := remoteAvailabilityTopic(base, "house", "sofa")
+
+	cases := []struct {
+		name      string
+		parse     func(base, topic string) (string, string, bool)
+		topic     string
+		namespace string
+		remote    string
+		ok        bool
+	}{
+		{name: "presence", parse: parseRemotePresenceTopic, topic: presence, namespace: "house", remote: "sofa", ok: true},
+		{name: "presence against availability", parse: parseRemotePresenceTopic, topic: availability},
+		{name: "presence against focus", parse: parseRemotePresenceTopic, topic: remoteFocusTopic(base, "house", "sofa")},
+		{name: "presence against the cycle topic", parse: parseRemotePresenceTopic, topic: remoteFocusCycleTopic(base, "house", "sofa")},
+		{name: "availability", parse: parseRemoteAvailabilityTopic, topic: availability, namespace: "house", remote: "sofa", ok: true},
+		{name: "availability against presence", parse: parseRemoteAvailabilityTopic, topic: presence},
+		{name: "availability against a play", parse: parseRemoteAvailabilityTopic, topic: playAvailabilityTopic(base, "house", "movie")},
+		{name: "availability under another base", parse: parseRemoteAvailabilityTopic, topic: "other/remotes/house/sofa/availability"},
+		{name: "an empty remote name", parse: parseRemotePresenceTopic, topic: base + "/remotes/house//presence"},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			namespace, remote, ok := each.parse(base, each.topic)
+			mustMatch(t, ok, each.ok)
+			mustMatch(t, namespace, each.namespace)
+			mustMatch(t, remote, each.remote)
+		})
 	}
 }

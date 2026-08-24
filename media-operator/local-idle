@@ -9,6 +9,17 @@
 # sets on the idle pod: the unit's friendly name, its parts one per line, and
 # the zone the clock reads. This script sets them from its arguments.
 #
+# On a cluster the bus drives the screen. This script sets IDLE_PREVIEW=1
+# instead, and under that variable the display binds four keys that build the
+# same messages the idle pod's sidecar sends:
+#
+#   p   a Play starts. The mark ramps into motion and the activity line
+#       appears.
+#   o   the Play runs. The mark stops, the way it does behind a film.
+#   i   the Play ends. The idle surface returns in motion and eases to still.
+#   d   the last part connects or disconnects. Its line dims, then pulses
+#       back.
+#
 # Usage:
 #   local-idle                          a sample unit, so a first run draws a
 #                                        full screen
@@ -42,6 +53,7 @@ exec env \
   TZ="${TZ:-America/New_York}" \
   IDLE_PLAYER_NAME="$name" \
   IDLE_PLAYER_COMPONENTS="$components" \
+  IDLE_PREVIEW=1 \
   mpv \
     --idle=yes \
     --force-window=yes \

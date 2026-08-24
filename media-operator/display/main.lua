@@ -11,6 +11,10 @@ local trickplay = require("trickplay")
 local clock = require("clock")
 local identity = require("identity")
 local logo = require("logo")
+local energy = require("energy")
+local activity = require("activity")
+local preview = require("preview")
+local utils = require("mp.utils")
 
 -- The remote reaches this client by its directory basename. The log names it
 -- once, so a wrong name shows in the player log.
@@ -24,8 +28,8 @@ overlay.res_y = theme.canvas.h
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
-  -- The idle client draws the centered logo, the clock, and the identity block,
-  -- and nothing else. mpv reports idle-active while it holds a window with no
+  -- The idle client draws the centered logo, the clock, the identity block, and
+  -- the activity line, and nothing else. mpv reports idle-active while it holds a window with no
   -- file, which is the whole life of the idle pod and never a moment of a Play.
   -- So the idle branch draws the logo in the center, the clock top-right, and
   -- the identity block bottom-left at full brightness on the black idle window
@@ -36,9 +40,18 @@ local function redraw()
   -- names no unit, so an unnamed Player still shows the logo and a clean clock.
   -- Assigning overlay.data and updating replaces the surface in place, so the
   -- minute turns with no clear-then-redraw flicker.
+  --
+  -- The logo takes the energy and the animation phase, so the mark pulses while
+  -- a Play starts and rests the rest of the time. The activity line draws under
+  -- the clock while a Play starts or runs, and draws nothing once the energy
+  -- reaches 0.
   if mp.get_property_bool("idle-active") then
     theme.set_fade(1)
-    local idle_parts = { logo.draw(), clock.draw() }
+    local idle_parts = { logo.draw(energy.level(), energy.phase()), clock.draw() }
+    local line = activity.draw(energy.level())
+    if line then
+      idle_parts[#idle_parts + 1] = line
+    end
     local block = identity.draw()
     if block then
       idle_parts[#idle_parts + 1] = block
@@ -153,6 +166,8 @@ images.set_redraw(request_redraw)
 presentation.set_redraw(request_redraw)
 header.set_redraw(request_redraw)
 trickplay.set_redraw(request_redraw)
+energy.set_redraw(request_redraw)
+identity.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -253,3 +268,42 @@ end
 mp.register_script_message("summon", function()
   focus.summon()
 end)
+
+-- The idle pod's sidecar subscribes to the Player's retained status on the bus
+-- and forwards each one here as a JSON string. One topic carries the display
+-- name, the activity, the current Play, and the parts with their presence, so
+-- the display reads one message and the operator does the folding. Text that
+-- does not parse changes nothing, because a half-read status is worse on screen
+-- than the last good one.
+local function on_status(text)
+  local parsed = nil
+  if text and text ~= "" then
+    parsed = utils.parse_json(text)
+  end
+  if type(parsed) ~= "table" then
+    return
+  end
+  energy.on_status(parsed.activity)
+  identity.receive(parsed)
+  activity.receive(parsed)
+  request_redraw()
+end
+
+mp.register_script_message("player-status", on_status)
+
+-- The sidecar sends this the moment it recreated the idle surface and showed it
+-- again, after a film ended. It names the exact frame the screen came back into
+-- view, which is the frame the mark starts its ramp down from full swing.
+local function on_revealed()
+  energy.on_revealed()
+  request_redraw()
+end
+
+mp.register_script_message("revealed", on_revealed)
+
+-- The preview keys exist only under IDLE_PREVIEW=1, which local-idle sets and
+-- the operator never sets on an idle pod. So a workstation can play each edge of
+-- the bus by hand, and a cluster binds no key at all.
+if os.getenv("IDLE_PREVIEW") == "1" then
+  preview.enable(on_status, on_revealed)
+end

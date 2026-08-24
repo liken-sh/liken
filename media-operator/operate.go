@@ -92,6 +92,11 @@ type operator struct {
 	// that arbitrates it.
 	focus *focusDesk
 
+	// presence is the desk for each controller's connected flag, built on
+	// the same wake: a controller that connects or disconnects wakes the
+	// pass that republishes the Player status the idle screen reads.
+	presence *presenceDesk
+
 	// positionWrites stamps when each run last wrote its position, so a
 	// bare position advance writes no more than once per
 	// positionWriteInterval. Only the pass goroutine touches it.
@@ -104,6 +109,14 @@ type operator struct {
 	// pass find a topic whose Keymap no longer exists and clear its
 	// retained value. Only the pass goroutine touches it.
 	keymapPublished map[string]string
+
+	// playerStatusPublished maps each Player's status topic to the payload
+	// the operator last published there. It is the keymap pattern applied to
+	// the unit's presentable state: the topic is retained, so the operator
+	// republishes only when the payload changes, and a topic whose Player no
+	// longer exists has its retained value cleared. Only the pass goroutine
+	// touches it.
+	playerStatusPublished map[string]string
 
 	// playReclaim stamps when the operator first saw a deleted Play whose
 	// retained topics still stand, so it clears them once the grace has
@@ -163,19 +176,22 @@ func operate() {
 	wake := make(chan struct{}, 1)
 	desk := newReports(wake)
 	focusDesk := newFocusDesk(wake)
+	presenceDesk := newPresenceDesk(wake)
 	media := &operator{
-		client:           client,
-		image:            image,
-		busAddress:       busAddress,
-		topicBase:        topicBase,
-		idleDisplayClass: idleDisplayClass,
-		reports:          desk,
-		focus:            focusDesk,
-		positionWrites:   map[string]time.Time{},
-		keymapPublished:  map[string]string{},
-		playReclaim:      map[string]time.Time{},
-		recreateBackoff:  map[string]backoffState{},
-		wake:             wake,
+		client:                client,
+		image:                 image,
+		busAddress:            busAddress,
+		topicBase:             topicBase,
+		idleDisplayClass:      idleDisplayClass,
+		reports:               desk,
+		focus:                 focusDesk,
+		presence:              presenceDesk,
+		positionWrites:        map[string]time.Time{},
+		keymapPublished:       map[string]string{},
+		playerStatusPublished: map[string]string{},
+		playReclaim:           map[string]time.Time{},
+		recreateBackoff:       map[string]backoffState{},
+		wake:                  wake,
 	}
 
 	// onConnect marks that a fresh broker session began, so the next pass
@@ -194,6 +210,8 @@ func operate() {
 	media.bus.Subscribe(playAvailabilityFilter(topicBase))
 	media.bus.Subscribe(remoteFocusFilter(topicBase))
 	media.bus.Subscribe(remoteFocusCycleFilter(topicBase))
+	media.bus.Subscribe(remotePresenceFilter(topicBase))
+	media.bus.Subscribe(remoteAvailabilityFilter(topicBase))
 	go media.bus.Run(context.Background())
 
 	// The first lists do two jobs: they prove the operator can read the
@@ -347,17 +365,41 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.focus.requestCycle(controllerKey(namespace, name))
 		return
 	}
+	// A presence or an availability with an empty payload is a cleared
+	// retained value and not a live signal, so it is ignored the way an
+	// empty plays message is. Folding a clear as offline would dim a
+	// controller that is in a person's hand.
+	if namespace, name, ok := parseRemotePresenceTopic(o.topicBase, topic); ok {
+		if len(payload) == 0 {
+			return
+		}
+		var presence remotePresence
+		if err := json.Unmarshal(payload, &presence); err != nil {
+			return
+		}
+		o.presence.setConnected(controllerKey(namespace, name), presence.Connected)
+		return
+	}
+	if namespace, name, ok := parseRemoteAvailabilityTopic(o.topicBase, topic); ok {
+		if len(payload) == 0 {
+			return
+		}
+		o.presence.setAvailability(controllerKey(namespace, name), string(payload) == availabilityOnline)
+		return
+	}
 }
 
 // reestablishRetained rewrites everything the operator publishes retained
 // after a fresh broker session, because the broker holds none of it. It
-// clears the record of published keymaps, so reconcileKeymaps writes every
-// keymap again this pass, and it republishes each focus mark, so a
-// controller keeps its owning Play across a broker or operator restart.
-// The command sidecar re-establishes a Play's status and availability the
-// same way from its own connect, so those need no help here.
+// clears the record of published keymaps and Player statuses, so
+// reconcileKeymaps and reconcilePlayers write every one of them again this
+// pass, and it republishes each focus mark, so a controller keeps its
+// owning Play across a broker or operator restart. The command sidecar and
+// the standing remote pod re-establish their own retained topics from
+// their own connect, so those need no help here.
 func (o *operator) reestablishRetained() {
 	o.keymapPublished = map[string]string{}
+	o.playerStatusPublished = map[string]string{}
 	for key, play := range o.focus.snapshot() {
 		o.publishFocus(key, play)
 	}
@@ -439,17 +481,31 @@ func (o *operator) reconcileKeymaps() {
 	}
 }
 
-// reconcilePlayers writes every Player's status and ensures every
-// Player's standing idle pod, from the Players and Plays the pass already
-// read. A Player's status is relational, derived from the Plays that name
-// it, so the pass lists the Players once and hands the slice here and to
-// reconcileFocus rather than listing twice. The idle pod stands whether
-// or not a Play runs, so its reconcile is per Player and not derived from
-// the Plays.
+// reconcilePlayers writes every Player's status, publishes the same state
+// to the bus, and ensures every Player's standing idle pod, from the
+// Players and Plays the pass already read. A Player's status is
+// relational, derived from the Plays that name it, so the pass lists the
+// Players once and hands the slice here and to reconcileFocus rather than
+// listing twice. The idle pod stands whether or not a Play runs, so its
+// reconcile is per Player and not derived from the Plays.
+//
+// The Kubernetes status and the bus status carry the same activity from
+// the same derivation. The API server holds what exists and what is
+// desired, and the bus carries the presentable now, which is why the idle
+// screen reads a topic and holds no API credentials.
 func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string) {
+	published := make(map[string]bool, len(players))
 	for index := range players {
 		player := &players[index]
 		desired := derivePlayerStatus(player, plays)
+		// The status goes out before the re-present, and the order is what
+		// the returning idle screen draws from. The display animates the
+		// return only when it reads the Idle status before the reveal that
+		// follows the re-present, because the status is what says the film is
+		// over. Both messages leave on the operator's one bus connection and
+		// reach the sidecar on its one connection, so the order the operator
+		// writes is the order the sidecar reads.
+		published[o.publishPlayerStatus(player, desired, plays)] = true
 		// A Play that ends leaves the idle pod's surface destroyed and
 		// hidden. Weston's kiosk-shell reveals a lower surface only along a
 		// code path gated on a seat, and liken's compositor has none, so the
@@ -474,6 +530,38 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
 	}
+	// A topic whose Player no longer exists has its retained value cleared
+	// with an empty publish, so a deleted Player leaves no unit on the bus
+	// for a subscriber to draw.
+	for topic := range o.playerStatusPublished {
+		if !published[topic] {
+			o.bus.Publish(topic, nil, true)
+			delete(o.playerStatusPublished, topic)
+		}
+	}
+}
+
+// publishPlayerStatus writes one unit's presentable state to its retained
+// status topic and returns the topic it wrote, so the caller records which
+// topics this pass still owns. The topic is retained, so republishing an
+// unchanged payload is churn a new subscriber does not need: it reads the
+// current value from the broker. The publish happens only when the payload
+// differs from the last one this operator wrote, which is what keeps the
+// backstop tick off the bus while a unit sits idle.
+func (o *operator) publishPlayerStatus(player *Player, desired PlayerStatus, plays []Play) string {
+	topic := playerStatusTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name)
+	payload, err := json.Marshal(derivePlayerBusStatus(player, desired, plays, o.presence))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshaling player %s/%s bus status: %v\n",
+			player.Metadata.Namespace, player.Metadata.Name, err)
+		return topic
+	}
+	if o.playerStatusPublished[topic] == string(payload) {
+		return topic
+	}
+	o.bus.Publish(topic, payload, true)
+	o.playerStatusPublished[topic] = string(payload)
+	return topic
 }
 
 // publishRePresent publishes the re-present to a Player's commands topic,
@@ -498,13 +586,20 @@ func (o *operator) reconcileRemotes() {
 		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
 		return
 	}
+	live := make(map[string]bool, len(list.Items))
 	for index := range list.Items {
 		remote := &list.Items[index]
+		live[controllerKey(remote.Metadata.Namespace, remote.Metadata.Name)] = true
 		if err := o.reconcileRemote(remote); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling remote %s/%s: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
 	}
+	// The presence desk holds a key per controller it has heard from, so it
+	// shrinks to the Remotes the cluster still holds. The pass reads the
+	// whole collection here already, so this is the one place that reads
+	// which controllers remain.
+	o.presence.retain(live)
 }
 
 // reconcile takes one Play from the Player it names to the status it

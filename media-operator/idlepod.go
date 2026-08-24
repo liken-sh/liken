@@ -153,10 +153,14 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // crash restarts it, and the pod ends only when the Player is deleted. It
 // carries the household timezone when the cluster set one, so the idle
 // clock reads the same wall-clock zone the playback display reads, and it
-// carries the bus address and the Player's commands topic, because the
-// sidecar reads the re-present off that topic. It carries the Player's
-// friendly name and its parts, which the idle screen draws so a person reads
-// what the unit is while no film runs.
+// carries the bus address and the Player's commands and status topics,
+// because the sidecar reads the re-present off the first and the unit's
+// live state off the second. It carries the Player's friendly name and its
+// parts, which the idle screen draws so a person reads what the unit is
+// while no film runs. Those two variables are the first paint alone: the
+// display seeds the identity block from them before the broker answers, and
+// the first retained status replaces them, so an edit to the Player shows
+// with no pod restart.
 func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topicBase, timeZone string) *Pod {
 	container := Container{
 		Name:         idleContainer,
@@ -190,8 +194,10 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topic
 	}
 
 	// The idle command sidecar owns no device claim. It subscribes to the
-	// Player's commands topic and drives the idle mpv over the shared ipc
-	// socket, so it mounts the ipc volume and reaches nothing else.
+	// Player's commands and status topics and drives the idle mpv over the
+	// shared ipc socket, so it mounts the ipc volume and reaches nothing
+	// else. Both topics are pre-built here, because the operator holds the
+	// topic base and the sidecar parses no topic of its own.
 	sidecar := Container{
 		Name:    idleCommandContainer,
 		Image:   image,
@@ -199,6 +205,7 @@ func buildIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topic
 		Env: []EnvVar{
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name)},
+			{Name: playerStatusTopicVariable, Value: playerStatusTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name)},
 		},
 		VolumeMounts:  []VolumeMount{ipcMount()},
 		RestartPolicy: sidecarRestartPolicy,
