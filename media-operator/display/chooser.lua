@@ -11,7 +11,7 @@ local ROW_H = 58
 local PAD = 24
 -- The panel grows upward from this baseline, so it floats over the regions
 -- above the strip.
-local BOTTOM = 876
+local BOTTOM = theme.panel_bottom
 -- A subtitle list can run to dozens of tracks, more than fit on screen. The
 -- panel shows a window of rows around the selection, so the current entry stays
 -- in view however long the list.

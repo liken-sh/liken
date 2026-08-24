@@ -15,7 +15,7 @@ end
 local LEFT = theme.margin.x
 local RIGHT = theme.canvas.w - theme.margin.x
 local BAR_W = RIGHT - LEFT
-local BAR_Y = 904
+local BAR_Y = theme.bar_y
 local BAR_H = 14
 -- The gap between two segments, so the divisions read as separate chapters.
 local SEG_GAP = 4

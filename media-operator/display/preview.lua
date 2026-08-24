@@ -14,25 +14,17 @@ local preview = {}
 local enabled = false
 
 -- The parts come from the environment seed, which carries names and no kinds.
--- The preview calls the last part the remote, because the parts read in the
--- order the operator lists them and a controller is the part a person adds last.
--- That part is the one whose presence the d key toggles.
-local function split_lines(text)
-  local lines = {}
-  if not text or text == "" then
-    return lines
-  end
-  for line in (text .. "\n"):gmatch("(.-)\n") do
-    lines[#lines + 1] = line
-  end
-  return lines
-end
+-- identity owns that seed's format and exports the splitter for it. The
+-- preview calls the last part the remote, because the parts read in the
+-- order the operator lists them and a controller is the part a person adds
+-- last. That part is the one whose presence the d key toggles.
+local identity = require("identity")
 
 local kind = "Idle"
 local connected = true
 
 local function status_json()
-  local names = split_lines(os.getenv("IDLE_PLAYER_COMPONENTS"))
+  local names = identity.split_lines(os.getenv("IDLE_PLAYER_COMPONENTS"))
   local components = {}
   for index, name in ipairs(names) do
     local component = { name = name, kind = "sink" }
@@ -96,7 +88,7 @@ function preview.draw()
   end
   local legend = "p play starts    o playing    i film ends    d presence    q quit"
   return theme.text(
-    theme.canvas.w - theme.margin.x, theme.canvas.h - 90,
+    theme.canvas.w - theme.margin.x, theme.canvas.h - theme.margin.y,
     legend, theme.type.tiny, theme.color.muted, 3, theme.alpha.dim
   )
 end

@@ -10,7 +10,7 @@ local presentation = require("presentation")
 local header = {}
 
 local LEFT = theme.margin.x
-local TOP_Y = 90
+local TOP_Y = theme.margin.y
 -- The second line sits below the title, far enough to clear the title glyphs.
 local SECOND_Y = TOP_Y + 82
 -- With a logo, the second line sits this far below the logo's own bottom.

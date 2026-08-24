@@ -6,7 +6,7 @@ local theme = require("theme")
 local clock = {}
 
 local RIGHT = theme.canvas.w - theme.margin.x
-local TOP_Y = 90
+local TOP_Y = theme.margin.y
 
 -- Format a wall-clock time as "3:01 pm", a twelve-hour clock with no leading
 -- zero and a lowercase suffix.

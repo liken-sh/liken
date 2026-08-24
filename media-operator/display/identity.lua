@@ -21,7 +21,7 @@ local LEFT = theme.margin.x
 -- The block sits the same distance from the bottom edge the clock sits from
 -- the top, so the two balance across the screen. The clock holds the
 -- top-right and the block holds the bottom-left, so the two never overlap.
-local BOTTOM_Y = theme.canvas.h - 90
+local BOTTOM_Y = theme.canvas.h - theme.margin.y
 
 -- The header reads one step larger than the parts, so the unit's name leads the
 -- list. The parts sit close together, and the header stands off from the first
@@ -58,9 +58,12 @@ function identity.set_redraw(fn)
   redraw_cb = fn
 end
 
--- The parts arrive as one string with a newline between each name. Split it
--- into a list, and return an empty list for an empty or absent value.
-local function split_lines(text)
+-- The parts arrive in the environment as one string with a newline between
+-- each name. Split it into a list, and return an empty list for an empty or
+-- absent value. The function is exported because that environment format is
+-- this block's contract, and the preview builds its fake status from the
+-- same seed.
+function identity.split_lines(text)
   local lines = {}
   if not text or text == "" then
     return lines
@@ -70,6 +73,7 @@ local function split_lines(text)
   end
   return lines
 end
+local split_lines = identity.split_lines
 
 -- One entry per part: its name, whether it reports a live connection, the
 -- brightness it draws at now, the brightness it eases toward, and the flash it

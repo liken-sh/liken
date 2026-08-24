@@ -163,12 +163,12 @@ end
 -- that alpha by the OSD fade so the mark fades with the rest of the screen.
 --
 -- level is the energy, from 0 at rest to 1 at full swing, and phase is the
--- animation clock the energy module advances. At level 0, and for a caller that
--- passes neither, every hexagon draws its still path, so a resting mark renders
--- exactly the drawing this module produced before it could move.
+-- animation clock the energy module advances. At level 0 every hexagon draws
+-- its still path, so a resting mark renders exactly the drawing this module
+-- produced before it could move.
 function logo.draw(level, phase)
   local alpha = theme.faded_alpha(theme.alpha.opaque)
-  local moving = level ~= nil and level > 0 and phase ~= nil
+  local moving = level > 0
   local parts = {}
   for _, s in ipairs(shapes) do
     local path = s.path

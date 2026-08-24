@@ -10,9 +10,10 @@ function images.set_redraw(fn)
   redraw_cb = fn
 end
 
--- The counter sits low and centered, where the scrubber bar sits for a film.
+-- The counter sits low and centered, on the row the scrubber bar holds for a
+-- film.
 local CENTER_X = theme.canvas.w / 2
-local Y = 904
+local Y = theme.bar_y
 
 -- An image item is one whose presentation block declares the image type.
 function images.available()

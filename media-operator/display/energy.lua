@@ -59,12 +59,6 @@ function energy.phase()
   return phase
 end
 
--- The activity from the last status, so a reveal reads the state the screen came
--- back into.
-function energy.activity()
-  return last_activity
-end
-
 -- Smoothstep, the curve that starts and ends at zero slope. It is what makes the
 -- ramp read as an ease and not as a straight climb.
 local function ease(t)

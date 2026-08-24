@@ -28,9 +28,10 @@ overlay.res_y = theme.canvas.h
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
-  -- The idle client draws the centered logo, the clock, the identity block, and
-  -- the activity line, and nothing else. mpv reports idle-active while it holds a window with no
-  -- file, which is the whole life of the idle pod and never a moment of a Play.
+  -- The idle client draws the centered logo, the clock, the identity block,
+  -- and the activity line, and nothing else. mpv reports idle-active while it
+  -- holds a window with no file, which is the whole life of the idle pod and
+  -- never a moment of a Play.
   -- So the idle branch draws the logo in the center, the clock top-right, and
   -- the identity block bottom-left at full brightness on the black idle window
   -- and returns, and a Play never reaches it. theme.fade scales every alpha for

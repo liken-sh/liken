@@ -11,9 +11,11 @@ local theme = require("theme")
 local activity = {}
 
 -- The line shares the clock's right edge and its top, so the two stack in the
--- same column. LINE_Y clears the clock's own line at theme.type.small.
+-- same column. LINE_Y clears the clock's own line: the clock hangs from the
+-- top margin at theme.type.small, and the gap below it keeps the two lines
+-- apart without touching.
 local RIGHT = theme.canvas.w - theme.margin.x
-local LINE_Y = 90 + 46
+local LINE_Y = theme.margin.y + theme.type.small + 12
 
 -- The typographic marks, as UTF-8 bytes. \226\128\156 and \226\128\157 are the
 -- left and right double quotation marks, and \226\128\166 is the ellipsis. The

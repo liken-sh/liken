@@ -80,9 +80,21 @@ theme.type = {
   tiny = 28,
 }
 
+-- The layout margins and the shared rows. x is the side margin every
+-- flush-left and flush-right element keeps. y is the top margin, and by
+-- symmetry the bottom one: the clock, the header, and the activity line
+-- hang from it, and the identity block and the preview legend stand the
+-- same distance off the bottom edge. bar_y is the scrubber bar's center
+-- line, where the image counter also sits. panel_bottom is the baseline a
+-- chooser or an adjuster panel grows upward from. They live here because
+-- two modules that share a row must read one number, not keep two copies
+-- that happen to agree.
 theme.margin = {
   x = 140,
+  y = 90,
 }
+theme.bar_y = 904
+theme.panel_bottom = 876
 
 -- The whole display draws in one family. libass resolves it through fontconfig,
 -- and the player image installs the font, so the text renders the same on every
@@ -175,26 +187,6 @@ function theme.panel(x, y, w, h)
     "{\\an7\\pos(%.2f,%.2f)\\bord2\\3c%s\\3a&H00&\\shad0\\1c%s\\1a%s\\p1}%s{\\p0}",
     x, y, theme.color.fill, theme.color.shadow, theme.alpha.panel, rounded_path(w, h, 14)
   )
-end
-
--- A circle from four cubic beziers. 0.5523 is the control-point offset that
--- fits a bezier arc to a quarter circle.
-local function circle_path(r)
-  local k = r * 0.5523
-  return string.format(
-    "m %.2f 0 b %.2f 0 %.2f %.2f %.2f %.2f "
-      .. "b %.2f %.2f %.2f %.2f %.2f %.2f "
-      .. "b %.2f %.2f 0 %.2f 0 %.2f "
-      .. "b 0 %.2f %.2f 0 %.2f 0",
-    r, r + k, 2 * r, r - k, 2 * r, r,
-    2 * r, r + k, r + k, 2 * r, r, 2 * r,
-    r - k, 2 * r, r + k, r,
-    r - k, r - k, r
-  )
-end
-
-function theme.circle(x, y, r, color, alpha)
-  return drawing(x, y, color, alpha, circle_path(r))
 end
 
 -- A pointy-top regular hexagon in a 2r box, center at (r, r). r is the

@@ -106,7 +106,7 @@ function offset.new(cfg)
     local X = theme.margin.x
     local W = 720
     local PAD = 24
-    local BOTTOM = 876
+    local BOTTOM = theme.panel_bottom
     local H = 200
     local top = BOTTOM - H
     local v = mp.get_property_number(cfg.prop) or 0
