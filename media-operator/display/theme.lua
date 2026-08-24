@@ -33,6 +33,34 @@ theme.color = {
   shadow = "&H000000&",
 }
 
+-- The global fade factor, from 0 clear to 1 full. drawing and theme.text scale
+-- every alpha by it, so the whole OSD fades as one. At 1 the alpha is unchanged.
+theme.fade = 1
+
+function theme.set_fade(v)
+  theme.fade = v
+end
+
+-- faded scales one ASS alpha byte by the fade factor. The byte runs 00 opaque to
+-- FF transparent, and out = 255 - round(fade * (255 - in)). At fade 1 the output
+-- byte equals the input, so a full OSD draws as it does with no fade at all.
+local function faded(alpha)
+  local hex = alpha:match("&H(%x+)&")
+  if not hex then
+    return alpha
+  end
+  local t = tonumber(hex, 16)
+  local out = 255 - math.floor(theme.fade * (255 - t) + 0.5)
+  return string.format("&H%02X&", out)
+end
+
+-- faded_alpha is faded for a module that sets an alpha inline. It fades an inline
+-- override with the rest of the OSD, so a segment with its own alpha does not hold
+-- that alpha while everything around it fades.
+function theme.faded_alpha(alpha)
+  return faded(alpha)
+end
+
 -- An ASS alpha runs from 00, opaque, to FF, transparent.
 theme.alpha = {
   opaque = "&H00&",
@@ -70,9 +98,10 @@ local function drawing(x, y, color, alpha, path, bord, bordcolor, blur)
   bord = bord or 0
   bordcolor = bordcolor or color
   blur = blur or 0
+  local a = faded(alpha)
   return string.format(
     "{\\an7\\pos(%.2f,%.2f)\\bord%.2f\\3c%s\\3a%s\\shad0\\blur%.2f\\1c%s\\1a%s\\p1}%s{\\p0}",
-    x, y, bord, bordcolor, alpha, blur, color, alpha, path
+    x, y, bord, bordcolor, a, blur, color, a, path
   )
 end
 
@@ -192,7 +221,7 @@ function theme.text(x, y, s, size, color, an, alpha)
   alpha = alpha or theme.alpha.opaque
   return string.format(
     "{\\an%d\\pos(%.2f,%.2f)\\fn%s\\fs%d\\bord0\\shad0\\1c%s\\1a%s}%s",
-    an, x, y, theme.font, size, color, alpha, s
+    an, x, y, theme.font, size, color, faded(alpha), s
   )
 end
 

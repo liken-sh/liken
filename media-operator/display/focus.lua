@@ -1,12 +1,21 @@
 -- The input router and the summon state of the OSD. It holds which stop has
 -- focus and whether a chooser captures, and it sends each press to the right
 -- module. It draws no pixels.
+local theme = require("theme")
 local scrubber = require("scrubber")
 local strip = require("strip")
 local images = require("images")
 local presentation = require("presentation")
 
 local focus = {}
+
+-- The OSD fades in over FADE_IN_MS and out over FADE_OUT_MS. The out is longer
+-- than the in, so the OSD fades out more slowly than it fades in. Tune both here.
+local FADE_IN_MS = 350
+local FADE_OUT_MS = 600
+-- The fade steps on this period, about sixty times a second, and asks for a
+-- redraw on each step.
+local FADE_TICK = 1 / 60
 
 -- The focus stops, top to bottom. The scrubber owns two of them, fine and
 -- chapter, on one bar. up and down walk the stops present for the current
@@ -21,7 +30,13 @@ local summoned = false
 local paused = false
 local first_pause = true
 local hide_timer = nil
+-- The current fade factor, the target it steps toward, and the timer that steps
+-- it. theme reads the factor to scale every alpha.
+local fade = 0
+local fade_target = 0
+local fade_timer = nil
 local redraw_cb = function() end
+theme.set_fade(fade)
 -- The stop that has focus, and the control whose chooser captures input.
 local focused = nil
 local capturing = nil
@@ -65,6 +80,42 @@ end
 
 function focus.visible()
   return summoned
+end
+
+-- The fade factor, so main draws the layout while it is above 0 and clears the
+-- overlay once it reaches 0.
+function focus.fade()
+  return fade
+end
+
+-- Step the factor toward its target on each tick, at the in-rate on the way up
+-- and the out-rate on the way down, then redraw. Stop the timer at the target.
+local function fade_step()
+  local rate_ms = fade_target > fade and FADE_IN_MS or FADE_OUT_MS
+  local step = FADE_TICK * 1000 / rate_ms
+  if fade_target > fade then
+    fade = math.min(fade_target, fade + step)
+  else
+    fade = math.max(fade_target, fade - step)
+  end
+  theme.set_fade(fade)
+  redraw_cb()
+  if fade == fade_target and fade_timer then
+    fade_timer:kill()
+    fade_timer = nil
+  end
+end
+
+-- Set the target and run the timer until the factor reaches it. One timer serves
+-- both directions, so a dismiss during a fade-in reverses the same timer in place.
+local function start_fade(target)
+  fade_target = target
+  if fade == fade_target then
+    return
+  end
+  if not fade_timer then
+    fade_timer = mp.add_periodic_timer(FADE_TICK, fade_step)
+  end
 end
 
 local function reset_focus()
@@ -132,15 +183,15 @@ local function arm_hide()
   end
   hide_timer = mp.add_timeout(IDLE_HIDE, function()
     hide_timer = nil
-    summoned = false
-    redraw_cb()
+    focus.dismiss()
   end)
 end
 
 -- Toggle mpv's pause. The pause observer calls on_pause, which summons the OSD,
--- so a pause from select needs no separate summon.
+-- so a pause from select needs no separate summon. The no-osd prefix suppresses
+-- mpv's own pause indicator, so the liken OSD is the only thing that draws.
 local function toggle_pause()
-  mp.commandv("cycle", "pause")
+  mp.commandv("no-osd", "cycle", "pause")
 end
 
 function focus.summon()
@@ -148,6 +199,7 @@ function focus.summon()
     summoned = true
     reset_focus()
   end
+  start_fade(1)
   arm_hide()
   redraw_cb()
 end
@@ -159,11 +211,12 @@ function focus.dismiss()
     capturing = nil
   end
   cancel_hide()
+  start_fade(0)
   redraw_cb()
 end
 
 -- main observes pause and reports it here. A pause summons the OSD and holds
--- it, and a resume starts the idle countdown.
+-- it, and a resume dismisses it at once.
 function focus.on_pause(p)
   paused = p
   -- mpv fires this callback once at startup with the current pause state. The
@@ -177,7 +230,7 @@ function focus.on_pause(p)
     focus.summon()
     cancel_hide()
   elseif summoned then
-    arm_hide()
+    focus.dismiss()
   end
   redraw_cb()
 end
@@ -210,10 +263,10 @@ function focus.select()
   toggle_pause()
 end
 
--- back has three meanings, one per state. An open chooser takes back to close
--- itself. A fine scan takes back to cancel the preview. With neither open, back
--- dismisses the OSD. The chooser and the scan each hold something to close, so
--- they take back before the OSD does.
+-- back has four meanings, one per state, tried in order. An open chooser closes.
+-- Else a fine scan cancels its preview. Else the visible OSD dismisses. Else, at
+-- the bare video, back quits mpv with code 0, so the pod ends as the Completed a
+-- finished film gives, not an Error.
 function focus.nav(action)
   if action == "back" then
     if capturing then
@@ -222,11 +275,13 @@ function focus.nav(action)
       redraw_cb()
     elseif focused == "fine" and scrubber.scanning() then
       -- A scan is in flight, so back cancels the preview and leaves the video
-      -- where it plays. With no scan, back dismisses the OSD.
+      -- where it plays.
       scrubber.cancel()
       redraw_cb()
-    else
+    elseif focus.visible() then
       focus.dismiss()
+    else
+      mp.commandv("quit", "0")
     end
     return
   end

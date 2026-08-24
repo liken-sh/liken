@@ -33,7 +33,7 @@ function clock.draw()
   local pos = mp.get_property_number("time-pos")
   if duration and pos and duration > 0 then
     local ends = fmt(now + math.floor(duration - pos + 0.5))
-    text = text .. "{\\1a" .. theme.alpha.subdued .. "}" .. "  \194\183  ends " .. ends
+    text = text .. "{\\1a" .. theme.faded_alpha(theme.alpha.subdued) .. "}" .. "  \194\183  ends " .. ends
   end
   return theme.text(RIGHT, TOP_Y, text, theme.type.small, theme.color.text, 9, theme.alpha.opaque)
 end

@@ -44,7 +44,10 @@ local function redraw()
     trickplay.sync(false)
   end
   local parts = {}
-  if focus.visible() then
+  -- Build the layout while the fade factor is above 0, not only while the OSD is
+  -- summoned, so the last frame keeps drawing at a falling alpha through the
+  -- fade-out. At 0 parts stays empty and the overlay clears.
+  if focus.fade() > 0 then
     local h = header.draw()
     local ck = clock.draw()
     if h or ck then
@@ -199,3 +202,10 @@ for _, action in ipairs({ "up", "down", "left", "right", "select", "back" }) do
     focus.nav(action)
   end)
 end
+
+-- The command sidecar sends summon right after an osd-no seek or chapter jump,
+-- so the liken scrubber appears and shows the new position. It shows the OSD and
+-- arms the idle hide, and moves no focus.
+mp.register_script_message("summon", function()
+  focus.summon()
+end)
