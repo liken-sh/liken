@@ -30,6 +30,11 @@ These plans are designed. Each keeps its number and moves to
   wants and whether subtitles show. One cluster resource holds the
   household default, and a `Player` or a `Play` overrides it. The
   operator resolves the fields at `Play` start and passes them to `mpv`.
+* [10, A native volume indicator](10-a-native-volume-indicator.md).
+  `volume` and `mute` move off `mpv`'s built-in text onto a
+  `liken`-drawn readout that fades with the rest of the OSD. It is listed
+  before 09 because it builds first; the number is its identity, not its
+  order.
 * [09, The music experience](09-the-music-experience.md). A music
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
@@ -95,6 +100,11 @@ These plans are designed. Each keeps its number and moves to
 owes an answer to. Those documents have no number, because nobody
 has decided yet what work they become.
 
+* [The screen is bare between plays](open-problems/the-screen-is-bare-between-plays.md).
+  The display lives in the playback pod and draws only while a `Play`
+  runs, so a `Player` with no `Play` shows a bare screen. A standing idle
+  surface, like the remote reader's standing pod, would draw status
+  between plays and give up the screen when a playback pod is ready.
 * [The player image is still Debian](open-problems/the-player-image-is-still-debian.md).
   The operator image is one binary on `scratch`; the player image is
   a distribution base, because `mpv`'s runtime closure is wide. The
