@@ -4,7 +4,7 @@ weight: 40
 toc: true
 ---
 
-<!-- Generated from deploy/keymaps-crd.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/keymaps-crd.yaml by crdref. Do not edit. -->
 
 A `Keymap` is one controller model's table from buttons and axes to
 named actions, written once per model and shared by every

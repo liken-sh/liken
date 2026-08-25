@@ -4,7 +4,7 @@ weight: 10
 toc: true
 ---
 
-<!-- Generated from deploy/players-crd.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/players-crd.yaml by crdref. Do not edit. -->
 
 A `Player` is one named unit of equipment: a lone speaker, a TV
 with its built-in speakers, a TV with a receiver. The spec selects

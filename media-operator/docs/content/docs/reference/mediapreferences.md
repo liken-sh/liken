@@ -4,7 +4,7 @@ weight: 50
 toc: true
 ---
 
-<!-- Generated from deploy/mediapreferences-crd.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/mediapreferences-crd.yaml by crdref. Do not edit. -->
 
 A `MediaPreferences` holds the cluster's defaults: the preferred
 audio and subtitle languages, the time zone its displays show, and

@@ -1,6 +1,6 @@
 # The docs domain builds the manual for media.liken.sh. Five of the
 # reference pages are generated, never edited: crdref, the generator
-# the liken repository publishes, renders each page from its CRD
+# the brand repository publishes, renders each page from its CRD
 # schema in deploy/, a hand-written preamble that opens the page, and
 # a hand-written postamble that carries its bus sections. The schema
 # descriptions become the field tables, so a schema edit is a manual
@@ -22,6 +22,11 @@ GENERATED := \
 .PHONY: build
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
+
+# The site's own tests: every internal link resolves before the build (manual_test.go passes this site's exceptions).
+.PHONY: test
+test:
+	go test ./...
 
 $(REFERENCE)/players.md: ../deploy/players-crd.yaml crdref/players-preamble.md crdref/players-postamble.md go.mod
 	$(CRDREF) -title Players -weight 10 -postamble crdref/players-postamble.md $< $@ crdref/players-preamble.md

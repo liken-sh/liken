@@ -4,7 +4,7 @@ weight: 30
 toc: true
 ---
 
-<!-- Generated from deploy/remotes-crd.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/remotes-crd.yaml by crdref. Do not edit. -->
 
 A `Remote` is one physical controller: the device it is and the
 [`Keymap`](/docs/reference/keymaps/) for its model. It names no

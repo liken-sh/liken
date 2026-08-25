@@ -4,7 +4,7 @@ weight: 20
 toc: true
 ---
 
-<!-- Generated from deploy/plays-crd.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/plays-crd.yaml by crdref. Do not edit. -->
 
 A `Play` is one run of media on a [Player](/docs/reference/players/):
 a film, an album, or a season of episodes, played in order. Its
