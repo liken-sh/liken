@@ -1,7 +1,7 @@
 # media-operator
 
-A media routing and playback layer expressed as Kubernetes
-resources. It runs on a
+The routing and control of media playback in a cluster, expressed
+as Kubernetes resources. It runs on a
 [`liken`](https://github.com/liken-sh/liken) cluster above the
 hardware operators: the
 [`display-operator`](https://display.liken.sh),
@@ -10,7 +10,7 @@ hardware operators: the
 display, speaker, and controller as a claimable device, and this
 operator declares what those devices form together.
 
-The API is four resources. A `Player` names one unit of equipment at
+The API is five resources. A `Player` names one unit of equipment at
 one spot, for one purpose: a lone speaker, a TV with its surround
 pair, a gaming TV with its controllers. A `Play` is one run of
 media on a player, with a lifecycle analogous to a `Job`: a film,
@@ -20,7 +20,8 @@ Create it to start, delete it to stop, and `kubectl get plays`
 lists what plays right now. A
 `Remote` is one physical controller, bound to the players it
 drives. A `Keymap` maps one controller model's buttons to named
-media actions.
+media actions. A fifth resource, `MediaPreferences`, holds one
+cluster-wide default for audio and subtitle languages.
 
 The operator reconciles a `Play` into one playback pod beside the
 hardware, running `mpv` under a thin supervisor, with every device
@@ -31,7 +32,10 @@ arrives by URI: `https://` streams, and `nfs://` mounts. Media
 library management is a separate concern, and this project does
 none of it.
 
-The operator is not built yet. [`plans/00-design.md`](plans/00-design.md)
-is the design: the resources, what was considered and set aside, and
-what the design still owes an answer to.
-[`plans/README.md`](plans/README.md) indexes the plans that build it.
+The manual is at [media.liken.sh](https://media.liken.sh/): the
+install guide, the reference for each resource, and the message bus
+every pod and any of your own programs share.
+[`plans/00-design.md`](plans/00-design.md) is the design: the
+resources, what was considered and set aside, and what the design
+still owes an answer to. [`plans/README.md`](plans/README.md)
+indexes the plans that built it and the ones still open.

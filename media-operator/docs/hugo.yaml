@@ -1,0 +1,60 @@
+# The site's configuration. The site is the manual for the media
+# operator, served at media.liken.sh. The hardware operators name
+# their sites after their device classes; this operator publishes no
+# devices, so the hostname names what it operates instead, the media
+# a cluster routes and controls.
+#
+# The theme is the shared brand repository, taken as a git submodule
+# at themes/brand. It provides the page shell, the top nav, the mark,
+# and the stylesheet that every liken site uses, so this site reads
+# as part of the same family as liken.sh.
+baseURL: https://media.liken.sh/
+title: media.liken.sh
+theme: brand
+
+# The theme's nav renders a repository entry from this, and the
+# sidebar heads the manual with the project's name, taken from the
+# last segment of this URL.
+params:
+  repository: https://github.com/liken-sh/media-operator
+
+# No taxonomies and no feeds: the site is a manual, not a blog. The
+# sitemap stays, because it is free and crawlers use it.
+disableKinds: [taxonomy, term, rss]
+
+# Every page renders twice, once as HTML for people and once as the
+# authored Markdown for agents and scripts. The two files land side
+# by side, so the Markdown twin of / is /index.md. The theme renders
+# the twin, but only when the site declares this format; without it,
+# the site builds as HTML alone (themes/brand/README.md).
+outputFormats:
+  markdown:
+    # text/markdown is a media type Hugo already has, with the md
+    # suffix. baseName index makes the output index.md, beside
+    # index.html in the same pretty-URL directory.
+    mediaType: text/markdown
+    baseName: index
+    isPlainText: true
+
+outputs:
+  home: [html, markdown]
+  section: [html, markdown]
+  page: [html, markdown]
+
+# The site serves the repository's deploy/ manifests whole, as raw
+# YAML, at /deploy/<file>.yaml. A reader reads the real manifests in
+# place, `kubectl apply -f` takes the URLs directly, and a
+# Kustomization can name them as resources, so an install needs no
+# clone. The mount publishes the files the repository holds: there is
+# no copy to drift.
+#
+# Declaring any mount replaces every default mount for the site, so
+# the content mount comes back explicitly. The theme's own mounts,
+# which provide the favicon and the brand images, are the theme's and
+# stay as they are.
+module:
+  mounts:
+    - source: content
+      target: content
+    - source: ../deploy
+      target: static/deploy
