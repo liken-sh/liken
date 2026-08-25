@@ -15,6 +15,8 @@ go 1.26.5
 
 tool github.com/gohugoio/hugo
 
+require github.com/liken-sh/brand v0.0.0-20260825124703-c6b8a07974d4
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect
