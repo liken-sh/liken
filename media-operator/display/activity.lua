@@ -15,7 +15,7 @@ local activity = {}
 -- top margin at theme.type.small, and the gap below it keeps the two lines
 -- apart without touching.
 local RIGHT = theme.canvas.w - theme.margin.x
-local LINE_Y = theme.margin.y + theme.type.small + 12
+local LINE_Y = theme.margin.y + theme.line_pitch
 
 -- The typographic marks, as UTF-8 bytes. \226\128\156 and \226\128\157 are the
 -- left and right double quotation marks, and \226\128\166 is the ellipsis. The

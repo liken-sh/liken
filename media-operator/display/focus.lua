@@ -10,12 +10,14 @@ local presentation = require("presentation")
 local focus = {}
 
 -- The OSD fades in over FADE_IN_MS and out over FADE_OUT_MS. The out is longer
--- than the in, so the OSD fades out more slowly than it fades in. Tune both here.
-local FADE_IN_MS = 350
-local FADE_OUT_MS = 600
--- The fade steps on this period, about sixty times a second, and asks for a
+-- than the in, so the OSD fades out more slowly than it fades in. The numbers
+-- live in theme, because the volume indicator fades on a clock of its own and
+-- the two clocks must run at the same rates. Tune them there.
+local FADE_IN_MS = theme.fade_in_ms
+local FADE_OUT_MS = theme.fade_out_ms
+-- The fade steps on this period, about sixty times a second, and requests a
 -- redraw on each step.
-local FADE_TICK = 1 / 60
+local FADE_TICK = theme.fade_tick
 
 -- The focus stops, top to bottom. The scrubber owns two of them, fine and
 -- chapter, on one bar. up and down walk the stops present for the current
@@ -23,8 +25,9 @@ local FADE_TICK = 1 / 60
 local STOPS = { "fine", "chapter", "images", "strip" }
 
 -- Hide the OSD after this many idle seconds of play. A pause does not start
--- the countdown.
-local IDLE_HIDE = 4
+-- the countdown. The number lives in theme, because the volume indicator
+-- waits out the same window on a timer of its own.
+local IDLE_HIDE = theme.idle_hide
 
 -- The script-message the display and the command sidecar agree on for the exit
 -- press. The sidecar answers it: it publishes the ending to the bus and then

@@ -50,6 +50,11 @@ const (
 // state, beside the commands and status topics of the same tree.
 const playerPanelKind = "panel"
 
+// The last segment of the players topic that carries the listening
+// level, beside the panel, commands, and status kinds of the same
+// tree.
+const playerVolumeKind = "volume"
+
 // remoteEventsTopic carries one Remote's raw button and axis events.
 // The standing remote pod publishes to it, not retained, because a
 // press is an event and not a state. The keymap stays off this topic,
@@ -240,18 +245,49 @@ func playerPanelFilter(base string) string {
 // parsePlayerPanelTopic maps a panel topic back to the Player it
 // names.
 func parsePlayerPanelTopic(base, topic string) (namespace, name string, ok bool) {
+	return parsePlayerTopic(base, topic, playerPanelKind)
+}
+
+// parsePlayerTopic maps one three-segment players topic back to the
+// unit it names, for the kind its last segment carries. It matches
+// the segment count as well as the kind, the way parseRemoteTopic
+// does, so a deeper topic under the same tree matches no kind.
+func parsePlayerTopic(base, topic, kind string) (namespace, name string, ok bool) {
 	prefix := base + "/players/"
 	if !strings.HasPrefix(topic, prefix) {
 		return "", "", false
 	}
 	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
-	if len(parts) != 3 || parts[2] != playerPanelKind {
+	if len(parts) != 3 || parts[2] != kind {
 		return "", "", false
 	}
 	if parts[0] == "" || parts[1] == "" {
 		return "", "", false
 	}
 	return parts[0], parts[1], true
+}
+
+// playerVolumeTopic carries the unit's listening level and its
+// muted flag, retained, because the level is a state and not an
+// event. Every pod for the unit subscribes and applies what it
+// reads, and only a press or the operator publishes, so the topic is
+// the authority and no observer ever writes back what it saw.
+func playerVolumeTopic(base, namespace, name string) string {
+	return base + "/players/" + namespace + "/" + name + "/" + playerVolumeKind
+}
+
+// playerVolumeFilter is the operator's one subscription across
+// every unit's level. The operator reads it to learn which units the
+// broker already holds a level for, so the seed writes only where
+// nothing stands.
+func playerVolumeFilter(base string) string {
+	return base + "/players/+/+/" + playerVolumeKind
+}
+
+// parsePlayerVolumeTopic maps a volume topic back to the Player it
+// names.
+func parsePlayerVolumeTopic(base, topic string) (namespace, name string, ok bool) {
+	return parsePlayerTopic(base, topic, playerVolumeKind)
 }
 
 // keymapTopic carries one Keymap's compiled table. It drops the

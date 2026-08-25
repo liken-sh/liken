@@ -58,10 +58,13 @@ func TestCommandFor(t *testing.T) {
 		want    []any
 	}{
 		{name: "pause", command: mediaCommand{Action: actionPause}, want: []any{"no-osd", "cycle", "pause"}},
-		{name: "mute", command: mediaCommand{Action: actionMute}, want: []any{"osd-auto", "cycle", "mute"}},
+		// A volume step and a mute press become no mpv command at
+		// all. Each publishes the unit's next level, and the subscription
+		// on the volume topic is what applies it.
+		{name: "mute", command: mediaCommand{Action: actionMute}, want: nil},
 		{name: "seek forward", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"no-osd", "seek", 30}},
 		{name: "seek back", command: mediaCommand{Action: actionSeek, Amount: -10}, want: []any{"no-osd", "seek", -10}},
-		{name: "volume", command: mediaCommand{Action: actionVolume, Amount: 5}, want: []any{"osd-auto", "add", "volume", 5}},
+		{name: "volume", command: mediaCommand{Action: actionVolume, Amount: 5}, want: nil},
 		{name: "chapter", command: mediaCommand{Action: actionChapter, Amount: -1}, want: []any{"no-osd", "add", "chapter", -1}},
 		{name: "subtitles", command: mediaCommand{Action: actionSubtitles}, want: []any{"osd-auto", "cycle", "sub"}},
 		{name: "audio", command: mediaCommand{Action: actionAudio}, want: []any{"osd-auto", "cycle", "audio"}},

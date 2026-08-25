@@ -9,6 +9,7 @@ local presentation = require("presentation")
 local header = require("header")
 local trickplay = require("trickplay")
 local clock = require("clock")
+local volume = require("volume")
 local identity = require("identity")
 local logo = require("logo")
 local energy = require("energy")
@@ -57,6 +58,14 @@ local function redraw()
     local block = identity.draw()
     if block then
       idle_parts[#idle_parts + 1] = block
+    end
+    -- The volume indicator is the one element of the idle screen that comes
+    -- and goes. It holds a fade of its own, so it draws here at that fade
+    -- while the rest of the idle screen draws full, and one module serves
+    -- both surfaces.
+    local idle_volume = volume.draw()
+    if idle_volume then
+      idle_parts[#idle_parts + 1] = idle_volume
     end
     -- The preview legend draws only when local-idle enabled the keys, so a
     -- cluster's idle screen never carries it.
@@ -156,6 +165,14 @@ local function redraw()
       parts[#parts + 1] = capturing.draw_chooser()
     end
   end
+  -- The volume row draws outside the OSD block, because it comes and goes
+  -- on a clock of its own and a level change must show the level and nothing
+  -- else. It draws last, so it reads over a chooser's dim as well as over
+  -- the bare video.
+  local vol = volume.draw()
+  if vol then
+    parts[#parts + 1] = vol
+  end
   overlay.data = table.concat(parts, "\n")
   overlay:update()
 end
@@ -184,6 +201,7 @@ trickplay.set_redraw(request_redraw)
 energy.set_redraw(request_redraw)
 identity.set_redraw(request_redraw)
 shade.set_redraw(request_redraw)
+volume.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -229,6 +247,18 @@ mp.observe_property("osd-dimensions", "native", function()
 end)
 mp.observe_property("pause", "bool", function(_, value)
   focus.on_pause(value == true)
+end)
+
+-- The display reads the level and the muted flag and never writes them. The
+-- bus holds the state and the command sidecar applies it to mpv, so these
+-- two observers only record what the indicator draws. They show nothing by
+-- themselves, because a pod that restores the retained level on start must
+-- draw no indicator.
+mp.observe_property("volume", "number", function(_, value)
+  volume.on_volume(value)
+end)
+mp.observe_property("mute", "bool", function(_, value)
+  volume.on_mute(value)
 end)
 
 -- The idle client redraws its clock once a second, so the minute turns on the
@@ -283,6 +313,16 @@ end
 -- arms the idle hide, and moves no focus.
 mp.register_script_message("summon", function()
   focus.summon()
+end)
+
+-- The command sidecar sends this after it applies a level from the bus, for
+-- every message except the first one it reads after it connects. That first
+-- one is the retained value, which a starting pod restores and a person did
+-- not press, so the indicator stays off screen for it. The sidecar sets the
+-- properties and sends the message, and the display shows the indicator and
+-- nothing else.
+mp.register_script_message("volume-changed", function()
+  volume.show()
 end)
 
 -- The idle pod's sidecar subscribes to the Player's retained status on the bus

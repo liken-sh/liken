@@ -243,6 +243,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: topicBaseVariable, Value: testTopicBase},
 			{Name: presentationsVariable, Value: "[{}]"},
 			{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
+			{Name: playerVolumeTopicVariable, Value: playerVolumeTopic(testTopicBase, "house", "theater")},
 		},
 		VolumeMounts: append([]VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
 			testResolution(t).Mounts...),
@@ -420,6 +421,42 @@ func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
 	if got := envValue(pod.Spec.Containers[0], playerOptionsVariable); got != "" {
 		t.Errorf("%s = %q, want none", playerOptionsVariable, got)
 	}
+}
+
+// The level the operator resolved reaches mpv on its command line,
+// so the film starts at the level the unit already holds instead of at
+// unity. The subscription is the live authority from there.
+func TestBuildPodStartsMpvAtTheUnitsLevel(t *testing.T) {
+	play := testPlay()
+	play.Spec.Volume = &PlayVolume{Level: level(35), Muted: muted(true)}
+	pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
+		testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+
+	mustMatch(t, envValue(pod.Spec.Containers[0], playerOptionsVariable), "--volume=35\n--mute=yes")
+}
+
+// A unit nothing has answered for carries no level onto the pod, so
+// mpv keeps its own default and the subscription sets the level a moment
+// later.
+func TestBuildPodWithNoLevelCarriesNoVolumeOption(t *testing.T) {
+	mustMatch(t, envValue(testPod(t).Spec.Containers[0], playerOptionsVariable), "")
+}
+
+// The volume topic reaches the command sidecar only for a unit that
+// has speakers. The claim answers that: it holds a sink request only for a
+// Player that states sinks.
+func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
+	speakerless := &Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Spec:     PlayerSpec{Display: &PlayerDevice{Class: "display-output"}},
+	}
+	play := testPlay()
+	pod := buildPod(play, buildClaim(play, speakerless), testResolution(t),
+		testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeTopicVariable), "")
+	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeTopicVariable),
+		playerVolumeTopic(testTopicBase, "house", "theater"))
 }
 
 // A resolved timezone reaches the player container as TZ, so the display clock

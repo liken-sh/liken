@@ -301,6 +301,16 @@ func buildIdlePod(
 			Name:  idlePanelTopicVariable,
 			Value: playerPanelTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name),
 		})
+	// The volume topic travels only for a unit that has speakers. A
+	// Player with no sinks has no level to mean anything, so its idle
+	// sidecar reads no topic, answers no volume press, and feeds the
+	// display no level to draw.
+	if len(player.Spec.Sinks) > 0 {
+		sidecar.Env = append(sidecar.Env, EnvVar{
+			Name:  playerVolumeTopicVariable,
+			Value: playerVolumeTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name),
+		})
+	}
 	// The control request is the sidecar's one device claim. The
 	// display-operator's CDI edit delivers the i2c node and its path
 	// to this container, and the media side wires none of it.

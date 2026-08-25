@@ -26,6 +26,12 @@ display_dir="$here/display"
 # arrows repeat on hold, so a held key accelerates the seek the way a held
 # remote button does. The bindings live in a temporary file, because they
 # belong to the test and not to the player image.
+#
+# The volume keys play the command sidecar's part: on a cluster a press
+# publishes the unit's next state, and the sidecar sets the properties and
+# sends volume-changed. Here the key does both, so the indicator shows the
+# way a press shows it. 9, 0, and m are mpv's own volume keys, taken over
+# so mpv's built-in text never draws.
 conf="$(mktemp)"
 trap 'rm -f "$conf"' EXIT
 cat >"$conf" <<'BINDINGS'
@@ -36,12 +42,16 @@ DOWN  repeatable script-message-to display down
 ENTER script-message-to display select
 ESC   script-message-to display back
 SPACE cycle pause
+9 repeatable no-osd add volume -5 ; script-message-to display volume-changed
+0 repeatable no-osd add volume  5 ; script-message-to display volume-changed
+m no-osd cycle mute ; script-message-to display volume-changed
 q quit
 BINDINGS
 
 # --load-scripts=no skips the workstation's own mpv scripts, so a personal
 # on-screen controller does not draw over the display. --osc=no turns off
-# mpv's built-in controller for the same reason. The workstation's mpv.conf
-# still chooses the video output that renders here.
-mpv --load-scripts=no --osc=no --pause --start="$start" \
+# mpv's built-in controller for the same reason. --volume-max=100 caps the
+# level at unity, the same cap the bus clamps to on a cluster. The
+# workstation's mpv.conf still chooses the video output that renders here.
+mpv --load-scripts=no --osc=no --pause --start="$start" --volume-max=100 \
   --script="$display_dir" --input-conf="$conf" -- "$film"

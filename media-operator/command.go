@@ -62,6 +62,11 @@ type commander struct {
 	availabilityTopic string
 	commandsTopic     string
 
+	// The unit's volume topic, empty for a Player with no sinks.
+	// Empty is the speaker gate: the sidecar subscribes to no level,
+	// applies none, and answers no volume press.
+	volumeTopic string
+
 	bus *Bus
 
 	// The items' presentation blocks in playlist order, baked into the
@@ -75,6 +80,22 @@ type commander struct {
 	reportMutex sync.Mutex
 	lastReport  playReport
 	haveReport  bool
+
+	// The last state the volume topic delivered, and whether one
+	// arrived at all. A press computes from this and never from what
+	// mpv reports, which keeps a held button from becoming its own
+	// echo. The bus reader writes it and a press reads it, so it
+	// takes a lock of its own.
+	volumeMutex sync.Mutex
+	volume      volumeState
+	haveVolume  bool
+
+	// volumeCaughtUp marks that this bus session has already
+	// delivered a level. The first message of a session is the
+	// broker's retained catch-up, a restore and not a press, so it
+	// applies silently and the display draws no indicator at pod
+	// start. Every message after it signals the display.
+	volumeCaughtUp bool
 
 	// ended is set once any of the three endings has happened. It is held
 	// rather than sent and forgotten, so every later report of this run
@@ -140,6 +161,7 @@ func runCommand() {
 		statusTopic:       playStatusTopic(base, namespace, name),
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		commandsTopic:     playCommandsTopic(base, namespace, name),
+		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
 		artDir:            artMountPath,
 	}
@@ -155,6 +177,13 @@ func runCommand() {
 	// re-sends it on every reconnect, so a broker restart does not need
 	// the command sidecar to subscribe again.
 	cmd.bus.Subscribe(cmd.commandsTopic)
+	// The volume topic is retained, so the broker delivers the
+	// unit's current level on this subscribe and the level reaches
+	// mpv with no request of its own. A Player with no sinks names no
+	// topic, so this pod subscribes to no level at all.
+	if cmd.volumeTopic != "" {
+		cmd.bus.Subscribe(cmd.volumeTopic)
+	}
 	go cmd.bus.Run(busCtx)
 
 	cmd.report(runCtx)
@@ -176,6 +205,11 @@ func runCommand() {
 // the broker drops its retained set on a restart and a reconnect must
 // leave the current status behind again.
 func (c *commander) onConnect(bus *Bus) {
+	// A fresh session redelivers the retained level, so that message
+	// is a catch-up again and applies silently again.
+	c.volumeMutex.Lock()
+	c.volumeCaughtUp = false
+	c.volumeMutex.Unlock()
 	bus.Publish(c.availabilityTopic, []byte(availabilityOnline), true)
 	c.reportMutex.Lock()
 	payload, have := c.marshalLastReport()
@@ -209,8 +243,23 @@ func (c *commander) marshalLastReport() ([]byte, bool) {
 // nothing, so a newer program's command degrades to no effect rather
 // than a crash.
 func (c *commander) handle(topic string, payload []byte) {
+	// The two subscriptions carry different payloads, and the topic
+	// says which this is. The volume topic is read first, because its
+	// payload is a state and not a named command.
+	if c.volumeTopic != "" && topic == c.volumeTopic {
+		c.applyVolume(payload)
+		return
+	}
 	var command mediaCommand
 	if err := json.Unmarshal(payload, &command); err != nil {
+		return
+	}
+	// A volume step and a mute press leave here without reaching mpv.
+	// They publish the unit's next state, and the subscription above
+	// applies it, so the pod that pressed and every pod that only
+	// listened run one apply path.
+	if isVolumeAction(command.Action) {
+		c.pressVolume(command)
 		return
 	}
 	mpv := commandFor(command)
@@ -225,6 +274,56 @@ func (c *commander) handle(topic string, payload []byte) {
 	if feedback := feedbackFor(command); feedback != nil {
 		c.command(feedback)
 	}
+}
+
+// applyVolume folds one message off the volume topic and writes it
+// to mpv. It is the only place in the pod that sets the level, so a
+// press made here and a press made on another screen of the same
+// unit reach mpv the same way.
+func (c *commander) applyVolume(payload []byte) {
+	state, ok := parseVolumeState(payload)
+	if !ok {
+		return
+	}
+	c.volumeMutex.Lock()
+	c.volume = state
+	c.haveVolume = true
+	signal := c.volumeCaughtUp
+	c.volumeCaughtUp = true
+	c.volumeMutex.Unlock()
+	for _, command := range volumeCommands(state) {
+		c.command(command)
+	}
+	if signal {
+		c.command(volumeChangedCommand())
+	}
+}
+
+// pressVolume publishes what a press means, retained, and writes
+// nothing to mpv. It computes from the last message the topic
+// delivered, or from unity before any message arrives, so a pod
+// that just started still steps from a definite level.
+func (c *commander) pressVolume(command mediaCommand) {
+	if c.volumeTopic == "" {
+		return
+	}
+	payload, err := marshalVolumeState(nextVolume(c.heldVolume(), command))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "command: volume: %v\n", err)
+		return
+	}
+	c.bus.Publish(c.volumeTopic, payload, true)
+}
+
+// heldVolume is the state the last message left, and unity before
+// any message arrives.
+func (c *commander) heldVolume() volumeState {
+	c.volumeMutex.Lock()
+	defer c.volumeMutex.Unlock()
+	if !c.haveVolume {
+		return defaultVolumeState()
+	}
+	return c.volume
 }
 
 // report is the reporting side of the run. It dials mpv, observes the

@@ -61,6 +61,21 @@ function theme.faded_alpha(alpha)
   return faded(alpha)
 end
 
+-- The fade timing lives here because two things fade on clocks of their own,
+-- the OSD and the volume indicator, and the two must look the same. A fade
+-- takes fade_in_ms to reach full and fade_out_ms to reach clear, and the out
+-- is longer than the in, so anything on the display leaves more slowly than
+-- it arrives.
+theme.fade_in_ms = 350
+theme.fade_out_ms = 600
+-- A fade steps on this period, about sixty times a second, and requests a
+-- redraw on each step.
+theme.fade_tick = 1 / 60
+-- An element the display summons for one action leaves this many seconds
+-- after the last one. The OSD and the volume indicator wait out the same
+-- window, each on its own timer.
+theme.idle_hide = 4
+
 -- An ASS alpha runs from 00, opaque, to FF, transparent.
 theme.alpha = {
   opaque = "&H00&",
@@ -95,6 +110,11 @@ theme.margin = {
 }
 theme.bar_y = 904
 theme.panel_bottom = 876
+-- line_pitch is the drop from one line of the top-right column to the next.
+-- The clock hangs at the top margin, the activity line one pitch under it,
+-- and the volume row one pitch under that, so the three read as a column and
+-- no two of them touch.
+theme.line_pitch = theme.type.small + 12
 
 -- The whole display draws in one family. libass resolves it through fontconfig,
 -- and the player image installs the font, so the text renders the same on every
@@ -206,6 +226,15 @@ end
 
 function theme.hexagon(x, y, r, color, alpha, bord, bordcolor, xscale)
   return drawing(x, y, color, alpha, hexagon_path(r, xscale), bord, bordcolor)
+end
+
+-- theme.shape draws one ASS path the caller supplies, for a mark the named
+-- shapes above do not cover, such as the volume glyph. The path is in the
+-- shape's own local box, and the shape takes the same fade every other shape
+-- takes. A border width and a color draw an outline, so a mark over another
+-- mark in the same color reads apart from it.
+function theme.shape(x, y, path, color, alpha, bord, bordcolor)
+  return drawing(x, y, color, alpha, path, bord, bordcolor)
 end
 
 -- The scrim holds the contrast, so the label draws flat, with no outline.

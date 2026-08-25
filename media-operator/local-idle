@@ -21,6 +21,10 @@
 #       back.
 #   s   the quiet window runs out, then a press follows. The screen fades
 #       to black, and the second press brings it back fast.
+#   9 0 a volume press, down and up. The indicator appears alone and
+#       fades on its own clock, the way a press from a remote shows it.
+#   m   a mute press. The glyph carries the muted state on the same
+#       indicator.
 #
 # Usage:
 #   local-idle                          a sample unit, so a first run draws a

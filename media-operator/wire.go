@@ -143,4 +143,11 @@ const (
 	// retained, so a freshly started idle pod reads the current state on
 	// subscribe and asks for nothing.
 	playerStatusTopicVariable = "MEDIA_PLAYER_STATUS_TOPIC"
+
+	// The unit's volume topic, on both the play pod's command sidecar
+	// and the idle pod's. It is the speaker gate as well as the
+	// address: the operator sets it only for a Player that states
+	// sinks, so a sidecar that reads nothing here subscribes to no
+	// level, applies none, and publishes none.
+	playerVolumeTopicVariable = "MEDIA_PLAYER_VOLUME_TOPIC"
 )

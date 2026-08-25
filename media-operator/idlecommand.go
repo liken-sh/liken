@@ -85,6 +85,26 @@ type idleCommander struct {
 	panelTopic string
 	publish    func(topic string, payload []byte, retained bool)
 
+	// The unit's volume topic, empty for a Player with no sinks.
+	// Empty is the speaker gate: the sidecar subscribes to no level,
+	// applies none, and answers no volume press.
+	volumeTopic string
+
+	// The last state the volume topic delivered, and whether one
+	// arrived at all. It takes a lock of its own rather than the
+	// fade's, because a press reads it while the bus reader writes
+	// it, and neither touches the shade.
+	volumeMu   sync.Mutex
+	volume     volumeState
+	haveVolume bool
+
+	// volumeCaughtUp marks that this bus session has already
+	// delivered a level. The first message of a session is the
+	// broker's retained catch-up, a restore and not a press, so it
+	// applies silently and the idle screen draws no indicator at pod
+	// start. Every message after it signals the display.
+	volumeCaughtUp bool
+
 	// The delivered control device. A nil wire is a Player that states
 	// no control device, and every hardware write below is off.
 	wire panelWire
@@ -175,6 +195,7 @@ func runIdleCommand() {
 		statusTopic:   statusTopic,
 		runCtx:        runCtx,
 		panelTopic:    os.Getenv(idlePanelTopicVariable),
+		volumeTopic:   os.Getenv(playerVolumeTopicVariable),
 		remotes: idleRemoteMap(
 			os.Getenv(idleRemoteEventsTopicsVariable),
 			os.Getenv(idleRemoteKeymapTopicsVariable)),
@@ -198,7 +219,7 @@ func runIdleCommand() {
 			ic.wire = wire
 		}
 	}
-	bus := newBus(busAddress, idleCommandClientID(commandsTopic), nil, nil, ic.handle)
+	bus := newBus(busAddress, idleCommandClientID(commandsTopic), nil, ic.onBusConnect, ic.handle)
 	// The panel state publishes on the same connection the sidecar
 	// reads its topics on.
 	ic.publish = bus.Publish
@@ -209,6 +230,13 @@ func runIdleCommand() {
 	// just started paints live state with no request of its own.
 	bus.Subscribe(commandsTopic)
 	bus.Subscribe(statusTopic)
+	// The volume topic is retained too, so the unit's current level
+	// reaches the idle mpv the moment the pod starts, and the display
+	// draws from the property. A Player with no sinks names no topic,
+	// so this pod subscribes to no level at all.
+	if ic.volumeTopic != "" {
+		bus.Subscribe(ic.volumeTopic)
+	}
 	// A press on any of the unit's remotes reaches the fade, so the
 	// sidecar reads every events topic. The keymap topics are retained,
 	// so each table arrives on subscribe and a Keymap edit reaches the
@@ -314,6 +342,12 @@ func (ic *idleCommander) handle(topic string, payload []byte) {
 		ic.onStatus(payload)
 		return
 	}
+	// The volume topic carries a state and not a named command, so it
+	// is read before the command vocabulary below.
+	if ic.volumeTopic != "" && topic == ic.volumeTopic {
+		ic.applyVolume(payload)
+		return
+	}
 	// A controller's presses reach the fade, and the keymap that names
 	// them arrives on its own retained topic. Both are checked before
 	// the commands topic, because neither carries the operator's
@@ -394,8 +428,13 @@ func isPressEdge(event remoteEvent) bool {
 // onRemoteEvent folds one press into the fade. A sleeping screen wakes
 // on any press, so a person gets the screen back with whatever control
 // they touched. A press named back, while the unit plays nothing,
-// draws the shade at once. Every other press restarts the quiet
-// window.
+// draws the shade at once. A press named volume or mute, while the
+// unit plays nothing and the screen is awake, publishes the unit's
+// next level, and the level reaches mpv on the subscription like any
+// other change. The two gates on it are deliberate: a press on a
+// sleeping screen is a wake and nothing more, and a unit that plays
+// has the film's own pod answering its presses. Every other press
+// restarts the quiet window.
 //
 // An event that is not a down edge, or does not decode, changes
 // nothing: it neither wakes, nor sleeps, nor restarts the window.
@@ -408,18 +447,23 @@ func (ic *idleCommander) onRemoteEvent(topic string, payload []byte) {
 		return
 	}
 	ic.mu.Lock()
+	binding, named := ic.bindingForLocked(topic, event)
 	message := ""
+	press := mediaCommand{}
 	switch {
 	case ic.asleep:
 		ic.asleep = false
 		message = playerWakeMessage
-	case ic.idle && ic.namesBackLocked(topic, event):
+	case ic.idle && named && binding.Action == actionBack:
 		ic.asleep = true
 		message = playerSleepMessage
+	case ic.idle && named && isVolumeAction(binding.Action):
+		press = mediaCommand{Action: binding.Action, Amount: binding.Amount}
 	}
 	ic.rearmLocked()
 	ic.mu.Unlock()
 	ic.applyShade(message)
+	ic.pressVolume(press)
 }
 
 // applyShade sends the fold's script message, pixels first: the shade
@@ -432,19 +476,86 @@ func (ic *idleCommander) applyShade(message string) {
 	}
 }
 
-// namesBackLocked reports whether this press is the back action on the
-// remote that published it. The match runs the translator's own
-// matchBinding against that remote's compiled table, so back means
-// here exactly what it means during a film. A remote with no keymap,
-// or a press no binding matches, names nothing.
-func (ic *idleCommander) namesBackLocked(topic string, event remoteEvent) bool {
+// bindingForLocked reports what this press names on the remote that
+// published it. The match runs the translator's own matchBinding
+// against that remote's compiled table, so back and a volume step
+// mean here exactly what they mean during a film. A remote with no
+// keymap, or a press no binding matches, names nothing.
+func (ic *idleCommander) bindingForLocked(topic string, event remoteEvent) (compiledBinding, bool) {
 	keymap := ic.remotes[topic]
 	if keymap == "" {
-		return false
+		return compiledBinding{}, false
 	}
-	binding, ok := matchBinding(ic.tables[keymap],
+	return matchBinding(ic.tables[keymap],
 		inputEvent{Type: event.Type, Code: event.Code, Value: event.Value})
-	return ok && binding.Action == actionBack
+}
+
+// applyVolume folds one message off the volume topic and writes it
+// to the idle mpv. The idle mpv plays no audio, and it holds the
+// level as a property all the same, and that property is what the
+// display draws the indicator from.
+func (ic *idleCommander) applyVolume(payload []byte) {
+	state, ok := parseVolumeState(payload)
+	if !ok {
+		return
+	}
+	ic.volumeMu.Lock()
+	ic.volume = state
+	ic.haveVolume = true
+	signal := ic.volumeCaughtUp
+	ic.volumeCaughtUp = true
+	ic.volumeMu.Unlock()
+	ic.withMPV("set the volume", func(d *mpvDialog) error {
+		for _, command := range volumeCommands(state) {
+			if err := d.call(command); err != nil {
+				return err
+			}
+		}
+		if !signal {
+			return nil
+		}
+		return d.call(volumeChangedCommand())
+	})
+}
+
+// onBusConnect runs at the start of every bus session. A fresh
+// session redelivers the retained level, so that message is a
+// catch-up again and applies silently again.
+func (ic *idleCommander) onBusConnect(*Bus) {
+	ic.volumeMu.Lock()
+	ic.volumeCaughtUp = false
+	ic.volumeMu.Unlock()
+}
+
+// pressVolume publishes what a press means, retained, and writes
+// nothing to mpv. An empty action is the ordinary case of a press
+// that named no level, and it publishes nothing. It computes from
+// the last message the topic delivered, or from unity before any
+// message arrives.
+func (ic *idleCommander) pressVolume(command mediaCommand) {
+	if ic.volumeTopic == "" || !isVolumeAction(command.Action) {
+		return
+	}
+	payload, err := marshalVolumeState(nextVolume(ic.heldVolume(), command))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "idle-command: volume: %v\n", err)
+		return
+	}
+	if ic.publish == nil {
+		return
+	}
+	ic.publish(ic.volumeTopic, payload, true)
+}
+
+// heldVolume is the state the last message left, and unity before
+// any message arrives.
+func (ic *idleCommander) heldVolume() volumeState {
+	ic.volumeMu.Lock()
+	defer ic.volumeMu.Unlock()
+	if !ic.haveVolume {
+		return defaultVolumeState()
+	}
+	return ic.volume
 }
 
 // holdsKeymapTopic reports whether this topic is the keymap topic of

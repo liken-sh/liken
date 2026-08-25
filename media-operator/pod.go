@@ -11,6 +11,7 @@ package main
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -87,7 +88,13 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	// Pass the resolved preference flags to the shim. Nothing is passed when no
 	// tier stated a preference, so mpv keeps its own default and the feature adds
 	// no behavior.
-	if options := mpvPreferenceOptions(prefs); len(options) > 0 {
+	//
+	// The unit's level joins the same list, so mpv starts at the
+	// level the unit already holds rather than at unity, and nothing
+	// drops a moment later when the subscription catches up. The
+	// subscription is the live authority from there.
+	options := append(mpvPreferenceOptions(prefs), mpvVolumeOptions(play.Spec.Volume)...)
+	if len(options) > 0 {
 		container.Env = append(container.Env,
 			EnvVar{Name: playerOptionsVariable, Value: strings.Join(options, "\n")})
 	}
@@ -114,7 +121,7 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	// order, and the operator reads the translator set back off it to tell
 	// whether a Player reshaped this pod.
 	initContainers := make([]Container, 0, len(remotes)+1)
-	initContainers = append(initContainers, commandSidecar(play, resolved.Logos, resolved.Trickplays, resolved.Mounts, image, busAddress, topicBase))
+	initContainers = append(initContainers, commandSidecar(play, claim, resolved.Logos, resolved.Trickplays, resolved.Mounts, image, busAddress, topicBase))
 	for _, remote := range remotes {
 		initContainers = append(initContainers, translatorSidecar(play, image, busAddress, topicBase, remote))
 	}
@@ -167,28 +174,57 @@ func mpvPreferenceOptions(prefs resolvedPreferences) []string {
 	return append(options, "--subs-match-os-language=no")
 }
 
+// mpvVolumeOptions turns the level the pod starts at into mpv's own
+// flags. The operator fills the block with the unit's current state
+// before it creates the pod, so what reaches mpv here is a snapshot,
+// and the volume topic stays the authority.
+func mpvVolumeOptions(volume *PlayVolume) []string {
+	if volume == nil {
+		return nil
+	}
+	var options []string
+	if volume.Level != nil {
+		options = append(options, "--volume="+strconv.Itoa(*volume.Level))
+	}
+	if volume.Muted != nil {
+		options = append(options, "--mute="+mpvYesNo(*volume.Muted))
+	}
+	return options
+}
+
 // commandSidecar is the playback pod's owner of the mpv IPC socket: the
 // player image in its command mode, holding no device claim. It
 // subscribes to the Play's commands topic, drives mpv through the shared
 // socket, and publishes the Play's status. It mounts the IPC volume,
 // because it is the one container besides mpv that reaches the socket.
-func commandSidecar(play *Play, logos, trickplays []string, mediaMounts []VolumeMount, image, busAddress, topicBase string) Container {
+func commandSidecar(play *Play, claim *ResourceClaim, logos, trickplays []string, mediaMounts []VolumeMount, image, busAddress, topicBase string) Container {
 	interval := play.Spec.TrickplayInterval
 	if interval == "" {
 		interval = defaultTrickplayInterval
+	}
+	env := []EnvVar{
+		{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
+		{Name: playNameVariable, Value: play.Metadata.Name},
+		{Name: busAddressVariable, Value: busAddress},
+		{Name: topicBaseVariable, Value: topicBase},
+		{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items, logos, trickplays)},
+		{Name: trickplayIntervalVariable, Value: interval},
+	}
+	// The volume topic travels only for a unit that has speakers, and
+	// the claim answers that: it holds a sink request only for a
+	// Player that states sinks. A unit with nothing to hear names no
+	// topic, and its sidecar answers no volume press.
+	if claimHasSink(claim) {
+		env = append(env, EnvVar{
+			Name:  playerVolumeTopicVariable,
+			Value: playerVolumeTopic(topicBase, play.Metadata.Namespace, playerName(play)),
+		})
 	}
 	return Container{
 		Name:    commandContainer,
 		Image:   image,
 		Command: []string{"/media-operator", commandMode},
-		Env: []EnvVar{
-			{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
-			{Name: playNameVariable, Value: play.Metadata.Name},
-			{Name: busAddressVariable, Value: busAddress},
-			{Name: topicBaseVariable, Value: topicBase},
-			{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items, logos, trickplays)},
-			{Name: trickplayIntervalVariable, Value: interval},
-		},
+		Env:     env,
 		// The command sidecar reads mpv's socket on the IPC volume and writes
 		// decoded art on the art volume, and mpv reads that art back through the
 		// same art volume. It also holds the player's media mounts, because the

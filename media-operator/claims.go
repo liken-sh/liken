@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 )
 
 // The request names are the roles, and they are the names the
@@ -160,6 +161,19 @@ func claimRequests(claim *ResourceClaim) []string {
 		names = append(names, request.Name)
 	}
 	return names
+}
+
+// claimHasSink reports whether this claim requests a speaker. The
+// claim carries one request per sink the Player states, and none for
+// a Player that states no sink, so it is the speaker gate the pod
+// builder reads without holding the Player.
+func claimHasSink(claim *ResourceClaim) bool {
+	for _, request := range claim.Spec.Devices.Requests {
+		if strings.HasPrefix(request.Name, audioRequestPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureClaim creates the playback claim when none exists and keeps an

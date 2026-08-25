@@ -88,7 +88,29 @@ function preview.enable(send_status, send_revealed, send_sleep, send_wake)
     end
   end)
 
-  mp.msg.info("liken display preview keys: p starting, o playing, i idle, d presence, s sleep")
+  -- The volume keys play the idle sidecar's part: on a cluster a press
+  -- publishes the unit's next state, and the sidecar sets the properties
+  -- and sends volume-changed. Here the key does both, so the indicator
+  -- shows on the idle surface the way a press shows it. 9, 0, and m are
+  -- mpv's own volume keys.
+  local function press_volume(step)
+    local level = mp.get_property_number("volume") or 100
+    level = math.max(0, math.min(100, level + step))
+    mp.set_property_number("volume", level)
+    mp.commandv("script-message", "volume-changed")
+  end
+  mp.add_key_binding("9", "liken-preview-volume-down", function()
+    press_volume(-5)
+  end, { repeatable = true })
+  mp.add_key_binding("0", "liken-preview-volume-up", function()
+    press_volume(5)
+  end, { repeatable = true })
+  mp.add_key_binding("m", "liken-preview-mute", function()
+    mp.set_property_bool("mute", not mp.get_property_bool("mute"))
+    mp.commandv("script-message", "volume-changed")
+  end)
+
+  mp.msg.info("liken display preview keys: p starting, o playing, i idle, d presence, s sleep, 9/0 volume, m mute")
   enabled = true
 end
 
@@ -101,7 +123,7 @@ function preview.draw()
   if not enabled then
     return nil
   end
-  local legend = "p play starts    o playing    i film ends    d presence    s sleep    q quit"
+  local legend = "p play starts    o playing    i film ends    d presence    s sleep    9/0 volume    m mute    q quit"
   return theme.text(
     theme.canvas.w - theme.margin.x, theme.canvas.h - theme.margin.y,
     legend, theme.type.tiny, theme.color.muted, 3, theme.alpha.dim

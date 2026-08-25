@@ -242,6 +242,29 @@ spec:
                   description: >-
                     A per-Play override of when subtitles show, the
                     most specific tier; omit it to inherit the Player.
+                volume:
+                  type: object
+                  description: >-
+                    The level this run starts at. The operator writes it
+                    to the Player's volume topic before it creates the
+                    pod, so the value becomes the unit's state and stands
+                    after the film ends. Omitted, the run starts at
+                    whatever the unit already holds.
+                  properties:
+                    level:
+                      type: integer
+                      minimum: 0
+                      maximum: 100
+                      description: >-
+                        The listening level, 0 to 100. 100 is unity, the
+                        player's own default, and the cap: a software
+                        gain above unity only distorts. Omitted, the
+                        level the unit already holds stands.
+                    muted:
+                      type: boolean
+                      description: >-
+                        Whether the run starts muted. Omitted, the muted
+                        state the unit already holds stands.
             status:
               type: object
               description: >-

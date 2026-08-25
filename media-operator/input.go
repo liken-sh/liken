@@ -263,23 +263,23 @@ func presentationCommand(block json.RawMessage) []any {
 	return []any{"script-message-to", displayClientName, presentationMessage, string(block)}
 }
 
-// commandFor is where the action vocabulary becomes mpv's words, and the
-// only place in the system that holds both. Seek, chapter, and pause carry
-// no-osd, because the liken display draws their feedback and mpv's own
-// overlay would draw a second time over it. The rest carry osd-auto, so mpv
-// shows a short line, such as the volume or the track name, that the display
-// does not yet draw. An action this build has no case for sends nothing, so a
-// command from a newer program has no effect rather than a crash.
+// commandFor is where the action vocabulary becomes the words mpv
+// takes on a press. Seek, chapter, and pause carry no-osd, because
+// the liken display draws their feedback and mpv's own overlay would
+// draw a second time over it. The rest carry osd-auto, so mpv shows
+// a short line, such as the track name, that the display does not
+// yet draw. Volume and mute are absent on purpose: a press of either
+// publishes the unit's next state on the volume topic, and the
+// subscription applies it, so neither action becomes a command a
+// sidecar sends on the press. An action this build has no case for
+// sends nothing, so a command from a newer program has no effect
+// rather than a crash.
 func commandFor(command mediaCommand) []any {
 	switch command.Action {
 	case actionPause:
 		return []any{"no-osd", "cycle", "pause"}
-	case actionMute:
-		return []any{"osd-auto", "cycle", "mute"}
 	case actionSeek:
 		return []any{"no-osd", "seek", command.Amount}
-	case actionVolume:
-		return []any{"osd-auto", "add", "volume", command.Amount}
 	case actionChapter:
 		return []any{"no-osd", "add", "chapter", command.Amount}
 	case actionSubtitles:

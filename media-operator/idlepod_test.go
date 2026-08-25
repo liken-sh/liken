@@ -434,6 +434,23 @@ func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 	mustMatch(t, env[idleRemoteKeymapTopicsVariable], "liken/media/keymaps/gamepad\n")
 }
 
+// The volume topic reaches the idle sidecar only for a unit that
+// has speakers. A Player with no sinks has no level to mean anything, so
+// its idle sidecar reads no topic at all.
+func TestBuildIdlePodCarriesTheVolumeTopicOnlyWithSinks(t *testing.T) {
+	speakerless := standingIdlePlayer()
+	pod := plainIdlePod(speakerless, buildIdleClaim(speakerless, "display-draw"),
+		testImage, testBusAddress, testTopicBase, "")
+	mustMatch(t, envValue(pod.Spec.InitContainers[0], playerVolumeTopicVariable), "")
+
+	speakered := standingIdlePlayer()
+	speakered.Spec.Sinks = []PlayerDevice{{Class: "audio-sink"}}
+	pod = plainIdlePod(speakered, buildIdleClaim(speakered, "display-draw"),
+		testImage, testBusAddress, testTopicBase, "")
+	mustMatch(t, envValue(pod.Spec.InitContainers[0], playerVolumeTopicVariable),
+		playerVolumeTopic(testTopicBase, "house", "theater"))
+}
+
 // A Player that owns no controller sends neither remote list, so its idle
 // screen fades on the window alone and wakes on a Play.
 func TestBuildIdlePodOmitsTheRemoteListsWithoutRemotes(t *testing.T) {

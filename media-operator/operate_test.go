@@ -154,6 +154,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		focus:                 newFocusDesk(wake),
 		presence:              newPresenceDesk(wake),
 		panels:                newPanelDesk(wake),
+		volumes:               newVolumeDesk(),
 		positionWrites:        map[string]time.Time{},
 		keymapPublished:       map[string]string{},
 		playerStatusPublished: map[string]string{},
@@ -1360,7 +1361,12 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		reports:               newReports(nil),
 		presence:              newPresenceDesk(nil),
 		panels:                newPanelDesk(nil),
+		volumes:               newVolumeDesk(),
 		playerStatusPublished: map[string]string{},
+		// These tests read what the status publish leaves on the bus,
+		// so the volume seed is held off for longer than any of them runs.
+		// The volume tests run their own operator with the grace elapsed.
+		volumeSeedAfter: time.Now().Add(time.Hour),
 	}, brokers[0]
 }
 
@@ -1561,6 +1567,170 @@ func TestADeletedPlayerClearsItsRetainedStatus(t *testing.T) {
 	mustMatch(t, cleared.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
 	mustMatch(t, len(cleared.payload), 0)
 	mustMatch(t, cleared.retained, true)
+}
+
+// volumeOperator wires a whole operator to a fake broker, with the seed
+// grace already elapsed, so a test reads the levels a pass publishes.
+func volumeOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+	t.Helper()
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.bus = bus
+	return media, brokers[0]
+}
+
+// theaterVolumeTopic is the one unit these tests seed and write through.
+func theaterVolumeTopic() string {
+	return playerVolumeTopic(defaultTopicBase, "house", "theater")
+}
+
+// mustPublishNoVolume drains the broker for the window a publish would
+// take and fails on any message that reached the unit's volume topic.
+func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
+	t.Helper()
+	deadline := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case got := <-broker.pubs:
+			if got.topic == theaterVolumeTopic() {
+				t.Fatalf("a level reached the bus: %+v", got)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// A unit the broker holds no level for is seeded at unity, so the
+// state is always readable off the bus and no reader carries a
+// default. The seed runs once: the pass that follows reads the level
+// it wrote and writes nothing more.
+func TestAPassSeedsAPlayerWithNoLevel(t *testing.T) {
+	media, broker := volumeOperator(t, newFakeCluster())
+	player := settledPlayer(housePlayer())
+
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, theaterVolumeTopic())
+	mustMatch(t, published.retained, true)
+	mustMatch(t, string(published.payload), `{"level":100,"muted":false}`)
+
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
+	mustPublishNoVolume(t, broker)
+}
+
+// A level that stands on the broker is never written over by the
+// seed, so a room keeps the level a person set across an operator restart.
+func TestThePassDoesNotSeedOverALevelThatStands(t *testing.T) {
+	media, broker := volumeOperator(t, newFakeCluster())
+	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":30,"muted":true}`))
+
+	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+
+	mustPublishNoVolume(t, broker)
+}
+
+// A Player with no sinks is not seeded, because a unit with nothing
+// to hear has no level to mean anything.
+func TestThePassDoesNotSeedASpeakerlessPlayer(t *testing.T) {
+	media, broker := volumeOperator(t, newFakeCluster())
+	player := housePlayer()
+	player.Spec.Sinks = nil
+
+	media.reconcilePlayers([]Player{settledPlayer(player)}, nil, "", nil)
+
+	mustPublishNoVolume(t, broker)
+}
+
+// A fresh broker session delivers its retained levels on its own
+// goroutine moments after the subscribe, so the pass holds the seed back
+// for the grace. A seed inside that window would write unity over a level
+// a person had set.
+func TestTheSeedWaitsOutTheGraceAfterAConnect(t *testing.T) {
+	media, broker := volumeOperator(t, newFakeCluster())
+
+	media.reestablishRetained()
+	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+
+	mustPublishNoVolume(t, broker)
+}
+
+// A Play that declares a starting level has it written through to
+// the unit's topic before the pod exists, merged over what the unit already
+// holds, and mpv starts at the merged value.
+func TestAPlayWritesItsLevelThroughBeforeThePodExists(t *testing.T) {
+	cluster := newFakeCluster()
+	play := housePlay("https://nas/film.mkv")
+	play.Spec.Volume = &PlayVolume{Level: level(35)}
+	cluster.plays["movie"] = play
+	cluster.players["theater"] = housePlayer()
+	media, broker := volumeOperator(t, cluster)
+	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":true}`))
+
+	media.pass()
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, theaterVolumeTopic())
+	mustMatch(t, published.retained, true)
+	mustMatch(t, string(published.payload), `{"level":35,"muted":true}`)
+	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
+		"--volume=35\n--mute=yes")
+}
+
+// The write-through runs on the creating pass alone. A republish on
+// a later pass of the same run would write the Play's level over every
+// press a person made during the film.
+func TestAPlayWritesItsLevelThroughOnlyOnce(t *testing.T) {
+	cluster := newFakeCluster()
+	play := housePlay("https://nas/film.mkv")
+	play.Spec.Volume = &PlayVolume{Level: level(35)}
+	cluster.plays["movie"] = play
+	cluster.players["theater"] = housePlayer()
+	media, broker := volumeOperator(t, cluster)
+
+	media.pass()
+	waitForPublish(t, broker.pubs)
+	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":60,"muted":false}`))
+
+	media.pass()
+
+	mustPublishNoVolume(t, broker)
+}
+
+// A Play may declare a level for a unit that has nothing to hear. The
+// write-through reads the same speaker gate the seed does, so the
+// declaration publishes nothing and the topic stays empty.
+func TestAPlayAgainstASpeakerlessPlayerWritesNoLevelThrough(t *testing.T) {
+	cluster := newFakeCluster()
+	play := housePlay("https://nas/film.mkv")
+	play.Spec.Volume = &PlayVolume{Level: level(35)}
+	cluster.plays["movie"] = play
+	player := housePlayer()
+	player.Spec.Sinks = nil
+	cluster.players["theater"] = player
+	media, broker := volumeOperator(t, cluster)
+
+	media.pass()
+
+	mustPublishNoVolume(t, broker)
+}
+
+// A Play that declares no level starts the run at whatever the unit
+// already holds, and the operator publishes nothing of its own.
+func TestAPlayWithNoLevelStartsAtTheUnitsOwn(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	media, broker := volumeOperator(t, cluster)
+	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":80,"muted":false}`))
+
+	media.pass()
+
+	mustPublishNoVolume(t, broker)
+	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
+		"--volume=80\n--mute=no")
 }
 
 // settledPlayer is a Player already idle, so a pass over it crosses no

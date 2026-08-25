@@ -262,6 +262,22 @@ type PlaySpec struct {
 	AudioLanguages    []string `json:"audioLanguages,omitempty"`
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// The level this run starts at. The operator writes it through to
+	// the unit's volume topic before it creates the pod, so the
+	// override becomes the Player's state and everything after it is
+	// the ordinary path. Absent, the run starts at whatever the topic
+	// already holds.
+	Volume *PlayVolume `json:"volume,omitempty"`
+}
+
+// PlayVolume is a Play's starting level, its muted flag, or both.
+// Each field is a pointer because absent and zero differ: an absent
+// level carries nothing and leaves the unit where it stands, and a
+// level of zero is silence the Play asked for.
+type PlayVolume struct {
+	Level *int  `json:"level,omitempty"`
+	Muted *bool `json:"muted,omitempty"`
 }
 
 // A PlayItem is one entry in the list: the media URI and an optional

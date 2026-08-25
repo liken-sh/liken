@@ -25,17 +25,11 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [09, The idle screen](09-the-idle-screen.md). A standing per-`Player`
-  pod draws status while no `Play` runs, and yields the screen when a
-  `Play`'s `mpv` draws on top. Most of it is built: the standing pod
-  and the bus-fed surface through plans 12 to 15, and the sleep
-  through plans 16 and 17, on the display-operator's
-  [plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/completed/07-sharing-the-screen.md)
-  draw device. What remains is surface content: the zone, and the
-  now-playing from another room.
-* [10, A native volume indicator](10-a-native-volume-indicator.md).
-  `volume` and `mute` move off `mpv`'s built-in text onto a
-  `liken`-drawn readout that fades with the rest of the OSD.
+* [10, The player owns the volume](10-the-player-owns-the-volume.md).
+  The listening level becomes `Player` state, one retained message on
+  the bus that every pod for the unit follows, settable from any of
+  the unit's screens, and drawn by a `liken`-owned indicator in place
+  of `mpv`'s built-in text.
 * [11, The music experience](11-the-music-experience.md). A music
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
@@ -100,6 +94,13 @@ These plans are designed. Each keeps its number and moves to
   wants and whether subtitles show. One cluster resource holds the
   household default, and a `Player` or a `Play` overrides it. The
   operator resolves the fields at `Play` start and passes them to `mpv`.
+* [09, The idle screen](completed/09-the-idle-screen.md). Built
+  across plans 12 to 17 and drilled on `liken-1` through release
+  2026.08.24-010: the standing per-`Player` pod, the bus-fed surface,
+  the fade, and the panel power, on the display-operator's
+  [plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/completed/07-sharing-the-screen.md)
+  draw device. Two surface items, the household zone and the
+  now-playing from another room, were set aside when the plan closed.
 * [12, The idle screen reads the bus](completed/12-the-idle-screen-reads-the-bus.md).
   Built, and drilled on `liken-1` on 2026-08-24 in release
   2026.08.24-006, with the reply-await fix in 2026.08.24-008. The idle

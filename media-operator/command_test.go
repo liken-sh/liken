@@ -299,6 +299,168 @@ func TestARunThatNeverReportedPublishesNoEnding(t *testing.T) {
 	mustPublishNothing(t, brokers[0])
 }
 
+// A volume press writes nothing to mpv. It publishes the unit's
+// next level, retained, and the subscription is what applies it.
+func TestAVolumePressPublishesTheNextLevelAndWritesNoMpvCommand(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+
+	c := &commander{
+		commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
+		volumeTopic:   playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		bus:           bus,
+		mpv:           client,
+		volume:        volumeState{Level: 40},
+		haveVolume:    true,
+	}
+	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
+
+	published := waitForPublish(t, brokers[0].pubs)
+	mustMatch(t, published.topic, c.volumeTopic)
+	mustMatch(t, published.retained, true)
+	mustMatch(t, string(published.payload), `{"level":45,"muted":false}`)
+	mustWriteNothing(t, server)
+}
+
+// A mute press toggles the flag the topic holds, and it too writes
+// nothing to mpv.
+func TestAMutePressPublishesTheToggledFlag(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+
+	c := &commander{
+		commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
+		volumeTopic:   playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		bus:           bus,
+	}
+	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionMute}))
+
+	published := waitForPublish(t, brokers[0].pubs)
+	mustMatch(t, string(published.payload), `{"level":100,"muted":true}`)
+}
+
+// The message on the volume topic is what reaches mpv, so the pod
+// that pressed and every pod that only listened run one apply path.
+func TestAMessageOnTheVolumeTopicReachesMpv(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := &commander{
+		volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		mpv:         client,
+	}
+	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":true}`))
+
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","yes"]}`)
+	mustMatch(t, c.heldVolume(), volumeState{Level: 45, Muted: true})
+}
+
+// The first level of a bus session is the broker's retained
+// catch-up, so it applies with no signal and the display pops no indicator
+// at pod start. Every level after it applies and then signals the display to
+// draw. A fresh session redelivers the retained level, so the first message
+// after a reconnect is silent again.
+func TestTheFirstLevelOfASessionAppliesSilently(t *testing.T) {
+	bus, _, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := &commander{
+		volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		bus:         bus,
+		mpv:         client,
+	}
+
+	c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+	mustNoLine(t, lines, 100*time.Millisecond)
+
+	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed"]}`)
+
+	c.onConnect(bus)
+
+	c.handle(c.volumeTopic, []byte(`{"level":50,"muted":false}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+	mustNoLine(t, lines, 100*time.Millisecond)
+}
+
+// mustNoLine fails when the sidecar writes anything to mpv inside this
+// window.
+func mustNoLine(t *testing.T, lines <-chan string, window time.Duration) {
+	t.Helper()
+	select {
+	case line := <-lines:
+		t.Fatalf("the sidecar wrote %s, and should have written nothing", line)
+	case <-time.After(window):
+	}
+}
+
+// A Player with no sinks hands its sidecar no volume topic. That
+// sidecar publishes nothing on a press and writes nothing to mpv, because
+// a unit with nothing to hear has no level to mean anything.
+func TestASidecarWithNoSpeakersIgnoresTheVolume(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+
+	c := &commander{
+		commandsTopic: playCommandsTopic(defaultTopicBase, "house", "movie"),
+		bus:           bus,
+		mpv:           client,
+	}
+	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
+	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionMute}))
+
+	mustPublishNothing(t, brokers[0])
+	mustWriteNothing(t, server)
+}
+
+// mustEncode marshals one message the way a program on the bus publishes
+// it.
+func mustEncode(t *testing.T, value any) []byte {
+	t.Helper()
+	payload, err := json.Marshal(value)
+	mustSucceed(t, err)
+	return payload
+}
+
+// readAsync hands each line the sidecar writes to mpv's socket to the
+// channel, so a test reads them in order.
+func readAsync(conn net.Conn) chan string {
+	lines := make(chan string, 8)
+	go func() {
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+	return lines
+}
+
+// mustWriteNothing proves the sidecar wrote nothing to mpv's socket in the
+// window a write would have taken.
+func mustWriteNothing(t *testing.T, conn net.Conn) {
+	t.Helper()
+	mustSucceed(t, conn.SetReadDeadline(time.Now().Add(100*time.Millisecond)))
+	buffer := make([]byte, 256)
+	read, err := conn.Read(buffer)
+	if err == nil {
+		t.Fatalf("the sidecar wrote %q to mpv, and should have written nothing", buffer[:read])
+	}
+}
+
 // writeEvent hands mpv's socket one event line, the newline-delimited JSON
 // the reader reads.
 func writeEvent(t *testing.T, conn net.Conn, line string) {

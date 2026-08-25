@@ -29,6 +29,8 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "player commands", got: playerCommandsTopic(base, "house", "theater"), want: "liken/media/players/house/theater/commands"},
 		{name: "player panel", got: playerPanelTopic(base, "house", "theater"), want: "liken/media/players/house/theater/panel"},
 		{name: "player panel filter", got: playerPanelFilter(base), want: "liken/media/players/+/+/panel"},
+		{name: "player volume", got: playerVolumeTopic(base, "house", "theater"), want: "liken/media/players/house/theater/volume"},
+		{name: "player volume filter", got: playerVolumeFilter(base), want: "liken/media/players/+/+/volume"},
 		{name: "keymap", got: keymapTopic(base, "gamepad"), want: "liken/media/keymaps/gamepad"},
 		{name: "status filter", got: playStatusFilter(base), want: "liken/media/plays/+/+/status"},
 		{name: "availability filter", got: playAvailabilityFilter(base), want: "liken/media/plays/+/+/availability"},
@@ -176,6 +178,7 @@ func TestParsePlayerPanelTopicNamesThePlayer(t *testing.T) {
 		},
 		{name: "the status topic", topic: playerStatusTopic(base, "house", "theater")},
 		{name: "the commands topic", topic: playerCommandsTopic(base, "house", "theater")},
+		{name: "the volume topic", topic: playerVolumeTopic(base, "house", "theater")},
 		{name: "another tree", topic: remotePresenceTopic(base, "house", "sofa")},
 		{name: "an empty namespace", topic: base + "/players//theater/panel"},
 		{name: "an empty player name", topic: base + "/players/house//panel"},
@@ -184,6 +187,41 @@ func TestParsePlayerPanelTopicNamesThePlayer(t *testing.T) {
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			namespace, player, ok := parsePlayerPanelTopic(base, each.topic)
+			mustMatch(t, ok, each.ok)
+			mustMatch(t, namespace, each.namespace)
+			mustMatch(t, player, each.player)
+		})
+	}
+}
+
+// The volume topic maps back to the unit whose level it carries,
+// and no other players topic reads as one.
+func TestParsePlayerVolumeTopicNamesThePlayer(t *testing.T) {
+	base := defaultTopicBase
+	cases := []struct {
+		name      string
+		topic     string
+		namespace string
+		player    string
+		ok        bool
+	}{
+		{
+			name:      "a volume topic",
+			topic:     playerVolumeTopic(base, "house", "theater"),
+			namespace: "house",
+			player:    "theater",
+			ok:        true,
+		},
+		{name: "the panel topic", topic: playerPanelTopic(base, "house", "theater")},
+		{name: "the status topic", topic: playerStatusTopic(base, "house", "theater")},
+		{name: "another base", topic: "other/players/house/theater/volume"},
+		{name: "an empty namespace", topic: base + "/players//theater/volume"},
+		{name: "an empty player name", topic: base + "/players/house//volume"},
+		{name: "a segment too many", topic: base + "/players/house/theater/volume/level"},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			namespace, player, ok := parsePlayerVolumeTopic(base, each.topic)
 			mustMatch(t, ok, each.ok)
 			mustMatch(t, namespace, each.namespace)
 			mustMatch(t, player, each.player)
