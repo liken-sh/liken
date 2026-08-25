@@ -192,3 +192,90 @@ func TestAnIdleSidecarWithNoSpeakersIgnoresTheVolume(t *testing.T) {
 	noPublish(t, published, 100*time.Millisecond)
 	fake.quiet(t, 100*time.Millisecond)
 }
+
+// bindRepeatingVolume compiles a table whose volume step repeats, the
+// way the dualsense keymap's volume bindings do, with a repeat quick
+// enough to land inside a test.
+func bindRepeatingVolume(t *testing.T, ic *idleCommander, keymap string) {
+	t.Helper()
+	ic.handle(keymap, mustEncode(t, []compiledBinding{
+		{EventType: evKey, Code: buttonCodes["BTN_NORTH"], Value: 1,
+			Action: actionVolume, Amount: 5, RepeatDelay: 10, RepeatInterval: 10},
+	}))
+}
+
+// releaseButton releases one named button on the given events topic.
+func releaseButton(t *testing.T, ic *idleCommander, events, button string) {
+	t.Helper()
+	sendEvent(t, ic, events, remoteEvent{Type: evKey, Code: buttonCodes[button], Value: 0})
+}
+
+// A held volume control steps again while it is held, on the same clock
+// the translator ticks during a film, so a hold feels the same on both
+// screens. The press publishes once and the repeat publishes more.
+func TestAHeldIdleVolumeControlRepeats(t *testing.T) {
+	events, keymap := fadeTopics()
+	fake := startFakeMPV(t)
+	ic, published := volumeCommander(t, map[string]string{events: keymap})
+	bindRepeatingVolume(t, ic, keymap)
+	sendActivity(t, ic, fake, playerIdle)
+	ic.handle(ic.volumeTopic, []byte(`{"level":40,"muted":false}`))
+
+	pressButton(t, ic, events, "BTN_NORTH")
+
+	for range 3 {
+		publish := nextPublish(t, published)
+		mustMatch(t, string(publish.payload), `{"level":45,"muted":false}`)
+	}
+	releaseButton(t, ic, events, "BTN_NORTH")
+}
+
+// The release ends the repeat its press started, so the level stops
+// moving the moment the control comes up.
+func TestAReleaseStopsTheIdleVolumeRepeat(t *testing.T) {
+	events, keymap := fadeTopics()
+	fake := startFakeMPV(t)
+	ic, published := volumeCommander(t, map[string]string{events: keymap})
+	bindRepeatingVolume(t, ic, keymap)
+	sendActivity(t, ic, fake, playerIdle)
+
+	pressButton(t, ic, events, "BTN_NORTH")
+	nextPublish(t, published)
+	releaseButton(t, ic, events, "BTN_NORTH")
+
+	drainPublishes(published, 50*time.Millisecond)
+	noPublish(t, published, 100*time.Millisecond)
+}
+
+// A Play that starts mid-hold silences the repeat's ticks, because a
+// playing unit has the film's own pod answering its presses. The gate
+// reads again on every tick, not once at the press.
+func TestAPlayStartedMidHoldSilencesTheRepeat(t *testing.T) {
+	events, keymap := fadeTopics()
+	fake := startFakeMPV(t)
+	ic, published := volumeCommander(t, map[string]string{events: keymap})
+	bindRepeatingVolume(t, ic, keymap)
+	sendActivity(t, ic, fake, playerIdle)
+
+	pressButton(t, ic, events, "BTN_NORTH")
+	nextPublish(t, published)
+	sendActivity(t, ic, fake, playerPlaying)
+
+	drainPublishes(published, 50*time.Millisecond)
+	noPublish(t, published, 100*time.Millisecond)
+	releaseButton(t, ic, events, "BTN_NORTH")
+}
+
+// drainPublishes empties the channel for the window a canceled repeat's
+// last ticks could still land in, so the quiet check that follows reads
+// only what came after.
+func drainPublishes(published chan brokerPublish, window time.Duration) {
+	deadline := time.After(window)
+	for {
+		select {
+		case <-published:
+		case <-deadline:
+			return
+		}
+	}
+}

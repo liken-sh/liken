@@ -25,11 +25,6 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [10, The player owns the volume](10-the-player-owns-the-volume.md).
-  The listening level becomes `Player` state, one retained message on
-  the bus that every pod for the unit follows, settable from any of
-  the unit's screens, and drawn by a `liken`-owned indicator in place
-  of `mpv`'s built-in text.
 * [11, The music experience](11-the-music-experience.md). A music
   `Play` draws a layout `liken` owns, the album art centered with the
   track list and the queue, in place of the scrubber a film shows. It
@@ -101,6 +96,16 @@ These plans are designed. Each keeps its number and moves to
   [plan 07](https://github.com/liken-sh/display-operator/blob/main/plans/completed/07-sharing-the-screen.md)
   draw device. Two surface items, the household zone and the
   now-playing from another room, were set aside when the plan closed.
+* [10, The player owns the volume](completed/10-the-player-owns-the-volume.md).
+  Built, and drilled on `liken-1` on 2026-08-24 in release
+  2026.08.24-011. The listening level and the muted flag became
+  `Player` state, one retained message per unit: a press publishes
+  the next state, every pod applies it off the subscription, the
+  operator seeds unity and writes a `Play`'s declared start through,
+  and the display draws its own indicator, shown only by the
+  sidecar's `volume-changed` signal. The idle screen sets the room's
+  level before any media plays, and the local harnesses gained
+  volume keys.
 * [12, The idle screen reads the bus](completed/12-the-idle-screen-reads-the-bus.md).
   Built, and drilled on `liken-1` on 2026-08-24 in release
   2026.08.24-006, with the reply-await fix in 2026.08.24-008. The idle

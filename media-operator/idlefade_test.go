@@ -116,9 +116,18 @@ func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string
 		tables:        map[string][]compiledBinding{},
 		// The panel is lit when a pod starts, the same state the
 		// sidecar assumes on the metal.
-		panel: panelOn,
+		panel:   panelOn,
+		repeats: map[uint16]context.CancelFunc{},
 	}
 	t.Cleanup(func() {
+		// A repeat still held when the test ends would tick into the
+		// next test's stand-in broker, so every cancel runs here.
+		ic.repeatMu.Lock()
+		for code, cancel := range ic.repeats {
+			cancel()
+			delete(ic.repeats, code)
+		}
+		ic.repeatMu.Unlock()
 		ic.mu.Lock()
 		defer ic.mu.Unlock()
 		ic.idle = false

@@ -261,6 +261,17 @@ func (tr *translator) stopRepeat(code uint16) {
 // tap from a hold, then publishes every interval. It ends on the
 // release, on the translator shutting down, or on the safety window.
 func (tr *translator) repeatLoop(ctx context.Context, command mediaCommand, delay, interval time.Duration) {
+	runRepeat(ctx, delay, interval, func() {
+		tr.publish(command)
+	})
+}
+
+// runRepeat is the one clock a held control ticks on, for the translator
+// during a film and for the idle sidecar between films, so a hold feels
+// the same on both screens. It waits the delay, which is what separates
+// a tap from a hold, then fires every interval. It ends on the context,
+// which the release cancels, or on the safety window.
+func runRepeat(ctx context.Context, delay, interval time.Duration, fire func()) {
 	select {
 	case <-ctx.Done():
 		return
@@ -277,7 +288,7 @@ func (tr *translator) repeatLoop(ctx context.Context, command mediaCommand, dela
 		case <-window.C:
 			return
 		case <-ticker.C:
-			tr.publish(command)
+			fire()
 		}
 	}
 }

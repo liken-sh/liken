@@ -105,6 +105,13 @@ type idleCommander struct {
 	// start. Every message after it signals the display.
 	volumeCaughtUp bool
 
+	// repeats holds one cancel per held control that repeats, keyed by
+	// its evdev code, the same shape the translator holds during a
+	// film, so a held volume button steps continuously on the idle
+	// screen too and the release stops the repeat the press started.
+	repeatMu sync.Mutex
+	repeats  map[uint16]context.CancelFunc
+
 	// The delivered control device. A nil wire is a Player that states
 	// no control device, and every hardware write below is off.
 	wire panelWire
@@ -204,6 +211,7 @@ func runIdleCommand() {
 		offMode:   idleOffMode(os.Getenv(idleOffModeVariable)),
 		tables:    map[string][]compiledBinding{},
 		panel:     panelOn,
+		repeats:   map[uint16]context.CancelFunc{},
 	}
 	// The delivered wire is the gate. A Player that states no control
 	// device holds no i2c node, so this variable is empty and the
@@ -433,7 +441,9 @@ func isPressEdge(event remoteEvent) bool {
 // next level, and the level reaches mpv on the subscription like any
 // other change. The two gates on it are deliberate: a press on a
 // sleeping screen is a wake and nothing more, and a unit that plays
-// has the film's own pod answering its presses. Every other press
+// has the film's own pod answering its presses. A binding whose
+// keymap repeats it steps again while the control is held, on the
+// same clock the translator ticks during a film. Every other press
 // restarts the quiet window.
 //
 // An event that is not a down edge, or does not decode, changes
@@ -443,6 +453,12 @@ func (ic *idleCommander) onRemoteEvent(topic string, payload []byte) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return
 	}
+	// A release stops the repeat its press started, the same first move
+	// the translator makes, so a held volume button and its release pair
+	// up whether or not anything else below acts.
+	if event.Value == 0 {
+		ic.stopRepeat(event.Code)
+	}
 	if !isPressEdge(event) {
 		return
 	}
@@ -450,6 +466,7 @@ func (ic *idleCommander) onRemoteEvent(topic string, payload []byte) {
 	binding, named := ic.bindingForLocked(topic, event)
 	message := ""
 	press := mediaCommand{}
+	repeat := false
 	switch {
 	case ic.asleep:
 		ic.asleep = false
@@ -459,11 +476,15 @@ func (ic *idleCommander) onRemoteEvent(topic string, payload []byte) {
 		message = playerSleepMessage
 	case ic.idle && named && isVolumeAction(binding.Action):
 		press = mediaCommand{Action: binding.Action, Amount: binding.Amount}
+		repeat = binding.RepeatInterval > 0
 	}
 	ic.rearmLocked()
 	ic.mu.Unlock()
 	ic.applyShade(message)
 	ic.pressVolume(press)
+	if repeat {
+		ic.startRepeat(event.Code, press, binding.RepeatDelay, binding.RepeatInterval)
+	}
 }
 
 // applyShade sends the fold's script message, pixels first: the shade
@@ -545,6 +566,54 @@ func (ic *idleCommander) pressVolume(command mediaCommand) {
 		return
 	}
 	ic.publish(ic.volumeTopic, payload, true)
+}
+
+// startRepeat runs one held control's repeat on the shared clock the
+// translator ticks on, so a hold feels the same on the idle screen as
+// during a film. A press of the same code while a repeat runs replaces
+// it, because a second press means the first release was missed or the
+// direction changed, and one control drives one repeat.
+func (ic *idleCommander) startRepeat(code uint16, press mediaCommand, delayMillis, intervalMillis int) {
+	ctx, cancel := context.WithCancel(ic.runCtx)
+	ic.repeatMu.Lock()
+	if previous, ok := ic.repeats[code]; ok {
+		previous()
+	}
+	ic.repeats[code] = cancel
+	ic.repeatMu.Unlock()
+	go runRepeat(ctx,
+		time.Duration(delayMillis)*time.Millisecond,
+		time.Duration(intervalMillis)*time.Millisecond,
+		func() { ic.repeatVolume(press) })
+}
+
+// stopRepeat ends the repeat a release names. A release for a code with
+// no repeat is the ordinary case of a control that does not repeat, and
+// it does nothing.
+func (ic *idleCommander) stopRepeat(code uint16) {
+	ic.repeatMu.Lock()
+	if cancel, ok := ic.repeats[code]; ok {
+		cancel()
+		delete(ic.repeats, code)
+	}
+	ic.repeatMu.Unlock()
+}
+
+// repeatVolume is one tick of a held volume control. It reads the two
+// press gates again on every tick, because a Play can start or the
+// screen can sleep mid-hold, and a tick in either state must publish
+// nothing. A tick that acts restarts the quiet window the way the press
+// did, so a long hold never fades the screen it is adjusting.
+func (ic *idleCommander) repeatVolume(press mediaCommand) {
+	ic.mu.Lock()
+	act := ic.idle && !ic.asleep
+	if act {
+		ic.rearmLocked()
+	}
+	ic.mu.Unlock()
+	if act {
+		ic.pressVolume(press)
+	}
 }
 
 // heldVolume is the state the last message left, and unity before
