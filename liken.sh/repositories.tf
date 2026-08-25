@@ -43,12 +43,12 @@ locals {
       topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "bluetooth", "bluez"]
     }
     media-operator = {
-      description = "The routing and control of media playback on liken clusters"
+      description = "Routing and control of media playback on liken clusters"
       cname       = "media.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "mqtt", "mpv", "media"]
     }
     brand = {
-      description = "The liken brand: the mark, the stylesheet, and the shared site theme"
+      description = "The liken brand assets"
       cname       = null
       homepage    = "https://liken.sh"
       topics      = ["liken", "hugo-theme"]
