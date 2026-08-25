@@ -26,7 +26,7 @@ cluster-wide default for audio and subtitle languages.
 The operator reconciles a `Play` into one playback pod beside the
 hardware, running `mpv` under a thin supervisor, with every device
 claim, toleration, and socket built from the `Player` spec. Each
-`Remote` runs as a standing pod that publishes button events to a
+`Remote` has its own pod, which publishes button events to a
 message bus, and the playback pod applies the bindings. Media
 arrives by URI: `https://` streams, and `nfs://` mounts. Media
 library management is a separate concern, and this project does

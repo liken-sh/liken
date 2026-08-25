@@ -171,7 +171,7 @@ credentials, so the operator folds this topic into
 
 ### `commands`
 
-The operator's channel to the standing idle pod. It carries
+The operator's channel to the `Player`'s idle pod. It carries
 `{"action": "re-present"}` when a `Play` ends, and the idle sidecar
 recreates the idle surface. A controller never sends it, and it is
 display plumbing, not part of the media vocabulary a

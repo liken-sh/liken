@@ -13,8 +13,8 @@ the work is declaring resources, and the
 ## How the pieces fit
 
 The install puts two Deployments in `liken-system`: the operator and
-the message bus, one Mosquitto broker. Nothing else is standing
-infrastructure.
+the message bus, one Mosquitto broker. Nothing else runs
+continuously.
 
 The resources divide the work by how often you write them. A
 `Player` is written once per unit of equipment: it selects the

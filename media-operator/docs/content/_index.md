@@ -28,10 +28,10 @@ subtitle languages.
 The operator reconciles a `Play` into one playback pod beside the
 hardware, running [`mpv`](https://mpv.io/) under a thin supervisor,
 with every device claim, toleration, and socket built from the
-`Player` spec. Each `Remote` runs as a standing pod that publishes
+`Player` spec. Each `Remote` has its own pod, which publishes
 button events to the cluster's [message bus](/docs/reference/bus/),
-and the playback pod applies the bindings. Between runs, a standing
-idle pod holds each `Player`'s display: it shows a clock and the
+and the playback pod applies the bindings. Between runs, each
+`Player`'s idle pod holds its display: it shows a clock and the
 unit's name, fades them after a quiet window, and powers the panel
 down after a longer one.
 
@@ -58,7 +58,7 @@ The operator publishes no devices of its own. A `Player` selects
 devices out of what the hardware operators publish, with the same
 [CEL](https://kubernetes.io/docs/reference/using-api/cel/) selectors
 a hand-written `ResourceClaim` would use, and the operator writes
-the claims itself: one standing claim for each `Player`'s idle
+the claims itself: one long-lived claim for each `Player`'s idle
 display, and one claim per run for what a `Play` needs. A cluster that never installs
 this operator runs unchanged. Media library management is a separate
 concern, and this project does none of it.

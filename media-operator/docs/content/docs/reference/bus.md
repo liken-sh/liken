@@ -9,8 +9,8 @@ toc: true
 The resources say what should exist. The bus carries what happens
 while it runs: reports, commands, button events, and state. It is
 one MQTT broker, and every running piece of this operator connects
-to it: the operator, each playback pod, each standing remote pod,
-and each idle pod. Your program can connect too. A phone app, a
+to it: the operator, each playback pod, each `Remote`'s pod, and
+each idle pod. Your program can connect too. A phone app, a
 Home Assistant instance, and a library application all join the same
 way, with a plain MQTT client and no Kubernetes credentials.
 
@@ -59,8 +59,8 @@ cluster-scoped.
 ## Availability
 
 Retained state outlives the pod that wrote it, so a reader needs a
-signal that the writer is gone. The playback pod and the standing
-remote pod each name an
+signal that the writer is gone. The playback pod and the
+`Remote`'s pod each name an
 `availability` topic in their tree as the MQTT Last Will, with
 `offline` as the payload, and publish `online` there once connected.
 Both messages are retained. When a pod dies without a clean

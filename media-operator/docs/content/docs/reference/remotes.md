@@ -46,9 +46,9 @@ they are.
 `Player` entry in `spec.remotes` may override it per unit, so one
 controller can map two ways on two units.
 
-## The standing pod
+## The Remote's pod
 
-The operator reconciles one standing pod for every `Remote` in the
+The operator reconciles one pod for every `Remote` in the
 cluster, whether or not a `Player` names it. The pod holds the
 controller's claim, reads its evdev nodes first-hand, and publishes
 to the bus. The claim tolerates the `bluetooth.liken.sh/disconnected`
@@ -72,15 +72,15 @@ base.
 
 | topic          | writer       | retained | carries                       |
 |----------------|--------------|----------|-------------------------------|
-| `events`       | standing pod | no       | one evdev event               |
-| `presence`     | standing pod | yes      | `{"connected": true}`         |
-| `availability` | standing pod | yes      | `online` or `offline`         |
+| `events`       | the `Remote`'s pod | no       | one evdev event               |
+| `presence`     | the `Remote`'s pod | yes      | `{"connected": true}`         |
+| `availability` | the `Remote`'s pod | yes      | `online` or `offline`         |
 | `focus`        | operator     | yes      | the name of the owning `Play` |
 | `focus/cycle`  | translator   | no       | a request to advance focus    |
 
 ### events
 
-The standing pod publishes each event as the controller's own evdev
+The `Remote`'s pod publishes each event as the controller's own evdev
 numbers, untranslated:
 
     {"type": 1, "code": 304, "value": 1}
@@ -99,7 +99,7 @@ Whether the controller's event nodes are open right now:
 
     {"connected": true}
 
-The standing pod senses the controller first-hand: its evdev nodes
+The `Remote`'s pod senses the controller first-hand: its evdev nodes
 open when the controller connects and vanish when it sleeps, so the
 signal starts where it is read. The topic is retained, so the
 operator reads the current value the instant it subscribes, and it
@@ -108,7 +108,7 @@ it publishes.
 
 ### availability
 
-The standing pod names this topic as its MQTT Last Will, with
+The `Remote`'s pod names this topic as its MQTT Last Will, with
 `offline` as the payload, and publishes `online` once it connects.
 When the pod dies, the broker writes `offline`, so the retained
 presence a dead pod left behind does not read as a connected

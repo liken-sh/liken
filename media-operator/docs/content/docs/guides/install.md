@@ -107,7 +107,7 @@ pods and your own programs share.
 ## Remove the operator
 
 Deleting a `Play` stops its run, and deleting a `Player` or a
-`Remote` removes its standing pods and claims, through the
+`Remote` removes its pods and claims, through the
 `ownerReference` every one of them carries. To remove the operator
 itself:
 
