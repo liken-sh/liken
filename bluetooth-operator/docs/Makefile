@@ -19,7 +19,7 @@ GENERATED := \
 
 .PHONY: build
 build: $(GENERATED)
-	$(HUGO) --destination dist
+	$(HUGO) --destination dist/site
 
 $(REFERENCE)/adapters.md: ../deploy/crds.yaml crdref/adapter-preamble.md go.mod
 	$(CRDREF) -kind Adapter -weight 10 $< $@ crdref/adapter-preamble.md

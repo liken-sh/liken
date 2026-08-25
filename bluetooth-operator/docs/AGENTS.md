@@ -12,5 +12,6 @@ the Markdown output format the theme's templates render, so every
 page publishes twice: as HTML for people, and as the authored
 Markdown for agents and scripts.
 
-Build the site from this directory with `go tool hugo --destination
-dist`. The `dist/` tree is build output and is not committed.
+Build the site from this directory with `make build`. It generates
+the CRD reference pages with `crdref`, then runs Hugo into
+`dist/site`. The `dist/` tree is build output and is not committed.

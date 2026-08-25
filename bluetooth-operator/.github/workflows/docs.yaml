@@ -69,7 +69,7 @@ jobs:
           go-version-file: docs/go.mod
 
       # The build runs the same command a workstation runs, so local
-      # and CI builds produce the same tree. What lands in docs/dist
+      # and CI builds produce the same tree. What lands in docs/dist/site
       # is byte for byte what Pages serves.
       - name: build the site
         run: make build
@@ -79,14 +79,14 @@ jobs:
       # polls it until this commit's tree answers on the public
       # name.
       - name: stamp the built tree
-        run: git rev-parse HEAD > docs/dist/release.txt
+        run: git rev-parse HEAD > docs/dist/site/release.txt
 
       # Everything below publishes, so pull requests stop here.
       - name: package the site for Pages
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
-          path: docs/dist
+          path: docs/dist/site
 
       - name: deploy to Pages
         if: github.event_name != 'pull_request'
