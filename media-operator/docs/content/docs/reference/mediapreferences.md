@@ -61,14 +61,15 @@ field a `Player`'s own block leaves unset:
 - `idle.offMode` is what the off window writes: `backlight`, the
   default, writes the backlight to zero and always wakes over DDC;
   `power` writes DPM off, which is deeper. State `power` only for
-  panels a drill proved wake.
+  a panel that woke from it in a drill.
 
 ## How a Play resolves it
 
 Each field settles on its own, `Play` then `Player` then the
 default. The first tier that states a field wins it, and a field no
 tier states resolves to nothing. For the two lists, omitting the
-field leaves the tier silent, and an empty list is a statement: a
+field means the tier states nothing, and an empty list is a
+statement: a
 `Play` with `audioLanguages: []` states no preference and overrides
 the tiers below it.
 

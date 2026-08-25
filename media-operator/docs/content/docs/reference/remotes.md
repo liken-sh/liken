@@ -121,7 +121,7 @@ controller now, as bytes, not JSON. The operator is the only writer,
 and the topic is retained, so a press reaches the owning film with
 the operator up or down. Each translator for the controller gates on
 the mark: it acts on a press only when the mark names its own
-`Play`, and stays quiet otherwise.
+`Play`, and it drops every other press.
 
 A press bound to `cycle-focus` publishes on `focus/cycle`. Only the
 translator that holds focus publishes it, and the operator reads it

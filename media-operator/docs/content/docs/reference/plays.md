@@ -46,7 +46,7 @@ delete the `Play` and create another.
 | `items` | the media to play in order; each entry is a `uri` and an optional `presentation` |
 | `start` | where in the first item the run begins, such as `0:10:00` or `600`; this is also how a run resumes |
 | `trickplayInterval` | the seconds one trickplay tile covers, as a Go duration like `10s`, the default |
-| `ttlSecondsAfterFinished` | how long the `Play` stands after it finishes; 300 seconds when omitted, and zero deletes it at once |
+| `ttlSecondsAfterFinished` | how long the `Play` stays after it finishes; 300 seconds when omitted, and zero deletes it at once |
 | `audioLanguages`, `subtitleLanguages`, `subtitles` | per-run overrides of the language preferences, the most specific tier |
 | `volume` | the level this run starts at; the operator writes it to the unit's volume topic before the pod exists |
 
@@ -91,8 +91,8 @@ credentials; it reports on the bus, and the operator writes here.
 ## On the bus
 
 The `plays` tree carries one run's commands, its report, and its
-availability. [The media bus](/docs/reference/bus/) gives the rules
-the tree follows.
+availability. See [the media bus](/docs/reference/bus/) for the
+rules every topic follows.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
@@ -160,7 +160,7 @@ reads this mark and returns the unit to idle in bus time instead of
 pod time.
 
 The operator folds each report into the `Play`'s Kubernetes status,
-so a program that only wants the current position may read either
+so a program that only needs the current position may read either
 surface.
 
 ### `availability`

@@ -23,7 +23,7 @@ same [CEL](https://kubernetes.io/docs/reference/using-api/cel/)
 selectors a hand-written `ResourceClaim` would use. A `Remote` and
 its `Keymap` are written once per controller. A `Play` is written
 per run: create it to start media on a player, and delete it to
-stop. The operator deletes a finished `Play` for you after its
+stop. The operator deletes a finished `Play` after its
 `ttlSecondsAfterFinished`.
 
 The operator turns a `Play` into one playback pod beside the

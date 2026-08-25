@@ -34,9 +34,7 @@ base. The pages in this reference write topics without the base.
 State is retained and events are not. A retained topic always holds
 the current value, so a program that just connected reads the live
 state without asking. An event topic carries one moment: a button
-press, a command, a request to move focus. When you add a
-subscriber, you never poll; when you publish an event, it does not
-linger.
+press, a command, a request to move focus.
 
 The topic names the object and the payload does not. A Play's
 namespace and name are segments of its topic path, and its report

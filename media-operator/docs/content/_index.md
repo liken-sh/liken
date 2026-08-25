@@ -13,9 +13,9 @@ operators: the [`display-operator`](https://display.liken.sh),
 display, speaker, and controller as a claimable device, and this
 operator declares what those devices form together.
 
-Five resources are the API. A `Player` names one unit of equipment
-at one spot, for one purpose: a lone speaker, a TV with its surround
-pair, a gaming TV with its controllers. A `Play` is one run of media
+The API is five resources. A `Player` is one unit of equipment in
+one place: a lone speaker, a TV with its surround pair, a gaming TV
+with its controllers. A `Play` is one run of media
 on a player, with a lifecycle analogous to a `Job`: a film, an
 album, or a season of episodes, played in order and run to
 completion. Create it to start, delete it to stop, and

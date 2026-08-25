@@ -10,8 +10,8 @@ hardware operators: the
 display, speaker, and controller as a claimable device, and this
 operator declares what those devices form together.
 
-The API is five resources. A `Player` names one unit of equipment at
-one spot, for one purpose: a lone speaker, a TV with its surround
+The API is five resources. A `Player` is one unit of
+equipment in one place: a lone speaker, a TV with its surround
 pair, a gaming TV with its controllers. A `Play` is one run of
 media on a player, with a lifecycle analogous to a `Job`: a film,
 an album, or a season of episodes, played in order and run to

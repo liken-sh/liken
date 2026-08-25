@@ -7,7 +7,7 @@ title: Manual
 This manual tells you how to install `media-operator` on a
 [`liken`](https://liken.sh/docs/) cluster and how to run media on
 the equipment it declares. The guides give the steps. The reference
-describes each resource, its fields, and the topics it speaks on the
+describes each resource, its fields, and its topics on the
 [message bus](/docs/reference/bus/).
 
 The operator declares players, plays, remotes, and keymaps as

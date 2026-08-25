@@ -52,7 +52,7 @@ the install needs no clone:
 The `-n` flag places the `ServiceAccount`, the two `Deployments`,
 and the `Service` in `liken-system`, the namespace every `liken`
 cluster has. The CRDs and the `ClusterRole` are cluster-scoped, so
-the flag leaves them alone.
+the flag does not apply to them.
 
 For GitOps, point a `Kustomization` at the served URLs. `kustomize`
 takes a raw YAML URL as a resource:

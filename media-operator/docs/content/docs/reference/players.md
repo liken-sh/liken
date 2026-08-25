@@ -15,9 +15,9 @@ a running thing: the operator turns it into claims only while a
 [Play](/docs/reference/plays/) runs on it, and an idle `Player`
 holds nothing.
 
-The resource is namespaced. Everything a `Player` becomes lives in
-its namespace: the claims, the playback pod, and the `Play` that
-names it, so RBAC on the namespace covers the set.
+The resource is namespaced, and everything a `Player` becomes is
+created in its namespace: the claims, the playback pod, and the
+`Play` that names it, so RBAC on the namespace covers the set.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Player
@@ -106,14 +106,14 @@ that name the `Player`, so it is empty until one does.
 
 ## On the bus
 
-The `players` tree describes the equipment, which stands whether or
-not a `Play` runs. [The media bus](/docs/reference/bus/) gives the
-rules the tree follows.
+The `players` tree describes the equipment, with or without a
+running `Play`. See [the media bus](/docs/reference/bus/) for the
+rules every topic follows.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
 | `players/{namespace}/{name}/status` | the operator | yes | the unit's presentable state |
-| `players/{namespace}/{name}/volume` | the operator, and a press | yes | the listening level |
+| `players/{namespace}/{name}/volume` | the operator and the pods | yes | the listening level |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel state |
 | `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
 
@@ -122,7 +122,8 @@ rules the tree follows.
 The presentable state of one unit: its friendly name, what it is
 doing, the `Play` it runs, and its parts with the presence of each.
 The operator is the only writer, so an idle pod that just started
-paints the live state the broker already holds and asks for nothing.
+draws the live state the broker already holds, with no request to
+the operator.
 
     {
       "displayName": "Studio Lab",
@@ -151,11 +152,11 @@ The unit's listening level and its muted flag:
 Both fields are always written, so a reader never needs a default
 for a missing key. The level runs 0 to 100, and 100 is unity, the
 player's own default and the cap. Every pod for the unit subscribes
-and applies what it reads, so the topic is the authority on the
-unit's loudness. The operator writes it when it seeds a unit or
+and applies what it reads, so the unit plays at the one level the
+topic holds. The operator writes it when it seeds a unit or
 applies a `Play`'s starting volume, and the pod that handles a
-`volume` or `mute` press writes the result back. A program that
-publishes a level outside 0 to 100 is clamped, not refused.
+`volume` or `mute` press writes the result back. A published level
+outside 0 to 100 is clamped to the range.
 
 ### `panel`
 

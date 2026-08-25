@@ -10,7 +10,7 @@ A `Keymap` is one controller model's table from buttons and axes to
 named actions, written once per model and shared by every
 [`Remote`](/docs/reference/remotes/) of that model. It is
 cluster-scoped, the way a `DeviceClass` and a `StorageClass` are,
-because it is a model's vocabulary and not any room's. A `Remote` in
+because one model's table is the same in every room. A `Remote` in
 any namespace names it without a namespace qualifier.
 
 The left side of the table uses evdev's names, because every Linux
@@ -60,7 +60,7 @@ buttons, so each d-pad direction is one entry here. `axis` is `ABS_HAT0X`,
 across, or `ABS_HAT0Y`, down. `value` is `-1` or `1`, the direction
 this entry binds; the hat reports 0 as the release. The analog
 sticks are not bindable: a resting thumb reports hundreds of times a
-second, and no action wants an analog value.
+second, and no action takes an analog value.
 
 ### Actions
 
@@ -130,7 +130,7 @@ The operator republishes a topic only when the compiled table
 differs from the last one it wrote, because a new subscriber reads
 the retained value from the broker. A `Keymap` that does not compile
 publishes nothing and leaves the last-good table in place, so a
-broken edit does not empty a running translation; the failure is
-logged. When a `Keymap` is deleted, the operator clears the retained
+broken edit does not empty a running translation, and the operator
+logs the failure. When a `Keymap` is deleted, the operator clears the retained
 value with an empty publish, so a deleted table leaves nothing
 behind on the bus.
