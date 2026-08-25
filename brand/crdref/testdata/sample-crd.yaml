@@ -1,0 +1,84 @@
+# A small CRD for the golden test. It is not a real liken resource.
+# Each field exists to exercise one shape the walker must render:
+# required fields, enums, defaults, patterns, arrays of scalars and
+# of objects, maps, and a pipe character that the table must escape.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.liken.sh
+spec:
+  group: liken.sh
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Widget describes one widget.
+          properties:
+            spec:
+              type: object
+              description: What the widget should be.
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                  pattern: ^[a-z]+$
+                  description: The widget's name.
+                mode:
+                  type: string
+                  enum: [simple, fancy]
+                  description: >-
+                    How the widget behaves. Folded
+                    across lines.
+                replicas:
+                  type: integer
+                  default: 1
+                  description: How many copies run.
+                tags:
+                  type: array
+                  items:
+                    type: string
+                  description: "Labels | with a pipe."
+                parts:
+                  type: array
+                  description: The widget's parts.
+                  items:
+                    type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: string
+                        description: The part's identity.
+                      size:
+                        type: integer
+                        description: The part's size.
+                mirrors:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                  description: Endpoint lists by host.
+                shape:
+                  type: object
+                  description: The widget's shape.
+                  properties:
+                    kind:
+                      type: string
+                      description: The shape's kind.
+            status:
+              type: object
+              description: What the widget reports.
+              properties:
+                phase:
+                  type: string
+                  enum: [Ready, Broken]
+                  description: One word for the state.

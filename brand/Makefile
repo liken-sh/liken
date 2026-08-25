@@ -6,9 +6,10 @@
 #
 # Every derived file is committed. A site consumes this repository as
 # a git submodule and runs nothing inside it, so the checkout itself
-# must already hold everything the theme serves. This Makefile is for
-# a person who changes the mark or the stylesheet, not for CI: edit
-# an original, run `make`, and commit the files that change.
+# must already hold everything the theme serves. The default target
+# is for a person who changes the mark or the stylesheet: edit an
+# original, run `make`, and commit the files that change. CI runs
+# only `make test`, the checks for the Go packages below.
 #
 # rsvg-convert (from librsvg) turns the vector image into pixels, and
 # ImageMagick packs the multi-size .ico file.
@@ -65,4 +66,12 @@ assets/liken.css: liken.css
 	mkdir -p assets
 	cp $< $@
 
-.PHONY: all
+# The checks for this module's Go packages, linkcheck and crdref.
+# staticcheck is a pinned tool dependency in go.mod, the way the
+# sites pin Hugo, so `go tool` is the whole toolchain.
+test:
+	go vet ./...
+	go tool staticcheck ./...
+	go test ./...
+
+.PHONY: all test
