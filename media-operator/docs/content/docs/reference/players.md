@@ -4,7 +4,7 @@ weight: 10
 toc: true
 ---
 
-# Players
+<!-- Generated from deploy/players-crd.yaml by docs/crdref. Do not edit. -->
 
 A `Player` is one named unit of equipment: a lone speaker, a TV
 with its built-in speakers, a TV with a receiver. The spec selects
@@ -44,64 +44,125 @@ The class names here are the cluster's own vocabulary: consumer
 `DeviceClass` objects are yours to create, and each hardware
 operator's manual gives the YAML for its class.
 
-## The spec
+A Player is one named unit of equipment. A Play names a Player to run media on it, and the media operator turns the Player into device claims: the display's claim stands between runs, for the idle screen, and the other devices are claimed only while a Play runs.
 
-All of a `Player`'s devices must be reachable from one machine. A
-`Play` becomes one pod, and the scheduler places that pod on the
-machine that owns every claimed device, so a `Player` whose devices
-span machines produces `Play`s that stay `Pending`. The spec must
-select a display or at least one sink; `render` alone plays nothing.
+## spec
 
-| Field | What it declares |
-|---|---|
-| `zone` | the area this unit is in, such as `living-room`; a word for grouping and display, nothing acts on it yet |
-| `displayName` | the human name of the unit, shown by the idle screen in place of the object name |
-| `display` | the display this unit shows video on; omit it for an audio-only unit |
-| `render` | the GPU render node the player program decodes and draws with; `mpv` needs one to put video on a display |
-| `sinks` | the audio outputs this unit plays sound through |
-| `control` | the panel's DDC/CI control device, an opt-in; the idle pod darkens the panel through it |
-| `remotes` | the controllers this unit owns, each naming a [Remote](/docs/reference/remotes/) in the same namespace |
-| `audioLanguages`, `subtitleLanguages`, `subtitles` | per-unit overrides of the language preferences; omit them to inherit the default `MediaPreferences` |
-| `idle` | this unit's idle screen policy, field by field over the default `MediaPreferences` |
+The devices that form the unit, each selected from what a hardware operator publishes. All of a Player's devices must be reachable from one machine, because a Play becomes one pod and the scheduler places that pod on the machine that owns every claimed device. A Player whose devices span machines produces Plays that stay Pending. The spec must select a display or at least one sink; render alone plays nothing.
 
-`display`, `render`, `sinks` entries, and `control` share one shape,
-a device selection:
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spec--zone"></span>`zone` | string | no | The area this Player is in, such as living-room. A word for grouping and display; nothing acts on it yet. |
+| <span id="spec--displayname"></span>`displayName` | string | no | The human name of this unit, the one the idle screen and later ambient surfaces show in place of the object name, such as Studio Lab. Omit it, and the idle screen falls back to the object name. |
+| <span id="spec--display"></span>`display` | [object](#specdisplay) | no | The display this Player shows video on. Omit it for an audio-only Player. |
+| <span id="spec--sinks"></span>`sinks` | [\[\]object](#specsinks) | no | The audio outputs this Player plays sound through. |
+| <span id="spec--render"></span>`render` | [object](#specrender) | no | The GPU render node the player program decodes and draws with. Omit it only for an audio-only Player; mpv needs a GPU to put video on a display. |
+| <span id="spec--control"></span>`control` | [object](#speccontrol) | no | The panel's DDC/CI control device, an opt-in. The idle pod holds it, and its sidecar darkens the panel after idle.offAfterSeconds and lights it on a press. A panel that refuses DDC/CI publishes no control device, so omit this there. |
+| <span id="spec--remotes"></span>`remotes` | [\[\]object](#specremotes) | no | The controllers this unit owns, each naming a Remote in the same namespace. The Play's pod builds one translator sidecar per entry. |
+| <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Player override of the audio language order; omit it to inherit the default MediaPreferences. |
+| <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Player override of the subtitle language order; omit it to inherit the default MediaPreferences. |
+| <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Player override of when subtitles show; omit it to inherit the default MediaPreferences. One of: `on`, `off`, `auto`. |
+| <span id="spec--idle"></span>`idle` | [object](#specidle) | no | This unit's idle screen policy. Each field overrides the default MediaPreferences on its own. |
 
-| Field | What it declares |
-|---|---|
-| `class` | the `DeviceClass` the claim allocates through |
-| `displayName` | the human name of the selection, shown in the idle screen's parts list |
-| `selector` | a CEL expression over `device.attributes`; omitted, the class alone chooses |
-| `parameters` | opaque configuration for the driver that prepares the device, carried onto the claim unread |
+### spec.display
 
-Each `remotes` entry names the controller and, optionally, how it
-maps on this unit:
+The display this Player shows video on. Omit it for an audio-only Player.
 
-| Field | What it declares |
-|---|---|
-| `name` | the `Remote` this unit owns, by name, in this namespace |
-| `displayName` | the human name of the controller, shown in the idle screen's parts list |
-| `keymap` | a per-unit [Keymap](/docs/reference/keymaps/) override; empty, the unit reads the `Remote`'s own `Keymap` |
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdisplay--class"></span>`class` | string | yes | The DeviceClass the claim allocates through. Consumer classes are the cluster owner's vocabulary; each hardware operator's manual gives the YAML for its class. |
+| <span id="specdisplay--displayname"></span>`displayName` | string | no | The human name of this selection, the one the idle screen shows in its parts list, such as Portable Screen. Omit it, and the idle screen falls back to the DeviceClass name. |
+| <span id="specdisplay--selector"></span>`selector` | string | no | A CEL expression over device.attributes, the same expression a hand-written claim would carry. Omitted, the class alone chooses, which fits a class that already names one kind of device. |
+| <span id="specdisplay--parameters"></span>`parameters` | [object](#specdisplayparameters) | no | Opaque configuration for the driver that prepares the device, carried onto the claim unread. The display operator's manual documents its parameters, such as mode and brightness. |
 
-The `idle` block states what the screen does while nothing plays.
-Each field overrides the default `MediaPreferences` on its own:
+#### spec.display.parameters
 
-| Field | What it declares |
-|---|---|
-| `fadeAfterSeconds` | seconds of quiet before the idle screen fades to black; zero disables the fade |
-| `offAfterSeconds` | seconds of quiet before the panel itself goes dark, at least `fadeAfterSeconds`; it acts only with a `control` device |
-| `offMode` | what the off window writes: `backlight`, the default, always wakes over DDC; `power` is deeper, and some panels never answer from it |
+Opaque configuration for the driver that prepares the device, carried onto the claim unread. The display operator's manual documents its parameters, such as mode and brightness.
 
-## The status
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdisplayparameters--driver"></span>`driver` | string | yes | The driver the parameters are for, such as display.liken.sh. |
+| <span id="specdisplayparameters--values"></span>`values` | object | no | The parameters themselves. The driver defines them; this operator carries them. |
 
-Only the operator writes the status. It is derived from the `Play`s
-that name the `Player`, so it is empty until one does.
+### spec.sinks[]
 
-| Field | What it reports |
-|---|---|
-| `activity` | `Playing`, `Starting`, or `Idle` |
-| `play` | the name of the `Play` on this unit, empty while `Idle` |
-| `panel` | the panel state the idle sidecar last actuated: `On`, `BacklightOff`, `Off`, or `Unresponsive` |
+The audio outputs this Player plays sound through.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specsinks--class"></span>`class` | string | yes | The DeviceClass the claim allocates through. Consumer classes are the cluster owner's vocabulary; each hardware operator's manual gives the YAML for its class. |
+| <span id="specsinks--displayname"></span>`displayName` | string | no | The human name of this selection, the one the idle screen shows in its parts list, such as Built-in Speakers. Omit it, and the idle screen falls back to the DeviceClass name. |
+| <span id="specsinks--selector"></span>`selector` | string | no | A CEL expression over device.attributes, the same expression a hand-written claim would carry. |
+| <span id="specsinks--parameters"></span>`parameters` | [object](#specsinksparameters) | no | Opaque configuration for the driver that prepares the device, carried onto the claim unread. The audio operator's manual documents its parameters, such as codec. |
+
+#### spec.sinks[].parameters
+
+Opaque configuration for the driver that prepares the device, carried onto the claim unread. The audio operator's manual documents its parameters, such as codec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specsinksparameters--driver"></span>`driver` | string | yes | The driver the parameters are for, such as audio.liken.sh. |
+| <span id="specsinksparameters--values"></span>`values` | object | no | The parameters themselves. The driver defines them; this operator carries them. |
+
+### spec.render
+
+The GPU render node the player program decodes and draws with. Omit it only for an audio-only Player; mpv needs a GPU to put video on a display.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specrender--class"></span>`class` | string | yes | The DeviceClass the claim allocates through. A render class usually needs no selector, because it already names one kind of device. |
+| <span id="specrender--displayname"></span>`displayName` | string | no | The human name of this selection, the one the idle screen shows in its parts list. Omit it, and the idle screen falls back to the DeviceClass name. |
+| <span id="specrender--selector"></span>`selector` | string | no | A CEL expression over device.attributes, for a machine with more than one GPU. |
+
+### spec.control
+
+The panel's DDC/CI control device, an opt-in. The idle pod holds it, and its sidecar darkens the panel after idle.offAfterSeconds and lights it on a press. A panel that refuses DDC/CI publishes no control device, so omit this there.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speccontrol--class"></span>`class` | string | yes | The cluster's control DeviceClass. A constraint ties the device to the display selection's own panel, so no selector is needed to name the screen twice. |
+| <span id="speccontrol--displayname"></span>`displayName` | string | no | The human name of this selection, shown where the idle screen lists the unit's parts. |
+| <span id="speccontrol--selector"></span>`selector` | string | no | A CEL expression over device.attributes that narrows which control device the claim takes. Usually omitted: the constraint already ties it to the display's panel. |
+| <span id="speccontrol--parameters"></span>`parameters` | [object](#speccontrolparameters) | no | Opaque driver configuration for the control selection, passed through on the claim. |
+
+#### spec.control.parameters
+
+Opaque driver configuration for the control selection, passed through on the claim.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speccontrolparameters--driver"></span>`driver` | string | yes | The driver these parameters are for. |
+| <span id="speccontrolparameters--values"></span>`values` | object | no | The parameters themselves, defined by the driver. |
+
+### spec.remotes[]
+
+The controllers this unit owns, each naming a Remote in the same namespace. The Play's pod builds one translator sidecar per entry.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specremotes--name"></span>`name` | string | yes | The Remote this unit owns, by name, in this namespace. |
+| <span id="specremotes--displayname"></span>`displayName` | string | no | The human name of this controller, the one the idle screen shows in its parts list, such as Studio Dualsense Controller. Omit it, and the idle screen falls back to name. |
+| <span id="specremotes--keymap"></span>`keymap` | string | no | A per-unit Keymap override for this controller on this unit, by name. Set it, and this controller maps this way here and its Remote's own way elsewhere. Empty, the unit reads the Remote's own Keymap. |
+
+### spec.idle
+
+This unit's idle screen policy. Each field overrides the default MediaPreferences on its own.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
+| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. It acts only on a Player that states a control device. |
+| <span id="specidle--offmode"></span>`offMode` | string | no | What the off window writes: backlight, the default, writes the backlight to zero and always wakes over DDC; power writes DPM off, which is deeper and which some panels never answer from. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
+
+## status
+
+What plays on this Player now, written only by the media operator. It is derived from the Plays that name the Player, so it is empty until one does.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="status--activity"></span>`activity` | string | no | Whether the Player performs a run now. Playing is a Play running on it, Starting is a Play whose pod has not begun, and Idle is no Play at all. One of: `Playing`, `Starting`, `Idle`. |
+| <span id="status--play"></span>`play` | string | no | The name of the Play on this Player, in the same namespace. Empty while the Player is Idle. |
+| <span id="status--panel"></span>`panel` | string | no | The panel state the idle sidecar last actuated: On, BacklightOff, Off, or Unresponsive. Empty until a sidecar with a control device reports one. |
 
 ## On the bus
 

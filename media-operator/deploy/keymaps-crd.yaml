@@ -84,7 +84,12 @@ spec:
                           The button, by its evdev key name, such as
                           BTN_SOUTH. Every Linux controller driver
                           reports the same position under the same
-                          name, so the name works across models.
+                          name, so the name works across models. The
+                          names this operator accepts: BTN_SOUTH,
+                          BTN_EAST, BTN_C, BTN_NORTH, BTN_WEST,
+                          BTN_Z, BTN_TL, BTN_TR, BTN_TL2, BTN_TR2,
+                          BTN_SELECT, BTN_START, BTN_MODE,
+                          BTN_THUMBL, and BTN_THUMBR.
                       action:
                         type: string
                         enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus, up, down, left, right, select, back]
@@ -102,7 +107,9 @@ spec:
                           How far the action moves: seconds for
                           seek, a step for volume and chapter. The
                           sign is the direction, so one action
-                          serves both bumpers.
+                          serves both bumpers. Exactly these three
+                          actions take an amount; the rest refuse
+                          one.
                       repeat:
                         type: object
                         description: >-
@@ -112,7 +119,9 @@ spec:
                           interval until the release. Omit it and the
                           button fires once per press. A repeat works on
                           any action, so a held seek scrubs and a held
-                          volume ramps.
+                          volume ramps. One repeat is capped at 30
+                          seconds, because a controller that sleeps
+                          mid-hold publishes no release.
                         properties:
                           delay:
                             type: string
@@ -150,7 +159,7 @@ spec:
                           One of the two hat axes, X across and Y
                           down. The analog sticks are not bindable:
                           a resting thumb reports hundreds of times
-                          a second, and no action wants an analog
+                          a second, and no action takes an analog
                           value.
                       value:
                         type: integer
@@ -176,7 +185,9 @@ spec:
                         description: >-
                           How far the action moves: seconds for
                           seek, a step for volume and chapter. The
-                          sign is the direction.
+                          sign is the direction. Exactly these three
+                          actions take an amount; the rest refuse
+                          one.
                       repeat:
                         type: object
                         description: >-
@@ -184,7 +195,9 @@ spec:
                           direction is held. The player pod fires it on
                           the press, waits the delay, then re-fires it
                           every interval until the release. Omit it and
-                          the direction fires once per press.
+                          the direction fires once per press. One repeat
+                          is capped at 30 seconds, because a controller
+                          that sleeps mid-hold publishes no release.
                         properties:
                           delay:
                             type: string

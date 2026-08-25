@@ -94,8 +94,7 @@ spec:
                     minLength: 1
                   description: >-
                     The Players this Play runs on, by name, in this
-                    namespace. One entry today; the carriage layer
-                    lifts the limit.
+                    namespace. One entry today.
                 items:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -125,8 +124,8 @@ spec:
                         description: >-
                           How the item should look, for the fields the
                           display cannot read from the file. The library
-                          that feeds liken supplies these, and the
-                          display trusts them over the container's tags.
+                          that fed the item supplies these, and the
+                          display prefers them over the container's tags.
                           Omit the block for a loose file, and the
                           display falls back to the file's own tags.
                         properties:
@@ -136,7 +135,7 @@ spec:
                             description: >-
                               The media type the display tunes its layout
                               by. mpv cannot infer this, and the display
-                              must not guess it from a file name.
+                              does not read it from the file name.
                           hint:
                             type: string
                             enum: [movie, series, album]
@@ -207,11 +206,11 @@ spec:
                   format: int64
                   minimum: 0
                   description: >-
-                    How long this Play stands after it finishes, in
+                    How long this Play stays after it finishes, in
                     seconds, the meaning a Job gives the name. While it
-                    stands, kubectl get plays still answers what just
-                    played and where it stopped; when it goes, that
-                    record goes with it. Omitted, it is 300 seconds.
+                    stays, kubectl get plays still answers what just
+                    played and where it stopped; deleting the Play
+                    deletes that record. Omitted, it is 300 seconds.
                     Zero deletes the Play as soon as it finishes. The
                     playback pod does not wait for this window: it is
                     deleted as soon as the run finishes.
@@ -247,7 +246,7 @@ spec:
                   description: >-
                     The level this run starts at. The operator writes it
                     to the Player's volume topic before it creates the
-                    pod, so the value becomes the unit's state and stands
+                    pod, so the value becomes the unit's state and stays
                     after the film ends. Omitted, the run starts at
                     whatever the unit already holds.
                   properties:
@@ -259,12 +258,12 @@ spec:
                         The listening level, 0 to 100. 100 is unity, the
                         player's own default, and the cap: a software
                         gain above unity only distorts. Omitted, the
-                        level the unit already holds stands.
+                        level the unit already holds stays.
                     muted:
                       type: boolean
                       description: >-
                         Whether the run starts muted. Omitted, the muted
-                        state the unit already holds stands.
+                        state the unit already holds stays.
             status:
               type: object
               description: >-
@@ -291,17 +290,16 @@ spec:
                   description: >-
                     The one word for what the Play does right now,
                     the phase and the paused flag folded together.
-                    Starting is Pending, Playing and Paused are the
-                    two faces of Running, and Finished and Failed
-                    match the phase. The phase is the lifecycle; the
+                    Starting is Pending, Playing and Paused both
+                    mean Running, and Finished and Failed match the
+                    phase. The phase is the lifecycle; the
                     activity is what a person reads at a glance.
                 paused:
                   type: boolean
                   description: >-
                     True while the player holds the current item
-                    still. The phase stays Running; pausing is a
-                    state of the performance, not a step in the
-                    lifecycle.
+                    still. The phase stays Running, because a
+                    pause does not advance the lifecycle.
                 item:
                   type: integer
                   description: >-
@@ -321,13 +319,13 @@ spec:
                   type: string
                   description: >-
                     The playback pod's name, for kubectl describe
-                    and logs. The pod is owned by this Play and
-                    leaves with it.
+                    and logs. The pod is owned by this Play and is
+                    deleted with it.
                 message:
                   type: string
                   description: >-
-                    Why the phase is what it is, when a word is not
-                    enough: the resolver refused a URI, the Player
+                    The reason for the phase, as one line of
+                    text: the resolver refused a URI, the Player
                     does not exist, the pod failed.
                 finishedAt:
                   type: string
@@ -346,7 +344,7 @@ spec:
                     type: string
                   description: >-
                     The resolved audio language order this run
-                    applied, the console-parity record of what the tiers
+                    applied, the record of what the three tiers
                     settled on.
                 subtitleLanguages:
                   type: array
@@ -364,10 +362,15 @@ spec:
                 audioLanguage:
                   type: string
                   description: >-
-                    The language of the audio track mpv chose, so a
-                    code that matched no track shows plainly.
+                    The language of the audio track mpv chose, so
+                    you can see when a code matched no track. The
+                    value is the track's own tag as the file
+                    carries it, for Matroska the three-letter ISO
+                    639-2 code, whatever form the preference used.
                 subtitleLanguage:
                   type: string
                   description: >-
                     The language of the subtitle track mpv chose;
-                    empty when none plays.
+                    empty when none plays. The value is the track's
+                    own tag as the file carries it, the way
+                    audioLanguage reports its track.

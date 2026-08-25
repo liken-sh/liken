@@ -59,10 +59,11 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A Player is one named unit of equipment at one spot, for
-            one purpose. A Play names a Player to run media on it,
-            and the media operator claims the Player's devices for
-            exactly as long as that Play exists.
+            A Player is one named unit of equipment. A Play names a
+            Player to run media on it, and the media operator turns
+            the Player into device claims: the display's claim
+            stands between runs, for the idle screen, and the other
+            devices are claimed only while a Play runs.
           properties:
             spec:
               type: object
@@ -73,7 +74,8 @@ spec:
                 Play becomes one pod and the scheduler places that
                 pod on the machine that owns every claimed device. A
                 Player whose devices span machines produces Plays
-                that stay Pending.
+                that stay Pending. The spec must select a display or
+                at least one sink; render alone plays nothing.
               # A Player with no display and no sinks plays nothing
               # anywhere, so the spec must select at least one of the
               # two. Render alone is not a Player.
@@ -248,9 +250,9 @@ spec:
                     displayName:
                       type: string
                       description: >-
-                        The household's name for this selection,
-                        shown where the idle screen lists the
-                        unit's parts.
+                        The human name of this selection, shown
+                        where the idle screen lists the unit's
+                        parts.
                     selector:
                       type: string
                       description: >-
@@ -371,7 +373,7 @@ spec:
                         always wakes over DDC; power writes DPM
                         off, which is deeper and which some panels
                         never answer from. State power only for a
-                        panel the drill proved wakes.
+                        panel that woke from it in a drill.
             status:
               type: object
               description: >-

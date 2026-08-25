@@ -65,11 +65,14 @@ spec:
                       description: >-
                         A CEL expression over device.attributes that
                         picks this one controller, such as a match
-                        on its address.
+                        on its address. Omit it, and the class alone
+                        chooses.
                 keymap:
                   type: string
                   minLength: 1
                   description: >-
                     The Keymap for this controller's model, by name. A
                     Keymap is cluster-scoped, so the name carries no
-                    namespace.
+                    namespace. A Player entry in spec.remotes may
+                    override it per unit, so one controller can map
+                    two ways on two units.

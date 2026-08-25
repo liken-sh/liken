@@ -4,7 +4,7 @@ weight: 50
 toc: true
 ---
 
-# MediaPreferences
+<!-- Generated from deploy/mediapreferences-crd.yaml by docs/crdref. Do not edit. -->
 
 A `MediaPreferences` holds the cluster's defaults: the preferred
 audio and subtitle languages, the time zone its displays show, and
@@ -18,8 +18,6 @@ name with a CEL rule, so a `MediaPreferences` under any other name
 is rejected at apply, and the mistake shows at once instead of
 adding a silent second object. A cluster without one is fine: a
 missing default is not an error, and resolution skips the tier.
-
-## The spec
 
     apiVersion: media.liken.sh/v1alpha1
     kind: MediaPreferences
@@ -35,34 +33,29 @@ missing default is not an error, and resolution skips the tier.
         offAfterSeconds: 1200
         offMode: backlight
 
-`audioLanguages` and `subtitleLanguages` are ordered language
-codes, most wanted first; mpv takes the first track that matches.
-The two lists are separate, so one viewer takes foreign audio with
-native subtitles.
+The cluster's defaults: the preferred audio and subtitle languages, the time zone its displays show, and what an idle display does. A Player or a Play overrides the language fields field by field; the time zone has no override.
 
-`subtitles` is when subtitles show: `on` always, `off` never, and
-`auto` only when the audio that played is not the first choice.
+## spec
 
-`timeZone` is the time zone, as an IANA name like
-`America/New_York`. The player pod reads it as `TZ`, so the display
-clock shows local time instead of UTC. It is one per cluster: unlike
-the language fields, no `Play` or `Player` overrides it.
+The default language and subtitle fields, each read only when no more specific tier states it.
 
-`idle` is the cluster's default for what a display does while
-nothing plays, read for each field a `Player`'s own block leaves
-unset:
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | Ordered audio language codes, most wanted first; mpv takes the first audio track that matches. Codes are IETF language tags, and mpv treats the ISO 639-1 form en and the ISO 639-2 form eng as the same language. |
+| <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | Ordered subtitle language codes, separate from the audio list, so one viewer takes foreign audio with native subtitles. |
+| <span id="spec--subtitles"></span>`subtitles` | string | no | When subtitles show; on always, off never, auto only when the audio that played is not the first choice. One of: `on`, `off`, `auto`. |
+| <span id="spec--timezone"></span>`timeZone` | string | no | The time zone, as an IANA name like America/New_York. The player pod reads it as TZ, so the display clock shows local time instead of UTC. One per cluster: no Play or Player overrides it. |
+| <span id="spec--idle"></span>`idle` | [object](#specidle) | no | The cluster's default for what a display does while nothing plays, read for each field a Player's own block leaves unset. |
 
-- `idle.fadeAfterSeconds` is the seconds of quiet before an idle
-  screen fades to black. Zero disables the automatic fade. Unset,
-  every screen fades after 600.
-- `idle.offAfterSeconds` is the seconds of quiet before an idle
-  panel goes dark, at least `fadeAfterSeconds`. Zero or unset means
-  panels never go dark on their own. It acts only on a `Player` that
-  states a control device.
-- `idle.offMode` is what the off window writes: `backlight`, the
-  default, writes the backlight to zero and always wakes over DDC;
-  `power` writes DPM off, which is deeper. State `power` only for
-  a panel that woke from it in a drill.
+### spec.idle
+
+The cluster's default for what a display does while nothing plays, read for each field a Player's own block leaves unset.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before an idle screen fades to black. Zero disables the automatic fade; unset, every screen fades after 600. |
+| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before an idle panel goes dark, at least fadeAfterSeconds. Zero or unset means panels never go dark on their own. It acts only on a Player that states a control device. |
+| <span id="specidle--offmode"></span>`offMode` | string | no | What the off window writes: backlight, the default, writes the backlight to zero and always wakes over DDC; power writes DPM off, which is deeper. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
 
 ## How a Play resolves it
 

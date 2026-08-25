@@ -4,7 +4,7 @@ weight: 20
 toc: true
 ---
 
-# Plays
+<!-- Generated from deploy/plays-crd.yaml by docs/crdref. Do not edit. -->
 
 A `Play` is one run of media on a [Player](/docs/reference/players/):
 a film, an album, or a season of episodes, played in order. Its
@@ -38,55 +38,80 @@ delete the `Play` and create another.
             year: 2021
       start: "0:10:00"
 
-## The spec
+A Play is one run of media on a Player: a film, an album, or a season of episodes, played in order. Create a Play to start it; delete the Play to stop it early.
 
-| Field | What it declares |
-|---|---|
-| `players` | the `Player`s this run plays on, by name, in this namespace; one entry today |
-| `items` | the media to play in order; each entry is a `uri` and an optional `presentation` |
-| `start` | where in the first item the run begins, such as `0:10:00` or `600`; this is also how a run resumes |
-| `trickplayInterval` | the seconds one trickplay tile covers, as a Go duration like `10s`, the default |
-| `ttlSecondsAfterFinished` | how long the `Play` stays after it finishes; 300 seconds when omitted, and zero deletes it at once |
-| `audioLanguages`, `subtitleLanguages`, `subtitles` | per-run overrides of the language preferences, the most specific tier |
-| `volume` | the level this run starts at; the operator writes it to the unit's volume topic before the pod exists |
+## spec
 
-An item's `uri` resolves by scheme: `https://` becomes a stream the
-player reads directly, and `nfs://host/export/path` becomes a mount
-on the playback pod. A scheme the operator does not know fails the
-`Play` before any pod exists.
+What to play and where. The spec is immutable: a different film or a different player is a different Play.
 
-An item's `presentation` declares what the player cannot read from
-the file, so the display renders the item the way the library that
-fed it describes it. Omit the block for a loose file, and the
-display falls back to the file's own tags:
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spec--players"></span>`players` | []string | yes | The Players this Play runs on, by name, in this namespace. One entry today. |
+| <span id="spec--items"></span>`items` | [\[\]object](#specitems) | yes | The media to play in order. Each entry is a URI and an optional presentation that declares how the display should render it. |
+| <span id="spec--start"></span>`start` | string | no | Where in the first item the run begins, as a time the player accepts, such as 0:10:00 or 600. Omitted, the run begins at the start. Later items always begin at their own start. This is also how a run resumes: a new Play with the position a finished or deleted one reported. |
+| <span id="spec--trickplayinterval"></span>`trickplayInterval` | string | no | The seconds one trickplay tile covers, as a Go duration like 10s. Jellyfin writes no manifest beside the sheets, so the Play declares it. Omitted, it defaults to 10s, the Jellyfin default. |
+| <span id="spec--ttlsecondsafterfinished"></span>`ttlSecondsAfterFinished` | integer | no | How long this Play stays after it finishes, in seconds, the meaning a Job gives the name. While it stays, kubectl get plays still answers what just played and where it stopped; deleting the Play deletes that record. Omitted, it is 300 seconds. Zero deletes the Play as soon as it finishes. The playback pod does not wait for this window: it is deleted as soon as the run finishes. |
+| <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order, the most specific tier; omit it to inherit the Player. |
+| <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Play override of the subtitle language order, the most specific tier; omit it to inherit the Player. |
+| <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Play override of when subtitles show, the most specific tier; omit it to inherit the Player. One of: `on`, `off`, `auto`. |
+| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The level this run starts at. The operator writes it to the Player's volume topic before it creates the pod, so the value becomes the unit's state and stays after the film ends. Omitted, the run starts at whatever the unit already holds. |
 
-| Field | What it declares |
-|---|---|
-| `type` | `video`, `music`, or `image`; the display tunes its layout by it |
-| `hint` | the finer kind within the type: `movie`, `series`, or `album` |
-| `title` | the item's name, which overrides the file's own tag |
-| `series`, `season`, `episode`, `episodeTitle`, `date` | the episode's place in its show |
-| `year` | the release year, shown under a movie's title |
-| `logo` | the logo art URI, `nfs://` or `https://`, resolved the way the media URI is |
-| `trickplay` | the item's trickplay directory URI; the display shows a tile from its sprite sheets on the scrub cursor |
+### spec.items[]
 
-## The status
+One entry in the playlist: the URI to play and, optionally, how it should look.
 
-Only the operator writes the status. The playback pod holds no API
-credentials; it reports on the bus, and the operator writes here.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path to a mount on the playback pod. A URI whose scheme the operator does not know fails the Play before any pod exists. |
+| <span id="specitems--presentation"></span>`presentation` | [object](#specitemspresentation) | no | How the item should look, for the fields the display cannot read from the file. The library that fed the item supplies these, and the display prefers them over the container's tags. Omit the block for a loose file, and the display falls back to the file's own tags. |
 
-| Field | What it reports |
-|---|---|
-| `phase` | `Pending`, `Running`, `Finished`, or `Failed`; the lifecycle, and it moves forward only |
-| `activity` | the phase and the paused flag folded into one word: `Starting`, `Playing`, `Paused`, `Finished`, or `Failed` |
-| `paused` | true while the player holds the current item still; the phase stays `Running` |
-| `item` | which URI plays now, counting from 1 in spec order |
-| `position`, `duration` | the playhead and the current item's length, each as `H:MM:SS` |
-| `pod` | the playback pod's name, for `kubectl describe` and `logs` |
-| `message` | the reason for the phase, as one line of text |
-| `finishedAt` | when the operator first read the phase as `Finished`; the time-to-live counts from here |
-| `audioLanguages`, `subtitleLanguages`, `subtitles` | the resolved preferences this run applied |
-| `audioLanguage`, `subtitleLanguage` | the languages of the tracks the player chose, so you can see when a code matched no track |
+#### spec.items[].presentation
+
+How the item should look, for the fields the display cannot read from the file. The library that fed the item supplies these, and the display prefers them over the container's tags. Omit the block for a loose file, and the display falls back to the file's own tags.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specitemspresentation--type"></span>`type` | string | no | The media type the display tunes its layout by. mpv cannot infer this, and the display does not read it from the file name. One of: `video`, `music`, `image`. |
+| <span id="specitemspresentation--hint"></span>`hint` | string | no | The finer kind within the type. A video is a movie or a series, and music is an album. It selects the layout the display draws. One of: `movie`, `series`, `album`. |
+| <span id="specitemspresentation--title"></span>`title` | string | no | The item's name, which overrides the file's own tag. Set it when the tag is wrong or absent. |
+| <span id="specitemspresentation--series"></span>`series` | string | no | The series this episode belongs to. |
+| <span id="specitemspresentation--season"></span>`season` | integer | no | The season number of the episode. |
+| <span id="specitemspresentation--episode"></span>`episode` | integer | no | The episode number within its season. |
+| <span id="specitemspresentation--episodetitle"></span>`episodeTitle` | string | no | The title of the episode. |
+| <span id="specitemspresentation--year"></span>`year` | integer | no | The release year, shown under a movie's title. |
+| <span id="specitemspresentation--date"></span>`date` | string | no | The air date of an episode, shown on its line. Give it as an ISO date like 2017-03-05, and the display formats it. |
+| <span id="specitemspresentation--logo"></span>`logo` | string | no | The logo art URI, nfs:// or https://, resolved the way the media URI is. The display shows it in the header in place of the title. |
+| <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The X.trickplay directory URI, nfs:// or https://, resolved the way the media URI is. The display shows a tile from it on the scrub cursor. |
+
+### spec.volume
+
+The level this run starts at. The operator writes it to the Player's volume topic before it creates the pod, so the value becomes the unit's state and stays after the film ends. Omitted, the run starts at whatever the unit already holds.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specvolume--level"></span>`level` | integer | no | The listening level, 0 to 100. 100 is unity, the player's own default, and the cap: a software gain above unity only distorts. Omitted, the level the unit already holds stays. |
+| <span id="specvolume--muted"></span>`muted` | boolean | no | Whether the run starts muted. Omitted, the muted state the unit already holds stays. |
+
+## status
+
+What the playback pod reports, written only by the media operator. The playback pod itself holds no API credentials; it reports to the operator, and the operator writes here.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="status--phase"></span>`phase` | string | no | Where the run is in its life, in the words Jobs and Pods use. Pending is declared but not yet performing, Running is the pod performing the play, paused or not, and Finished and Failed are the two ends. The word is Running rather than Playing because a phase moves forward only, and a paused film would force Playing to flap; the paused field beside this one says the rest. One of: `Pending`, `Running`, `Finished`, `Failed`. |
+| <span id="status--activity"></span>`activity` | string | no | The one word for what the Play does right now, the phase and the paused flag folded together. Starting is Pending, Playing and Paused both mean Running, and Finished and Failed match the phase. The phase is the lifecycle; the activity is what a person reads at a glance. One of: `Starting`, `Playing`, `Paused`, `Finished`, `Failed`. |
+| <span id="status--paused"></span>`paused` | boolean | no | True while the player holds the current item still. The phase stays Running, because a pause does not advance the lifecycle. |
+| <span id="status--item"></span>`item` | integer | no | Which URI plays now, counting from 1 in spec order. The third of five episodes shows 3. |
+| <span id="status--position"></span>`position` | string | no | The playhead inside the current item, as H:MM:SS. |
+| <span id="status--duration"></span>`duration` | string | no | The length of the current item, as H:MM:SS, once the player has read it. |
+| <span id="status--pod"></span>`pod` | string | no | The playback pod's name, for kubectl describe and logs. The pod is owned by this Play and is deleted with it. |
+| <span id="status--message"></span>`message` | string | no | The reason for the phase, as one line of text: the resolver refused a URI, the Player does not exist, the pod failed. |
+| <span id="status--finishedat"></span>`finishedAt` | string | no | When the operator first read this run's phase as Finished. The time-to-live after finishing counts from here and not from the Play's creation, so the window measures the end of the film. It is written here rather than held in the operator, so an operator that restarts reads the clock back. |
+| <span id="status--audiolanguages"></span>`audioLanguages` | []string | no | The resolved audio language order this run applied, the record of what the three tiers settled on. |
+| <span id="status--subtitlelanguages"></span>`subtitleLanguages` | []string | no | The resolved subtitle language order this run applied. |
+| <span id="status--subtitles"></span>`subtitles` | string | no | The resolved subtitle setting this run applied, one of on, off, or auto. |
+| <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language of the audio track mpv chose, so you can see when a code matched no track. The value is the track's own tag as the file carries it, for Matroska the three-letter ISO 639-2 code, whatever form the preference used. |
+| <span id="status--subtitlelanguage"></span>`subtitleLanguage` | string | no | The language of the subtitle track mpv chose; empty when none plays. The value is the track's own tag as the file carries it, the way audioLanguage reports its track. |
 
 ## On the bus
 
@@ -153,7 +178,9 @@ running `Play`'s place back from the broker.
 
 `item` counts from 1 in spec order. `duration` is empty until the
 player has read the item's header, and the two language fields are
-absent while no track of that kind plays. One more field, `ended`,
+absent while no track of that kind plays. The language values are
+the track's own tags as the file carries them, for Matroska the
+three-letter ISO 639-2 codes, whatever form the preference used. One more field, `ended`,
 appears when the run is over and stays set in every later report of
 the same run. The pod takes seconds to terminate, so the operator
 reads this mark and returns the unit to idle at once instead of

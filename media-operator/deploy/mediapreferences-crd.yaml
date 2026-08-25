@@ -1,6 +1,6 @@
-# The MediaPreferences API. One cluster-scoped resource holds the household
-# default for audio and subtitle languages, the lowest of the three tiers a
-# Play resolves.
+# The MediaPreferences API. One cluster-scoped resource holds the
+# cluster's default for audio and subtitle languages, the lowest of the
+# three tiers a Play resolves.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -13,9 +13,9 @@ spec:
     plural: mediapreferences
     singular: mediapreferences
     categories: [media]
-  # A MediaPreferences is cluster-scoped because the household default
-  # belongs to the whole cluster, not one namespace, the same reason a
-  # Keymap is cluster-scoped.
+  # A MediaPreferences is cluster-scoped because the default belongs
+  # to the whole cluster, not one namespace, the same reason a Keymap
+  # is cluster-scoped.
   scope: Cluster
   versions:
     - name: v1alpha1
@@ -34,8 +34,11 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            The household default for audio and subtitle
-            languages; a Player or a Play overrides it field by field.
+            The cluster's defaults: the preferred audio and subtitle
+            languages, the time zone its displays show, and what an
+            idle display does. A Player or a Play overrides the
+            language fields field by field; the time zone has no
+            override.
           # The name is fixed at default, because a second default is a
           # contradiction. A MediaPreferences under any other name is
           # rejected at apply, so the mistake shows at once instead of
@@ -55,8 +58,11 @@ spec:
                   x-kubernetes-list-type: atomic
                   maxItems: 10
                   description: >-
-                    Ordered audio language codes, most wanted first;
-                    mpv takes the first audio track that matches.
+                    Ordered audio language codes, most wanted
+                    first; mpv takes the first audio track that
+                    matches. Codes are IETF language tags, and mpv
+                    treats the ISO 639-1 form en and the ISO 639-2
+                    form eng as the same language.
                   items:
                     type: string
                     pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
@@ -82,13 +88,17 @@ spec:
                   # An IANA zone name, for example America/New_York. The display
                   # clock reads it. One per cluster, with no Play or Player override.
                   description: >-
-                    The household wall-clock zone as an IANA name, so the
-                    display clock shows local time instead of UTC.
+                    The time zone, as an IANA name like
+                    America/New_York. The player pod reads it as TZ,
+                    so the display clock shows local time instead of
+                    UTC. One per cluster: no Play or Player
+                    overrides it.
                 idle:
                   type: object
                   description: >-
-                    The household default idle screen policy, read for
-                    each field a Player states none of its own.
+                    The cluster's default for what a display does
+                    while nothing plays, read for each field a
+                    Player's own block leaves unset.
                   properties:
                     fadeAfterSeconds:
                       type: integer
@@ -116,4 +126,4 @@ spec:
                         default, writes the backlight to zero and
                         always wakes over DDC; power writes DPM
                         off, which is deeper. State power only for
-                        panels a drill proved wake.
+                        a panel that woke from it in a drill.

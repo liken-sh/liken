@@ -4,7 +4,7 @@ weight: 40
 toc: true
 ---
 
-# Keymaps
+<!-- Generated from deploy/keymaps-crd.yaml by docs/crdref. Do not edit. -->
 
 A `Keymap` is one controller model's table from buttons and axes to
 named actions, written once per model and shared by every
@@ -18,8 +18,6 @@ controller driver reports the south face button as `BTN_SOUTH`,
 whatever is printed on the button. The right side names what a
 person means, `pause` or `seek`, never an mpv command, so a
 different player program can implement the same table later.
-
-## The spec
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Keymap
@@ -44,51 +42,57 @@ Buttons and axes are separate lists because they bind differently: a
 button is a press, and an axis entry names a direction as well. A
 `Keymap` must bind at least one entry across the two lists.
 
-### Buttons
+One controller model's table from buttons and axes to named actions. Write one Keymap per model, and share it through every Remote of that model.
 
-`press` is the button, by its evdev key name. The names this
-operator accepts: `BTN_SOUTH`, `BTN_EAST`, `BTN_C`, `BTN_NORTH`,
-`BTN_WEST`, `BTN_Z`, `BTN_TL`, `BTN_TR`, `BTN_TL2`, `BTN_TR2`,
-`BTN_SELECT`, `BTN_START`, `BTN_MODE`, `BTN_THUMBL`, and
-`BTN_THUMBR`.
+## spec
 
-### Axes
+The table itself, in two lists: buttons for key presses, and axes for the d-pad's hat directions.
 
-A gamepad's d-pad arrives as the two hat axes rather than as
-buttons, so each d-pad direction is one entry here. `axis` is `ABS_HAT0X`,
-across, or `ABS_HAT0Y`, down. `value` is `-1` or `1`, the direction
-this entry binds; the hat reports 0 as the release. The analog
-sticks are not bindable: a resting thumb reports hundreds of times a
-second, and no action takes an analog value.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spec--buttons"></span>`buttons` | [\[\]object](#specbuttons) | no | Button entries. Each one answers the press. A held button fires once unless it names a repeat, and the release stops a repeat the press started. |
+| <span id="spec--axes"></span>`axes` | [\[\]object](#specaxes) | no | Axis entries. A gamepad's d-pad arrives as the two hat axes rather than as buttons, so each d-pad direction is one entry here. |
 
-### Actions
+### spec.buttons[]
 
-`action` is what the press does, in this operator's vocabulary:
-`pause`, `mute`, `seek`, `volume`, `chapter`, `subtitles`, `audio`,
-`info`, `cycle-focus`, `up`, `down`, `left`, `right`, `select`, and
-`back`. Most actions command the player. The navigation actions,
-`up`, `down`, `left`, `right`, `select`, and `back`, drive the
-on-screen display. `cycle-focus` switches which unit a shared
-controller holds.
+Button entries. Each one answers the press. A held button fires once unless it names a repeat, and the release stops a repeat the press started.
 
-`amount` is how far an action moves: seconds for `seek`, a step for
-`volume` and `chapter`. The sign is the direction, so one action
-serves both bumpers. Exactly the three actions that move take an
-amount; the rest refuse one. The CRD states this rule in CEL, and
-the operator checks it again before it builds a pod.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specbuttons--press"></span>`press` | string | yes | The button, by its evdev key name, such as BTN_SOUTH. Every Linux controller driver reports the same position under the same name, so the name works across models. The names this operator accepts: BTN_SOUTH, BTN_EAST, BTN_C, BTN_NORTH, BTN_WEST, BTN_Z, BTN_TL, BTN_TR, BTN_TL2, BTN_TR2, BTN_SELECT, BTN_START, BTN_MODE, BTN_THUMBL, and BTN_THUMBR. |
+| <span id="specbuttons--action"></span>`action` | string | yes | What the press does, in this operator's vocabulary. The words name what a person means, never a player program's own command. Most actions command the player. The navigation actions, up, down, left, right, select, and back, drive the on-screen display. cycle-focus switches which unit a shared controller holds. One of: `pause`, `mute`, `seek`, `volume`, `chapter`, `subtitles`, `audio`, `info`, `cycle-focus`, `up`, `down`, `left`, `right`, `select`, `back`. |
+| <span id="specbuttons--amount"></span>`amount` | integer | no | How far the action moves: seconds for seek, a step for volume and chapter. The sign is the direction, so one action serves both bumpers. Exactly these three actions take an amount; the rest refuse one. |
+| <span id="specbuttons--repeat"></span>`repeat` | [object](#specbuttonsrepeat) | no | When present, the action repeats while the button is held. The player pod fires it on the press, waits the delay, then re-fires it every interval until the release. Omit it and the button fires once per press. A repeat works on any action, so a held seek scrubs and a held volume ramps. One repeat is capped at 30 seconds, because a controller that sleeps mid-hold publishes no release. |
 
-### Repeat
+#### spec.buttons[].repeat
 
-A binding with a `repeat` block repeats while the control is held:
-the translator publishes the command on the press, waits `delay`,
-then re-publishes every `interval` until the release. Both fields
-are durations, like `400ms` or `1s`. `delay` defaults to 400ms, long
-enough that a tap does not repeat, and `interval` defaults to 300ms.
-A binding with no `repeat` block fires once per press, whatever the
-action is. A repeat works on any action, so a held `seek` scrubs and
-a held `volume` ramps. One synthesized repeat is capped at 30
-seconds, because a controller that sleeps mid-hold publishes no
-release.
+When present, the action repeats while the button is held. The player pod fires it on the press, waits the delay, then re-fires it every interval until the release. Omit it and the button fires once per press. A repeat works on any action, so a held seek scrubs and a held volume ramps. One repeat is capped at 30 seconds, because a controller that sleeps mid-hold publishes no release.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specbuttonsrepeat--delay"></span>`delay` | string | no | How long to hold before the repeat starts, as a duration like 400ms. A tap shorter than this does not repeat. Defaults to 400ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
+| <span id="specbuttonsrepeat--interval"></span>`interval` | string | no | How often to re-run the action while the button is held, as a duration like 300ms. Defaults to 300ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
+
+### spec.axes[]
+
+Axis entries. A gamepad's d-pad arrives as the two hat axes rather than as buttons, so each d-pad direction is one entry here.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specaxes--axis"></span>`axis` | string | yes | One of the two hat axes, X across and Y down. The analog sticks are not bindable: a resting thumb reports hundreds of times a second, and no action takes an analog value. One of: `ABS_HAT0X`, `ABS_HAT0Y`. |
+| <span id="specaxes--value"></span>`value` | integer | yes | Which direction of the axis this entry binds. The hat reports -1 and 1 as its two presses and 0 as the release, and the release stops a repeat the press started. One of: `-1`, `1`. |
+| <span id="specaxes--action"></span>`action` | string | yes | What the press does, in this operator's vocabulary. The words name what a person means, never a player program's own command. Most actions command the player. The navigation actions, up, down, left, right, select, and back, drive the on-screen display. cycle-focus switches which unit a shared controller holds. One of: `pause`, `mute`, `seek`, `volume`, `chapter`, `subtitles`, `audio`, `info`, `cycle-focus`, `up`, `down`, `left`, `right`, `select`, `back`. |
+| <span id="specaxes--amount"></span>`amount` | integer | no | How far the action moves: seconds for seek, a step for volume and chapter. The sign is the direction. Exactly these three actions take an amount; the rest refuse one. |
+| <span id="specaxes--repeat"></span>`repeat` | [object](#specaxesrepeat) | no | When present, the action repeats while the hat direction is held. The player pod fires it on the press, waits the delay, then re-fires it every interval until the release. Omit it and the direction fires once per press. One repeat is capped at 30 seconds, because a controller that sleeps mid-hold publishes no release. |
+
+#### spec.axes[].repeat
+
+When present, the action repeats while the hat direction is held. The player pod fires it on the press, waits the delay, then re-fires it every interval until the release. Omit it and the direction fires once per press. One repeat is capped at 30 seconds, because a controller that sleeps mid-hold publishes no release.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specaxesrepeat--delay"></span>`delay` | string | no | How long to hold before the repeat starts, as a duration like 400ms. A tap shorter than this does not repeat. Defaults to 400ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
+| <span id="specaxesrepeat--interval"></span>`interval` | string | no | How often to re-run the action while the hat direction is held, as a duration like 300ms. Defaults to 300ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
 
 ## No status
 
