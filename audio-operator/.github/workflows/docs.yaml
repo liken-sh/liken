@@ -71,7 +71,7 @@ jobs:
       # produce the same tree. What this step writes to
       # docs/dist/site/ is byte for byte what Pages serves.
       - name: build the site
-        run: go tool hugo --destination dist/site
+        run: make build
         working-directory: docs
 
       # The commit lands in the built tree as release.txt, so the
