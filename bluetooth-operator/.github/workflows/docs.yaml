@@ -72,7 +72,7 @@ jobs:
       # and CI builds produce the same tree. What lands in docs/dist
       # is byte for byte what Pages serves.
       - name: build the site
-        run: go tool hugo --destination dist
+        run: make build
         working-directory: docs
 
       # release.txt is the deploy marker: the served-site check below

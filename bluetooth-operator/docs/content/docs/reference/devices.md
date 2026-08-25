@@ -305,25 +305,14 @@ now.
 
 ## The pairing API
 
-Three `CustomResourceDefinitions`, group `bluetooth.liken.sh/v1alpha1`.
-The operator creates and reconciles all of them; a person creates a
-`PairingRequest`, edits a `Pairing`'s spec, and deletes a `Pairing` to
-unpair. The schema descriptions in
-[`deploy/crds.yaml`](/deploy/crds.yaml), which this site serves as
-the repository holds it, are the field-level reference.
-
-| Kind | Scope | What it is |
-|---|---|---|
-| `Adapter` | Cluster | one radio, named for its address; the root that owns every `Pairing` keyed to it |
-| `Pairing` | Cluster | one bond; deleting it is the unpair; it owns the `Secret` with the bond's keys |
-| `PairingRequest` | Namespaced | one pairing window; `status.seen` lists what the radio observed, and writing `spec.device` approves one |
-
-A `PairingRequest`'s spec takes four fields: `adapter` (required, the
-`Adapter`'s name), `windowSeconds` (default 180, 15 to 900), `device`
-(the approval; empty never pairs anything), and
-`ttlSecondsAfterFinished` (default 86400). `PairingRequest` is
-namespaced so RBAC can grant "may create `PairingRequests`" in one
-namespace, with no exec into the operator's pod.
+Three `CustomResourceDefinitions`, group `bluetooth.liken.sh/v1alpha1`,
+each with its own reference page: an
+[Adapter](/docs/reference/adapters/) is one radio, a
+[Pairing](/docs/reference/pairings/) is one bond, and a
+[PairingRequest](/docs/reference/pairingrequests/) is one pairing
+window. A person creates a `PairingRequest`, edits a `Pairing`'s
+spec, and deletes a `Pairing` to unpair; the operator creates and
+reconciles everything else.
 
 ## Where the bonds are stored
 

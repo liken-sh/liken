@@ -5,6 +5,16 @@
 # is named for the operator's DRA driver, bluetooth.liken.sh, because
 # that name is the one an operator of a cluster already knows.
 baseURL: https://bluetooth.liken.sh/
+
+# The generated reference pages put an id on each field's table row,
+# as a raw-HTML span, so a link can land on exactly one field (the
+# crdref generator emits them). Goldmark drops raw HTML unless this
+# is set, and everything this site renders is authored in this
+# repository.
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
 title: bluetooth.liken.sh
 theme: brand
 

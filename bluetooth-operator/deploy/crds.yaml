@@ -365,9 +365,11 @@ spec:
                   type: array
                   maxItems: 16
                   description: >-
-                    The devices the radio observed during the window
-                    and holds no bond with. The list is capped because
-                    it is written from radio observations.
+                    The devices the radio observed during this window
+                    that the cluster holds no bond with. The list is
+                    capped at 16 entries, because it is written from
+                    radio observations, and a busy room would
+                    otherwise grow the object without limit.
                   items:
                     type: object
                     required: [address]
