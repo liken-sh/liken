@@ -68,6 +68,12 @@ jobs:
           # source on first use.
           go-version-file: docs/go.mod
 
+      # The tests resolve every internal link in the content tree,
+      # so a broken deep link never publishes.
+      - name: test the manual
+        run: make test
+        working-directory: docs
+
       # The build runs the same command a workstation runs, so local
       # and CI builds produce the same tree. What lands in docs/dist/site
       # is byte for byte what Pages serves.

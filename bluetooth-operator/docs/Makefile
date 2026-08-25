@@ -1,6 +1,6 @@
 # The docs domain builds the manual for bluetooth.liken.sh. The three
 # CRD reference pages are generated, never edited: crdref, the
-# generator the liken repository publishes, renders each page from
+# generator the brand repository publishes, renders each page from
 # its schema in deploy/crds.yaml and a hand-written preamble that
 # opens it. The schema descriptions become the field tables, so a
 # schema edit is a manual edit. The three CRDs travel in one manifest
@@ -20,6 +20,12 @@ GENERATED := \
 .PHONY: build
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
+
+# The site's own tests: every internal link resolves before the build
+# (manual_test.go passes this site's exceptions).
+.PHONY: test
+test:
+	go test ./...
 
 $(REFERENCE)/adapters.md: ../deploy/crds.yaml crdref/adapter-preamble.md go.mod
 	$(CRDREF) -kind Adapter -weight 10 $< $@ crdref/adapter-preamble.md

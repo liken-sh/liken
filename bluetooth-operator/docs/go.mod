@@ -16,8 +16,10 @@ go 1.26.5
 
 tool (
 	github.com/gohugoio/hugo
-	github.com/liken-sh/liken/docs/crdref
+	github.com/liken-sh/brand/crdref
 )
+
+require github.com/liken-sh/brand v0.0.0-20260825124703-c6b8a07974d4
 
 require (
 	cel.dev/expr v0.25.1 // indirect
@@ -131,7 +133,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/kyokomi/emoji/v2 v2.2.13 // indirect
-	github.com/liken-sh/liken/docs v0.0.0-20260825122345-980098b1390b // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/makeworld-the-better-one/dither/v2 v2.4.0 // indirect
 	github.com/marekm4/color-extractor v1.2.1 // indirect

@@ -4,7 +4,7 @@ weight: 10
 toc: true
 ---
 
-<!-- Generated from deploy/crds.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
 An `Adapter` is one Bluetooth radio. The operator creates the
 object for the adapter its pod claimed and names it for the radio's

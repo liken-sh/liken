@@ -4,7 +4,7 @@ weight: 20
 toc: true
 ---
 
-<!-- Generated from deploy/crds.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
 A `PairingRequest` is one pairing window on one adapter. Create it
 to open the window, watch `status.seen` for the controller you put

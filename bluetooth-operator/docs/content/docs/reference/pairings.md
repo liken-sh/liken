@@ -4,7 +4,7 @@ weight: 15
 toc: true
 ---
 
-<!-- Generated from deploy/crds.yaml by docs/crdref. Do not edit. -->
+<!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
 A `Pairing` is one bond: this controller holds link keys with this
 adapter. The operator creates the object when a pairing succeeds,
