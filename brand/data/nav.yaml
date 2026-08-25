@@ -25,3 +25,5 @@
   param: repository
 - label: releases
   url: https://releases.liken.sh/
+- label: devlog
+  url: https://log.liken.sh/
