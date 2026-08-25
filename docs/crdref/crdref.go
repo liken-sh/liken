@@ -9,13 +9,37 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/liken-sh/liken/docs/linkcheck"
 )
+
+// Options are the per-page choices the command line makes. Kind
+// names which CRD in the file to render, and matters only when the
+// file holds more than one. Preamble opens the page and Postamble
+// closes it, both hand-written files that land verbatim, because
+// the schema cannot hold that prose. Title and Weight set the two
+// front matter values a repository orders its pages with. The zero
+// values keep today's pages: an empty Title is the kind, and a zero
+// Weight is defaultWeight.
+type Options struct {
+	Kind      string
+	Title     string
+	Weight    int
+	Preamble  []byte
+	Postamble []byte
+}
+
+// defaultWeight puts a generated page ahead of the hand-written
+// reference pages in its section listing. A repository with several
+// generated pages passes -weight to order them against each other.
+const defaultWeight = 10
 
 // Generate renders one CRD manifest as a Markdown page with Hugo
 // front matter. The source path appears in a comment so a reader of
@@ -25,20 +49,17 @@ import (
 // to the guides, so that paragraph is in a file beside this
 // program and lands here verbatim.
 //
+// The postamble follows the generated tables the way the preamble
+// precedes them, for hand-written sections that belong under the
+// field reference.
+//
 // The walk uses yaml.v3 nodes rather than decoded maps, because
 // nodes preserve the document's field order. The CRDs declare their
 // fields in a deliberate teaching order, and the page keeps it.
-func Generate(crdYAML []byte, source string, preamble []byte) ([]byte, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(crdYAML, &doc); err != nil {
+func Generate(crdYAML []byte, source string, opts Options) ([]byte, error) {
+	root, err := selectCRD(crdYAML, source, opts.Kind)
+	if err != nil {
 		return nil, err
-	}
-	if len(doc.Content) == 0 {
-		return nil, fmt.Errorf("%s holds no YAML document", source)
-	}
-	root := doc.Content[0]
-	if kind := scalar(mapGet(root, "kind")); kind != "CustomResourceDefinition" {
-		return nil, fmt.Errorf("%s is a %s, not a CustomResourceDefinition", source, kind)
 	}
 
 	spec := mapGet(root, "spec")
@@ -60,15 +81,26 @@ func Generate(crdYAML []byte, source string, preamble []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%s has no openAPIV3Schema", source)
 	}
 
+	title := opts.Title
+	if title == "" {
+		title = kind
+	}
+	weight := opts.Weight
+	if weight == 0 {
+		weight = defaultWeight
+	}
+
 	var b strings.Builder
-	// The weight puts the generated pages ahead of the hand-written
-	// reference pages in the section listing; ties fall back to the
-	// title, which is the kind. toc asks the page template for an
+	// The default weight puts the generated pages ahead of the
+	// hand-written reference pages in the section listing, and a
+	// repository with several generated pages orders them with its
+	// own weights. Ties fall back to the title, which is the kind
+	// unless Title replaces it. toc asks the page template for an
 	// "On this page" table of contents, which these long pages need
 	// and short pages would not.
-	fmt.Fprintf(&b, "---\ntitle: %s\nweight: 10\ntoc: true\n---\n\n", kind)
+	fmt.Fprintf(&b, "---\ntitle: %s\nweight: %d\ntoc: true\n---\n\n", title, weight)
 	fmt.Fprintf(&b, "<!-- Generated from %s by docs/crdref. Do not edit. -->\n\n", displayPath(source))
-	if p := strings.TrimRight(string(preamble), "\n"); p != "" {
+	if p := strings.Trim(string(opts.Preamble), "\n"); p != "" {
 		b.WriteString(p + "\n\n")
 	}
 	if d := foldText(scalar(mapGet(schema, "description"))); d != "" {
@@ -82,7 +114,70 @@ func Generate(crdYAML []byte, source string, preamble []byte) ([]byte, error) {
 		}
 		emitSection(&b, name, field, 1, "")
 	})
+	if p := strings.Trim(string(opts.Postamble), "\n"); p != "" {
+		b.WriteString(p + "\n\n")
+	}
 	return []byte(strings.TrimRight(b.String(), "\n") + "\n"), nil
+}
+
+// selectCRD picks one CustomResourceDefinition out of a YAML
+// stream, because a repository may ship all of its CRDs in one
+// file. It matches on spec.names.kind and skips every document that
+// is not a CRD. An empty want takes the only CRD in the file and
+// refuses a file that holds several, so a page can never quietly
+// change which resource it documents. Every refusal names the kinds
+// the file holds, because that list is what the caller needs to
+// write the flag.
+func selectCRD(crdYAML []byte, source, want string) (*yaml.Node, error) {
+	var documents int
+	var kinds, others []string
+	var found []*yaml.Node
+
+	decoder := yaml.NewDecoder(bytes.NewReader(crdYAML))
+	for {
+		var doc yaml.Node
+		err := decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(doc.Content) == 0 {
+			continue
+		}
+		documents++
+		root := doc.Content[0]
+		objectKind := scalar(mapGet(root, "kind"))
+		if objectKind != "CustomResourceDefinition" {
+			if objectKind != "" {
+				others = append(others, objectKind)
+			}
+			continue
+		}
+		kind := scalar(mapGet(mapGet(mapGet(root, "spec"), "names"), "kind"))
+		kinds = append(kinds, kind)
+		if want == "" || want == kind {
+			found = append(found, root)
+		}
+	}
+
+	switch {
+	case documents == 0:
+		return nil, fmt.Errorf("%s holds no YAML document", source)
+	case len(kinds) == 0 && len(others) == 0:
+		return nil, fmt.Errorf("%s holds no CustomResourceDefinition", source)
+	case len(kinds) == 0:
+		return nil, fmt.Errorf("%s holds no CustomResourceDefinition, only %s",
+			source, strings.Join(others, ", "))
+	case want == "" && len(kinds) > 1:
+		return nil, fmt.Errorf("%s holds %d CustomResourceDefinitions (%s), so -kind must name one",
+			source, len(kinds), strings.Join(kinds, ", "))
+	case len(found) == 0:
+		return nil, fmt.Errorf("%s holds no CustomResourceDefinition for kind %s, only %s",
+			source, want, strings.Join(kinds, ", "))
+	}
+	return found[0], nil
 }
 
 // emitSection writes one object's heading, its description, a table
