@@ -29,14 +29,15 @@ all: build
 
 # Each page opens with a hand-written preamble that the schema cannot
 # hold: how the page relates to the guides. The preamble is beside
-# the generator and passes as the third argument. crdref imports
-# linkcheck for the heading-id algorithm, so the linkcheck sources are
-# prerequisites too.
-content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml crdref/machine-preamble.md $(wildcard crdref/*.go) $(wildcard linkcheck/*.go)
-	go run ./crdref $< $@ crdref/machine-preamble.md
+# the generator and passes as the third argument.
+# crdref is pinned from the brand repository as a tool dependency,
+# so go.mod versions the generator, and go.mod is the prerequisite
+# that rebuilds a page when the generator changes.
+content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml crdref/machine-preamble.md go.mod
+	go tool crdref $< $@ crdref/machine-preamble.md
 
-content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref/cluster-preamble.md $(wildcard crdref/*.go) $(wildcard linkcheck/*.go)
-	go run ./crdref $< $@ crdref/cluster-preamble.md
+content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref/cluster-preamble.md go.mod
+	go tool crdref $< $@ crdref/cluster-preamble.md
 
 generate: $(GENERATED)
 
@@ -71,7 +72,7 @@ serve: $(GENERATED)
 test: $(GENERATED)
 	go vet ./...
 	go tool staticcheck ./...
-	go test ./crdref ./linkcheck
+	go test ./...
 
 # clean removes everything the build produced. Hugo's own bytes are
 # not here to remove: the Go module cache holds them, outside the

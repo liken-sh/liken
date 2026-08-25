@@ -77,7 +77,7 @@ moved submodule pointer.
 
     make -C docs build     build the site into dist/site/
     make -C docs serve     the authoring loop, with live reload
-    make -C docs test      test the crdref generator
+    make -C docs test      check the links and the generated reference
 
 `dist/site/` is exactly what production serves, so a static file
 server pointed at it is an exact preview.

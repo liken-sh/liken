@@ -15,10 +15,14 @@ go 1.26.5
 
 tool (
 	github.com/gohugoio/hugo
+	github.com/liken-sh/brand/crdref
 	honnef.co/go/tools/cmd/staticcheck
 )
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	github.com/liken-sh/brand v0.0.0-20260825124703-c6b8a07974d4
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
 
 require (
 	cel.dev/expr v0.25.1 // indirect
