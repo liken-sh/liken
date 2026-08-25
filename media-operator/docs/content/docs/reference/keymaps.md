@@ -10,12 +10,12 @@ A `Keymap` is one controller model's table from buttons and axes to
 named actions, written once per model and shared by every
 [`Remote`](/docs/reference/remotes/) of that model. It is
 cluster-scoped, the way a `DeviceClass` and a `StorageClass` are,
-because one model's table is the same in every room. A `Remote` in
+because one model's table is the same in every namespace. A `Remote` in
 any namespace names it without a namespace qualifier.
 
 The left side of the table uses evdev's names, because every Linux
 controller driver reports the south face button as `BTN_SOUTH`,
-whatever the glyph on the plastic. The right side names what a
+whatever is printed on the button. The right side names what a
 person means, `pause` or `seek`, never an mpv command, so a
 different player program can implement the same table later.
 
@@ -42,8 +42,7 @@ different player program can implement the same table later.
 
 Buttons and axes are separate lists because they bind differently: a
 button is a press, and an axis entry names a direction as well. A
-`Keymap` must bind at least one entry across the two lists, because
-a table that binds nothing would answer no press.
+`Keymap` must bind at least one entry across the two lists.
 
 ### Buttons
 
@@ -93,11 +92,11 @@ release.
 
 ## No status
 
-A `Keymap` is a table a person writes and nothing reports on, so
-there is no status subresource, and `kubectl get keymaps` shows
-nothing but each table's age. The compile runs in the operator,
-before any object is created, so a name that means nothing fails the
-`Play` with a message instead of crash-looping a sidecar.
+Nothing reports on a `Keymap`, so it has no status subresource, and
+`kubectl get keymaps` shows each table's age. The operator compiles
+a table before it creates any pod. A `press` or `action` name
+outside the vocabulary above fails the `Play` that uses the table,
+and the reason appears on that `Play`'s status.
 
 ## On the bus
 
@@ -110,8 +109,8 @@ The topic drops the namespace segment because a `Keymap` is
 cluster-scoped. The operator is the only writer. It compiles the
 table's names down to numbers and publishes the whole table as one
 JSON array, retained, so a translator reads the current table the
-instant it connects, and a `Keymap` edit reaches a running film with
-no pod restart. The example above compiles to:
+instant it connects, and a `Keymap` edit reaches a running
+translator with no pod restart. The example above compiles to:
 
     [{"type": 1, "code": 304, "value": 1, "action": "pause"},
      {"type": 1, "code": 311, "value": 1, "action": "seek", "amount": 30,

@@ -1,12 +1,12 @@
 # The Player API, declared to Kubernetes.
 #
-# A Player is one named unit of equipment at one spot, for one
-# purpose: a lone speaker, a TV with its built-in speakers, a TV with
-# a receiver. The spec selects the unit's devices out of what the
-# hardware operators publish, with the same CEL selectors a
-# hand-written ResourceClaim would use. The media operator turns a
-# Player into claims only while a Play runs on it; an idle Player
-# holds nothing.
+# A Player is one named unit of equipment: a lone speaker, a TV with
+# its built-in speakers, a TV with a receiver. The spec selects the
+# unit's devices out of what the hardware operators publish, with the
+# same CEL selectors a hand-written ResourceClaim would use. The
+# media operator holds a claim on the unit's display between runs,
+# for the idle screen, and it claims the other devices only while a
+# Play runs.
 #
 # The resource is namespaced, unlike liken's own Machine, because
 # everything a Player becomes is namespaced: the claims, the playback

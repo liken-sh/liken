@@ -28,5 +28,5 @@ stop. The operator deletes a finished `Play` after its
 
 The operator turns a `Play` into one playback pod beside the
 hardware, and it creates the device claims only while that `Play`
-runs. An idle `Player` holds no claims except its idle display, so
-the equipment is free for any other workload between runs.
+runs. An idle `Player` holds only its display claim, so the other
+devices are free for any workload between runs.

@@ -50,19 +50,19 @@ controller can map two ways on two units.
 
 The operator reconciles one pod for every `Remote` in the
 cluster, whether or not a `Player` names it. The pod holds the
-controller's claim, reads its evdev nodes first-hand, and publishes
+controller's claim, reads its evdev nodes directly, and publishes
 to the bus. The claim tolerates the `bluetooth.liken.sh/disconnected`
 taint with no time limit, so a controller that sleeps keeps its
 allocation and the pod keeps running. It does not tolerate
 `bluetooth.liken.sh/no-input-node`, so the pod stays `Pending` until
-the controller first connects, then runs across every sleep after.
+the controller first connects, then keeps running through every later sleep.
 
 ## No status
 
 The operator reports nothing on a `Remote`, so there is no status
 subresource. `kubectl get remotes` shows each controller's `Keymap`
 and its age. A `Remote` whose `Keymap` does not compile shows the
-failure on the `Play` that tried to use it.
+failure on the `Play` that uses it.
 
 ## On the bus
 
@@ -99,9 +99,9 @@ Whether the controller's event nodes are open right now:
 
     {"connected": true}
 
-The `Remote`'s pod senses the controller first-hand: its evdev nodes
-open when the controller connects and vanish when it sleeps, so the
-signal starts where it is read. The topic is retained, so the
+The `Remote`'s pod reads the controller's evdev nodes directly:
+they open when the controller connects and vanish when it sleeps,
+so presence comes straight from the device. The topic is retained, so the
 operator reads the current value the instant it subscribes, and it
 folds the flag into the [`Player` status](/docs/reference/players/)
 it publishes.
@@ -118,8 +118,8 @@ controller.
 
 The focus mark is the plain name of the `Play` that owns this
 controller now, as bytes, not JSON. The operator is the only writer,
-and the topic is retained, so a press reaches the owning film with
-the operator up or down. Each translator for the controller gates on
+and the topic is retained, so a press reaches its `Play` even while
+the operator is down. Each translator for the controller gates on
 the mark: it acts on a press only when the mark names its own
 `Play`, and it drops every other press.
 

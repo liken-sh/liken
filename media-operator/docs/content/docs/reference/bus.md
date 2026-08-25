@@ -38,8 +38,8 @@ press, a command, a request to move focus.
 
 The topic names the object and the payload does not. A Play's
 namespace and name are segments of its topic path, and its report
-body carries only the playback numbers. Parse the path, not the
-payload, to learn which object spoke.
+body carries only the playback numbers. Parse the topic path to learn
+which object a message belongs to.
 
 ## The trees
 
@@ -49,7 +49,7 @@ resource's page gives the topics, the payloads, and who writes each.
 | Tree | What it carries | Page |
 |---|---|---|
 | `plays/{namespace}/{name}/...` | one run's commands, report, and availability | [Plays](/docs/reference/plays/) |
-| `players/{namespace}/{name}/...` | one unit's presentable state, volume, and panel | [Players](/docs/reference/players/) |
+| `players/{namespace}/{name}/...` | one unit's activity, volume, and panel | [Players](/docs/reference/players/) |
 | `remotes/{namespace}/{name}/...` | one controller's events, presence, and focus | [Remotes](/docs/reference/remotes/) |
 | `keymaps/{name}` | one Keymap's compiled binding table | [Keymaps](/docs/reference/keymaps/) |
 

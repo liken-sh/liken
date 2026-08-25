@@ -42,7 +42,7 @@ delete the `Play` and create another.
 
 | Field | What it declares |
 |---|---|
-| `players` | the `Player`s this run plays on, by name, in this namespace; one entry today, and the carriage layer lifts the limit |
+| `players` | the `Player`s this run plays on, by name, in this namespace; one entry today |
 | `items` | the media to play in order; each entry is a `uri` and an optional `presentation` |
 | `start` | where in the first item the run begins, such as `0:10:00` or `600`; this is also how a run resumes |
 | `trickplayInterval` | the seconds one trickplay tile covers, as a Go duration like `10s`, the default |
@@ -83,10 +83,10 @@ credentials; it reports on the bus, and the operator writes here.
 | `item` | which URI plays now, counting from 1 in spec order |
 | `position`, `duration` | the playhead and the current item's length, each as `H:MM:SS` |
 | `pod` | the playback pod's name, for `kubectl describe` and `logs` |
-| `message` | why the phase is what it is, when a word is not enough |
+| `message` | the reason for the phase, as one line of text |
 | `finishedAt` | when the operator first read the phase as `Finished`; the time-to-live counts from here |
 | `audioLanguages`, `subtitleLanguages`, `subtitles` | the resolved preferences this run applied |
-| `audioLanguage`, `subtitleLanguage` | the languages of the tracks the player chose, so a code that matched no track shows plainly |
+| `audioLanguage`, `subtitleLanguage` | the languages of the tracks the player chose, so you can see when a code matched no track |
 
 ## On the bus
 
@@ -102,7 +102,7 @@ rules every topic follows.
 
 ### `commands`
 
-The one open surface a program joins a run on in media terms. A
+The topic any program publishes to drive the run. A
 translator sidecar, a phone, and a Home Assistant integration all
 reach the run the same way: publish one JSON command, and the
 playback pod applies it.
@@ -156,12 +156,12 @@ player has read the item's header, and the two language fields are
 absent while no track of that kind plays. One more field, `ended`,
 appears when the run is over and stays set in every later report of
 the same run. The pod takes seconds to terminate, so the operator
-reads this mark and returns the unit to idle in bus time instead of
-pod time.
+reads this mark and returns the unit to idle at once instead of
+waiting out the pod.
 
 The operator folds each report into the `Play`'s Kubernetes status,
-so a program that only needs the current position may read either
-surface.
+so a program that only needs the current position can read either
+one.
 
 ### `availability`
 

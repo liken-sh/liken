@@ -6,14 +6,13 @@ toc: true
 
 # Players
 
-A `Player` is one named unit of equipment at one spot, for one
-purpose: a lone speaker, a TV with its built-in speakers, a TV with
-a receiver. The spec selects the unit's devices out of what the
-hardware operators publish, with the same CEL selectors a
-hand-written `ResourceClaim` would use. A `Player` is equipment, not
-a running thing: the operator turns it into claims only while a
-[Play](/docs/reference/plays/) runs on it, and an idle `Player`
-holds nothing.
+A `Player` is one named unit of equipment: a lone speaker, a TV
+with its built-in speakers, a TV with a receiver. The spec selects
+the unit's devices out of what the hardware operators publish, with
+the same CEL selectors a hand-written `ResourceClaim` would use.
+Between runs, the operator holds one claim on the unit's display
+for the idle screen. It claims the other devices only while a
+[Play](/docs/reference/plays/) runs on it.
 
 The resource is namespaced, and everything a `Player` becomes is
 created in its namespace: the claims, the playback pod, and the
@@ -112,14 +111,14 @@ rules every topic follows.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
-| `players/{namespace}/{name}/status` | the operator | yes | the unit's presentable state |
+| `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
 | `players/{namespace}/{name}/volume` | the operator and the pods | yes | the listening level |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel state |
 | `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
 
 ### `status`
 
-The presentable state of one unit: its friendly name, what it is
+What a screen would show about one unit: its name, what it is
 doing, the `Play` it runs, and its parts with the presence of each.
 The operator is the only writer, so an idle pod that just started
 draws the live state the broker already holds, with no request to
@@ -173,6 +172,6 @@ credentials, so the operator folds this topic into
 
 The operator's channel to the `Player`'s idle pod. It carries
 `{"action": "re-present"}` when a `Play` ends, and the idle sidecar
-recreates the idle surface. A controller never sends it, and it is
-display plumbing, not part of the media vocabulary a
+recreates the idle surface. A controller never sends it, and it
+carries none of the media actions a
 [Play's commands topic](/docs/reference/plays/#commands) accepts.

@@ -6,9 +6,9 @@ toc: true
 
 # MediaPreferences
 
-A `MediaPreferences` is the cluster-scoped default for audio and
-subtitle languages, the wall-clock zone, and the idle screen
-policy. It is the lowest of the three tiers a
+A `MediaPreferences` holds the cluster's defaults: the preferred
+audio and subtitle languages, the time zone its displays show, and
+when an idle display fades and goes dark. It is the lowest of the three tiers a
 [`Play`](/docs/reference/plays/) resolves: the `Play`'s own spec
 first, then the [`Player`](/docs/reference/players/)'s, then this
 default.
@@ -43,13 +43,14 @@ native subtitles.
 `subtitles` is when subtitles show: `on` always, `off` never, and
 `auto` only when the audio that played is not the first choice.
 
-`timeZone` is the cluster's wall-clock zone as an IANA name, like
+`timeZone` is the time zone, as an IANA name like
 `America/New_York`. The player pod reads it as `TZ`, so the display
 clock shows local time instead of UTC. It is one per cluster: unlike
 the language fields, no `Play` or `Player` overrides it.
 
-`idle` is the cluster's default idle screen policy, read for each
-field a `Player`'s own block leaves unset:
+`idle` is the cluster's default for what a display does while
+nothing plays, read for each field a `Player`'s own block leaves
+unset:
 
 - `idle.fadeAfterSeconds` is the seconds of quiet before an idle
   screen fades to black. Zero disables the automatic fade. Unset,
