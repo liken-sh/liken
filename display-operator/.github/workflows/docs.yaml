@@ -69,7 +69,8 @@ jobs:
           go-version-file: docs/go.mod
 
       - name: build the site
-        run: cd docs && go tool hugo --destination dist/site
+        run: make build
+        working-directory: docs
 
       # release.txt holds the commit that built the tree, so the
       # served-site check below can tell this deploy's content from
