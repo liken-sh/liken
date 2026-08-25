@@ -231,6 +231,17 @@ moved {
   to   = linode_domain_record.extension_operators
 }
 
+# The devlog at log.liken.sh is a Pages site like the manuals, but it
+# is a journal, not an operator, so its record stands apart from the
+# extension_operators set. The liken-sh/log repository claims the
+# name as its custom domain.
+resource "linode_domain_record" "devlog" {
+  domain_id   = linode_domain.liken_sh.id
+  name        = "log"
+  record_type = "CNAME"
+  target      = "liken-sh.github.io"
+}
+
 # GitHub's proof that the liken-sh organization owns these names.
 # GitHub issues a code for each name, and reads it back from a TXT
 # record at a label derived from the organization's login. When the

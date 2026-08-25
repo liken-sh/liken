@@ -47,6 +47,11 @@ locals {
       cname       = "media.liken.sh"
       topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "mqtt", "mpv", "media"]
     }
+    log = {
+      description = "The liken devlog"
+      cname       = "log.liken.sh"
+      topics      = ["liken", "devlog"]
+    }
     brand = {
       description = "The liken brand assets"
       cname       = null
@@ -126,8 +131,12 @@ import {
   id       = each.key
 }
 
+# The five manual sites predate this file, so their Pages
+# configurations import. A site added after adoption (the devlog) is
+# created by the resource instead, and an import for it would fail,
+# because there is nothing to import yet.
 import {
-  for_each = { for name, repo in local.repositories : name => repo.cname if repo.cname != null }
+  for_each = { for name, repo in local.repositories : name => repo.cname if repo.cname != null && name != "log" }
   to       = github_repository_pages.sites[each.key]
   id       = each.key
 }
