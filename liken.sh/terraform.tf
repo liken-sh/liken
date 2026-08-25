@@ -195,27 +195,40 @@ resource "linode_domain_record" "www" {
   target      = "liken-sh.github.io"
 }
 
-# The hardware operators' manuals. Each operator repository
-# (bluetooth-operator, display-operator, audio-operator) publishes
-# its own Pages site under the hostname that is also its device
-# class's name. A subdomain can CNAME where the apex cannot, so each
-# name points at the organization's Pages hostname, and GitHub routes
-# the request to the repository that claims the name as its custom
-# domain. The Pages verification record below covers these names
-# too, because it locks liken.sh's immediate subdomains to this
-# organization.
+# The extension operators' manuals. Each operator repository
+# publishes its own Pages site under a liken.sh subdomain. The
+# hardware operators (bluetooth-operator, display-operator,
+# audio-operator) each publish devices, and their hostnames are also
+# their device class names, so the name a claim selects on is also
+# the address where a reader learns what it selects. media-operator
+# composes those devices into playback, and its manual answers at
+# media.liken.sh the same way. A subdomain can CNAME where the apex
+# cannot, so each name points at the organization's Pages hostname,
+# and GitHub routes the request to the repository that claims the
+# name as its custom domain. The Pages verification record below
+# covers these names too, because it locks liken.sh's immediate
+# subdomains to this organization.
 
-resource "linode_domain_record" "hardware_operators" {
+resource "linode_domain_record" "extension_operators" {
   for_each = toset([
     "bluetooth",
     "display",
     "audio",
+    "media",
   ])
 
   domain_id   = linode_domain.liken_sh.id
   name        = each.value
   record_type = "CNAME"
   target      = "liken-sh.github.io"
+}
+
+# The three hardware records lived under the name hardware_operators
+# before media joined the set. This block maps their state onto the
+# wider name, so an apply renames them instead of recreating them.
+moved {
+  from = linode_domain_record.hardware_operators
+  to   = linode_domain_record.extension_operators
 }
 
 # GitHub's proof that the liken-sh organization owns these names.
