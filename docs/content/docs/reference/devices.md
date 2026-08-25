@@ -28,7 +28,7 @@ Usually a cluster administrator installs a DRA driver as a DaemonSet.
 system is the only thing that identifies the hardware before other
 software starts.
 
-The [hardware operators](/docs/concepts/hardware-operators/) are
+The [hardware operators](/docs/concepts/extension-operators/#the-hardware-operators) are
 separate DRA drivers that you install as workloads. Each one
 publishes a kind of device this driver does not, such as the
 controllers paired to a Bluetooth radio.
