@@ -25,6 +25,15 @@ metadata:
   # DNS name that we own. This prevents a conflict between the custom
   # Machine types of different organizations.
   name: machines.liken.sh
+  annotations:
+    # The revision orders this file's schema across releases. When a
+    # boot seeds the manifests, init keeps whichever copy of this file
+    # declares the higher revision, so a boot of an older slot cannot
+    # replace a newer schema and silently prune the stored objects
+    # that use its fields (init/schemarevision.go). Raise it in the
+    # same change that changes the schema below; a test holds the two
+    # together.
+    liken.sh/schema-revision: "2"
 spec:
   group: liken.sh
   names:

@@ -157,6 +157,22 @@ func armProvingBoot(act bootActuator, stateRoot, runningSlot string) {
 		return
 	}
 
+	// The running slot and the proven slot are not always the same
+	// one. A person can pick the other slot from the firmware's own
+	// menu, and a firmware that cannot load the proven slot's entry
+	// falls through to the other. Either way, this boot runs a slot
+	// that the store does not call proven, and the check above, which
+	// compares against the running slot, is satisfied by a trial
+	// staged for the proven slot itself. Such a trial must be refused:
+	// it would put an unproven release on the one slot the fallback
+	// has to come from, and the machine would then have a fallback
+	// nowhere.
+	if proven := provenRecord(stateRoot); proven != nil && record.Slot == proven.Slot {
+		fmt.Fprintf(os.Stderr, "liken: system: release %s is staged for slot %s, which is the proven slot; rebooting without arming the trial\n",
+			record.Version, record.Slot)
+		return
+	}
+
 	if err := act.canArmTrial(record.Slot); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: %v; rebooting without arming the trial\n", err)
 		return
@@ -266,10 +282,41 @@ func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Co
 				return nil
 			}
 			fmt.Printf("liken: system: release %s was promoted; asserting the proven slot from the store\n", record.Version)
-			assertProvenSlot(act, machine.MachineStateDir)
+			assertProvenSlotUnderLock(act, machine.MachineStateDir)
 			return nil
 		}
 	}
+}
+
+// assertProvenSlotUnderLock is the proving watch's way to the
+// firmware. The watch runs for as long as the machine runs, so its
+// assertion is the one write that can collide with the reboot path,
+// and the comment on firmwareWrites in actuator.go says what that
+// collision costs. The shutdown test happens under the lock, not
+// before it: a watch that waited out the reboot path's turn must see
+// the flag that turn set, and testing before the lock would let it
+// pass the test, wait, and then undo the trial the reboot path armed.
+func assertProvenSlotUnderLock(act bootActuator, stateRoot string) {
+	firmwareWrites.Lock()
+	defer firmwareWrites.Unlock()
+	if shuttingDown.Load() {
+		return
+	}
+	assertProvenSlot(act, stateRoot)
+}
+
+// assertAndArmForReboot is the reboot path's whole firmware turn,
+// taken in one held lock. The two calls belong together: a trial is
+// only safe when the fallback under it was asserted first, so nothing
+// may write between them. The unlock is deferred because this runs
+// inside PID 1 on the way down, where a panic is recovered rather
+// than fatal; a panic that escaped with the lock held would leave
+// every later reboot blocked on it (firmwareWrites in actuator.go).
+func assertAndArmForReboot(act bootActuator, stateRoot, runningSlot string) {
+	firmwareWrites.Lock()
+	defer firmwareWrites.Unlock()
+	assertProvenSlot(act, stateRoot)
+	armProvingBoot(act, stateRoot, runningSlot)
 }
 
 // assertProvenSlot sets the firmware to match the store: the proven

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -234,13 +235,25 @@ func firmwareFacts(dir string) machine.FirmwareStatus {
 	// optional: a firmware that direct-booted a kernel may have set
 	// none of them.
 	if b, err := readEFIVar(dir, "BootCurrent"); err == nil && len(b) >= 2 {
-		fw.BootCurrent = describeBootEntry(dir, binary.LittleEndian.Uint16(b))
+		fw.BootCurrent = describeBootEntry(dir, binary.LittleEndian.Uint16(b), "")
 	}
+	order := readBootOrder(dir)
+	// A healthy firmware consumes BootNext at power-on, and this runs
+	// after power-on, so any value found here deserves a word in the
+	// report. Two kinds of value exist. An entry that repeats the
+	// head of the order is the pin that assertBootNext leaves
+	// (bootentries.go), which means the firmware did not consume the
+	// variable. An entry that names anything else is a trial that has
+	// not run. The note tells a reader which of the two they see.
 	if b, err := readEFIVar(dir, "BootNext"); err == nil && len(b) >= 2 {
-		fw.BootNext = describeBootEntry(dir, binary.LittleEndian.Uint16(b))
+		next, note := binary.LittleEndian.Uint16(b), ""
+		if len(order) > 0 && order[0] == next {
+			note = "pinned at the proven slot"
+		}
+		fw.BootNext = describeBootEntry(dir, next, note)
 	}
-	for _, n := range readBootOrder(dir) {
-		fw.BootOrder = append(fw.BootOrder, describeBootEntry(dir, n))
+	for _, n := range order {
+		fw.BootOrder = append(fw.BootOrder, describeBootEntry(dir, n, ""))
 	}
 	return fw
 }
@@ -249,17 +262,25 @@ func firmwareFacts(dir string) machine.FirmwareStatus {
 // firmware's own name for the variable, plus the entry's description
 // when the code can decode it. An entry that is missing or corrupted
 // still appears by its ID, so nothing in the order stays hidden.
-func describeBootEntry(dir string, n uint16) string {
-	id := bootEntryID(n)
-	payload, err := readEFIVar(dir, id)
-	if err != nil {
+//
+// The note is what the caller knows about this entry that the entry
+// itself does not say. It joins the description inside the same
+// parentheses, and it appears even for an entry that will not
+// decode, because what the caller knows is true either way.
+func describeBootEntry(dir string, n uint16, note string) string {
+	id, inside := bootEntryID(n), []string{}
+	if payload, err := readEFIVar(dir, id); err == nil {
+		if option, err := parseLoadOption(payload); err == nil && option.description != "" {
+			inside = append(inside, option.description)
+		}
+	}
+	if note != "" {
+		inside = append(inside, note)
+	}
+	if len(inside) == 0 {
 		return id
 	}
-	option, err := parseLoadOption(payload)
-	if err != nil || option.description == "" {
-		return id
-	}
-	return fmt.Sprintf("%s (%s)", id, option.description)
+	return fmt.Sprintf("%s (%s)", id, strings.Join(inside, ", "))
 }
 
 // reportFirmware prints the firmware's facts on the console: the
@@ -282,7 +303,7 @@ func reportFirmware() {
 		fmt.Printf("liken: firmware: booted via %s\n", fw.BootCurrent)
 	}
 	if fw.BootNext != "" {
-		fmt.Printf("liken: firmware: a one-shot trial is armed: %s\n", fw.BootNext)
+		fmt.Printf("liken: firmware: BootNext holds %s\n", fw.BootNext)
 	}
 	for _, entry := range fw.BootOrder {
 		fmt.Printf("liken: firmware: boot order: %s\n", entry)

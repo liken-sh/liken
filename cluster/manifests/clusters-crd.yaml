@@ -19,6 +19,13 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: clusters.liken.sh
+  annotations:
+    # The same annotation the Machine CRD carries: init keeps
+    # whichever copy of this file declares the higher revision, so an
+    # older slot's boot cannot downgrade the schema the cluster
+    # serves (init/schemarevision.go). Raise it in the same change
+    # that changes the schema below; a test holds the two together.
+    liken.sh/schema-revision: "1"
 spec:
   group: liken.sh
   names:

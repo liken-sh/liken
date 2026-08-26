@@ -70,6 +70,35 @@ func TestFirmwareFactsReportsAnArmedBootNext(t *testing.T) {
 	}
 }
 
+// assertBootNext pins the proven slot in BootNext on every boot, so a
+// value here no longer means a trial is queued. The report names which
+// kind it found: an entry that repeats the head of the order is the
+// pin, and an entry that aims elsewhere is a trial that never ran.
+func TestFirmwareFactsTellsAPinnedOneShotFromATrial(t *testing.T) {
+	cases := map[string]struct {
+		next uint16
+		want string
+	}{
+		"the one-shot repeats the standing preference": {
+			next: 1, want: "Boot0001 (liken slot B, pinned at the proven slot)",
+		},
+		"the one-shot aims at the other slot": {next: 0, want: "Boot0000 (liken slot A)"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := fakeEFIVars(t, map[string][]byte{
+				"BootOrder": u16le(1, 0),
+				"BootNext":  u16le(c.next),
+				"Boot0000":  encodeLoadOption(loadOption{description: "liken slot A"}),
+				"Boot0001":  encodeLoadOption(loadOption{description: "liken slot B"}),
+			})
+			if got := firmwareFacts(dir).BootNext; got != c.want {
+				t.Errorf("bootNext: got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestFirmwareFactsNamesUndecodableEntriesHonestly(t *testing.T) {
 	// An entry in the order whose variable is missing or corrupted
 	// still shows its ID, so nothing in the order stays hidden.
@@ -169,6 +198,9 @@ func fakeFirmwareVars(t *testing.T, vars map[string][]byte) string {
 }
 
 func TestReportFirmwareUEFI(t *testing.T) {
+	// This is what a healthy machine looks like after a boot: slot A
+	// leads the order, and the boot's own assertion pinned the one-shot
+	// at the same entry.
 	fakeFirmwareVars(t, map[string][]byte{
 		"Boot0002":    encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"}),
 		"BootCurrent": u16le(0x0002),
@@ -185,8 +217,8 @@ func TestReportFirmwareUEFI(t *testing.T) {
 	if fw.BootCurrent != "Boot0002 (liken slot A)" {
 		t.Errorf("entries decode to their names: %q", fw.BootCurrent)
 	}
-	if fw.BootNext != "Boot0002 (liken slot A)" {
-		t.Errorf("BootNext decodes too: %q", fw.BootNext)
+	if fw.BootNext != "Boot0002 (liken slot A, pinned at the proven slot)" {
+		t.Errorf("BootNext decodes too, and says which kind it is: %q", fw.BootNext)
 	}
 }
 

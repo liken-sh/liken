@@ -20,6 +20,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"slices"
@@ -50,6 +51,12 @@ func registerSlotEntries(slotA, slotB *slotPartition, machineName string) error 
 	if err := writeBootOrder(efiVarsDir, bootOrderWith(efiVarsDir, []uint16{entryA, entryB})); err != nil {
 		return fmt.Errorf("writing BootOrder: %w", err)
 	}
+	// The one-shot is pinned here for the same reason every later
+	// boot pins it (assertBootNext): a firmware that drops the
+	// BootOrder write across a reset would otherwise send the
+	// machine's very first boot back to whatever it booted before
+	// the install.
+	assertBootNext(efiVarsDir, entryA, "A")
 	fmt.Printf("liken: install: boot entries %s and %s written; BootOrder prefers slot A\n",
 		bootEntryID(entryA), bootEntryID(entryB))
 	return nil
@@ -178,9 +185,15 @@ func consoleArgs() []string {
 // this. slotloader.go covers that one.
 //
 // Every comparison happens before any write. NVRAM accepts a limited
-// number of writes, and a healthy machine must spend none of them. A
-// healthy machine's console also stays silent, so a line from here
-// always means something drifted.
+// number of writes, and the entries and the order cost a healthy
+// machine none of them. BootNext is the one exception, at one write
+// per boot cycle: the firmware consumes the variable at power-on, so
+// the boot-time assertion always finds it gone and writes it back,
+// and the shutdown assertion then finds that write standing and
+// writes nothing. assertBootNext says why the variable is written at
+// all. A healthy machine's console still stays silent, because
+// assertBootNext prints only when a write fails or does not read
+// back, so a line from here still means something drifted.
 //
 // The two halves are separate because a boot that cannot write an entry
 // can still order the entries that exist. Without a name there is
@@ -193,16 +206,33 @@ func healBootEntries(dir, machineName, preferred string) {
 		writeSlotEntries(dir, machineName, preferred)
 	}
 	var leaders []uint16
+	preferredEntry, havePreferred := uint16(0), false
 	for _, slot := range slotOrder(preferred) {
-		if number, ok := findSlotEntry(dir, slot); ok {
-			leaders = append(leaders, number)
+		number, ok := findSlotEntry(dir, slot)
+		if !ok {
+			continue
+		}
+		leaders = append(leaders, number)
+		if slot == preferred {
+			preferredEntry, havePreferred = number, true
 		}
 	}
 	if len(leaders) == 0 {
 		fmt.Fprintf(os.Stderr, "liken: system: no boot entry answers to either slot and this boot cannot write one; leaving BootOrder alone\n")
 		return
 	}
-	assertBootOrder(dir, leaders, preferred)
+	assertBootOrder(dir, leaders, preferred, havePreferred)
+	// BootNext joins the assertion because a firmware exists that
+	// accepts a BootOrder write, reads it back correctly, and still
+	// resets to its old order, while it honors BootNext through every
+	// reset. The one-shot is the only preference such a firmware
+	// keeps, so the proven slot is pinned there too. The pin is written only
+	// when the preferred slot's own entry exists: leaders[0] is the
+	// other slot's entry when it does not, and a one-shot aimed there
+	// would boot the wrong half of the pair.
+	if havePreferred {
+		assertBootNext(dir, preferredEntry, preferred)
+	}
 }
 
 // writeSlotEntries renders each slot's entry from the GPT facts on its
@@ -240,7 +270,11 @@ func writeSlotEntries(dir, machineName, preferred string) {
 // entries. It trusts the readback, not the write. Some firmware accepts
 // a write and then fails to hold it, and every later report would be
 // wrong if this code took the write result at face value.
-func assertBootOrder(dir string, leaders []uint16, preferred string) {
+// preferredLeads says whether leaders[0] is the preferred slot's own
+// entry. It is false when no entry answers to that slot, and the
+// console line must not then claim the preferred slot leads, because
+// what actually leads is the other slot's entry.
+func assertBootOrder(dir string, leaders []uint16, preferred string, preferredLeads bool) {
 	want := bootOrderWith(dir, leaders)
 	if slices.Equal(want, readBootOrder(dir)) {
 		return // the firmware already agrees
@@ -253,8 +287,60 @@ func assertBootOrder(dir string, leaders []uint16, preferred string) {
 		fmt.Fprintln(os.Stderr, "liken: system: BootOrder was written but does not read back; the firmware is not holding it")
 		return
 	}
+	if !preferredLeads {
+		fmt.Printf("liken: system: BootOrder now leads with %s; no entry answers to slot %s, which the store calls proven\n",
+			bootEntryID(leaders[0]), preferred)
+		return
+	}
 	fmt.Printf("liken: system: BootOrder now leads with %s (slot %s is proven)\n",
 		bootEntryID(leaders[0]), preferred)
+}
+
+// assertBootNext points the one-shot at the proven slot's entry, so a
+// firmware that drops the BootOrder write across a reset still boots
+// the proven slot: the one-shot is consumed and honored before the
+// standing order is consulted at all. This costs one NVRAM write per
+// boot, because the firmware deletes the variable at power-on, and
+// the boot-time assertion always finds it gone. armTrial runs after
+// this on the reboot path and overwrites the value, which is the
+// contract: a staged trial takes the one shot for exactly one boot.
+// The same overwrite clears a one-shot left over from a withdrawn
+// trial, the way the GRUB dialect clears try_slot.
+//
+// The comparison decodes both sides to a number instead of comparing
+// bytes, because a firmware may store the variable wider than the two
+// bytes it needs. A byte comparison would then rewrite NVRAM on every
+// call and warn about a firmware that is holding the value correctly.
+// Like assertBootOrder, this trusts the readback and not the write.
+func assertBootNext(dir string, entry uint16, preferred string) {
+	if current, err := readEFIVar(dir, "BootNext"); err == nil && bootNextEntry(current) == int32(entry) {
+		return // the firmware already aims at the proven slot
+	}
+	if err := writeEFIVar(dir, "BootNext", bootNextPayload(entry)); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: aiming BootNext at slot %s: %v\n", preferred, err)
+		return
+	}
+	if readback, err := readEFIVar(dir, "BootNext"); err != nil || bootNextEntry(readback) != int32(entry) {
+		fmt.Fprintln(os.Stderr, "liken: system: BootNext was written but does not read back; the firmware is not holding it")
+	}
+}
+
+// bootNextEntry decodes the variable's entry number, and returns -1
+// for a payload too short to carry one. The result is signed so that
+// a missing or truncated variable compares unequal to every real
+// entry number, all of which are non-negative.
+func bootNextEntry(payload []byte) int32 {
+	if len(payload) < 2 {
+		return -1
+	}
+	return int32(binary.LittleEndian.Uint16(payload))
+}
+
+// bootNextPayload encodes one entry number the way BootNext carries it:
+// a single 16-bit little-endian number, the same encoding BootOrder
+// uses for each of its elements.
+func bootNextPayload(entry uint16) []byte {
+	return []byte{byte(entry), byte(entry >> 8)}
 }
 
 // slotOrder puts the preferred slot first and the other slot second.

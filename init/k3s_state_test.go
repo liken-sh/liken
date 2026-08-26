@@ -216,8 +216,18 @@ func TestSeedClusterStateWithoutSeedsIsANoOp(t *testing.T) {
 	old := seedSourceDir
 	seedSourceDir = filepath.Join(t.TempDir(), "nothing")
 	t.Cleanup(func() { seedSourceDir = old })
-	if err := seedClusterState(t.TempDir()); err != nil {
-		t.Errorf("an image without k3s has no seed files, and that's fine: %v", err)
+	root := t.TempDir()
+
+	if err := seedClusterState(root); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("an image without k3s writes nothing: %v", entries)
 	}
 }
 
@@ -372,6 +382,9 @@ func TestSweepTornK3sFilesOnAFreshDiskDoesNothing(t *testing.T) {
 	sweepTornK3sFiles(t.TempDir())
 }
 
+// A seed the image cannot read reports and the boot goes on. The
+// machine then runs on the manifests its disk already holds, and the
+// seeds that can be read still land.
 func TestSeedClusterStateReportsAnUnreadableSeed(t *testing.T) {
 	dir := fakeSeedSource(t)
 	sealed := filepath.Join(dir, likenManifestsRel, "seeded")
@@ -379,8 +392,13 @@ func TestSeedClusterStateReportsAnUnreadableSeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(sealed, 0o644) })
+	root := t.TempDir()
 
-	if err := seedClusterState(t.TempDir()); err == nil {
-		t.Error("a seed that can't be copied is an error the mount must hear about")
+	if err := seedClusterState(root); err != nil {
+		t.Errorf("an unreadable manifest is not worth a machine: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "k3s/agent/images", "seeded")); err != nil {
+		t.Errorf("the seeds that can be read still land: %v", err)
 	}
 }

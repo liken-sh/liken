@@ -28,9 +28,37 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 
 	"github.com/liken-sh/liken/machine"
 )
+
+// firmwareWrites serializes the two firmware writers that can overlap
+// in time: the reboot path and the proving watch. Every other write
+// happens at boot, before the machine plane starts, with nothing to
+// race. The order of the reboot path's writes is load-bearing: it
+// asserts the proven fallback and then arms the trial, and a write
+// landing between or after those two leaves the attempted marker
+// standing for a trial that the firmware will never run, which the
+// next boot reads as a release that ran and fell back.
+//
+// Every holder releases this lock, including one that panics. The
+// reboot path is reachable from inside a machine-plane component, and
+// the plane restarts a component after a panic. A lock left held by
+// no one would block every later reboot before the reboot syscall,
+// and such a machine looks healthy while it ignores every reboot it
+// is asked to take. Only a power cycle would recover it.
+var firmwareWrites sync.Mutex
+
+// shuttingDown says the reboot path has claimed the firmware. The
+// lock alone cannot say that, because the reboot path releases it
+// after its turn, and the proving watch may still be running for a
+// while after. The reboot path sets this before it takes the lock,
+// and the watch tests it while holding the lock, so a watch that
+// waited out the reboot path's turn sees the flag and leaves the
+// firmware exactly as that turn left it.
+var shuttingDown atomic.Bool
 
 // bootActuator lists the three actions the proving lifecycle asks of
 // the firmware. Each method performs one of the three actions

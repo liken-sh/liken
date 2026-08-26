@@ -6,6 +6,7 @@ package main
 // coming back from nothing.
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -74,6 +75,97 @@ func TestEFIActuatorAssertProvenMovesTheFallback(t *testing.T) {
 	}
 	if _, ok := findSlotEntry(dir, "A"); !ok {
 		t.Error("slot A keeps its entry, because BootOrder still falls back to it")
+	}
+}
+
+// bootNextVar reads the raw BootNext payload, or nothing when the
+// variable is absent.
+func bootNextVar(t *testing.T, dir string) []byte {
+	t.Helper()
+	payload, err := readEFIVar(dir, "BootNext")
+	if err != nil {
+		return nil
+	}
+	return payload
+}
+
+// Some firmware accepts a BootOrder write, reads it back correctly, and
+// still comes back from a reset with its old order. BootNext survives
+// on the same firmware, so the assertion arms it at the proven slot too.
+func TestEFIActuatorAssertProvenArmsBootNextAtTheProvenSlot(t *testing.T) {
+	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A\n")
+	installedDisk(t)
+	fakeSlotMounts(t)
+	dir := fakeEFIVars(t, map[string][]byte{})
+	act := efiActuator{dir: dir, machineName: "node-1"}
+
+	act.assertProven("A")
+
+	entryA, ok := findSlotEntry(dir, "A")
+	if !ok {
+		t.Fatal("the proven slot's entry is back in NVRAM")
+	}
+	if got := bootNextVar(t, dir); !bytes.Equal(got, bootNextPayload(entryA)) {
+		t.Errorf("BootNext must aim at the proven slot's entry: % x", got)
+	}
+}
+
+// A one-shot armed for a release that is no longer staged must not run
+// on a later reboot. The assertion overwrites it with the proven slot,
+// the same way the GRUB dialect clears a leftover try_slot.
+func TestEFIActuatorAssertProvenOverwritesAStaleBootNext(t *testing.T) {
+	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A\n")
+	installedDisk(t)
+	fakeSlotMounts(t)
+	dir := fakeEFIVars(t, map[string][]byte{})
+	act := efiActuator{dir: dir, machineName: "node-1"}
+	act.assertProven("A")
+	entryB, ok := findSlotEntry(dir, "B")
+	if !ok {
+		t.Fatal("both slots carry an entry")
+	}
+	if err := writeEFIVar(dir, "BootNext", bootNextPayload(entryB)); err != nil {
+		t.Fatal(err)
+	}
+
+	act.assertProven("A")
+
+	entryA, _ := findSlotEntry(dir, "A")
+	if got := bootNextVar(t, dir); !bytes.Equal(got, bootNextPayload(entryA)) {
+		t.Errorf("the stale one-shot must give way to the proven slot: % x", got)
+	}
+}
+
+// This is the assertion on the way down, before a reboot. The boot-time
+// assertion wrote BootNext, nothing has consumed it since, so the
+// reboot path finds it correct and spends no NVRAM write on it. (The
+// boot-time assertion itself always writes: the firmware consumed the
+// variable at power-on.)
+func TestEFIActuatorAssertProvenLeavesACorrectBootNextAlone(t *testing.T) {
+	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A\n")
+	installedDisk(t)
+	fakeSlotMounts(t)
+	dir := fakeEFIVars(t, map[string][]byte{})
+	act := efiActuator{dir: dir, machineName: "node-1"}
+	act.assertProven("A")
+	entryA, _ := findSlotEntry(dir, "A")
+	path := filepath.Join(dir, "BootNext-"+efiGlobalVariable)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	act.assertProven("A")
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("BootNext already aimed at the proven slot, so no write was needed")
+	}
+	if got := bootNextVar(t, dir); !bytes.Equal(got, bootNextPayload(entryA)) {
+		t.Errorf("BootNext still aims at the proven slot: % x", got)
 	}
 }
 

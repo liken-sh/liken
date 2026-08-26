@@ -929,43 +929,82 @@ func sweepTornK3sFiles(root string) {
 // the liken version of the running image, and an upgraded image must
 // deliver its upgraded operator.
 //
-// The refresh of the manifests is a wipe and a copy, and that is why
-// it reaches only liken's own subdirectory. k3s stages the manifests
-// of its bundled components at the top of the auto-deploy directory,
-// and the teardown of a component that a boot disables reads that
-// component's file at startup. A wipe of the whole directory takes
-// that file away first, and the component then keeps running with no
-// file left to retract it.
+// The refresh of the manifests replaces the files of liken's own
+// subdirectory, and that is why it reaches no further. k3s stages the
+// manifests of its bundled components at the top of the auto-deploy
+// directory, and the teardown of a component that a boot disables
+// reads that component's file at startup. A wipe of the whole
+// directory takes that file away first, and the component then keeps
+// running with no file left to retract it.
+//
+// The refresh has one exception. A CRD manifest that the disk holds
+// at a higher liken.sh/schema-revision than the image carries is
+// neither removed nor rewritten, because replacing it would downgrade
+// a schema the cluster already serves and silently prune stored
+// objects. schemarevision.go carries that whole story.
+//
+// The seeds do not share one failure policy, because they do not
+// share one failure cost. The identity seed is fatal: a machine that
+// cannot put the cluster's CAs on its disk lets k3s mint its own, and
+// the result is an API that no kubeconfig from this image can verify
+// and a cluster that no machine holding this image's token can join,
+// all while reporting itself healthy. Refusing the boot is the only
+// honest outcome there. The content seeds degrade instead: a machine
+// whose manifests or images did not refresh runs on what its disk
+// already holds, and the cluster can read it, report it, and upgrade
+// it. A powered-off machine offers none of that, so a content seed
+// must never be the reason PID 1 stops.
 func seedClusterState(root string) error {
 	for _, seed := range []struct {
-		rel     string
-		refresh bool
+		rel      string
+		refresh  bool
+		identity bool
 	}{
-		{"k3s/server/tls", false},
-		{likenManifestsRel, true},
-		{"k3s/agent/images", true},
+		{"k3s/server/tls", false, true},
+		{likenManifestsRel, true, false},
+		{"k3s/agent/images", true, false},
 	} {
 		src := filepath.Join(seedSourceDir, seed.rel)
 		if _, err := os.Stat(src); err != nil {
 			continue // an image without k3s has no seed files
 		}
 		dst := filepath.Join(root, seed.rel)
+		var err error
 		if seed.refresh {
-			if err := os.RemoveAll(dst); err != nil {
-				return err
+			keep := map[string]bool{}
+			if seed.rel == likenManifestsRel {
+				keep = newerCRDsOnDisk(src, dst)
 			}
-		} else if _, err := os.Stat(dst); err == nil {
+			err = refreshSeedDir(dst, src, keep)
+		} else if _, absent := os.Stat(dst); absent != nil {
+			err = copySeedTree(dst, src)
+		}
+		if err == nil {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
+		if seed.identity {
+			return fmt.Errorf("%s: %w", seed.rel, err)
 		}
-		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
-			return err
-		}
+		reportSeedFailure(seed.rel, err)
 	}
 	sweepLikenManifestsFromTheTop(root)
 	return nil
+}
+
+// copySeedTree lays a seed onto a disk that has none of it.
+func copySeedTree(dst, src string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.CopyFS(dst, os.DirFS(src))
+}
+
+// reportSeedFailure states what the boot goes on without. The lines
+// go to stderr, beside the other failures a person reads off the
+// console.
+func reportSeedFailure(rel string, err error) {
+	fmt.Fprintf(os.Stderr, "liken: k3s: seeding %s failed: %v\n", rel, err)
+	fmt.Fprintf(os.Stderr, "liken: k3s: this boot runs on the %s the disk already holds\n", rel)
 }
 
 // likenManifestNames lists every file name that liken puts in k3s's

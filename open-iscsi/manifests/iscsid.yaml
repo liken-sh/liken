@@ -44,8 +44,14 @@ spec:
   # OnDelete, like every OS DaemonSet: the image is baked into each
   # node's OS and imagePullPolicy is Never, so a template change must
   # not recreate pods on nodes that have not rebooted into the release
-  # that carries the new image. The steward refreshes pods machine by
-  # machine as upgrades land.
+  # that carries the new image.
+  #
+  # An iscsid pod picks up a new build with no refresh at all. The
+  # node's reboot restarts the container, and the restart resolves
+  # the stable tag against the image that boot just imported. The pod
+  # steward does not refresh these pods: stewardedDaemonSets in
+  # cluster-operator/steward.go lists only the machine operator and
+  # the log relays.
   updateStrategy:
     type: OnDelete
   template:

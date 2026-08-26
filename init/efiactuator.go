@@ -38,7 +38,7 @@ func (a efiActuator) armTrial(slot string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no boot entry answers to %q", "liken slot "+slot)
 	}
-	if err := writeEFIVar(a.dir, "BootNext", []byte{byte(entry), byte(entry >> 8)}); err != nil {
+	if err := writeEFIVar(a.dir, "BootNext", bootNextPayload(entry)); err != nil {
 		return "", fmt.Errorf("arming BootNext: %w", err)
 	}
 	return "BootNext armed at " + bootEntryID(entry), nil
@@ -65,6 +65,11 @@ func (a efiActuator) fallbackLeads(slot string) bool {
 // The two assertions run separately on purpose. A slot that cannot
 // carry a loader must not stop the entries from healing, and a variable
 // store that refuses a write must not stop the loader from landing.
+//
+// The first half asserts more than the standing order: it also aims
+// the one-shot BootNext at the proven slot, for the firmware that
+// holds BootNext through a reset but not BootOrder (assertBootNext in
+// bootentries.go).
 func (a efiActuator) assertProven(slot string) {
 	healBootEntries(a.dir, a.machineName, slot)
 	a.healSlotLoader(slot)

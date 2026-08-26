@@ -49,6 +49,54 @@ func TestWriteSlotBootEntry(t *testing.T) {
 	}
 }
 
+// The install is the first boot's only protection on a firmware that
+// drops a BootOrder write. Slot A leads the order and the one-shot is
+// pinned to the same entry.
+func TestRegisterSlotEntriesPinTheFirstBoot(t *testing.T) {
+	fakeCmdline(t, "console=ttyS0 rdinit=/liken\n")
+	dir := fakeFirmwareVars(t, map[string][]byte{})
+	slotA := &slotPartition{number: 1, firstLBA: 2048, lastLBA: 4095}
+	slotB := &slotPartition{number: 2, firstLBA: 4096, lastLBA: 6143}
+
+	if err := registerSlotEntries(slotA, slotB, "node-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	entryA, ok := findSlotEntry(dir, "A")
+	if !ok {
+		t.Fatal("the install writes slot A's entry")
+	}
+	if order := readBootOrder(dir); len(order) == 0 || order[0] != entryA {
+		t.Errorf("slot A leads the order: %v", order)
+	}
+	next, err := readEFIVar(dir, "BootNext")
+	if err != nil || bootNextEntry(next) != int32(entryA) {
+		t.Errorf("the one-shot is pinned to slot A's entry: % x, %v", next, err)
+	}
+}
+
+// A firmware may store a variable wider than the two bytes BootNext
+// needs. Comparing the raw bytes would rewrite NVRAM on every boot and
+// warn about a firmware that is holding the value correctly.
+func TestAssertBootNextAcceptsAWiderVariable(t *testing.T) {
+	dir := fakeEFIVars(t, map[string][]byte{"BootNext": {0x03, 0x00, 0x00, 0x00}})
+	path := filepath.Join(dir, "BootNext-"+efiGlobalVariable)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertBootNext(dir, 0x0003, "B")
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("the firmware already names this entry, however wide it stores it")
+	}
+}
+
 // A firmware whose variables reset to defaults holds no entries at
 // all. The boot that the fallback loader started puts both of them
 // back.

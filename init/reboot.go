@@ -161,23 +161,30 @@ func scanIntents(dir string, reboots chan<- machine.RebootIntent,
 // investigates it.
 func rebootMachine(intent machine.RebootIntent) {
 	fmt.Printf("liken: rebooting: %s\n", intent.Reason)
-	// The firmware actions happen first, while machineState and the
-	// boot path's filesystems are still mounted. The function asserts
-	// the proven slot before anything else. On a BIOS machine, this
-	// assertion also repairs the boot chain on disk. This step must
-	// happen on the way down, because a boot path can become damaged
-	// while the machine runs. (Cloud hosts rewrite MBRs under running
-	// guests.) A damaged boot path would prevent this reboot from
-	// coming back up. Arming the proving boot always happens after
-	// asserting the proven slot, never before. assertProven clears a
-	// stale one-shot flag, and the trial that this reboot might be
-	// arming must not appear stale.
-	actuator := chooseBootActuator()
-	assertProvenSlot(actuator, machine.MachineStateDir)
-	// If a release is staged for the other slot, this reboot proves
-	// that release. The one-shot trial must be armed before the
-	// machine shuts down (see proving.go).
-	armProvingBoot(actuator, machine.MachineStateDir, bootParamValue("liken.slot"))
+	// The firmware turn happens first, while machineState and the
+	// boot path's filesystems are still mounted. It asserts the
+	// proven slot and then, when a release is staged for the other
+	// slot, arms the one-shot trial that this reboot proves, in that
+	// order and with nothing between them: assertProven clears a
+	// stale one-shot, so the trial armed after it never appears
+	// stale, and the trial is only safe over a fallback that was just
+	// asserted (assertAndArmForReboot in proving.go). On a BIOS
+	// machine the assertion also repairs the boot chain on disk. The
+	// turn must happen on the way down, because a boot path can
+	// become damaged while the machine runs. (Cloud hosts rewrite
+	// MBRs under running guests.) A damaged boot path would prevent
+	// this reboot from coming back up.
+	//
+	// The flag goes up before the turn and stays up. The proving
+	// watch may still be running, and once this turn is over there is
+	// nothing left for it to correct. The turn's lock is released
+	// with the turn: this function is reachable from inside a
+	// machine-plane component, and a lock held across the shutdown
+	// below would outlive its holder if anything in that shutdown
+	// panicked.
+	shuttingDown.Store(true)
+	assertAndArmForReboot(chooseBootActuator(), machine.MachineStateDir,
+		bootParamValue("liken.slot"))
 	// The supplicants stop before the general signal because each
 	// one runs under a restart loop that would start it again during
 	// the grace period below. A stop through the loop lets the

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/liken/machine"
 )
@@ -162,6 +163,136 @@ func TestArmProvingBootAssertsTheFallbackFirst(t *testing.T) {
 	if err != nil || len(next) != 2 || next[0] != 0x02 {
 		t.Errorf("the trial arms at slot A's entry once the fallback holds: %v, %v", next, err)
 	}
+}
+
+// The reboot path asserts the proven slot and then arms the trial, in
+// that order. The assertion aims BootNext at the proven slot, so this
+// test holds the order that keeps a staged trial in front of it.
+func TestTheRebootPathLeavesBootNextOnTheTrial(t *testing.T) {
+	root := t.TempDir()
+	provenRelease(t, root, "0.1.0", "A")
+	stagedRelease(t, root, "0.2.0", "B")
+	dir := slotFirmware(t, 0x0002, 0x0003)
+
+	assertAndArmForReboot(efiActuator{dir: dir}, root, "A")
+
+	next, err := readEFIVar(dir, "BootNext")
+	if err != nil || !slices.Equal(next, bootNextPayload(0x0003)) {
+		t.Errorf("the trial takes the one shot back from the proven slot: % x, %v", next, err)
+	}
+}
+
+// The slot this boot runs and the slot the store calls proven are not
+// always the same one: a person can pick the other slot from the
+// firmware's menu, and a firmware that cannot load the proven slot
+// falls through to it. A trial of the proven slot would leave the
+// machine no fallback at all.
+func TestArmProvingBootRefusesATrialOnTheProvenSlot(t *testing.T) {
+	root := t.TempDir()
+	provenRelease(t, root, "0.1.0", "B")
+	stagedRelease(t, root, "0.2.0", "B")
+	dir := slotFirmware(t, 0x0002, 0x0003)
+
+	// This boot runs slot A while the store calls slot B proven, so
+	// the staged slot passes the running-slot check.
+	armProvingBoot(efiActuator{dir: dir}, root, "A")
+
+	if attempted, _ := machine.SystemReleases(root).LoadAttempted(); attempted != "" {
+		t.Error("the trial never armed, so no marker may claim it did")
+	}
+	if _, err := readEFIVar(dir, "BootNext"); !os.IsNotExist(underlying(err)) {
+		t.Errorf("BootNext must not aim at the proven slot's own trial: %v", err)
+	}
+}
+
+// The reboot path holds the firmware lock across its whole turn: the
+// proven slot's assertion and the trial it arms after it. The proving
+// watch's own assertion waits on that lock, so it cannot land between
+// the two and take the one shot back from the trial.
+func TestTheProvenAssertionWaitsForTheFirmwareLock(t *testing.T) {
+	root := t.TempDir()
+	provenRelease(t, root, "0.2.0", "B")
+	// The firmware still holds the install's order: slot A first. So
+	// an assertion that ran would be visible in BootOrder.
+	dir := slotFirmware(t, 0x0002, 0x0003)
+
+	firmwareWrites.Lock()
+	done := make(chan struct{})
+	go func() {
+		assertProvenSlotUnderLock(efiActuator{dir: dir}, root)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Unlocking after this would panic the binary, because the
+		// assertion took the lock and gave it back.
+		t.Fatal("the assertion must wait while another writer holds the lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002, 0x0003}) {
+		t.Errorf("nothing may reach the firmware while the lock is held: % x", got)
+	}
+
+	firmwareWrites.Unlock()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the assertion must run once the lock is free")
+	}
+	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0003, 0x0002}) {
+		t.Errorf("the proven slot leads once the assertion runs: % x", got)
+	}
+}
+
+// A machine on its way down has already had its firmware turn. The
+// proving watch may still be running, and once the reboot path releases
+// the lock, the flag is the only thing that keeps the watch away from
+// the trial that path armed.
+func TestTheProvenAssertionStopsOnceTheMachineIsShuttingDown(t *testing.T) {
+	root := t.TempDir()
+	provenRelease(t, root, "0.2.0", "B")
+	dir := slotFirmware(t, 0x0002, 0x0003)
+	shuttingDown.Store(true)
+	t.Cleanup(func() { shuttingDown.Store(false) })
+
+	assertProvenSlotUnderLock(efiActuator{dir: dir}, root)
+
+	if got := readBootOrder(dir); !slices.Equal(got, []uint16{0x0002, 0x0003}) {
+		t.Errorf("the firmware keeps what the reboot path left it: % x", got)
+	}
+}
+
+// panicOf runs f and reports what it panicked with, or nil.
+func panicOf(f func()) (recovered any) {
+	defer func() { recovered = recover() }()
+	f()
+	return nil
+}
+
+// panickingActuator stands for a firmware call that fails the way only
+// a bug fails. noActuator answers everything else.
+type panickingActuator struct{ noActuator }
+
+func (panickingActuator) assertProven(string) { panic("the firmware went away") }
+
+// The reboot path is reachable from inside a machine-plane component,
+// and the plane recovers a component that panicked and restarts it. A
+// lock left held by the panicked call would block every later reboot
+// before the reboot syscall, and the machine would never come back
+// without a power cycle.
+func TestTheRebootFirmwareStepReleasesTheLockOnAPanic(t *testing.T) {
+	root := t.TempDir()
+	provenRelease(t, root, "0.2.0", "B")
+
+	if panicOf(func() { assertAndArmForReboot(panickingActuator{}, root, "A") }) == nil {
+		t.Fatal("the panic must reach the machine plane, which reports and restarts")
+	}
+
+	if !firmwareWrites.TryLock() {
+		t.Fatal("a panic must not leave the firmware lock held; every later reboot would block on it")
+	}
+	firmwareWrites.Unlock()
 }
 
 func TestArmProvingBootRefusesWithoutAnEntry(t *testing.T) {

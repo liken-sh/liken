@@ -182,6 +182,20 @@ release="$(cat "$kdist/release")"
 # images, running it from its own copies of the inputs into its own
 # tree (see the Makefile).
 liken_version="${LIKEN_VERSION:?LIKEN_VERSION must be set; the Makefile passes it via version.mk}"
+
+# The version string reaches two places that each constrain its
+# characters. It becomes the replacement text of the sed passes
+# below, where a slash ends the build with a sed syntax error and an
+# ampersand silently expands to the text it replaced. It also becomes
+# part of a container image tag, and this pattern is that tag's
+# grammar. One check covers both hazards, and it runs here, before
+# the build has done any work worth losing.
+if [[ ! $liken_version =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]]; then
+    echo "build.sh: LIKEN_VERSION is $liken_version, which is not a usable version." >&2
+    echo "build.sh: a version must match ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\$: it starts with a letter, a digit, or an underscore, and the rest are letters, digits, dots, underscores, and dashes." >&2
+    exit 1
+fi
+
 dist="${DIST:-$here/dist}"
 init_dist="${INIT_DIST:-$here/../init/dist}"
 mount_dist="${MOUNT_DIST:-$here/../mount/dist}"
