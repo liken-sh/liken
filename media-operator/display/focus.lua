@@ -304,9 +304,8 @@ function focus.nav(action)
   end
 
   -- The press that wakes a hidden OSD only wakes it. It lands focus on the
-  -- first stop, the fine playhead, and does not move or seek. The next press
-  -- starts navigating, so a viewer sees where the film is before a press
-  -- changes it.
+  -- first stop present, and does not move or seek. The next press starts
+  -- navigating, so a viewer sees where the film is before a press changes it.
   local was_visible = focus.visible()
   focus.summon()
   if not was_visible then

@@ -307,6 +307,18 @@ type Presentation struct {
 	Year         int    `json:"year,omitempty"`
 	Date         string `json:"date,omitempty"`
 	Logo         string `json:"logo,omitempty"`
+
+	// The two music text fields. An album states them so the display draws
+	// the words the Play resolved, and the display reads no tags of its
+	// own.
+	Artist string `json:"artist,omitempty"`
+	Album  string `json:"album,omitempty"`
+
+	// A reference to the item's cover image, resolved the way the logo is.
+	// It is the first tier of the art the music layout draws, and the
+	// picture inside the file and a cover beside it follow.
+	Art string `json:"art,omitempty"`
+
 	// A reference to the item's X.trickplay directory, resolved the way the
 	// logo is. The display shows a tile from its sprite sheets on the scrub
 	// cursor.

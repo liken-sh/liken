@@ -113,16 +113,27 @@ function scrubber.cancel()
   end
 end
 
+local function chapter_list()
+  return mp.get_property_native("chapter-list") or {}
+end
+
 -- Stepping a chapter moves the playback position, so the fine playhead
 -- follows. This is the coarse seek axis, one chapter a press, on the same
 -- bar as the fine scrubber that moves in seconds.
+-- The ends of the list hold. A step past the last chapter would end the
+-- run, and ending the run is what back is for.
 function scrubber.chapter_step(dir)
+  local list = chapter_list()
+  local at = mp.get_property_number("chapter")
+  if at == nil or #list == 0 then
+    return
+  end
+  local next_at = at + dir
+  if next_at < 0 or next_at > #list - 1 then
+    return
+  end
   mp.commandv("add", "chapter", dir)
   redraw_cb()
-end
-
-local function chapter_list()
-  return mp.get_property_native("chapter-list") or {}
 end
 
 function scrubber.fine_available()

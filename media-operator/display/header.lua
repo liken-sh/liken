@@ -4,6 +4,11 @@
 -- When the item carries a logo, the header shows the logo in place of that
 -- name. It asks the bridge to decode the logo to a pixel size, and places the
 -- returned bitmap with overlay-add.
+-- A music item shows the track title over the artist, then the album with
+-- its year.
+-- An album plays as one mpv item whose chapters are its tracks, so the track
+-- name is the chapter mpv plays now, and the artist, the album, and the year
+-- come from the item's own block.
 local theme = require("theme")
 local presentation = require("presentation")
 
@@ -15,6 +20,9 @@ local TOP_Y = theme.margin.y
 local SECOND_Y = TOP_Y + 82
 -- With a logo, the second line sits this far below the logo's own bottom.
 local SECOND_GAP = 26
+-- A music item runs to a third line, so the header keeps one drop from each
+-- of those lines to the next.
+local MUSIC_LINE_GAP = 46
 
 -- The logo's largest box, in canvas coordinates. It sits where the title line
 -- does, and is about that line's height, so the second line below it stays
@@ -139,8 +147,14 @@ end
 -- previous item's logo, removes its overlay, and asks for the new item's logo.
 -- An item with no logo leaves the overlay removed, and the header falls back to
 -- text.
+-- A music item asks for no logo at all. The one fact its header changes is
+-- the track name, and a logo would stand in the line that carries it.
 function header.on_item()
-  logo_uri = presentation.logo()
+  if presentation.type() == "music" then
+    logo_uri = nil
+  else
+    logo_uri = presentation.logo()
+  end
   blob = nil
   want = nil
   if placed then
@@ -204,6 +218,30 @@ local function second_y()
   return SECOND_Y
 end
 
+-- The lines under a music title: the artist on one, then the album and the
+-- year together on the next. A field the block and the tags both leave empty
+-- draws nothing.
+local function music_lines()
+  local lines = {}
+  local artist = presentation.artist()
+  if artist then
+    lines[#lines + 1] = artist
+  end
+  local segs = {}
+  local album = presentation.album()
+  if album then
+    segs[#segs + 1] = album
+  end
+  local year = presentation.music_year()
+  if year ~= nil then
+    segs[#segs + 1] = num(year)
+  end
+  if #segs > 0 then
+    lines[#lines + 1] = table.concat(segs, "  \194\183  ")
+  end
+  return lines
+end
+
 -- A series shows the series name over the season line. Everything else with a
 -- title shows the title. A field that resolved to nothing draws nothing. A
 -- logo takes the place of that name, and the second line stays as text.
@@ -211,7 +249,20 @@ function header.draw()
   local parts = {}
   local has_logo = blob ~= nil
   local sy = second_y()
-  if presentation.hint() == "series" then
+  if presentation.type() == "music" then
+    local title = mp.get_property("chapter-metadata/by-key/title")
+    if not title or title == "" then
+      title = presentation.title()
+    end
+    if title then
+      parts[#parts + 1] = theme.text(LEFT, TOP_Y, title, theme.type.title, theme.color.text, 7)
+    end
+    for i, line in ipairs(music_lines()) do
+      parts[#parts + 1] = theme.text(
+        LEFT, sy + (i - 1) * MUSIC_LINE_GAP, line, theme.type.small, theme.color.muted, 7
+      )
+    end
+  elseif presentation.hint() == "series" then
     if not has_logo then
       local series = presentation.series() or presentation.title()
       if series then

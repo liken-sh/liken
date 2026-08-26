@@ -133,13 +133,16 @@ func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	if !reflect.DeepEqual(container.Args, args) {
 		t.Errorf("args = %v, want %v", container.Args, args)
 	}
-	if len(container.Env) != 0 {
-		t.Errorf("env = %+v, want none", container.Env)
+	// The blocks travel on the player container because the shim reads them
+	// to expand a music album, so every run carries them.
+	env := []EnvVar{{Name: presentationsVariable, Value: "[{}]"}}
+	if !reflect.DeepEqual(container.Env, env) {
+		t.Errorf("env = %+v, want %+v", container.Env, env)
 	}
 }
 
-// A declared start reaches the player container as one variable, and an
-// ordinary run's player container carries nothing extra.
+// A declared start reaches the player container as one variable, beside the
+// blocks every run carries.
 func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	play := testPlay()
 	play.Spec.Start = "0:10:00"
@@ -147,7 +150,10 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	env := pod.Spec.Containers[0].Env
-	want := []EnvVar{{Name: playStartVariable, Value: "0:10:00"}}
+	want := []EnvVar{
+		{Name: presentationsVariable, Value: "[{}]"},
+		{Name: playStartVariable, Value: "0:10:00"},
+	}
 	if !reflect.DeepEqual(env, want) {
 		t.Errorf("env = %+v, want %+v", env, want)
 	}

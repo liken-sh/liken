@@ -39,11 +39,18 @@ var mpvDialDelay = time.Second
 const (
 	audioLanguageProperty    = "current-tracks/audio/lang"
 	subtitleLanguageProperty = "current-tracks/sub/lang"
+
+	// The playlist is the one observed property no report carries. The
+	// bridge resolves each item's album art from it once, before the
+	// display asks for any of it. It is observed rather than asked for,
+	// because the supervisor observes properties and never polls.
+	playlistProperty = "playlist"
 )
 
 var observedProperties = []string{
 	"pause", "playlist-pos", "time-pos", "duration",
 	audioLanguageProperty, subtitleLanguageProperty,
+	playlistProperty,
 }
 
 // propertyChangeEvent carries an observed property's new value.

@@ -7,11 +7,14 @@
 
 FROM golang:1.26.5-bookworm AS build
 WORKDIR /src
-# The module file comes first, so a source edit reuses the cached
+# The module files come first, so a source edit reuses the cached
 # download layer.
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+# The EDL package builds into the binary, so the source tree it needs is the
+# root files and this one directory.
+COPY edl/ ./edl/
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. It runs
 # from scratch, where there is no loader to need.

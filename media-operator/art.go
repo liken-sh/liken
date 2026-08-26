@@ -32,7 +32,8 @@ type artBlob struct {
 }
 
 // One parsed art request. timeMs carries the scrub time for a trickplay
-// request, and stays zero for a logo request, which needs only the box.
+// request, and stays zero for every other kind, which needs only the box.
+// The box is the bounds the logo, the cover, or the tile must fit inside.
 type artRequest struct {
 	kind   string
 	timeMs int
@@ -42,19 +43,19 @@ type artRequest struct {
 
 // parseArtRequest reads a client-message as a request for art. The first
 // argument names the request, so the bridge drops another script's broadcast.
-// The rest depends on the kind: a logo carries a box, a trickplay carries a
-// time and a box.
+// The rest depends on the kind: a logo and a cover carry a box, and a
+// trickplay carries a time and a box.
 func parseArtRequest(args []string) (artRequest, bool) {
 	if len(args) < 4 || args[0] != artRequestMessage {
 		return artRequest{}, false
 	}
 	switch args[1] {
-	case artKindLogo:
+	case artKindLogo, artKindAlbum:
 		w, h, ok := parseBox(args[2], args[3])
 		if !ok {
 			return artRequest{}, false
 		}
-		return artRequest{kind: artKindLogo, width: w, height: h}, true
+		return artRequest{kind: args[1], width: w, height: h}, true
 	case artKindTrickplay:
 		if len(args) < 5 {
 			return artRequest{}, false
@@ -87,7 +88,8 @@ func parseBox(widthArg, heightArg string) (w, h int, ok bool) {
 }
 
 // serveArt answers one art request. It dispatches by kind, the logo to
-// serveLogo and the trickplay tile to serveTrickplay.
+// serveLogo, the trickplay tile to serveTrickplay, and the playing album's
+// cover to serveAlbum.
 func (c *commander) serveArt(args []string) {
 	request, ok := parseArtRequest(args)
 	if !ok {
@@ -98,6 +100,8 @@ func (c *commander) serveArt(args []string) {
 		c.serveLogo(request)
 	case artKindTrickplay:
 		c.serveTrickplay(request)
+	case artKindAlbum:
+		c.serveAlbum(request)
 	}
 }
 

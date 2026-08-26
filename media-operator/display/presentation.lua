@@ -68,6 +68,48 @@ function presentation.episode_title()
   return block.episodeTitle
 end
 
+-- A standalone track plays as a plain file, so mpv reads its tags, and the
+-- artist and the album resolve from the block first and from the tags next.
+-- An album plays as one timeline, and mpv reads the first track's tags and
+-- keeps them for the whole run. So the block states the album's own words,
+-- and the tag tier behind it reads track one.
+local function tag(name)
+  local value = mp.get_property("metadata/by-key/" .. name)
+  if value and value ~= "" then
+    return value
+  end
+  return nil
+end
+
+function presentation.artist()
+  if block.artist and block.artist ~= "" then
+    return block.artist
+  end
+  return tag("artist")
+end
+
+function presentation.album()
+  if block.album and block.album ~= "" then
+    return block.album
+  end
+  return tag("album")
+end
+
+-- The music year takes the block's own year first, then the leading four
+-- digits of the file's date tag, which often carries a whole date. The film
+-- year below keeps the block as its only tier, so a film file with a date
+-- tag never shows a year its block did not declare.
+function presentation.music_year()
+  if block.year ~= nil and block.year ~= "" then
+    return block.year
+  end
+  local date = tag("date")
+  if date then
+    return date:match("^(%d%d%d%d)")
+  end
+  return nil
+end
+
 function presentation.year()
   return block.year
 end

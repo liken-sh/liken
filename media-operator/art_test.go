@@ -21,6 +21,7 @@ func TestParseArtRequest(t *testing.T) {
 	}{
 		{name: "a logo request", args: []string{"liken-art-request", "logo", "280", "96"}, request: artRequest{kind: "logo", width: 280, height: 96}, ok: true},
 		{name: "a trickplay request", args: []string{"liken-art-request", "trickplay", "125000", "240", "136"}, request: artRequest{kind: "trickplay", timeMs: 125000, width: 240, height: 136}, ok: true},
+		{name: "an album request", args: []string{"liken-art-request", "album", "600", "600"}, request: artRequest{kind: "album", width: 600, height: 600}, ok: true},
 		{name: "another script's broadcast", args: []string{"someone-else", "logo", "280", "96"}},
 		{name: "an unknown kind", args: []string{"liken-art-request", "poster", "280", "96"}},
 		{name: "too few arguments", args: []string{"liken-art-request", "logo", "280"}},

@@ -217,12 +217,16 @@ const displaySummonMessage = "summon"
 // The two script-message names the display and the bridge agree on for art.
 // The display broadcasts artRequestMessage to ask for a decoded blob at a
 // pixel size. The bridge answers with artReplyMessage, addressed to the
-// display, carrying the ready blob. artKindLogo is the one art kind today.
+// display, carrying the ready blob.
+//
+// The three art kinds: the film's logo, the scrub tile, and the playing
+// album's cover.
 const (
 	artRequestMessage = "liken-art-request"
 	artReplyMessage   = "liken-art"
 	artKindLogo       = "logo"
 	artKindTrickplay  = "trickplay"
+	artKindAlbum      = "album"
 )
 
 // exitMessage is the script-message the display broadcasts when a person

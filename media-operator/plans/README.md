@@ -26,9 +26,9 @@ These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
 * [11, The music experience](11-the-music-experience.md). A music
-  `Play` draws a layout `liken` owns, the album art centered with the
-  track list and the queue, in place of the scrubber a film shows. It
-  builds on the display of plan 07.
+  `Play` draws a layout `liken` owns: the album art centered, the
+  tracks as chapters on the scrubber, and one timeline for the whole
+  album. It builds on the display of plan 07.
 
 ## Completed
 

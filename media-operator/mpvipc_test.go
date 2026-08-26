@@ -21,6 +21,7 @@ func TestObservePropertiesAsksForEachPropertyOnce(t *testing.T) {
 		`{"command":["observe_property",4,"duration"]}`,
 		`{"command":["observe_property",5,"current-tracks/audio/lang"]}`,
 		`{"command":["observe_property",6,"current-tracks/sub/lang"]}`,
+		`{"command":["observe_property",7,"playlist"]}`,
 	})
 }
 

@@ -8,6 +8,7 @@ local images = require("images")
 local presentation = require("presentation")
 local header = require("header")
 local trickplay = require("trickplay")
+local album = require("album")
 local clock = require("clock")
 local volume = require("volume")
 local identity = require("identity")
@@ -90,6 +91,8 @@ local function redraw()
   -- draws over the ASS layer, so a logo left in place would sit on top of the
   -- dim rather than under it.
   header.sync(focus.visible() and not focus.capturing())
+  -- The cover holds the frame for a music item whether the OSD is up or down.
+  album.sync()
   -- The thumbnail shows only while a fine scan is in flight, for an item that
   -- declares trickplay. At rest the video shows the frame the thumbnail would,
   -- so the tile appears only when the scan previews another position. It hides
@@ -198,6 +201,7 @@ images.set_redraw(request_redraw)
 presentation.set_redraw(request_redraw)
 header.set_redraw(request_redraw)
 trickplay.set_redraw(request_redraw)
+album.set_redraw(request_redraw)
 energy.set_redraw(request_redraw)
 identity.set_redraw(request_redraw)
 shade.set_redraw(request_redraw)
@@ -218,6 +222,12 @@ mp.observe_property("chapter", "number", function()
   request_redraw()
 end)
 mp.observe_property("chapter-list", "native", function()
+  request_redraw()
+end)
+mp.observe_property("chapter-metadata/by-key/title", "string", function()
+  request_redraw()
+end)
+mp.observe_property("metadata", "native", function()
   request_redraw()
 end)
 mp.observe_property("track-list", "native", function()
@@ -243,6 +253,7 @@ end)
 mp.observe_property("osd-dimensions", "native", function()
   header.on_resize()
   trickplay.on_resize()
+  album.on_resize()
   request_redraw()
 end)
 mp.observe_property("pause", "bool", function(_, value)
@@ -287,16 +298,19 @@ mp.register_script_message("presentation", function(text)
   presentation.receive(text)
   header.on_item()
   trickplay.on_item()
+  album.on_item()
 end)
 
--- The bridge answers an art request over this script-message, and the logo and
--- the trickplay tile share the one reply. Read the kind, and route the reply to
--- the header for a logo and to the thumbnail for a tile.
+-- The bridge answers an art request over this script-message, and every bitmap
+-- shares the one reply. Read the kind, and route the reply to the header for a
+-- logo, to the thumbnail for a tile, and to the cover for an album.
 mp.register_script_message("liken-art", function(kind, path, w, h, stride)
   if kind == "logo" then
     header.on_art(kind, path, w, h, stride)
   elseif kind == "trickplay" then
     trickplay.on_art(kind, path, w, h, stride)
+  elseif kind == "album" then
+    album.on_art(kind, path, w, h, stride)
   end
 end)
 

@@ -135,6 +135,11 @@ type commander struct {
 	// newer tile has replaced it.
 	trickHavePrev bool
 	trickPrev     artBlob
+
+	// The playlist as the bridge resolved it: the file names mpv reported,
+	// and the art tier each item resolved to.
+	playlistFiles []string
+	tracks        []trackEntry
 }
 
 // runCommand connects to the bus, drives mpv's IPC socket, and reports
@@ -386,7 +391,7 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 	// socket closes and the reader closes the messages channel.
 	go c.serveMessages(messages)
 
-	runReporter(ctx, changes, send, c.present)
+	runReporter(ctx, changes, send, c.present, c.playlistChanged)
 	<-reading
 }
 
@@ -682,12 +687,17 @@ type reportSender func(playReport) error
 // like reportSender, so a test catches the forward with no mpv socket.
 type itemPresenter func(item int)
 
+// playlistReceiver is how mpv's playlist leaves the loop, a function like
+// itemPresenter. The playlist takes its own path out because it settles each
+// item's album art, and no field of the report carries it.
+type playlistReceiver func(playlist json.RawMessage)
+
 // runReporter is the whole reporting rule in one loop: fold the change,
 // send it now when it is one of the two that matter, and otherwise send
 // no more than one report per interval. A send that fails is logged and
 // the run goes on, because the loss is the operator's view of the film
 // and not a reason to stop playing.
-func runReporter(ctx context.Context, changes <-chan propertyChange, send reportSender, present itemPresenter) {
+func runReporter(ctx context.Context, changes <-chan propertyChange, send reportSender, present itemPresenter, playlist playlistReceiver) {
 	var state playbackState
 	var sent time.Time
 	var presented int
@@ -698,6 +708,16 @@ func runReporter(ctx context.Context, changes <-chan propertyChange, send report
 		case change, open := <-changes:
 			if !open {
 				return
+			}
+			// The playlist is the art, not the report, so it leaves here
+			// and folds into no playbackState field. It arrives before mpv
+			// says which item plays, because observe answers every property
+			// with its current value at subscribe time.
+			if change.Name == playlistProperty {
+				if change.known() {
+					playlist(change.Data)
+				}
+				continue
 			}
 			atOnce := state.apply(change)
 			if !state.reportable() {

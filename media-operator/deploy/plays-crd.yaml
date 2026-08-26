@@ -142,7 +142,12 @@ spec:
                             description: >-
                               The finer kind within the type. A video is a
                               movie or a series, and music is an album. It
-                              selects the layout the display draws.
+                              selects the layout the display draws. An album
+                              also declares that the item's URI names a
+                              directory, which the playback pod expands into
+                              one timeline of the audio files it holds. The
+                              directory must hold at least one audio file, or
+                              the run fails.
                           title:
                             type: string
                             description: >-
@@ -173,6 +178,27 @@ spec:
                               The air date of an episode, shown on its line.
                               Give it as an ISO date like 2017-03-05, and the
                               display formats it.
+                          artist:
+                            type: string
+                            description: >-
+                              The artist of a music item, shown in the header
+                              under the title. For an album this field is the
+                              one source; a standalone track can also leave it
+                              unset and let its own tags supply it.
+                          album:
+                            type: string
+                            description: >-
+                              The record a music item belongs to, shown in the
+                              header beside the year. It fills in the same way
+                              the artist does.
+                          art:
+                            type: string
+                            description: >-
+                              The cover art URI, nfs:// or https://, resolved
+                              the way the media URI is. It is the first place
+                              the cover is looked for; a picture embedded in
+                              the file and a cover.jpg beside it follow, and
+                              the pod reads both of those itself.
                           logo:
                             type: string
                             description: >-

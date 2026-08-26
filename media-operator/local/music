@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# local/music opens the liken music layout over a real album on this
+# workstation, so the centered cover, the chapter scrubber, and the header
+# can be seen and felt without a cluster. It loads the same display script
+# the player runs, and binds the keyboard to the navigation actions the
+# command bus carries, so a key press drives the display by the path a
+# remote does. It decodes the art with the real Go bridge, so the cover
+# comes out the way the pod decodes it.
+#
+# An album plays as one piece of media: local/edl reads the directory's
+# tags and writes one mpv EDL timeline, each track a segment with its
+# title, so mpv exposes one duration and one chapter per track. The film's
+# chapter stop then steps the tracks. A single file plays as a one-track
+# album the same way.
+#
+# It takes one audio file or a directory of audio files. The repository
+# names no media of its own.
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: local/music <audio-file-or-album-dir>" >&2
+  exit 2
+fi
+target="$1"
+if [ ! -e "$target" ]; then
+  echo "local/music: not a file or directory: $target" >&2
+  exit 1
+fi
+
+# The display script and the Go source sit in the repository above this file,
+# so their paths resolve from this script's own directory and need no absolute
+# path.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/.." && pwd)"
+display_dir="$root/display"
+
+# Clean up the temporary files, the decoded art, the bridge, and a built
+# binary on exit. The handler is installed before the first temporary file
+# exists, so a failure in the steps below leaks nothing. Each name is empty
+# until its step sets it, and the handler reads an empty name as nothing to
+# remove.
+EDL=""
+CONF=""
+SOCK=""
+ARTDIR=""
+BIN=""
+BUILT=0
+SERVE=""
+cleanup() {
+  [ -n "$SERVE" ] && kill "$SERVE" 2>/dev/null || true
+  [ -n "$CONF" ] && rm -f "$CONF" || true
+  [ -n "$SOCK" ] && rm -f "$SOCK" || true
+  [ -n "$EDL" ] && rm -f "$EDL" || true
+  [ -n "$ARTDIR" ] && rm -rf "$ARTDIR" || true
+  [ "$BUILT" -eq 1 ] && rm -f "$BIN" || true
+}
+trap cleanup EXIT
+
+# A directory is an album. local/edl reads its tags twice: once for the EDL
+# timeline mpv plays, and once for the block the display reads. go -C runs
+# it from the repository root, where a relative album path names another
+# file, so the path is made absolute first. The block carries the album's
+# artist, album, and year; the track names travel as chapter titles inside
+# the EDL.
+#
+# A file is a standalone track. It plays as itself, its block declares only
+# the music type, and the header reads the artist and the album from the
+# tags mpv exposes, the way a single-track Play item does.
+if [ -d "$target" ]; then
+  album="$(realpath "$target")"
+  EDL="$(mktemp --tmpdir local-music.XXXXXX.edl)"
+  go -C "$root" run ./local/edl "$album" >"$EDL"
+  BLOCK="$(go -C "$root" run ./local/edl -block "$album" || true)"
+  [ -n "$BLOCK" ] || BLOCK='{"type":"music"}'
+  MEDIA="$EDL"
+else
+  BLOCK='{"type":"music"}'
+  MEDIA="$target"
+fi
+PRESENTATIONS="[$BLOCK]"
+
+# These bindings send the same script messages the translator sidecar
+# publishes, so the keyboard and a controller drive the display alike. The
+# arrows repeat on hold, so a held key steps the chapters the way a held
+# remote button does.
+#
+# The volume keys play the command sidecar's part: on a cluster a press
+# publishes the unit's next state, and the sidecar sets the properties and
+# sends volume-changed. Here the key does both, so the indicator shows the
+# way a press shows it. 9, 0, and m are mpv's own volume keys, taken over
+# so mpv's built-in text never draws.
+CONF="$(mktemp --tmpdir local-music.XXXXXX.conf)"
+SOCK="$(mktemp -u --tmpdir local-music.XXXXXX.sock)"
+ARTDIR="$(mktemp -d --tmpdir local-music.XXXXXX.art)"
+cat >"$CONF" <<'BINDINGS'
+LEFT  repeatable script-message-to display left
+RIGHT repeatable script-message-to display right
+UP    repeatable script-message-to display up
+DOWN  repeatable script-message-to display down
+ENTER script-message-to display select
+ESC   script-message-to display back
+SPACE cycle pause
+9 repeatable no-osd add volume -5 ; script-message-to display volume-changed
+0 repeatable no-osd add volume  5 ; script-message-to display volume-changed
+m no-osd cycle mute ; script-message-to display volume-changed
+q quit
+BINDINGS
+
+# Build the mpv command line. --vid=no blanks mpv's video, so an embedded
+# cover never frames and the display owns the whole frame. --force-window
+# holds the window open over the blanked video. --load-scripts=no skips the
+# workstation's own mpv scripts, so a personal on-screen controller does not
+# draw over the display. --osc=no turns off mpv's built-in controller for the
+# same reason. --volume-max=100 caps the level at unity, the same cap the bus
+# clamps to on a cluster. --input-ipc-server opens the socket the bridge
+# dials, because a local mpv serves its socket somewhere other than the pod's
+# fixed path.
+MPV=(mpv --vid=no --force-window=yes --load-scripts=no --osc=no
+  --volume-max=100
+  --script="$display_dir"
+  --input-conf="$CONF"
+  --input-ipc-server="$SOCK"
+  -- "$MEDIA")
+
+# The bridge is the media-operator binary in serve-art mode. Reuse a prebuilt
+# one, or build it from the checkout.
+BIN="${LIKEN_MEDIA_OPERATOR_BIN:-}"
+if [ -z "$BIN" ]; then
+  BIN="$(mktemp -u --tmpdir media-operator.XXXXXX)"
+  go -C "$root" build -o "$BIN" .
+  BUILT=1
+fi
+
+# Run mpv in the background so it opens the window in the user's own session,
+# then wait for its IPC socket. The wait is bounded, so a socket that never
+# opens does not hang the preview. Do not override the Wayland or display
+# environment.
+"${MPV[@]}" &
+MPV_PID=$!
+for _ in $(seq 1 100); do
+  [ -S "$SOCK" ] && break
+  sleep 0.1
+done
+if [ ! -S "$SOCK" ]; then
+  echo "local/music: mpv opened no IPC socket" >&2
+  exit 1
+fi
+
+# Launch the real bridge against mpv's socket. serve-art forwards the album's
+# presentation block to the display and answers every art request with a real
+# decode, the same code the pod's command sidecar runs. The cover resolves
+# from the EDL's first segment, through the same tiers a plain file takes.
+MEDIA_MPV_SOCKET="$SOCK" MEDIA_ART_DIR="$ARTDIR" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
+  "$BIN" serve-art >"$ARTDIR/serve.log" 2>&1 &
+SERVE=$!
+
+# Wait for mpv to close, which is when the user quits the window with q.
+wait "$MPV_PID" || true

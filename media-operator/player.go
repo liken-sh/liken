@@ -10,6 +10,7 @@ package main
 // reads its exit code, and a zero code is a Play that ran to the end.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,7 +41,16 @@ var displayScriptDir = "/display"
 // stderr and exits nonzero, which the kubelet reads as a pod that
 // failed to start its player.
 func runPlayer(items []string) {
-	argv, err := playerArgv(items)
+	// The shim reads the same blocks the command sidecar reads, because the
+	// block is where an item declares its shape, and the album expansion
+	// needs that declaration before mpv sees any argument.
+	blocks := parsePresentations(os.Getenv(presentationsVariable))
+	entries, err := expandItems(items, blocks)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "player: %v\n", err)
+		os.Exit(1)
+	}
+	argv, err := playerArgv(entries, blocks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "player: %v\n", err)
 		os.Exit(1)
@@ -142,7 +152,7 @@ func idleArgv() ([]string, error) {
 // at a stand-in reads back the path it set. exec.LookPath fails before
 // mpv runs when the image carries no mpv, which the shim reports rather
 // than execing nothing.
-func playerArgv(items []string) ([]string, error) {
+func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 	path, err := exec.LookPath(mpvBinary)
 	if err != nil {
 		return nil, fmt.Errorf("find %s: %w", mpvBinary, err)
@@ -157,6 +167,17 @@ func playerArgv(items []string) ([]string, error) {
 		"--input-ipc-server=" + mpvSocketPath,
 		"--script=" + displayScriptDir,
 		"--osc=no",
+	}
+	// A run of nothing but music draws no video, so the display owns the
+	// whole frame instead of annotating the cover art mpv would frame. One
+	// item that is not music keeps video on for the whole run.
+	//
+	// --force-window=yes holds a window over the blanked video, the way it
+	// holds one for the idle client with no file. Without it mpv opens no
+	// window at all for a run with no video track, and the display draws
+	// nothing.
+	if allMusic(blocks, len(items)) {
+		argv = append(argv, "--vid=no", "--force-window=yes")
 	}
 	if applicationID := os.Getenv(displayAppIDVariable); applicationID != "" {
 		argv = append(argv, "--wayland-app-id="+applicationID)

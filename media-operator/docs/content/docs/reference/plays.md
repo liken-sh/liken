@@ -72,7 +72,7 @@ How the item should look, for the fields the display cannot read from the file. 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specitemspresentation--type"></span>`type` | string | no | The media type the display tunes its layout by. mpv cannot infer this, and the display does not read it from the file name. One of: `video`, `music`, `image`. |
-| <span id="specitemspresentation--hint"></span>`hint` | string | no | The finer kind within the type. A video is a movie or a series, and music is an album. It selects the layout the display draws. One of: `movie`, `series`, `album`. |
+| <span id="specitemspresentation--hint"></span>`hint` | string | no | The finer kind within the type. A video is a movie or a series, and music is an album. It selects the layout the display draws. An album also declares that the item's URI names a directory, which the playback pod expands into one timeline of the audio files it holds. The directory must hold at least one audio file, or the run fails. One of: `movie`, `series`, `album`. |
 | <span id="specitemspresentation--title"></span>`title` | string | no | The item's name, which overrides the file's own tag. Set it when the tag is wrong or absent. |
 | <span id="specitemspresentation--series"></span>`series` | string | no | The series this episode belongs to. |
 | <span id="specitemspresentation--season"></span>`season` | integer | no | The season number of the episode. |
@@ -80,6 +80,9 @@ How the item should look, for the fields the display cannot read from the file. 
 | <span id="specitemspresentation--episodetitle"></span>`episodeTitle` | string | no | The title of the episode. |
 | <span id="specitemspresentation--year"></span>`year` | integer | no | The release year, shown under a movie's title. |
 | <span id="specitemspresentation--date"></span>`date` | string | no | The air date of an episode, shown on its line. Give it as an ISO date like 2017-03-05, and the display formats it. |
+| <span id="specitemspresentation--artist"></span>`artist` | string | no | The artist of a music item, shown in the header under the title. For an album this field is the one source; a standalone track can also leave it unset and let its own tags supply it. |
+| <span id="specitemspresentation--album"></span>`album` | string | no | The record a music item belongs to, shown in the header beside the year. It fills in the same way the artist does. |
+| <span id="specitemspresentation--art"></span>`art` | string | no | The cover art URI, nfs:// or https://, resolved the way the media URI is. It is the first place the cover is looked for; a picture embedded in the file and a cover.jpg beside it follow, and the pod reads both of those itself. |
 | <span id="specitemspresentation--logo"></span>`logo` | string | no | The logo art URI, nfs:// or https://, resolved the way the media URI is. The display shows it in the header in place of the title. |
 | <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The X.trickplay directory URI, nfs:// or https://, resolved the way the media URI is. The display shows a tile from it on the scrub cursor. |
 

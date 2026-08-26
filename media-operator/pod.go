@@ -70,6 +70,8 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	mounts = append(mounts, resolved.Mounts...)
 	mounts = append(mounts, artMount(), ipcMount())
 
+	blocks := presentationBlocks(play.Spec.Items, resolved.Logos, resolved.Trickplays, resolved.Arts)
+
 	container := Container{
 		Name:  playerContainer,
 		Image: image,
@@ -77,6 +79,10 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 		// only what to play.
 		Args:         resolved.Items,
 		VolumeMounts: mounts,
+		// The shim reads the same blocks the command sidecar reads: the block
+		// declares an item's shape, and the shim expands a music album into
+		// one timeline before mpv sees any argument.
+		Env: []EnvVar{{Name: presentationsVariable, Value: blocks}},
 	}
 	// The start is added only when the spec declares one, so an
 	// ordinary run's pod carries nothing extra. The shim reads it and
@@ -121,7 +127,7 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	// order, and the operator reads the translator set back off it to tell
 	// whether a Player reshaped this pod.
 	initContainers := make([]Container, 0, len(remotes)+1)
-	initContainers = append(initContainers, commandSidecar(play, claim, resolved.Logos, resolved.Trickplays, resolved.Mounts, image, busAddress, topicBase))
+	initContainers = append(initContainers, commandSidecar(play, claim, blocks, resolved.Mounts, image, busAddress, topicBase))
 	for _, remote := range remotes {
 		initContainers = append(initContainers, translatorSidecar(play, image, busAddress, topicBase, remote))
 	}
@@ -197,7 +203,7 @@ func mpvVolumeOptions(volume *PlayVolume) []string {
 // subscribes to the Play's commands topic, drives mpv through the shared
 // socket, and publishes the Play's status. It mounts the IPC volume,
 // because it is the one container besides mpv that reaches the socket.
-func commandSidecar(play *Play, claim *ResourceClaim, logos, trickplays []string, mediaMounts []VolumeMount, image, busAddress, topicBase string) Container {
+func commandSidecar(play *Play, claim *ResourceClaim, blocks string, mediaMounts []VolumeMount, image, busAddress, topicBase string) Container {
 	interval := play.Spec.TrickplayInterval
 	if interval == "" {
 		interval = defaultTrickplayInterval
@@ -207,7 +213,7 @@ func commandSidecar(play *Play, claim *ResourceClaim, logos, trickplays []string
 		{Name: playNameVariable, Value: play.Metadata.Name},
 		{Name: busAddressVariable, Value: busAddress},
 		{Name: topicBaseVariable, Value: topicBase},
-		{Name: presentationsVariable, Value: presentationBlocks(play.Spec.Items, logos, trickplays)},
+		{Name: presentationsVariable, Value: blocks},
 		{Name: trickplayIntervalVariable, Value: interval},
 	}
 	// The volume topic travels only for a unit that has speakers, and
@@ -241,8 +247,9 @@ func commandSidecar(play *Play, claim *ResourceClaim, logos, trickplays []string
 // definite value the sidecar forwards as it is.
 //
 // Each block carries the resolved logo for its item, so the bridge reads an
-// nfs logo by an in-pod path and mpv fetches an https logo by its URL.
-func presentationBlocks(items []PlayItem, logos, trickplays []string) string {
+// nfs logo by an in-pod path and mpv fetches an https logo by its URL. The
+// cover art resolves the same way.
+func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) string {
 	blocks := make([]json.RawMessage, len(items))
 	for index, item := range items {
 		if item.Presentation == nil {
@@ -255,6 +262,9 @@ func presentationBlocks(items []PlayItem, logos, trickplays []string) string {
 		}
 		if index < len(trickplays) {
 			block.Trickplay = trickplays[index]
+		}
+		if index < len(arts) {
+			block.Art = arts[index]
 		}
 		encoded, err := json.Marshal(block)
 		if err != nil {

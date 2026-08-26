@@ -4,6 +4,7 @@
 -- on select. A control that opens a chooser returns itself, and the strip hands
 -- that back to focus as the capturing module.
 local theme = require("theme")
+local presentation = require("presentation")
 local audio = require("audio")
 local subtitles = require("subtitles")
 local video = require("video")
@@ -45,7 +46,12 @@ function strip.set_redraw(fn)
   end
 end
 
+-- A music item shows no strip. An album is one audio stream with nothing to
+-- choose, so the row would only repeat what the frame already says.
 local function present()
+  if presentation.type() == "music" then
+    return {}
+  end
   local out = {}
   for _, c in ipairs(controls) do
     if c.available() then

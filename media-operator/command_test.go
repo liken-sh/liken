@@ -116,7 +116,7 @@ func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
 		changeOf("time-pos", "1.0"),
 		changeOf("playlist-pos", "1"),
 	)
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {})
 
 	want := []string{
 		`{"command":["script-message-to","display","presentation","{\"title\":\"First\"}"]}`,
@@ -152,7 +152,7 @@ func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 
 	changes := make(chan propertyChange, 8)
 	go feedChanges(changes, changeOf("playlist-pos", "0"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present)
+	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, func(json.RawMessage) {})
 
 	want := `{"command":["script-message-to","display","presentation","{}"]}`
 	select {
@@ -638,7 +638,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("playlist-pos", "1"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {})
+		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {})
 
 		mustMatchAll(t, itemsAndPauses(sent()), []string{"1 playing", "1 paused", "2 paused"})
 	})
@@ -655,7 +655,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changes <- changeOf("time-pos", "2.0")
 			close(changes)
 		}()
-		runReporter(t.Context(), changes, send, func(int) {})
+		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {})
 
 		mustMatchAll(t, positions(sent()), []string{"", "0:00:02"})
 	})
@@ -670,7 +670,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("duration", "60.0"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {})
+		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {})
 
 		mustMatch(t, len(sent()), 0)
 	})
@@ -689,7 +689,7 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 			changeOf("time-pos", "1.0"),
 			changeOf("time-pos", "2.0"),
 		)
-		runReporter(t.Context(), changes, send, func(int) {})
+		runReporter(t.Context(), changes, send, func(int) {}, func(json.RawMessage) {})
 
 		mustMatch(t, attempts, 3)
 	})

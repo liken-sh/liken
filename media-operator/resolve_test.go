@@ -212,6 +212,101 @@ func TestResolveALogoBesideTheMediaSharesTheMount(t *testing.T) {
 	}
 }
 
+// The cover art resolves the way the logo does: an nfs reference rewrites
+// under the media's own mount, and an https reference stays a URL.
+func TestResolveTheCoverArtTheWayTheLogoResolves(t *testing.T) {
+	cases := []struct {
+		name string
+		art  string
+		want string
+	}{
+		{name: "a cover beside the album", art: "nfs://nas.example/music/album/cover.jpg", want: "/media/1/cover.jpg"},
+		{name: "a cover on the web", art: "https://art.example/cover.jpg", want: "https://art.example/cover.jpg"},
+		{name: "no cover at all", art: "", want: ""},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			resolved, err := resolvePlay([]PlayItem{{
+				URI:          "nfs://nas.example/music/album/track.flac",
+				Presentation: &Presentation{Type: "music", Art: each.art},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{each.want}; !reflect.DeepEqual(resolved.Arts, want) {
+				t.Errorf("arts = %v, want %v", resolved.Arts, want)
+			}
+			if want := []string{"/media/1/track.flac"}; !reflect.DeepEqual(resolved.Items, want) {
+				t.Errorf("items = %v, want %v", resolved.Items, want)
+			}
+		})
+	}
+}
+
+// A directory the pod does not expand is refused, because mpv would expand it
+// itself and add playlist entries the operator never counted, which would land
+// every later item's block on the wrong track. The error names both ways out.
+func TestResolveRefusesADirectoryThatIsNoAlbum(t *testing.T) {
+	cases := []struct {
+		name         string
+		presentation *Presentation
+	}{
+		{name: "no presentation at all"},
+		{name: "music with no hint", presentation: &Presentation{Type: "music"}},
+		{name: "the album hint on a film", presentation: &Presentation{Type: "video", Hint: "album"}},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			_, err := resolvePlay([]PlayItem{{
+				URI:          "nfs://nas.example/music/None Shall Pass/",
+				Presentation: each.presentation,
+			}})
+			if err == nil {
+				t.Fatal("a directory that is no album resolved")
+			}
+			want := `the URI "nfs://nas.example/music/None Shall Pass/" names a directory; ` +
+				"mark the item as an album with type music and hint album, or name a file"
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err.Error(), want)
+			}
+		})
+	}
+}
+
+// A music album is one item and one directory, and it mounts the way a file
+// item mounts: the parent is the volume, and the item is the directory under
+// it. A trailing slash changes nothing.
+func TestResolveAnAlbumDirectory(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+	}{
+		{name: "a directory", uri: "nfs://nas.example/music/None Shall Pass"},
+		{name: "a directory with a trailing slash", uri: "nfs://nas.example/music/None Shall Pass/"},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			resolved, err := resolvePlay([]PlayItem{{
+				URI:          each.uri,
+				Presentation: &Presentation{Type: "music", Hint: "album"},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{"/media/1/None Shall Pass"}; !reflect.DeepEqual(resolved.Items, want) {
+				t.Errorf("items = %v, want %v", resolved.Items, want)
+			}
+			volume := Volume{Name: "media-1", NFS: &NFSVolumeSource{Server: "nas.example", Path: "/music", ReadOnly: true}}
+			if len(resolved.Volumes) != 1 || !reflect.DeepEqual(resolved.Volumes[0], volume) {
+				t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volume)
+			}
+		})
+	}
+}
+
 // An https logo stays a URL for the bridge to fetch, and the media
 // beside it still mounts.
 func TestResolveAnHTTPSLogoStaysAURL(t *testing.T) {
@@ -271,7 +366,6 @@ func TestResolveRefusesAURIItCannotMount(t *testing.T) {
 		{name: "no scheme at all", uri: "/export/films/film.mkv"},
 		{name: "an nfs URI with no server", uri: "nfs:///export/films/film.mkv"},
 		{name: "an nfs URI with no directory to mount", uri: "nfs://nas.example/film.mkv"},
-		{name: "an nfs URI that names a directory", uri: "nfs://nas.example/export/films/"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

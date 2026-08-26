@@ -36,8 +36,12 @@ type resolution struct {
 	// Trickplays is the resolved trickplay reference for each item, in spec
 	// order. An item with no trickplay has an empty string.
 	Trickplays []string
-	Volumes    []Volume
-	Mounts     []VolumeMount
+	// Arts is the resolved cover reference for each item, in spec order. It
+	// resolves the way the logo does, and an item with no art has an empty
+	// string.
+	Arts    []string
+	Volumes []Volume
+	Mounts  []VolumeMount
 }
 
 // nfsRef is one parsed nfs:// URI: the server it names, and the path segments
@@ -67,6 +71,7 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 	mediaRefs := make([]resolvedRef, len(items))
 	logoRefs := make([]resolvedRef, len(items))
 	trickRefs := make([]resolvedRef, len(items))
+	artRefs := make([]resolvedRef, len(items))
 
 	var serverOrder []string
 	seen := map[string]bool{}
@@ -80,6 +85,16 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 	}
 
 	for index, item := range items {
+		// A directory item is refused unless its block marks it as an album.
+		// The pod expands an album into one timeline and one playlist entry,
+		// and a directory mpv expands itself would add entries the operator
+		// never counted, so every later item's block and art would land on
+		// the wrong track.
+		if strings.HasSuffix(item.URI, "/") && !albumItem(item) {
+			return resolution{}, fmt.Errorf(
+				"the URI %q names a directory; mark the item as an album with type music and hint album, or name a file",
+				item.URI)
+		}
 		media, err := parseRef(item.URI)
 		if err != nil {
 			return resolution{}, err
@@ -89,10 +104,11 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 			register(media.nfs)
 		}
 
-		logo, trickplay := "", ""
+		logo, trickplay, cover := "", "", ""
 		if item.Presentation != nil {
 			logo = item.Presentation.Logo
 			trickplay = item.Presentation.Trickplay
+			cover = item.Presentation.Art
 		}
 		if logo != "" {
 			art, err := parseRef(logo)
@@ -112,6 +128,16 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 			trickRefs[index] = trick
 			if trick.nfs != nil {
 				register(trick.nfs)
+			}
+		}
+		if cover != "" {
+			art, err := parseRef(cover)
+			if err != nil {
+				return resolution{}, err
+			}
+			artRefs[index] = art
+			if art.nfs != nil {
+				register(art.nfs)
 			}
 		}
 	}
@@ -148,12 +174,20 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 	resolved.Items = make([]string, len(items))
 	resolved.Logos = make([]string, len(items))
 	resolved.Trickplays = make([]string, len(items))
+	resolved.Arts = make([]string, len(items))
 	for index := range items {
 		resolved.Items[index] = rewrite(mediaRefs[index])
 		resolved.Logos[index] = rewrite(logoRefs[index])
 		resolved.Trickplays[index] = rewrite(trickRefs[index])
+		resolved.Arts[index] = rewrite(artRefs[index])
 	}
 	return resolved, nil
+}
+
+// albumItem says whether one item's block marks it as an album, the one shape
+// of item the pod expands from a directory.
+func albumItem(item PlayItem) bool {
+	return item.Presentation != nil && isAlbum(*item.Presentation)
 }
 
 // resolvedPreferences is the settled value of each preference field, after
@@ -317,14 +351,15 @@ func parseRef(raw string) (resolvedRef, error) {
 }
 
 // parseNFS reads the server and the path segments from one nfs URI. A URI that
-// names no server, no file, or no directory to mount fails, because none of
-// the three resolves to a mount with a file under it.
+// names no server, or no directory to mount, fails, because neither resolves
+// to a mount with the item under it.
+//
+// The last segment may name a file or a folder, because a music album is
+// one item and one folder. A trailing slash changes nothing, because the
+// empty last segment drops out of the split.
 func parseNFS(parsed *url.URL, raw string) (*nfsRef, error) {
 	if parsed.Host == "" {
 		return nil, fmt.Errorf("the URI %q names no NFS server", raw)
-	}
-	if strings.HasSuffix(parsed.Path, "/") {
-		return nil, fmt.Errorf("the URI %q names a directory, not a file", raw)
 	}
 	segments := splitPath(parsed.Path)
 	if len(segments) < 2 {
