@@ -79,9 +79,9 @@ body {
   max-width: var(--measure);
   margin: 2rem auto 4rem;
   padding: 0 1rem;
-  /* One notch above the browser default of 16px. The measure is in
+  /* Two notches above the browser default of 16px. The measure is in
      rem, so the column's width holds and the text alone grows. */
-  font-size: 1.0625rem;
+  font-size: 1.125rem;
   font-family: "Source Sans 3", system-ui, sans-serif;
   line-height: 1.6;
   color: var(--ink);
