@@ -43,6 +43,14 @@ The controller itself, selected out of the devices the hardware operators publis
 | <span id="specdevice--class"></span>`class` | string | yes | The DeviceClass the claim allocates through. Consumer classes are the cluster owner's vocabulary, so the name is whatever this cluster calls its controllers. |
 | <span id="specdevice--selector"></span>`selector` | string | no | A CEL expression over device.attributes that picks this one controller, such as a match on its address. Omit it, and the class alone chooses. |
 
+## status
+
+What the operator reports about this controller. The one field names the unit its presses reach now.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="status--player"></span>`player` | string | no | The Player this Remote's focus mark names now: the unit its presses reach, idle or playing. It is empty while no Player lists this Remote. |
+
 ## The Remote's pod
 
 The operator reconciles one pod for every `Remote` in the
@@ -54,12 +62,13 @@ allocation and the pod keeps running. It does not tolerate
 `bluetooth.liken.sh/no-input-node`, so the pod stays `Pending` until
 the controller first connects, then keeps running through every later sleep.
 
-## No status
+## Status
 
-The operator reports nothing on a `Remote`, so there is no status
-subresource. `kubectl get remotes` shows each controller's `Keymap`
-and its age. A `Remote` whose `Keymap` does not compile shows the
-failure on the `Play` that uses it.
+The operator writes one fact on a `Remote`: `status.player`, the
+`Player` its focus mark names now. `kubectl get remotes` shows
+each controller's `Keymap`, the unit it drives, and its age. A
+`Remote` whose `Keymap` does not compile shows the failure on the
+`Play` that uses it.
 
 ## On the bus
 
@@ -72,8 +81,8 @@ base.
 | `events`       | the `Remote`'s pod | no       | one evdev event               |
 | `presence`     | the `Remote`'s pod | yes      | `{"connected": true}`         |
 | `availability` | the `Remote`'s pod | yes      | `online` or `offline`         |
-| `focus`        | operator     | yes      | the name of the owning `Play` |
-| `focus/cycle`  | translator   | no       | a request to advance focus    |
+| `focus`        | operator     | yes      | the name of the `Player` it drives |
+| `focus/cycle`  | the focus holder | no   | a request to advance focus    |
 
 ### events
 
@@ -113,15 +122,28 @@ controller.
 
 ### focus and focus/cycle
 
-The focus mark is the plain name of the `Play` that owns this
-controller now, as bytes, not JSON. The operator is the only writer,
-and the topic is retained, so a press reaches its `Play` even while
-the operator is down. Each translator for the controller gates on
-the mark: it acts on a press only when the mark names its own
-`Play`, and it drops every other press.
+The focus mark is the plain name of the `Player` this controller
+drives now, as bytes, not JSON. The operator is the only writer,
+and the topic is retained, so a press reaches its unit even while
+the operator is down. Every reader of the controller's presses
+gates on the mark. A `Play`'s translator acts only when the mark
+names the `Player` its film runs on. An idle unit's sidecar acts
+only when the mark names that `Player` itself, and the idle screen
+draws a small hexagon beside the focused controller in its parts
+list.
+
+The operator moves the marks. When a `Play` starts on a `Player`,
+each of that unit's controllers is marked to it, so the controller
+in a person's hand drives the film they just started. A mark that
+names a deleted `Player`, or a `Player` that no longer lists the
+controller, moves to the first bound `Player` by name. A `Play`
+that finishes moves no mark: the unit stays focused and shows its
+idle screen.
 
 A press bound to `cycle-focus` publishes on `focus/cycle`. Only the
-translator that holds focus publishes it, and the operator reads it
-and advances the mark to the next unit. The operator also moves a
-mark off a `Play` that finished, so a controller with a live `Play`
-always has a translator that acts.
+holder of focus publishes it, the translator during a film and the
+idle sidecar between films. The operator reads the request and
+advances the mark to the next bound `Player` by name, wrapping the
+last back to the first. A controller bound to one unit wraps to
+the same `Player`, and the operator republishes the mark, which
+the idle screen answers with a pulse of its hexagon.

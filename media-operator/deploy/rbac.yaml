@@ -59,6 +59,12 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [remotes]
     verbs: [get, list, watch]
+  # Only the status half, the same subresource split the plays and the
+  # players use. The operator writes which unit a controller drives now,
+  # never the device selector a person declared.
+  - apiGroups: [media.liken.sh]
+    resources: [remotes/status]
+    verbs: [update]
   # The keymaps, cluster-scoped now. The operator lists them to compile
   # every Keymap and publish its table to the bus retained on each pass,
   # and the watch is the wake signal for a keymap edit. Read-only,

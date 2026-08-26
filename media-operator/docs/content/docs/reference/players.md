@@ -192,7 +192,7 @@ the operator.
       "components": [
         {"name": "Portable Screen", "kind": "display"},
         {"name": "Built-in Speakers", "kind": "sink"},
-        {"name": "Studio Controller", "kind": "remote", "connected": true}
+        {"name": "Studio Controller", "kind": "remote", "connected": true, "focused": true}
       ]
     }
 
@@ -201,7 +201,10 @@ present while a run starts or plays: `name` is the object a person
 finds with `kubectl`, and `title` is the one line a screen draws. A
 component's `kind` is `display`, `sink`, or `remote`, and only a
 remote carries `connected`, because a wired screen reports no
-presence.
+presence. `focused` appears on the one remote whose
+[focus mark](/docs/reference/remotes/) names this `Player`, and the
+idle screen draws a small hexagon beside that controller in its
+parts list. Every other component omits the key.
 
 ### `volume`
 

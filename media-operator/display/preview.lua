@@ -23,6 +23,11 @@ local identity = require("identity")
 local kind = "Idle"
 local connected = true
 
+-- Whether the fake status marks the remote focused. The f key sets it and
+-- pulses, the way a live mark landing here does, and the g key clears it,
+-- the way a cycle onto another unit does.
+local focused = false
+
 -- Whether the s key last put the screen to sleep, so the one key plays
 -- the two edges of the fade in turn.
 local asleep = false
@@ -35,6 +40,9 @@ local function status_json()
     if index == #names then
       component.kind = "remote"
       component.connected = connected
+      if focused then
+        component.focused = true
+      end
     end
     components[#components + 1] = component
   end
@@ -76,6 +84,22 @@ function preview.enable(send_status, send_revealed, send_sleep, send_wake)
     connected = not connected
     send_status(status_json())
   end)
+  -- f plays a live focus message naming this unit: the sidecar sends the
+  -- pulse and the operator's status follows with the focused part. A first
+  -- press draws the hexagon and beats it, and every later press beats it
+  -- again, which is the cycle press that wraps onto the unit already
+  -- focused. The index is 0 because the preview's status lists one remote.
+  mp.add_key_binding("f", "liken-preview-focus", function()
+    focused = true
+    send_status(status_json())
+    mp.commandv("script-message", "focus-pulse", "0")
+  end)
+  -- g plays the focus cycling away: the status stops marking the remote,
+  -- the hexagon goes, and nothing beats.
+  mp.add_key_binding("g", "liken-preview-unfocus", function()
+    focused = false
+    send_status(status_json())
+  end)
   -- s plays the two edges of the fade in turn, the quiet window that
   -- runs out and the press that follows, through the same handlers the
   -- two script messages call.
@@ -110,7 +134,7 @@ function preview.enable(send_status, send_revealed, send_sleep, send_wake)
     mp.commandv("script-message", "volume-changed")
   end)
 
-  mp.msg.info("liken display preview keys: p starting, o playing, i idle, d presence, s sleep, 9/0 volume, m mute")
+  mp.msg.info("liken display preview keys: p starting, o playing, i idle, d presence, f focus, g unfocus, s sleep, 9/0 volume, m mute")
   enabled = true
 end
 
@@ -123,7 +147,7 @@ function preview.draw()
   if not enabled then
     return nil
   end
-  local legend = "p play starts    o playing    i film ends    d presence    s sleep    9/0 volume    m mute    q quit"
+  local legend = "p play starts    o playing    i film ends    d presence    f focus    g unfocus    s sleep    9/0 volume    m mute    q quit"
   return theme.text(
     theme.canvas.w - theme.margin.x, theme.canvas.h - theme.margin.y,
     legend, theme.type.tiny, theme.color.muted, 3, theme.alpha.dim

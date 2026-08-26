@@ -366,6 +366,15 @@ end
 
 mp.register_script_message("player-status", on_status)
 
+-- The sidecar sends focus-pulse when a live focus mark names this Player,
+-- with the remote's 0-based index in the Player's spec.remotes order as
+-- the one argument. The status that follows carries the focused part, and
+-- this message carries the moment, so the identity block beats that
+-- remote's marker once as focus arrives.
+mp.register_script_message("focus-pulse", function(index)
+  identity.pulse(index)
+end)
+
 -- The sidecar sends this the moment it recreated the idle surface and showed it
 -- again, after a film ended. It names the exact frame the screen came back into
 -- view, which is the frame the mark starts its ramp down from full swing.

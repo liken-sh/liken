@@ -20,13 +20,22 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
-      # The operator reports nothing on a Remote yet, so there is no
-      # status subresource. A Remote whose Keymap will not compile
-      # shows the failure on the Play that tried to use it.
+      # The operator reports the focused Player on a Remote, so this
+      # version carries a status subresource. The split keeps the operator
+      # from rewriting the device selector a person declared. A Remote
+      # whose Keymap will not compile still shows the failure on the Play
+      # that tried to use it.
+      subresources:
+        status: {}
+      # The Player column answers which unit this controller drives now,
+      # so kubectl get remotes reads it without a read of the bus.
       additionalPrinterColumns:
         - name: Keymap
           type: string
           jsonPath: .spec.keymap
+        - name: Player
+          type: string
+          jsonPath: .status.player
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -76,3 +85,15 @@ spec:
                     namespace. A Player entry in spec.remotes may
                     override it per unit, so one controller can map
                     two ways on two units.
+            status:
+              type: object
+              description: >-
+                What the operator reports about this controller. The
+                one field names the unit its presses reach now.
+              properties:
+                player:
+                  type: string
+                  description: >-
+                    The Player this Remote's focus mark names now:
+                    the unit its presses reach, idle or playing. It
+                    is empty while no Player lists this Remote.

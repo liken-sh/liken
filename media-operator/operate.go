@@ -374,8 +374,12 @@ func (o *operator) pass() {
 			zone = defaults.Spec.TimeZone
 			defaultIdle = defaults.Spec.Idle
 		}
+		// Focus settles before the Player statuses, because a remote part
+		// of a unit's bus status carries whether the mark names that unit.
+		// Arbitrating after would publish the previous pass's mark and
+		// leave the indicator one pass behind.
+		o.reconcileFocus(players.Items)
 		o.reconcilePlayers(players.Items, list.Items, zone, defaultIdle)
-		o.reconcileFocus(list.Items, players.Items)
 	}
 	o.reconcileRemotes()
 	o.reconcileKeymaps()
@@ -467,8 +471,8 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 // after a fresh broker session, because the broker holds none of it. It
 // clears the record of published keymaps and Player statuses, so
 // reconcileKeymaps and reconcilePlayers write every one of them again this
-// pass, and it republishes each focus mark, so a controller keeps its
-// owning Play across a broker or operator restart. The command sidecar and
+// pass, and it republishes each focus mark, so a controller keeps the
+// Player it drives across a broker or operator restart. The command sidecar and
 // the standing remote pod re-establish their own retained topics from
 // their own connect, so those need no help here.
 func (o *operator) reestablishRetained() {
@@ -479,8 +483,8 @@ func (o *operator) reestablishRetained() {
 	// waits out volumeSeedGrace and then seeds only the units nothing
 	// answered for.
 	o.volumeSeedAfter = time.Now().Add(volumeSeedGrace)
-	for key, play := range o.focus.snapshot() {
-		o.publishFocus(key, play)
+	for key, player := range o.focus.snapshot() {
+		o.publishFocus(key, player)
 	}
 }
 
@@ -721,7 +725,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 // backstop tick off the bus while a unit sits idle.
 func (o *operator) publishPlayerStatus(player *Player, desired PlayerStatus, plays []Play) string {
 	topic := playerStatusTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name)
-	payload, err := json.Marshal(derivePlayerBusStatus(player, desired, plays, o.presence))
+	payload, err := json.Marshal(derivePlayerBusStatus(player, desired, plays, o.presence, o.focus))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshaling player %s/%s bus status: %v\n",
 			player.Metadata.Namespace, player.Metadata.Name, err)
@@ -806,9 +810,10 @@ func (o *operator) publishRePresent(namespace, name string) {
 }
 
 // reconcileRemotes reconciles a standing pod for every Remote in the
-// cluster. A Remote's pod runs whether or not anything plays, so this
-// pass is its own read of the whole collection and not derived from the
-// Plays.
+// cluster and writes each Remote's status. A Remote's pod runs whether or
+// not anything plays, so this pass is its own read of the whole collection
+// and not derived from the Plays. It runs after reconcileFocus on the same
+// pass, so the status reports the mark this pass settled.
 func (o *operator) reconcileRemotes() {
 	list, err := ListAllRemotes(o.client)
 	if err != nil {
@@ -818,9 +823,15 @@ func (o *operator) reconcileRemotes() {
 	live := make(map[string]bool, len(list.Items))
 	for index := range list.Items {
 		remote := &list.Items[index]
-		live[controllerKey(remote.Metadata.Namespace, remote.Metadata.Name)] = true
+		key := controllerKey(remote.Metadata.Namespace, remote.Metadata.Name)
+		live[key] = true
 		if err := o.reconcileRemote(remote); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling remote %s/%s: %v\n",
+				remote.Metadata.Namespace, remote.Metadata.Name, err)
+		}
+		desired := RemoteStatus{Player: o.focus.markFor(key)}
+		if err := writeRemoteStatus(o.client, remote, desired); err != nil {
+			fmt.Fprintf(os.Stderr, "writing remote %s/%s status: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
 	}
@@ -829,6 +840,37 @@ func (o *operator) reconcileRemotes() {
 	// whole collection here already, so this is the one place that reads
 	// which controllers remain.
 	o.presence.retain(live)
+}
+
+// writeRemoteStatus follows the same two rules as the Play's and the
+// Player's status writers: an unchanged status is not written, and a
+// conflict earns one retry. The operator watches Remotes, so a needless
+// write would wake the loop that just wrote it, a pass per pass forever.
+func writeRemoteStatus(c *Client, remote *Remote, desired RemoteStatus) error {
+	if remote.Status == desired {
+		return nil
+	}
+
+	remote.Status = desired
+	_, err := PutRemoteStatus(c, remote)
+	if !errors.Is(err, ErrConflict) {
+		return err
+	}
+
+	// A conflict means the Remote changed between the read and the write.
+	// The fresh copy carries the resourceVersion the API server accepts,
+	// and the desired status still reports the mark this pass settled, so
+	// it goes on unchanged.
+	fresh, err := GetRemote(c, remote.Metadata.Namespace, remote.Metadata.Name)
+	if err != nil {
+		return err
+	}
+	if fresh.Status == desired {
+		return nil
+	}
+	fresh.Status = desired
+	_, err = PutRemoteStatus(c, fresh)
+	return err
 }
 
 // reconcile takes one Play from the Player it names to the status it

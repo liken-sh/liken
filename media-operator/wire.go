@@ -49,6 +49,15 @@ const (
 	playNamespaceVariable = "MEDIA_PLAY_NAMESPACE"
 	playNameVariable      = "MEDIA_PLAY_NAME"
 
+	// playerNameVariable carries a Player's metadata.name, the value every
+	// focus mark holds. In a playback pod it is the Play's own unit,
+	// spec.players[0], and the translator gates the mark against it. In an
+	// idle pod it is the idle Player itself, and the sidecar gates the
+	// same way. It is the object name, never the friendly name
+	// IDLE_PLAYER_NAME carries, because the operator writes marks from
+	// metadata.name.
+	playerNameVariable = "MEDIA_PLAYER_NAME"
+
 	// playStartVariable carries spec.start when the Play declares one.
 	// The player shim turns it into mpv's --start, so the run begins
 	// where the spec says instead of at zero.
@@ -73,14 +82,17 @@ const (
 
 	// The idle sidecar's fade wiring. The first carries the resolved
 	// quiet window in seconds, where zero means the screen never fades
-	// on its own. The two topic lists are newline-joined and aligned by
-	// position, so each remote's events topic pairs with the keymap
-	// topic that names its presses. A blank keymap line is a remote
-	// with no keymap: its presses still wake the screen, and none of
-	// them is back.
+	// on its own. The three topic lists are newline-joined and aligned by
+	// position, so each remote's events topic pairs with the keymap topic
+	// that names its presses and the focus topic that carries its mark. A
+	// blank keymap line is a remote with no keymap: its presses still wake
+	// the screen while it holds focus, and none of them is back. The
+	// sidecar gates every press on the mark naming this Player, and it
+	// builds the cycle topic from the focus topic.
 	idleFadeAfterSecondsVariable   = "IDLE_FADE_AFTER_SECONDS"
 	idleRemoteEventsTopicsVariable = "IDLE_REMOTE_EVENTS_TOPICS"
 	idleRemoteKeymapTopicsVariable = "IDLE_REMOTE_KEYMAP_TOPICS"
+	idleRemoteFocusTopicsVariable  = "IDLE_REMOTE_FOCUS_TOPICS"
 
 	// The idle sidecar's hardware wiring: the off window in seconds,
 	// where zero never darkens the panel, and the mode the sidecar

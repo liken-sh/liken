@@ -1,9 +1,10 @@
 package main
 
-// These tests cover the translator sidecar: a focused controller event
-// becomes a named command, a non-focused one publishes nothing, a
-// cycle-focus press publishes a cycle request, and a focus change stops
-// an in-flight repeat.
+// These tests cover the translator sidecar. A controller event on the
+// focused Player becomes a named command, one on another Player publishes
+// nothing, a Play's own name in the mark does not pass the gate, a
+// cycle-focus press publishes a cycle request, and a focus change stops an
+// in-flight repeat.
 
 import (
 	"context"
@@ -26,16 +27,17 @@ func testTranslator(t *testing.T) (*translator, *fakeBroker) {
 		focusTopicID:    remoteFocusTopic(defaultTopicBase, "house", "sofa"),
 		focusCycleTopic: remoteFocusCycleTopic(defaultTopicBase, "house", "sofa"),
 		playName:        "movie",
+		playerName:      "theater",
 		bus:             bus,
 		repeatCtx:       context.Background(),
 		repeats:         map[uint16]context.CancelFunc{},
 	}, brokers[0]
 }
 
-// focusHere marks the translator's own Play, so a press passes the focus
-// gate.
+// focusHere marks the translator's own Player, so a press passes the
+// focus gate.
 func focusHere(tr *translator) {
-	tr.handle(tr.focusTopicID, []byte("movie"))
+	tr.handle(tr.focusTopicID, []byte("theater"))
 }
 
 func mustJSON(t *testing.T, value any) []byte {
@@ -139,19 +141,37 @@ func TestATranslatorMatchesNothingBeforeAKeymapArrives(t *testing.T) {
 	}
 }
 
-// A translator whose mark names another Play publishes nothing for the
-// same press a focused translator would command.
+// A translator whose mark names another Player publishes nothing for
+// the same press a focused translator would command.
 func TestANonFocusedTranslatorPublishesNothing(t *testing.T) {
 	tr, broker := testTranslator(t)
 	tr.handle(tr.keymapTopicID, mustJSON(t,
 		[]compiledBinding{{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause}}))
 
-	tr.handle(tr.focusTopicID, []byte("other"))
+	tr.handle(tr.focusTopicID, []byte("console"))
 	tr.handle(tr.eventsTopic, mustJSON(t, remoteEvent{Type: evKey, Code: 0x130, Value: 1}))
 
 	select {
 	case got := <-broker.pubs:
 		t.Fatalf("a non-focused translator published %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// The gate reads the Player, so a mark holding this translator's own
+// Play name passes nothing. The mark carries a Player name and never a Play
+// name.
+func TestAMarkNamingThePlayDoesNotPassTheGate(t *testing.T) {
+	tr, broker := testTranslator(t)
+	tr.handle(tr.keymapTopicID, mustJSON(t,
+		[]compiledBinding{{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause}}))
+
+	tr.handle(tr.focusTopicID, []byte("movie"))
+	tr.handle(tr.eventsTopic, mustJSON(t, remoteEvent{Type: evKey, Code: 0x130, Value: 1}))
+
+	select {
+	case got := <-broker.pubs:
+		t.Fatalf("a mark naming the play published %+v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
 }
@@ -178,8 +198,8 @@ func TestACycleFocusPressPublishesACycleRequest(t *testing.T) {
 	}
 }
 
-// A focus change away from this Play stops a repeat the press started, so
-// a held control does not keep firing after focus leaves.
+// A focus change away from this Player stops a repeat the press
+// started, so a held control does not keep firing after focus leaves.
 func TestAFocusChangeAwayStopsAnInFlightRepeat(t *testing.T) {
 	tr, broker := testTranslator(t)
 	tr.handle(tr.keymapTopicID, mustJSON(t, []compiledBinding{
@@ -210,7 +230,7 @@ func TestAFocusChangeAwayStopsAnInFlightRepeat(t *testing.T) {
 
 	tr.handle(tr.eventsTopic, mustJSON(t, remoteEvent{Type: evKey, Code: 0x137, Value: 1}))
 	time.Sleep(50 * time.Millisecond)
-	tr.handle(tr.focusTopicID, []byte("other"))
+	tr.handle(tr.focusTopicID, []byte("console"))
 	time.Sleep(20 * time.Millisecond)
 
 	held := total()

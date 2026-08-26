@@ -317,6 +317,7 @@ func TestBuildPodRunsOneTranslatorPerRemote(t *testing.T) {
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: "house"},
 			{Name: playNameVariable, Value: "movie"},
+			{Name: playerNameVariable, Value: "theater"},
 			{Name: busAddressVariable, Value: testBusAddress},
 			{Name: topicBaseVariable, Value: testTopicBase},
 			{Name: remoteNameVariable, Value: "sofa"},

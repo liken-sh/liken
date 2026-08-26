@@ -464,14 +464,24 @@ type MediaPreferencesList struct {
 	Items    []MediaPreferences `json:"items"`
 }
 
-// A Remote is one physical controller: the device it is, the Keymap
-// for its model, and the player it drives. This operator only reads
-// it, and only at the moment a Play's pod is built.
+// A Remote is one physical controller: the device it is and the Keymap
+// for its model. The operator reads the spec to build the standing pod and
+// the translator sidecars, and writes the status to report which unit the
+// controller drives now.
 type Remote struct {
-	APIVersion string     `json:"apiVersion,omitempty"`
-	Kind       string     `json:"kind,omitempty"`
-	Metadata   ObjectMeta `json:"metadata"`
-	Spec       RemoteSpec `json:"spec"`
+	APIVersion string       `json:"apiVersion,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       RemoteSpec   `json:"spec"`
+	Status     RemoteStatus `json:"status"`
+}
+
+// RemoteStatus is what the operator reports on a Remote. Player is the
+// Player the controller's retained focus mark names, so kubectl answers
+// which unit a press reaches without a read of the bus. It is empty while
+// no Player in the namespace lists the Remote.
+type RemoteStatus struct {
+	Player string `json:"player,omitempty"`
 }
 
 // A Remote holds its device selector and the Keymap for its model,

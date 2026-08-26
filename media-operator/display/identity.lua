@@ -13,6 +13,13 @@
 -- full when it returns. A part with no live state, a wired screen or its
 -- built-in speakers, draws at full brightness always, because a part that cannot
 -- be absent must not read as present-for-now.
+--
+-- The block also shows focus. The status marks at most one part focused,
+-- the remote whose presses drive this unit, and that line carries a small
+-- hexagon in the left margin. The environment seed carries no focus, so no
+-- hexagon draws before the first status. When focus arrives here, the
+-- sidecar sends focus-pulse with the remote's 0-based index, and that
+-- line's hexagon beats white once.
 local theme = require("theme")
 
 local identity = {}
@@ -33,6 +40,18 @@ local ITEM_SIZE = theme.type.small - 4
 local ITEM_LEADING = 1.1
 local HEADER_LEADING = 1.3
 
+-- The focus marker's geometry: a hexagon, the same shape as the logo mark.
+-- MARKER_R is center-to-vertex, a fifth of ITEM_SIZE, so the mark scales
+-- with the line and stands 12 canvas pixels tall beside a 30 pixel name.
+-- MARKER_X is the mark's center, MARKER_GAP left of LEFT, inside the
+-- margin, so the names keep one flush-left column with or without a mark.
+-- MARKER_RISE lifts the center off the line's an1 anchor, the bottom of
+-- the line box, to the middle of the lowercase letters.
+local MARKER_R = ITEM_SIZE / 5
+local MARKER_GAP = 18
+local MARKER_X = LEFT - MARKER_GAP
+local MARKER_RISE = ITEM_SIZE * 0.42
+
 -- The brightness of one part runs from 0, theme's dim alpha, to 1, opaque. A
 -- disconnected part settles at 0 and a connected part at 1. The step runs on the
 -- same period the OSD fade uses, about sixty times a second.
@@ -48,6 +67,14 @@ local FLASH_FALL_MS = 500
 -- third of full brightness: enough to read the name, far enough from full that a
 -- glance tells the disconnected part from the rest.
 local DIM_BYTE = tonumber(theme.alpha.dim:match("&H(%x+)&"), 16)
+
+-- The marker's two resting alphas. On a lit line the mark draws at
+-- theme.alpha.dim, one step under its name. On a dim line it draws at dim
+-- of dim, 0xE1, the same fraction of the line it holds on a lit one, so
+-- the mark never reads brighter than the part it marks. A pulse carries it
+-- to opaque.
+local MARKER_BYTE = DIM_BYTE
+local MARKER_DIM_BYTE = 255 - math.floor((255 - DIM_BYTE) * (255 - DIM_BYTE) / 255 + 0.5)
 
 -- The three channel bytes of the text color, so the flash interpolates from the
 -- normal text color toward white and back.
@@ -75,34 +102,65 @@ function identity.split_lines(text)
 end
 local split_lines = identity.split_lines
 
--- One entry per part: its name, whether it reports a live connection, the
--- brightness it draws at now, the brightness it eases toward, and the flash it
--- carries from a reconnection. connected is nil for a part that reports no live
--- state at all.
-local function new_item(name, connected)
+-- A beat is one white pulse: level 0 at rest, rising while it climbs to 1,
+-- then falling back to 0. Two beats run per part, the reconnection flash
+-- on the name and the focus pulse on the marker, and both use these two
+-- fields so one stepper serves them.
+local function new_beat()
+  return { level = 0, rising = false }
+end
+
+-- One entry per part: its name, its kind, its presence, its focus, the
+-- brightness it draws at now and eases toward, and its two beats. kind is
+-- the component's kind from the status, "remote" on a controller, and nil
+-- for a part the environment seeded. connected is nil for a part that
+-- reports no live state. focused is true only on the part the status
+-- marks, and nil before the first status.
+local function new_item(name, kind, connected, focused)
   local lit = connected ~= false
   return {
     name = name,
+    kind = kind,
     connected = connected,
+    focused = focused,
     level = lit and 1 or 0,
     target = lit and 1 or 0,
-    flash = 0,
-    flash_rising = false,
+    flash = new_beat(),
+    pulse = new_beat(),
   }
 end
 
 local header = os.getenv("IDLE_PLAYER_NAME")
 local items = {}
 for _, name in ipairs(split_lines(os.getenv("IDLE_PLAYER_COMPONENTS"))) do
-  items[#items + 1] = new_item(name, nil)
+  items[#items + 1] = new_item(name, nil, nil, nil)
 end
 
 local timer = nil
 
--- Step every part toward its target brightness, then run any flash through its
--- rise and its fall, and stop the timer once nothing moves. One timer serves
--- every part and both directions, so a part that reconnects during its own
--- fade-out turns around on the same timer.
+-- step_beat carries one beat through its rise and its fall, and reports
+-- whether the beat still moves.
+local function step_beat(beat, rise_step, fall_step)
+  if beat.rising then
+    beat.level = beat.level + rise_step
+    if beat.level >= 1 then
+      beat.level = 1
+      beat.rising = false
+    end
+    return true
+  end
+  if beat.level > 0 then
+    beat.level = math.max(0, beat.level - fall_step)
+    return true
+  end
+  return false
+end
+
+-- Step every part toward its target brightness, then run its flash and its
+-- focus pulse through their rise and fall, and stop the timer once nothing
+-- moves. One timer serves every part, both beats, and both directions, so
+-- a part that reconnects during its own fade-out turns around on the same
+-- timer.
 local function step()
   local moving = false
   local dim_step = TICK * 1000 / DIM_MS
@@ -117,15 +175,10 @@ local function step()
     if item.level ~= item.target then
       moving = true
     end
-    if item.flash_rising then
-      item.flash = item.flash + rise_step
-      if item.flash >= 1 then
-        item.flash = 1
-        item.flash_rising = false
-      end
+    if step_beat(item.flash, rise_step, fall_step) then
       moving = true
-    elseif item.flash > 0 then
-      item.flash = math.max(0, item.flash - fall_step)
+    end
+    if step_beat(item.pulse, rise_step, fall_step) then
       moving = true
     end
   end
@@ -146,7 +199,10 @@ end
 -- whole block with it. A part that keeps its name keeps the brightness it draws
 -- at, so a status that changed one field does not restart every fade. A part
 -- that changed from disconnected to connected starts a flash, which is the pulse
--- that tells a person the controller came back.
+-- that tells a person the controller came back. The status sets only
+-- whether the focus marker draws. A part that gained focused starts no
+-- beat, because the sidecar sends focus-pulse for the arrival and the
+-- status carries no timing of its own.
 function identity.receive(status)
   if type(status) ~= "table" then
     return
@@ -166,16 +222,25 @@ function identity.receive(status)
         if type(component.connected) == "boolean" then
           connected = component.connected
         end
+        local kind = nil
+        if type(component.kind) == "string" then
+          kind = component.kind
+        end
+        -- focused is absent on every part but the focused one, so its
+        -- absence is a false and never an unknown.
+        local focused = component.focused == true
         local item = previous[component.name]
         if item then
           local returned = connected == true and item.connected == false
+          item.kind = kind
           item.connected = connected
+          item.focused = focused
           item.target = connected ~= false and 1 or 0
           if returned then
-            item.flash_rising = true
+            item.flash.rising = true
           end
         else
-          item = new_item(component.name, connected)
+          item = new_item(component.name, kind, connected, focused)
         end
         list[#list + 1] = item
       end
@@ -186,9 +251,44 @@ function identity.receive(status)
   redraw_cb()
 end
 
+-- identity.pulse beats one part's marker white once. The index is the
+-- remote's 0-based position as the sidecar sends it, counted over the
+-- parts of kind "remote" in the order the status lists them, which is the
+-- Player's spec.remotes order. An index that names no remote changes
+-- nothing, because a pulse can arrive for a remote this unit's status has
+-- not listed yet. The beat runs whether or not the marker draws now, so a
+-- pulse that lands just before the status that sets focused still shows.
+function identity.pulse(index)
+  index = tonumber(index)
+  if not index or index < 0 or index ~= math.floor(index) then
+    return
+  end
+  local remaining = index
+  for _, item in ipairs(items) do
+    if item.kind == "remote" then
+      if remaining == 0 then
+        item.pulse.rising = true
+        start_timer()
+        redraw_cb()
+        return
+      end
+      remaining = remaining - 1
+    end
+  end
+end
+
 -- The alpha one part draws at. level 1 is opaque and level 0 is theme's dim.
 local function item_alpha(level)
   return string.format("&H%02X&", math.floor(DIM_BYTE * (1 - level) + 0.5))
+end
+
+-- The marker's alpha at rest runs with the line's own brightness, from
+-- theme's dim on a lit line to dim of dim on a disconnected one, so the
+-- mark carries the same news the name does. The pulse then lifts it to
+-- opaque, and that lift is what a person sees when focus arrives.
+local function marker_alpha(level, pulse)
+  local rest = MARKER_BYTE + (MARKER_DIM_BYTE - MARKER_BYTE) * (1 - level)
+  return string.format("&H%02X&", math.floor(rest * (1 - pulse) + 0.5))
 end
 
 -- The color one part draws in. At flash 0 it is the normal text color, and at
@@ -221,8 +321,20 @@ function identity.draw()
   for index = #items, 1, -1 do
     local item = items[index]
     parts[#parts + 1] = theme.text(
-      LEFT, y, item.name, ITEM_SIZE, item_color(item.flash), 1, item_alpha(item.level)
+      LEFT, y, item.name, ITEM_SIZE, item_color(item.flash.level), 1, item_alpha(item.level)
     )
+    -- The marker draws for the focused part, and for a part mid-pulse
+    -- whose status has not landed yet. theme.hexagon takes the top-left of
+    -- the mark's box, so the center subtracts MARKER_R on both axes. The
+    -- mark takes the same color the name does, so a reconnection's flash
+    -- carries both.
+    if item.focused or item.pulse.level > 0 then
+      parts[#parts + 1] = theme.hexagon(
+        MARKER_X - MARKER_R, y - MARKER_RISE - MARKER_R, MARKER_R,
+        item_color(math.max(item.flash.level, item.pulse.level)),
+        marker_alpha(item.level, item.pulse.level)
+      )
+    end
     if index > 1 then
       y = y - math.floor(ITEM_SIZE * ITEM_LEADING + 0.5)
     end

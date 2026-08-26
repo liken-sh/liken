@@ -10,8 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -99,6 +101,34 @@ func fadeTopics() (events, keymap string) {
 		keymapTopic(defaultTopicBase, "gamepad")
 }
 
+// idleTestPlayer is the Player every idle sidecar in these tests
+// stands for, the same name its commands and status topics carry.
+const idleTestPlayer = "theater"
+
+// focusedRemotes turns the events-to-keymap map a test states into the
+// sidecar's own records, and marks every controller focused on this
+// Player with its mark already caught up. That is the state a running
+// pod holds once the retained marks arrive, so a test about the fade
+// presses a controller that points here and says nothing about focus.
+// The records take their index from the sorted events topics, so one
+// test reads the same index twice.
+func focusedRemotes(t *testing.T, remotes map[string]string) (map[string]idleRemote, map[string]focusMark) {
+	t.Helper()
+	records := map[string]idleRemote{}
+	marks := map[string]focusMark{}
+	for index, events := range slices.Sorted(maps.Keys(remotes)) {
+		namespace, name, ok := parseRemoteTopic(defaultTopicBase, events, "events")
+		mustMatch(t, ok, true)
+		records[events] = idleRemote{
+			keymap: remotes[events],
+			focus:  remoteFocusTopic(defaultTopicBase, namespace, name),
+			index:  index,
+		}
+		marks[events] = focusMark{player: idleTestPlayer, caughtUp: true}
+	}
+	return records, marks
+}
+
 // fadingCommander builds one idle sidecar for a Player, with its quiet
 // window in milliseconds so the fade lands inside a test rather than
 // ten minutes after it. A sidecar runs as long as its pod, so nothing
@@ -107,11 +137,14 @@ func fadeTopics() (events, keymap string) {
 // test's stand-in mpv.
 func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string) *idleCommander {
 	t.Helper()
+	records, marks := focusedRemotes(t, remotes)
 	ic := &idleCommander{
-		commandsTopic: playerCommandsTopic(defaultTopicBase, "house", "theater"),
-		statusTopic:   playerStatusTopic(defaultTopicBase, "house", "theater"),
+		commandsTopic: playerCommandsTopic(defaultTopicBase, "house", idleTestPlayer),
+		statusTopic:   playerStatusTopic(defaultTopicBase, "house", idleTestPlayer),
 		runCtx:        context.Background(),
-		remotes:       remotes,
+		playerName:    idleTestPlayer,
+		remotes:       records,
+		marks:         marks,
 		fadeAfter:     fade,
 		tables:        map[string][]compiledBinding{},
 		// The panel is lit when a pod starts, the same state the
@@ -323,23 +356,27 @@ func TestIdleBackNeedsAKeymapToNameThePress(t *testing.T) {
 	fake.quiet(t, 100*time.Millisecond)
 }
 
-// The two remote lists travel one per line and stay aligned by position, so
-// each events topic reads the keymap of its own controller.
-func TestIdleRemoteMapPairsTheTwoLists(t *testing.T) {
-	remotes := idleRemoteMap("events/sofa\nevents/armchair", "keymaps/gamepad\nkeymaps/pad")
+// The three remote lists travel one per line and stay aligned by position, so
+// each events topic reads the keymap and the mark of its own controller, and
+// its line number is the index the focus pulse carries.
+func TestIdleRemoteMapPairsTheThreeLists(t *testing.T) {
+	remotes := idleRemoteMap(
+		"events/sofa\nevents/armchair",
+		"keymaps/gamepad\nkeymaps/pad",
+		"focus/sofa\nfocus/armchair")
 
 	mustMatch(t, len(remotes), 2)
-	mustMatch(t, remotes["events/sofa"], "keymaps/gamepad")
-	mustMatch(t, remotes["events/armchair"], "keymaps/pad")
+	mustMatch(t, remotes["events/sofa"], idleRemote{keymap: "keymaps/gamepad", focus: "focus/sofa", index: 0})
+	mustMatch(t, remotes["events/armchair"], idleRemote{keymap: "keymaps/pad", focus: "focus/armchair", index: 1})
 }
 
 // A blank line, and a keymap list shorter than the events list, leave that
 // controller with no keymap rather than shifting the pairing.
 func TestIdleRemoteMapLeavesAMissingKeymapBlank(t *testing.T) {
-	remotes := idleRemoteMap("events/sofa\nevents/armchair", "\nkeymaps/pad")
+	remotes := idleRemoteMap("events/sofa\nevents/armchair", "\nkeymaps/pad", "focus/sofa\nfocus/armchair")
 
-	mustMatch(t, remotes["events/sofa"], "")
-	mustMatch(t, remotes["events/armchair"], "keymaps/pad")
+	mustMatch(t, remotes["events/sofa"].keymap, "")
+	mustMatch(t, remotes["events/armchair"].keymap, "keymaps/pad")
 }
 
 // An unset or unreadable quiet window fades nothing, because the operator

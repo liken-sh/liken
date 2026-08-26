@@ -282,10 +282,11 @@ func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) stri
 
 // translatorSidecar is one controller's translator: the player image in
 // its translate mode, holding no device claim and no IPC mount. Its
-// environment carries the play identity plus the three topics it works
-// between: the events topic it reads, the keymap topic it reads the table
-// from, and the focus topic it gates on. It builds the cycle topic it
-// publishes to from the same identity.
+// environment carries the play identity, the Player the play runs on,
+// which is what the gate compares the mark against, and the three topics
+// it works between: the events topic it reads, the keymap topic it reads
+// the table from, and the focus topic it gates on. It builds the cycle
+// topic it publishes to from the same identity.
 func translatorSidecar(play *Play, image, busAddress, topicBase string, remote boundRemote) Container {
 	return Container{
 		Name:    translatorContainer(remote.Name),
@@ -294,6 +295,7 @@ func translatorSidecar(play *Play, image, busAddress, topicBase string, remote b
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
 			{Name: playNameVariable, Value: play.Metadata.Name},
+			{Name: playerNameVariable, Value: playerName(play)},
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: remoteNameVariable, Value: remote.Name},

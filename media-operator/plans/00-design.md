@@ -287,9 +287,6 @@ volumes can already mount, and flexibility here is cheap.
 
 ## Open problems
 
-* **The default focus rule.** When a remote's bound players both start
-  plays, which binding does the operator mark active? The most recent
-  `Play` is the likely default. Undecided.
 * **Cross-machine film audio.** The snapcast delay compensation above
   is unproven. It needs a drill with a measured buffer and a lip-sync
   check on real hardware.

@@ -80,13 +80,17 @@ type playerBusPlay struct {
 }
 
 // playerBusComponent is one part of the unit: its friendly name, its kind,
-// and its presence when the part has any. Connected is a pointer so a part
-// with no live state carries no key at all, so the display draws it at full
-// brightness always.
+// its presence when the part has any, and, for a remote, whether the focus
+// mark names this unit. Connected is a pointer so a part with no live
+// state carries no key at all, and the display draws it at full brightness
+// always. Focused is a pointer for the same reason: it appears only on the
+// remote whose mark names this Player, so exactly one unit draws the
+// marker for a controller that several units list.
 type playerBusComponent struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	Connected *bool  `json:"connected,omitempty"`
+	Focused   *bool  `json:"focused,omitempty"`
 }
 
 // The three kinds of part the idle screen draws. The kind is the display's
@@ -99,12 +103,13 @@ const (
 )
 
 // derivePlayerBusStatus builds the message the idle screen reads from the
-// Player, the activity the same pass derived, and the presence the desk
-// folded. The parts come from the spec in the order the screen shows them:
-// the display first, then each sink, then each remote. Only a remote
-// carries presence, because a wired screen and its speakers report none,
-// and a controller a person carries comes and goes.
-func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, presence *presenceDesk) playerBusStatus {
+// Player, the activity the same pass derived, the presence the desk
+// folded, and the marks the focus desk holds. The parts come from the spec
+// in the order the screen shows them: the display first, then each sink,
+// then each remote. Only a remote carries presence and focus, because a
+// wired screen and its speakers report neither, and a controller a person
+// carries comes and goes and drives one unit at a time.
+func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, presence *presenceDesk, focus *focusDesk) playerBusStatus {
 	status := playerBusStatus{
 		DisplayName: idlePlayerName(player),
 		Activity:    activity.Activity,
@@ -125,12 +130,17 @@ func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, 
 		})
 	}
 	for _, remote := range player.Spec.Remotes {
+		key := controllerKey(player.Metadata.Namespace, remote.Name)
 		component := playerBusComponent{
 			Name: remoteDisplayName(remote),
 			Kind: remoteComponent,
 		}
-		if connected, held := presence.presenceFor(controllerKey(player.Metadata.Namespace, remote.Name)); held {
+		if connected, held := presence.presenceFor(key); held {
 			component.Connected = &connected
+		}
+		if focus.markFor(key) == player.Metadata.Name {
+			focused := true
+			component.Focused = &focused
 		}
 		status.Components = append(status.Components, component)
 	}

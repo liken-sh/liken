@@ -64,18 +64,20 @@ func remoteEventsTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/events"
 }
 
-// remoteFocusTopic carries the retained focus mark, the name of the Play
-// that owns this controller now. The operator writes it, and every
-// translator for the controller reads it and gates on it. It is retained,
-// so a press reaches the owning film with the operator up or down.
+// remoteFocusTopic carries the retained focus mark, the bare name of the
+// Player that owns this controller now, in the Remote's own namespace. A
+// mark may name an idle Player. The operator writes it, and every reader
+// of the controller's presses gates on it. It is retained, so a press
+// reaches the owning unit with the operator up or down.
 func remoteFocusTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/focus"
 }
 
 // remoteFocusCycleTopic carries the cycle request a source press
-// publishes. Only the translator that holds focus publishes it, and the
-// operator reads it to advance the mark. It is not retained, because a
-// cycle is an event and not a state.
+// publishes. Only the holder of focus publishes it, the translator during
+// a film and the idle sidecar between films, and the operator reads it to
+// advance the mark. It is not retained, because a cycle is an event and
+// not a state.
 func remoteFocusCycleTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/focus/cycle"
 }

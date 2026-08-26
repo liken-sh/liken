@@ -1,12 +1,15 @@
 package main
 
-// These tests cover focus arbitration: a fresh Play steals its
-// controllers, a graceful recreate does not, a cycle advances the mark in
-// stable order and wraps, and a mark on a finished Play recovers to a live
-// one.
+// These tests cover focus arbitration against Players. A fresh Play
+// marks its Player, a graceful recreate marks nothing, a cycle advances the
+// mark through the Players that name the Remote in name order and wraps, a
+// one-Player cycle republishes the same mark, an idle Player is in the cycle
+// set, a mark on a Player that no longer names the Remote recovers to the
+// first of the set, and a Remote no Player names has its mark cleared.
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +23,20 @@ func focusOperator(t *testing.T) *operator {
 		focus:     newFocusDesk(make(chan struct{}, 1)),
 		volumes:   newVolumeDesk(),
 	}
+}
+
+// focusBrokerOperator wires the focus desk to a fake broker, so a test
+// reads the retained messages publishFocus writes and not only the desk.
+func focusBrokerOperator(t *testing.T) (*operator, *fakeBroker) {
+	t.Helper()
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	return &operator{
+		topicBase: defaultTopicBase,
+		bus:       bus,
+		focus:     newFocusDesk(make(chan struct{}, 1)),
+		volumes:   newVolumeDesk(),
+	}, brokers[0]
 }
 
 // focusPlay is one Play on one Player in the house namespace.
@@ -69,9 +86,9 @@ func remotePlayer(name string) *Player {
 	return player
 }
 
-// A fresh Play with a controller steals that controller's mark on create,
-// the most-recent-steals default.
-func TestAFreshPlayStealsTheFocusMark(t *testing.T) {
+// A fresh Play marks its Player, so the controller drives the unit the
+// newest film runs on.
+func TestAFreshPlayStealsTheFocusMarkForItsPlayer(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -81,8 +98,8 @@ func TestAFreshPlayStealsTheFocusMark(t *testing.T) {
 
 	media.pass()
 
-	if got := media.focus.markFor(controllerKey("house", "sofa")); got != "movie" {
-		t.Errorf("focus mark = %q, want the fresh play to have stolen it", got)
+	if got := media.focus.markFor(controllerKey("house", "sofa")); got != "theater" {
+		t.Errorf("focus mark = %q, want the fresh play's Player", got)
 	}
 }
 
@@ -124,12 +141,12 @@ func TestAGracefulRecreateDoesNotStealTheFocusMark(t *testing.T) {
 	cluster.players["theater"] = theater
 
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	media.focus.setMark(controllerKey("house", "sofa"), "game")
+	media.focus.setMark(controllerKey("house", "sofa"), "console")
 
 	media.pass()
 
-	if got := media.focus.markFor(controllerKey("house", "sofa")); got != "game" {
-		t.Errorf("focus mark = %q, want game; a graceful recreate must not steal", got)
+	if got := media.focus.markFor(controllerKey("house", "sofa")); got != "console" {
+		t.Errorf("focus mark = %q, want console; a graceful recreate must not steal", got)
 	}
 	if _, held := cluster.pods["movie-playback"]; !held {
 		t.Fatalf("the movie pod is gone: %v", cluster.requests)
@@ -139,53 +156,111 @@ func TestAGracefulRecreateDoesNotStealTheFocusMark(t *testing.T) {
 	}
 }
 
-// A cycle request advances the mark to the next bound-and-active Play in
-// name order, and wraps from the last back to the first.
-func TestReconcileFocusCyclesThroughTheBoundActivePlays(t *testing.T) {
+// A cycle advances the mark to the next Player that names the Remote,
+// in name order, and wraps from the last back to the first.
+func TestReconcileFocusCyclesThroughTheBoundPlayers(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
-	plays := []Play{
-		focusPlay("aaa", "one", phaseRunning),
-		focusPlay("bbb", "two", phaseRunning),
-	}
 	players := []Player{
-		focusPlayer("one", "sofa"),
-		focusPlayer("two", "sofa"),
+		focusPlayer("aaa", "sofa"),
+		focusPlayer("bbb", "sofa"),
 	}
 	o.focus.setMark(key, "aaa")
 
 	o.focus.requestCycle(key)
-	o.reconcileFocus(plays, players)
+	o.reconcileFocus(players)
 	if got := o.focus.markFor(key); got != "bbb" {
 		t.Errorf("mark = %q, want bbb after one cycle", got)
 	}
 
 	o.focus.requestCycle(key)
-	o.reconcileFocus(plays, players)
+	o.reconcileFocus(players)
 	if got := o.focus.markFor(key); got != "aaa" {
 		t.Errorf("mark = %q, want aaa after the cycle wraps", got)
 	}
 }
 
-// A mark on a finished Play recovers to a live bound Play, so focus never
-// rests on a Play that is gone.
-func TestReconcileFocusRecoversAMarkOnAFinishedPlay(t *testing.T) {
+// An idle Player is in the cycle set, because the set reads the
+// Players that name the Remote and reads no Play at all.
+func TestReconcileFocusCyclesToAnIdlePlayer(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
-	plays := []Play{
-		focusPlay("done", "one", phaseFinished),
-		focusPlay("live", "two", phaseRunning),
-	}
 	players := []Player{
-		focusPlayer("one", "sofa"),
-		focusPlayer("two", "sofa"),
+		focusPlayer("aaa", "sofa"),
+		focusPlayer("bbb", "sofa"),
 	}
-	o.focus.setMark(key, "done")
+	o.focus.setMark(key, "aaa")
 
-	o.reconcileFocus(plays, players)
+	o.focus.requestCycle(key)
+	o.reconcileFocus(players)
 
-	if got := o.focus.markFor(key); got != "live" {
-		t.Errorf("mark = %q, want the finished play recovered to the live one", got)
+	if got := o.focus.markFor(key); got != "bbb" {
+		t.Errorf("mark = %q, want the idle player bbb", got)
+	}
+}
+
+// A cycle on a Remote one Player names republishes the same mark. The
+// retained message is the press's feedback, so it goes out whether or not the
+// value changed.
+func TestACycleWithOneBoundPlayerRepublishesTheSameMark(t *testing.T) {
+	o, broker := focusBrokerOperator(t)
+	key := controllerKey("house", "sofa")
+	players := []Player{focusPlayer("theater", "sofa")}
+	o.focus.setMark(key, "theater")
+
+	o.focus.requestCycle(key)
+	o.reconcileFocus(players)
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, string(published.payload), "theater")
+	mustMatch(t, published.retained, true)
+}
+
+// A mark on a Player that no longer names the Remote moves to the
+// first of the cycle set, so a controller always drives a unit that lists it.
+func TestReconcileFocusRecoversAMarkOffTheCycleSet(t *testing.T) {
+	o := focusOperator(t)
+	key := controllerKey("house", "sofa")
+	players := []Player{focusPlayer("theater", "sofa")}
+	o.focus.setMark(key, "console")
+
+	o.reconcileFocus(players)
+
+	if got := o.focus.markFor(key); got != "theater" {
+		t.Errorf("mark = %q, want the mark recovered to theater", got)
+	}
+}
+
+// A Play that finished moves no mark, because the mark names a Player
+// and a unit whose film ended still holds its controllers.
+func TestReconcileFocusLeavesTheMarkWhenAPlayFinishes(t *testing.T) {
+	o := focusOperator(t)
+	key := controllerKey("house", "sofa")
+	players := []Player{
+		focusPlayer("aaa", "sofa"),
+		focusPlayer("bbb", "sofa"),
+	}
+	o.focus.setMark(key, "bbb")
+
+	o.reconcileFocus(players)
+
+	if got := o.focus.markFor(key); got != "bbb" {
+		t.Errorf("mark = %q, want bbb; a finished film moves no mark", got)
+	}
+}
+
+// A Remote no Player names has an empty cycle set, so its mark is
+// cleared and no translator gates on a unit that dropped it.
+func TestReconcileFocusClearsAMarkWithNoBoundPlayer(t *testing.T) {
+	o := focusOperator(t)
+	key := controllerKey("house", "sofa")
+	o.focus.setMark(key, "theater")
+
+	o.reconcileFocus([]Player{focusPlayer("theater")})
+
+	if got := o.focus.markFor(key); got != "" {
+		t.Errorf("mark = %q, want it cleared", got)
 	}
 }
 
@@ -194,12 +269,48 @@ func TestReconcileFocusRecoversAMarkOnAFinishedPlay(t *testing.T) {
 func TestReconcileFocusOverANeverRunBusIsSafe(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
-	plays := []Play{focusPlay("live", "one", phaseRunning)}
-	players := []Player{focusPlayer("one", "sofa")}
+	players := []Player{focusPlayer("theater", "sofa")}
 
-	o.reconcileFocus(plays, players)
+	o.reconcileFocus(players)
 
-	if got := o.focus.markFor(key); got != "live" {
-		t.Errorf("mark = %q, want live set by recovery", got)
+	if got := o.focus.markFor(key); got != "theater" {
+		t.Errorf("mark = %q, want theater set by recovery", got)
+	}
+}
+
+// One pass settles the mark and publishes it on the unit's bus
+// status, so the focus indicator is never a pass behind the press.
+func TestOnePassMarksTheFocusedRemoteOnTheBusStatus(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	topic := playerStatusTopic(defaultTopicBase, "house", "theater")
+	mustMatch(t, strings.Contains(media.playerStatusPublished[topic], `"focused":true`), true)
+}
+
+// A stored value that changes wakes the loop, because the Player bus
+// status and the Remote status both derive from the mark. A repeat of the
+// same value wakes nothing.
+func TestSetMarkWakesTheLoopOnAChange(t *testing.T) {
+	wake := make(chan struct{}, 1)
+	desk := newFocusDesk(wake)
+
+	desk.setMark(controllerKey("house", "sofa"), "theater")
+	select {
+	case <-wake:
+	default:
+		t.Fatal("a changed mark did not wake the loop")
+	}
+
+	desk.setMark(controllerKey("house", "sofa"), "theater")
+	select {
+	case <-wake:
+		t.Error("an unchanged mark woke the loop")
+	default:
 	}
 }

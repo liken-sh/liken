@@ -123,13 +123,15 @@ func idleComponents(player *Player) []string {
 	return components
 }
 
-// idleRemoteTopics is one of the unit's controllers as the idle pod
-// reads it: the topic its presses arrive on, and the topic its
-// compiled keymap stands on. Keymap is empty for a controller with no
-// keymap.
+// idleRemoteTopics is one of the unit's controllers as the idle pod reads
+// it: the topic its presses arrive on, the topic its compiled keymap
+// stands on, and the topic its focus mark stands on. Keymap is empty for a
+// controller with no keymap. The sidecar gates every press on the mark
+// naming this Player, and it builds the cycle topic from the focus topic.
 type idleRemoteTopics struct {
 	Events string
 	Keymap string
+	Focus  string
 }
 
 // gatherIdleRemotes reads the events and keymap topics of every
@@ -142,7 +144,10 @@ func gatherIdleRemotes(c *Client, player *Player, base string) []idleRemoteTopic
 	namespace := player.Metadata.Namespace
 	remotes := make([]idleRemoteTopics, 0, len(player.Spec.Remotes))
 	for _, entry := range player.Spec.Remotes {
-		topics := idleRemoteTopics{Events: remoteEventsTopic(base, namespace, entry.Name)}
+		topics := idleRemoteTopics{
+			Events: remoteEventsTopic(base, namespace, entry.Name),
+			Focus:  remoteFocusTopic(base, namespace, entry.Name),
+		}
 		name := entry.Keymap
 		if name == "" {
 			remote, err := GetRemote(c, namespace, entry.Name)
@@ -275,6 +280,10 @@ func buildIdlePod(
 		Command: []string{"/media-operator", idleCommandMode},
 		Env: []EnvVar{
 			{Name: busAddressVariable, Value: busAddress},
+			// The Player's object name, the value every focus mark holds. It
+			// is not the friendly name IDLE_PLAYER_NAME carries, because the
+			// operator writes marks from metadata.name.
+			{Name: playerNameVariable, Value: player.Metadata.Name},
 			{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name)},
 			{Name: playerStatusTopicVariable, Value: playerStatusTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name)},
 		},
@@ -318,10 +327,12 @@ func buildIdlePod(
 		sidecar.Resources.Claims = append(sidecar.Resources.Claims,
 			ContainerClaim{Name: podClaimName, Request: idleControlRequest})
 	}
-	// The two remote lists stay index-aligned, so the sidecar pairs
-	// each events topic with the keymap that names its presses. A
-	// Player with no remotes sends neither variable, and the fade then
-	// runs on the timer alone.
+	// The three remote lists stay index-aligned, so the sidecar pairs each
+	// events topic with the keymap that names its presses and the focus
+	// topic that carries its mark. A remote's position in them is its
+	// spec.remotes order, and the sidecar sends that index with the focus
+	// pulse. A Player with no remotes sends none of the variables, and the
+	// fade then runs on the timer alone.
 	if len(remotes) > 0 {
 		sidecar.Env = append(sidecar.Env,
 			EnvVar{
@@ -331,6 +342,10 @@ func buildIdlePod(
 			EnvVar{
 				Name:  idleRemoteKeymapTopicsVariable,
 				Value: joinIdleRemotes(remotes, func(r idleRemoteTopics) string { return r.Keymap }),
+			},
+			EnvVar{
+				Name:  idleRemoteFocusTopicsVariable,
+				Value: joinIdleRemotes(remotes, func(r idleRemoteTopics) string { return r.Focus }),
 			})
 	}
 

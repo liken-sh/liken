@@ -210,6 +210,7 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 	}
 	wantEnv := map[string]string{
 		busAddressVariable:           testBusAddress,
+		playerNameVariable:           "theater",
 		playerCommandsTopicVariable:  playerCommandsTopic(testTopicBase, "house", "theater"),
 		playerStatusTopicVariable:    playerStatusTopic(testTopicBase, "house", "theater"),
 		idleFadeAfterSecondsVariable: "600",
@@ -418,8 +419,15 @@ func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 	player := standingIdlePlayer()
 	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
 	remotes := []idleRemoteTopics{
-		{Events: remoteEventsTopic(testTopicBase, "house", "sofa"), Keymap: keymapTopic(testTopicBase, "gamepad")},
-		{Events: remoteEventsTopic(testTopicBase, "house", "armchair")},
+		{
+			Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
+			Keymap: keymapTopic(testTopicBase, "gamepad"),
+			Focus:  remoteFocusTopic(testTopicBase, "house", "sofa"),
+		},
+		{
+			Events: remoteEventsTopic(testTopicBase, "house", "armchair"),
+			Focus:  remoteFocusTopic(testTopicBase, "house", "armchair"),
+		},
 	}
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testImage, testBusAddress, testTopicBase, "", resolveIdle(fadeAfter(60), nil), remotes)
@@ -432,6 +440,22 @@ func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 	mustMatch(t, env[idleRemoteEventsTopicsVariable],
 		"liken/media/remotes/house/sofa/events\nliken/media/remotes/house/armchair/events")
 	mustMatch(t, env[idleRemoteKeymapTopicsVariable], "liken/media/keymaps/gamepad\n")
+	mustMatch(t, env[idleRemoteFocusTopicsVariable],
+		"liken/media/remotes/house/sofa/focus\nliken/media/remotes/house/armchair/focus")
+}
+
+// The sidecar gates every press on the mark, so it carries the Player's own
+// object name. The friendly name is the one the screen draws, and a mark never
+// carries it, so the two variables differ on a Player that states a
+// displayName.
+func TestBuildIdlePodCarriesThePlayerName(t *testing.T) {
+	player := standingIdlePlayer()
+	player.Spec.DisplayName = "The Theater"
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testImage, testBusAddress, testTopicBase, "")
+
+	mustMatch(t, envValue(pod.Spec.InitContainers[0], playerNameVariable), "theater")
+	mustMatch(t, envValue(pod.Spec.Containers[0], idlePlayerNameVariable), "The Theater")
 }
 
 // The volume topic reaches the idle sidecar only for a unit that
@@ -468,6 +492,9 @@ func TestBuildIdlePodOmitsTheRemoteListsWithoutRemotes(t *testing.T) {
 	if _, carried := env[idleRemoteKeymapTopicsVariable]; carried {
 		t.Errorf("%s = %q, want none", idleRemoteKeymapTopicsVariable, env[idleRemoteKeymapTopicsVariable])
 	}
+	if _, carried := env[idleRemoteFocusTopicsVariable]; carried {
+		t.Errorf("%s = %q, want none", idleRemoteFocusTopicsVariable, env[idleRemoteFocusTopicsVariable])
+	}
 }
 
 // The gather reads spec.remotes in spec order and resolves each keymap the
@@ -486,10 +513,12 @@ func TestGatherIdleRemotesResolvesEachKeymap(t *testing.T) {
 		{
 			Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
 			Keymap: keymapTopic(testTopicBase, "gamepad"),
+			Focus:  remoteFocusTopic(testTopicBase, "house", "sofa"),
 		},
 		{
 			Events: remoteEventsTopic(testTopicBase, "house", "armchair"),
 			Keymap: keymapTopic(testTopicBase, "pad"),
+			Focus:  remoteFocusTopic(testTopicBase, "house", "armchair"),
 		},
 	}
 	if !reflect.DeepEqual(remotes, want) {
@@ -508,7 +537,10 @@ func TestGatherIdleRemotesLeavesAMissingRemoteWithoutAKeymap(t *testing.T) {
 
 	remotes := gatherIdleRemotes(media.client, player, testTopicBase)
 
-	want := []idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}}
+	want := []idleRemoteTopics{{
+		Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
+		Focus:  remoteFocusTopic(testTopicBase, "house", "sofa"),
+	}}
 	if !reflect.DeepEqual(remotes, want) {
 		t.Errorf("remotes = %+v, want %+v", remotes, want)
 	}

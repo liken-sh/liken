@@ -14,9 +14,11 @@ package main
 // One controller can drive several units, so it has a translator in each
 // of their pods, all reading its one events topic. The translator
 // subscribes to the controller's focus topic and gates on the retained
-// mark: it acts on a press only when the mark names its own Play, and
-// stays quiet otherwise. A source press it holds asks the operator to
-// move the mark to the next unit.
+// mark: it acts on a press only when the mark names the Player its own
+// Play runs on, and stays quiet otherwise. The mark names a Player and
+// never a Play, because a claim is exclusive and one active Play holds one
+// Player. A source press it holds asks the operator to move the mark to
+// the next unit.
 
 import (
 	"context"
@@ -48,9 +50,12 @@ type translator struct {
 
 	bus *Bus
 
-	// playName is this translator's own Play. The focus mark must hold this
-	// value for a press to act, so it is the gate.
+	// playName is this translator's own Play. It names the commands topic
+	// the translator publishes into and the client id it connects with.
 	playName string
+	// playerName is the Player this translator's Play runs on. The focus
+	// mark must hold this value for a press to act, so it is the gate.
+	playerName string
 	// focusCycleTopic is where a cycle-focus press publishes its request for
 	// the operator to arbitrate.
 	focusCycleTopic string
@@ -58,9 +63,9 @@ type translator struct {
 	tableMu sync.Mutex
 	table   []compiledBinding
 
-	// focusOwner is the Play the retained mark names. The gate compares it
-	// against playName, and focusMu guards it because the bus reader writes
-	// it while an event read holds it.
+	// focusOwner is the Player the retained mark names. The gate compares
+	// it against playerName, and focusMu guards it because the bus reader
+	// writes it while an event read holds it.
 	focusMu    sync.Mutex
 	focusOwner string
 
@@ -84,6 +89,7 @@ func runTranslator() {
 	if base == "" {
 		base = defaultTopicBase
 	}
+	playerName := os.Getenv(playerNameVariable)
 	remoteName := os.Getenv(remoteNameVariable)
 	eventsTopic := os.Getenv(remoteEventsVariable)
 	keymapTopicID := os.Getenv(keymapTopicVariable)
@@ -102,6 +108,7 @@ func runTranslator() {
 		keymapTopicID:   keymapTopicID,
 		focusTopicID:    focusTopicID,
 		playName:        playName,
+		playerName:      playerName,
 		focusCycleTopic: remoteFocusCycleTopic(base, playNamespace, remoteName),
 		repeatCtx:       runCtx,
 		repeats:         map[uint16]context.CancelFunc{},
@@ -146,24 +153,24 @@ func (tr *translator) setTable(payload []byte) {
 	tr.tableMu.Unlock()
 }
 
-// setFocus records the new mark. When focus leaves this Play, it stops
-// every repeat, so a control held as focus moves away does not keep
-// firing on a film this translator no longer drives.
+// setFocus records the new mark. When focus leaves this Player, it stops
+// every repeat, so a control held as focus moves away does not keep firing
+// on a film this translator no longer drives.
 func (tr *translator) setFocus(payload []byte) {
 	owner := string(payload)
 	tr.focusMu.Lock()
 	tr.focusOwner = owner
 	tr.focusMu.Unlock()
-	if owner != tr.playName {
+	if owner != tr.playerName {
 		tr.stopAllRepeats()
 	}
 }
 
 // event turns one controller event into a command. A release stops any
 // repeat and returns, focused or not, so a held control always cleans up.
-// A press acts only when the mark names this Play. A cycle-focus binding
-// asks the operator to move the mark and never reaches mpv; any other
-// binding publishes its named command.
+// A press acts only when the mark names the Player this Play runs on. A
+// cycle-focus binding asks the operator to move the mark and never reaches
+// mpv; any other binding publishes its named command.
 func (tr *translator) event(payload []byte) {
 	var event remoteEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
@@ -176,7 +183,7 @@ func (tr *translator) event(payload []byte) {
 	tr.focusMu.Lock()
 	owner := tr.focusOwner
 	tr.focusMu.Unlock()
-	if owner != tr.playName {
+	if owner != tr.playerName {
 		return
 	}
 	tr.tableMu.Lock()

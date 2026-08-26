@@ -185,6 +185,10 @@ func remotesPath(namespace string) string {
 	return mediaPrefix + namespace + "/remotes"
 }
 
+func remotePath(namespace, name string) string {
+	return remotesPath(namespace) + "/" + name
+}
+
 // keymapPath reads one Keymap by name. A Keymap is cluster-scoped, so
 // the path carries no namespace, the way a StorageClass path carries
 // none.
@@ -285,10 +289,26 @@ func PutPlayStatus(c *Client, play *Play) (*Play, error) {
 // Player's spec.remotes entry carries.
 func GetRemote(c *Client, namespace, name string) (*Remote, error) {
 	remote := &Remote{}
-	if err := c.RequestJSON(http.MethodGet, remotesPath(namespace)+"/"+name, nil, remote); err != nil {
+	if err := c.RequestJSON(http.MethodGet, remotePath(namespace, name), nil, remote); err != nil {
 		return nil, err
 	}
 	return remote, nil
+}
+
+// PutRemoteStatus writes the Remote's status subresource, the one write
+// path this operator has onto a Remote. The subresource split keeps it
+// from ever rewriting the device selector a person declared.
+func PutRemoteStatus(c *Client, remote *Remote) (*Remote, error) {
+	body, err := json.Marshal(remote)
+	if err != nil {
+		return nil, err
+	}
+	written := &Remote{}
+	path := remotePath(remote.Metadata.Namespace, remote.Metadata.Name) + "/status"
+	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
 }
 
 // ListAllRemotes reads every Remote in the cluster in one request, the

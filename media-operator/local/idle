@@ -19,6 +19,10 @@
 #   i   the Play ends. The idle surface returns in motion and eases to still.
 #   d   the last part connects or disconnects. Its line dims, then pulses
 #       back.
+#   f   focus lands on the last part, the remote. Its hexagon draws in the
+#       left margin and beats white. A press while it is focused beats it
+#       again, the cycle press that wrapped onto this unit.
+#   g   focus cycles away. The hexagon goes.
 #   s   the quiet window runs out, then a press follows. The screen fades
 #       to black, and the second press brings it back fast.
 #   9 0 a volume press, down and up. The indicator appears alone and

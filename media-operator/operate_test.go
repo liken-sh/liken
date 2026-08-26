@@ -58,6 +58,11 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			_ = json.NewDecoder(r.Body).Decode(&written)
 			f.players[written.Metadata.Name] = &written
 			_ = json.NewEncoder(w).Encode(written)
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/remotes/") && strings.HasSuffix(r.URL.Path, "/status"):
+			var written Remote
+			_ = json.NewDecoder(r.Body).Decode(&written)
+			f.remotes[written.Metadata.Name] = &written
+			_ = json.NewEncoder(w).Encode(written)
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/status"):
 			var written Play
 			_ = json.NewDecoder(r.Body).Decode(&written)
@@ -705,6 +710,38 @@ func TestAPassWiresABoundRemote(t *testing.T) {
 	}
 }
 
+// A pass writes the focused Player onto the Remote's status, so
+// kubectl answers which unit a controller drives.
+func TestAPassWritesTheFocusedPlayerOntoTheRemote(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	mustMatch(t, cluster.remotes["sofa"].Status.Player, "theater")
+}
+
+// A status that already reads the current Player is not written
+// again, so a settled Remote costs the API server nothing per pass.
+func TestAPassSkipsAnUnchangedRemoteStatus(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+	settled := len(cluster.requests)
+	media.pass()
+
+	for _, request := range cluster.requests[settled:] {
+		mustMatch(t, strings.HasSuffix(request, "/remotes/sofa/status"), false)
+	}
+}
+
 // A Keymap edit is bus state, not pod shape. The container set is fixed
 // once the pod runs, so a Keymap changed after the film started recreates
 // no pod and the run keeps its status.
@@ -1219,10 +1256,10 @@ func TestAnEmptyAvailabilityDoesNotMarkARunSeen(t *testing.T) {
 	}
 }
 
-// A fresh broker session holds none of the operator's retained state, so
-// a reconnect clears the record of published keymaps, which makes the
-// next reconcile write them again, and republishes each focus mark, so a
-// controller keeps its owner across a broker restart.
+// A fresh broker session holds none of the operator's retained state,
+// so a reconnect clears the record of published keymaps, which makes the next
+// reconcile write them again, and republishes each focus mark, so a
+// controller keeps the Player it drives across a broker restart.
 func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
@@ -1236,7 +1273,7 @@ func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
 			keymapTopic(defaultTopicBase, "gamepad"): "already-published",
 		},
 	}
-	media.focus.setMark(controllerKey("den", "sofa"), "movie")
+	media.focus.setMark(controllerKey("den", "sofa"), "theater")
 
 	media.reestablishRetained()
 
@@ -1245,8 +1282,8 @@ func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
 	}
 	published := waitForPublish(t, broker.pubs)
 	if published.topic != remoteFocusTopic(defaultTopicBase, "den", "sofa") ||
-		string(published.payload) != "movie" || !published.retained {
-		t.Errorf("focus republish = %+v, want the retained movie mark", published)
+		string(published.payload) != "theater" || !published.retained {
+		t.Errorf("focus republish = %+v, want the retained theater mark", published)
 	}
 }
 
@@ -1359,6 +1396,7 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		topicBase:             defaultTopicBase,
 		bus:                   bus,
 		reports:               newReports(nil),
+		focus:                 newFocusDesk(nil),
 		presence:              newPresenceDesk(nil),
 		panels:                newPanelDesk(nil),
 		volumes:               newVolumeDesk(),

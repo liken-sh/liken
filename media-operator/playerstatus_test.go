@@ -5,7 +5,9 @@ package main
 // the one status it earns.
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -159,7 +161,7 @@ func TestDerivePlayerBusStatusListsThePartsInScreenOrder(t *testing.T) {
 	desk := connectedTo(controllerKey("house", "sofa"), true)
 	connected := true
 
-	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, desk)
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, desk, newFocusDesk(nil))
 
 	want := playerBusStatus{
 		DisplayName: "Studio Lab",
@@ -188,10 +190,65 @@ func TestDerivePlayerBusStatusFallsBackToTheClassAndTheName(t *testing.T) {
 		},
 	}
 
-	got := derivePlayerBusStatus(player, PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil))
+	got := derivePlayerBusStatus(player, PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil), newFocusDesk(nil))
 
 	mustMatch(t, got.DisplayName, "theater")
 	mustMatchAll(t, componentNames(got), []string{"display-output", "audio-sink", "sofa"})
+}
+
+// focusedOn builds a focus desk holding one mark, so a case states
+// which unit a controller drives in one line.
+func focusedOn(key, player string) *focusDesk {
+	desk := newFocusDesk(nil)
+	desk.setMark(key, player)
+	return desk
+}
+
+// The remote part carries focused only on the unit the mark names.
+// Every other unit that lists the same controller carries no key, so the
+// display draws one focus indicator per controller.
+func TestDerivePlayerBusStatusMarksTheFocusedRemote(t *testing.T) {
+	key := controllerKey("house", "sofa")
+	cases := []struct {
+		name  string
+		focus *focusDesk
+		want  bool
+		held  bool
+	}{
+		{name: "the mark names this player", focus: focusedOn(key, "theater"), want: true, held: true},
+		{name: "the mark names another player", focus: focusedOn(key, "console")},
+		{name: "no mark at all", focus: newFocusDesk(nil)},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			got := derivePlayerBusStatus(theaterWithParts(),
+				PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil), each.focus)
+			remote := got.Components[len(got.Components)-1]
+			mustMatch(t, remote.Focused != nil, each.held)
+			mustMatch(t, remote.Focused != nil && *remote.Focused, each.want)
+		})
+	}
+}
+
+// Only a remote part carries focused. The display and the sinks are
+// not a controller's to hold.
+func TestDerivePlayerBusStatusMarksNoDisplayOrSinkFocused(t *testing.T) {
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
+		nil, newPresenceDesk(nil), focusedOn(controllerKey("house", "sofa"), "theater"))
+
+	mustMatch(t, got.Components[0].Focused == nil, true)
+	mustMatch(t, got.Components[1].Focused == nil, true)
+}
+
+// The key the display reads is focused, so the payload is pinned by
+// its JSON and not only by its Go field.
+func TestPlayerBusStatusCarriesTheFocusedKey(t *testing.T) {
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
+		nil, newPresenceDesk(nil), focusedOn(controllerKey("house", "sofa"), "theater"))
+
+	payload, err := json.Marshal(got)
+	mustSucceed(t, err)
+	mustMatch(t, strings.Contains(string(payload), `"focused":true`), true)
 }
 
 // componentNames renders one status's parts as their names, so a test
@@ -229,7 +286,7 @@ func TestDerivePlayerBusStatusFoldsThePresence(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, each.desk)
+			got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, each.desk, newFocusDesk(nil))
 			remote := got.Components[len(got.Components)-1]
 			mustMatch(t, remote.Connected != nil, each.held)
 			mustMatch(t, remote.Connected != nil && *remote.Connected, each.want)
@@ -240,7 +297,7 @@ func TestDerivePlayerBusStatusFoldsThePresence(t *testing.T) {
 // An idle unit names no Play, so the payload carries no play block and the
 // screen draws the clock alone.
 func TestDerivePlayerBusStatusCarriesNoPlayWhileIdle(t *testing.T) {
-	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil))
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil), newFocusDesk(nil))
 
 	mustMatch(t, got.Play == nil, true)
 }
@@ -252,7 +309,7 @@ func TestDerivePlayerBusStatusNamesTheStartingPlay(t *testing.T) {
 	play.Spec.Items = []PlayItem{{URI: "https://nas/sailing.mkv", Presentation: &Presentation{Title: "Sailing"}}}
 
 	got := derivePlayerBusStatus(theaterWithParts(),
-		PlayerStatus{Activity: playerStarting, Play: "sailing"}, []Play{play}, newPresenceDesk(nil))
+		PlayerStatus{Activity: playerStarting, Play: "sailing"}, []Play{play}, newPresenceDesk(nil), newFocusDesk(nil))
 
 	mustMatch(t, got.Activity, playerStarting)
 	mustMatch(t, got.Play.Name, "sailing")
