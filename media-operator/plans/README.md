@@ -25,11 +25,6 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [11, The music experience](11-the-music-experience.md). A music
-  `Play` draws a layout `liken` owns: the album art centered, the
-  tracks as chapters on the scrubber, and one timeline for the whole
-  album. It builds on the display of plan 07.
-
 ## Completed
 
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
@@ -106,6 +101,14 @@ These plans are designed. Each keeps its number and moves to
   sidecar's `volume-changed` signal. The idle screen sets the room's
   level before any media plays, and the local harnesses gained
   volume keys.
+* [11, The music experience](completed/11-the-music-experience.md).
+  Built and released on 2026-08-26 in release 2026.08.26-001. An
+  album plays as one `mpv` EDL timeline: the player shim expands a
+  directory item marked as an album, the tracks become chapters on
+  the film's own scrubber, the cover centers on the blanked frame,
+  and a standalone track's header reads its own tags. Proven end to
+  end under the headless workstation harness and an adversarial
+  review, with the first music `Play` staged for `liken-1`.
 * [12, The idle screen reads the bus](completed/12-the-idle-screen-reads-the-bus.md).
   Built, and drilled on `liken-1` on 2026-08-24 in release
   2026.08.24-006, with the reply-await fix in 2026.08.24-008. The idle

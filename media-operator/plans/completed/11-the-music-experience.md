@@ -3,7 +3,7 @@
 Plan 11. It draws a music layout `liken` owns: the album art centered,
 the track names as chapters on the scrubber, and one timeline for the
 whole album. It builds on the display of
-[plan 07](completed/07-the-player-draws-its-own-display.md). When this plan
+[plan 07](07-the-player-draws-its-own-display.md). When this plan
 lands, a music `Play` looks like a music player, not a film with the
 picture blanked.
 
