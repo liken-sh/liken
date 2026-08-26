@@ -85,10 +85,16 @@ mkdir -p "$fw"
 
 # The union of declarations, one name per line. modinfo reads the
 # compressed modules directly.
+#
+# One modinfo invocation set at a time, never in parallel. Several
+# modinfo processes writing one pipe interleave once a write passes
+# PIPE_BUF, and the splice joins the head of one name to the tail of
+# another, which loses both real names. Reading all the modules in
+# one process takes about a second, so parallelism bought nothing.
 names="$(mktemp)"
 trap 'rm -f "$names"' EXIT
 find "$modules" -name '*.ko.zst' -print0 |
-    xargs -0 -P "$(nproc)" -n 64 modinfo -F firmware |
+    xargs -0 -n 64 modinfo -F firmware |
     sort -u >"$names"
 
 # The WHENCE aliases: "Link: <alias> -> <target>", target relative
