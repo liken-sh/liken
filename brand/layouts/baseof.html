@@ -82,7 +82,11 @@ chrome excluded.
     aside p { margin: 0 0 0.5rem; }
     aside ul { list-style: none; padding-left: 1rem; margin: 0 0 1rem; }
     aside li { margin: 0.2rem 0; }
-    aside a[aria-current] { font-weight: 600; text-decoration: none; }
+    /* Sidebar links read as a table of contents, not as prose, so
+       the underline waits for hover. The current page is bold. */
+    aside a { text-decoration: none; }
+    aside a:hover { text-decoration: underline; }
+    aside a[aria-current] { font-weight: 600; }
   }
 </style>
 </head>
