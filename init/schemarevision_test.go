@@ -346,6 +346,61 @@ func TestSeedClusterStateGoesOnWhenAContentSeedFails(t *testing.T) {
 	}
 }
 
+// stuckEntry puts an entry in a directory that RemoveAll cannot take
+// away, the way an immutable file refuses unlinkat, while everything
+// beside it stays removable.
+func stuckEntry(t *testing.T, dir, name string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "held"), []byte("held\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+}
+
+// One entry that cannot be removed costs exactly itself. A drill
+// against an immutable machines-crd.yaml left the seed directory
+// holding that one file: the entries before it in directory order
+// were already gone, and the copy never ran. A machine that failed
+// this way on every boot would run with most of its manifests missing
+// from the disk.
+func TestRefreshSeedDirIsBestEffortPerEntry(t *testing.T) {
+	src, dst := t.TempDir(), t.TempDir()
+	writeManifest(t, src, "liken-system.yaml", []byte("kind: Namespace\nmetadata:\n  name: new\n"))
+	writeManifest(t, src, "machines-crd.yaml", crdManifest("2"))
+	writeManifest(t, dst, "liken-system.yaml", []byte("kind: Namespace\nmetadata:\n  name: old\n"))
+	writeManifest(t, dst, "retired.yaml", []byte("kind: DaemonSet\n"))
+	stuckEntry(t, dst, "machines-crd.yaml")
+
+	err := refreshSeedDir(dst, src, map[string]bool{})
+
+	if err == nil {
+		t.Fatal("a refresh that could not reach every entry must say so")
+	}
+	if !strings.Contains(err.Error(), "machines-crd.yaml") {
+		t.Errorf("the error must name the entry that stuck: %v", err)
+	}
+	raw, readErr := os.ReadFile(filepath.Join(dst, "liken-system.yaml"))
+	if readErr != nil {
+		t.Fatalf("the entries beside it still refresh: %v", readErr)
+	}
+	if string(raw) != "kind: Namespace\nmetadata:\n  name: new\n" {
+		t.Errorf("the entries beside it still refresh: %q", raw)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "retired.yaml")); !os.IsNotExist(err) {
+		t.Errorf("an entry the image no longer carries still goes: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "machines-crd.yaml", "held")); err != nil {
+		t.Errorf("the entry that stuck stays as it was: %v", err)
+	}
+}
+
 // The identity seed is the other half of the policy. A machine that
 // cannot take the cluster's CAs onto its disk would mint its own, and
 // then serve an API that no kubeconfig this image carries can verify

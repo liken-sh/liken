@@ -216,42 +216,65 @@ func reportBadRevision(name, where string, declared schemaRevision) {
 // entry, the kept manifest is never removed and never rewritten, so
 // no instant of the boot leaves the disk without the schema the
 // cluster serves.
+//
+// The refresh is also best effort per entry, and only the failures
+// are collected. A refresh that stopped at its first failure would
+// let one stuck file decide the fate of every entry after it in
+// directory order: files already removed would never be copied back,
+// and a directory of six manifests could end the boot holding one.
+// Attempted one by one, a file the disk refuses to give up costs
+// exactly itself, and it stays as it stood rather than being
+// half-replaced, because the copy loop skips what the removal could
+// not take away.
 func refreshSeedDir(dst, src string, keep map[string]bool) error {
+	var failures []string
 	existing, err := os.ReadDir(dst)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	stuck := map[string]bool{}
 	for _, entry := range existing {
 		if keep[entry.Name()] {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(dst, entry.Name())); err != nil {
-			return err
+			stuck[entry.Name()] = true
+			failures = append(failures, err.Error())
 		}
 	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
+		return collectSeedFailures(append(failures, err.Error()))
 	}
 	entries, err := os.ReadDir(src)
 	if err != nil {
-		return err
+		return collectSeedFailures(append(failures, err.Error()))
 	}
 	for _, entry := range entries {
-		if keep[entry.Name()] {
+		if keep[entry.Name()] || stuck[entry.Name()] {
 			continue
 		}
 		from, to := filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name())
 		if entry.IsDir() {
 			if err := os.CopyFS(to, os.DirFS(from)); err != nil {
-				return err
+				failures = append(failures, err.Error())
 			}
 			continue
 		}
 		if err := copySeedFile(to, from); err != nil {
-			return err
+			failures = append(failures, err.Error())
 		}
 	}
-	return nil
+	return collectSeedFailures(failures)
+}
+
+// collectSeedFailures turns the entries that failed into one error.
+// It reads as one line, because the console reports one fact per line
+// and every line begins with liken:.
+func collectSeedFailures(failures []string) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(failures, "; "))
 }
 
 // copySeedFile copies one seed file, streaming it rather than holding
