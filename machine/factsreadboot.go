@@ -66,6 +66,9 @@ func (t FactsTree) readBoot() (BootStatus, error) {
 	if b.Rlimits, err = t.readKeyedScalars("boot/rlimits"); err != nil {
 		return BootStatus{}, err
 	}
+	if b.ModuleParameters, err = t.readKeyedScalars("boot/moduleParameters"); err != nil {
+		return BootStatus{}, err
+	}
 	if b.Storage, err = t.readBootStorage(); err != nil {
 		return BootStatus{}, err
 	}

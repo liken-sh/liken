@@ -159,6 +159,17 @@ type MachineSpec struct {
 	// boot, because unloading is not part of that path.
 	Modules []string `json:"modules,omitempty"`
 
+	// ModuleParameters sets how a declared module loads: a flat map
+	// from "<module>.<parameter>" to the value, in the kernel's own
+	// spelling, the same form the kernel command line uses and
+	// /sys/module mirrors. Each key must name a module that Modules
+	// declares, spelled the same way. A parameter applies once, at
+	// the load, because a loaded module never reads its parameters
+	// again; so a value added with its module converges live, and a
+	// change on a module this boot already loaded stages for the
+	// next boot like every other reboot-class edit.
+	ModuleParameters map[string]string `json:"moduleParameters,omitempty"`
+
 	// NodeLabels is this machine's scheduling identity: the labels
 	// that its Kubernetes Node object carries. Workloads select
 	// machines using these labels, for example to find which machine

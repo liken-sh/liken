@@ -156,6 +156,37 @@ Two facts about the platform come before any of the above:
   ships both the database and its signature. Without it, a
   5GHz-only network may be invisible.
 
+## The ciphers the kernel cannot load itself
+
+The 802.11 stack encrypts with ciphers it instantiates at the moment
+the supplicant installs a key: `ccm(aes)` for CCMP, `gcm(aes)` for
+GCMP, and `cmac(aes)` for protected management frames. On an ordinary
+distribution these arrive by autoload: the crypto API asks the kernel
+to run `modprobe`, and `modprobe` loads the cipher module. liken
+ships no `modprobe`, so the request fails silently and the cipher
+never exists.
+
+The failure this produces is misleading. The four-way handshake
+completes, the supplicant derives the keys, and then the kernel
+refuses the key install with `ENOENT`. The supplicant reports
+`WRONG_KEY`, the one failure this plan treats as deterministic. A
+machine with a correct passphrase and a missing cipher would park as
+if the passphrase were wrong, and no edit to the passphrase could
+release it.
+
+So the wireless bring-up loads the cipher modules itself, before the
+supplicant starts, through the same loader that `spec.modules` uses.
+It loads each of the three ciphers above that the kernel build ships
+as a module, and it skips the ones built in. The loads run only when
+a spec declares a wireless interface, which keeps the rule that
+nothing wireless runs unless the spec asks for it.
+
+The lab measured the failure and the fix on `liken-1`'s RTL8821CE on
+2026-08-26: with no `ccm(aes)`, the handshake succeeded and the key
+install failed with `set_key failed; err=-2`; with `ccm.ko` loaded,
+the same configuration associated in 5 seconds and pulled a DHCP
+lease.
+
 ## An address from DHCP must be stable
 
 k3s reads the node's address at start. The kubelet registers with
@@ -181,13 +212,24 @@ added for radios.
 
 ## The drill
 
-`liken-1` has a wireless NIC. Its Machine adds a second interface
-entry: the wifi, `wpa-psk`, with a static address one above its wired
-address on the same network. Both paths reach the cluster's endpoint,
-so the drill exercises the join, the status story, and the
-degraded-not-parked rule on real `iwlwifi` hardware. Lab releases
-serve from the development laptop over the LAN with the existing
-`-9xx` channel recipe.
+`liken-1` has a wireless NIC, an RTL8821CE on the `rtw88` driver. Its
+Machine adds a second interface entry: the wifi, `wpa-psk`, with a
+static address one above its wired address on the same network. Both
+paths reach the cluster's endpoint, so the drill exercises the join,
+the status story, and the degraded-not-parked rule on real hardware.
+Lab releases serve from the development laptop over the LAN with the
+existing `-9xx` channel recipe.
+
+This chip cannot run with ASPM enabled. Powering the radio on with
+ASPM active deadlocks the kernel against its own PCIe error handler,
+and the 2026-08-26 incident took the machine down hard enough to need
+a reinstall. The drill therefore depends on plan 55: `liken-1`
+declares `rtw88_pci` in `spec.modules`, ordered before the chip
+module so the parameter string reaches it, and sets
+`rtw88_pci.disable_aspm: "1"` in `spec.moduleParameters`. The lab
+proved the parameter on 2026-08-26: with it, the same power-on that
+deadlocked the kernel returned in under a second, and the radio
+carried a join and a DHCP exchange with no PCIe error.
 
 ## Deferred, by name
 

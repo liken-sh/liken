@@ -114,6 +114,31 @@ func TestReconcileLeavesTempFilesAlone(t *testing.T) {
 	}
 }
 
+// A read can land between another write's temp file and its rename.
+// writeAtomic names that file .liken-*, and publishing it as a key
+// would put a half-written value in the status under a key nobody
+// declared.
+func TestReadKeyedScalarsSkipsATempFile(t *testing.T) {
+	tree := FactsTree{Dir: t.TempDir()}
+	if err := tree.WriteRlimits(map[string]string{"nofile": "1048576"}); err != nil {
+		t.Fatal(err)
+	}
+	temp := filepath.Join(tree.Dir, "rlimits", ".liken-inflight")
+	if err := os.WriteFile(temp, []byte("partial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tree.readKeyedScalars("rlimits")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := got[".liken-inflight"]; present {
+		t.Errorf("a temp file is not a key: %v", got)
+	}
+	if got["nofile"] != "1048576" {
+		t.Errorf("got %v", got)
+	}
+}
+
 func TestReadIgnoresUnknownEntries(t *testing.T) {
 	tree := FactsTree{Dir: t.TempDir()}
 	writeAll(t, tree, sparseFacts())

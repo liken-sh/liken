@@ -207,7 +207,14 @@ func ModuleSetDiff(desired, actuated []string) (added, retracted []string) {
 // image would change nothing. The ModulesLoaded condition reports
 // that problem instead. The fix for that problem is a new image, not
 // a reboot.
-func ModulesDrift(desired, actuated []string) []string {
+//
+// Parameter drift rides in this same list rather than in a list of
+// its own, because the live-load rule counts: a staged spec applies
+// live only when added modules are the whole of the drift
+// (converge.go). A parameter line in the count makes any parameter
+// change on a loaded module miss that test and take the reboot path,
+// with no new rule written anywhere.
+func ModulesDrift(desired, actuated []string, desiredParameters, actuatedParameters map[string]string) []string {
 	added, retracted := ModuleSetDiff(desired, actuated)
 	var diffs []string
 	for _, name := range added {
@@ -216,7 +223,60 @@ func ModulesDrift(desired, actuated []string) []string {
 	for _, name := range retracted {
 		diffs = append(diffs, fmt.Sprintf("modules: %s no longer declared but this boot ran with it", name))
 	}
+	return append(diffs, ModuleParameterDrift(desired, actuated, desiredParameters, actuatedParameters)...)
+}
+
+// ModuleParameterDrift writes a line only for a module that both the
+// desired and the actuated sets declare. A parameter that arrives
+// with a module the boot never loaded is part of that module's own
+// added line: the live loader passes the string at the load, because
+// a module loading for the first time takes its parameters normally.
+// A parameter on a module the boot already loaded writes its own
+// line here, and that line is what forces the reboot path, because a
+// loaded module never reads its parameters again.
+func ModuleParameterDrift(desiredModules, actuatedModules []string, desired, actuated map[string]string) []string {
+	shared := sharedModules(desiredModules, actuatedModules)
+	keys := map[string]bool{}
+	for key := range desired {
+		keys[key] = true
+	}
+	for key := range actuated {
+		keys[key] = true
+	}
+	var diffs []string
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		module, _, ok := splitModuleParameterKey(key)
+		if !ok || !shared[module] {
+			continue
+		}
+		d, dok := desired[key]
+		a, aok := actuated[key]
+		switch {
+		case dok && !aok:
+			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s declared but not actuated", key, d))
+		case !dok && aok:
+			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s actuated but no longer declared", key, a))
+		case d != a:
+			diffs = append(diffs, fmt.Sprintf("module parameter %s: %s declared, %s actuated", key, d, a))
+		}
+	}
 	return diffs
+}
+
+// sharedModules is the set of modules present in both lists, the
+// only modules a parameter drift line may name.
+func sharedModules(desired, actuated []string) map[string]bool {
+	have := map[string]bool{}
+	for _, name := range actuated {
+		have[name] = true
+	}
+	shared := map[string]bool{}
+	for _, name := range desired {
+		if have[name] {
+			shared[name] = true
+		}
+	}
+	return shared
 }
 
 func rolesByName(spec StorageSpec) map[StorageRoleName]DeclaredRole {

@@ -280,6 +280,8 @@ func (t FactsTree) WriteModules(modules []ModuleStatus) error {
 		if err := firstError(
 			t.writeFact(filepath.Join(base, "state"), string(m.State)),
 			t.writeFact(filepath.Join(base, "message"), m.Message),
+			t.writeFact(filepath.Join(base, "alreadyResident"), formatBool(m.AlreadyResident)),
+			t.writeKeyedScalars(filepath.Join(base, "parameters"), m.Parameters),
 		); err != nil {
 			return t.report(err)
 		}
@@ -410,6 +412,16 @@ func (t FactsTree) WriteBootRestarts(n int) error {
 // declared, recorded as actuated regardless of each load's outcome.
 func (t FactsTree) WriteBootModules(modules []string) error {
 	return t.report(t.writeListFact("boot/modules", modules))
+}
+
+// WriteBootModuleParameters publishes the parameter map this machine
+// counts as actuated. A boot records the whole declared map, the
+// same way boot/modules records its list. A live load records only
+// the keys it delivered, so an undelivered parameter drifts and the
+// reboot that can deliver it gets scheduled (init/liveload.go). The
+// per-module readback under modules/ reports what the kernel holds.
+func (t FactsTree) WriteBootModuleParameters(parameters map[string]string) error {
+	return t.report(t.writeKeyedScalars("boot/moduleParameters", parameters))
 }
 
 // WriteBootManifest publishes the Machine manifest this boot ran under.

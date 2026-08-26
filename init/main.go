@@ -273,7 +273,8 @@ func main() {
 	// modules). The statuses keep the results, bound for
 	// status.modules through the facts tree.
 	boot.Modules = slices.Sorted(slices.Values(m.Spec.Modules))
-	moduleStatuses := loadDeclaredModules(m.Spec.Modules)
+	boot.ModuleParameters = m.Spec.ModuleParameters
+	moduleStatuses := loadDeclaredModules(m.Spec.Modules, m.Spec.ModuleParameters)
 
 	// The cluster's opt-in features are actuated and reported per
 	// machine, the same way as declared modules (features.go). Bundled
@@ -325,12 +326,13 @@ func main() {
 
 	worldReport()
 
-	// The endpoint reaches the network step because the park
-	// decision asks whether any settled interface gives a route
-	// toward the cluster. The cluster document is the only place
-	// that address is written, and this boot's document is already
-	// chosen by this line.
-	conns, err := bringUpNetwork(m.Spec.Network, clusterDoc.EndpointOrEmpty())
+	// The cluster document reaches the network step because two
+	// decisions there read it: the park asks whether any settled
+	// interface gives a route toward the endpoint, and the pass
+	// split asks whether pass one already holds the address k3s
+	// starts with. This boot's document is already chosen by this
+	// line.
+	conns, radios, err := bringUpNetwork(m.Spec.Network, clusterDoc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
 	}
@@ -345,7 +347,7 @@ func main() {
 	// boot, then powers off.
 	if _, err := os.Stat(k3sBinary); err == nil {
 		clusterLife(choice, storage, boot, clusterDoc, clusterRaw, creds,
-			conns, moduleStatuses, featureStatuses, actuator, trial, lastCrash, lastFailStop) // never returns
+			conns, radios, moduleStatuses, featureStatuses, actuator, trial, lastCrash, lastFailStop) // never returns
 	}
 
 	// With no k3s to supervise, a boot is complete once the report is
@@ -365,7 +367,7 @@ func main() {
 // power-off.
 func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot machine.BootStatus,
 	clusterDoc *cluster.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
-	conns []*connection, moduleStatuses []machine.ModuleStatus,
+	conns []*connection, radios *radioPass, moduleStatuses []machine.ModuleStatus,
 	featureStatuses []machine.FeatureStatus, actuator bootActuator, trial *machine.SystemRelease,
 	lastCrash *machine.CrashStatus, lastFailStop *machine.FailStop) {
 	m := choice.m
@@ -444,11 +446,10 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	unclaimed := discoverUnclaimed(catalog)
 	blockDevices := discoverBlockDevices()
 	initialTime := timeStatus(firstSync, clk.sources)
-	// The facts step waits until this point because the facts tree
-	// lives under /run, and prepareForK3s just mounted a fresh tmpfs
-	// there. The mount would hide anything written to /run earlier.
-	// Each boot step held its discovered facts locally, and hands them
-	// here, once /run is the tmpfs that lasts the machine's life.
+	// The facts step waits until this point so the tree appears
+	// once, complete. Each boot step held its discovered facts
+	// locally and hands them here, and the operator's first read
+	// sees a whole tree rather than one growing in pieces.
 	publishBootFacts(factsTree, bootFacts{
 		clusterDoc:   clusterDoc,
 		role:         role,
@@ -466,6 +467,15 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	})
 	publishBootManifest(choice)
 	publishBootClusterManifest(clusterRaw)
+	// A background radio's verdicts land through this component. It
+	// starts here, after publishBootFacts, because publishBootFacts
+	// writes the network subtree itself: a verdict written before it
+	// would be overwritten with the pending state it replaced. The
+	// radio's address and its status arrive late, and both beat a
+	// boot that waited (plans/64).
+	if radios != nil {
+		plane.start("the wireless verdicts", publishRadioVerdicts(radios, factsTree, clusterDoc))
+	}
 	// The hardware watch keeps that walk correct for the whole
 	// life of the machine. Hot-plugged devices arrive as uevents,
 	// and the report follows these events (hardware.go). An image
@@ -520,11 +530,12 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// beside the supervisor rather than inside it, because, unlike
 	// the other two intents, this intent does not involve k3s.
 	loader := &moduleLoader{
-		tree:        factsTree,
-		bootStorage: boot.Storage,
-		bootNetwork: m.Spec.Network,
-		bootModules: boot.Modules,
-		statuses:    moduleStatuses,
+		tree:           factsTree,
+		bootStorage:    boot.Storage,
+		bootNetwork:    m.Spec.Network,
+		bootModules:    boot.Modules,
+		bootParameters: boot.ModuleParameters,
+		statuses:       moduleStatuses,
 	}
 	plane.start("the module loader", func(ctx context.Context) error {
 		store := machine.MachineManifests(machine.MachineStateDir)

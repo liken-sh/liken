@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -194,7 +195,33 @@ func writeWirelessConfig(ifname, config string) (string, error) {
 // can stop them before it signals the rest of the machine. It is a
 // package variable for the same reason the death registry is: init is
 // one program, and these are its children.
-var supplicants []*supplicantProcess
+//
+// The lock exists because background radios register their
+// supplicants from the radio component's goroutine while the boot
+// and the shutdown run on others. The stopping flag latches when the
+// shutdown runs, and no supplicant starts after it: a radio that
+// settles late during a reboot must not leave a process the shutdown
+// already finished stopping.
+var (
+	supplicantsMu       sync.Mutex
+	supplicants         []*supplicantProcess
+	supplicantsStopping bool
+)
+
+// registerSupplicant adds one supervised supplicant to the list the
+// shutdown stops, and reports false once the shutdown has run. The
+// check and the append happen under one hold of the lock, so a
+// supplicant either makes the list the shutdown will stop, or is
+// refused; there is no window between the two.
+func registerSupplicant(p *supplicantProcess) bool {
+	supplicantsMu.Lock()
+	defer supplicantsMu.Unlock()
+	if supplicantsStopping {
+		return false
+	}
+	supplicants = append(supplicants, p)
+	return true
+}
 
 // supplicantProcess is one supervised supplicant: the loop that keeps
 // it running, and the channels that stop it.
@@ -248,7 +275,17 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 		stop: make(chan struct{}), done: make(chan struct{}),
 		backoff: time.Second, maxBackoff: 30 * time.Second,
 	}
-	supplicants = append(supplicants, p)
+	// A radio that settles after the shutdown began gets its
+	// supplicant stopped, not supervised. The process just started,
+	// so it is stopped by the same deliberate path the shutdown
+	// uses, and the caller reports the refusal.
+	if !registerSupplicant(p) {
+		control.close()
+		died := make(chan unix.WaitStatus, 1)
+		go func() { died <- deaths.await(pid) }()
+		stopSupplicant(ifname, pid, died)
+		return nil, fmt.Errorf("the machine is stopping its supplicants; the one on %s was stopped again", ifname)
+	}
 	plane.start("the supplicant on "+ifname, func(ctx context.Context) error {
 		p.run(ctx, pid, config)
 		return nil
@@ -472,17 +509,25 @@ var killProcess = unix.Kill
 // it before it signals the rest of the machine, so the restart loops are
 // finished before kill(-1) reaches anything.
 func stopSupplicants() {
-	for _, p := range supplicants {
+	// The latch and the list move under one hold of the lock: after
+	// this block, every registered supplicant is in running, and
+	// every later register is refused.
+	supplicantsMu.Lock()
+	supplicantsStopping = true
+	running := supplicants
+	supplicants = nil
+	supplicantsMu.Unlock()
+
+	for _, p := range running {
 		close(p.stop)
 	}
-	for _, p := range supplicants {
+	for _, p := range running {
 		select {
 		case <-p.done:
 		case <-time.After(10 * time.Second):
 			fmt.Fprintf(os.Stderr, "liken: wireless: the supplicant on %s did not stop; going on without it\n", p.ifname)
 		}
 	}
-	supplicants = nil
 }
 
 // routeLookup answers which interface a packet toward one address would
@@ -544,11 +589,7 @@ func endpointAddress(endpoint string) (net.IP, bool) {
 // loopback, and a leader must never park on a radio it does not need.
 func parkDecision(conns []*connection, endpoint string, route routeLookup) (*radio, string) {
 	var failed *radio
-	settled := map[string]bool{}
 	for _, conn := range conns {
-		if conn.addr != nil {
-			settled[conn.ifname] = true
-		}
 		if failed == nil && conn.radio != nil && conn.radio.deterministic() {
 			failed = conn.radio
 		}
@@ -556,22 +597,47 @@ func parkDecision(conns []*connection, endpoint string, route routeLookup) (*rad
 	if failed == nil {
 		return nil, ""
 	}
+	routed, why := routeToward(conns, endpoint, route)
+	if routed {
+		return nil, ""
+	}
 	reason := fmt.Sprintf("liken: wireless: %s cannot join %s: %s", failed.ifname, failed.ssid, failed.message)
+	return failed, fmt.Sprintf("%s; %s, so this boot waits here", reason, why)
+}
+
+// routeToward answers the one question both the park and the pass
+// split ask: can this machine, on the interfaces that settled, send
+// a packet toward its cluster's endpoint? The false answers carry
+// the reason, in the words the park has always printed.
+//
+// An endpoint that names no address counts as routed. A DNS name
+// needs DNS, and DNS needs the network in question, so nothing
+// reliable can be decided from it; a machine alone declares no
+// endpoint at all. The bias in both cases is the plan's: boot rather
+// than wait. A route that leaves by loopback also counts, because a
+// leader's endpoint is its own address.
+func routeToward(conns []*connection, endpoint string, route routeLookup) (bool, string) {
+	settled := map[string]bool{}
+	for _, conn := range conns {
+		if conn.addr != nil {
+			settled[conn.ifname] = true
+		}
+	}
 	if len(settled) == 0 {
-		return failed, reason + "; no other interface has an address, so this boot waits here"
+		return false, "no other interface has an address"
 	}
 	dst, ok := endpointAddress(endpoint)
 	if !ok {
-		return nil, ""
+		return true, ""
 	}
 	ifname, err := route(dst)
 	if err != nil {
-		return failed, fmt.Sprintf("%s; nothing on this machine has a route toward %s, so this boot waits here", reason, dst)
+		return false, fmt.Sprintf("nothing on this machine has a route toward %s", dst)
 	}
 	if ifname == "lo" || settled[ifname] {
-		return nil, ""
+		return true, ""
 	}
-	return failed, fmt.Sprintf("%s; the route toward %s leaves by %s, which never came up, so this boot waits here", reason, dst, ifname)
+	return false, fmt.Sprintf("the route toward %s leaves by %s, which never came up", dst, ifname)
 }
 
 // parkConsole is the device a park writes its reason to. It is a

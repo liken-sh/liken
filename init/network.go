@@ -30,12 +30,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
 	"github.com/vishvananda/netlink"
 
+	"github.com/liken-sh/liken/cluster"
 	"github.com/liken-sh/liken/machine"
 )
 
@@ -58,6 +60,12 @@ type connection struct {
 	leaseTime   time.Duration
 	server      net.IP
 
+	// leaseExpires is fixed at the moment the DHCP ACK lands. The
+	// facts render from this absolute time, so a rewrite hours later
+	// reports the same expiry; deriving it from the clock at render
+	// time would move every lease forward with no DHCP exchange.
+	leaseExpires time.Time
+
 	// radio is the 802.11 session behind this interface, for an
 	// interface the spec gave a wireless entry. Nil means the
 	// interface is wired.
@@ -72,13 +80,25 @@ type connection struct {
 // up is degraded, not absent, and the console report shows which
 // interface is which. The function returns an error only when no
 // interface comes up.
-func bringUpNetwork(spec machine.NetworkSpec, endpoint string) ([]*connection, error) {
+//
+// The bring-up runs in two passes (radios.go): wired interfaces
+// settle here, and radios settle behind the boot when the machine
+// already has a route toward its cluster. The second return value is
+// that background pass, nil when nothing runs behind; the caller
+// hands it to the component that lands each radio's verdict in the
+// facts tree after the boot's own facts publish.
+//
+// The whole cluster document comes in rather than the endpoint
+// alone, because the pass split reads two of its facts: the endpoint
+// for the route question, and the nodeCIDR for the node-address
+// question (radios.go, backgroundable).
+func bringUpNetwork(spec machine.NetworkSpec, clusterDoc *cluster.Cluster) ([]*connection, *radioPass, error) {
 	// The code brings up loopback first. Nearly all networked
 	// software assumes that 127.0.0.1 exists. The kernel creates the
 	// loopback interface; the code only needs to raise it.
-	if lo, err := netlink.LinkByName("lo"); err == nil {
-		if err := netlink.LinkSetUp(lo); err != nil {
-			return nil, fmt.Errorf("raising lo: %w", err)
+	if lo, err := linkByName("lo"); err == nil {
+		if err := linkSetUp(lo); err != nil {
+			return nil, nil, fmt.Errorf("raising lo: %w", err)
 		}
 	}
 
@@ -88,7 +108,7 @@ func bringUpNetwork(spec machine.NetworkSpec, endpoint string) ([]*connection, e
 	// also reads manifests that were written by hand and carried in
 	// on a stick, which no API server ever saw.
 	if err := spec.Validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// The kernel's link list is read once and used for every
@@ -97,7 +117,7 @@ func bringUpNetwork(spec machine.NetworkSpec, endpoint string) ([]*connection, e
 	// person needs to correct the manifest.
 	links, err := netlink.LinkList()
 	if err != nil {
-		return nil, fmt.Errorf("listing interfaces: %w", err)
+		return nil, nil, fmt.Errorf("listing interfaces: %w", err)
 	}
 	present := presentInterfaces(links)
 
@@ -105,46 +125,78 @@ func bringUpNetwork(spec machine.NetworkSpec, endpoint string) ([]*connection, e
 	if len(interfaces) == 0 {
 		name, err := pickInterface(present)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		interfaces = []machine.InterfaceSpec{{Name: name}}
 	}
 
-	var conns []*connection
-	for _, ifc := range interfaces {
-		conn, err := bringUpInterface(ifc, present)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", ifc.Name, err)
-			continue
-		}
-		conns = append(conns, conn)
-	}
-
-	// The park (plans/62-wifi.md). Every interface has settled by
-	// this line, so the decision has everything it needs. The hold
-	// ends on a join event rather than a keypress, and the
-	// addressing that follows is the same addressing a radio that
-	// joined on the first try would have taken.
-	if failed, reason := parkDecision(conns, endpoint, routeVia); failed != nil {
-		park(failed, reason)
-		conns = readdressRadio(conns, interfaces, failed)
-	}
+	conns, pass := bootPasses(present).run(interfaces, clusterDoc)
 
 	if !anyAddressed(conns) {
-		return conns, fmt.Errorf("no interface came up")
+		return conns, pass, fmt.Errorf("no interface came up")
 	}
+	if err := writeResolvConf(conns); err != nil {
+		return conns, pass, err
+	}
+	return conns, pass, nil
+}
 
-	// The code builds one resolv.conf file for the whole machine,
-	// gathered from every interface. The resolvConf function below
-	// explains which nameservers it keeps. The file is an ordinary
-	// file. Resolvers, including Go's own resolver, read it by
-	// convention.
-	if content := resolvConf(conns); content != "" {
-		if err := os.WriteFile("/etc/resolv.conf", []byte(content), 0o644); err != nil {
-			return conns, err
-		}
+// resolvConfPath is where the resolver file goes. It is a variable
+// rather than a constant so a test can write into a file of its own,
+// the way wirelessRunDir and parkConsole let tests stand in for the
+// real machine.
+var resolvConfPath = "/etc/resolv.conf"
+
+// The code builds one resolv.conf file for the whole machine,
+// gathered from every interface. The resolvConf function below
+// explains which nameservers it keeps. The file is an ordinary
+// file. Resolvers, including Go's own resolver, read it by
+// convention.
+//
+// The boot writes the file once, from the pass one connections. A
+// radio that settles late renders it again through this same
+// function, so its nameservers join the file under the same order
+// and the same cap as every other interface's. That late rewrite
+// happens while k3s and the kubelet run, and a pod sandbox created
+// mid-write copies whatever the file holds, which is why the write
+// below is atomic.
+func writeResolvConf(conns []*connection) error {
+	content := resolvConf(conns)
+	if content == "" {
+		return nil
 	}
-	return conns, nil
+	return writeResolvConfAtomic(resolvConfPath, []byte(content))
+}
+
+// writeResolvConfAtomic writes one file through a temp file in the
+// same directory and a rename, the pattern machine/staging.go's
+// writeAtomic uses for the facts tree.
+//
+// A rename inside one filesystem replaces the file in a single step,
+// so a reader opens either the old content or the new, never an
+// empty or partial file. A plain WriteFile truncates first, and a
+// reader in that window gets an empty resolv.conf for the life of
+// its copy.
+func writeResolvConfAtomic(path string, raw []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".liken-*")
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	// CreateTemp makes the file owner-only, and every resolver on
+	// the machine reads this file, so the mode is set before the
+	// rename publishes it.
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // resolvConf renders the machine's resolv.conf file from its
@@ -180,44 +232,32 @@ func resolvConf(conns []*connection) string {
 	return b.String()
 }
 
+// The two netlink calls the passes make, as variables so a test can
+// run the whole bring-up with no kernel, including a raise that
+// never returns.
+var (
+	linkByName = netlink.LinkByName
+	linkSetUp  = netlink.LinkSetUp
+)
+
 // bringUpInterface raises one link and gives it an address, using
-// the method that the interface spec chose.
+// the method that the interface spec chose. Only pass one calls it:
+// a wired raise returns in milliseconds, so it runs with no deadline
+// machinery, and the wireless half of what this function once did
+// lives in bringUpRadio (radios.go).
 func bringUpInterface(ifc machine.InterfaceSpec, present []interfaceIdentity) (*connection, error) {
 	if err := requirePort(ifc.Name, present); err != nil {
 		return nil, err
 	}
-	link, err := netlink.LinkByName(ifc.Name)
+	link, err := linkByName(ifc.Name)
 	if err != nil {
 		return nil, fmt.Errorf("opening interface %q: %w", ifc.Name, err)
 	}
 	fmt.Printf("liken: bringing up %s\n", ifc.Name)
-	if err := netlink.LinkSetUp(link); err != nil {
+	if err := linkSetUp(link); err != nil {
 		return nil, fmt.Errorf("raising %s: %w", ifc.Name, err)
 	}
-
-	if ifc.Wireless == nil {
-		return addressInterface(link, ifc)
-	}
-
-	// The join comes before the addressing because an unassociated
-	// radio carries no frames: a DHCP exchange on it would only wait
-	// out its own deadline. Once the radio associates, the interface
-	// behaves exactly like an ethernet port, which is why the same
-	// two addressing paths run below with nothing added.
-	r := joinWireless(ifc, machine.MachineStateDir)
-	if r.state != machine.WirelessConnected {
-		// A failed join still yields a connection. The interface
-		// exists, the status must carry the reason it has no
-		// address, and the park decision reads these same
-		// connections to learn what settled.
-		return &connection{ifname: ifc.Name, mac: link.Attrs().HardwareAddr, radio: r}, nil
-	}
-	conn, err := addressInterface(link, ifc)
-	if err != nil {
-		return nil, err
-	}
-	conn.radio = r
-	return conn, nil
+	return addressInterface(link, ifc)
 }
 
 // addressInterface gives one raised link its address, by the method the
@@ -259,7 +299,7 @@ func readdressRadio(conns []*connection, interfaces []machine.InterfaceSpec, r *
 			spec = ifc
 		}
 	}
-	link, err := netlink.LinkByName(r.ifname)
+	link, err := linkByName(r.ifname)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", r.ifname, err)
 		return conns
@@ -444,14 +484,18 @@ func applyLease(link netlink.Link, lease *nclient4.Lease, ifc machine.InterfaceS
 		return nil, fmt.Errorf("assigning %s: %w", addr, err)
 	}
 
+	leaseTime := ack.IPAddressLeaseTime(0)
 	conn := &connection{
 		ifname:      link.Attrs().Name,
 		mac:         link.Attrs().HardwareAddr,
 		addr:        addr,
 		method:      machine.MethodDHCP,
 		nameservers: ack.DNS(),
-		leaseTime:   ack.IPAddressLeaseTime(0),
-		server:      ack.ServerIdentifier(),
+		leaseTime:   leaseTime,
+		// The clock is read once, here at the ACK; see the field's
+		// comment for why the expiry must not be derived later.
+		leaseExpires: time.Now().Add(leaseTime),
+		server:       ack.ServerIdentifier(),
 	}
 	for _, raw := range ifc.Nameservers {
 		if ns := net.ParseIP(raw); ns != nil {

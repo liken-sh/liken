@@ -180,7 +180,7 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 			// the outcome, exactly as a from-disk boot loads spec.modules.
 			// The interfaces and disks these drivers create are real only
 			// after this returns and the probe settles again.
-			loadDeclaredModulesFrom(base, dedupChains(recommendations))
+			loadDeclaredModulesFrom(base, dedupChains(recommendations), nil)
 			quiesceHardware()
 		}
 	}

@@ -11,6 +11,8 @@ package main
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -185,5 +187,53 @@ func TestResolvConfDropsDuplicates(t *testing.T) {
 func TestResolvConfWithNoNameserversIsEmpty(t *testing.T) {
 	if got := resolvConf([]*connection{{}}); got != "" {
 		t.Errorf("no nameservers must render nothing, got %q", got)
+	}
+}
+
+func TestWritingResolvConfReplacesTheWholeFileAtOnce(t *testing.T) {
+	// A radio that settles late rewrites this file while every
+	// resolver on the machine reads it. A write in place would leave a
+	// reader with a truncated file, so the write must be a rename: the
+	// old file keeps serving until the new one replaces it whole.
+	path := aimResolvConf(t)
+	first := withNameserver(addressed("eth0", "10.10.0.5/24"), "10.10.0.1")
+	if err := writeResolvConf([]*connection{first}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second := withNameserver(joinedRadio("wlan0", "stonypoint", "192.168.1.20/24"), "192.168.1.1")
+	if err := writeResolvConf([]*connection{first, second}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if os.SameFile(before, after) {
+		t.Error("the rewrite kept the same file, so a reader could see it half written")
+	}
+	if mode := after.Mode().Perm(); mode != 0o644 {
+		t.Errorf("every resolver reads this file: mode %o", mode)
+	}
+	rendered, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "nameserver 10.10.0.1\nnameserver 192.168.1.1\n"
+	if string(rendered) != want {
+		t.Errorf("got %q, want %q", rendered, want)
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("the write left a temp file behind: %d entries", len(entries))
 	}
 }

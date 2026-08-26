@@ -190,7 +190,7 @@ func leaderJoinConfig(clusterDoc *cluster.Cluster, name, manifestDir string) (cl
 // interface that holds the default route, which on a machine with an
 // internet uplink is exactly the wrong interface.
 func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname string) {
-	if clusterDoc == nil || clusterDoc.Spec.Network.NodeCIDR == "" {
+	if !declaresNodeCIDR(clusterDoc) {
 		return "", ""
 	}
 	_, subnet, err := net.ParseCIDR(clusterDoc.Spec.Network.NodeCIDR)
@@ -204,6 +204,16 @@ func nodeAddress(clusterDoc *cluster.Cluster, conns []*connection) (ip, ifname s
 		}
 	}
 	return "", ""
+}
+
+// declaresNodeCIDR reports whether the cluster names the subnet a node
+// address must fall inside. The pass split asks it separately from
+// nodeAddress because the two absences mean different things: no
+// nodeCIDR means there is no address rule to satisfy, while a
+// declared nodeCIDR that no interface matches means the rule exists
+// and is not met yet.
+func declaresNodeCIDR(clusterDoc *cluster.Cluster) bool {
+	return clusterDoc != nil && clusterDoc.Spec.Network.NodeCIDR != ""
 }
 
 // k3sBootInputs gathers everything that the drop-in needs and that

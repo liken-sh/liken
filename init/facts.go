@@ -22,11 +22,10 @@ package main
 // factstree.go documents the whole ownership map.
 //
 // The boot's write-once facts land together, in publishBootFacts,
-// rather than each at its own discovery line. The facts tree lives
-// under /run, and prepareForK3s mounts a fresh tmpfs there partway
-// through the boot. A write before that mount would be hidden. So each
-// boot step holds its discovered facts locally and hands them here,
-// once /run is the tmpfs that lasts the machine's life.
+// rather than each at its own discovery line. Each boot step holds
+// its discovered facts locally and hands them here, so the tree
+// appears once, complete, instead of growing in pieces while the
+// operator's watch reads it.
 
 import (
 	"fmt"
@@ -111,7 +110,7 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteVersion(versionFacts())
 	// Network facts exist only for interfaces that came up; a machine
 	// that failed DHCP still publishes the facts it has.
-	tree.WriteNetwork(networkFacts(in.clusterDoc, in.conns, now))
+	tree.WriteNetwork(networkFacts(in.clusterDoc, in.conns))
 	// The clock's state so far: the boot-time measurement, if one
 	// succeeded, or an accurate unsynchronized or free-running report.
 	// The clock loop owns time/ after this seed.
@@ -145,6 +144,7 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteBootStorage(in.boot.Storage)
 	tree.WriteBootNetwork(in.boot.Network)
 	tree.WriteBootModules(in.boot.Modules)
+	tree.WriteBootModuleParameters(in.boot.ModuleParameters)
 	tree.WriteBootRlimits(in.boot.Rlimits)
 	tree.WriteBootManifest(in.boot.ManifestSource, in.boot.ManifestHash)
 	tree.WriteBootClusterManifest(in.boot.ClusterManifestSource, in.boot.ClusterManifestHash)
@@ -284,15 +284,19 @@ func publishBootClusterManifest(raw []byte) {
 	}
 }
 
-// networkFacts folds every connection into a NetworkStatus.
-func networkFacts(clusterDoc *cluster.Cluster, conns []*connection, now time.Time) machine.NetworkStatus {
+// networkFacts folds every connection into a NetworkStatus. Every
+// value comes from the connections themselves, and nothing reads a
+// clock or the kernel, so the background radio pass can call this
+// again after boot and every unchanged interface renders exactly the
+// facts it rendered the first time.
+func networkFacts(clusterDoc *cluster.Cluster, conns []*connection) machine.NetworkStatus {
 	status := machine.NetworkStatus{}
 	if len(conns) == 0 {
 		return status
 	}
 
 	for _, conn := range conns {
-		status.Interfaces = append(status.Interfaces, interfaceFacts(conn, now))
+		status.Interfaces = append(status.Interfaces, interfaceFacts(conn))
 	}
 
 	// The summary skips an addressless interface. The top-level
@@ -313,7 +317,7 @@ func networkFacts(clusterDoc *cluster.Cluster, conns []*connection, now time.Tim
 			}
 		}
 	}
-	summary := interfaceFacts(primary, now)
+	summary := interfaceFacts(primary)
 	status.Interface = summary.Name
 	status.MAC = summary.MAC
 	status.Addresses = []string{summary.Address}
@@ -325,7 +329,7 @@ func networkFacts(clusterDoc *cluster.Cluster, conns []*connection, now time.Tim
 
 // interfaceFacts turns one connection into status: the same facts
 // the console report prints, in a form other code can query.
-func interfaceFacts(conn *connection, now time.Time) machine.InterfaceStatus {
+func interfaceFacts(conn *connection) machine.InterfaceStatus {
 	status := machine.InterfaceStatus{
 		Name:        conn.ifname,
 		MAC:         conn.mac.String(),
@@ -338,8 +342,11 @@ func interfaceFacts(conn *connection, now time.Time) machine.InterfaceStatus {
 	if conn.radio != nil {
 		status.Wireless = conn.radio.wirelessStatus()
 	}
-	if conn.method == machine.MethodDHCP {
-		expires := now.Add(conn.leaseTime)
+	// applyLease fixed this instant when the ACK landed, so a later
+	// rewrite reports the same expiry instead of inventing a new
+	// one.
+	if conn.method == machine.MethodDHCP && !conn.leaseExpires.IsZero() {
+		expires := conn.leaseExpires
 		status.LeaseExpires = &expires
 	}
 	if conn.gateway != nil {

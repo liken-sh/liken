@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "2"
+    liken.sh/schema-revision: "3"
 spec:
   group: liken.sh
   names:
@@ -227,6 +227,23 @@ spec:
                 stages a change to network, storage, modules, or
                 rlimits, and the change takes effect at the next
                 boot.
+              # This rule is at the spec level because it must read
+              # two fields at once. A module parameter key names a
+              # module, and only the module list says which names this
+              # machine loads. The comparison is exact: a kernel takes
+              # "-" and "_" in a module name interchangeably, and
+              # admission has no normalizer to do the same, so the key
+              # must spell the module the way the module list spells
+              # it.
+              x-kubernetes-validations:
+                - rule: >-
+                    !has(self.moduleParameters) ||
+                    (has(self.modules) &&
+                    self.moduleParameters.all(k, self.modules.exists(m, k.startsWith(m + '.'))))
+                  message: >-
+                    every moduleParameters key must start with a module
+                    that modules declares, spelled the same way, and
+                    then a dot
               properties:
                 network:
                   type: object
@@ -314,15 +331,21 @@ spec:
                             required: [ssid]
                             description: >-
                               The wireless network this interface
-                              joins. Init runs a supplicant for the
-                              interface and applies the addressing
-                              above once the radio associates, so a
-                              wireless entry changes how the link
-                              comes up and nothing else. An absent
-                              value means the interface is wired.
-                              The passphrase is never part of this
-                              document. The installer writes it to a
-                              file on the machine, named for the
+                              joins. The machine runs a supplicant
+                              for the interface and applies the
+                              addressing above once the radio
+                              associates, so the interface takes
+                              the same addressing a wired one does.
+                              A machine that already has a wired
+                              path to its cluster does not wait for
+                              the radio: it boots, joins the wifi
+                              in the background, and this
+                              interface's status appears when the
+                              join settles. An absent value means
+                              the interface is wired. The
+                              passphrase is never part of this
+                              document. The installer writes it to
+                              a file on the machine, named for the
                               SSID, under /etc/liken/psk/.
                             properties:
                               ssid:
@@ -509,16 +532,85 @@ spec:
                     Removing one needs a reboot. Admission checks the
                     shape of the name only, because only the boot, or
                     the load that follows a later edit, can determine
-                    whether the name exists.
-                  # This is a set: the order carries no meaning, and
-                  # the API server refuses duplicates instead of
-                  # trusting the caller.
+                    whether the name exists. A module's load-time
+                    settings go in moduleParameters, and they apply
+                    when the module loads, not after.
+                  # This is a set for admission: the API server
+                  # refuses duplicates instead of trusting the
+                  # caller. The order still matters to the load: the
+                  # boot loads these in list order, and a module that
+                  # arrives early as another module's dependency
+                  # cannot take parameters when its own turn comes,
+                  # so a module with parameters belongs before any
+                  # module that depends on it.
                   x-kubernetes-list-type: set
                   maxItems: 64
                   items:
                     type: string
                     maxLength: 64
                     pattern: ^[A-Za-z0-9][A-Za-z0-9_-]*$
+                moduleParameters:
+                  type: object
+                  description: >-
+                    Settings that declared modules load with, as a map
+                    from "<module>.<parameter>" to a value, for
+                    example "snd_hda_intel.power_save": "0". The key
+                    is the kernel's own spelling, the same form the
+                    kernel command line uses, and the module half
+                    must name a module that spec.modules declares,
+                    spelled the same way. A parameter applies when
+                    the module loads and never after, so changing one
+                    on a module the machine already loaded takes
+                    effect at the next reboot. A parameter cannot
+                    reach a module that is built into the kernel, or
+                    one that was already loaded before the declared
+                    modules, and the ModuleParametersApplied
+                    condition reports both cases with the fix.
+                    status.boot.moduleParameters records what was
+                    declared, and status.modules[].parameters records
+                    what the kernel holds.
+                  # The cap matches the module list's own maxItems: a
+                  # machine that needs more than 64 parameter lines is
+                  # describing a different problem.
+                  maxProperties: 64
+                  additionalProperties:
+                    type: string
+                    description: >-
+                      The value, exactly as the kernel's parser will
+                      read it. Spaces and double quotes are refused,
+                      because the parameter string is space-separated
+                      and the kernel treats a double quote as a
+                      grouping character. An array parameter takes
+                      its values separated by commas, which is the
+                      kernel's own spelling for it. An empty value
+                      is refused; a parameter without a value is a
+                      declaration of nothing.
+                    maxLength: 256
+                    pattern: ^[^\s"]+$
+                  # The key is the kernel's own name for a module
+                  # parameter: the same form the kernel command line
+                  # uses, and the same form
+                  # /sys/module/<name>/parameters/<parameter> mirrors.
+                  # The pattern checks the shape here, the way the
+                  # rlimits map checks its resource names. Whether this
+                  # kernel builds the module, whether the module has
+                  # the parameter, and whether the value is in range are
+                  # questions only the load can answer. The length
+                  # bound exists because a key becomes a file name in
+                  # the machine's boot record: 64 bytes for the module
+                  # name, the dot, and 64 for the parameter name is
+                  # the widest a valid key can be.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.all(k, k.matches('^[A-Za-z0-9][A-Za-z0-9_-]*[.][A-Za-z0-9][A-Za-z0-9_-]*$'))
+                      message: >-
+                        a key is a module name, a dot, and a parameter
+                        name, for example snd_hda_intel.power_save
+                    - rule: self.all(k, size(k) <= 129)
+                      message: >-
+                        a key is at most 129 characters: 64 for the
+                        module name, one dot, and 64 for the parameter
+                        name
                 nodeLabels:
                   type: object
                   maxProperties: 64
@@ -1359,7 +1451,7 @@ spec:
                                   this interface.
                               state:
                                 type: string
-                                enum: [Associating, Connected, WrongKey, NoCarrier]
+                                enum: [Associating, Connected, WrongKey, NoCarrier, NotRaised]
                                 description: >-
                                   What the join did. Associating
                                   means the supplicant still works
@@ -1370,14 +1462,29 @@ spec:
                                   state on its own: the access point
                                   refused the passphrase, or the
                                   machine has no passphrase file for
-                                  this network. NoCarrier means no
-                                  access point answered; an access
-                                  point that is off and one that is
-                                  out of range look the same, so the
-                                  supplicant keeps trying and time
-                                  can correct this state. WrongKey
+                                  this network. NoCarrier means the
+                                  radio is not associated: no access
+                                  point answered, or the machine did
+                                  not attempt this radio because
+                                  another radio's raise never
+                                  returned; the message says which.
+                                  An access point that is off and
+                                  one that is out of range look the
+                                  same, so the supplicant keeps
+                                  trying and time can correct this
+                                  state. WrongKey
                                   is the one state that waiting
-                                  never corrects.
+                                  never corrects. NotRaised means
+                                  the kernel call that powers the
+                                  radio on did not return: the
+                                  driver is stuck inside the
+                                  kernel, no supplicant ever ran on
+                                  this interface, and the boot went
+                                  on without it. Waiting does not
+                                  correct this state either; remove
+                                  the interface from the spec, or
+                                  fix the driver's load-time
+                                  settings, and reboot.
                               message:
                                 type: string
                                 description: >-
@@ -2622,6 +2729,20 @@ spec:
                       additionalProperties:
                         type: string
                         maxLength: 41
+                    moduleParameters:
+                      type: object
+                      description: >-
+                        The module parameters that the manifest of
+                        this boot declared. The system records them
+                        as actuated, whatever each load did with
+                        them, because a boot under the same manifest
+                        would pass the same strings; this field is
+                        the drift reference beside modules above,
+                        and status.modules[].parameters gives what
+                        the kernel actually holds.
+                      additionalProperties:
+                        type: string
+                        maxLength: 256
                     rejection:
                       type: object
                       description: >-
@@ -2854,6 +2975,43 @@ spec:
                           prints on the console, and named as a
                           correction. This field is empty when the
                           state is Loaded or Builtin.
+                      parameters:
+                        type: object
+                        description: >-
+                          What the machine read back from the kernel
+                          for each parameter that
+                          spec.moduleParameters declares for this
+                          module, keyed by parameter name. The value
+                          is the kernel's own rendering, for example
+                          Y or N for a boolean, so it can differ in
+                          spelling from the declaration without
+                          being wrong; compare the two by eye. A
+                          declared parameter that is missing here
+                          usually has a wrong name: the kernel loads
+                          a module, ignores a parameter name it does
+                          not have, and says so once in the
+                          machine's log stream. A missing entry can
+                          also mean the parameter is real but
+                          unreadable, because some drivers register
+                          a parameter with no file to read back; the
+                          kernel's log line is what tells the two
+                          apart.
+                        additionalProperties:
+                          type: string
+                          maxLength: 1024
+                      alreadyResident:
+                        type: boolean
+                        description: >-
+                          Whether this module was already in the
+                          kernel before the declared modules loaded,
+                          put there by the operating system's own
+                          list, a cluster feature, or an earlier
+                          declared module's dependencies. It matters
+                          for parameters: a module that is already
+                          loaded ignores a new parameter string, so
+                          any parameter declared for this module did
+                          not reach the kernel, and the
+                          ModuleParametersApplied condition says so.
                 features:
                   type: array
                   description: >-

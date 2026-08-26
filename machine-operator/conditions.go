@@ -275,6 +275,64 @@ func modulesCondition(observed []machine.ModuleStatus) api.Condition {
 		"no extra modules declared")
 }
 
+// moduleParametersCondition reports the two cases where a declared
+// parameter structurally cannot have reached the kernel: the module
+// is built in, or it was already resident when the declared pass got
+// to it. Both are facts about the load, not about values. The
+// declared string is never compared against the /sys readback,
+// because the kernel renders a bool as Y or N and an array with its
+// own separators, so a machine comparison would report false drift
+// on the most common parameter types; a person compares the two
+// status fields that sit beside each other. Each problem message
+// names its own fix, the way every other outcome message does.
+func moduleParametersCondition(declared map[string]string, observed []machine.ModuleStatus) api.Condition {
+	byName := map[string]machine.ModuleStatus{}
+	for _, s := range observed {
+		byName[s.Name] = s
+	}
+	var problems []string
+	// Only a module the boot observed can say whether its load
+	// carried the parameters. A module declared since the last boot
+	// has no load to report on, so it counts toward nothing here;
+	// the convergence machinery already carries it to the reboot.
+	loaded := 0
+	for _, name := range machine.ModuleParameterModules(declared) {
+		s, seen := byName[name]
+		if !seen {
+			continue
+		}
+		// Only a load that succeeded can have carried the string, so
+		// only Loaded modules count toward the healthy message. A
+		// Failed or Missing module is ModulesLoaded's problem, and
+		// claiming its parameters "reached the kernel" would be
+		// false.
+		switch {
+		case s.State == machine.ModuleBuiltin:
+			problems = append(problems, fmt.Sprintf(
+				"%s: the kernel builds %s in, so no load carried %s; set it on the kernel command line",
+				name, name, machine.ModuleParameterString(name, declared)))
+		case s.AlreadyResident:
+			problems = append(problems, fmt.Sprintf(
+				"%s: %s was already in the kernel when the declared modules loaded, so no load carried %s; "+
+					"it comes from the image's fixed list, a cluster feature, or an earlier declared module's dependencies",
+				name, name, machine.ModuleParameterString(name, declared)))
+		case s.State == machine.ModuleLoaded:
+			loaded++
+		}
+	}
+	// Parameters were declared even when no load succeeded, so the
+	// message must not claim nothing was declared; it says no load
+	// carried one, which is the fact.
+	none := "no module parameters declared"
+	if len(declared) != 0 {
+		none = "no load this boot carried a declared parameter"
+	}
+	return outcomesCondition("ModuleParametersApplied", loaded, problems,
+		"ParametersNotApplied", "Applied",
+		fmt.Sprintf("every parameter declared for %d modules reached the kernel at the load", loaded),
+		none)
+}
+
 // featuresCondition summarizes the boot's feature outcomes as one
 // condition, in the same form as modulesCondition. Any state other
 // than Active carries init's message, which names the fix. For a
@@ -302,8 +360,13 @@ func featuresCondition(observed []machine.FeatureStatus) api.Condition {
 // message carries the supplicant's own reason, the one fact that
 // tells a wrong passphrase apart from an access point that is
 // switched off.
+//
+// A radio still associating is work in progress, not a failure: the
+// boot handed it to the background on purpose, and the verdict
+// arrives in seconds. The Joining reason marks that window so the
+// phase mapping can leave the machine Ready while it lasts.
 func wirelessCondition(interfaces []machine.InterfaceStatus) api.Condition {
-	declared := 0
+	declared, joining := 0, 0
 	var problems []string
 	for _, iface := range interfaces {
 		w := iface.Wireless
@@ -314,10 +377,20 @@ func wirelessCondition(interfaces []machine.InterfaceStatus) api.Condition {
 		if w.State == machine.WirelessConnected {
 			continue
 		}
+		if w.State == machine.WirelessAssociating {
+			joining++
+		}
 		problems = append(problems, fmt.Sprintf("%s (%s): %s", iface.Name, w.SSID, wirelessReason(*w)))
 	}
+	// One settled failure makes the reason NotJoined whatever the
+	// other radios are doing, because a wrong key or a stuck raise
+	// must not hide behind a neighbor that is merely slow.
+	reason := "NotJoined"
+	if joining == len(problems) {
+		reason = "Joining"
+	}
 	return outcomesCondition("WirelessJoined", declared, problems,
-		"NotJoined", "AllJoined",
+		reason, "AllJoined",
 		fmt.Sprintf("all %d declared wireless networks are joined", declared),
 		"no wireless network declared")
 }

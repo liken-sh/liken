@@ -53,6 +53,16 @@ func conditionPhase(c api.Condition) api.Phase {
 		return ""
 	}
 	switch c.Reason {
+	case "Joining":
+		// A radio the boot handed to the background is still
+		// associating. The condition stays False, because it reports
+		// what the boot actuated and the join has not finished, but
+		// the machine is not degraded: the boot went on without the
+		// radio on purpose, and a join takes seconds. The fleet
+		// listing must not show a fault for that window: a Degraded
+		// that appears on every boot and clears itself teaches
+		// people to ignore Degraded.
+		return ""
 	case "FactsUnreadable":
 		// The operator is running but cannot read the facts, so it
 		// has no information about the machine it runs on.
@@ -79,7 +89,7 @@ func conditionPhase(c api.Condition) api.Phase {
 		// the same shape: only a corrected Secret fixes it.
 		return api.PhaseBlocked
 	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining", "Downloading",
-		"Proving":
+		"Proving", "LoadRequested":
 		// A disruption is in progress; the machine is in the middle
 		// of a change. Draining is the first step of a reboot: the
 		// node is cordoned and its workloads are being evicted
@@ -89,7 +99,10 @@ func conditionPhase(c api.Condition) api.Phase {
 		// network instead of waiting on a reboot, but the machine is
 		// just as much in the middle of a change. So is Proving: a
 		// boot's imports stay on trial until the OS pods prove them,
-		// which ordinarily takes seconds.
+		// which ordinarily takes seconds. LoadRequested is the live
+		// load's moment in flight, usually under a second, and a
+		// machine applying its spec in place is updating, not
+		// degraded.
 		return api.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn",
 		"StagedForNextBoot", "AwaitingPodRefresh":

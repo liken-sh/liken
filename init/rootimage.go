@@ -77,7 +77,7 @@ func loadBootModules(names ...string) {
 	}
 	loaded := map[string]bool{}
 	for _, name := range names {
-		if _, err := loadModule(bootModulesDir, name, deps, loaded); err != nil {
+		if _, err := loadModule(bootModulesDir, name, "", deps, loaded); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: boot modules: %s: %v\n", name, err)
 		}
 	}

@@ -148,7 +148,7 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 		status.Message = err.Error()
 		return status
 	}
-	for _, m := range loadDeclaredModulesFrom(moduleBase, names) {
+	for _, m := range loadDeclaredModulesFrom(moduleBase, names, nil) {
 		if m.State == machine.ModuleLoaded || m.State == machine.ModuleBuiltin {
 			continue
 		}

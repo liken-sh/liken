@@ -2,15 +2,15 @@ package main
 
 // The cursor lets a restarted relay resume from its last position
 // instead of resending everything it can see. It lives in the pod's
-// emptyDir, and that choice is deliberate. An emptyDir survives
-// container restarts, which is the common failure (a crash or an OOM
-// kill), but the emptyDir is removed with the pod and with the
-// machine. The cursor must not survive those two events. After a
-// reboot, the kernel's sequence numbers start over and the log files
-// have rotated, so a saved cursor would point into a previous boot.
-// A recreated pod that replays from the start is the correct
-// behavior, and the seq field in every envelope is what lets a
-// consumer remove the duplicate records from that replay.
+// emptyDir, which survives container restarts, the common failure (a
+// crash or an OOM kill). It also survives a reboot: the Pod object
+// outlives the machine's restart, so kubelet reuses the same
+// emptyDir on the durable pod storage. A reboot restarts the
+// kernel's sequence numbers at zero, so a cursor read after one
+// names records this kernel never printed, and the kmsg relay dates
+// its cursor against the machine's uptime to detect exactly that
+// (kmsg.go, earlierBoot). The seq field in every envelope is what
+// lets a consumer remove duplicate records from any replay.
 //
 // This file considered durable stores and rejected them.
 // Checkpointing through the cluster API would push node-local state

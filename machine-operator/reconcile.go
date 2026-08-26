@@ -205,6 +205,14 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	status.Conditions = api.SetCondition(status.Conditions,
 		modulesCondition(status.Modules), now)
 
+	// ModulesLoaded keeps its meaning: a module that loaded is
+	// loaded, whatever happened to its parameters. The parameters
+	// report through their own condition, so each answers one
+	// question and a person reads two plain answers instead of one
+	// mixed one.
+	status.Conditions = api.SetCondition(status.Conditions,
+		moduleParametersCondition(m.Spec.ModuleParameters, status.Modules), now)
+
 	// The unclaimed-hardware report deliberately has no condition,
 	// even though it looks like modules and features at first
 	// glance. The difference is that those judge requests: a

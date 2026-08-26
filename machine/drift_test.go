@@ -303,27 +303,27 @@ func TestNetworkDriftSeesARadioRemoved(t *testing.T) {
 }
 
 func TestModulesDriftIgnoresOrderAndRepetition(t *testing.T) {
-	diffs := ModulesDrift([]string{"nvidia", "zram", "nvidia"}, []string{"zram", "nvidia"})
+	diffs := ModulesDrift([]string{"nvidia", "zram", "nvidia"}, []string{"zram", "nvidia"}, nil, nil)
 	if len(diffs) != 0 {
 		t.Errorf("the lists are the same set: %v", diffs)
 	}
 }
 
 func TestModulesDriftTreatsNilAndEmptyAlike(t *testing.T) {
-	if diffs := ModulesDrift(nil, []string{}); len(diffs) != 0 {
+	if diffs := ModulesDrift(nil, []string{}, nil, nil); len(diffs) != 0 {
 		t.Errorf("nothing declared, nothing actuated: %v", diffs)
 	}
 }
 
 func TestModulesDriftSeesAnAddedModule(t *testing.T) {
-	diffs := ModulesDrift([]string{"nvidia"}, nil)
+	diffs := ModulesDrift([]string{"nvidia"}, nil, nil, nil)
 	if len(diffs) != 1 || !strings.Contains(diffs[0], "nvidia declared but this boot ran without it") {
 		t.Errorf("got %v", diffs)
 	}
 }
 
 func TestModulesDriftSeesARemovedModule(t *testing.T) {
-	diffs := ModulesDrift(nil, []string{"zram"})
+	diffs := ModulesDrift(nil, []string{"zram"}, nil, nil)
 	if len(diffs) != 1 || !strings.Contains(diffs[0], "zram no longer declared") {
 		t.Errorf("got %v", diffs)
 	}

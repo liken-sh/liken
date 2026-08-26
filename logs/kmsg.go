@@ -101,8 +101,32 @@ func parseKmsgRecord(raw []byte) (kmsgRecord, error) {
 // relay has read. This is the last number read, not the last number
 // sent, so a restart does not scan the other facility's records
 // again either.
+//
+// The stamp is the monotonic timestamp of the last record read, and
+// it dates the cursor against the boot that wrote it: a stamp larger
+// than the current uptime can only have come from an earlier boot.
 type kmsgCursor struct {
-	Seq uint64 `json:"seq"`
+	Seq   uint64        `json:"seq"`
+	Stamp time.Duration `json:"stamp"`
+}
+
+// The uptime and the record stamps come from clocks that sample at
+// different moments, so the comparison below carries one second of
+// slack rather than demanding exact agreement.
+const kmsgClockSlack = time.Second
+
+// earlierBoot reports whether the cursor was written by a boot
+// before this one. The kernel restarts kmsg sequence numbers at zero
+// on every boot, so a cursor that survives a reboot names records
+// this kernel never printed, and comparing sequences would silently
+// drop the whole new boot's log until the numbers caught up. The
+// buffer's records cannot settle it either, because a resumed reader
+// starts at the oldest surviving record, whose stamp is legitimately
+// far below the cursor's. The uptime can: no record of this boot can
+// carry a stamp beyond the time this boot has been running, so a
+// cursor stamped past it is from an earlier boot.
+func (c kmsgCursor) earlierBoot(uptime time.Duration) bool {
+	return c.Stamp > uptime+kmsgClockSlack
 }
 
 // kmsgRelay follows one facility of the kernel buffer. The read
@@ -121,6 +145,15 @@ type kmsgRelay struct {
 func (r *kmsgRelay) run() error {
 	var cur kmsgCursor
 	resuming := loadCursor(r.cursorDir, &cur)
+	// A cursor from an earlier boot is discarded, with a notice, so
+	// this boot relays from its first record instead of losing its
+	// log to the old boot's sequence numbers (earlierBoot above).
+	if resuming && cur.earlierBoot(r.now().Sub(r.anchor())) {
+		_ = r.out.notice(r.now(), "info", cur.Seq, &r.facility,
+			fmt.Sprintf("the cursor holds sequence %d from an earlier boot; relaying this boot from its first record", cur.Seq))
+		cur = kmsgCursor{}
+		resuming = false
+	}
 	if resuming {
 		_ = r.out.notice(r.now(), "info", cur.Seq, &r.facility,
 			fmt.Sprintf("resuming after sequence %d", cur.Seq))
@@ -169,7 +202,7 @@ func (r *kmsgRelay) run() error {
 			resuming = false
 		}
 
-		cur.Seq = rec.Seq
+		cur.Seq, cur.Stamp = rec.Seq, rec.Stamp
 		if rec.Facility == r.facility {
 			if err := r.out.emit(envelope{
 				Time:     r.anchor().Add(rec.Stamp).UTC().Format(time.RFC3339Nano),

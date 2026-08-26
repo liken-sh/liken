@@ -38,17 +38,13 @@ package main
 // explains what each outcome means.
 
 import (
-	"bytes"
-	"debug/elf"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
-	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sys/unix"
 
 	"github.com/liken-sh/liken/machine"
@@ -58,6 +54,12 @@ import (
 // rather than a constant so tests can point the first pass at a list
 // of their own making.
 var modulesConf = "/etc/liken/modules.conf"
+
+// finitModule is the syscall behind every load, a variable so a test
+// can watch exactly which file and which parameter string the kernel
+// would have received, without a test run being able to load
+// anything real.
+var finitModule = unix.FinitModule
 
 func loadModules() {
 	release := kernelRelease()
@@ -81,7 +83,7 @@ func loadModules() {
 	loaded := map[string]bool{}
 	count := 0
 	for _, name := range names {
-		n, err := loadModule(base, name, deps, loaded)
+		n, err := loadModule(base, name, "", deps, loaded)
 		count += n
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: modules: %s: %v\n", name, err)
@@ -98,17 +100,27 @@ func loadModules() {
 // These outcomes travel through the facts tree into status.modules.
 // Nothing here can stop the boot. A machine missing a workload's
 // driver is degraded, not down.
-func loadDeclaredModules(names []string) []machine.ModuleStatus {
-	return loadDeclaredModulesFrom(filepath.Join("/lib/modules", kernelRelease()), names)
+func loadDeclaredModules(names []string, parameters map[string]string) []machine.ModuleStatus {
+	return loadDeclaredModulesFrom(filepath.Join("/lib/modules", kernelRelease()), names, parameters)
 }
 
 // loadDeclaredModulesFrom is the same pass with the module tree as a
 // parameter, so tests can point it at a fabricated tree. Only the
 // kernel's own tree ever has real modules to load.
-func loadDeclaredModulesFrom(base string, names []string) []machine.ModuleStatus {
+//
+// The parameters map is spec.moduleParameters, and only this pass
+// carries one. The fixed list and a feature's list ship with the
+// release, and a machine that needs to modify how the OS loads its
+// own drivers has a bug for liken to fix, not a knob to turn
+// (plans/55).
+func loadDeclaredModulesFrom(base string, names []string, parameters map[string]string) []machine.ModuleStatus {
 	if len(names) == 0 {
 		return nil
 	}
+	// The last guard before the kernel. Admission refuses these
+	// shapes, but a manifest carried in on a stick never met
+	// admission (moduleparams.go explains each drop).
+	parameters = usableModuleParameters(parameters)
 
 	// Both indexes are depmod's work, shipped beside the modules
 	// themselves. modules.dep maps every shipped module to its
@@ -126,18 +138,67 @@ func loadDeclaredModulesFrom(base string, names []string) []machine.ModuleStatus
 	}
 
 	loaded := map[string]bool{}
-	statuses := declaredModuleOutcomes(names, deps, builtin, func(name string) error {
-		_, err := loadModule(base, name, deps, loaded)
-		return err
+	statuses := declaredModuleOutcomes(names, deps, builtin, parameters, declaredPass{
+		resident: func(name string) bool { return moduleIsResident(sysModuleDir, name) },
+		load: func(name, params string) error {
+			_, err := loadModule(base, name, params, deps, loaded)
+			return err
+		},
+		readback: func(name string) map[string]string {
+			return readModuleParameters(sysModuleDir, name, parameters)
+		},
 	})
 	for _, s := range statuses {
-		if s.Message != "" {
-			fmt.Printf("liken: modules: %s: %s: %s\n", s.Name, strings.ToLower(string(s.State)), s.Message)
-		} else {
-			fmt.Printf("liken: modules: %s: %s\n", s.Name, strings.ToLower(string(s.State)))
-		}
+		fmt.Println(declaredModuleLine(s, parameters))
 	}
 	return statuses
+}
+
+// declaredModuleLine renders one declared module's console line. A
+// load that carried parameters names the exact string the kernel
+// got, so the console and the log record what this boot passed, the
+// same record status.boot.moduleParameters keeps for the API.
+func declaredModuleLine(s machine.ModuleStatus, parameters map[string]string) string {
+	line := fmt.Sprintf("liken: modules: %s: %s", s.Name, strings.ToLower(string(s.State)))
+	if params := passedParameters(s, parameters); params != "" {
+		line += " (" + params + ")"
+	}
+	if s.Message != "" {
+		line += ": " + s.Message
+	}
+	// A resident module's line, and a builtin's line, would otherwise
+	// read exactly like a clean load, and the console is the live
+	// record on a machine with no shell; the dropped string has to be
+	// said here, not only in status.
+	if declared := machine.ModuleParameterString(s.Name, parameters); declared != "" {
+		switch {
+		case s.AlreadyResident:
+			line += ": already in the kernel, so " + declared + " did not reach it"
+		case s.State == machine.ModuleBuiltin:
+			line += ": the kernel builds it in, so " + declared + " did not reach it"
+		}
+	}
+	return line
+}
+
+// passedParameters is the string to show beside a load, and only a
+// load that actually delivered one: a resident module never received
+// the string, and a refused load already names it in its message.
+func passedParameters(s machine.ModuleStatus, parameters map[string]string) string {
+	if s.AlreadyResident || s.State != machine.ModuleLoaded {
+		return ""
+	}
+	return machine.ModuleParameterString(s.Name, parameters)
+}
+
+// declaredPass is the three questions a declared pass asks the
+// machine: is this module already in the kernel, load it with this
+// string, and what does /sys hold now. They are fields so a test can
+// answer each one without a kernel.
+type declaredPass struct {
+	resident func(name string) bool
+	load     func(name, parameters string) error
+	readback func(name string) map[string]string
 }
 
 // declaredModuleOutcomes classifies each declared name before it
@@ -149,21 +210,37 @@ func loadDeclaredModulesFrom(base string, names []string) []machine.ModuleStatus
 // misspelled name, or a driver from outside this kernel build.
 // Failed means the kernel refused a module that the image does ship.
 func declaredModuleOutcomes(names []string, deps map[string][]string,
-	builtin map[string]bool, load func(name string) error) []machine.ModuleStatus {
+	builtin map[string]bool, parameters map[string]string, pass declaredPass) []machine.ModuleStatus {
 	statuses := make([]machine.ModuleStatus, 0, len(names))
 	for _, name := range names {
 		status := machine.ModuleStatus{Name: name}
 		key := strings.ReplaceAll(name, "-", "_")
+		params := machine.ModuleParameterString(name, parameters)
 		switch {
 		case deps[key] != nil:
-			if err := load(name); err != nil {
+			// Residency is read before the load, because the load
+			// cannot report it: finit_module returns EEXIST for a
+			// module the kernel already holds and drops the
+			// parameter string without a trace. The string is
+			// cleared here so the record shows what was delivered,
+			// not what was hoped.
+			status.AlreadyResident = pass.resident(name)
+			if status.AlreadyResident {
+				params = ""
+			}
+			if err := pass.load(name, params); err != nil {
 				status.State = machine.ModuleFailed
 				status.Message = err.Error()
+				if params != "" {
+					status.Message += fmt.Sprintf(" (parameters %s)", params)
+				}
 			} else {
 				status.State = machine.ModuleLoaded
+				status.Parameters = pass.readback(name)
 			}
 		case builtin[key]:
 			status.State = machine.ModuleBuiltin
+			status.Parameters = pass.readback(name)
 		default:
 			status.State = machine.ModuleMissing
 			status.Message = "not a module in this image's kernel build; check the spelling against the machine's unclaimed-hardware report"
@@ -256,7 +333,12 @@ func moduleName(path string) string {
 // loaded. An already-loaded module, whether loaded by this call or
 // by an earlier dependency chain, returns EEXIST, which counts as
 // success but not toward the count.
-func loadModule(base, name string, deps map[string][]string, loaded map[string]bool) (int, error) {
+//
+// The parameter string goes to the module's own file alone, which is
+// entry zero of its modules.dep line; every dependency loads with an
+// empty string, exactly as modprobe would load it. A parameter meant
+// for a dependency belongs to that module's own declaration.
+func loadModule(base, name, parameters string, deps map[string][]string, loaded map[string]bool) (int, error) {
 	entry, ok := deps[strings.ReplaceAll(name, "-", "_")]
 	if !ok {
 		return 0, fmt.Errorf("not in modules.dep (is it built into the kernel?)")
@@ -271,7 +353,11 @@ func loadModule(base, name string, deps map[string][]string, loaded map[string]b
 		if err != nil {
 			return count, err
 		}
-		err = unix.FinitModule(int(f.Fd()), "", unix.MODULE_INIT_COMPRESSED_FILE)
+		params := ""
+		if i == 0 {
+			params = parameters
+		}
+		err = finitModule(int(f.Fd()), params, unix.MODULE_INIT_COMPRESSED_FILE)
 		f.Close()
 		if err != nil && !errors.Is(err, unix.EEXIST) {
 			return count, fmt.Errorf("finit_module %s: %w", file, err)
@@ -290,206 +376,4 @@ func kernelRelease() string {
 		return "unknown"
 	}
 	return unix.ByteSliceToString(u.Release[:])
-}
-
-// Reading a module's soft dependencies.
-//
-// A hard dependency is a symbol one module needs from another, and
-// depmod records every one of them in modules.dep, ordered so that
-// loading right-to-left satisfies them. A soft dependency is a weaker
-// thing: a hint that one module names another to load before it, so
-// that a device probes to the right driver. The lab's Realtek NIC is
-// the case that taught this. The r8169 driver asks, through a "pre"
-// soft dependency, for the realtek PHY library to load ahead of it.
-// Without realtek the NIC still binds, but to a generic PHY, and the
-// link does not come up the same way.
-//
-// depmod does not index soft dependencies. modules.dep, modules.alias,
-// and the rest say nothing about them. Each module carries its own
-// soft dependencies inside its compiled object, in the .modinfo
-// section, as strings of the form "softdep=pre: realtek". modprobe
-// reads them there, and so does liken. (modprobe also reads softdep
-// lines from modprobe.d files, which liken does not ship, so a
-// module's own .modinfo is the whole source here.)
-//
-// This knowledge never reaches the module loader. The loader stays
-// explicit: it loads what a manifest declares, in the declared order,
-// and a soft dependency the manifest did not name does not load. liken
-// has no udev for the same reason. The manifest is the whole truth
-// about what a machine runs. Soft dependencies inform the advice a
-// person reads before they write the manifest, so a recommendation can
-// name realtek and r8169 together, but they never change what the
-// loader does with the manifest it is handed.
-//
-// Only "pre" soft dependencies matter here. liken loads a driver so
-// that a device appears, and a "pre" dependency changes which driver
-// binds, so it changes that outcome. A "post" dependency loads after
-// the module and does not change whether the device appears, so the
-// recommendation ignores it.
-
-// busCompanions names the modules that a driver needs beside it, which
-// no index in the module tree can name.
-//
-// A recommendation starts from modules.alias, which maps a device's
-// fingerprint to the drivers that claim that fingerprint. Some drivers
-// claim nothing there, because they bind over a bus that another
-// driver creates: usbhid turns a USB interface into a HID device, and
-// hid-generic then binds that HID device. No modalias points at
-// hid-generic, and no soft dependency names it, so a report that reads
-// only the index recommends a keyboard's transport and stops one
-// module short of a working keyboard.
-//
-// The table is the place to record each of these pairs as hardware
-// proves them. It stays short on purpose: an entry here is a claim
-// that the index cannot express, not a shortcut around reading it.
-var busCompanions = map[string][]string{
-	"usbhid": {"hid_generic"},
-}
-
-// driverChain is the full ordered list a person declares to make one
-// driver work: its soft dependencies, the driver, and any companion
-// that binds over the bus the driver creates. The companions come last
-// because they bind to what the driver produces.
-func driverChain(base, name string) []string {
-	chain := softdepChain(base, name)
-	for _, module := range chain {
-		for _, companion := range busCompanions[strings.ReplaceAll(module, "-", "_")] {
-			if !slices.Contains(chain, companion) {
-				chain = append(chain, companion)
-			}
-		}
-	}
-	return chain
-}
-
-// softdepChain expands one module name into the ordered list of
-// modules to declare so the kernel binds the intended driver: the
-// module's "pre" soft dependencies first, resolved recursively because
-// a soft dependency can carry its own, then the module itself. The
-// report boot and the unclaimed-hardware advice both call this to turn
-// a single recommended driver into the full list a person writes into
-// spec.modules. A tree with no readable index yields the name alone,
-// which is the honest answer when nothing can be resolved.
-func softdepChain(base, name string) []string {
-	deps, err := readModulesDep(filepath.Join(base, "modules.dep"))
-	if err != nil {
-		return []string{name}
-	}
-	return expandSoftdeps(name, func(n string) []string {
-		return modulePreSoftdeps(base, deps, n)
-	})
-}
-
-// expandSoftdeps walks the "pre" soft-dependency graph depth-first and
-// returns the names in load order, each name once. The seen set is the
-// cycle guard. Soft dependencies are only a hint, and nothing stops a
-// module from naming one that names it back, so the walk records every
-// name it enters and never enters one twice. A name already placed by
-// an earlier branch is not placed again.
-func expandSoftdeps(name string, pre func(string) []string) []string {
-	return appendSoftdeps(name, pre, map[string]bool{}, nil)
-}
-
-func appendSoftdeps(name string, pre func(string) []string, seen map[string]bool, out []string) []string {
-	key := strings.ReplaceAll(name, "-", "_")
-	if seen[key] {
-		return out
-	}
-	seen[key] = true
-	for _, p := range pre(name) {
-		out = appendSoftdeps(p, pre, seen, out)
-	}
-	return append(out, name)
-}
-
-// modulePreSoftdeps returns the "pre" soft dependencies that a single
-// module names in its .modinfo, without recursing. It finds the
-// module's file through modules.dep, whose first field on each line is
-// the module's own path, then reads the strings from that file.
-func modulePreSoftdeps(base string, deps map[string][]string, name string) []string {
-	entry, ok := deps[strings.ReplaceAll(name, "-", "_")]
-	if !ok || len(entry) == 0 {
-		return nil
-	}
-	modinfo, err := readModinfo(filepath.Join(base, entry[0]))
-	if err != nil {
-		return nil
-	}
-	return parseSoftdepPre(modinfo)
-}
-
-// readModinfo returns the raw bytes of a module's .modinfo section.
-// The module files are compiled objects, so the soft-dependency
-// strings live in an ELF section, not in any index. liken's modules
-// are zstd-compressed exactly as Ubuntu shipped them, and the kernel
-// normally decompresses them itself during finit_module. Reading the
-// section back in userspace has no such help, so this decompresses the
-// file first when its name says it carries a zstd frame.
-func readModinfo(path string) ([]byte, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if strings.HasSuffix(path, ".zst") {
-		raw, err = zstdDecode(raw)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return elfSection(raw, ".modinfo")
-}
-
-// elfSection returns one named section's bytes from an ELF image held
-// in memory.
-func elfSection(image []byte, name string) ([]byte, error) {
-	f, err := elf.NewFile(bytes.NewReader(image))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	section := f.Section(name)
-	if section == nil {
-		return nil, fmt.Errorf("no %s section", name)
-	}
-	return section.Data()
-}
-
-// zstdDecode decompresses a whole zstd frame held in memory.
-func zstdDecode(data []byte) ([]byte, error) {
-	reader, err := zstd.NewReader(nil)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	return reader.DecodeAll(data, nil)
-}
-
-// parseSoftdepPre reads the "pre" soft dependencies out of a .modinfo
-// section. The section is a run of NUL-separated "key=value" strings.
-// A soft dependency is a "softdep" key whose value lists names under
-// "pre:" and "post:" markers, for example "pre: realtek post: foo".
-// This collects the names under "pre:", in order, across every softdep
-// string, and drops the "post:" names for the reason stated above.
-func parseSoftdepPre(modinfo []byte) []string {
-	var pre []string
-	for entry := range bytes.SplitSeq(modinfo, []byte{0}) {
-		key, value, ok := bytes.Cut(entry, []byte{'='})
-		if !ok || string(key) != "softdep" {
-			continue
-		}
-		bucket := ""
-		for _, token := range strings.Fields(string(value)) {
-			switch token {
-			case "pre:":
-				bucket = "pre"
-			case "post:":
-				bucket = "post"
-			default:
-				if bucket == "pre" {
-					pre = append(pre, token)
-				}
-			}
-		}
-	}
-	return pre
 }

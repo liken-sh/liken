@@ -298,8 +298,14 @@ func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy
 //     record through convergence, unblocks the hash.
 //  4. The facts claim this exact manifest was actuated, yet drift
 //     still computes: this is a contradiction, and it can only mean
-//     a liken bug. Holding in a stuck condition is better than
-//     rebooting the machine on every reconcile pass.
+//     a liken bug, with one exception. Parameter-only drift under a
+//     matching hash is a state a live load produces by design: it
+//     promotes the manifest and records only the parameters it
+//     delivered, so an undelivered one drifts toward the reboot
+//     that can deliver it (init/liveload.go). That shape takes the
+//     staged path below. Every other drift shape under a matching
+//     hash holds in the stuck condition, because holding is better
+//     than rebooting the machine on every reconcile pass.
 //  5. machineState is backed by memory: there is nowhere durable to
 //     stage a document.
 //  6. The spec fails validation against the machine's reality.
@@ -314,8 +320,12 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 
 	storageDiffs := machine.StorageDrift(m.Spec.Storage, facts.Boot.Storage)
 	networkDiffs := machine.NetworkDrift(m.Spec.Network, facts.Boot.Network)
+	added, retracted := machine.ModuleSetDiff(m.Spec.Modules, facts.Boot.Modules)
+	parameterDiffs := machine.ModuleParameterDrift(m.Spec.Modules, facts.Boot.Modules,
+		m.Spec.ModuleParameters, facts.Boot.ModuleParameters)
 	drift := slices.Concat(storageDiffs, networkDiffs,
-		machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules),
+		machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules,
+			m.Spec.ModuleParameters, facts.Boot.ModuleParameters),
 		machine.RlimitDrift(m.Spec.Rlimits, facts.Boot.Rlimits))
 	if len(drift) == 0 {
 		return convergedWithCleanup(
@@ -333,7 +343,15 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		return convergence{condition: notConverged("SpecConverged", "RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", rejection.Reason))}
 	}
-	if facts.Boot.ManifestHash == hash {
+	// The one drift shape a matching hash may legitimately carry:
+	// every line is a module parameter on an unchanged module set,
+	// which is what a live load leaves when it could not deliver a
+	// parameter (list item 4 above). The test is structural, a count
+	// over the drift's parts, so no drift text is ever matched and
+	// any other shape stays a contradiction.
+	parametersOnly := len(storageDiffs) == 0 && len(networkDiffs) == 0 &&
+		len(added) == 0 && len(retracted) == 0 && len(parameterDiffs) == len(drift)
+	if facts.Boot.ManifestHash == hash && !parametersOnly {
 		return convergence{condition: notConverged("SpecConverged", "BootMismatch",
 			fmt.Sprintf("facts claim this spec was actuated, yet it differs from the boot's record (%s); refusing to reboot over a contradiction; this is a liken bug", diffs))}
 	}
@@ -391,7 +409,6 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	// and init's live loader promotes the staged manifest to proven
 	// whether or not it applied anything. A machine would then report
 	// itself converged on a spec it never actuated.
-	added, retracted := machine.ModuleSetDiff(m.Spec.Modules, facts.Boot.Modules)
 	if len(retracted) == 0 && len(drift) == len(added) {
 		c.requestLoad = true
 		c.condition = notConverged("SpecConverged", "LoadRequested",

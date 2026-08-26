@@ -127,6 +127,30 @@ the log lines that the kernel wrote as it failed:
 
     kubectl get machine <name> -o jsonpath='{.status.lastCrash}' | jq
 
+## A module parameter did not take
+
+Read back what the kernel holds for the module:
+
+    kubectl get machine <name> -o jsonpath='{.status.modules}' | jq
+
+Each declared parameter that the kernel offers a readable file for
+appears under that module's `parameters`, with the value in the
+kernel's own spelling. A parameter that is missing there usually has
+a wrong name. The kernel loads the module anyway and says so only
+once, as `unknown parameter ... ignored`, in the machine's log
+stream at the moment of the load. If that line is in the log, check
+the parameter's spelling against the driver's documentation and
+correct the spec. If it is not, the parameter is real but the
+kernel offers no readable file for it; some drivers register a
+parameter without one, and the setting still applied at the load.
+
+If the parameter's name is right but the `ModuleParametersApplied`
+condition is `False`, the condition's message names one of two
+cases. The module is built into the kernel, so no load happened and
+the setting must go elsewhere. Or the module was already loaded
+before the declared modules ran, so the load that carried your
+string was skipped; the message names what loaded it first.
+
 ## A machine needs a reboot and nothing is staged
 
 A machine converges to its documents, so a machine that already

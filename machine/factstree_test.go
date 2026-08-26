@@ -55,6 +55,7 @@ func writeAll(t *testing.T, tree FactsTree, s *MachineStatus) {
 	must(tree.WriteBootRestarts(s.Boot.Restarts))
 	must(tree.WriteBootModules(s.Boot.Modules))
 	must(tree.WriteBootRlimits(s.Boot.Rlimits))
+	must(tree.WriteBootModuleParameters(s.Boot.ModuleParameters))
 	must(tree.WriteBootStorage(s.Boot.Storage))
 	must(tree.WriteBootNetwork(s.Boot.Network))
 	must(tree.WriteRejection(RejectMachine, s.Boot.Rejection))
@@ -194,6 +195,12 @@ func everythingSet() *MachineStatus {
 		Modules: []ModuleStatus{
 			{Name: "nvme", State: ModuleLoaded},
 			{Name: "e1000e", State: ModuleMissing, Message: "not in image"},
+			// One module carries a readback and the residency mark, so
+			// the round trip covers both halves of a parameter report.
+			{
+				Name: "snd_hda_intel", State: ModuleLoaded, AlreadyResident: true,
+				Parameters: map[string]string{"power_save": "1", "enable_msi": "Y"},
+			},
 		},
 		Features: []FeatureStatus{
 			{Name: "gpu", State: FeatureActive},
@@ -220,7 +227,14 @@ func everythingSet() *MachineStatus {
 			// A real command line, spaces and all, because it goes into
 			// a scalar fact and a space is not a separator there.
 			CommandLine: "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10",
-			Modules:     []string{"nvme", "e1000e"},
+			Modules:     []string{"nvme", "e1000e", "snd_hda_intel"},
+			// The declared map as the manifest wrote it: the dotted key
+			// the kernel uses, and a value the kernel renders differently
+			// when it is read back.
+			ModuleParameters: map[string]string{
+				"snd_hda_intel.power_save": "1",
+				"snd_hda_intel.enable_msi": "1",
+			},
 			// One limit in each of the spec's three forms, so the round
 			// trip covers a bare number, the word, and a pair.
 			Rlimits: map[string]string{

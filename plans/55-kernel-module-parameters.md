@@ -155,6 +155,32 @@ re-derives the same judgment from the same shared functions
 (`init/liveload.go`), so a stale or forged intent still applies
 nothing that a reboot would have to apply.
 
+One rule keeps the live path honest about delivery. A live load
+loads its added modules in the manifest's order, the same order a
+boot uses, because the order decides which module arrives early as a
+dependency and so cannot take its parameters. When an added module
+is already resident anyway, the load applies the rest of the edit
+and records in `boot/moduleParameters` only the keys it delivered.
+The undelivered key then drifts, parameter drift on a loaded module
+is reboot-class, and `rebootPolicy` takes the normal turn; the
+reboot delivers it. The load has already promoted the manifest by
+then, so this drift arrives under a manifest hash that matches the
+boot record, the one state the operator's contradiction guard would
+otherwise call a bug. The guard admits exactly that shape, parameter
+lines alone on an unchanged module set, and every other drift under
+a matching hash still holds as a contradiction
+(machine-operator/converge.go). If the module is resident at boot too, from the
+fixed list or the manifest's own order, the boot records the request
+and the `ModuleParametersApplied` condition carries the story, so
+the worst case is one reboot that ends Degraded with a message, and
+never a loop.
+
+One gap stays open, recorded here on purpose: reordering
+`spec.modules` alone produces no drift, because the comparison is
+set-based. An operator who moves a dependency earlier to route a
+parameter to it gets the fix at the next reboot that happens for any
+other reason, not a scheduled one.
+
 Reconciling the writable parameters live, by writing
 `/sys/module/<name>/parameters/<parameter>`, is deliberately not part
 of this. Whether a parameter is writable is a per-parameter mode bit
@@ -225,11 +251,15 @@ Two additions, each matching a field that already exists:
   request, not the result.
 * `status.modules[].parameters`, a map, records what the machine read
   back from `/sys/module/<name>/parameters/<parameter>` for the
-  declared keys, verbatim. A key whose file does not exist is absent,
-  and absence is the signal that the parameter name is wrong, because
-  the kernel accepts the module and ignores the name. This follows
-  `status.rlimits`, which reports what the kernel holds and omits what
-  it could not set.
+  declared keys, verbatim. A key whose file cannot be read is absent.
+  Absence usually means the parameter name is wrong, because the
+  kernel accepts the module and ignores the name; it can also mean
+  the parameter is real but unreadable, since a driver may register
+  a parameter with no sysfs file at all (`libata.force` does) or
+  with a write-only mode. The kernel's log line at the load is what
+  separates the wrong name from the unreadable one. This follows
+  `status.rlimits`, which reports what the kernel holds and omits
+  what it could not set.
 
 The two are not compared. The kernel prints a bool parameter back as
 `Y` or `N`, an array with its own separators, and a charp as whatever
@@ -341,4 +371,33 @@ so once, in the machine's log stream, at the moment of the load.
 
 ## What the lab measured
 
-Nothing yet. The milestone is not built, by decision.
+The QEMU drills ran on 2026-08-26 against a dev build. A declared
+parameter took at the load (`nbd.nbds_max=5`) and read back
+identically. A wrong name loaded the module, left the readback key
+absent, and put the kernel's `unknown parameter` line in the
+machine's log stream. A refused value (`nbds_max=abc`) failed the
+module with `EINVAL` and the passed string in the message, and the
+boot still settled its pods in 28.8 seconds. A parameter change on a
+loaded module produced one drift line and went straight to
+`AwaitingTurn` with no live load. A module added with its parameters
+applied in place with no reboot. All six admission refusals fired
+against the live API server with their messages. A parameter for the
+builtin `loop` reported `ParametersNotApplied` naming the command
+line, with `4` declared beside the kernel's `8`.
+
+The resident case ran end to end on a machine with `rebootPolicy:
+Auto`: the live load applied, the console said the string did not
+reach the resident module, the undelivered key drifted under the
+promoted manifest's own hash, the operator staged and took the
+conductor's turn, and the machine rebooted itself and delivered the
+parameter, 61 seconds from patch to reboot. The first attempt at
+this drill found the operator's contradiction guard calling that
+state a bug and holding the machine Blocked; the guard now admits
+parameter-only drift on an unchanged module set, and nothing else.
+
+Two readback limits the drills confirmed: a parameter registered
+with mode 0 (`dummy.numdummies`) has no sysfs file, so the console
+line is the only proof of delivery; and the kernel-log line for a
+wrong name is only reachable because the log relay now survives a
+reboot, which the same drills proved by reading the new boot's
+records from sequence zero.

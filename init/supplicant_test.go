@@ -282,6 +282,71 @@ func TestTheEventStreamComesBackAfterARestart(t *testing.T) {
 	end(t, p)
 }
 
+// aimWirelessRunDir points the wireless runtime at a tempdir, so a
+// test never writes under the machine's own /run.
+func aimWirelessRunDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	orig := wirelessRunDir
+	wirelessRunDir = dir
+	t.Cleanup(func() { wirelessRunDir = orig })
+	return dir
+}
+
+// afterTheShutdown latches the supplicant list closed, the way
+// stopSupplicants latches it, and restores it when the test ends.
+func afterTheShutdown(t *testing.T) {
+	t.Helper()
+	supplicantsMu.Lock()
+	supplicantsStopping = true
+	supplicantsMu.Unlock()
+	t.Cleanup(func() {
+		supplicantsMu.Lock()
+		supplicantsStopping = false
+		supplicants = nil
+		supplicantsMu.Unlock()
+	})
+}
+
+// trackedSupplicants reports the list the shutdown would stop.
+func trackedSupplicants() []*supplicantProcess {
+	supplicantsMu.Lock()
+	defer supplicantsMu.Unlock()
+	return append([]*supplicantProcess(nil), supplicants...)
+}
+
+func TestASupplicantThatStartsAfterTheShutdownIsStoppedAtOnce(t *testing.T) {
+	// A background radio can reach superviseSupplicant after
+	// stopSupplicants has already run. Such a supplicant would never
+	// be stopped by anything, so it must be stopped here, and it must
+	// never be tracked as if the shutdown could still reach it.
+	aimWirelessRunDir(t)
+	starts := scriptStarts(t, 0)
+	sent := recordSignals(t)
+	afterTheShutdown(t)
+
+	dir := controlSocketDir("wlan0")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	serveAt(t, filepath.Join(dir, "wlan0"), "OK\n")
+
+	control, err := superviseSupplicant("wlan0", "/run/liken/wireless/wlan0/wpa_supplicant.conf")
+	if err == nil {
+		t.Fatal("a supplicant started after the shutdown must be refused")
+	}
+	if control != nil {
+		t.Error("a refused supervision hands back no control client")
+	}
+	if tracked := trackedSupplicants(); len(tracked) != 0 {
+		t.Errorf("the refused supplicant is tracked: %d", len(tracked))
+	}
+	pid := starts.started(t)
+	if reached := sent.reached(); len(reached) != 1 || reached[0] != pid {
+		t.Errorf("the process it started is an orphan; signals reached %v, want [%d]", reached, pid)
+	}
+}
+
 // servingSocket is a stand-in supplicant that answers ATTACH, for the
 // tests whose subject is the process and not the event stream.
 func servingSocket(t *testing.T) string {

@@ -32,6 +32,7 @@ func fullConn(t *testing.T, ifname, cidr string, method machine.AddressMethod) *
 	c.nameservers = []net.IP{net.ParseIP("10.0.2.3")}
 	if method == machine.MethodDHCP {
 		c.leaseTime = time.Hour
+		c.leaseExpires = factsNow.Add(time.Hour)
 	}
 	return c
 }
@@ -94,7 +95,7 @@ func TestRuntimeFactsWithoutLevelsReportNone(t *testing.T) {
 }
 
 func TestNetworkFactsWithNoConnections(t *testing.T) {
-	status := networkFacts(nil, nil, factsNow)
+	status := networkFacts(nil, nil)
 	if status.Interface != "" || len(status.Interfaces) != 0 {
 		t.Errorf("no connections means no facts: %+v", status)
 	}
@@ -105,7 +106,7 @@ func TestNetworkFactsSummarizesTheClusterFacingInterface(t *testing.T) {
 		fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP),
 		fullConn(t, "eth1", "10.10.0.2/24", machine.MethodStatic),
 	}
-	status := networkFacts(labCluster(), conns, factsNow)
+	status := networkFacts(labCluster(), conns)
 	if status.Interface != "eth1" {
 		t.Errorf("the nodeCIDR identifies the primary interface, got %s", status.Interface)
 	}
@@ -121,7 +122,7 @@ func TestNetworkFactsFallsBackToTheFirstConnection(t *testing.T) {
 	conns := []*connection{
 		fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP),
 	}
-	status := networkFacts(nil, conns, factsNow)
+	status := networkFacts(nil, conns)
 	if status.Interface != "eth0" {
 		t.Errorf("with no cluster the first connection is primary, got %s", status.Interface)
 	}
@@ -131,7 +132,7 @@ func TestNetworkFactsFallsBackToTheFirstConnection(t *testing.T) {
 }
 
 func TestInterfaceFactsForALease(t *testing.T) {
-	got := interfaceFacts(fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP), factsNow)
+	got := interfaceFacts(fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP))
 	if got.Method != machine.MethodDHCP {
 		t.Errorf("got %s", got.Method)
 	}
@@ -140,8 +141,30 @@ func TestInterfaceFactsForALease(t *testing.T) {
 	}
 }
 
+func TestALeaseExpiryStaysWhereTheACKPutIt(t *testing.T) {
+	// A background radio rewrites the whole network subtree whenever
+	// it settles. That rewrite must repeat every wired lease's expiry,
+	// not derive a new one from the clock, or a machine with a radio
+	// would report a lease that never runs out.
+	conns := []*connection{fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP)}
+
+	first := networkFacts(nil, conns)
+	time.Sleep(2 * time.Millisecond)
+	second := networkFacts(nil, conns)
+
+	if first.LeaseExpires == nil || second.LeaseExpires == nil {
+		t.Fatalf("a lease has an expiry: %v, %v", first.LeaseExpires, second.LeaseExpires)
+	}
+	if !first.LeaseExpires.Equal(*second.LeaseExpires) {
+		t.Errorf("the expiry moved from %v to %v", first.LeaseExpires, second.LeaseExpires)
+	}
+	if !first.LeaseExpires.Equal(factsNow.Add(time.Hour)) {
+		t.Errorf("the expiry is the one the ACK fixed, got %v", first.LeaseExpires)
+	}
+}
+
 func TestInterfaceFactsForAStaticAddress(t *testing.T) {
-	got := interfaceFacts(fullConn(t, "eth1", "10.10.0.2/24", machine.MethodStatic), factsNow)
+	got := interfaceFacts(fullConn(t, "eth1", "10.10.0.2/24", machine.MethodStatic))
 	if got.Method != machine.MethodStatic {
 		t.Errorf("got %s", got.Method)
 	}

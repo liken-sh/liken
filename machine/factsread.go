@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/liken-sh/liken/api"
 )
@@ -102,6 +103,12 @@ func (t FactsTree) readKeyedScalars(rel string) (map[string]string, error) {
 	values := map[string]string{}
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		// writeAtomic stages its temp file inside this directory as
+		// .liken-*, and a read can race the rename; a dotfile is
+		// never a key.
+		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		value, err := t.readFact(filepath.Join(rel, entry.Name()))
@@ -473,6 +480,14 @@ func (t FactsTree) readModules() ([]ModuleStatus, error) {
 		}
 		m.State = ModuleState(state)
 		if m.Message, err = t.readFact(filepath.Join(base, "message")); err != nil {
+			return nil, err
+		}
+		resident, err := t.readFact(filepath.Join(base, "alreadyResident"))
+		if err != nil {
+			return nil, err
+		}
+		m.AlreadyResident = resident == "true"
+		if m.Parameters, err = t.readKeyedScalars(filepath.Join(base, "parameters")); err != nil {
 			return nil, err
 		}
 		modules = append(modules, m)

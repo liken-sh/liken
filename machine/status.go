@@ -296,12 +296,15 @@ type InterfaceStatus struct {
 	Wireless *WirelessStatus `json:"wireless,omitempty"`
 }
 
-// WirelessState is what a radio is doing at the moment the boot
-// reports it. Four words exist because the kernel alone cannot tell
-// them apart: it reports the same missing carrier for a wrong
+// WirelessState is what a radio is doing at the moment the machine
+// reports it. Distinct words exist because the kernel alone cannot
+// tell them apart: it reports the same missing carrier for a wrong
 // passphrase and for an access point that is switched off. Only the
 // supplicant's own events separate WrongKey from NoCarrier, and
 // WrongKey is the one value that no amount of waiting corrects.
+// NotRaised is the exception that comes from init rather than the
+// supplicant: the kernel call that raises the interface never
+// returned, so no supplicant ever ran on it.
 type WirelessState string
 
 const (
@@ -309,6 +312,12 @@ const (
 	WirelessConnected   WirelessState = "Connected"
 	WirelessWrongKey    WirelessState = "WrongKey"
 	WirelessNoCarrier   WirelessState = "NoCarrier"
+	// WirelessNotRaised reports a raise that did not return within
+	// init's deadline. A driver that deadlocks in the kernel while
+	// powering the radio produces it; the thread cannot be stopped,
+	// so this state is a report about the driver, not the network,
+	// and only a reboot without the radio in the spec clears it.
+	WirelessNotRaised WirelessState = "NotRaised"
 )
 
 // WirelessStatus is the wireless half of one interface's status: the
@@ -599,6 +608,28 @@ type ModuleStatus struct {
 	Name    string      `json:"name"`
 	State   ModuleState `json:"state"`
 	Message string      `json:"message,omitempty"`
+
+	// Parameters is what the machine read back from
+	// /sys/module/<name>/parameters/ for the declared parameter
+	// names, keyed by parameter name, verbatim. A declared name that
+	// is absent here usually means the kernel ignored a wrong name,
+	// which it says once in its log as "unknown parameter ...
+	// ignored". It can also mean the parameter is real but offers
+	// nothing to read: a driver may register a parameter with no
+	// sysfs file at all, or with a write-only mode. The values are
+	// not compared against the declaration, because the kernel
+	// prints a bool back as Y or N and an array with its own
+	// separators; a person compares the two fields that sit beside
+	// each other.
+	Parameters map[string]string `json:"parameters,omitempty"`
+
+	// AlreadyResident reports that the module was in the kernel
+	// before the declared pass reached it, loaded by the fixed list,
+	// a feature, or an earlier module's dependency chain. It matters
+	// because a resident module never receives a parameter string:
+	// finit_module returns EEXIST and ignores it, so the residency
+	// has to be read before the load to be reported at all.
+	AlreadyResident bool `json:"alreadyResident,omitempty"`
 }
 
 // FeatureState is one enabled feature's standing on one machine, a
@@ -756,6 +787,13 @@ type BootStatus struct {
 	// reboot of its own. Comparing them here would read as drift on
 	// every machine at once the moment the table changed.
 	Rlimits map[string]string `json:"rlimits,omitempty"`
+
+	// ModuleParameters is the parameter map the winning manifest
+	// declared and this boot passed to the loads, the drift
+	// reference for spec.moduleParameters the same way Modules is
+	// for spec.modules. It records the request; the readback lives
+	// in status.modules[].parameters.
+	ModuleParameters map[string]string `json:"moduleParameters,omitempty"`
 
 	// Slot is the system slot this boot came from, "A" or "B", read
 	// from the liken.slot= parameter in each boot entry's command

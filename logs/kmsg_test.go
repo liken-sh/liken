@@ -293,6 +293,74 @@ func TestKmsgRelayNoticesRecordsExpiredWhileDown(t *testing.T) {
 	}
 }
 
+// The kernel restarts its sequence numbers at 0 on every boot, so a
+// cursor carried across a reboot sits far past every record the new
+// boot has printed. Skipping those records would lose the whole boot.
+func TestKmsgRelayRelaysANewBootFromItsFirstRecord(t *testing.T) {
+	immediateCheckpoints(t)
+
+	relay, _ := testKmsgRelay(t, 0, scriptedDevice(
+		"6,700,1800000000,-;half an hour into the last boot\n",
+	))
+	if err := relay.run(); err != io.EOF {
+		t.Fatal(err)
+	}
+
+	restarted, out := testKmsgRelay(t, 0, scriptedDevice(
+		"6,0,500000,-;the new boot's first record\n",
+		"6,1,900000,-;and its second\n",
+	))
+	restarted.cursorDir = relay.cursorDir
+	// This machine booted ten seconds ago, so no record of this boot
+	// can carry the cursor's half-hour stamp.
+	boot := restarted.anchor()
+	restarted.now = func() time.Time { return boot.Add(10 * time.Second) }
+	if err := restarted.run(); err != io.EOF {
+		t.Fatal(err)
+	}
+
+	es := parseEnvelopes(t, out.String())
+	if len(es) != 3 {
+		t.Fatalf("got %d envelopes, want a notice and both records: %+v", len(es), es)
+	}
+	if es[1].Seq != 0 || es[2].Seq != 1 {
+		t.Errorf("the new boot's records must all flow: %+v", es)
+	}
+}
+
+// A container restart within one boot reads the buffer from its
+// oldest surviving record, which is normally far behind the cursor.
+// That distance is not a reboot, and those records were already sent.
+func TestKmsgRelayKeepsItsCursorWithinOneBoot(t *testing.T) {
+	immediateCheckpoints(t)
+
+	relay, _ := testKmsgRelay(t, 0, scriptedDevice(
+		"6,100,1000000,-;one second after boot\n",
+		"6,101,1500000000,-;twenty five minutes after boot\n",
+	))
+	if err := relay.run(); err != io.EOF {
+		t.Fatal(err)
+	}
+
+	restarted, out := testKmsgRelay(t, 0, scriptedDevice(
+		"6,100,1000000,-;one second after boot\n",
+		"6,101,1500000000,-;twenty five minutes after boot\n",
+		"6,102,1500001000,-;the only new one\n",
+	))
+	restarted.cursorDir = relay.cursorDir
+	if err := restarted.run(); err != io.EOF {
+		t.Fatal(err)
+	}
+
+	es := parseEnvelopes(t, out.String())
+	if len(es) != 2 {
+		t.Fatalf("got %d envelopes, want the resume notice and one new record: %+v", len(es), es)
+	}
+	if es[1].Seq != 102 {
+		t.Errorf("a same-boot resume must not replay: %+v", es)
+	}
+}
+
 // A relay that cannot send records must exit with the write error,
 // so the kubelet restarts it, instead of reading on and dropping
 // records.

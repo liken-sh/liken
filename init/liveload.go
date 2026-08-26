@@ -52,7 +52,13 @@ type moduleLoader struct {
 	bootStorage machine.StorageSpec
 	bootNetwork machine.NetworkSpec
 	bootModules []string
-	statuses    []machine.ModuleStatus
+	// bootParameters is the parameter map this boot loaded with, the
+	// reference a staged spec's parameters are judged against. Init
+	// re-derives the judgment from its own record rather than trust
+	// the intent, so a stale or forged intent still applies nothing
+	// that a reboot would apply differently.
+	bootParameters map[string]string
+	statuses       []machine.ModuleStatus
 }
 
 // apply performs one live load. It reads the staged manifest, refuses
@@ -103,7 +109,26 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 		return
 	}
 
-	outcomes := loadDeclaredModulesFrom(moduleBase, added)
+	// A loaded module never reads its parameters again, so a changed
+	// parameter on one is a reboot-class edit however it arrives.
+	// The drift function only writes lines for modules in both sets,
+	// which is what lets an added module bring its parameters along
+	// and load with them below.
+	if diffs := machine.ModuleParameterDrift(doc.Spec.Modules, l.bootModules,
+		doc.Spec.ModuleParameters, l.bootParameters); len(diffs) != 0 {
+		fmt.Printf("liken: modules: the staged spec (%.12s) changes the parameters of a loaded module (%s); it needs a boot, not a load\n",
+			hash, strings.Join(diffs, "; "))
+		return
+	}
+
+	// The diff's added set comes back sorted, and a reboot loads
+	// spec.modules in the manifest's own order. The live load must
+	// match the reboot it claims equivalence with, because the order
+	// decides which module arrives first as a dependency and so
+	// cannot take its parameters when its own turn comes.
+	load := declaredOrder(doc.Spec.Modules, added)
+
+	outcomes := loadDeclaredModulesFrom(moduleBase, load, doc.Spec.ModuleParameters)
 
 	if err := store.Promote(); err != nil {
 		// The loads happened, but the record did not move. The
@@ -115,6 +140,7 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 	}
 
 	l.bootModules = slices.Sorted(slices.Values(doc.Spec.Modules))
+	l.bootParameters = deliveredParameters(doc.Spec.ModuleParameters, outcomes)
 	l.statuses = mergeModuleStatuses(l.statuses, outcomes)
 	// The write order is the commit protocol. boot/modules and modules/
 	// land first, and boot/manifest lands last, because the manifest
@@ -122,10 +148,54 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 	// (machine-operator/converge.go). The operator must never read a
 	// promoted manifest hash before the module facts that explain it.
 	l.tree.WriteBootModules(l.bootModules)
+	l.tree.WriteBootModuleParameters(l.bootParameters)
 	l.tree.WriteModules(l.statuses)
 	l.tree.WriteBootManifest(machine.ManifestSourceProven, hash)
 	fmt.Printf("liken: spec %.12s applied in place: %s loaded without a reboot\n",
-		hash, strings.Join(added, ", "))
+		hash, strings.Join(load, ", "))
+}
+
+// deliveredParameters is the record a live load writes: the staged
+// spec's map, less every key whose module was already in the kernel
+// when this load reached it.
+//
+// A resident module's parameters were not delivered: finit_module
+// returned EEXIST and dropped the string. Leaving those keys out of
+// the record makes them drift, and parameter drift on a loaded
+// module is reboot-class, so the operator stages the manifest and
+// rebootPolicy takes the normal turn. The reboot loads in manifest
+// order and delivers what this load could not. Keys for Missing and
+// Failed modules stay recorded, because a reboot with the same
+// image changes nothing for them; their conditions carry the story.
+func deliveredParameters(declared map[string]string, outcomes []machine.ModuleStatus) map[string]string {
+	delivered := maps.Clone(declared)
+	for _, outcome := range outcomes {
+		if !outcome.AlreadyResident {
+			continue
+		}
+		for _, parameter := range machine.ModuleParameterNames(outcome.Name, declared) {
+			delete(delivered, outcome.Name+"."+parameter)
+		}
+	}
+	return delivered
+}
+
+// declaredOrder filters the manifest's module list down to the added
+// set, keeping the manifest's order. Which module is resident when a
+// load runs decides who keeps their parameters, so the order a load
+// runs in is part of what the manifest declares.
+func declaredOrder(declared, added []string) []string {
+	want := map[string]bool{}
+	for _, name := range added {
+		want[name] = true
+	}
+	order := make([]string, 0, len(added))
+	for _, name := range declared {
+		if want[name] {
+			order = append(order, name)
+		}
+	}
+	return order
 }
 
 // mergeModuleStatuses folds a load's outcomes into the standing

@@ -230,11 +230,74 @@ func TestAwaitingPodRefreshIsUpdatePending(t *testing.T) {
 	}
 }
 
+// healthyBesides is a machine whose every other condition is True, so
+// the radio's own verdict decides the phase by itself.
+func healthyBesides(wireless api.Condition) []api.Condition {
+	return []api.Condition{
+		condition("FactsPublished", "True", "FactsRead"),
+		condition("SysctlsApplied", "True", "Applied"),
+		condition("SpecConverged", "True", "Converged"),
+		condition("ClusterConverged", "True", "Converged"),
+		condition("NodeHealthy", "True", "KubeletReady"),
+		wireless,
+	}
+}
+
+// oneRadio is a machine with one wired port and one radio in the
+// given state, as the facts tree reports it.
+func oneRadio(state machine.WirelessState) []machine.InterfaceStatus {
+	return []machine.InterfaceStatus{
+		{Name: "eth0", Address: "10.10.0.5/24"},
+		{Name: "wlan0", Wireless: &machine.WirelessStatus{SSID: "stonypoint", State: state}},
+	}
+}
+
+func TestARadioStillJoiningLeavesTheMachineReady(t *testing.T) {
+	// The boot handed the radio to the background on purpose, so the
+	// join window is not a fault. A listing that showed every such
+	// machine as Degraded for the length of a join would teach a
+	// person to ignore the column.
+	wireless := wirelessCondition(oneRadio(machine.WirelessAssociating))
+	if wireless.Status != api.ConditionFalse || wireless.Reason != "Joining" {
+		t.Fatalf("the condition still reports what the boot actuated: %+v", wireless)
+	}
+	if phase := decidePhase(healthyBesides(wireless)); phase != api.PhaseReady {
+		t.Errorf("a radio still joining put the machine in %s", phase)
+	}
+}
+
+func TestASettledRadioFailureIsDegraded(t *testing.T) {
+	// Only the join window is soft. Every state a radio settles on is
+	// a fault a person must see in the listing.
+	for _, state := range []machine.WirelessState{
+		machine.WirelessNoCarrier, machine.WirelessNotRaised, machine.WirelessWrongKey,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			wireless := wirelessCondition(oneRadio(state))
+			if wireless.Reason != "NotJoined" {
+				t.Errorf("got reason %q", wireless.Reason)
+			}
+			if phase := decidePhase(healthyBesides(wireless)); phase != api.PhaseDegraded {
+				t.Errorf("put the machine in %s", phase)
+			}
+		})
+	}
+}
+
 func TestDrainingIsUpdating(t *testing.T) {
 	phase := decidePhase([]api.Condition{
 		{Type: "SpecConverged", Status: "False", Reason: "Draining"},
 	})
 	if phase != api.PhaseUpdating {
 		t.Errorf("draining is the reboot's opening move: %s", phase)
+	}
+}
+
+func TestALiveLoadInFlightIsUpdating(t *testing.T) {
+	phase := decidePhase([]api.Condition{
+		{Type: "SpecConverged", Status: "False", Reason: "LoadRequested"},
+	})
+	if phase != api.PhaseUpdating {
+		t.Errorf("a requested live load is a change in progress: %s", phase)
 	}
 }

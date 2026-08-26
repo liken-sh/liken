@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -23,6 +25,11 @@ import (
 // store, the module tree, the loader, and the staged document's hash.
 func liveLoadFixture(t *testing.T, staged machine.MachineSpec, bootModules []string) (machine.ManifestStore, string, *moduleLoader, string) {
 	t.Helper()
+	// Residency decides whether a load can carry parameters, so the
+	// fixture answers that question from a tree of its own. Without
+	// this, a module the machine running the tests happens to hold
+	// would change the outcome.
+	fakeSysModules(t, nil)
 
 	base := t.TempDir()
 	if err := os.WriteFile(filepath.Join(base, "modules.dep"), []byte(""), 0o644); err != nil {
@@ -211,5 +218,159 @@ func TestMergeModuleStatusesUpsertsByName(t *testing.T) {
 	}
 	if byName["zram"].State != machine.ModuleLoaded {
 		t.Errorf("untouched outcomes should survive: %+v", byName["zram"])
+	}
+}
+
+func TestLiveLoadRefusesAParameterChangeOnALoadedModule(t *testing.T) {
+	// A module reads its parameters once, when it loads, so a change
+	// on a module the boot already loaded cannot apply in place. The
+	// operator classifies it as reboot-class, and this refusal is
+	// init's own derivation of the same judgment.
+	staged := liveLoadable()
+	staged.ModuleParameters = map[string]string{"loop.max_part": "8"}
+	store, base, loader, hash := liveLoadFixture(t, staged, []string{"loop"})
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	if staged, _ := store.LoadStaged(); staged == nil {
+		t.Error("a parameter change on a loaded module must stay staged for its reboot")
+	}
+	if boot := bootManifestRecord(t, loader); boot.ManifestHash != "before" {
+		t.Errorf("the boot record must be untouched: %+v", boot)
+	}
+}
+
+// fakeModuleTree writes a loadable module file for each name and a
+// modules.dep entry with no dependencies, so that a declared load
+// reaches finit_module instead of stopping at Missing.
+func fakeModuleTree(t *testing.T, base string, names ...string) {
+	t.Helper()
+	var dep strings.Builder
+	for _, name := range names {
+		file := name + ".ko.zst"
+		if err := os.WriteFile(filepath.Join(base, file), []byte("module"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		dep.WriteString(file + ":\n")
+	}
+	if err := os.WriteFile(filepath.Join(base, "modules.dep"), []byte(dep.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A reboot loads spec.modules in the order the manifest lists, and a
+// live load must load the same additions in the same order. The diff
+// reports the added set sorted, so a manifest whose order runs against
+// the alphabet proves the load follows the manifest.
+func TestLiveLoadLoadsInTheOrderTheManifestLists(t *testing.T) {
+	staged := liveLoadable()
+	staged.Modules = []string{"zebra", "aardvark"}
+	store, base, loader, hash := liveLoadFixture(t, staged, nil)
+	fakeModuleTree(t, base, "zebra", "aardvark")
+	calls := fakeFinitModule(t)
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	var order []string
+	for _, call := range *calls {
+		order = append(order, call[0])
+	}
+	want := []string{"zebra.ko.zst", "aardvark.ko.zst"}
+	if !slices.Equal(order, want) {
+		t.Errorf("loaded %v, want %v", order, want)
+	}
+}
+
+// A resident module loads nothing and its parameter must stay out
+// of the boot record, while the rest of the edit still applies and
+// promotes.
+func TestLiveLoadAppliesAroundAResidentModule(t *testing.T) {
+	staged := liveLoadable()
+	staged.Modules = []string{"aardvark", "zebra"}
+	staged.ModuleParameters = map[string]string{"aardvark.mode": "3", "zebra.speed": "9"}
+	store, base, loader, hash := liveLoadFixture(t, staged, nil)
+	fakeModuleTree(t, base, "aardvark", "zebra")
+	fakeSysModules(t, map[string]map[string]string{"aardvark": {}})
+	calls := fakeFinitModule(t)
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	want := [][2]string{{"aardvark.ko.zst", ""}, {"zebra.ko.zst", "speed=9"}}
+	if !slices.Equal(*calls, want) {
+		t.Errorf("loaded %v, want %v", *calls, want)
+	}
+	if staged, _ := store.LoadStaged(); staged != nil {
+		t.Error("the manifest should have been promoted")
+	}
+	boot := bootManifestRecord(t, loader)
+	if boot.ManifestHash != hash {
+		t.Fatalf("the spec should have applied in place: %+v", boot)
+	}
+	if _, ok := boot.ModuleParameters["aardvark.mode"]; ok {
+		t.Errorf("an undelivered parameter must not be recorded: %v", boot.ModuleParameters)
+	}
+	if boot.ModuleParameters["zebra.speed"] != "9" {
+		t.Errorf("boot/moduleParameters = %v", boot.ModuleParameters)
+	}
+}
+
+// The record the load writes must leave exactly one drift line for
+// the undelivered key, because that line is what makes the operator
+// stage the reboot that can deliver it.
+func TestLiveLoadLeavesAnUndeliveredParameterAsDrift(t *testing.T) {
+	staged := liveLoadable()
+	staged.Modules = []string{"aardvark"}
+	staged.ModuleParameters = map[string]string{"aardvark.mode": "3"}
+	store, base, loader, hash := liveLoadFixture(t, staged, nil)
+	fakeModuleTree(t, base, "aardvark")
+	fakeSysModules(t, map[string]map[string]string{"aardvark": {}})
+	fakeFinitModule(t)
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	boot := bootManifestRecord(t, loader)
+	diffs := machine.ModuleParameterDrift(staged.Modules, boot.Modules,
+		staged.ModuleParameters, boot.ModuleParameters)
+	want := []string{"module parameter aardvark.mode: 3 declared but not actuated"}
+	if !slices.Equal(diffs, want) {
+		t.Errorf("drift = %v, want %v", diffs, want)
+	}
+}
+
+// A module loading for the first time takes its parameters at the
+// load, so the record keeps them and nothing drifts.
+func TestLiveLoadRecordsAParameterItDelivered(t *testing.T) {
+	staged := liveLoadable()
+	staged.Modules = []string{"aardvark"}
+	staged.ModuleParameters = map[string]string{"aardvark.mode": "3"}
+	store, base, loader, hash := liveLoadFixture(t, staged, nil)
+	fakeModuleTree(t, base, "aardvark")
+	calls := fakeFinitModule(t)
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	want := [][2]string{{"aardvark.ko.zst", "mode=3"}}
+	if !slices.Equal(*calls, want) {
+		t.Errorf("loaded %v, want %v", *calls, want)
+	}
+	boot := bootManifestRecord(t, loader)
+	if boot.ModuleParameters["aardvark.mode"] != "3" {
+		t.Errorf("boot/moduleParameters = %v", boot.ModuleParameters)
+	}
+}
+
+func TestLiveLoadAppliesAModuleAddedWithItsParameters(t *testing.T) {
+	staged := liveLoadable()
+	staged.ModuleParameters = map[string]string{"loop.max_part": "8"}
+	store, base, loader, hash := liveLoadFixture(t, staged, nil)
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	boot := bootManifestRecord(t, loader)
+	if boot.ManifestHash != hash {
+		t.Fatalf("the spec should have applied in place: %+v", boot)
+	}
+	if boot.ModuleParameters["loop.max_part"] != "8" {
+		t.Errorf("boot/moduleParameters = %v", boot.ModuleParameters)
 	}
 }
