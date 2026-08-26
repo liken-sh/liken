@@ -102,13 +102,15 @@ These plans are designed. Each keeps its number and moves to
   level before any media plays, and the local harnesses gained
   volume keys.
 * [11, The music experience](completed/11-the-music-experience.md).
-  Built and released on 2026-08-26 in release 2026.08.26-001. An
-  album plays as one `mpv` EDL timeline: the player shim expands a
-  directory item marked as an album, the tracks become chapters on
-  the film's own scrubber, the cover centers on the blanked frame,
-  and a standalone track's header reads its own tags. Proven end to
-  end under the headless workstation harness and an adversarial
-  review, with the first music `Play` staged for `liken-1`.
+  Built, and drilled on `liken-1` on 2026-08-26 in release
+  2026.08.26-003. An album plays as one `mpv` EDL timeline: the
+  player shim expands a directory item marked as an album, the
+  tracks become chapters on the film's own scrubber, the cover
+  centers on the blanked frame, and a standalone track's header
+  reads its own tags. The drill's findings shipped in the same day's
+  releases: the idle line names the record, the display survives the
+  pod's startup order, and the canvas takes each screen's own ratio,
+  proven beside a film on the second screen.
 * [12, The idle screen reads the bus](completed/12-the-idle-screen-reads-the-bus.md).
   Built, and drilled on `liken-1` on 2026-08-24 in release
   2026.08.24-006, with the reply-await fix in 2026.08.24-008. The idle
