@@ -47,28 +47,6 @@
   }
 }
 
-/* The text face is Source Sans 3, the face the player's on-screen
-   display draws in, so the sites and the product read as one thing.
-   The two variable files cover every weight, self-hosted from this
-   repository's static/fonts/ because the sites make no external
-   requests. The license is beside the files. font-display swap
-   keeps the first paint on the fallback stack, which is also the
-   stack for any reader whose browser skips the download. */
-@font-face {
-  font-family: "Source Sans 3";
-  src: url("/fonts/SourceSans3VF-Upright.otf.woff2") format("woff2");
-  font-style: normal;
-  font-weight: 200 900;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Source Sans 3";
-  src: url("/fonts/SourceSans3VF-Italic.otf.woff2") format("woff2");
-  font-style: italic;
-  font-weight: 200 900;
-  font-display: swap;
-}
-
 /* The gutter for the scrollbar is always reserved, on both edges so
    the centered column stays centered. Without this, a short page and
    a long page center differently, and navigation between them
@@ -82,7 +60,7 @@ body {
   /* One notch above the browser default of 16px. The measure is in
      rem, so the column's width holds and the text alone grows. */
   font-size: 1.0625rem;
-  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-family: system-ui, sans-serif;
   line-height: 1.6;
   color: var(--ink);
   background: var(--page);
