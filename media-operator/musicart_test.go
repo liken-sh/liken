@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -305,9 +306,12 @@ func bridgeToMPV(t *testing.T) (*commander, <-chan string) {
 	return &commander{mpv: client, artDir: t.TempDir()}, lines
 }
 
-// Every album request is answered, including the ones with nothing to show.
-// Silence reads as a slow decode, so the display asks again on every redraw
-// and never stops. An empty path is the answer that ends the asking.
+// Every album request the bridge can answer is answered, including the ones
+// with nothing to show. Silence reads as a slow decode, so the display asks
+// again on every redraw and never stops. An empty path is the answer that ends
+// the asking. A request for an item the bridge has not resolved yet is the one
+// it holds instead, which TestServeAlbumHoldsARequestUntilThePlaylistResolves
+// covers.
 func TestServeAlbumAlwaysAnswers(t *testing.T) {
 	empty := `{"command":["script-message-to","display","liken-art","album","","0","0","0"]}`
 
@@ -320,12 +324,6 @@ func TestServeAlbumAlwaysAnswers(t *testing.T) {
 			setup: func(t *testing.T, c *commander) {
 				c.artItem = 1
 				c.tracks = []trackEntry{{tier: artTierNone}}
-			},
-		},
-		{
-			name: "the playlist holds no such item",
-			setup: func(t *testing.T, c *commander) {
-				c.artItem = 1
 			},
 		},
 		{
@@ -373,5 +371,119 @@ func TestServeAlbumAnswersADecodedCover(t *testing.T) {
 		mustMatch(t, line, want)
 	case <-time.After(time.Second):
 		t.Fatal("the bridge answered nothing")
+	}
+}
+
+// artReply is the line mpv receives for one answered request, so a test states
+// the blob it expects and not the wire shape.
+func artReply(path string, w, h, stride int) string {
+	return fmt.Sprintf(
+		`{"command":["script-message-to","display","liken-art","album","%s","%d","%d","%d"]}`,
+		path, w, h, stride)
+}
+
+// playlistOf is mpv's playlist property for one file, the shape the reporter
+// hands playlistChanged.
+func playlistOf(file string) json.RawMessage {
+	return json.RawMessage(`[{"filename":` + strconv.Quote(file) + `,"current":true}]`)
+}
+
+// The display asks for the cover as soon as it reads the item's block, and mpv
+// reports the playing item before it reports the playlist, so the request can
+// arrive before the bridge knows what the item's art is. The bridge holds that
+// request rather than answering it, because the display asks once and keeps
+// the answer, and it serves the held request the moment the playlist resolves.
+func TestServeAlbumHoldsARequestUntilThePlaylistResolves(t *testing.T) {
+	cases := []struct {
+		name  string
+		track func(t *testing.T, dir string) string
+		want  func(bridge *commander) string
+	}{
+		{
+			name: "the item has a cover",
+			track: func(t *testing.T, dir string) string {
+				return writeMedia(t, filepath.Join(dir, "track.mp3"), pictureFrame(pngBytes(t, 20, 20)))
+			},
+			want: func(bridge *commander) string {
+				return artReply(filepath.Join(bridge.artDir, "album-1-10x10.bgra"), 10, 10, 40)
+			},
+		},
+		{
+			name: "the item has no art at all",
+			track: func(t *testing.T, dir string) string {
+				return writeMedia(t, filepath.Join(dir, "track.mp3"), textFrame("TIT2", "Track"))
+			},
+			want: func(bridge *commander) string { return artReply("", 0, 0, 0) },
+		},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			bridge, lines := bridgeToMPV(t)
+			bridge.artItem = 1
+			file := each.track(t, t.TempDir())
+
+			// The request arrives while the bridge knows the item but not yet
+			// the playlist, which is the moment the race opens.
+			bridge.serveAlbum(artRequest{kind: artKindAlbum, width: 10, height: 10})
+			select {
+			case line := <-lines:
+				t.Fatalf("the bridge answered %q before it knew the playlist", line)
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			bridge.playlistChanged(playlistOf(file))
+
+			select {
+			case line := <-lines:
+				mustMatch(t, line, each.want(bridge))
+			case <-time.After(time.Second):
+				t.Fatal("the held request was never answered")
+			}
+			// The held request is served once, so the display places one
+			// overlay and the bridge decodes nothing twice.
+			select {
+			case line := <-lines:
+				t.Errorf("the bridge answered twice, the second time %q", line)
+			case <-time.After(100 * time.Millisecond):
+			}
+		})
+	}
+}
+
+// A request that arrives after the playlist resolved is answered at once, so
+// the holding is the exception and not the rule.
+func TestServeAlbumAnswersAfterThePlaylistResolved(t *testing.T) {
+	bridge, lines := bridgeToMPV(t)
+	bridge.artItem = 1
+	file := writeMedia(t, filepath.Join(t.TempDir(), "track.mp3"), pictureFrame(pngBytes(t, 20, 20)))
+
+	bridge.playlistChanged(playlistOf(file))
+	go bridge.serveAlbum(artRequest{kind: artKindAlbum, width: 10, height: 10})
+
+	select {
+	case line := <-lines:
+		mustMatch(t, line, artReply(filepath.Join(bridge.artDir, "album-1-10x10.bgra"), 10, 10, 40))
+	case <-time.After(time.Second):
+		t.Fatal("the bridge answered nothing")
+	}
+}
+
+// Only the latest box is still on the screen, so a second request replaces the
+// one the bridge holds and the playlist answers that one alone.
+func TestServeAlbumHoldsTheLatestRequest(t *testing.T) {
+	bridge, lines := bridgeToMPV(t)
+	bridge.artItem = 1
+	file := writeMedia(t, filepath.Join(t.TempDir(), "track.mp3"), pictureFrame(pngBytes(t, 20, 20)))
+
+	bridge.serveAlbum(artRequest{kind: artKindAlbum, width: 10, height: 10})
+	bridge.serveAlbum(artRequest{kind: artKindAlbum, width: 20, height: 20})
+	bridge.playlistChanged(playlistOf(file))
+
+	select {
+	case line := <-lines:
+		mustMatch(t, line, artReply(filepath.Join(bridge.artDir, "album-1-20x20.bgra"), 20, 20, 80))
+	case <-time.After(time.Second):
+		t.Fatal("the held request was never answered")
 	}
 }

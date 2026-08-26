@@ -5,7 +5,9 @@ local theme = require("theme")
 
 local clock = {}
 
-local RIGHT = theme.canvas.w - theme.margin.x
+local function right()
+  return theme.canvas.w - theme.margin.x
+end
 local TOP_Y = theme.margin.y
 
 -- Format a wall-clock time as "3:01 pm", a twelve-hour clock with no leading
@@ -35,7 +37,7 @@ function clock.draw()
     local ends = fmt(now + math.floor(duration - pos + 0.5))
     text = text .. "{\\1a" .. theme.faded_alpha(theme.alpha.subdued) .. "}" .. "  \194\183  ends " .. ends
   end
-  return theme.text(RIGHT, TOP_Y, text, theme.type.small, theme.color.text, 9, theme.alpha.opaque)
+  return theme.text(right(), TOP_Y, text, theme.type.small, theme.color.text, 9, theme.alpha.opaque)
 end
 
 return clock

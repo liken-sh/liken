@@ -13,7 +13,9 @@ local offset = require("offset")
 local strip = {}
 
 -- The row sits at the bottom right, its right edge at the margin.
-local RIGHT = theme.canvas.w - theme.margin.x
+local function right()
+  return theme.canvas.w - theme.margin.x
+end
 -- The heading row and the value row, in canvas pixels. The heading sits close
 -- above its value, and the pair sits clear below the scrubber's time line.
 local Y_HEAD = 990
@@ -102,7 +104,7 @@ function strip.draw(focused)
   local pg = present_groups()
   -- Right-align the row of groups. The last group's nominal ink ends at the
   -- margin, so the row holds its right edge as a value changes width.
-  local start = RIGHT - GROUP_INK - (#pg - 1) * GROUP_PITCH
+  local start = right() - GROUP_INK - (#pg - 1) * GROUP_PITCH
   local parts = {}
   for gi, g in ipairs(pg) do
     local gx = start + (gi - 1) * GROUP_PITCH

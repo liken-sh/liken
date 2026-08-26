@@ -13,8 +13,12 @@ end
 
 -- geometry
 local LEFT = theme.margin.x
-local RIGHT = theme.canvas.w - theme.margin.x
-local BAR_W = RIGHT - LEFT
+local function right()
+  return theme.canvas.w - theme.margin.x
+end
+local function bar_w()
+  return right() - LEFT
+end
 local BAR_Y = theme.bar_y
 local BAR_H = 14
 -- The gap between two segments, so the divisions read as separate chapters.
@@ -189,14 +193,14 @@ end
 local function segments(dur)
   local chs = chapter_list()
   if #chs == 0 then
-    return { { x0 = LEFT, x1 = RIGHT, w = BAR_W } }
+    return { { x0 = LEFT, x1 = right(), w = bar_w() } }
   end
   local out = {}
   for i, ch in ipairs(chs) do
     local start = ch.time or 0
     local finish = (chs[i + 1] and chs[i + 1].time) or dur
-    local x0 = LEFT + BAR_W * (start / dur)
-    local x1 = LEFT + BAR_W * (finish / dur)
+    local x0 = LEFT + bar_w() * (start / dur)
+    local x1 = LEFT + bar_w() * (finish / dur)
     out[i] = { x0 = x0, x1 = x1, w = math.max(2, x1 - x0 - SEG_GAP) }
   end
   return out
@@ -211,7 +215,7 @@ local function displayed_pos(dur)
 end
 
 local function pos_to_x(dur, pos)
-  return LEFT + BAR_W * (pos / dur)
+  return LEFT + bar_w() * (pos / dur)
 end
 
 -- The displayed position in seconds, the in-flight cursor or time-pos, and nil
@@ -284,24 +288,18 @@ function scrubber.draw(axis)
     parts[#parts + 1] = theme.rect(livex - 1, top - 6, 2, BAR_H + 12, theme.color.text, theme.alpha.subdued)
   end
 
-  -- The playhead must read as a regular hexagon at any window shape. libass
-  -- stretches the canvas by sx across and sy down, so a wide window widens the
-  -- shape. A pre-compression by sy/sx in canvas x cancels the stretch. Before
-  -- the first frame the scale is not known, so k stays 1.
-  local osd = theme.osd_scale()
-  local k = 1
-  if osd then
-    k = osd.sy / osd.sx
-  end
+  -- The playhead reads as a regular hexagon at any window shape, because
+  -- the canvas holds the screen's own ratio and libass scales the two axes
+  -- alike.
   parts[#parts + 1] = theme.hexagon(
     knobx - KNOB_R, BAR_Y - KNOB_R, KNOB_R, theme.color.playhead, pos_a,
-    KNOB_BORDER, theme.color.shadow, k
+    KNOB_BORDER, theme.color.shadow
   )
 
   -- The current time rides above the playhead and moves with it, so the eye
   -- reads the position where it is already looking. The x is clamped to the
   -- bar, so the label stays on screen at either end.
-  local head_x = math.max(LEFT, math.min(RIGHT, knobx))
+  local head_x = math.max(LEFT, math.min(right(), knobx))
   parts[#parts + 1] = theme.text(head_x, TOP_Y, fmt(pos), theme.type.label, theme.color.text, 2, pos_a)
 
   -- Below the bar on the left, the chapter title and position. Below on the
@@ -315,7 +313,7 @@ function scrubber.draw(axis)
     parts[#parts + 1] = theme.text(LEFT, BELOW_Y, label, theme.type.small, theme.color.text, 7, chap_a)
   end
   parts[#parts + 1] = theme.text(
-    RIGHT, BELOW_Y, remaining_phrase(dur - pos) .. "  \194\183  " .. fmt(dur),
+    right(), BELOW_Y, remaining_phrase(dur - pos) .. "  \194\183  " .. fmt(dur),
     theme.type.small, theme.color.text, 9, pos_a
   )
 

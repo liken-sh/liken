@@ -746,3 +746,51 @@ func positions(reports []playReport) []string {
 	}
 	return rendered
 }
+
+// The display broadcasts one request for the current block when it loads,
+// because the sidecar's own send races the script's registration: a block sent
+// before the script registered reaches nobody, and the display would then
+// never learn the item's type or ask for its art.
+func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
+	bridge, lines := bridgeToMPV(t)
+	bridge.presentations = []json.RawMessage{
+		json.RawMessage(`{"title":"First"}`),
+		json.RawMessage(`{"type":"music","hint":"album"}`),
+	}
+	bridge.artItem = 2
+
+	go bridge.serveMessages(requestFor(presentationRequestMessage))
+
+	want := `{"command":["script-message-to","display","presentation","{\"type\":\"music\",\"hint\":\"album\"}"]}`
+	select {
+	case line := <-lines:
+		mustMatch(t, line, want)
+	case <-time.After(time.Second):
+		t.Fatal("the sidecar answered nothing")
+	}
+}
+
+// Before mpv says which item plays there is no block to answer with, and the
+// reporter presents the first item the moment it does, so the request goes
+// unanswered rather than forwarding a block for no item.
+func TestThePresentationRequestBeforeTheFirstItem(t *testing.T) {
+	bridge, lines := bridgeToMPV(t)
+	bridge.presentations = []json.RawMessage{json.RawMessage(`{"title":"First"}`)}
+
+	go bridge.serveMessages(requestFor(presentationRequestMessage))
+
+	select {
+	case line := <-lines:
+		t.Errorf("the sidecar sent %q, want nothing", line)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// requestFor is one broadcast on a closed channel, the shape the reader hands
+// the message goroutine for a display message with no arguments.
+func requestFor(name string) <-chan clientMessage {
+	messages := make(chan clientMessage, 1)
+	messages <- clientMessage{Args: []string{name}}
+	close(messages)
+	return messages
+}

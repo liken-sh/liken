@@ -140,6 +140,14 @@ type commander struct {
 	// and the art tier each item resolved to.
 	playlistFiles []string
 	tracks        []trackEntry
+
+	// The one album request the bridge holds, nil when it holds none. The
+	// display asks for the cover as soon as it reads the item's block, and
+	// mpv reports the playing item before it reports the playlist, so the
+	// request can arrive in the moment between, when the bridge does not yet
+	// know what the item's art is. A newer request replaces an older one,
+	// because only the latest box is still on the screen.
+	pendingAlbum *artRequest
 }
 
 // runCommand connects to the bus, drives mpv's IPC socket, and reports
@@ -395,17 +403,38 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 	<-reading
 }
 
-// serveMessages answers the two things the display broadcasts: the exit
-// press and each art request. It runs beside the reporter, so a slow
-// decode or a network fetch never holds up the position reports.
+// serveMessages answers the three things the display broadcasts: the exit
+// press, its request for the current block, and each art request. It runs
+// beside the reporter, so a slow decode or a network fetch never holds up the
+// position reports.
 func (c *commander) serveMessages(messages <-chan clientMessage) {
 	for message := range messages {
 		if isExitMessage(message.Args) {
 			c.exit()
 			continue
 		}
+		if isPresentationRequest(message.Args) {
+			c.resendPresentation()
+			continue
+		}
 		c.serveArt(message.Args)
 	}
+}
+
+// resendPresentation answers the display's request with the block for the
+// item that is playing. It sends nothing before the first item, because the
+// reporter presents that item as soon as mpv says which one plays, so a
+// block is on its way already. It does not swap the art the way present
+// does: the item has not changed, and the decoded art the volume holds is
+// still the current item's own.
+func (c *commander) resendPresentation() {
+	c.artMutex.Lock()
+	item := c.artItem
+	c.artMutex.Unlock()
+	if item < 1 {
+		return
+	}
+	c.command(presentationCommand(c.blockForItem(item)))
 }
 
 // attach sets the mpv connection and observes the properties under one

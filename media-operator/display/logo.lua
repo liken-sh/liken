@@ -53,22 +53,33 @@ end
 
 local MINX, MINY, MAXX, MAXY = bounds()
 
--- The mark fills the middle third of the canvas width, centered. The scale maps
--- the bounding box width to one third of the fixed canvas, and the same factor
--- scales the height, so the aspect ratio holds. The offset places the box
--- center at the canvas center. The SVG y axis and the ASS y axis both run down,
--- so the shape needs no flip. libass then scales the whole overlay to the real
--- screen.
-local SCALE = (theme.canvas.w / 3) / (MAXX - MINX)
+-- The mark fills the middle third of the canvas, centered. The scale maps the
+-- bounding box width to one third of that span, and the same factor scales the
+-- height, so the aspect ratio holds. The offset places the box center at the
+-- canvas center. The SVG y axis and the ASS y axis both run down, so the shape
+-- needs no flip. libass then scales the whole overlay to the real screen.
+-- The span is the canvas height at 16:9, not the canvas width, so the mark
+-- keeps one size against the height and a wide screen shows the same mark
+-- with more room beside it. A screen taller than 16:9 has less width than
+-- that, so the narrower of the two wins and the mark stays inside the
+-- margins.
 local BOX_CX = (MINX + MAXX) / 2
 local BOX_CY = (MINY + MAXY) / 2
 
+local function span()
+  return math.min(theme.canvas.w, theme.canvas.h * 16 / 9)
+end
+
+local function scale()
+  return (span() / 3) / (MAXX - MINX)
+end
+
 local function to_canvas_x(x)
-  return theme.canvas.w / 2 + (x - BOX_CX) * SCALE
+  return theme.canvas.w / 2 + (x - BOX_CX) * scale()
 end
 
 local function to_canvas_y(y)
-  return theme.canvas.h / 2 + (y - BOX_CY) * SCALE
+  return theme.canvas.h / 2 + (y - BOX_CY) * scale()
 end
 
 -- Each hexagon pulses in size about its own center, up to SWING at full energy.
@@ -96,36 +107,49 @@ local RATE_SPAN = 0.18
 -- rounds them. The still path is kept because a resting idle screen draws it on
 -- every clock tick, and formatting fourteen paths again for a mark that does not
 -- move is work with no result on screen.
+-- The vertices sit on the canvas, so a canvas of another width needs them
+-- again. The build runs once for a width and holds until the width changes,
+-- which is a screen change and not a frame.
 local shapes = {}
-for index, hex in ipairs(HEXAGONS) do
-  local points = {}
-  local segs = {}
-  local sx, sy = 0, 0
-  for i, p in ipairs(hex.points) do
-    local x, y = to_canvas_x(p[1]), to_canvas_y(p[2])
-    points[i] = { x, y }
-    sx = sx + x
-    sy = sy + y
-    segs[#segs + 1] = string.format("%s %.2f %.2f", i == 1 and "m" or "l", x, y)
+local built_for = nil
+
+local function build()
+  if built_for == theme.canvas.w then
+    return
   end
-  local spread = (index * PHI) % 1
-  shapes[#shapes + 1] = {
-    points = points,
-    -- The centroid of the six vertices. A regular hexagon's centroid is its
-    -- center, so a scale about this point grows and shrinks the shape in place.
-    cx = sx / #points,
-    cy = sy / #points,
-    path = table.concat(segs, " "),
-    color = ass_color(hex.fill),
-    bord = hex.stroke * SCALE / 2,
-    rate1 = RATE_MIN + RATE_SPAN * spread,
-    -- The second rate is the first times the golden ratio, an irrational
-    -- multiple, so the sum of the two sines never repeats and the hexagon never
-    -- settles into a visible loop.
-    rate2 = (RATE_MIN + RATE_SPAN * spread) * PHI,
-    off1 = TAU * spread,
-    off2 = TAU * ((index * PHI * PHI) % 1),
-  }
+  built_for = theme.canvas.w
+  local k = scale()
+  shapes = {}
+  for index, hex in ipairs(HEXAGONS) do
+    local points = {}
+    local segs = {}
+    local sx, sy = 0, 0
+    for i, p in ipairs(hex.points) do
+      local x, y = to_canvas_x(p[1]), to_canvas_y(p[2])
+      points[i] = { x, y }
+      sx = sx + x
+      sy = sy + y
+      segs[#segs + 1] = string.format("%s %.2f %.2f", i == 1 and "m" or "l", x, y)
+    end
+    local spread = (index * PHI) % 1
+    shapes[#shapes + 1] = {
+      points = points,
+      -- The centroid of the six vertices. A regular hexagon's centroid is its
+      -- center, so a scale about this point grows and shrinks the shape in place.
+      cx = sx / #points,
+      cy = sy / #points,
+      path = table.concat(segs, " "),
+      color = ass_color(hex.fill),
+      bord = hex.stroke * k / 2,
+      rate1 = RATE_MIN + RATE_SPAN * spread,
+      -- The second rate is the first times the golden ratio, an irrational
+      -- multiple, so the sum of the two sines never repeats and the hexagon never
+      -- settles into a visible loop.
+      rate2 = (RATE_MIN + RATE_SPAN * spread) * PHI,
+      off1 = TAU * spread,
+      off2 = TAU * ((index * PHI * PHI) % 1),
+    }
+  end
 end
 
 -- The scale factor for one hexagon at one moment. The mean of two sines stays
@@ -167,6 +191,7 @@ end
 -- its still path, so a resting mark renders exactly the drawing this module
 -- produced before it could move.
 function logo.draw(level, phase)
+  build()
   local alpha = theme.faded_alpha(theme.alpha.opaque)
   local moving = level > 0
   local parts = {}

@@ -19,7 +19,9 @@ local FULL = 100
 -- The row is the third line of the top-right column, under the clock and
 -- the activity line, because the low center of the screen holds the
 -- scrubber on a Play and the mark on the idle screen.
-local RIGHT = theme.canvas.w - theme.margin.x
+local function right()
+  return theme.canvas.w - theme.margin.x
+end
 local ROW_Y = theme.margin.y + 2 * theme.line_pitch
 -- The number reserves this much width at the right margin, so the bar and
 -- the glyph hold their place as the number moves between one and three
@@ -46,16 +48,27 @@ local SURFACE_R = 14
 -- The bar and the glyph center on the middle of the number's line, so the
 -- three parts read as one row.
 local MID_Y = ROW_Y + theme.type.small / 2
-local BAR_X = RIGHT - NUM_W - BAR_W
 local BAR_TOP = MID_Y - BAR_H / 2
-local GLYPH_X = BAR_X - GLYPH_GAP - GLYPH_W
 local GLYPH_TOP = MID_Y - GLYPH_H / 2
+local SURFACE_Y = ROW_Y - PAD_Y
 -- The surface covers the three parts and the padding, and the number's
 -- line is the tallest of the three.
-local SURFACE_X = GLYPH_X - PAD_X
-local SURFACE_Y = ROW_Y - PAD_Y
-local SURFACE_W = RIGHT + PAD_X - SURFACE_X
 local SURFACE_H = theme.type.small + 2 * PAD_Y
+
+-- The three parts hang off the right margin, so the row measures itself
+-- when it draws. The canvas width follows the screen, and a row measured at
+-- load would hold the margin of another screen.
+local function columns()
+  local bar_x = right() - NUM_W - BAR_W
+  local glyph_x = bar_x - GLYPH_GAP - GLYPH_W
+  local surface_x = glyph_x - PAD_X
+  return {
+    bar_x = bar_x,
+    glyph_x = glyph_x,
+    surface_x = surface_x,
+    surface_w = right() + PAD_X - surface_x,
+  }
+end
 
 -- The speaker is one closed polygon, the driver box and the cone, drawn as
 -- an ASS shape because the player image carries no icon font.
@@ -168,33 +181,34 @@ function volume.draw()
   end
   local outer_fade = theme.fade
   theme.set_fade(fade)
+  local col = columns()
   local parts = {}
   parts[#parts + 1] = theme.rounded_rect(
-    SURFACE_X, SURFACE_Y, SURFACE_W, SURFACE_H, SURFACE_R, theme.color.shadow,
+    col.surface_x, SURFACE_Y, col.surface_w, SURFACE_H, SURFACE_R, theme.color.shadow,
     string.format("&H%02X&", theme.scrim_edge_alpha)
   )
   parts[#parts + 1] = theme.rounded_rect(
-    BAR_X, BAR_TOP, BAR_W, BAR_H, BAR_R, theme.color.track, theme.alpha.track
+    col.bar_x, BAR_TOP, BAR_W, BAR_H, BAR_R, theme.color.track, theme.alpha.track
   )
   local fillw = BAR_W * math.max(0, math.min(1, level / FULL))
   if fillw >= 1 then
     parts[#parts + 1] = theme.rounded_rect(
-      BAR_X, BAR_TOP, fillw, BAR_H, BAR_R, theme.color.fill, theme.alpha.opaque
+      col.bar_x, BAR_TOP, fillw, BAR_H, BAR_R, theme.color.fill, theme.alpha.opaque
     )
   end
   local glyph_color = theme.color.text
   if muted then
     glyph_color = theme.color.muted
   end
-  parts[#parts + 1] = theme.shape(GLYPH_X, GLYPH_TOP, SPEAKER, glyph_color, theme.alpha.opaque)
+  parts[#parts + 1] = theme.shape(col.glyph_x, GLYPH_TOP, SPEAKER, glyph_color, theme.alpha.opaque)
   if muted then
     parts[#parts + 1] = theme.shape(
-      GLYPH_X, GLYPH_TOP, SLASH, glyph_color, theme.alpha.opaque,
+      col.glyph_x, GLYPH_TOP, SLASH, glyph_color, theme.alpha.opaque,
       SLASH_BORDER, theme.color.shadow
     )
   end
   parts[#parts + 1] = theme.text(
-    RIGHT, ROW_Y, string.format("%d", math.floor(level + 0.5)),
+    right(), ROW_Y, string.format("%d", math.floor(level + 0.5)),
     theme.type.small, theme.color.text, 9, theme.alpha.opaque
   )
   theme.set_fade(outer_fade)

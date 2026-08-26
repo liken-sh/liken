@@ -2,15 +2,33 @@
 -- palette, the type scale, and the drawing shapes are defined in one place.
 local theme = {}
 
--- The display draws in one fixed 1920x1080 space. libass scales the whole
+-- The display draws in one space 1080 rows tall. libass scales the whole
 -- overlay to the real output, so the same layout serves 720, 1080, and 4K
 -- with no branch.
+-- The width follows the real surface's own ratio, so a canvas pixel is
+-- square. A fixed 1920 canvas on a 21:9 screen stretched every vector
+-- drawing by a third and pulled every margin inside where it belonged. A
+-- 16:9 surface gives 1920, the width this space always held, so a 16:9
+-- screen draws every number it drew before.
 theme.canvas = { w = 1920, h = 1080 }
 
--- osd_scale reads how the canvas maps to the real screen. mpv stretches the ass
--- overlay across the whole output window, so a window that is not 16:9 stretches
--- the two axes by different amounts. sx maps a canvas x to real pixels, and sy
--- maps a canvas y. It is nil until a frame has rendered and mpv reports a size.
+-- update_canvas takes the width from the surface mpv reports. Every module
+-- reads theme.canvas at draw time, because a width captured at load would
+-- hold the width of another screen. main calls this before it tells the
+-- modules the size changed.
+function theme.update_canvas()
+  local d = mp.get_property_native("osd-dimensions")
+  if not d or not d.w or d.w <= 0 or not d.h or d.h <= 0 then
+    return
+  end
+  theme.canvas.w = math.floor(theme.canvas.h * d.w / d.h + 0.5)
+end
+
+-- osd_scale reads how the canvas maps to the real screen. sx maps a canvas x to
+-- real pixels, and sy maps a canvas y. It is nil until a frame has rendered and
+-- mpv reports a size.
+-- The canvas takes its width from the same surface, so the two factors come
+-- out equal. A caller that places a bitmap still reads the axis it means.
 function theme.osd_scale()
   local d = mp.get_property_native("osd-dimensions")
   if not d or not d.w or d.w <= 0 or not d.h or d.h <= 0 then
@@ -212,20 +230,19 @@ end
 -- A pointy-top regular hexagon in a 2r box, center at (r, r). r is the
 -- distance from the center to a vertex. The 0.866 is cos(30 degrees), the
 -- half-width of a pointy-top hexagon.
--- xscale narrows the hexagon in x. The half-width term takes the factor, so a
--- caller pre-compresses the shape to counter the canvas stretch. The top and
--- bottom vertices sit on the center column at x = r, so they hold still.
-local function hexagon_path(r, xscale)
-  xscale = xscale or 1
-  local a = 0.8660254 * r * xscale
+-- The shape needs no counter-stretch. The canvas holds the screen's own
+-- ratio, so a hexagon drawn regular on the canvas lands regular on the
+-- screen.
+local function hexagon_path(r)
+  local a = 0.8660254 * r
   return string.format(
     "m %.2f 0 l %.2f %.2f l %.2f %.2f l %.2f %.2f l %.2f %.2f l %.2f %.2f",
     r, r + a, 0.5 * r, r + a, 1.5 * r, r, 2 * r, r - a, 1.5 * r, r - a, 0.5 * r
   )
 end
 
-function theme.hexagon(x, y, r, color, alpha, bord, bordcolor, xscale)
-  return drawing(x, y, color, alpha, hexagon_path(r, xscale), bord, bordcolor)
+function theme.hexagon(x, y, r, color, alpha, bord, bordcolor)
+  return drawing(x, y, color, alpha, hexagon_path(r), bord, bordcolor)
 end
 
 -- theme.shape draws one ASS path the caller supplies, for a mark the named

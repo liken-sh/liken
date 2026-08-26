@@ -244,18 +244,36 @@ func (c *commander) playlistChanged(data json.RawMessage) {
 	c.artMutex.Lock()
 	c.playlistFiles = files
 	c.tracks = tracks
+	pending := c.pendingAlbum
+	c.pendingAlbum = nil
 	c.artMutex.Unlock()
+
+	// A request held from before the playlist was known is served here, now
+	// that the item's art is settled, and it takes the ordinary path, so it
+	// answers with the cover or with the empty path the same way any other
+	// request does. It runs on a goroutine of its own, because this is the
+	// reporter's goroutine, and a decode or a fetch must never hold up the
+	// position reports.
+	if pending != nil {
+		go c.serveAlbum(*pending)
+	}
 }
 
 // serveAlbum decodes the current item's cover to the box the display asks for,
 // caches the blob by size, and replies. A size already decoded for the current
 // item replies from the cache and decodes nothing.
 //
-// Every request is answered, including the ones with nothing to show: an
-// item with no art, and a decode that failed, both reply with an empty
-// path. Silence would read as a slow decode, so the display would ask again
-// on every redraw and never stop, and an empty path is the answer that ends
-// the asking.
+// Every request the bridge can answer is answered, including the ones with
+// nothing to show: an item with no art, and a decode that failed, both reply
+// with an empty path. Silence would read as a slow decode, so the display
+// would ask again on every redraw and never stop, and an empty path is the
+// answer that ends the asking.
+//
+// The one exception: a request for an item the bridge has not resolved yet
+// is held rather than answered, because the display asks once and keeps the
+// answer, so an empty path sent before the playlist arrived would leave the
+// cover dark for the whole run. playlistChanged serves the held request the
+// moment it knows.
 func (c *commander) serveAlbum(request artRequest) {
 	kind, w, h := request.kind, request.width, request.height
 	key := kind + ":" + strconv.Itoa(w) + "x" + strconv.Itoa(h)
@@ -267,9 +285,15 @@ func (c *commander) serveAlbum(request artRequest) {
 		return
 	}
 	track, known := c.trackFor(item)
+	if !known {
+		held := request
+		c.pendingAlbum = &held
+		c.artMutex.Unlock()
+		return
+	}
 	c.artMutex.Unlock()
 
-	if !known || track.tier == artTierNone {
+	if track.tier == artTierNone {
 		c.replyArt(kind, artBlob{})
 		return
 	}

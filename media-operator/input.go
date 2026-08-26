@@ -236,11 +236,25 @@ const (
 // to tear down the film's surface.
 const exitMessage = "liken-exit"
 
+// presentationRequestMessage is the script-message the display broadcasts
+// once, when it loads. The sidecar sends each item's block the moment the
+// playlist reaches it, and a block sent before the script registered
+// reaches nobody. The display carries no block of its own until one
+// arrives, so it asks for the current one as soon as it can answer, and
+// the sidecar replays it.
+const presentationRequestMessage = "liken-presentation-request"
+
 // isExitMessage reads a client-message as the display's exit press. The
 // first argument names the request, the same shape an art request takes,
 // so another script's broadcast is not an ending.
 func isExitMessage(args []string) bool {
 	return len(args) > 0 && args[0] == exitMessage
+}
+
+// isPresentationRequest reads a client-message as the display asking for the
+// current item's block. It takes no arguments, so the name is the whole of it.
+func isPresentationRequest(args []string) bool {
+	return len(args) > 0 && args[0] == presentationRequestMessage
 }
 
 // exitCommand is mpv's own word for the ending. The exit code is zero, so

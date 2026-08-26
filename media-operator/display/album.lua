@@ -11,10 +11,16 @@ local album = {}
 local REGION_X = theme.margin.x
 local REGION_TOP = 300
 local REGION_BOTTOM = 832
-local BOX_W = theme.canvas.w - 2 * REGION_X
 local BOX_H = REGION_BOTTOM - REGION_TOP
-local CENTER_X = REGION_X + BOX_W / 2
 local CENTER_Y = REGION_TOP + BOX_H / 2
+
+local function box_w()
+  return theme.canvas.w - 2 * REGION_X
+end
+
+local function center_x()
+  return REGION_X + box_w() / 2
+end
 
 -- The overlay id the cover owns. The logo owns id 1 and the trickplay tile owns
 -- id 2, so the cover keeps a third id in overlay-add's own numbering.
@@ -72,7 +78,7 @@ local function request()
   if not m then
     return
   end
-  local w = math.floor(BOX_W * m.sx + 0.5)
+  local w = math.floor(box_w() * m.sx + 0.5)
   local h = math.floor(BOX_H * m.sy + 0.5)
   if w <= 0 or h <= 0 then
     return
@@ -102,9 +108,10 @@ end
 -- album.on_resize runs when the screen size changes. It asks for the cover at
 -- the new box, and keeps the current bitmap on screen until the new one arrives,
 -- so the cover does not blink on a resize.
+-- It forgets no key. A new box differs from the one in flight and from the
+-- one answered, so request asks on its own, and an osd-dimensions change
+-- that leaves the box where it was asks nothing.
 function album.on_resize()
-  want = nil
-  answered = nil
   request()
 end
 
@@ -144,7 +151,7 @@ function album.sync()
   if not blob then
     return
   end
-  local x = math.floor(CENTER_X * m.sx + 0.5) - math.floor(blob.w / 2)
+  local x = math.floor(center_x() * m.sx + 0.5) - math.floor(blob.w / 2)
   local y = math.floor(CENTER_Y * m.sy + 0.5) - math.floor(blob.h / 2)
   if x < 0 then
     x = 0

@@ -12,7 +12,9 @@ end
 
 -- The counter sits low and centered, on the row the scrubber bar holds for a
 -- film.
-local CENTER_X = theme.canvas.w / 2
+local function center_x()
+  return theme.canvas.w / 2
+end
 local Y = theme.bar_y
 
 -- An image item is one whose presentation block declares the image type.
@@ -37,7 +39,7 @@ function images.draw()
   local pos = mp.get_property_number("playlist-pos") or 0
   local count = mp.get_property_number("playlist-count") or 1
   local label = string.format("%d of %d", pos + 1, count)
-  return theme.text(CENTER_X, Y, label, theme.type.small, theme.color.muted, 5)
+  return theme.text(center_x(), Y, label, theme.type.small, theme.color.muted, 5)
 end
 
 return images

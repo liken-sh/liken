@@ -14,7 +14,9 @@ local activity = {}
 -- same column. LINE_Y clears the clock's own line: the clock hangs from the
 -- top margin at theme.type.small, and the gap below it keeps the two lines
 -- apart without touching.
-local RIGHT = theme.canvas.w - theme.margin.x
+local function right()
+  return theme.canvas.w - theme.margin.x
+end
 local LINE_Y = theme.margin.y + theme.line_pitch
 
 -- The typographic marks, as UTF-8 bytes. \226\128\156 and \226\128\157 are the
@@ -63,7 +65,7 @@ function activity.draw(level)
     alpha = string.format("&H%02X&", math.floor(255 * (1 - level) + 0.5))
   end
   local text = "Playing " .. OPEN_QUOTE .. title .. CLOSE_QUOTE .. ELLIPSIS
-  return theme.text(RIGHT, LINE_Y, text, theme.type.small, theme.color.text, 9, alpha)
+  return theme.text(right(), LINE_Y, text, theme.type.small, theme.color.text, 9, alpha)
 end
 
 return activity

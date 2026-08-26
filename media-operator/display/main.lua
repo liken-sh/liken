@@ -24,13 +24,15 @@ local utils = require("mp.utils")
 mp.msg.info("liken display loaded as script " .. mp.get_script_name())
 
 local overlay = mp.create_osd_overlay("ass-events")
-overlay.res_x = theme.canvas.w
-overlay.res_y = theme.canvas.h
 
 -- Draw the scrubber, then the strip, then the open chooser last. The scrubber
 -- owns two focus stops but draws one bar, told which axis is focused. The
 -- chooser covers the two while it captures input, so it draws on top.
 local function redraw()
+  -- The ass space is the canvas, and the canvas width follows the surface,
+  -- so the overlay takes both before it draws.
+  overlay.res_x = theme.canvas.w
+  overlay.res_y = theme.canvas.h
   -- The idle client draws the centered logo, the clock, the identity block,
   -- and the activity line, and nothing else. mpv reports idle-active while it
   -- holds a window with no file, which is the whole life of the idle pod and
@@ -251,6 +253,9 @@ end)
 -- A screen resize changes the pixel size the logo needs, so the header asks
 -- the bridge for the logo again at the new size.
 mp.observe_property("osd-dimensions", "native", function()
+  -- The canvas takes its width from the new surface first, so every module
+  -- below measures against the screen that is there now.
+  theme.update_canvas()
   header.on_resize()
   trickplay.on_resize()
   album.on_resize()
@@ -394,3 +399,9 @@ mp.register_script_message("player-wake", on_wake)
 if os.getenv("IDLE_PREVIEW") == "1" then
   preview.enable(on_status, on_revealed, on_sleep, on_wake)
 end
+
+-- The command sidecar can present an item before this script registers its
+-- handlers, and a block sent then reaches nobody. So the display asks once
+-- here, with every handler above in place, and the bridge answers by
+-- sending the current item's block again through the presentation handler.
+mp.command_native({ "script-message", "liken-presentation-request" })
