@@ -38,6 +38,8 @@ OPENISCSI_VERSION := $(strip $(file <open-iscsi/VERSION))
 OPENISCSI_DIST := open-iscsi/dist/$(OPENISCSI_VERSION)
 NFSUTILS_VERSION := $(strip $(file <nfs-utils/VERSION))
 NFSUTILS_DIST := nfs-utils/dist/$(NFSUTILS_VERSION)
+WPASUPPLICANT_VERSION := $(strip $(file <wpa-supplicant/VERSION))
+WPASUPPLICANT_DIST := wpa-supplicant/dist/$(WPASUPPLICANT_VERSION)
 SYSTEMDBOOT_VERSION := $(strip $(file <systemd-boot/VERSION))
 SYSTEMDBOOT_DIST := systemd-boot/dist/$(SYSTEMDBOOT_VERSION)
 GRUB_VERSION := $(strip $(file <grub/VERSION))
@@ -51,7 +53,7 @@ LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
 MICROCODE_VERSION := $(strip $(file <microcode/VERSION))
 MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
+all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
 
 # The version is part of the artifact's name. So a pin bump changes
 # the target path itself, and Make rebuilds the artifact with no
@@ -154,6 +156,17 @@ $(NFSUTILS_DIST)/mount.nfs: nfs-utils/VERSION nfs-utils/fetch.sh
 	$(MAKE) -C nfs-utils
 
 nfs-utils: $(NFSUTILS_DIST)/mount.nfs
+
+# The wireless supplicant: one static binary, built from pinned
+# source inside a pinned container, the same shape as nfs-utils
+# above (wpa-supplicant/fetch.sh). The build configuration is a
+# prerequisite because the feature list decides what the binary
+# contains.
+$(WPASUPPLICANT_DIST)/wpa_supplicant: wpa-supplicant/VERSION \
+		wpa-supplicant/build.config wpa-supplicant/fetch.sh
+	$(MAKE) -C wpa-supplicant
+
+wpa-supplicant: $(WPASUPPLICANT_DIST)/wpa_supplicant
 
 # systemd-boot is the boot menu on install media. Its fetch.sh
 # explains why the stick needs a boot program when installed machines
@@ -329,6 +342,7 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken mount/dist/mount \
 		$(wildcard open-iscsi/manifests/*.yaml) \
 		open-iscsi/modules.conf open-iscsi/iscsid.conf \
 		$(NFSUTILS_DIST)/mount.nfs nfs-utils/modules.conf \
+		$(WPASUPPLICANT_DIST)/wpa_supplicant \
 		$(wildcard flux/manifests/*.yaml) \
 		machine-operator/dist/liken-machine-operator-image.tar \
 		$(wildcard machine-operator/manifests/*.yaml) \
@@ -582,7 +596,7 @@ install-gitops: $(GITOPS_IMAGE_DIR)/install.cpio
 # no per-deployment channel. The lab's machines upgrade from this
 # bundle directly, and they carry their own deployment layer between
 # slots.
-release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils hwdata tzdata linux-firmware microcode
+release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant hwdata tzdata linux-firmware microcode
 	$(MAKE) -C releases release
 
 # This target serves the release channel to the lab over HTTP. The
@@ -614,7 +628,7 @@ docs:
 #
 # This target reaches the network, so it is not part of any build.
 VERSION_DOMAINS := kernel k3s xtables trust e2fsprogs open-iscsi \
-	nfs-utils systemd-boot grub hwdata tzdata linux-firmware \
+	nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware \
 	microcode flux docs licensing dev-cluster/storage
 
 versions:
@@ -641,6 +655,7 @@ clean:
 	$(MAKE) -C e2fsprogs clean
 	$(MAKE) -C open-iscsi clean
 	$(MAKE) -C nfs-utils clean
+	$(MAKE) -C wpa-supplicant clean
 	$(MAKE) -C systemd-boot clean
 	$(MAKE) -C grub clean
 	$(MAKE) -C licensing clean
@@ -655,4 +670,4 @@ clean:
 	rm -rf $(IMAGE_DIR)
 	rm -rf $(HW_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean

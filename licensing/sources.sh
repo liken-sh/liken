@@ -93,11 +93,16 @@ trust_version="$(cat "$here/../trust/VERSION")"
 e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
 openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
 nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
+wpasupplicant_version="$(cat "$here/../wpa-supplicant/VERSION")"
 systemdboot_version="$(cat "$here/../systemd-boot/VERSION")"
 grub_version="$(cat "$here/../grub/VERSION")"
 hwdata_version="$(cat "$here/../hwdata/VERSION")"
 tzdata_version="$(cat "$here/../tzdata/VERSION")"
 linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
+# The regulatory database is a nested pin inside the linux-firmware
+# domain, so its version comes out of that domain's fetch script
+# instead of a VERSION file.
+regdb_version="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/../linux-firmware/fetch.sh")"
 
 cache="$here/cache"
 out="$here/dist/sources"
@@ -267,19 +272,34 @@ for tarball in "$here/../nfs-utils/cache/$nfsutils_version"/*.tar.*; do
     place "nfs-utils/$nfsutils_version" "$(basename "$tarball")" "$tarball"
 done
 
-# These are the static libraries that those two builds link from
+# The wireless supplicant is built from source the same way. Its BSD
+# license asks for notices rather than source, so this mirror is the
+# channel's own rule, not an obligation: the channel offers source for
+# everything a release carries.
+prefetch "$here/../wpa-supplicant/fetch.sh" --sources-only
+for tarball in "$here/../wpa-supplicant/cache/$wpasupplicant_version"/*.tar.*; do
+    place "wpa-supplicant/$wpasupplicant_version" "$(basename "$tarball")" "$tarball"
+done
+
+# These are the static libraries that those three builds link from
 # their pinned alpine container: musl (every binary's libc) and
 # util-linux (libblkid and libmount). Alpine patches its packages
 # lightly. These upstream tarballs match the packaged versions, and
 # NOTICES.md names the container digest for anyone who wants to audit
 # the exact bytes.
-# Tracks the builder pin in open-iscsi/fetch.sh and nfs-utils/fetch.sh.
+# libnl is the third library: LGPL-2.1, linked into the wireless
+# supplicant, and the only way a program speaks nl80211.
+# Tracks the builder pin in open-iscsi/fetch.sh, nfs-utils/fetch.sh,
+# and wpa-supplicant/fetch.sh.
 mirror "toolchain/alpine-3.22" "musl-1.2.5.tar.gz" \
     "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4" \
     "https://musl.libc.org/releases/musl-1.2.5.tar.gz"
 mirror "toolchain/alpine-3.22" "util-linux-2.41.tar.xz" \
     "81ee93b3cfdfeb7d7c4090cedeba1d7bbce9141fd0b501b686b3fe475ddca4c6" \
     "https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-2.41.tar.xz"
+mirror "toolchain/alpine-3.22" "libnl-3.11.0.tar.gz" \
+    "2a56e1edefa3e68a7c00879496736fdbf62fc94ed3232c0baba127ecfa76874d" \
+    "https://github.com/thom311/libnl/releases/download/libnl3_11_0/libnl-3.11.0.tar.gz"
 
 # systemd-boot and GRUB are prebuilt Ubuntu packages, so their
 # corresponding source is the Ubuntu source package: the upstream
@@ -350,6 +370,16 @@ if ! ((repin)) &&
 fi
 place "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" \
     "$here/../linux-firmware/cache/$linuxfirmware_tarball"
+
+# The regulatory database. The ISC license asks for notices, not
+# source, but db.txt is the text form that regulatory.db compiles
+# from, and the tarball carries it along with the compiler and the
+# public certificate. The whole mirror is 32 KB, so it costs nothing
+# to keep the channel's rule whole. Tracks the regdb pin in
+# linux-firmware/fetch.sh.
+mirror "wireless-regdb/$regdb_version" "wireless-regdb-$regdb_version.tar.xz" \
+    "8a27bfc081bafed8c24dd70fab0d96f098e5a0bfcd08d3da672595f225ab8993" \
+    "https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-$regdb_version.tar.xz"
 
 echo
 if ((repin)); then

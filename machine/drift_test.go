@@ -233,6 +233,75 @@ func TestNetworkDriftIgnoresHostEntries(t *testing.T) {
 	}
 }
 
+// driftLabWireless is the lab radio's shape as a boot record: a
+// wireless entry with a static address on it.
+func driftLabWireless() NetworkSpec {
+	spec := driftLabNetwork()
+	spec.Interfaces = append(spec.Interfaces, InterfaceSpec{
+		Name: "wlan0", Address: "10.10.0.2/24",
+		Wireless: &WirelessSpec{SSID: "stonypoint", Security: WirelessWPAPSK},
+	})
+	return spec
+}
+
+func TestNetworkDriftSeesNoDriftInTheSameWirelessSpec(t *testing.T) {
+	actuated := driftLabWireless()
+	if diffs := NetworkDrift(driftLabWireless(), &actuated); len(diffs) != 0 {
+		t.Errorf("identical specs should not drift: %v", diffs)
+	}
+}
+
+func TestNetworkDriftSeesAChangedSSID(t *testing.T) {
+	actuated := driftLabWireless()
+	desired := driftLabWireless()
+	desired.Interfaces[2].Wireless.SSID = "stonypoint-guest"
+	diffs := NetworkDrift(desired, &actuated)
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "wireless stonypoint-guest (wpa-psk) declared, stonypoint (wpa-psk) actuated") {
+		t.Errorf("expected an SSID diff: %v", diffs)
+	}
+}
+
+func TestNetworkDriftSeesAChangedSecurity(t *testing.T) {
+	actuated := driftLabWireless()
+	desired := driftLabWireless()
+	desired.Interfaces[2].Wireless.Security = WirelessOpen
+	diffs := NetworkDrift(desired, &actuated)
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "stonypoint (open) declared, stonypoint (wpa-psk) actuated") {
+		t.Errorf("expected a security diff: %v", diffs)
+	}
+}
+
+func TestNetworkDriftReadsTheUnsetSecurityAsItsDefault(t *testing.T) {
+	// The API server writes the default into a spec applied through
+	// it, and a manifest from a stick keeps the field empty, so the
+	// comparison resolves both sides before it compares them.
+	actuated := driftLabWireless()
+	desired := driftLabWireless()
+	desired.Interfaces[2].Wireless.Security = ""
+	if diffs := NetworkDrift(desired, &actuated); len(diffs) != 0 {
+		t.Errorf("an unset security means wpa-psk: %v", diffs)
+	}
+}
+
+func TestNetworkDriftSeesARadioAddedToAWiredInterface(t *testing.T) {
+	actuated := driftLabWireless()
+	actuated.Interfaces[2].Wireless = nil
+	diffs := NetworkDrift(driftLabWireless(), &actuated)
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "stonypoint (wpa-psk) declared, (none) actuated") {
+		t.Errorf("expected an added-wireless diff: %v", diffs)
+	}
+}
+
+func TestNetworkDriftSeesARadioRemoved(t *testing.T) {
+	actuated := driftLabWireless()
+	desired := driftLabWireless()
+	desired.Interfaces[2].Wireless = nil
+	diffs := NetworkDrift(desired, &actuated)
+	if len(diffs) != 1 || !strings.Contains(diffs[0], "wireless (none) declared, stonypoint (wpa-psk) actuated") {
+		t.Errorf("expected a removed-wireless diff: %v", diffs)
+	}
+}
+
 func TestModulesDriftIgnoresOrderAndRepetition(t *testing.T) {
 	diffs := ModulesDrift([]string{"nvidia", "zram", "nvidia"}, []string{"zram", "nvidia"})
 	if len(diffs) != 0 {

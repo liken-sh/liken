@@ -295,6 +295,44 @@ func featuresCondition(observed []machine.FeatureStatus) api.Condition {
 		"the cluster enables no features")
 }
 
+// wirelessCondition summarizes every radio the boot was asked to
+// join as one condition, in the same form as modulesCondition and
+// featuresCondition. Only Connected is a healthy state. A machine
+// with no wireless entry declares nothing and stays Ready. The
+// message carries the supplicant's own reason, the one fact that
+// tells a wrong passphrase apart from an access point that is
+// switched off.
+func wirelessCondition(interfaces []machine.InterfaceStatus) api.Condition {
+	declared := 0
+	var problems []string
+	for _, iface := range interfaces {
+		w := iface.Wireless
+		if w == nil {
+			continue
+		}
+		declared++
+		if w.State == machine.WirelessConnected {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("%s (%s): %s", iface.Name, w.SSID, wirelessReason(*w)))
+	}
+	return outcomesCondition("WirelessJoined", declared, problems,
+		"NotJoined", "AllJoined",
+		fmt.Sprintf("all %d declared wireless networks are joined", declared),
+		"no wireless network declared")
+}
+
+// wirelessReason names why one radio is not joined. Init writes a
+// message for every failure it has words for. The state is the
+// fallback, for a radio that is still associating and has said
+// nothing yet.
+func wirelessReason(w machine.WirelessStatus) string {
+	if w.Message != "" {
+		return w.Message
+	}
+	return string(w.State)
+}
+
 // nodeHealthyCondition translates the Node's Ready condition into the
 // Machine's own condition. When the Node carries no Ready condition,
 // this function reports the machine as unhealthy: a kubelet that has

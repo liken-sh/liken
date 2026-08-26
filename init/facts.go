@@ -295,7 +295,17 @@ func networkFacts(clusterDoc *cluster.Cluster, conns []*connection, now time.Tim
 		status.Interfaces = append(status.Interfaces, interfaceFacts(conn, now))
 	}
 
+	// The summary skips an addressless interface. The top-level
+	// fields describe the interface that carries the machine's
+	// traffic, and a radio that did not join carries none, so it
+	// appears in the collection below and never as the summary.
 	primary := conns[0]
+	for _, conn := range conns {
+		if conn.addr != nil {
+			primary = conn
+			break
+		}
+	}
 	if _, ifname := nodeAddress(clusterDoc, conns); ifname != "" {
 		for _, conn := range conns {
 			if conn.ifname == ifname {
@@ -319,9 +329,14 @@ func interfaceFacts(conn *connection, now time.Time) machine.InterfaceStatus {
 	status := machine.InterfaceStatus{
 		Name:        conn.ifname,
 		MAC:         conn.mac.String(),
-		Address:     conn.addr.String(),
 		Method:      conn.method,
 		Nameservers: make([]string, 0, len(conn.nameservers)),
+	}
+	if conn.addr != nil {
+		status.Address = conn.addr.String()
+	}
+	if conn.radio != nil {
+		status.Wireless = conn.radio.wirelessStatus()
 	}
 	if conn.method == machine.MethodDHCP {
 		expires := now.Add(conn.leaseTime)

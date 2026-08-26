@@ -72,7 +72,7 @@ printf '%s\t%s\t%s\t%s\n' '  libtirpc' "$pinned_libtirpc" "${latest_libtirpc:-?}
     "the RPC library, linked static"
 printf '%s\t%s\t%s\t%s\n' '  alpine' \
     "$(short "$pinned_builder")" "$(short "${latest_builder:-?}")" \
-    "the $builder_tag builder; open-iscsi and tzdata pin it too"
+    "the $builder_tag builder; open-iscsi, tzdata, and wpa-supplicant pin it too"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
@@ -128,7 +128,7 @@ alpine)
     sed -i "s|^builder=\".*\"|builder=\"docker.io/library/alpine@$latest_builder\"|" \
         "$here/fetch.sh"
     echo "alpine: $(short "$pinned_builder") -> $(short "$latest_builder")"
-    echo "open-iscsi and tzdata pin the same image; run their --bump alpine too"
+    echo "open-iscsi, tzdata, and wpa-supplicant pin the same image; run their --bump alpine too"
     ;;
 *)
     echo "latest.sh: no pin named ${2}; try libtirpc or alpine" >&2

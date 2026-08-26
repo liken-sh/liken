@@ -93,6 +93,12 @@ runs:
       with:
         path: nfs-utils/dist
         key: nfs-utils-${{ hashFiles('nfs-utils/VERSION', 'nfs-utils/fetch.sh') }}
+    # The key covers build.config too, because the feature list
+    # decides what the binary contains.
+    - uses: actions/cache@v6
+      with:
+        path: wpa-supplicant/dist
+        key: wpa-supplicant-${{ hashFiles('wpa-supplicant/VERSION', 'wpa-supplicant/fetch.sh', 'wpa-supplicant/build.config') }}
     - uses: actions/cache@v6
       with:
         path: systemd-boot/dist
@@ -135,6 +141,7 @@ runs:
       run: |
         for dist in kernel/dist k3s/dist xtables/dist trust/dist \
                     e2fsprogs/dist open-iscsi/dist nfs-utils/dist \
+                    wpa-supplicant/dist \
                     systemd-boot/dist grub/dist linux-firmware/dist \
                     microcode/dist; do
             [ -d "$dist" ] && find "$dist" -type f -exec touch {} +

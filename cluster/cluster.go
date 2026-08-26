@@ -546,6 +546,17 @@ func (c *Cluster) ContainerdSpec() ContainerdRuntimeSpec {
 	return c.Spec.Runtime.Containerd
 }
 
+// EndpointOrEmpty is the join URL, safe on a nil Cluster like the
+// accessors above. An empty answer means a machine alone: it is its
+// own cluster and has no endpoint to reach, so nothing about it is
+// unreachable.
+func (c *Cluster) EndpointOrEmpty() string {
+	if c == nil {
+		return ""
+	}
+	return c.Spec.Endpoint
+}
+
 // NodePortAddresses is the address plan's NodePort resolution, safe
 // on a nil Cluster. A machine on its own answers NodePorts on its
 // node IP, the same narrow default a document leaves unset.

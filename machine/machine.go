@@ -315,6 +315,11 @@ func (s NetworkSpec) Validate() error {
 			return fmt.Errorf("interfaces %d and %d both declare %s; declare each port once", first, i, ifc.Name)
 		}
 		claimed[ifc.Name] = i
+		if ifc.Wireless != nil {
+			if err := ifc.Wireless.validate(ifc.Name); err != nil {
+				return err
+			}
+		}
 	}
 
 	claimedAddresses := map[string]int{}
@@ -373,6 +378,11 @@ type InterfaceSpec struct {
 	// Nameservers lists nameservers to use in addition to any that
 	// DHCP leases supply.
 	Nameservers []string `json:"nameservers,omitempty"`
+
+	// Wireless names the network this interface joins before any of
+	// the addressing above applies. An absent value means the
+	// interface is wired.
+	Wireless *WirelessSpec `json:"wireless,omitempty"`
 }
 
 // HostEntry is one static line for /etc/hosts: one address and the

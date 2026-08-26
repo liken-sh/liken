@@ -109,6 +109,11 @@
 #                                 negotiate a protocol version with
 #                                 the server before the kernel mounts
 #                                 the export
+#   /sbin/wpa_supplicant          the wireless supplicant, static,
+#                                 built by wpa-supplicant/fetch.sh.
+#                                 Init runs it as a child process
+#                                 when spec.network names a wireless
+#                                 interface
 #   /etc/mtab                     the compatibility symlink mount
 #                                 helpers require. It points at the
 #                                 kernel's own mount table
@@ -267,6 +272,17 @@ nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
 cp "$here/../nfs-utils/dist/$nfsutils_version/mount.nfs" "$root/sbin/mount.nfs"
 ln -s mount.nfs "$root/sbin/mount.nfs4"
 
+# The wireless supplicant, the one program that runs the WPA
+# handshake for a wireless spec.network entry (wpa-supplicant/fetch.sh
+# explains the static build). Every image carries it and it stays
+# inert: init starts it only when the manifest names a wireless
+# interface, so a machine with no radio never runs the process. It
+# lands in /sbin with the rest of the vendored userspace, and init
+# names it by absolute path.
+wpasupplicant_version="$(cat "$here/../wpa-supplicant/VERSION")"
+cp "$here/../wpa-supplicant/dist/$wpasupplicant_version/wpa_supplicant" \
+   "$root/sbin/wpa_supplicant"
+
 # /etc/mtab is the file where mount tools once recorded mounts, from
 # before the kernel exposed them itself. On every mainstream
 # distribution since about 2011, it has been a compatibility symlink
@@ -416,12 +432,23 @@ cp -a "$here/../tzdata/dist/$tzdata_version/zoneinfo" \
 # the channel. It sits under /usr/share, deliberately outside
 # /etc/liken, because it states a fact about the image, not about any
 # deployment of the image.
+#
+# wireless-regdb is the one row whose version does not come from a
+# VERSION file. linux-firmware/fetch.sh owns the nested pin, and
+# linux-firmware/derive.sh reads it out of that script the same way.
+# Reading it here too is what keeps this record and the shipped blob
+# naming one version.
+regdb_version="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/../linux-firmware/fetch.sh")"
 mkdir -p "$root/usr/share/liken"
 {
     echo "components:"
-    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils systemd-boot grub hwdata tzdata linux-firmware microcode; do
+    for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware wireless-regdb microcode; do
+        case "$component" in
+            wireless-regdb) version="$regdb_version" ;;
+            *) version="$(cat "$here/../$component/VERSION")" ;;
+        esac
         echo "  - name: $component"
-        echo "    version: $(cat "$here/../$component/VERSION")"
+        echo "    version: $version"
     done
 } > "$root/usr/share/liken/components.yaml"
 

@@ -215,11 +215,13 @@ func (t FactsTree) readVersion() (VersionStatus, error) {
 		{"version/e2fsprogs", &v.E2fsprogs},
 		{"version/openIscsi", &v.OpenISCSI},
 		{"version/nfsUtils", &v.NFSUtils},
+		{"version/wpaSupplicant", &v.WPASupplicant},
 		{"version/systemdBoot", &v.SystemdBoot},
 		{"version/grub", &v.Grub},
 		{"version/hwdata", &v.Hwdata},
 		{"version/tzdata", &v.Tzdata},
 		{"version/linuxFirmware", &v.LinuxFirmware},
+		{"version/wirelessRegdb", &v.WirelessRegdb},
 		{"version/microcode", &v.Microcode},
 		{"version/microcodeRevision", &v.MicrocodeRevision},
 	}
@@ -281,9 +283,34 @@ func (t FactsTree) readNetwork() (NetworkStatus, error) {
 		if iface.Nameservers, err = t.readListFact(filepath.Join(base, "nameservers")); err != nil {
 			return NetworkStatus{}, err
 		}
+		if iface.Wireless, err = t.readInterfaceWireless(base); err != nil {
+			return NetworkStatus{}, err
+		}
 		n.Interfaces = append(n.Interfaces, iface)
 	}
 	return n, nil
+}
+
+// readInterfaceWireless reads the radio's standing for one
+// interface. The ssid file is the record's presence: a wired
+// interface writes none, so an absent or empty ssid reads back as no
+// status at all rather than an empty one.
+func (t FactsTree) readInterfaceWireless(base string) (*WirelessStatus, error) {
+	dir := filepath.Join(base, "wireless")
+	ssid, err := t.readFact(filepath.Join(dir, "ssid"))
+	if err != nil || ssid == "" {
+		return nil, err
+	}
+	w := &WirelessStatus{SSID: ssid}
+	state, err := t.readFact(filepath.Join(dir, "state"))
+	if err != nil {
+		return nil, err
+	}
+	w.State = WirelessState(state)
+	if w.Message, err = t.readFact(filepath.Join(dir, "message")); err != nil {
+		return nil, err
+	}
+	return w, nil
 }
 
 func (t FactsTree) readTimeStatus() (TimeStatus, error) {

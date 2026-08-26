@@ -165,8 +165,28 @@ func (t FactsTree) readBootNetwork() (*NetworkSpec, error) {
 		if ifc.Nameservers, err = t.readListFact(filepath.Join(dir, "nameservers")); err != nil {
 			return nil, err
 		}
+		if ifc.Wireless, err = t.readBootWireless(dir); err != nil {
+			return nil, err
+		}
 		spec.Interfaces = append(spec.Interfaces, ifc)
 	}
+}
+
+// readBootWireless reads the wireless half of one interface's boot
+// record. The ssid file is the record's presence, so an interface
+// that came up wired reads back as a nil pointer, not as an empty
+// spec.
+func (t FactsTree) readBootWireless(dir string) (*WirelessSpec, error) {
+	base := filepath.Join(dir, "wireless")
+	ssid, err := t.readFact(filepath.Join(base, "ssid"))
+	if err != nil || ssid == "" {
+		return nil, err
+	}
+	security, err := t.readFact(filepath.Join(base, "security"))
+	if err != nil {
+		return nil, err
+	}
+	return &WirelessSpec{SSID: ssid, Security: WirelessSecurity(security)}, nil
 }
 
 // readRejection reads one standing quarantine record. A record

@@ -20,6 +20,9 @@ package image
 //	etc/liken/machines/*.yaml    one manifest per machine
 //	etc/liken/token              the join token (0600; init hands k3s
 //	                             the path, never the value)
+//	etc/liken/psk/<ssid>         one passphrase file per wireless
+//	                             network (0600), the same class of
+//	                             secret as the token
 //	var/lib/rancher/k3s/         the certificate authorities, exactly
 //	  server/tls/**              where k3s looks before generating
 //	                             its own
@@ -36,7 +39,9 @@ package image
 // access to anyone who reads the disk.
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -53,6 +58,14 @@ func Layer(manifests, identityDir, out string) error {
 	// exists, so a refusal leaves no truncated cpio behind for a later
 	// step to pack into an image.
 	d, err := readDeployment(manifests)
+	if err != nil {
+		return err
+	}
+	// The passphrases are read and cross-checked against the
+	// manifests here, before the output exists, for the same reason
+	// the documents are: a refusal must leave no truncated cpio
+	// behind.
+	passphrases, err := readPassphrases(identityDir, d)
 	if err != nil {
 		return err
 	}
@@ -132,6 +145,14 @@ func Layer(manifests, identityDir, out string) error {
 		}
 	}
 
+	// The passphrases land beside the token, at the token's mode,
+	// because init reads its cluster credentials from one place.
+	for _, p := range passphrases {
+		if err := place(filepath.Join("etc/liken/psk", p.name), p.raw, 0o600); err != nil {
+			return err
+		}
+	}
+
 	return a.close()
 }
 
@@ -146,6 +167,64 @@ type deployment struct {
 type deploymentMachine struct {
 	name string
 	raw  []byte
+	// The layer packs the raw bytes and reads the parsed document
+	// for the checks that need a field, so nothing parses twice.
+	parsed *machine.Machine
+}
+
+// passphraseFile is one wireless network's passphrase, read from the
+// identity directory under the SSID that names it. These files are
+// not part of identity.Bundle: the bundle is the fixed set the mint
+// creates, while a passphrase is written by the operator, and a
+// deployment with no wifi has none at all.
+type passphraseFile struct {
+	name string
+	raw  []byte
+}
+
+// readPassphrases reads every passphrase file in the identity
+// directory, and refuses a deployment that declares a network no file
+// answers for. The refusal belongs here, at build time, because the
+// alternative is a boot that parks: the machine would install, come
+// up with no passphrase, and hold on its console. The person building
+// the stick can fix the file now; the person at the machine cannot.
+func readPassphrases(identityDir string, d *deployment) ([]passphraseFile, error) {
+	dir := filepath.Join(identityDir, "psk")
+	// A deployment with no wireless machine has no psk directory at
+	// all, and that is not a missing file.
+	entries, err := os.ReadDir(dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+
+	var files []passphraseFile
+	held := map[string]bool{}
+	for _, entry := range entries {
+		// One file names one network, so a directory here names no
+		// network and is skipped.
+		if entry.IsDir() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, passphraseFile{name: entry.Name(), raw: raw})
+		held[entry.Name()] = true
+	}
+
+	for _, m := range d.machines {
+		for _, ifc := range m.parsed.Spec.Network.Interfaces {
+			w := ifc.Wireless
+			// An open network takes no key, so it needs no file.
+			if w == nil || w.SecurityOrDefault() != machine.WirelessWPAPSK || held[w.SSID] {
+				continue
+			}
+			return nil, fmt.Errorf("%s: interface %s joins the network %q, and no file holds its passphrase; write it to %s",
+				m.name, ifc.Name, w.SSID, filepath.Join(dir, w.SSID))
+		}
+	}
+	return files, nil
 }
 
 // readDeployment reads every document the layer will pack and runs the
@@ -191,7 +270,7 @@ func readDeployment(manifests string) (*deployment, error) {
 		if err := parsed.Spec.Network.Validate(); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		d.machines = append(d.machines, deploymentMachine{name: filepath.Base(path), raw: raw})
+		d.machines = append(d.machines, deploymentMachine{name: filepath.Base(path), raw: raw, parsed: parsed})
 	}
 	return d, nil
 }

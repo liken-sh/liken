@@ -88,11 +88,17 @@ TRUST_VERSION := $(strip $(file <../trust/VERSION))
 E2FSPROGS_VERSION := $(strip $(file <../e2fsprogs/VERSION))
 OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
 NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
+WPASUPPLICANT_VERSION := $(strip $(file <../wpa-supplicant/VERSION))
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 GRUB_VERSION := $(strip $(file <../grub/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
 TZDATA_VERSION := $(strip $(file <../tzdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
+# This pin is read out of a script instead of a VERSION file because
+# linux-firmware/fetch.sh owns the nested wireless-regdb pin.
+# linux-firmware/derive.sh and image/build.sh read it the same way, so
+# the release document and the shipped blob name one version.
+WIRELESSREGDB_VERSION := $(shell sed -n 's|^regdb_version="\(.*\)"$$|\1|p' ../linux-firmware/fetch.sh)
 MICROCODE_VERSION := $(strip $(file <../microcode/VERSION))
 FLUX_VERSION := $(strip $(file <../flux/VERSION))
 
@@ -152,11 +158,13 @@ release: build
 		e2fsprogs=$(E2FSPROGS_VERSION) \
 		open-iscsi=$(OPENISCSI_VERSION) \
 		nfs-utils=$(NFSUTILS_VERSION) \
+		wpa-supplicant=$(WPASUPPLICANT_VERSION) \
 		systemd-boot=$(SYSTEMDBOOT_VERSION) \
 		grub=$(GRUB_VERSION) \
 		hwdata=$(HWDATA_VERSION) \
 		tzdata=$(TZDATA_VERSION) \
 		linux-firmware=$(LINUXFIRMWARE_VERSION) \
+		wireless-regdb=$(WIRELESSREGDB_VERSION) \
 		microcode=$(MICROCODE_VERSION) \
 		flux=$(FLUX_VERSION)
 

@@ -231,6 +231,15 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	status.Conditions = api.SetCondition(status.Conditions,
 		featuresCondition(status.Features), now)
 
+	// The radios judge the boot's report, not the spec. A join
+	// happens once, at boot, on the same terms as a module load, so
+	// a freshly declared wireless entry is SpecConverged's concern
+	// until a reboot joins it. A machine that joined nothing and
+	// still reached this line reached it over some other interface,
+	// which is the degraded case plans/62-wifi.md describes.
+	status.Conditions = api.SetCondition(status.Conditions,
+		wirelessCondition(status.Network.Interfaces), now)
+
 	// Storage compares the spec's declared roles against the facts'
 	// report of where each is actually backed. The operator cannot
 	// observe the disks directly, because claiming happened before

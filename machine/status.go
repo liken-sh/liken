@@ -222,16 +222,27 @@ type VersionStatus struct {
 	// is observed, not echoed from a build pin.
 	Xtables string `json:"xtables,omitempty"`
 
-	K3s           string `json:"k3s,omitempty"`
-	Trust         string `json:"trust,omitempty"`
-	E2fsprogs     string `json:"e2fsprogs,omitempty"`
-	OpenISCSI     string `json:"openIscsi,omitempty"`
-	NFSUtils      string `json:"nfsUtils,omitempty"`
+	K3s       string `json:"k3s,omitempty"`
+	Trust     string `json:"trust,omitempty"`
+	E2fsprogs string `json:"e2fsprogs,omitempty"`
+	OpenISCSI string `json:"openIscsi,omitempty"`
+	NFSUtils  string `json:"nfsUtils,omitempty"`
+
+	// WPASupplicant is the hostap release that supplied the
+	// supplicant init runs for a wireless spec.network entry.
+	WPASupplicant string `json:"wpaSupplicant,omitempty"`
+
 	SystemdBoot   string `json:"systemdBoot,omitempty"`
 	Grub          string `json:"grub,omitempty"`
 	Hwdata        string `json:"hwdata,omitempty"`
 	Tzdata        string `json:"tzdata,omitempty"`
 	LinuxFirmware string `json:"linuxFirmware,omitempty"`
+
+	// WirelessRegdb is the regulatory database under /lib/firmware.
+	// Its pin lives inside linux-firmware/fetch.sh rather than in a
+	// domain of its own, but the channels a radio may use depend on
+	// it, so it reports here like any other component.
+	WirelessRegdb string `json:"wirelessRegdb,omitempty"`
 
 	// Microcode is the pin: which early cpio the release carries.
 	// MicrocodeRevision is observed from the running CPUs. The two
@@ -277,6 +288,38 @@ type InterfaceStatus struct {
 	Gateway      string        `json:"gateway,omitempty"`
 	Nameservers  []string      `json:"nameservers,omitempty"`
 	LeaseExpires *time.Time    `json:"leaseExpires,omitempty"`
+
+	// Wireless is the radio's own standing, present only for an
+	// interface the spec gave a wireless entry. The addressing
+	// fields above describe the same interface after the join, so an
+	// interface can carry a wireless failure and no address at all.
+	Wireless *WirelessStatus `json:"wireless,omitempty"`
+}
+
+// WirelessState is what a radio is doing at the moment the boot
+// reports it. Four words exist because the kernel alone cannot tell
+// them apart: it reports the same missing carrier for a wrong
+// passphrase and for an access point that is switched off. Only the
+// supplicant's own events separate WrongKey from NoCarrier, and
+// WrongKey is the one value that no amount of waiting corrects.
+type WirelessState string
+
+const (
+	WirelessAssociating WirelessState = "Associating"
+	WirelessConnected   WirelessState = "Connected"
+	WirelessWrongKey    WirelessState = "WrongKey"
+	WirelessNoCarrier   WirelessState = "NoCarrier"
+)
+
+// WirelessStatus is the wireless half of one interface's status: the
+// network the spec named, what the join did, and the reason behind a
+// join that failed. Everything init prints about the radio also
+// lands here, because a machine with no shell cannot be asked to
+// repeat itself.
+type WirelessStatus struct {
+	SSID    string        `json:"ssid,omitempty"`
+	State   WirelessState `json:"state,omitempty"`
+	Message string        `json:"message,omitempty"`
 }
 
 // TimeState is a machine clock's condition. FreeRunning and

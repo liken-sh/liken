@@ -178,6 +178,12 @@ func rebootMachine(intent machine.RebootIntent) {
 	// that release. The one-shot trial must be armed before the
 	// machine shuts down (see proving.go).
 	armProvingBoot(actuator, machine.MachineStateDir, bootParamValue("liken.slot"))
+	// The supplicants stop before the general signal because each
+	// one runs under a restart loop that would start it again during
+	// the grace period below. A stop through the loop lets the
+	// process deauthenticate and put the interface down once, for
+	// good.
+	stopSupplicants()
 	killEverything()
 	// The machine plane stops only after every process ends. The
 	// reaper is one of its components, and it must collect exited

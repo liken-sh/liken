@@ -232,7 +232,12 @@ spec:
                     does a storage edit, and the next boot applies
                     it. rebootPolicy sets who starts that boot, and
                     status.boot.network reports the network that the
-                    running boot started with.
+                    running boot started with. An address from DHCP
+                    must stay stable: k3s reads the node's address
+                    when it starts, and a lease that comes back
+                    different does not take effect while the machine
+                    runs. Configure the DHCP server to reserve a
+                    fixed address for each machine that uses DHCP.
                   properties:
                     interfaces:
                       type: array
@@ -295,6 +300,54 @@ spec:
                             items:
                               type: string
                               maxLength: 253
+                          wireless:
+                            type: object
+                            required: [ssid]
+                            description: >-
+                              The wireless network this interface
+                              joins. Init runs a supplicant for the
+                              interface and applies the addressing
+                              above once the radio associates, so a
+                              wireless entry changes how the link
+                              comes up and nothing else. An absent
+                              value means the interface is wired.
+                              The passphrase is never part of this
+                              document. The installer writes it to a
+                              file on the machine, named for the
+                              SSID, under /etc/liken/psk/.
+                            properties:
+                              ssid:
+                                type: string
+                                maxLength: 32
+                                # The SSID names the passphrase file,
+                                # so it must be a name a path can end
+                                # in. The three alternatives accept
+                                # every such name and refuse the four
+                                # that cannot: the empty name, the
+                                # two dot names, and any name that
+                                # holds a separator.
+                                pattern: '^([^./][^/]*|\.[^./][^/]*|\.\.[^/]+)$'
+                                description: >-
+                                  The network's name, exactly as the
+                                  access point advertises it, at
+                                  most 32 octets. The name also
+                                  selects the passphrase file that
+                                  the installer writes under
+                                  /etc/liken/psk/, so a name that
+                                  cannot end a file path is refused.
+                              security:
+                                type: string
+                                enum: [wpa-psk, open]
+                                default: wpa-psk
+                                description: >-
+                                  How the machine joins the network.
+                                  wpa-psk covers WPA2 and WPA3
+                                  personal networks with one
+                                  passphrase, and the supplicant
+                                  negotiates the strongest protocol
+                                  the access point offers. open
+                                  joins a network with no encryption
+                                  and needs no passphrase file.
                     hostEntries:
                       type: array
                       maxItems: 64
@@ -1112,6 +1165,12 @@ spec:
                         The nfs-utils release that supplied
                         mount.nfs, the mount helper that the nfs
                         feature uses.
+                    wpaSupplicant:
+                      type: string
+                      description: >-
+                        The hostap release that supplied
+                        wpa_supplicant, the supplicant that init
+                        runs for an interface with a wireless entry.
                     systemdBoot:
                       type: string
                       description: >-
@@ -1142,6 +1201,13 @@ spec:
                       description: >-
                         The linux-firmware release that supplied the
                         driver blobs under /lib/firmware.
+                    wirelessRegdb:
+                      type: string
+                      description: >-
+                        The wireless-regdb release that supplied
+                        regulatory.db, the database the kernel reads
+                        to learn which channels and transmit powers
+                        each country allows.
                     microcode:
                       type: string
                       description: >-
@@ -1266,6 +1332,50 @@ spec:
                               interface expires. This field is empty
                               when the interface has a static
                               address.
+                          wireless:
+                            type: object
+                            description: >-
+                              The radio's report for this interface,
+                              present only when the spec gives the
+                              interface a wireless entry. The
+                              addressing fields above describe the
+                              same interface after the join, because
+                              an address arrives only once the radio
+                              associates.
+                            properties:
+                              ssid:
+                                type: string
+                                description: >-
+                                  The network the spec names for
+                                  this interface.
+                              state:
+                                type: string
+                                enum: [Associating, Connected, WrongKey, NoCarrier]
+                                description: >-
+                                  What the join did. Associating
+                                  means the supplicant still works
+                                  on it. Connected means the radio
+                                  associated and the interface then
+                                  took its address. WrongKey means a
+                                  credential failure the machine can
+                                  state on its own: the access point
+                                  refused the passphrase, or the
+                                  machine has no passphrase file for
+                                  this network. NoCarrier means no
+                                  access point answered; an access
+                                  point that is off and one that is
+                                  out of range look the same, so the
+                                  supplicant keeps trying and time
+                                  can correct this state. WrongKey
+                                  is the one state that waiting
+                                  never corrects.
+                              message:
+                                type: string
+                                description: >-
+                                  The reason behind the state, in
+                                  the supplicant's words, or in
+                                  init's words when the passphrase
+                                  file itself is the problem.
                 time:
                   type: object
                   description: >-

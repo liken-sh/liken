@@ -325,7 +325,12 @@ func main() {
 
 	worldReport()
 
-	conns, err := bringUpNetwork(m.Spec.Network)
+	// The endpoint reaches the network step because the park
+	// decision asks whether any settled interface gives a route
+	// toward the cluster. The cluster document is the only place
+	// that address is written, and this boot's document is already
+	// chosen by this line.
+	conns, err := bringUpNetwork(m.Spec.Network, clusterDoc.EndpointOrEmpty())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
 	}
@@ -574,6 +579,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 // wrote still mounted. PID 1 must not simply exit. This is the only
 // correct way for init to stop.
 func powerOff() {
+	stopSupplicants()
 	quiesceDisks()
 	syncLogs()
 	unix.Sync()

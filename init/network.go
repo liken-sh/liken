@@ -44,14 +44,24 @@ import (
 // machine connects to the network, and to publish the same facts to
 // the Machine's status.
 type connection struct {
-	ifname      string
-	mac         net.HardwareAddr
+	ifname string
+	mac    net.HardwareAddr
+
+	// addr may be nil. A radio that did not join leaves an interface
+	// that exists and has no address, and that state is exactly what
+	// the status must report, so the boot keeps the connection and
+	// every reader checks this field before it reads one.
 	addr        *net.IPNet
 	method      machine.AddressMethod // how the code obtained the address: DHCP or Static
 	gateway     net.IP
 	nameservers []net.IP
 	leaseTime   time.Duration
 	server      net.IP
+
+	// radio is the 802.11 session behind this interface, for an
+	// interface the spec gave a wireless entry. Nil means the
+	// interface is wired.
+	radio *radio
 }
 
 // bringUpNetwork configures every interface that the spec names.
@@ -62,7 +72,7 @@ type connection struct {
 // up is degraded, not absent, and the console report shows which
 // interface is which. The function returns an error only when no
 // interface comes up.
-func bringUpNetwork(spec machine.NetworkSpec) ([]*connection, error) {
+func bringUpNetwork(spec machine.NetworkSpec, endpoint string) ([]*connection, error) {
 	// The code brings up loopback first. Nearly all networked
 	// software assumes that 127.0.0.1 exists. The kernel creates the
 	// loopback interface; the code only needs to raise it.
@@ -109,8 +119,19 @@ func bringUpNetwork(spec machine.NetworkSpec) ([]*connection, error) {
 		}
 		conns = append(conns, conn)
 	}
-	if len(conns) == 0 {
-		return nil, fmt.Errorf("no interface came up")
+
+	// The park (plans/62-wifi.md). Every interface has settled by
+	// this line, so the decision has everything it needs. The hold
+	// ends on a join event rather than a keypress, and the
+	// addressing that follows is the same addressing a radio that
+	// joined on the first try would have taken.
+	if failed, reason := parkDecision(conns, endpoint, routeVia); failed != nil {
+		park(failed, reason)
+		conns = readdressRadio(conns, interfaces, failed)
+	}
+
+	if !anyAddressed(conns) {
+		return conns, fmt.Errorf("no interface came up")
 	}
 
 	// The code builds one resolv.conf file for the whole machine,
@@ -174,16 +195,88 @@ func bringUpInterface(ifc machine.InterfaceSpec, present []interfaceIdentity) (*
 		return nil, fmt.Errorf("raising %s: %w", ifc.Name, err)
 	}
 
+	if ifc.Wireless == nil {
+		return addressInterface(link, ifc)
+	}
+
+	// The join comes before the addressing because an unassociated
+	// radio carries no frames: a DHCP exchange on it would only wait
+	// out its own deadline. Once the radio associates, the interface
+	// behaves exactly like an ethernet port, which is why the same
+	// two addressing paths run below with nothing added.
+	r := joinWireless(ifc, machine.MachineStateDir)
+	if r.state != machine.WirelessConnected {
+		// A failed join still yields a connection. The interface
+		// exists, the status must carry the reason it has no
+		// address, and the park decision reads these same
+		// connections to learn what settled.
+		return &connection{ifname: ifc.Name, mac: link.Attrs().HardwareAddr, radio: r}, nil
+	}
+	conn, err := addressInterface(link, ifc)
+	if err != nil {
+		return nil, err
+	}
+	conn.radio = r
+	return conn, nil
+}
+
+// addressInterface gives one raised link its address, by the method the
+// interface spec chose. It is the half of the bring-up that a wireless
+// interface reaches only after its radio associates.
+func addressInterface(link netlink.Link, ifc machine.InterfaceSpec) (*connection, error) {
 	if ifc.Address != "" {
 		return applyStatic(link, ifc)
 	}
-
 	fmt.Printf("liken: negotiating DHCP on %s\n", ifc.Name)
 	lease, err := acquireLease(ifc.Name)
 	if err != nil {
 		return nil, err
 	}
 	return applyLease(link, lease, ifc)
+}
+
+// anyAddressed reports whether any interface came up with an address.
+// An interface that exists with no address is a report, not a path.
+func anyAddressed(conns []*connection) bool {
+	for _, conn := range conns {
+		if conn.addr != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// readdressRadio addresses the interface behind a radio that joined
+// after the park released the boot. It replaces the addressless
+// connection that the failed join left behind.
+func readdressRadio(conns []*connection, interfaces []machine.InterfaceSpec, r *radio) []*connection {
+	if r.state != machine.WirelessConnected {
+		return conns
+	}
+	var spec machine.InterfaceSpec
+	for _, ifc := range interfaces {
+		if ifc.Name == r.ifname {
+			spec = ifc
+		}
+	}
+	link, err := netlink.LinkByName(r.ifname)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", r.ifname, err)
+		return conns
+	}
+	conn, err := addressInterface(link, spec)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", r.ifname, err)
+		return conns
+	}
+	conn.radio = r
+	for i, existing := range conns {
+		if existing.ifname == r.ifname {
+			conns[i] = conn
+			return conns
+		}
+	}
+	return append(conns, conn)
 }
 
 // interfaceIdentity is one link reduced to the two facts the boot
@@ -381,6 +474,16 @@ func applyLease(link netlink.Link, lease *nclient4.Lease, ifc machine.InterfaceS
 }
 
 func (c *connection) report() {
+	if c.radio != nil {
+		fmt.Printf("liken: %s (%s) is on %s (%s)\n", c.ifname, c.mac, c.radio.ssid, c.radio.state)
+		if c.radio.message != "" {
+			fmt.Printf("liken:   %s\n", c.radio.message)
+		}
+	}
+	if c.addr == nil {
+		fmt.Printf("liken: %s (%s) has no address\n", c.ifname, c.mac)
+		return
+	}
 	fmt.Printf("liken: %s (%s) is %s (%s)\n", c.ifname, c.mac, c.addr, strings.ToLower(string(c.method)))
 	if c.method == machine.MethodDHCP {
 		fmt.Printf("liken:   gateway %s, dhcp server %s, lease %s\n",

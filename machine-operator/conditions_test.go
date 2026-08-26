@@ -377,6 +377,61 @@ func TestFeaturesConditionNothingEnabled(t *testing.T) {
 	}
 }
 
+// wiredAndWireless is a machine with one ethernet port and one radio,
+// the shape of the drill: both paths reach the cluster, so the radio's
+// verdict is the only thing this condition judges.
+func wiredAndWireless(w *machine.WirelessStatus) []machine.InterfaceStatus {
+	return []machine.InterfaceStatus{
+		{Name: "eth0", Address: "10.10.0.5/24"},
+		{Name: "wlan0", Address: "10.10.0.6/24", Wireless: w},
+	}
+}
+
+func TestWirelessConditionJoined(t *testing.T) {
+	c := wirelessCondition(wiredAndWireless(&machine.WirelessStatus{
+		SSID: "stonypoint", State: machine.WirelessConnected,
+	}))
+	if c.Type != "WirelessJoined" || c.Status != api.ConditionTrue || c.Reason != "AllJoined" {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestWirelessConditionCarriesTheSupplicantsReason(t *testing.T) {
+	// This is the whole point of reading the supplicant's events: a
+	// wrong passphrase and an access point that is switched off look
+	// the same to the kernel, and only this message tells them apart.
+	c := wirelessCondition(wiredAndWireless(&machine.WirelessStatus{
+		SSID: "stonypoint", State: machine.WirelessWrongKey,
+		Message: "the access point refused the passphrase (WRONG_KEY); fix it on the install media",
+	}))
+	if c.Status != api.ConditionFalse || c.Reason != "NotJoined" {
+		t.Errorf("got %+v", c)
+	}
+	for _, want := range []string{"wlan0", "stonypoint", "WRONG_KEY"} {
+		if !strings.Contains(c.Message, want) {
+			t.Errorf("the message must carry %q: %q", want, c.Message)
+		}
+	}
+}
+
+func TestWirelessConditionFallsBackToTheStateWhenNothingSaidWhy(t *testing.T) {
+	c := wirelessCondition(wiredAndWireless(&machine.WirelessStatus{
+		SSID: "stonypoint", State: machine.WirelessAssociating,
+	}))
+	if c.Status != api.ConditionFalse || !strings.Contains(c.Message, "Associating") {
+		t.Errorf("got %+v", c)
+	}
+}
+
+func TestWirelessConditionNothingDeclared(t *testing.T) {
+	// Every wired machine in the fleet takes this path, so it must
+	// leave the machine Ready.
+	c := wirelessCondition(wiredAndWireless(nil))
+	if c.Status != api.ConditionTrue || c.Reason != "NothingDeclared" {
+		t.Errorf("got %+v", c)
+	}
+}
+
 func nodeWithReady(status api.ConditionStatus) *nodeObject {
 	n := &nodeObject{}
 	n.Status.Conditions = []api.Condition{

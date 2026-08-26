@@ -42,6 +42,18 @@ var essentials = []mount{
 	// machine with known hardware, devtmpfs replaces the entire udev
 	// system.
 	{"devtmpfs", "/dev", "devtmpfs", unix.MS_NOSUID},
+
+	// /run is the standard location for runtime state: sockets, PIDs,
+	// and locks. containerd and k3s use hardcoded paths under it, and
+	// so do the facts tree and the supplicant's generated
+	// configuration.
+	//
+	// This mount is an essential rather than one of the mounts that
+	// prepareForK3s makes. A wireless interface comes up long before
+	// k3s does, and its generated configuration and control socket
+	// live under /run. A tmpfs mounted over /run later would hide
+	// both from the supplicant restart that has to read them again.
+	{"tmpfs", "/run", "tmpfs", unix.MS_NOSUID | unix.MS_NODEV},
 }
 
 func mountEssentials() {

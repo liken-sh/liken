@@ -251,6 +251,49 @@ func TestANetworkEditIsNeverLoadedInPlace(t *testing.T) {
 	}
 }
 
+func TestDecideConvergenceStagesAWirelessEdit(t *testing.T) {
+	// A radio joins its network at boot like every other interface
+	// comes up at boot, so an edit to the SSID takes the same staged
+	// path a nameserver edit takes.
+	m := labMachine()
+	m.Spec.Network.Interfaces = append(m.Spec.Network.Interfaces, machine.InterfaceSpec{
+		Name: "wlan0", Wireless: &machine.WirelessSpec{SSID: "stonypoint-guest"},
+	})
+	facts := labFacts()
+	boot := labNetwork()
+	boot.Interfaces = append(boot.Interfaces, machine.InterfaceSpec{
+		Name: "wlan0", Wireless: &machine.WirelessSpec{SSID: "stonypoint"},
+	})
+	facts.Boot.Network = &boot
+	conv := decideConvergence(m, facts, nil, "", turnStandalone)
+	if conv.condition.Reason != "RebootPending" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if !conv.stage || conv.requestLoad {
+		t.Errorf("a wireless edit stages and waits for a reboot: %+v", conv)
+	}
+	if !strings.Contains(conv.condition.Message, "stonypoint-guest") {
+		t.Errorf("the message should carry the diff: %q", conv.condition.Message)
+	}
+}
+
+func TestDecideConvergenceRefusesAnSSIDThatCannotNameAFile(t *testing.T) {
+	// Init resolves the passphrase from a file named by the SSID, so
+	// a spec init would refuse at boot is refused here instead of
+	// costing a reboot.
+	m := labMachine()
+	m.Spec.Network.Interfaces = append(m.Spec.Network.Interfaces, machine.InterfaceSpec{
+		Name: "wlan0", Wireless: &machine.WirelessSpec{SSID: "../secrets"},
+	})
+	conv := decideConvergence(m, labFacts(), nil, "", turnStandalone)
+	if conv.condition.Reason != "StagingRejected" {
+		t.Fatalf("got %+v", conv.condition)
+	}
+	if conv.stage || conv.requestReboot {
+		t.Error("an invalid network must not stage")
+	}
+}
+
 func TestDecideConvergenceRefusesTwoInterfacesForOnePort(t *testing.T) {
 	// A spec that init would refuse at boot is refused here instead,
 	// because finding out at boot costs a reboot and returns the

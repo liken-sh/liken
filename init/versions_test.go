@@ -4,12 +4,101 @@ package main
 // become status.version fields.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/liken-sh/liken/machine"
 )
+
+// buildScript is the image build, read from the repository rather than
+// from a built image, so the guard below runs on any checkout.
+const buildScript = "../image/build.sh"
+
+// componentsLoop finds the one line of the image build that lists every
+// component the record names. That list is the authority: a person who
+// vendors a new component adds its name there, and the guard below
+// fails until the fold reports it.
+var componentsLoop = regexp.MustCompile(`(?m)^\s*for component in ([^;]+); do$`)
+
+// recordedComponents reads the component names out of the image build.
+func recordedComponents(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(buildScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := componentsLoop.FindSubmatch(raw)
+	if match == nil {
+		t.Fatalf("%s no longer holds a `for component in ...` list; the guard below reads that list as the authority on what the record names", buildScript)
+	}
+	return strings.Fields(string(match[1]))
+}
+
+// versionFields reports every string in a VersionStatus, so the guard
+// can ask whether a component's version landed anywhere at all without
+// naming the field it should have landed in.
+func versionFields(v machine.VersionStatus) []string {
+	value := reflect.ValueOf(v)
+	fields := make([]string, 0, value.NumField())
+	for i := range value.NumField() {
+		fields = append(fields, value.Field(i).String())
+	}
+	return fields
+}
+
+func TestEveryRecordedComponentReachesTheVersionStatus(t *testing.T) {
+	// This is the mechanical half of the rule that every vendored
+	// component reports its version in Machine status. It feeds the
+	// fold a record holding every name the image build writes, each
+	// with a version of its own, and then checks that each version
+	// arrived somewhere in the block.
+	names := recordedComponents(t)
+	var record strings.Builder
+	record.WriteString("components:\n")
+	for _, name := range names {
+		fmt.Fprintf(&record, "  - name: %s\n    version: pin-%s\n", name, name)
+	}
+	componentsFile(t, record.String())
+
+	v := machine.VersionStatus{}
+	applyComponentFacts(&v)
+	arrived := versionFields(v)
+
+	for _, name := range names {
+		if slices.Contains(observedAtRuntime, name) {
+			continue
+		}
+		if slices.Contains(arrived, "pin-"+name) {
+			continue
+		}
+		t.Errorf("the image build ships %[1]q in the components record, and no status.version field reports it. "+
+			"Add a field to machine.VersionStatus, a case for %[1]q to applyComponentFacts, the matching "+
+			"writeFact and readFact lines in machine/factswrite.go and machine/factsread.go, and the property "+
+			"under status.version in machine/manifests/machines-crd.yaml. If the running machine reports %[1]q "+
+			"in its own vocabulary instead, add the name to observedAtRuntime in init/versions.go.", name)
+	}
+}
+
+func TestObservedComponentsAreNamesTheRecordHolds(t *testing.T) {
+	// The skip list must name real components. A stale entry there
+	// would silently exempt nothing, and would hide the next
+	// component that needs a field.
+	names := recordedComponents(t)
+	for _, name := range observedAtRuntime {
+		if name == "liken" {
+			continue // liken is the machine's own version, not a vendored one
+		}
+		if !slices.Contains(names, name) {
+			t.Errorf("observedAtRuntime names %q, which the image build no longer ships in the components record", name)
+		}
+	}
+}
 
 // componentsFile writes a components record in the same form that
 // image/build.sh stages one. It also points componentsPath at the

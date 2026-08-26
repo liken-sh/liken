@@ -107,7 +107,25 @@ func interfaceDrift(position int, desired, actuated InterfaceSpec) []string {
 			orNone(strings.Join(desired.Nameservers, ", ")),
 			orNone(strings.Join(actuated.Nameservers, ", "))))
 	}
+	if wirelessSummary(desired.Wireless) != wirelessSummary(actuated.Wireless) {
+		diffs = append(diffs, fmt.Sprintf("network: %s: wireless %s declared, %s actuated",
+			desired.Name,
+			orNone(wirelessSummary(desired.Wireless)),
+			orNone(wirelessSummary(actuated.Wireless))))
+	}
 	return diffs
+}
+
+// wirelessSummary renders one wireless entry as the pair of facts
+// that decide whether a rejoin is needed. The security is resolved
+// through its default first, so a spec that left the field unset and
+// a record that holds the default read as the same request instead
+// of as drift that never settles.
+func wirelessSummary(w *WirelessSpec) string {
+	if w == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s (%s)", w.SSID, w.SecurityOrDefault())
 }
 
 // RlimitDrift compares the declared resource limits against what the

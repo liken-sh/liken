@@ -26,6 +26,7 @@ LOGS_DIST ?= ../logs/dist
 OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
 OPENISCSI_DIST ?= ../open-iscsi/dist/$(OPENISCSI_VERSION)
 NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
+WPASUPPLICANT_VERSION := $(strip $(file <../wpa-supplicant/VERSION))
 
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
@@ -55,6 +56,7 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		../open-iscsi/modules.conf ../open-iscsi/iscsid.conf \
 		../nfs-utils/dist/$(NFSUTILS_VERSION)/mount.nfs \
 		../nfs-utils/modules.conf \
+		../wpa-supplicant/dist/$(WPASUPPLICANT_VERSION)/wpa_supplicant \
 		$(wildcard ../flux/manifests/*.yaml) \
 		$(MACHINE_OPERATOR_DIST)/liken-machine-operator-image.tar \
 		$(wildcard ../machine-operator/manifests/*.yaml) \

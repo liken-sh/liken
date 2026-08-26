@@ -2,6 +2,7 @@ package machine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -142,6 +143,20 @@ func everythingSet() *MachineStatus {
 					Nameservers: []string{"10.0.2.3"}, LeaseExpires: &lease,
 				},
 				{Name: "eth1", MAC: "52:54:00:ab:cd:ef", Address: "192.168.1.10/24", Method: MethodStatic},
+				// A radio that joined, and one that did not. The second
+				// is the case the tree has to carry whole: an interface
+				// with no address at all, whose only fact is why.
+				{
+					Name: "wlan0", MAC: "04:4a:2c:11:22:33", Address: "192.168.1.11/24", Method: MethodStatic,
+					Wireless: &WirelessStatus{SSID: "stonypoint", State: WirelessConnected},
+				},
+				{
+					Name: "wlan1", MAC: "04:4a:2c:11:22:34",
+					Wireless: &WirelessStatus{
+						SSID: "stonypoint-5", State: WirelessWrongKey,
+						Message: "the access point refused the passphrase (WRONG_KEY)",
+					},
+				},
 			},
 		},
 		Time: TimeStatus{
@@ -223,6 +238,10 @@ func everythingSet() *MachineStatus {
 					Name:    "eth1",
 					Address: "192.168.1.10/24", Gateway: "192.168.1.1",
 					Nameservers: []string{"192.168.1.1", "10.0.2.3"},
+				},
+				{
+					Name: "wlan0", Address: "192.168.1.11/24",
+					Wireless: &WirelessSpec{SSID: "stonypoint", Security: WirelessWPAPSK},
 				},
 			}},
 			Rejection:            &Rejection{Hash: "r1", Reason: "bad spec", RejectedAt: rejected},
@@ -353,6 +372,31 @@ func TestBootNetworkTellsAnEmptySpecFromAnAbsentRecord(t *testing.T) {
 	}
 	if facts.Boot.Network != nil {
 		t.Errorf("a boot that recorded nothing must read as nothing: %+v", facts.Boot.Network)
+	}
+}
+
+// A rewrite of the boot record drops a radio when the spec that
+// replaces it declares none, so no stale SSID survives a respec.
+func TestBootNetworkDropsAWirelessRecordThatIsNoLongerDeclared(t *testing.T) {
+	tree := FactsTree{Dir: t.TempDir()}
+	wireless := &NetworkSpec{Interfaces: []InterfaceSpec{
+		{Name: "wlan0", Wireless: &WirelessSpec{SSID: "stonypoint", Security: WirelessOpen}},
+	}}
+	if err := tree.WriteBootNetwork(wireless); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.WriteBootNetwork(&NetworkSpec{Interfaces: []InterfaceSpec{{Name: "wlan0"}}}); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := tree.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := facts.Boot.Network.Interfaces[0].Wireless; got != nil {
+		t.Errorf("the record must hold no radio: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(tree.Dir, "boot", "network", "interfaces", "0", "wireless")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the wireless directory must be gone: %v", err)
 	}
 }
 

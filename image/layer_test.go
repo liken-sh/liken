@@ -7,6 +7,7 @@ package image
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/liken-sh/liken/identity"
+	"github.com/liken-sh/liken/machine"
 )
 
 // fixtureManifests writes a minimal deployment: one cluster document
@@ -51,13 +53,59 @@ metadata:
 	return dir
 }
 
+// fixtureWirelessManifests writes a deployment whose one machine
+// joins ssid on wlan0 with the given security.
+func fixtureWirelessManifests(t *testing.T, ssid string, security machine.WirelessSecurity) string {
+	t.Helper()
+	dir := fixtureManifests(t)
+	m := fmt.Sprintf(`apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  network:
+    interfaces:
+      - name: wlan0
+        wireless:
+          ssid: %q
+          security: %q
+`, ssid, security)
+	if err := os.WriteFile(filepath.Join(dir, "machines", "node-1.yaml"), []byte(m), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// fixtureIdentity mints an identity and writes one passphrase file
+// for each network in psk. An empty map leaves no psk directory, the
+// shape of a deployment with no wifi.
+func fixtureIdentity(t *testing.T, psk map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := identity.Mint(dir, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for ssid, passphrase := range psk {
+		if err := os.MkdirAll(filepath.Join(dir, "psk"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "psk", ssid), []byte(passphrase), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
 // builtLayer runs Layer over the fixtures and parses the archive.
 func builtLayer(t *testing.T, manifests string) map[string]cpioEntry {
 	t.Helper()
-	identityDir := t.TempDir()
-	if err := identity.Mint(identityDir, io.Discard); err != nil {
-		t.Fatal(err)
-	}
+	return builtLayerFrom(t, manifests, fixtureIdentity(t, nil))
+}
+
+// builtLayerFrom runs Layer over one manifests directory and one
+// identity directory, and parses the archive back into entries.
+func builtLayerFrom(t *testing.T, manifests, identityDir string) map[string]cpioEntry {
+	t.Helper()
 	out := filepath.Join(t.TempDir(), "deployment.cpio")
 	if err := Layer(manifests, identityDir, out); err != nil {
 		t.Fatal(err)
@@ -238,6 +286,71 @@ spec:
 			// pack into an image.
 			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
 				t.Errorf("a refused build left %s behind: %v", out, err)
+			}
+		})
+	}
+}
+
+func TestLayerCarriesAPassphrase(t *testing.T) {
+	// A passphrase is the same class of secret as the token, so it
+	// travels with the identity and lands at the token's mode.
+	entries := builtLayerFrom(t,
+		fixtureWirelessManifests(t, "stonypoint", machine.WirelessWPAPSK),
+		fixtureIdentity(t, map[string]string{"stonypoint": "swordfish1"}))
+	e, ok := entries["etc/liken/psk/stonypoint"]
+	if !ok {
+		t.Fatal("the layer carries no passphrase for stonypoint")
+	}
+	if string(e.data) != "swordfish1" {
+		t.Errorf("passphrase content: %q", e.data)
+	}
+	if e.mode&0o777 != 0o600 {
+		t.Errorf("passphrase mode: %o", e.mode&0o777)
+	}
+}
+
+// Both ways a manifest asks for wpa-psk are covered here: the word
+// itself, and the unset field that SecurityOrDefault resolves to it.
+func TestLayerRefusesAWirelessMachineWithNoPassphrase(t *testing.T) {
+	cases := map[string]machine.WirelessSecurity{
+		"a declared wpa-psk": machine.WirelessWPAPSK,
+		"an unset security":  "",
+	}
+	for name, security := range cases {
+		t.Run(name, func(t *testing.T) {
+			manifests := fixtureWirelessManifests(t, "stonypoint", security)
+			identityDir := fixtureIdentity(t, nil)
+			out := filepath.Join(t.TempDir(), "deployment.cpio")
+			err := Layer(manifests, identityDir, out)
+			if err == nil {
+				t.Fatal("the layer packed a wireless machine with no passphrase")
+			}
+			want := filepath.Join(identityDir, "psk", "stonypoint")
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the error should name %s, got %v", want, err)
+			}
+			// The refusal happens before the output exists, so no
+			// half-built archive is left for a later step to pack.
+			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("a refused build left %s behind: %v", out, err)
+			}
+		})
+	}
+}
+
+// The two deployments that need no psk directory at all: no radio,
+// and a radio on an open network.
+func TestLayerCarriesNoPassphraseFile(t *testing.T) {
+	cases := map[string]string{
+		"a deployment with no wireless interface": fixtureManifests(t),
+		"an open network":                         fixtureWirelessManifests(t, "stonypoint-guest", machine.WirelessOpen),
+	}
+	for name, manifests := range cases {
+		t.Run(name, func(t *testing.T) {
+			for entry := range builtLayerFrom(t, manifests, fixtureIdentity(t, nil)) {
+				if strings.HasPrefix(entry, "etc/liken/psk") {
+					t.Errorf("the layer carries %s", entry)
+				}
 			}
 		})
 	}

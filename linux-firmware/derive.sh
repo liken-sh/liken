@@ -19,6 +19,11 @@
 #   3. A name that matches a WHENCE "Link:" alias ships its target,
 #      and the alias itself ships as a symlink. Drivers request the
 #      alias name, so the link is load-bearing, not decoration.
+#   4. A name that the wireless-regdb tarball carries ships from
+#      there. cfg80211 declares regulatory.db and regulatory.db.p7s,
+#      and the linux-firmware release carries neither; the
+#      wireless-regdb project is their upstream. This form exists for
+#      exactly those two names.
 #
 # One exception is named, not derived: the nvidia/ directory. Those
 # GSP blobs serve display and compute paths that a headless OS does
@@ -64,7 +69,16 @@ done
 version="$(cat "$here/VERSION")"
 tree="$here/cache/$version"
 [[ -f "$tree/WHENCE" ]] || {
-    echo "derive.sh: no extracted tree at $tree — run fetch.sh first" >&2
+    echo "derive.sh: no extracted tree at $tree; run fetch.sh first" >&2
+    exit 1
+}
+
+# fetch.sh owns the wireless-regdb pin, and reading it out of that
+# script is what keeps the two files from drifting apart.
+regdb_version="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/fetch.sh")"
+regdb="$here/cache/wireless-regdb-$regdb_version"
+[[ -f "$regdb/regulatory.db" ]] || {
+    echo "derive.sh: no extracted tree at $regdb; run fetch.sh first" >&2
     exit 1
 }
 
@@ -73,7 +87,7 @@ kdist="$here/../kernel/dist/$kernel_version"
 release="$(cat "$kdist/release")"
 modules="$kdist/lib/modules/$release"
 [[ -d "$modules" ]] || {
-    echo "derive.sh: no module tree at $modules — build the kernel domain first" >&2
+    echo "derive.sh: no module tree at $modules; build the kernel domain first" >&2
     exit 1
 }
 
@@ -127,6 +141,19 @@ ship() {
     }
 }
 
+# ship_regdb copies one name out of the wireless-regdb tree, or
+# returns 1 when that tree does not carry it. The .db and its .p7s
+# must land in the same directory, because the kernel asks for the
+# signature by the blob's own name with .p7s appended.
+ship_regdb() {
+    local file="$1"
+    [[ -f "$regdb/$file" ]] || return 1
+    [[ -f "$fw/$file" ]] || {
+        mkdir -p "$fw/$(dirname "$file")"
+        cp "$regdb/$file" "$fw/$file"
+    }
+}
+
 cd "$tree"
 while IFS= read -r name; do
     if [[ "$name" == nvidia/* ]]; then
@@ -156,6 +183,8 @@ while IFS= read -r name; do
         if [[ -n "$target" && -f "$target" ]]; then
             ship "$target"
             aliased=$((aliased + 1))
+        elif ship_regdb "$name"; then
+            shipped=$((shipped + 1))
         else
             unshipped+=("$name")
         fi
@@ -179,8 +208,15 @@ done <"$links"
 cp "$tree/WHENCE" "$tree/LICENSE" "$fw/"
 cp -r "$tree/LICENSES" "$fw/LICENSES"
 
+# The regulatory database has no WHENCE entry, because it comes from
+# a different project. Its ISC text joins the per-family texts, so
+# every blob under /lib/firmware still has its terms beside it.
+[[ ! -f "$fw/regulatory.db" ]] ||
+    cp "$regdb/LICENSE" "$fw/LICENSES/LICENCE.wireless-regdb"
+
 {
     echo "linux-firmware $version, derived for kernel $release"
+    echo "wireless-regdb $regdb_version"
     echo
     echo "shipped: $shipped names as files, $aliased through WHENCE links"
     echo "excluded: $excluded names under nvidia/ (the named exception)"

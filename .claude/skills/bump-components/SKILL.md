@@ -31,7 +31,8 @@ in one background task. Two orderings and one repeat matter:
    connections, and each bump's tail runs `licensing/sources.sh
    --repin`, which retries launchpad every time.
 2. A sub-pin needs a named bump, for example
-   `nfs-utils/latest.sh --bump libtirpc`. The alpine builder is one
+   `nfs-utils/latest.sh --bump libtirpc` or
+   `linux-firmware/latest.sh --bump wireless-regdb`. The alpine builder is one
    image pinned by three domains; when it moves, run `--bump alpine`
    in `open-iscsi`, `nfs-utils`, and `tzdata`.
 3. Finish with one `licensing/sources.sh --repin`. The mirror cache
@@ -81,6 +82,10 @@ the notes live:
 * linux-firmware: the gitlab.com/kernel-firmware compare between
   tags; git.kernel.org blocks automated fetches. Watch for removed
   files and i915/xe changes.
+* wireless-regdb: the git log at
+  git.kernel.org/pub/scm/linux/kernel/git/wens/wireless-regdb.git,
+  announced on the linux-wireless list. A change is regulatory rules
+  per country, so the research is which countries moved.
 * microcode: `releasenote.md` in Intel's
   Intel-Linux-Processor-Microcode-Data-Files repo, which lists the
   INTEL-SA advisories and the updated platforms.

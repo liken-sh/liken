@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 62.
+milestone is 64.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents have no number, because nobody has
@@ -233,6 +233,14 @@ decided yet what work they become.
   init passes to `finit_module`; a parameter on a loaded module is a
   reboot-class change, and the status reads the result back from
   `/sys/module` without comparing it.
+* **62.** [Wifi](62-wifi.md). A machine joins over a wireless
+  interface, declared in `spec.network` the way a wired one is. The
+  image vendors `wpa_supplicant`, init supervises it and reads its
+  events, and the passphrase rides the stick beside the join token.
+* **63.** [eMMC storage](63-emmc.md). A machine installs to and boots
+  from an eMMC disk. A stub: the report drops class `0805`
+  controllers as `system`, the boot archive carries no eMMC driver,
+  and the by-id tree builds no `mmc-` names.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.

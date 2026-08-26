@@ -98,6 +98,21 @@ Sun Microsystems, Inc.) and the same util-linux and musl libraries as
 the iSCSI initiator. Sources are mirrored under `sources/nfs-utils/`
 and `sources/toolchain/`.
 
+## The wireless supplicant (`/sbin/wpa_supplicant`)
+
+License: BSD-3-Clause. Copyright 2002-2026 Jouni Malinen and the
+hostap contributors.
+
+This repository's own recipe (`wpa-supplicant/fetch.sh`) builds the
+binary from pinned hostap source. It statically links libnl
+(LGPL-2.1 or later, copyright Thomas Graf and the libnl
+contributors), OpenSSL (Apache-2.0, copyright the OpenSSL Project),
+and the same musl as the two clients above. The sources are mirrored
+under `sources/wpa-supplicant/` and `sources/toolchain/`.
+
+The BSD license asks for notices, not source. The mirror exists
+because the channel offers source for everything a release carries.
+
 ## systemd-boot (`systemd-bootx64.efi`)
 
 License: LGPL-2.1 or later. Copyright the systemd contributors.
@@ -160,6 +175,21 @@ For most blobs the binary is its own source form; for the GPL blobs
 whose source exists, upstream keeps that source in the same tree, so
 the one mirror satisfies the source offer for every file the image
 carries.
+
+## The wireless regulatory database (`/lib/firmware/regulatory.db`)
+
+License: ISC. Copyright 2008 Luis R. Rodriguez, Johannes Berg, and
+Michael Green. The text ships in the image at
+`/lib/firmware/LICENSES/LICENCE.wireless-regdb`.
+
+`regulatory.db` is the wireless regulatory database, the record of
+which radio channels and transmit powers each country allows, and
+`regulatory.db.p7s` is its detached signature. The kernel's
+`cfg80211` module requests both by name. They come from the
+wireless-regdb project, not from the linux-firmware release, which
+carries neither. `db.txt` in the mirrored tarball is the text form
+the database compiles from, and the tarball is mirrored under
+`sources/wireless-regdb/`.
 
 ## CPU microcode (`microcode.cpio`)
 

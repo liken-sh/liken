@@ -88,11 +88,13 @@ func (t FactsTree) WriteVersion(v VersionStatus) error {
 		t.writeFact("version/e2fsprogs", v.E2fsprogs),
 		t.writeFact("version/openIscsi", v.OpenISCSI),
 		t.writeFact("version/nfsUtils", v.NFSUtils),
+		t.writeFact("version/wpaSupplicant", v.WPASupplicant),
 		t.writeFact("version/systemdBoot", v.SystemdBoot),
 		t.writeFact("version/grub", v.Grub),
 		t.writeFact("version/hwdata", v.Hwdata),
 		t.writeFact("version/tzdata", v.Tzdata),
 		t.writeFact("version/linuxFirmware", v.LinuxFirmware),
+		t.writeFact("version/wirelessRegdb", v.WirelessRegdb),
 		t.writeFact("version/microcode", v.Microcode),
 		t.writeFact("version/microcodeRevision", v.MicrocodeRevision),
 	))
@@ -132,8 +134,27 @@ func (t FactsTree) WriteNetwork(n NetworkStatus) error {
 		); err != nil {
 			return t.report(err)
 		}
+		if err := t.writeInterfaceWireless(base, iface.Wireless); err != nil {
+			return t.report(err)
+		}
 	}
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, "network", "interfaces"), want))
+}
+
+// writeInterfaceWireless publishes the radio's standing for one
+// interface. The ssid file is the record's presence, for the same
+// reason it is in the boot record: a wireless entry always names a
+// network, so a wired interface leaves no wireless directory at all.
+func (t FactsTree) writeInterfaceWireless(base string, w *WirelessStatus) error {
+	dir := filepath.Join(base, "wireless")
+	if w == nil {
+		return os.RemoveAll(filepath.Join(t.Dir, dir))
+	}
+	return firstError(
+		t.writeFact(filepath.Join(dir, "ssid"), w.SSID),
+		t.writeFact(filepath.Join(dir, "state"), string(w.State)),
+		t.writeFact(filepath.Join(dir, "message"), w.Message),
+	)
 }
 
 // WriteTime publishes the state of the machine's clock. The clock loop
@@ -502,8 +523,27 @@ func (t FactsTree) WriteBootNetwork(spec *NetworkSpec) error {
 		); err != nil {
 			return t.report(err)
 		}
+		if err := t.writeBootWireless(dir, ifc.Wireless); err != nil {
+			return t.report(err)
+		}
 	}
 	return t.report(syncEntryDirs(filepath.Join(t.Dir, interfaces), want))
+}
+
+// writeBootWireless publishes the wireless half of one interface's
+// boot record. The ssid file is the record's presence, because a
+// wireless entry always names a network. An interface with no radio
+// needs no file here, and a respec that drops the radio removes the
+// directory whole, so no stale SSID outlives the spec that named it.
+func (t FactsTree) writeBootWireless(dir string, w *WirelessSpec) error {
+	base := filepath.Join(dir, "wireless")
+	if w == nil {
+		return os.RemoveAll(filepath.Join(t.Dir, base))
+	}
+	return firstError(
+		t.writeFact(filepath.Join(base, "ssid"), w.SSID),
+		t.writeFact(filepath.Join(base, "security"), string(w.Security)),
+	)
 }
 
 // WriteRejection publishes one of the four standing quarantine records.

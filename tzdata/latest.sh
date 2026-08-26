@@ -55,7 +55,7 @@ printf '%s\t%s\t%s\t%s\n' tzdata "$pinned" "${latest:-?}" \
     "the release IANA names as current"
 printf '%s\t%s\t%s\t%s\n' '  alpine' \
     "$(short "$pinned_builder")" "$(short "${latest_builder:-?}")" \
-    "the $builder_tag builder; open-iscsi and nfs-utils pin it too"
+    "the $builder_tag builder; open-iscsi, nfs-utils, and wpa-supplicant pin it too"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
@@ -71,7 +71,7 @@ if [[ "${2:-tzdata}" == "alpine" ]]; then
     sed -i "s|^builder=\".*\"|builder=\"docker.io/library/alpine@$latest_builder\"|" \
         "$here/fetch.sh"
     echo "alpine: $(short "$pinned_builder") -> $(short "$latest_builder")"
-    echo "open-iscsi and nfs-utils pin the same image; run their --bump alpine too"
+    echo "open-iscsi, nfs-utils, and wpa-supplicant pin the same image; run their --bump alpine too"
     echo "next: make -C .. tzdata"
     exit 0
 fi

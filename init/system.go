@@ -60,12 +60,6 @@ var k3sMounts = []mount{
 	// whole setup this step needs.
 	{"cgroup2", "/sys/fs/cgroup", "cgroup2", unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV},
 
-	// /run is the standard location for runtime state: sockets,
-	// PIDs, and locks. Everything under liken's root is already in
-	// RAM, but containerd and k3s use hardcoded paths under /run, so
-	// /run must exist.
-	{"tmpfs", "/run", "tmpfs", unix.MS_NOSUID | unix.MS_NODEV},
-
 	// Pseudo-terminals. kubectl exec is the only interactive access
 	// on an OS with no shell, and it allocates its terminals here.
 	{"devpts", "/dev/pts", "devpts", unix.MS_NOSUID | unix.MS_NOEXEC},

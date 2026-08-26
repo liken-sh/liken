@@ -61,8 +61,17 @@ func microcodeRevision(path string) string {
 	return ""
 }
 
+// observedAtRuntime names the components in the record that this fold
+// deliberately skips, because the running machine reports them itself,
+// in the running software's own vocabulary. The versions guard test
+// reads this list, so a component that belongs here is declared here
+// rather than left to a reader to infer from the switch below.
+var observedAtRuntime = []string{"liken", "kernel", "xtables"}
+
 // applyComponentFacts folds the record into the version block. It
-// fills only the fields that no runtime probe owns.
+// fills only the fields that no runtime probe owns. Every other name
+// the image build writes into the record must appear in the switch
+// below, and the versions guard test is what enforces that.
 func applyComponentFacts(v *machine.VersionStatus) {
 	raw, err := os.ReadFile(componentsPath)
 	if err != nil {
@@ -86,6 +95,8 @@ func applyComponentFacts(v *machine.VersionStatus) {
 			v.OpenISCSI = c.Version
 		case "nfs-utils":
 			v.NFSUtils = c.Version
+		case "wpa-supplicant":
+			v.WPASupplicant = c.Version
 		case "systemd-boot":
 			v.SystemdBoot = c.Version
 		case "grub":
@@ -96,6 +107,8 @@ func applyComponentFacts(v *machine.VersionStatus) {
 			v.Tzdata = c.Version
 		case "linux-firmware":
 			v.LinuxFirmware = c.Version
+		case "wireless-regdb":
+			v.WirelessRegdb = c.Version
 		case "microcode":
 			v.Microcode = c.Version
 		}

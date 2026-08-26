@@ -3,14 +3,15 @@
 # Report the pins that exist only in the source mirror.
 #
 # Most of what sources.sh mirrors is keyed to a domain's own VERSION
-# file, and that domain's latest.sh watches it. Five pins have no
+# file, and that domain's latest.sh watches it. Six pins have no
 # domain of their own, because liken never fetches them: they are the
 # corresponding source for code that arrives already compiled inside
 # something else. glibc is linked into the mke2fs binary. musl and
-# util-linux are linked into the iSCSI and NFS binaries. iptables is
-# what the k3s-root release built, and buildroot is what built it.
+# util-linux are linked into the iSCSI and NFS binaries. libnl is
+# linked into the wireless supplicant. iptables is what the k3s-root
+# release built, and buildroot is what built it.
 #
-# None of these five moves on its own. Each one follows something
+# None of these six moves on its own. Each one follows something
 # else, and this report asks that governing thing what it ships now.
 # So a row that says "behind" here means the pin it follows already
 # moved, and the mirror has not caught up.
@@ -27,7 +28,7 @@
 # version, so a pin bump leaves that file alone.
 #
 # Usage:
-#   licensing/latest.sh          report the five source-only pins
+#   licensing/latest.sh          report the six source-only pins
 #   licensing/latest.sh --bump   re-pin the digests that moved
 
 set -euo pipefail
@@ -51,6 +52,7 @@ bullseye_glibc="2.31"
 pinned_glibc="$(pin_of glibc)"
 pinned_musl="$(pin_of musl)"
 pinned_utillinux="$(pin_of util-linux)"
+pinned_libnl="$(pin_of libnl)"
 pinned_iptables="$(pin_of iptables)"
 pinned_buildroot="$(pin_of buildroot)"
 
@@ -83,6 +85,7 @@ alpine_package() {
 
 latest_musl="$(alpine_package musl)" || latest_musl=""
 latest_utillinux="$(alpine_package util-linux-dev)" || latest_utillinux=""
+latest_libnl="$(alpine_package libnl3-dev)" || latest_libnl=""
 
 # iptables and buildroot come from a chain: the k3s-root release liken
 # pins names a buildroot version in its download script, and that
@@ -116,6 +119,8 @@ printf '%s\t%s\t%s\t%s\n' glibc "$pinned_glibc" "${latest_glibc:-?}" \
 printf '%s\t%s\t%s\t%s\n' musl "$pinned_musl" "${latest_musl:-?}" \
     "follows the alpine $alpine_tag builder"
 printf '%s\t%s\t%s\t%s\n' util-linux "$pinned_utillinux" "${latest_utillinux:-?}" \
+    "follows the alpine $alpine_tag builder"
+printf '%s\t%s\t%s\t%s\n' libnl "$pinned_libnl" "${latest_libnl:-?}" \
     "follows the alpine $alpine_tag builder"
 printf '%s\t%s\t%s\t%s\n' iptables "$pinned_iptables" "${latest_iptables:-?}" \
     "follows what k3s-root $k3s_root builds"
