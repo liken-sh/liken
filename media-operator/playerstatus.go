@@ -156,9 +156,9 @@ func findPlay(plays []Play, namespace, name string) *Play {
 // playTitle resolves the one line the idle screen draws for a Play. The
 // first item's Presentation is what the library that fed liken said the
 // item is, so a Series names the show a person put on, a Title names a
-// film, and a Play whose first item declares neither falls back to the
-// Play's own name. The operator resolves it here so the display formats one
-// string and reads no Presentation of its own.
+// film, an Album names a record, and a Play whose first item declares none
+// of them falls back to the Play's own name. The operator resolves it here
+// so the display formats one string and reads no Presentation of its own.
 func playTitle(play *Play) string {
 	if len(play.Spec.Items) > 0 && play.Spec.Items[0].Presentation != nil {
 		presentation := play.Spec.Items[0].Presentation
@@ -167,6 +167,9 @@ func playTitle(play *Play) string {
 		}
 		if presentation.Title != "" {
 			return presentation.Title
+		}
+		if presentation.Album != "" {
+			return presentation.Album
 		}
 	}
 	return play.Metadata.Name

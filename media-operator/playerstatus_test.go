@@ -260,8 +260,8 @@ func TestDerivePlayerBusStatusNamesTheStartingPlay(t *testing.T) {
 }
 
 // The title resolves from the first item's Presentation: the Series names
-// the show, the Title names a film, and a first item that declares neither
-// falls back to the Play's own name.
+// the show, the Title names a film, the Album names a record, and a first
+// item that declares none of them falls back to the Play's own name.
 func TestPlayTitleResolvesTheSeriesThenTheTitleThenTheName(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -277,6 +277,16 @@ func TestPlayTitleResolvesTheSeriesThenTheTitleThenTheName(t *testing.T) {
 			name:         "a title names a film",
 			presentation: &Presentation{Title: "Sailing"},
 			want:         "Sailing",
+		},
+		{
+			name:         "an album names a record",
+			presentation: &Presentation{Type: "music", Hint: "album", Album: "The Bends", Artist: "Radiohead"},
+			want:         "The Bends",
+		},
+		{
+			name:         "a title beats an album",
+			presentation: &Presentation{Title: "OK Computer OKNOTOK", Album: "OK Computer"},
+			want:         "OK Computer OKNOTOK",
 		},
 		{
 			name:         "an empty presentation falls back to the name",
