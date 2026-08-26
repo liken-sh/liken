@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# local-idle opens the liken idle screen on this workstation, so the clock, the
+# local/idle opens the liken idle screen on this workstation, so the clock, the
 # centered logo, and the identity block can be seen without a cluster and
 # without a release. It runs mpv with no file, the way the standing idle pod
 # does, and loads the same display script the player runs, so an edit to a
@@ -27,17 +27,17 @@
 #       indicator.
 #
 # Usage:
-#   local-idle                          a sample unit, so a first run draws a
+#   local/idle                          a sample unit, so a first run draws a
 #                                        full screen
-#   local-idle "Studio Desk" "LG Ultrawide Screen" "Built-in Speakers"
+#   local/idle "Studio Desk" "LG Ultrawide Screen" "Built-in Speakers"
 #                                        the first argument is the name, the
 #                                        rest are the components in order
 set -euo pipefail
 
-# The display script sits beside this file, so its path resolves from this
-# script's own directory and needs no absolute path.
+# The display script sits in the repository above this file, so its path
+# resolves from this script's own directory and needs no absolute path.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-display_dir="$here/display"
+display_dir="$here/../display"
 
 # The name is the first argument, the components are the rest. With no
 # arguments, show a sample unit.

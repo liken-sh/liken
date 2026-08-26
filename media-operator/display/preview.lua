@@ -1,6 +1,6 @@
 -- The preview keys, the workstation stand-in for the bus. On a cluster the idle
 -- pod's sidecar forwards the Player's retained status and the reveal, and there
--- is no keyboard. On a workstation local-idle sets IDLE_PREVIEW=1 and this
+-- is no keyboard. On a workstation local/idle sets IDLE_PREVIEW=1 and this
 -- module binds keys that build the same JSON the sidecar sends and hand it to
 -- the same handler, so the ramps, the dim, and the pulse can be seen before a
 -- release. Nothing here runs with the variable unset.
@@ -116,7 +116,7 @@ end
 
 -- The legend, one dim line at the bottom right, so the keys read on the screen
 -- itself and not only in this file. It draws only after enable ran, which only
--- local-idle causes, so an idle pod on a cluster draws no legend. The an3
+-- local/idle causes, so an idle pod on a cluster draws no legend. The an3
 -- alignment anchors the line at its bottom-right, mirroring the identity block's
 -- bottom-left across the screen.
 function preview.draw()

@@ -67,7 +67,7 @@ local function redraw()
     if idle_volume then
       idle_parts[#idle_parts + 1] = idle_volume
     end
-    -- The preview legend draws only when local-idle enabled the keys, so a
+    -- The preview legend draws only when local/idle enabled the keys, so a
     -- cluster's idle screen never carries it.
     local legend = preview.draw()
     if legend then
@@ -374,7 +374,7 @@ end
 mp.register_script_message("player-sleep", on_sleep)
 mp.register_script_message("player-wake", on_wake)
 
--- The preview keys exist only under IDLE_PREVIEW=1, which local-idle sets and
+-- The preview keys exist only under IDLE_PREVIEW=1, which local/idle sets and
 -- the operator never sets on an idle pod. So a workstation can play each edge of
 -- the bus by hand, and a cluster binds no key at all.
 if os.getenv("IDLE_PREVIEW") == "1" then

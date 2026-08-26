@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# local/video opens the liken display over a film on this workstation, so the
+# scrubber and its key bindings can be seen and felt without a cluster. It
+# loads the same display script the player runs, and binds the keyboard to
+# the navigation actions the command bus carries, so a key press drives the
+# display by the path a remote does. It decodes the art with the real Go
+# bridge, so the window shows art decoded the way the pod decodes it.
+#
+# It needs a media file, named on the command line. The repository names no
+# media of its own.
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: local/video <media-file> [start-seconds]" >&2
+  exit 2
+fi
+film="$1"
+start="${2:-0}"
+if [ ! -f "$film" ]; then
+  echo "local/video: not a file: $film" >&2
+  exit 1
+fi
+
+# The display script and the Go source sit in the repository above this file,
+# so their paths resolve from this script's own directory and need no absolute
+# path.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/.." && pwd)"
+display_dir="$root/display"
+
+# The block comes from the film's sibling NFO. With no NFO local/present
+# prints a block that still carries the art fields, and the display falls back
+# to mpv's own media-title for the name. The {} fallback covers a failed build
+# or run, so the window still opens with no metadata. go -C runs local/present
+# from the repository root, where a relative film path names another file, so
+# the path is made absolute first.
+BLOCK="$(go -C "$root" run ./local/present "$(realpath "$film")" || true)"
+[ -n "$BLOCK" ] || BLOCK="{}"
+
+# The bridge reads MEDIA_PRESENTATIONS as a JSON array, one block per playlist
+# item, so playlist position i indexes item i's block. A film is one item.
+PRESENTATIONS="[$BLOCK]"
+
+# These bindings send the same script messages the translator sidecar
+# publishes, so the keyboard and a controller drive the display alike. The
+# arrows repeat on hold, so a held key accelerates the seek the way a held
+# remote button does. The bindings live in a temporary file, because they
+# belong to the preview and not to the player image.
+#
+# The volume keys play the command sidecar's part: on a cluster a press
+# publishes the unit's next state, and the sidecar sets the properties and
+# sends volume-changed. Here the key does both, so the indicator shows the
+# way a press shows it. 9, 0, and m are mpv's own volume keys, taken over
+# so mpv's built-in text never draws.
+CONF="$(mktemp --tmpdir local-video.XXXXXX.conf)"
+SOCK="$(mktemp -u --tmpdir local-video.XXXXXX.sock)"
+ARTDIR="$(mktemp -d --tmpdir local-video.XXXXXX.art)"
+cat >"$CONF" <<'BINDINGS'
+LEFT  repeatable script-message-to display left
+RIGHT repeatable script-message-to display right
+UP    repeatable script-message-to display up
+DOWN  repeatable script-message-to display down
+ENTER script-message-to display select
+ESC   script-message-to display back
+SPACE cycle pause
+9 repeatable no-osd add volume -5 ; script-message-to display volume-changed
+0 repeatable no-osd add volume  5 ; script-message-to display volume-changed
+m no-osd cycle mute ; script-message-to display volume-changed
+q quit
+BINDINGS
+
+# Build the mpv command line. --load-scripts=no skips the workstation's own
+# mpv scripts, so a personal on-screen controller does not draw over the
+# display. --osc=no turns off mpv's built-in controller for the same reason.
+# --volume-max=100 caps the level at unity, the same cap the bus clamps to on
+# a cluster. --input-ipc-server opens the socket the bridge dials, because a
+# local mpv serves its socket somewhere other than the pod's fixed path. The
+# workstation's mpv.conf still chooses the video output that renders here.
+MPV=(mpv --load-scripts=no --osc=no --start="$start" --volume-max=100
+  --script="$display_dir"
+  --input-conf="$CONF"
+  --input-ipc-server="$SOCK"
+  -- "$film")
+
+# The bridge is the media-operator binary in serve-art mode. Reuse a prebuilt
+# one, or build it from the checkout.
+BIN="${LIKEN_MEDIA_OPERATOR_BIN:-}"
+BUILT=0
+if [ -z "$BIN" ]; then
+  BIN="$(mktemp -u --tmpdir media-operator.XXXXXX)"
+  go -C "$root" build -o "$BIN" .
+  BUILT=1
+fi
+
+# Clean up the temporary files, the decoded art, the bridge, and a built
+# binary on exit.
+SERVE=
+cleanup() {
+  [ -n "$SERVE" ] && kill "$SERVE" 2>/dev/null || true
+  rm -f "$CONF" "$SOCK"
+  rm -rf "$ARTDIR"
+  [ "$BUILT" -eq 1 ] && rm -f "$BIN" || true
+}
+trap cleanup EXIT
+
+# Run mpv in the background so it opens the window in the user's own session,
+# then wait for its IPC socket. The wait is bounded, so a socket that never
+# opens does not hang the preview. Do not override the Wayland or display
+# environment.
+"${MPV[@]}" &
+MPV_PID=$!
+for _ in $(seq 1 100); do
+  [ -S "$SOCK" ] && break
+  sleep 0.1
+done
+if [ ! -S "$SOCK" ]; then
+  echo "local/video: mpv opened no IPC socket" >&2
+  exit 1
+fi
+
+# Launch the real bridge against mpv's socket. serve-art forwards each item's
+# presentation block to the display and answers every logo request with a real
+# image decode, the same code the pod's command sidecar runs.
+# MEDIA_TRICKPLAY_INTERVAL sets the seconds one trickplay tile covers. The
+# bridge defaults it to 10s, Jellyfin's own default, so pass it through only
+# to try another value.
+MEDIA_MPV_SOCKET="$SOCK" MEDIA_ART_DIR="$ARTDIR" MEDIA_PRESENTATIONS="$PRESENTATIONS" \
+  MEDIA_TRICKPLAY_INTERVAL="${MEDIA_TRICKPLAY_INTERVAL:-}" \
+  "$BIN" serve-art >"$ARTDIR/serve.log" 2>&1 &
+SERVE=$!
+
+# Wait for mpv to close, which is when the user quits the window with q.
+wait "$MPV_PID" || true
