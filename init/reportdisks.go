@@ -109,13 +109,12 @@ func awaitInstallStick(ceiling time.Duration) installStick {
 // machine. A disk that only might be the stick stays in the list as
 // evidence, marked, so the proposal can account for it and still place
 // no role on it.
-func readReportDisks(stick installStick) []reportDisk {
-	var disks []reportDisk
+func readReportDisks(stick installStick) (disks, cards []reportDisk) {
 	for _, d := range discoverBlockDevices() {
 		if d.Name == stick.Disk || !canHoldARole(d) {
 			continue
 		}
-		disks = append(disks, reportDisk{
+		measured := reportDisk{
 			Name:       d.Name,
 			Path:       devicePath(d),
 			SizeBytes:  d.SizeBytes,
@@ -123,9 +122,35 @@ func readReportDisks(stick installStick) []reportDisk {
 			Transport:  diskTransport(d.Name),
 			StableName: firstByIDName(d.StableNames),
 			MaybeStick: stick.ambiguous() && slices.Contains(stick.Candidates, d.Name),
-		})
+		}
+		if cardInASlot(d.Name) {
+			cards = append(cards, measured)
+			continue
+		}
+		disks = append(disks, measured)
 	}
-	return disks
+	return disks, cards
+}
+
+// cardInASlot reports whether a block device is a memory card a
+// person put in a slot, as against an eMMC module soldered to the
+// board. A card leaves the machine with the person, like the install
+// stick, so the report names it and proposes nothing onto it. The mmc
+// bus publishes what the card is on the card device: MMC for an eMMC
+// module, SD for an SD card, SDcombo for an SD card with SDIO on it.
+// Only the mmc bus writes a word here at all; a SCSI disk writes its
+// peripheral device type as a number in the same attribute, which is
+// what canHoldARole reads.
+//
+// This is about the report's proposal alone. A spec that names an SD
+// card by hand still installs onto it, because a person who declares a
+// card has decided something the report may not decide for them.
+func cardInASlot(name string) bool {
+	switch sysfsString(filepath.Join(sysBlock, name), "device/type") {
+	case "SD", "SDcombo":
+		return true
+	}
+	return false
 }
 
 // firstByIDName returns the first by-id name among a disk's stable
@@ -199,6 +224,10 @@ func diskTransport(name string) string {
 		{"/ata", "sata"},
 		{"/usb", "usb"},
 		{"/virtio", "virtio"},
+		// An mmc card's sysfs path passes through its host
+		// controller's mmc_host node, so that segment names the bus
+		// for an eMMC module or an SD card.
+		{"/mmc", "mmc"},
 	} {
 		if strings.Contains(real, bus.marker) {
 			return bus.transport

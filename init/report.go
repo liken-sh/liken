@@ -202,7 +202,8 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 	// only here, with the recommendations and the disks in hand
 	// together. It is the fact that determines whether this machine can
 	// install from a stock image at all.
-	disks := markDisksBehindDrivers(readReportDisks(stick), recommendations)
+	measured, cards := readReportDisks(stick)
+	disks := markDisksBehindDrivers(measured, recommendations)
 
 	return hardwareReport{
 		UEFI:            uefi,
@@ -210,6 +211,7 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 		Recommendations: recommendations,
 		Claimable:       claimable,
 		Disks:           disks,
+		Cards:           cards,
 		Interfaces:      observeInterfaces(),
 	}, stick
 }
@@ -289,9 +291,11 @@ func recommendFor(catalog *hardware.Catalog, base string, want func(string) bool
 
 // reportableClass selects which undriven devices the report loads a
 // driver for. The answer is storage and network, and nothing else:
-// PCI base class 01 and 02, and the USB mass-storage class, which is
-// how the report reaches the installation stick it writes to. These
-// are the devices a machine must have to install itself and to join a
+// PCI base class 01, PCI subclass 0805 (the SD and eMMC host
+// controllers, which the class word already reads as storage), base
+// class 02, and the USB mass-storage class, which is how the report
+// reaches the installation stick it writes to. These are the devices
+// a machine must have to install itself and to join a
 // cluster.
 //
 // The limit is not tidiness. Loading a driver changes the running

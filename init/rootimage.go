@@ -36,9 +36,11 @@ package main
 // parameters and never passes them to init directly.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -96,7 +98,7 @@ func findSystemImage(slotParam, slotMount string) (imagePath string, err error) 
 	if slotParam == "" {
 		return "", fmt.Errorf("no %s in rootfs and no liken.slot= boot parameter", ramImage)
 	}
-	device, err := slotDevice(discoverPartitions(), slotParam)
+	device, err := awaitSlotDevice(slotParam)
 	if err != nil {
 		return "", err
 	}
@@ -123,6 +125,88 @@ func findSystemImage(slotParam, slotMount string) (imagePath string, err error) 
 	return filepath.Join(slotMount, slotImageName), nil
 }
 
+// The shape of the slot wait. These are variables rather than
+// constants for the same testing reason ramImage is one; a real boot
+// never points them anywhere else. The poll is short because the
+// wait runs in early boot against a card that attaches within tens
+// of milliseconds, and the deadline is long enough that reaching it
+// means the disk is not coming, not that it is slow.
+var (
+	slotPoll     = 50 * time.Millisecond
+	slotDeadline = 10 * time.Second
+)
+
+// awaitSlotDevice waits, boundedly, for the slot's partition to
+// appear with a device node the mount can open. A controller
+// registers before the disk behind it does, and mmc card detection
+// runs on a workqueue, so on an eMMC machine the card attaches tens
+// of milliseconds after init first looks. Only a boot with
+// liken.slot= reaches this function, and that parameter means the
+// boot loader has already read this slot, so the partition is on
+// this machine and waiting for it is always correct. A boot from
+// RAM never gets here at all, and a machine whose disk is already
+// visible returns from the first search and never sleeps.
+//
+// Only the two still-arriving errors wait. Waiting cannot fix an
+// ambiguity:
+// two partitions already carrying the slot's name stay two however
+// long the code waits, and a disk that attaches later cannot un-name
+// them. A search that runs out the deadline returns the last
+// search's error, so the caller reports the missing slot and the
+// boot continues on rootfs, the same as before the wait existed.
+// Polling, rather than uevents, keeps this simple: the window is
+// short and a walk of /sys/block costs nothing.
+func awaitSlotDevice(slotParam string) (string, error) {
+	device, err := mountableSlotDevice(slotParam)
+	if !stillArriving(err) {
+		return device, err
+	}
+	fmt.Printf("liken: waiting for the disk that carries slot %s\n", slotParam)
+	for begin := time.Now(); time.Since(begin) < slotDeadline; {
+		time.Sleep(slotPoll)
+		device, err = mountableSlotDevice(slotParam)
+		if !stillArriving(err) {
+			return device, err
+		}
+	}
+	return "", err
+}
+
+// mountableSlotDevice finds the slot's partition and then requires
+// its device node, because the kernel publishes a partition's sysfs
+// entries before devtmpfs creates its node, and the mount that
+// follows this search opens the node. A poll that trusted sysfs
+// alone could land in that window and hand the caller a path that
+// does not exist yet.
+func mountableSlotDevice(slotParam string) (string, error) {
+	device, err := slotDevice(discoverPartitions(), slotParam)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(device); err != nil {
+		return "", fmt.Errorf("%w %s", errNoSlotNode, device)
+	}
+	return device, nil
+}
+
+// stillArriving names the errors a wait can fix. Both mean the
+// device is on its way; every other error means waiting changes
+// nothing.
+func stillArriving(err error) bool {
+	return errors.Is(err, errNoSlotPartition) || errors.Is(err, errNoSlotNode)
+}
+
+// errNoSlotPartition is the one error the slot search can wait out:
+// a slot that no partition carries yet is what a disk that has not
+// attached looks like. The sentinel holds the sentence the error
+// reads as, so the message a boot prints is the one it always
+// printed.
+var errNoSlotPartition = errors.New("no partition carries")
+
+// errNoSlotNode is the second waitable error: the partition is in
+// sysfs and devtmpfs has not created its node yet.
+var errNoSlotNode = errors.New("no device node yet for")
+
 // slotDevice picks the partition that holds the named slot, from the
 // machine's discovered partitions. It recognizes the slot the same
 // way storage roles are recognized: by the GPT partition name that
@@ -143,11 +227,11 @@ func slotDevice(parts []partition, slotParam string) (string, error) {
 			if device != "" {
 				return "", fmt.Errorf("two partitions carry %s; refusing to guess", want)
 			}
-			device = "/dev/" + p.name
+			device = devRoot + "/" + p.name
 		}
 	}
 	if device == "" {
-		return "", fmt.Errorf("no partition carries %s", want)
+		return "", fmt.Errorf("%w %s", errNoSlotPartition, want)
 	}
 	return device, nil
 }

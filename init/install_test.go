@@ -29,6 +29,9 @@ func TestPartitionNumber(t *testing.T) {
 		{partition{name: "vda1", disk: "vda"}, 1},
 		{partition{name: "vdc2", disk: "vdc"}, 2},
 		{partition{name: "nvme0n1p3", disk: "nvme0n1"}, 3},
+		// An mmc partition uses the same p separator, and its number
+		// reaches the EFI HD() node of the boot entry.
+		{partition{name: "mmcblk0p12", disk: "mmcblk0"}, 12},
 	}
 	for _, c := range cases {
 		got, err := partitionNumber(c.part)

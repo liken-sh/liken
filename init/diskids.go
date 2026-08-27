@@ -85,6 +85,20 @@ func diskIDNames(name string) []string {
 		if hex, ok := strings.CutPrefix(wwid, "eui."); ok {
 			names = append(names, "nvme-eui."+sanitizeIDPart(hex))
 		}
+	case "mmc":
+		// An mmc card carries its product name and serial in its CID
+		// register, which the card's own controller answers with, so
+		// the name survives an image write the way the ata- names do.
+		// The kernel publishes the serial as 0x-prefixed hex, and the
+		// prefix stays in the name: udev's by-id rule substitutes the
+		// attribute exactly as sysfs prints it, and real machines
+		// carry links like mmc-SA16G_0xbee5b555. A name without the
+		// prefix would not match the name udev gives the same disk.
+		card := sysfsString(dir, "device/name")
+		serial := sysfsString(dir, "device/serial")
+		if card != "" && serial != "" {
+			names = append(names, "mmc-"+sanitizeIDPart(card)+"_"+sanitizeIDPart(serial))
+		}
 	case "virtio":
 		// virtio-blk publishes only a serial, directly on the disk,
 		// because a virtual disk has no model or vendor to report.

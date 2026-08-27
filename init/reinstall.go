@@ -114,46 +114,29 @@ func reclaimManifestDisks() {
 
 // awaitDevice waits, boundedly, for a declared device to attach, and
 // resolves it to the kernel node that a wipe can open. A reinstall
-// hits the same probe race an install does: the controller's driver
-// has loaded, but a SATA link or a USB device finishes negotiating a
-// moment later. A device the manifest names is expected to exist, so
+// hits the same probe race an install does, so it waits the same way
+// (resolve.go). A device the manifest names is expected to exist, so
 // its continued absence at the deadline is an error, not a silent
 // skip.
 func awaitDevice(declared string) (string, error) {
-	return awaitDeviceDeadline(declared, 30*time.Second)
+	return awaitDeviceDeadline(declared, declaredDiskDeadline)
 }
 
 // awaitDeviceDeadline is awaitDevice with its deadline exposed as an
 // argument, so a test can prove the timeout behavior in well under a
-// second instead of waiting out the real 30.
+// second instead of waiting out the real 30. It resolves the declared
+// string rather than opening it directly, because a stable name is not
+// a device node a wipe can open.
 func awaitDeviceDeadline(declared string, deadline time.Duration) (string, error) {
-	const poll = 500 * time.Millisecond
-
-	// resolve re-runs resolveDeclaredDisk on every poll, the same
-	// computation the claim path uses, rather than opening the
-	// declared string directly: a stable name is not a device node a
-	// wipe can open, and a name that matches two disks must refuse at
-	// once rather than wait out the deadline over an ambiguity that
-	// waiting cannot fix.
-	resolve := func() (string, error) {
-		disk, err := resolveDeclaredDisk(declared)
-		if err != nil || disk == nil {
-			return "", err
-		}
-		return devicePath(*disk), nil
+	disk, err := awaitDeclaredDisk(declared, deadline,
+		fmt.Sprintf("liken: reinstall: waiting for %s to attach", declared))
+	switch {
+	case err != nil:
+		return "", err
+	case disk == nil:
+		return "", fmt.Errorf("%s did not attach within %s", declared, deadline)
 	}
-
-	if node, err := resolve(); err != nil || node != "" {
-		return node, err
-	}
-	fmt.Printf("liken: reinstall: waiting for %s to attach\n", declared)
-	for begin := time.Now(); time.Since(begin) < deadline; {
-		time.Sleep(poll)
-		if node, err := resolve(); err != nil || node != "" {
-			return node, err
-		}
-	}
-	return "", fmt.Errorf("%s did not attach within %s", declared, deadline)
+	return devicePath(*disk), nil
 }
 
 // blankDisk makes a disk blank in the two ways that matter: on the

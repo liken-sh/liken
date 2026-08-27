@@ -124,7 +124,18 @@ func planAllClaims(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 
 	for _, role := range roles {
 		_, isFound := found[role.Name]
+		// A found role's disk resolves without waiting: its partition
+		// is already recognized, nothing here is about to write to
+		// it, and a stale device hint on it must not cost the boot
+		// the whole deadline. A still-missing role names the disk the
+		// claim is about to format, and an install boot reaches this
+		// moments after the boot archive loads its controller
+		// drivers, so that one waits for the disk to attach.
 		disk, err := resolveDeclaredDisk(role.Device)
+		if !isFound && err == nil && disk == nil {
+			disk, err = awaitDeclaredDisk(role.Device, declaredDiskDeadline,
+				fmt.Sprintf("liken: storage: waiting for %s to attach", role.Device))
+		}
 		switch {
 		case isFound:
 			if err != nil || disk == nil {

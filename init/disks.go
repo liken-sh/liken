@@ -63,6 +63,10 @@ func discoverBlockDevices() []machine.BlockDevice {
 			continue
 		}
 
+		if mmcHardwareArea(dir) {
+			continue
+		}
+
 		d := machine.BlockDevice{Name: name}
 
 		// The size file counts sectors of 512 bytes. It always uses
@@ -95,6 +99,36 @@ func discoverBlockDevices() []machine.BlockDevice {
 		disks = append(disks, d)
 	}
 	return disks
+}
+
+// mmcHardwareArea reports whether a block device is one of the areas
+// an eMMC card presents beside its data area: the two boot areas, the
+// general-purpose areas, and RPMB. No role may land on any of them.
+// The boot areas hold what a board's firmware reads before Linux
+// runs, RPMB is an authenticated mailbox rather than storage, and the
+// general-purpose areas are partitions the card's own controller
+// carved. Only the data area is a disk.
+//
+// The marker is structural, not a name pattern. The mmc block driver
+// registers each hardware area as a child of the data area's own
+// block device, so an area's `device` link leads to a device in the
+// block subsystem, where every real disk's `device` link leads to the
+// bus device that carries it (PCI, virtio, USB, mmc). Only the mmc
+// driver builds that shape today, so on a machine with no mmc
+// hardware this function returns false for every device and the walk
+// is unchanged.
+//
+// RPMB needs no check of its own. Kernels from 3.8 to 4.14 built
+// its block device with the data area as its parent, the same shape
+// the boot areas have, so the structural check covers it there, and
+// kernels from 4.15 on publish RPMB as a character device that
+// never reaches this walk.
+func mmcHardwareArea(dir string) bool {
+	subsystem, err := filepath.EvalSymlinks(filepath.Join(dir, "device", "subsystem"))
+	if err != nil {
+		return false
+	}
+	return filepath.Base(subsystem) == "block"
 }
 
 // stableDiskByID and stableDiskByPath are the directories udev's own

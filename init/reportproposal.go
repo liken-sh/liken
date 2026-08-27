@@ -131,8 +131,14 @@ type hardwareReport struct {
 	// it names them in comments, because whether this machine should
 	// drive its GPU is the operator's decision, and they cannot make it
 	// if nothing tells them the GPU is there.
-	Claimable  []moduleRecommendation
-	Disks      []reportDisk
+	Claimable []moduleRecommendation
+	Disks     []reportDisk
+	// Cards is every memory card the report found in a slot. A card
+	// leaves the machine with the person, so it never appears in
+	// Disks and no role may land on it. The proposal still names it,
+	// so a person counting their disks finds every one accounted
+	// for.
+	Cards      []reportDisk
 	Interfaces []reportInterface
 }
 
@@ -345,6 +351,14 @@ func composeStorage(b *strings.Builder, r hardwareReport) {
 	if r.StickPath != "" {
 		fmt.Fprintf(b, "  #   (%s is the installation stick; it leaves with you,\n", r.StickPath)
 		b.WriteString("  #   so it is not listed and no role may live on it)\n")
+	}
+	// A card in a slot leaves with the person the same way the stick
+	// does, so the report says it saw the card and says why it
+	// proposes nothing onto it.
+	for _, c := range r.Cards {
+		fmt.Fprintf(b, "  #   (%s is a %s memory card in a slot; a card leaves with\n", c.Path, gib(c.SizeBytes))
+		b.WriteString("  #   you, so no role is proposed on it. Declare it yourself if\n")
+		b.WriteString("  #   this card stays in this machine.)\n")
 	}
 	for _, warning := range storageWarnings(r) {
 		writeComment(b, "  ", warning)

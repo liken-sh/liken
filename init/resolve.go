@@ -22,9 +22,45 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/liken-sh/liken/machine"
 )
+
+// The shape of the declared-disk wait. These are variables so a
+// test can prove the timeout in milliseconds instead of waiting out
+// the real 30 seconds; a real boot never points them anywhere else.
+// The deadline is long enough that reaching it means the disk is
+// not coming, not that it is slow.
+var (
+	declaredDiskPoll     = 500 * time.Millisecond
+	declaredDiskDeadline = 30 * time.Second
+)
+
+// awaitDeclaredDisk waits, boundedly, for a declared device to
+// attach. Every path that claims or wipes a disk hits the same probe
+// race: the controller's driver has loaded, but the SATA link, the
+// USB device, or the mmc card finishes attaching a moment later, and
+// mmc card detection runs on a workqueue up to a second behind. A
+// device the manifest names is expected to exist, so the caller
+// reports its continued absence at the deadline. Only the not-found
+// case waits: an ambiguity is two disks however long the code waits,
+// and a disk that attaches later cannot un-name them.
+func awaitDeclaredDisk(declared string, deadline time.Duration, notice string) (*machine.BlockDevice, error) {
+	disk, err := resolveDeclaredDisk(declared)
+	if err != nil || disk != nil {
+		return disk, err
+	}
+	fmt.Println(notice)
+	for begin := time.Now(); time.Since(begin) < deadline; {
+		time.Sleep(declaredDiskPoll)
+		disk, err = resolveDeclaredDisk(declared)
+		if err != nil || disk != nil {
+			return disk, err
+		}
+	}
+	return nil, nil
+}
 
 // resolveDeclaredDisk turns one declared device string into the disk
 // it names. A plain device path, such as /dev/vda, names whichever

@@ -70,6 +70,69 @@ func TestDiskPathNameUSB(t *testing.T) {
 	}
 }
 
+// fakeMMCDisk builds the sysfs tree an mmc card presents: a host
+// controller on the named bus, the mmc_host and card directories the
+// mmc core creates under it, and the card's block device at the bottom.
+// The `subsystem` link on the host is what tells a platform host from a
+// PCI one, and it is the fact the by-path name turns on.
+func fakeMMCDisk(t *testing.T, sys, name, bus string, hostSegments ...string) {
+	t.Helper()
+	root := t.TempDir()
+	host := filepath.Join(append([]string{root, "devices"}, hostSegments...)...)
+	busDir := filepath.Join(root, "bus", bus)
+	if err := os.MkdirAll(busDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	block := filepath.Join(host, "mmc_host", "mmc0", "mmc0:0001", "block", name)
+	if err := os.MkdirAll(filepath.Join(block, "device"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(busDir, filepath.Join(host, "subsystem")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(block, filepath.Join(sys, name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An eMMC on a host the firmware enumerates through ACPI or a
+// device tree: udev names such a disk after the platform device,
+// and it is the only mmc disk udev names at all.
+func TestDiskPathNameMMCOnAPlatformHost(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	fakeMMCDisk(t, sys, "mmcblk0", "platform", "platform", "80860F14:00")
+
+	if got, want := diskPathName("mmcblk0"), "platform-80860F14:00"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A card reader whose driver registers a platform device under a
+// PCI function: udev prepends the PCI slot to the platform name.
+func TestDiskPathNameMMCOnAPlatformHostBehindPCI(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	fakeMMCDisk(t, sys, "mmcblk0", "platform", "pci0000:00", "0000:3f:00.0", "rtsx_pci_sdmmc.0")
+
+	want := "pci-0000:3f:00.0-platform-rtsx_pci_sdmmc.0"
+	if got := diskPathName("mmcblk0"); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A card on a bare sdhci-pci host has no by-path name. udev's
+// path_id has no mmc handler, and a PCI slot alone is a parent and
+// not a transport, so path_id publishes no ID_PATH and udev builds
+// no by-path link. liken must publish no name where udev publishes
+// none.
+func TestDiskPathNameMMCOnAPCIHostHasNone(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	fakeMMCDisk(t, sys, "mmcblk0", "pci", "pci0000:00", "0000:00:1c.0")
+
+	if got := diskPathName("mmcblk0"); got != "" {
+		t.Errorf("got %q, want no by-path name", got)
+	}
+}
+
 func TestDiskPathNameISCSIHasNone(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	fakeDisk(t, sys, "sdc", "platform", "host6", "session2", "target6:0:0",

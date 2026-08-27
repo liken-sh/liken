@@ -91,7 +91,7 @@ func TestReadReportDisksExcludesTheStick(t *testing.T) {
 	addDisk(t, sys, dev, "sdb", 1<<30, nil)
 	addPartition(t, sys, "sdb", "sdb1", "liken:install", 1<<30)
 
-	disks := readReportDisks(resolveInstallStick())
+	disks, _ := readReportDisks(resolveInstallStick())
 	if len(disks) != 1 {
 		t.Fatalf("disks: %v", disks)
 	}
@@ -111,7 +111,7 @@ func TestReadReportDisksMarksEveryDiskThatMightBeTheStick(t *testing.T) {
 	addDisk(t, sys, dev, "sdc", 1<<30, nil)
 	addPartition(t, sys, "sdc", "sdc1", "liken:install", 1<<30)
 
-	disks := readReportDisks(resolveInstallStick())
+	disks, _ := readReportDisks(resolveInstallStick())
 	if len(disks) != 3 {
 		t.Fatalf("an unresolved stick hides no disk: %v", disks)
 	}
@@ -141,9 +141,53 @@ func TestReadReportDisksSkipsDevicesThatCannotHoldARole(t *testing.T) {
 	addDisk(t, sys, dev, "sda", 8<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "sda", "device"), "type", "0\n")
 
-	disks := readReportDisks(installStick{})
+	disks, _ := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].Name != "sda" {
 		t.Errorf("only the disk that can hold a role belongs in the report: %+v", disks)
+	}
+}
+
+// An SD card in a slot leaves with the person, like the install
+// stick, so no role may land on it and it enters no proposal. The
+// kernel's own word for what the card is decides: the mmc bus
+// writes MMC for an eMMC module and SD for a card in a slot.
+func TestReadReportDisksExcludesAnSDCard(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "mmcblk0", 64<<30, nil)
+	writeSysfs(t, filepath.Join(sys, "mmcblk0", "device"), "type", "SD\n")
+	addDisk(t, sys, dev, "nvme0n1", 256<<30, nil)
+
+	disks, cards := readReportDisks(installStick{})
+	if len(disks) != 1 || disks[0].Name != "nvme0n1" {
+		t.Errorf("only the machine's own disk belongs in the report: %+v", disks)
+	}
+	if len(cards) != 1 || cards[0].Path != dev+"/mmcblk0" {
+		t.Errorf("the card must be named as seen and not proposed: %+v", cards)
+	}
+	layout := planStorageLayout(disks, true)
+	for _, role := range layout.Roles {
+		if role.Device != dev+"/nvme0n1" {
+			t.Errorf("role %s landed on %s, not the nvme disk", role.Name, role.Device)
+		}
+	}
+	if len(layout.Roles) == 0 {
+		t.Error("the nvme disk must still carry the machine's roles")
+	}
+}
+
+// An eMMC module is soldered to the board and is the only disk
+// some machines have, so it stays a candidate.
+func TestReadReportDisksProposesAnEMMCCard(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "mmcblk0", 64<<30, nil)
+	writeSysfs(t, filepath.Join(sys, "mmcblk0", "device"), "type", "MMC\n")
+
+	disks, cards := readReportDisks(installStick{})
+	if len(disks) != 1 || disks[0].Name != "mmcblk0" {
+		t.Errorf("an eMMC module is the machine's own disk: %+v", disks)
+	}
+	if len(cards) != 0 {
+		t.Errorf("an eMMC module is not a card in a slot: %+v", cards)
 	}
 }
 
@@ -154,7 +198,7 @@ func TestReadReportDisksCarriesTheFirstByIDName(t *testing.T) {
 	writeSysfs(t, dir, "size", "16777216\n")
 	writeSysfs(t, filepath.Join(dir, "device"), "wwid", "naa.5002538d40a45c88\n")
 
-	disks := readReportDisks(installStick{})
+	disks, _ := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].StableName != "/dev/disk/by-id/wwn-0x5002538d40a45c88" {
 		t.Errorf("a disk with a wwn must carry its by-id name as the stable name: %+v", disks)
 	}
@@ -169,7 +213,7 @@ func TestReadReportDisksWithOnlyAByPathNameHasNoStableName(t *testing.T) {
 	// This disk offers no wwid, so its only stable name is a by-path
 	// name, which names the port and not the disk. The report must not
 	// propose it as the disk's identity.
-	disks := readReportDisks(installStick{})
+	disks, _ := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].StableName != "" {
 		t.Errorf("a by-path name is not an identity, and must not become the stable name: %+v", disks)
 	}

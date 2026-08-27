@@ -112,6 +112,38 @@ func TestDiskIDNamesUSB(t *testing.T) {
 	}
 }
 
+// The mmc name must match the name udev gives the same disk, byte
+// for byte, including the 0x the kernel prints in front of the
+// card's serial. A card missing either attribute gets no by-id name
+// at all, because half a name would match nothing.
+func TestDiskIDNamesMMC(t *testing.T) {
+	cases := []struct {
+		name   string
+		card   string
+		serial string
+		want   []string
+	}{
+		{"name and serial", "SEM64G", "0x4a2b5c8e", []string{"mmc-SEM64G_0x4a2b5c8e"}},
+		{"spaces in the card name", "SD 32G", "0x00112233", []string{"mmc-SD_32G_0x00112233"}},
+		{"no serial", "SEM64G", "", nil},
+		{"no name", "", "0x4a2b5c8e", nil},
+		{"neither", "", "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys, _ := fakeMachine(t)
+			dir := fakeDisk(t, sys, "mmcblk0", "pci0000:00", "0000:00:1c.0",
+				"mmc_host", "mmc0", "mmc0:0001", "block", "mmcblk0")
+			writeSysfs(t, filepath.Join(dir, "device"), "name", tc.card+"\n")
+			writeSysfs(t, filepath.Join(dir, "device"), "serial", tc.serial+"\n")
+
+			if names := diskIDNames("mmcblk0"); !equalNames(names, tc.want) {
+				t.Errorf("got %v, want %v", names, tc.want)
+			}
+		})
+	}
+}
+
 func TestDiskIDNamesSATAWithoutWWNHasNone(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	fakeDisk(t, sys, "sda", "pci0000:00", "0000:00:1f.2", "ata3", "host2",

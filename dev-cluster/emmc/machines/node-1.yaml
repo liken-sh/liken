@@ -1,0 +1,83 @@
+# node-1, the eMMC guest: the same node-1 the dev cluster runs, on a
+# machine whose only disk is an eMMC module. dev-cluster/Makefile
+# builds this guest under HARDWARE=emmc, one sdhci-pci controller
+# fronting one emmc card, and the kernel reaches the card through
+# modules the boot archive carries (sdhci, sdhci-pci, mmc_block).
+# The cluster document beside this manifest is a symlink to the dev
+# cluster's own, so node-1 is still the founding leader and still
+# comes up Ready on its own. README.md in this directory tells the
+# whole story.
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  # node-1.yaml in the dev cluster explains why the lab's machines
+  # choose Auto.
+  rebootPolicy: Auto
+  network:
+    # The same two interfaces as the dev cluster's node-1, on the
+    # same virtio cards: this shape varies the storage stack alone.
+    # The dev cluster's manifest explains the names.
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.10.0.1/24
+  # Every storage role on one disk. Two things differ from the other
+  # two deployments. First, the device name: the card is named by its
+  # by-id identity, built from the CID its own controller answers
+  # with (QEMU's is fixed, so the name is stable), not by the kernel
+  # name. The kernel's name is not stable even here: the lab has seen
+  # the same card come up as mmcblk0 on one boot and mmcblk1 on the
+  # next, and the machine converged anyway because roles resolve by
+  # GPT partition name after the claim. The card's two hardware boot
+  # areas are block devices too, and no role may land on them: they
+  # hold what a board's firmware reads before Linux runs. (The RPMB
+  # area is an authenticated mailbox, which this kernel presents as
+  # a character device that never reaches the disk walk.) The walk
+  # skips the boot areas, and smoke.sh asserts the skip against this
+  # machine's own status. Second, the one-disk layout: a machine
+  # built this way has nowhere else to put a role, so the boot slots
+  # and the pod storage share the card. clusterState names a size
+  # here, because only one role per disk may omit its size, and
+  # podEphemeral is the role that takes the remainder.
+  storage:
+    # The dev cluster's node-1.yaml explains the GRUB boot path these
+    # two roles declare and the two system slots below.
+    # An eMMC machine still declares them: they cost two small
+    # partitions, and the roles are how a machine states which boot
+    # paths it can take. The lab boots this guest under UEFI only,
+    # because QEMU's emmc device carries no bootindex and SeaBIOS
+    # cannot name the card.
+    biosBoot:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 1Mi
+    bootHome:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 64Mi
+    systemA:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 1Gi
+    systemB:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 1Gi
+    machineState:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 64Mi
+    clusterState:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 2Gi
+    machineEphemeral:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 256Mi
+    podStorage:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+      size: 512Mi
+    podEphemeral:
+      device: /dev/disk/by-id/mmc-QEMU___0xdeadbeef
+  # This machine declares no spec.modules. The eMMC controller's
+  # drivers cannot come from there, because the install claims the
+  # card long before declared modules load, so they travel in the
+  # boot archive instead (image/boot-modules.conf). The network cards
+  # are virtio, which the kernel builds in. Nothing is left for this
+  # machine to declare.

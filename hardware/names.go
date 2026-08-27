@@ -10,12 +10,6 @@ package hardware
 
 import "strings"
 
-// pciClassWord decodes sysfs's class attribute (for example,
-// "0x038000" means class 03, subclass 80, interface 00) to the word
-// for its class byte. The vocabulary uses the PCI code space at
-// base-class detail. An operator who decides whether to care about
-// an unclaimed device needs a word like "display" or "network", not
-// the subclass detail.
 // classCode normalizes a bus's class attribute to bare lowercase hex.
 // The buses write it differently: PCI writes "0x038000" and USB writes
 // "03". Both are published as they are, minus the prefix, so a
@@ -24,10 +18,27 @@ func classCode(class string) string {
 	return strings.ToLower(strings.TrimPrefix(class, "0x"))
 }
 
+// pciClassWord decodes sysfs's class attribute (for example,
+// "0x038000" means class 03, subclass 80, interface 00) to the word
+// for its class byte. An operator who decides whether to care about
+// an unclaimed device needs a word like "display" or "network", not
+// the subclass detail, so the vocabulary reads the base class, with
+// exactly one subclass exception below. The test beside this file
+// locks every word: a subclass earns a row of its own only when the
+// base class's word would misdescribe a device liken must act on.
 func pciClassWord(class string) string {
 	hex := strings.TrimPrefix(class, "0x")
 	if len(hex) < 2 {
 		return ""
+	}
+	// Subclass 0805 is the SD and eMMC host controller. PCI files it
+	// under base class 08, the system peripherals, but the device
+	// behind it is a disk, and a machine whose only disk is an eMMC
+	// module cannot install unless the report reads the controller as
+	// storage. Every other subclass of base class 08 stays system,
+	// because those devices really are the machine's own plumbing.
+	if strings.HasPrefix(hex, "0805") {
+		return "storage"
 	}
 	switch hex[:2] {
 	case "01":

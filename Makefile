@@ -519,6 +519,40 @@ smoke-hardware: $(KERNEL_DIST)/vmlinuz $(HW_IMAGE_DIR)/install.cpio \
 		$(HW_IMAGE_DIR)/stick.img kubeconfig
 	$(MAKE) -C dev-cluster smoke-hardware
 
+# The eMMC deployment (dev-cluster/emmc) boots the dev cluster on a
+# machine whose only disk is an eMMC card behind an sdhci-pci
+# controller. Like the parity deployment above, it reuses the dev
+# cluster's cluster document and identity, so its node-1 is the same
+# founding leader and the same admin kubeconfig authenticates the
+# readiness poll. Only the machine manifest differs, so only the
+# layer and the install image differ, and one release channel serves
+# all three deployments. It needs no install stick, because its
+# drill runs no report boot. dev-cluster/emmc/README.md tells the
+# story.
+EMMC_DIR := dev-cluster/emmc
+EMMC_IMAGE_DIR := dev-cluster/emmc/image
+
+$(EMMC_IMAGE_DIR)/deployment.cpio: cli/dist/liken \
+		$(EMMC_DIR)/cluster.yaml $(wildcard $(EMMC_DIR)/machines/*.yaml) \
+		$(IDENTITY_DIR)/tls/server-ca.crt $(IDENTITY_DIR)/token
+	@mkdir -p $(EMMC_IMAGE_DIR)
+	cli/dist/liken layer $(EMMC_DIR) $(IDENTITY_DIR) $@
+
+$(EMMC_IMAGE_DIR)/install.cpio: $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml \
+		$(EMMC_IMAGE_DIR)/deployment.cpio cli/dist/liken
+	cli/dist/liken media $(IMAGE_DIR)/channel/$(LAB_VERSION) $(EMMC_IMAGE_DIR)/deployment.cpio $@
+
+# The eMMC smoke installs node-1 onto a blank card and boots the
+# installed card under OVMF, the same two steps and the same Ready
+# verdict as smoke-uefi. It proves the boot archive's eMMC modules,
+# the disk walk's skip of the card's boot and RPMB areas, and a
+# one-disk machine claiming every storage role on the one disk. It
+# is not a CI step: CI's runner carries QEMU 8.2, and the emmc
+# device arrived in QEMU 9.1. The target lives here because it needs
+# the eMMC install image defined just above.
+smoke-emmc: $(KERNEL_DIST)/vmlinuz $(EMMC_IMAGE_DIR)/install.cpio kubeconfig
+	$(MAKE) -C dev-cluster smoke-emmc
+
 # The install stick holds the same release and layer as a bootable
 # disk image, with the machine menu. This is the medium that real
 # hardware uses. The lab sets console=ttyS0 so the menu and every
@@ -669,5 +703,6 @@ clean:
 	$(MAKE) -C image clean
 	rm -rf $(IMAGE_DIR)
 	rm -rf $(HW_IMAGE_DIR)
+	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware install install-stick install-gitops storage release serve docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs clean

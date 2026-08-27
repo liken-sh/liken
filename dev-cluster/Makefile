@@ -124,6 +124,21 @@ guests/$(NODE)/boot.qcow2:
 	mkdir -p guests/$(NODE)
 	qemu-img create -f qcow2 $@ 4G
 
+# The eMMC shape's one disk. A machine whose only disk is an eMMC
+# module puts every storage role on it, boot slots and pod storage
+# alike, so the shape gets a single backing file instead of the
+# three above. The card is 6G, and the size is a drill cost, not a
+# realism claim: QEMU's emmc emulation writes at about 32 MiB per
+# second, the machine formats every ext4 role on this one disk at
+# claim time, and every spare gigabyte is another half minute of
+# drill. 6G covers the fixed roles and leaves about 1.1G of
+# remainder for podEphemeral. Real eMMC modules are 32GB and larger;
+# the lab's card is small for the same reason the lab's guests hold
+# 1 GB of memory.
+guests/$(NODE)/emmc.qcow2:
+	mkdir -p guests/$(NODE)
+	qemu-img create -f qcow2 $@ 6G
+
 # The guest's firmware. liken supports two firmware types, and both
 # exist on real machines: UEFI is the firmware on every modern
 # motherboard, and BIOS is the firmware on every Linode guest. The lab
@@ -296,12 +311,16 @@ endif
 #                            order, so the uplink is always eth0 and
 #                            the cluster segment is always eth1,
 #                            matching the names the manifests pin
-#   -drive                   the machine's disks (the qcow2 files
+#   $(QEMU_DRIVES)           the machine's disks (the qcow2 files
 #                            above). if=none only registers a backing
 #                            file under an id; the $(QEMU_DISKS) lines
 #                            below do the attaching. This is the same
 #                            declare-then-attach split that
-#                            -netdev/-device use for the NICs
+#                            -netdev/-device use for the NICs.
+#                            The list itself depends on HARDWARE:
+#                            three files under virtio and metal, one
+#                            file under emmc, whose card carries
+#                            every storage role
 #   $(QEMU_DISKS)            the disk controller that attaches those
 #                            backing files. Its class depends on
 #                            HARDWARE (above): a virtio-blk device per
@@ -311,7 +330,15 @@ endif
 #                            /dev/sdb, /dev/sdc). serial= gives each
 #                            disk the identity a real drive carries, so
 #                            a disk is identifiable by its identity and
-#                            not only by its kernel name
+#                            not only by its kernel name.
+#                            Under emmc, two sdhci-pci controllers:
+#                            one fronts one emmc card, which the
+#                            guest sees as /dev/mmcblk0 with the
+#                            card's two hardware boot areas beside
+#                            it, and the second is empty
+#                            (QEMU_DISKS_emmc below says why). The
+#                            card carries no serial=, because an
+#                            eMMC answers with a CID instead
 # A reboot that the guest starts itself resets the VM in place: QEMU
 # reloads the firmware (and -kernel/-initrd, when present), the
 # qcow2 disks and the NVRAM persist, and the serial console shows the
@@ -373,8 +400,8 @@ RTC_BASE := -rtc base=$(RTC)
 # empty for every ordinary boot.
 QEMU_EXTRA ?=
 
-# HARDWARE selects the controller classes the guest presents. The two
-# values name the two hardware shapes the lab drills.
+# HARDWARE selects the controller classes the guest presents. The three
+# values name the three hardware shapes the lab drills.
 #
 # HARDWARE=virtio (the default) is the lab's fast paravirtual shape.
 # The disks are virtio-blk and the network cards are virtio-net. The
@@ -393,11 +420,25 @@ QEMU_EXTRA ?=
 # shape so the lab exercises the module path a real machine's first
 # boot walks.
 #
+# HARDWARE=emmc is the third shape: two sdhci-pci controllers, one
+# fronting one emmc card and one with an empty slot, the shape of a
+# stick PC or a small board whose only disk is an eMMC module
+# soldered to it beside a card slot nobody filled. QEMU emulates
+# eMMC natively from version 9.1, hardware boot areas and RPMB
+# included, so the guest presents the same block devices a real card
+# does. Every storage role lands on that one disk, because that is
+# how such a machine is built. The network cards stay virtio-net:
+# storage is the only thing this shape varies, and the metal shape
+# already drills the NIC module path.
+#
 # Selected by name at recipe expansion, the same idiom as FIRMWARE and
 # BOOT. Two groups of devices change with the shape: the network cards
-# and the disk controller. The -netdev backends and the -drive backing
-# files do not change, because a backend and a backing file are the
-# same whichever controller fronts them.
+# and the disk controller.
+# The -netdev backends do not change with the shape, because a
+# backend is the same whichever card fronts it. The -drive backing
+# files do change: the emmc shape has one disk where the other two
+# have three, so the backing-file list is per-shape ($(QEMU_DRIVES)
+# below) beside the controller list ($(QEMU_DISKS)).
 HARDWARE ?= virtio
 
 # The network cards. Under metal, both cards are e1000, so the whole
@@ -415,6 +456,10 @@ QEMU_NICS_virtio = \
 QEMU_NICS_metal = \
 	-device e1000,netdev=uplink,mac=$(UPLINK_MAC) \
 	-device e1000,netdev=cluster,mac=$(CLUSTER_MAC)
+# The emmc shape varies the storage stack alone, so it borrows the
+# virtio shape's cards rather than restating them, and its machine
+# manifest declares no module.
+QEMU_NICS_emmc = $(QEMU_NICS_virtio)
 QEMU_NICS = $(QEMU_NICS_$(HARDWARE))
 
 # The disk controller. Under virtio, each disk is its own
@@ -439,9 +484,68 @@ QEMU_DISKS_metal = \
 	-device ide-hd,drive=state,bus=sata.0,serial=liken-$(NODE)-state \
 	-device ide-hd,drive=pods,bus=sata.1,serial=liken-$(NODE)-pods \
 	-device ide-hd,drive=boot,bus=sata.2,serial=liken-$(NODE)-boot$(QEMU_BOOTINDEX)
+# The emmc shape's controllers: two sdhci-pci host controllers on
+# the PCI bus, one emmc card on the SD bus behind the first. The
+# guest
+# reaches the card through sdhci, sdhci-pci, and mmc_block, the
+# modules the boot archive carries, and names it /dev/mmcblk0.
+# boot-partition-size gives the card the two 4 MiB hardware boot
+# areas a real eMMC has (mmcblk0boot0 and mmcblk0boot1), and
+# rpmb-partition-size gives it the 128 KiB authenticated RPMB area,
+# which this kernel presents as the mmcblk0rpmb character device.
+# The two boot areas are exactly what the disk walk must skip, so
+# the lab must present them. The device carries no
+# serial= and no bootindex, because QEMU's emmc device has neither
+# property: an eMMC card answers with a CID, not an ATA serial, and
+# the boot order under BIOS cannot name the card at all.
+#
+# mmc-empty carries no card, and it is the common case, not the
+# spare: every liken machine in the field has at least one class
+# 0805 controller with nothing behind it, and after this milestone
+# every one of them binds sdhci-pci on every boot. The empty
+# controller puts that case in the drill: the driver binds, the
+# host registers, no card answers, so no block device appears and
+# nothing in the boot waits on one. Without it the drill only ever
+# proves the bind that finds a card.
+#
+# The order of the three -device lines is load-bearing. QEMU names
+# both child buses sd-bus and a bus= value cannot tell them apart,
+# so the card attaches to the first sd-bus that exists when its own
+# -device is read. The card must follow its own controller and
+# precede the empty one. That order also keeps the populated
+# controller at PCI 00:03.0, so the card's by-path name does not
+# move.
+QEMU_DISKS_emmc = \
+	-device sdhci-pci,id=mmc \
+	-device emmc,drive=emmc,boot-partition-size=4194304,rpmb-partition-size=131072 \
+	-device sdhci-pci,id=mmc-empty
 QEMU_DISKS = $(QEMU_DISKS_$(HARDWARE))
 
-run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2 $(FIRMWARE_DEPS)
+# The backing files, per shape. The virtio and the metal shapes
+# register the same three, in the order that gives the disks the
+# device names their claims declare. The emmc shape registers one
+# file, because the card is the machine's only disk and carries
+# every role. if=none registers a file under an id and attaches
+# nothing; the $(QEMU_DISKS) lines above do the attaching.
+QEMU_DRIVES_virtio = \
+	-drive file=guests/$(NODE)/state.qcow2,format=qcow2,if=none,id=state \
+	-drive file=guests/$(NODE)/pods.qcow2,format=qcow2,if=none,id=pods \
+	-drive file=guests/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot
+QEMU_DRIVES_metal = $(QEMU_DRIVES_virtio)
+QEMU_DRIVES_emmc = \
+	-drive file=guests/$(NODE)/emmc.qcow2,format=qcow2,if=none,id=emmc
+QEMU_DRIVES = $(QEMU_DRIVES_$(HARDWARE))
+
+# The same per-shape split on the make side: the files a boot must
+# create before QEMU opens them. This list is a prerequisite list,
+# so it is a variable of its own for the same reason FIRMWARE_DEPS
+# is separate from QEMU_FIRMWARE.
+DISK_DEPS_virtio := guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2
+DISK_DEPS_metal := $(DISK_DEPS_virtio)
+DISK_DEPS_emmc := guests/$(NODE)/emmc.qcow2
+DISK_DEPS := $(DISK_DEPS_$(HARDWARE))
+
+run: $(DISK_DEPS) $(FIRMWARE_DEPS)
 	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
@@ -458,9 +562,7 @@ run: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qc
 		-netdev user,id=uplink$(API_FORWARD) \
 		-netdev socket,id=cluster,mcast=239.192.76.75:26443 \
 		$(QEMU_NICS) \
-		-drive file=guests/$(NODE)/state.qcow2,format=qcow2,if=none,id=state \
-		-drive file=guests/$(NODE)/pods.qcow2,format=qcow2,if=none,id=pods \
-		-drive file=guests/$(NODE)/boot.qcow2,format=qcow2,if=none,id=boot \
+		$(QEMU_DRIVES) \
 		$(QEMU_DISKS)
 
 # One-shot boots, for debugging and automation. liken.oneshot tells
@@ -514,7 +616,7 @@ install: run
 # matches the hardware shape. The installer never reads the stick
 # after boot, because everything it needs already came in the
 # initramfs.
-install-stick: guests/$(NODE)/state.qcow2 guests/$(NODE)/pods.qcow2 guests/$(NODE)/boot.qcow2
+install-stick: $(DISK_DEPS)
 	cp /usr/share/OVMF/OVMF_VARS_4M.fd guests/$(NODE)/OVMF_VARS.fd
 	$(MAKE) run NODE=$(NODE) QEMU_EXIT_ON_REBOOT=-no-reboot QEMU_EXTRA="-device qemu-xhci \
 		-drive file=image/stick.img,format=raw,if=none,id=stick \
@@ -578,7 +680,42 @@ smoke-hardware:
 		REPORT_STICK=hardware/image/stick.img \
 		./smoke.sh uefi hardware
 
-.PHONY: run run-once install install-stick storage grow-pods reset-nvram smoke-uefi smoke-bios smoke-hardware clean
+# The eMMC smoke. It is the same drill as smoke-uefi, on the emmc
+# hardware shape: two sdhci-pci controllers, one fronting one emmc
+# card and one empty, with every storage role on the one disk. It
+# boots the emmc deployment's install image, whose node-1 manifest
+# puts every role on /dev/mmcblk0, so the drill proves that the
+# boot archive's eMMC modules load, that a controller with no card
+# binds quietly, and that a one-disk machine claims and formats
+# every role. The disk walk's skip of the card's hardware boot
+# areas is asserted, not assumed: assert_emmc_disks in smoke.sh
+# reads status.hardware.blockDevices back from the cluster and
+# fails if a hardware area appears there. The firmware is UEFI,
+# because QEMU's emmc
+# device carries no bootindex and SeaBIOS cannot name the card. The
+# drill passes no REPORT_STICK: the report step's assertions in
+# smoke.sh read the metal shape's proposal. See emmc/README.md, and
+# smoke.sh, which explains the shared drill.
+#
+# This drill runs locally and not in CI. The CI runner is Ubuntu
+# 24.04 with QEMU 8.2, and the emmc device arrived in QEMU 9.1. When
+# the runner's QEMU reaches that version, the drill joins the build
+# workflow beside the other smokes.
+#
+# The drill raises both of smoke.sh's bounds to 420 seconds. QEMU's
+# emmc emulation writes at about 32 MiB per second, and the machine
+# formats every ext4 role on the one card at claim time: the lab
+# measured the install at 200 seconds of guest time, past the 180
+# seconds an attended boot gets by default, so 420 is about double
+# the measured install. The readiness bound is a guess, not a
+# measurement: k3s's first start writes its database and imports its
+# container images onto the same slow card.
+smoke-emmc:
+	HARDWARE=emmc INSTALL_CPIO=emmc/image/install.cpio \
+		HOLD_DEADLINE=420 SMOKE_DEADLINE=420 \
+		./smoke.sh uefi emmc
+
+.PHONY: run run-once install install-stick storage grow-pods reset-nvram smoke-uefi smoke-bios smoke-hardware smoke-emmc clean
 
 clean:
 	rm -rf guests

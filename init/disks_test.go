@@ -62,6 +62,16 @@ func addPartition(t *testing.T, sys, disk, name, partName string, sizeBytes uint
 	writeSysfs(t, dir, "uevent", uevent)
 }
 
+// addPartitionNode gives a fake partition the /dev node devtmpfs
+// creates for it. On a real machine the node is a separate step
+// from the sysfs entry, so it is a separate step here too.
+func addPartitionNode(t *testing.T, dev, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dev, name), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeSysfs(t *testing.T, dir, name, value string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o644); err != nil {
@@ -95,6 +105,89 @@ func TestDiscoverBlockDevicesReadsSysfs(t *testing.T) {
 	}
 	if d.Serial != "liken-lab-state" {
 		t.Errorf("serial: %q", d.Serial)
+	}
+}
+
+// addMMCCard gives the fake machine the block devices an eMMC module
+// presents. The `device` link is what tells them apart: the card's data area
+// hangs off the mmc card device, and each hardware area hangs off the data
+// area's own block device, because the mmc block driver makes them children of
+// that disk.
+func addMMCCard(t *testing.T, sys string) {
+	t.Helper()
+	root := t.TempDir()
+	blockClass := filepath.Join(root, "class", "block")
+	card := filepath.Join(root, "devices", "pci0000:00", "0000:00:1c.0",
+		"mmc_host", "mmc0", "mmc0:0001")
+	for _, dir := range []string{blockClass, filepath.Join(root, "bus", "mmc"), card} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "bus", "mmc"), filepath.Join(card, "subsystem")); err != nil {
+		t.Fatal(err)
+	}
+	writeSysfs(t, card, "name", "SEM64G\n")
+	writeSysfs(t, card, "serial", "0x4a2b5c8e\n")
+
+	data := addMMCArea(t, sys, blockClass, "mmcblk0", card, 58<<30)
+	addMMCArea(t, sys, blockClass, "mmcblk0boot0", data, 4<<20)
+	addMMCArea(t, sys, blockClass, "mmcblk0boot1", data, 4<<20)
+	addMMCArea(t, sys, blockClass, "mmcblk0gp0", data, 1<<30)
+	addMMCArea(t, sys, blockClass, "mmcblk0rpmb", data, 512<<10)
+}
+
+// addMMCArea adds one mmc block device to the fake machine: its size, the
+// `subsystem` link every block device carries, and the `device` link to its
+// parent. It returns the directory it made.
+func addMMCArea(t *testing.T, sys, blockClass, name, parent string, sizeBytes uint64) string {
+	t.Helper()
+	dir := filepath.Join(sys, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/disks.SectorSize))
+	if err := os.Symlink(blockClass, filepath.Join(dir, "subsystem")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(parent, filepath.Join(dir, "device")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// The card's data area is the only entry that may survive the walk.
+// The boot and general-purpose areas hold what a board's firmware
+// reads before Linux runs, and RPMB is an authenticated mailbox, so
+// a role placed on any of them would be destroyed or unreachable.
+func TestDiscoverBlockDevicesSkipsMMCHardwareAreas(t *testing.T) {
+	sys, _ := fakeMachine(t)
+	addMMCCard(t, sys)
+
+	found := discoverBlockDevices()
+	if len(found) != 1 {
+		t.Fatalf("discovered %d disks, want only the card's data area: %v", len(found), found)
+	}
+	if found[0].Name != "mmcblk0" || found[0].SizeBytes != 58<<30 {
+		t.Errorf("got %+v, want the mmcblk0 data area", found[0])
+	}
+}
+
+// The skip keys on a sysfs shape only the mmc block driver builds,
+// so a machine with any other kind of disk walks exactly as it did
+// before. This test is that claim, pinned.
+func TestDiscoverBlockDevicesKeepsEveryOtherDisk(t *testing.T) {
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "nvme0n1", 512<<30, nil)
+	addDisk(t, sys, dev, "sda", 8<<30, nil)
+	addDisk(t, sys, dev, "vda", 2<<30, nil)
+
+	var names []string
+	for _, d := range discoverBlockDevices() {
+		names = append(names, d.Name)
+	}
+	if !equalNames(names, []string{"nvme0n1", "sda", "vda"}) {
+		t.Errorf("got %v, want every disk the walk found before", names)
 	}
 }
 

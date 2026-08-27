@@ -70,6 +70,56 @@ var iscsiSessionPattern = regexp.MustCompile(`^session\d+$`)
 // would claim namespace 1 while the disk is actually namespace 2.
 var nvmeNsidPattern = regexp.MustCompile(`n(\d+)$`)
 
+// mmcHostSegment is the directory the mmc core creates under a host
+// controller to hold the cards on it. It sits directly below the
+// controller's own device, so the segment before it names the
+// controller.
+const mmcHostSegment = "mmc_host"
+
+// mmcPathName is udev's by-path answer for an eMMC module or an SD
+// card, which is a name only when the host controller is a platform
+// device.
+//
+// udev's path_id builtin has no mmc handler at all. It walks the
+// parents of a block device and prepends a segment for each bus it
+// recognizes, and mmc is not one of them. A card's parents are the mmc
+// card, the mmc host, and then the controller, so the name a card gets
+// is the name of its controller and nothing else. A controller the
+// firmware enumerates through ACPI or a device tree is a platform
+// device, and path_id names a platform device platform-<name>, with
+// the PCI slot ahead of it when the platform device sits under a PCI
+// function. That is where an eMMC's by-path name comes from.
+//
+// A controller that enumerates over PCI on its own, which is what
+// sdhci-pci drives, gets no name. path_id counts a PCI slot as a
+// parent and not as a transport, and it refuses to name a block device
+// whose walk found no transport, so udev writes no ID_PATH and builds
+// no link under /dev/disk/by-path. liken publishes no name there
+// either, because a by-path name that udev does not build is a name no
+// other tool on the machine agrees with. Such a card is named by its
+// by-id name alone (diskids.go).
+func mmcPathName(segments []string, pciSlot string) string {
+	host := -1
+	for i, seg := range segments {
+		if seg == mmcHostSegment {
+			host = i - 1
+			break
+		}
+	}
+	if host < 0 {
+		return ""
+	}
+	dir := strings.Join(segments[:host+1], string(filepath.Separator))
+	subsystem, err := filepath.EvalSymlinks(filepath.Join(dir, "subsystem"))
+	if err != nil || filepath.Base(subsystem) != "platform" {
+		return ""
+	}
+	if pciSlot != "" {
+		return "pci-" + pciSlot + "-platform-" + segments[host]
+	}
+	return "platform-" + segments[host]
+}
+
 // diskPathName computes the local by-path name for one disk: the port
 // it answers on, read from the resolved sysfs path behind
 // /sys/block/<name>. It returns "" for a disk with no such name,
@@ -94,6 +144,11 @@ func diskPathName(name string) string {
 			pciSlot = seg
 		}
 	}
+
+	if name := mmcPathName(segments, pciSlot); name != "" {
+		return name
+	}
+
 	if pciSlot == "" {
 		return ""
 	}

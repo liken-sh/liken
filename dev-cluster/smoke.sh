@@ -119,6 +119,17 @@ REPORT_QEMU_LOG="guests/node-1/report-qemu.log"
 # failure path.
 SMOKE_DEADLINE="${SMOKE_DEADLINE:-120}"
 
+# How long an attended boot (the report boot and the install boot
+# below) gets to reach its own verdict line. 180 seconds covers the
+# virtio and the metal shapes, whose installs finish in well under a
+# minute. The emmc drill overrides it: QEMU's emmc emulation writes
+# at about 32 MiB per second, the install formats every storage role
+# on the one card, and the lab measured that install at 200 seconds
+# of guest time. Like SMOKE_DEADLINE above, this bound only sets how
+# long a hung boot can hold up the run; a guest that dies fails the
+# drill immediately.
+HOLD_DEADLINE="${HOLD_DEADLINE:-180}"
+
 for f in "$K3S" "$KUBECONFIG_FILE" "$INSTALL_CPIO"; do
     [[ -e "$f" ]] || {
         echo "$drill: missing $f — run \`make $drill\` from the repo root," >&2
@@ -218,6 +229,90 @@ assert_machine_reports() {
     exit 1
 }
 
+# The emmc drill claims to prove that the disk walk skips the
+# card's hardware boot areas, and without this function nothing
+# read that back: a walk that stopped skipping still installed,
+# still booted, and still went Ready. status.hardware.blockDevices
+# is the disk walk's own output, published through the cluster, so
+# it is where the skip is visible. The check carries both halves:
+# the card's data area must be in the list, and mmcblk0boot0,
+# mmcblk0boot1, and any RPMB block device must not. If the walk
+# stopped skipping, an area would appear here and this fails.
+#
+# The second read is the partition-name check the plan calls for.
+# An mmc partition is mmcblk0p1, the p form, so every one of the
+# nine roles must name a partition of that shape on the card. A
+# role that fell back to memory names no device at all, and the
+# count catches that too. Gated on the emmc shape, the way the
+# report assertions gate on the metal one.
+assert_emmc_disks() {
+    [[ "$HARDWARE" == emmc ]] || return 0
+
+    local deadline=$(( $(date +%s) + 90 )) walked="" backing=""
+    while (( $(date +%s) < deadline )); do
+        walked="$("$K3S" kubectl --kubeconfig "$KUBECONFIG_FILE" \
+            --request-timeout=5s get machine node-1 \
+            -o jsonpath='{.status.hardware.blockDevices[*].name}' 2>/dev/null || true)"
+        [[ -z "$walked" ]] || break
+        sleep 5
+    done
+
+    # The roles are named one by one rather than with a jsonpath
+    # wildcard: status.storage is an object with nine named fields,
+    # and naming them keeps the order fixed and the list readable as
+    # the manifest's own role list.
+    local role path=""
+    for role in biosBoot bootHome systemA systemB machineState \
+        machineEphemeral clusterState podStorage podEphemeral; do
+        path+="{.status.storage.${role}.device} "
+    done
+    backing="$("$K3S" kubectl --kubeconfig "$KUBECONFIG_FILE" \
+        --request-timeout=5s get machine node-1 \
+        -o jsonpath="$path" 2>/dev/null || true)"
+
+    emmc_failed() {
+        teardown
+        echo "$drill: $1" >&2
+        echo "$drill: status.hardware.blockDevices: $walked" >&2
+        echo "$drill: status.storage role devices: $backing" >&2
+        evidence
+        exit 1
+    }
+
+    # The card must be in the list and every mmc hardware area out of
+    # it. The list is not compared whole, because QEMU's default
+    # machine carries an empty IDE DVD-ROM (sr0) that the walk
+    # legitimately reports on every lab shape. The card's kernel name
+    # is a pattern rather than mmcblk0, because the index is not
+    # stable: the lab has seen the same card as mmcblk0 on one boot
+    # and mmcblk1 on the next.
+    local device card=""
+    for device in $walked; do
+        case "$device" in
+        *boot[0-9] | *rpmb | *gp[0-9])
+            emmc_failed "the disk walk reported the hardware area $device" ;;
+        mmcblk[0-9]*)
+            [[ -z "$card" ]] || emmc_failed \
+                "the disk walk reported two mmc disks, $card and $device"
+            card="$device" ;;
+        esac
+    done
+    [[ -n "$card" ]] || emmc_failed \
+        "the disk walk did not report the card"
+
+    local -a partitions
+    read -r -a partitions <<< "$backing"
+    (( ${#partitions[@]} == 9 )) || emmc_failed \
+        "all nine storage roles should sit on the card, and ${#partitions[@]} name a partition"
+    local partition
+    for partition in "${partitions[@]}"; do
+        [[ "$partition" == "$card"p* ]] || emmc_failed \
+            "role partition $partition is not a partition of $card"
+    done
+
+    echo "$drill: the disk walk kept the card and skipped its hardware areas"
+}
+
 teardown() {
     [[ -n "$guest" ]] || return 0
     local leader="$guest"
@@ -296,9 +391,9 @@ watch_hold() {
             evidence
             exit 1
         fi
-        if (( $(date +%s) - started >= 180 )); then
+        if (( $(date +%s) - started >= HOLD_DEADLINE )); then
             teardown
-            echo "$drill: $what did not finish within 180s" >&2
+            echo "$drill: $what did not finish within ${HOLD_DEADLINE}s" >&2
             evidence
             exit 1
         fi
@@ -397,6 +492,7 @@ while true; do
         elapsed=$(( $(date +%s) - started ))
         echo "$drill: node-1 is Ready after ${elapsed}s, booted from disk under $FIRMWARE"
         assert_machine_reports
+        assert_emmc_disks
         exit 0
     fi
 
