@@ -204,6 +204,12 @@ decided yet what work they become.
   interface, declared in `spec.network` the way a wired one is. The
   image vendors `wpa_supplicant`, init supervises it and reads its
   events, and the passphrase rides the stick beside the join token.
+* **63.** [eMMC storage](completed/63-emmc.md). A machine whose only
+  disk is an eMMC module installs and boots the same way a SATA or
+  NVMe machine does. PCI subclass `0805` reads as storage, the boot
+  archive carries the mmc stack, the card gets its udev-identical
+  `mmc-` by-id name, the disk walk skips the card's hardware areas,
+  and an SD card in a slot is never proposed.
 * **64.** [The boot does not wait for radios](completed/64-the-boot-does-not-wait-for-radios.md).
   Wired interfaces settle in line; radios raise under a deadline and
   join behind the boot when the wired path already reaches the
@@ -242,10 +248,6 @@ decided yet what work they become.
   The netbooted report posts to the cluster as an `Enrollment`, and
   approval is applying the proposed `Machine`, with a CLI verb as
   sugar.
-* **63.** [eMMC storage](63-emmc.md). A machine installs to and boots
-  from an eMMC disk. A stub: the report drops class `0805`
-  controllers as `system`, the boot archive carries no eMMC driver,
-  and the by-id tree builds no `mmc-` names.
 
 The hardening tier waits until the milestones above are proven: UKIs,
 dm-verity, secure boot, TPM-sealed secrets, and signed releases.

@@ -13,7 +13,7 @@ produced this deployment is `stick-1`, an Apollo Lake HDMI stick PC
 whose 64GB eMMC `liken` could not see: the controller's PCI class
 read as `system`, no driver recommendation appeared, and the report
 proposed an empty storage block while a working disk sat in the
-machine. `plans/63-emmc.md` gives the whole design.
+machine. `plans/completed/63-emmc.md` gives the whole design.
 
 This deployment closes the gap. It boots the same `node-1` the dev
 cluster boots, on the hardware shape a stick PC has: two `sdhci-pci`
