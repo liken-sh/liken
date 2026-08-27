@@ -131,6 +131,16 @@ say why it is built the way it is.
   deferred blank landed capture-first within a poll window of the
   switch back.
 
+* [12, The compositor reports its outputs](12-the-compositor-reports-its-outputs.md).
+  Built 2026-08-27, not yet drilled on the metal. The operator holds
+  one standing, listen-only Wayland connection to its compositor.
+  The registry's own output events replace plan 10's comparison of
+  monitor identities, which was blind to the flap the studio
+  produces nightly: the same monitor sleeping and waking. The
+  `wl_output` mode events replace the kernel poll as the mode
+  switch's readback, and `status.mode` reports the mode's two
+  values, `kernel` and `weston`, whose gap is the canvas defect.
+
 ## Open problems
 
 [`open-problems/`](open-problems/) holds the questions this operator

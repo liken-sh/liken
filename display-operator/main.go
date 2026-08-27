@@ -219,9 +219,25 @@ func operate() {
 	// one lock between them. The heal's restart is that road with no
 	// config change.
 	panels.setMode = func(ctx context.Context, output Output, mode string) error {
-		return plugin.applyMode(ctx, output, mode, socketPath)
+		return plugin.applyMode(ctx, output, mode)
 	}
 	panels.restart = plugin.restartCompositor
+	// The compositor's own registry reports when an output was
+	// destroyed and re-created. The watch holds one standing
+	// connection to the compositor's socket, and every restart the
+	// operator makes ends that connection, so the operator's own
+	// restarts report nothing.
+	watch := newOutputWatch(socketPath, panels.outputsMoved)
+	// The same connection answers the mode readback: a switch
+	// waits for the compositor that started after its restart to
+	// report the mode the claim stated.
+	plugin.served = watch.served
+	// The same connection fills the second half of the mode the
+	// Display reports: status.mode.kernel is what the card is synced
+	// to, and status.mode.weston is what the compositor serves
+	// canvases at.
+	panels.served = watch.served
+	go watch.run(ctx)
 	go panels.run(ctx)
 	go watchDisplays(ctx, client, panels.wake)
 

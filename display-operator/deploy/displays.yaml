@@ -42,7 +42,10 @@ spec:
           jsonPath: .status.attachedInput
         - name: Mode
           type: string
-          jsonPath: .status.currentMode
+          jsonPath: .status.mode.kernel
+        - name: Canvas
+          type: string
+          jsonPath: .status.mode.weston
         - name: Connected
           type: string
           jsonPath: .status.conditions[?(@.type=="Connected")].status
@@ -145,9 +148,16 @@ spec:
                 attachedInput:
                   type: string
                   description: "The input this machine's cable occupies, as the operator derived it from the EDID: an HDMI sink serves each of its ports an EDID naming that port. It is published so a person can check the derivation against the cabling, and a declared spec.attachedInput wins over it. A DisplayPort cable, and a panel that serves the same address on every port, derive nothing; those are the panels the owner declares for."
-                currentMode:
-                  type: string
-                  description: "The mode this output drives now, read from the card, absent while it drives nothing."
+                mode:
+                  type: object
+                  description: "The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows."
+                  properties:
+                    kernel:
+                      type: string
+                      description: "The mode the card reports this connector is synced to, absent while it drives nothing."
+                    weston:
+                      type: string
+                      description: "The mode the compositor reports it serves canvases at, from its own wl_output events, absent while the operator holds no connection to a compositor."
                 modes:
                   type: array
                   items:

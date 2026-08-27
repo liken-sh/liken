@@ -84,6 +84,12 @@ type draPlugin struct {
 	currentModes   func() (map[string]string, error)
 	connectorModes func() (map[string][]drmMode, error)
 	endCompositor  func() error
+	// What the compositor itself reports about the outputs it
+	// serves, which is what a mode switch reads back. It is nil until
+	// the operator wires the standing Wayland connection, and a nil
+	// seam reports nothing, so every readback runs out its budget and
+	// fails with the reason.
+	served func() servedOutputs
 	// Republish is the operator's own reconcile pass, run after a
 	// prepare that read the kernel, so the slice follows what the
 	// prepare read. It is nil until the operator wires it, and a nil
@@ -342,7 +348,7 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// and a delivery that raced it would start the consumer against
 			// a screen that is about to go dark.
 			if mode := selection.forRequest(result.Request); mode != "" {
-				if err := p.applyMode(ctx, output, mode, socketPath); err != nil {
+				if err := p.applyMode(ctx, output, mode); err != nil {
 					return fail("%v", err)
 				}
 			}

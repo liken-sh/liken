@@ -91,12 +91,21 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--widthmillimeters"></span>`widthMillimeters` | integer | no | The panel's physical width, as the monitor states it. |
 | <span id="status--heightmillimeters"></span>`heightMillimeters` | integer | no | The panel's physical height, as the monitor states it. |
 | <span id="status--attachedinput"></span>`attachedInput` | string | no | The input this machine's cable occupies, as the operator derived it from the EDID: an HDMI sink serves each of its ports an EDID naming that port. It is published so a person can check the derivation against the cabling, and a declared spec.attachedInput wins over it. A DisplayPort cable, and a panel that serves the same address on every port, derive nothing; those are the panels the owner declares for. |
-| <span id="status--currentmode"></span>`currentMode` | string | no | The mode this output drives now, read from the card, absent while it drives nothing. |
+| <span id="status--mode"></span>`mode` | [object](#statusmode) | no | The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows. |
 | <span id="status--modes"></span>`modes` | []string | no | Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels. |
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. |
+
+### status.mode
+
+The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusmode--kernel"></span>`kernel` | string | no | The mode the card reports this connector is synced to, absent while it drives nothing. |
+| <span id="statusmode--weston"></span>`weston` | string | no | The mode the compositor reports it serves canvases at, from its own wl_output events, absent while the operator holds no connection to a compositor. |
 
 ### status.capabilities.*
 
@@ -178,6 +187,21 @@ claim holds the screen. A claim's own `mode` parameter wins for the
 claim's lifetime, a `spec.mode` edit during a claim waits for the
 claim to end, and the unprepare that frees the screen restores the
 declaration promptly.
+
+## The two values of the mode
+
+`status.mode` reports the mode twice, because two parties each
+report one and they can disagree. `kernel` is the mode the graphics
+card is synced to on the connector. `weston` is the mode the
+compositor lays canvases out at, read from the compositor's own
+`wl_output` events over a standing connection the operator holds.
+A client draws at the second one. When the two values differ, the
+clients on that screen are drawn at the wrong size, and the
+operator restarts the compositor to correct it once the screens are
+free. `weston` is absent while the operator holds no connection to
+a compositor, and `kernel` is absent while the connector drives
+nothing. `kubectl get displays` shows the two as the `MODE` and
+`CANVAS` columns.
 
 ## The attached input
 

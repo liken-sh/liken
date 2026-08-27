@@ -362,7 +362,7 @@ func writeModeRecord(path string, record map[string]string) error {
 // One claim at a time holds this. The record is one file for
 // every connector, and two prepares that rewrote it at once would
 // restart the compositor twice for one config.
-func (p *draPlugin) applyMode(ctx context.Context, output Output, mode, socketPath string) error {
+func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) error {
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()
 
@@ -403,6 +403,12 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode, socketPa
 		return err
 	}
 
+	// The connection standing now, read before the restart ends
+	// it. The readback below takes no answer from this connection,
+	// because this compositor still serves the mode the claim
+	// replaced.
+	before := p.compositorOutputs().session
+
 	// The blast. The kubelet restarts the container, the new
 	// compositor parses the rewritten config, and every client on every
 	// output of this card loses its connection. That is the accepted
@@ -414,7 +420,7 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode, socketPa
 		p.restarted = map[string]string{}
 	}
 	p.restarted[output.Connector] = mode
-	if err := p.awaitMode(ctx, output.Connector, mode, socketPath); err != nil {
+	if err := p.awaitMode(ctx, output.Connector, mode, before); err != nil {
 		return err
 	}
 	p.republishSlice()
@@ -451,24 +457,33 @@ func (p *draPlugin) rewriteConfig(record map[string]string) error {
 	return nil
 }
 
-// AwaitMode waits for the compositor to answer again and for
-// the card to report the requested mode.
+// AwaitMode waits for the compositor that started after the
+// restart to serve the requested mode.
 //
-// Both halves are the delivery. The socket is what a consumer
-// connects to, and the mode is what the claim asked for, so a wait
-// that ended on either alone would start a client against a screen
-// that is not ready or not the mode it stated.
-func (p *draPlugin) awaitMode(ctx context.Context, connector, mode, socketPath string) error {
+// The compositor is the source, not the card. The kernel
+// syncing a mode on a connector and weston serving canvases at that
+// mode are two different facts, and a client draws at the second
+// one. The compositor's own wl_output events carry that second fact.
+//
+// The wait requires a connection newer than the one the
+// restart ended, because the compositor on its way out still reports
+// the mode the claim replaced. A compositor with a standing
+// connection is also a compositor a consumer can connect to, so the
+// socket needs no separate check.
+func (p *draPlugin) awaitMode(ctx context.Context, connector, mode string, before uint64) error {
 	deadline := time.Now().Add(p.switchTimeout)
 	for {
-		if compositorServing(socketPath) {
-			current, err := p.currentModes()
-			if err == nil && modeMatches(mode, current[connector]) {
-				return nil
-			}
+		served := p.compositorOutputs()
+		if served.session > before && modeMatches(mode, served.modes[connector]) {
+			return nil
 		}
 		if !time.Now().Before(deadline) {
-			return fmt.Errorf("%s did not report the mode %s within %s", connector, mode, p.switchTimeout)
+			// The failure names the connector, the mode the
+			// claim stated, the budget it had, and the mode the
+			// compositor serves instead, because a person reads
+			// this line to learn which of the two the screen runs.
+			return fmt.Errorf("%s did not report the mode %s within %s; it reports %s",
+				connector, mode, p.switchTimeout, reportedMode(served.modes[connector]))
 		}
 		select {
 		case <-ctx.Done():
@@ -476,6 +491,25 @@ func (p *draPlugin) awaitMode(ctx context.Context, connector, mode, socketPath s
 		case <-time.After(p.switchInterval):
 		}
 	}
+}
+
+// What a failure states for a connector the compositor named
+// no mode for, which is a compositor that never came back or an
+// output it never re-created.
+func reportedMode(mode string) string {
+	if mode == "" {
+		return "no mode"
+	}
+	return mode
+}
+
+// What the compositor reports it serves, and nothing at all
+// when this operator holds no connection to one.
+func (p *draPlugin) compositorOutputs() servedOutputs {
+	if p.served == nil {
+		return servedOutputs{}
+	}
+	return p.served()
 }
 
 // ReleaseModes takes the connectors of one ended claim out of

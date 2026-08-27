@@ -11,7 +11,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"reflect"
 	"slices"
@@ -72,13 +71,20 @@ type displayControl struct {
 	// them, and a nil seam does nothing.
 	setMode func(ctx context.Context, output Output, mode string) error
 	restart func() error
-	// What each connector carried on the pass before, which is
-	// how an output that was re-created is told from one that never
-	// moved, and when the set last changed. The debt an output that
-	// came back raises stands until the restart that pays it.
-	seen     map[string]string
-	settled  time.Time
-	owed     bool
+	// What the compositor reports it serves on each connector,
+	// which is the mode status reports beside the kernel's. It is nil
+	// until the operator wires the standing Wayland connection, and a
+	// nil seam reports no mode at all.
+	served func() servedOutputs
+	// What the compositor's own output events left behind: when
+	// the last one arrived, and whether an output was re-created. The
+	// debt stands until the restart that pays it. The Wayland watch
+	// reports from its own goroutine, so both fields take the lock
+	// above.
+	settled time.Time
+	owed    bool
+	// Whether the standing debt has printed its line already.
+	// The pass is the only reader and writer, so it takes no lock.
 	deferred bool
 }
 
@@ -195,7 +201,7 @@ func (d *displayControl) pass(ctx context.Context) error {
 	// and its status written. A compositor restart ends the Wayland
 	// clients and touches no DDC wire, so it can follow the panels'
 	// own work without disturbing it.
-	d.healCanvas(outputs, held)
+	d.healCanvas(held)
 	return errors.Join(failures...)
 }
 
@@ -205,26 +211,26 @@ func (d *displayControl) pass(ctx context.Context) error {
 // problem records, so the heal waits for the flap to end.
 const canvasSettleWindow = 5 * time.Second
 
-// The canvas heal. An output that is present now and was absent
-// or another monitor on the pass before was re-created, and Weston
-// never gives the clients on the surviving screens a corrected size.
-// A fresh compositor places every surface at its own output's size,
-// so the restart is the repair.
+// The canvas heal. The compositor's own registry reports when
+// an output was destroyed and re-created, and weston never gives the
+// clients on the surviving screens a corrected size. A fresh
+// compositor places every surface at its own output's size, so the
+// restart is the repair.
 //
 // it waits on three things: a claim that holds any screen on
 // this card, an output set that is still moving, and a panel whose
 // restore is still writing. The first is the workload's screen, the
 // second is the hazard window upstream documents, and the third is a
 // panel on its way back that has enough to do.
-func (d *displayControl) healCanvas(outputs []Output, held map[string]bool) {
-	d.track(outputs)
-	if !d.owed || d.restart == nil {
+func (d *displayControl) healCanvas(held map[string]bool) {
+	owed, settled := d.canvasDebt()
+	if !owed || d.restart == nil {
 		return
 	}
 	switch {
 	case len(held) > 0:
 		d.deferHeal("a prepared claim holds a screen on this card")
-	case d.now().Before(d.settled.Add(canvasSettleWindow)):
+	case d.now().Before(settled.Add(canvasSettleWindow)):
 		d.deferHeal("the outputs are still settling")
 	case d.restoresRunning():
 		d.deferHeal("a panel is still being restored")
@@ -233,47 +239,36 @@ func (d *displayControl) healCanvas(outputs []Output, held map[string]bool) {
 			fmt.Fprintf(os.Stderr, "restarting the compositor to heal the canvas: %v\n", err)
 			return
 		}
-		d.owed, d.deferred = false, false
+		d.canvasHealed()
+		d.deferred = false
 		fmt.Printf("an output was re-created: the compositor restarts and every canvas is laid out again\n")
 	}
 }
 
-// What each connector carried, compared against the pass
-// before. An output that is present now and was not the same then owes
-// a restart, and the whole set holding still is what starts the
-// settling window. The first pass of an operator learns the set and
-// owes nothing: a compositor that just started has every canvas right.
-func (d *displayControl) track(outputs []Output) {
-	identity := map[string]string{}
-	for _, output := range outputs {
-		identity[output.Connector] = outputIdentity(output)
-	}
-	if d.seen == nil {
-		d.seen, d.settled = identity, d.now()
-		return
-	}
-	if maps.Equal(identity, d.seen) {
-		return
-	}
-	for connector, monitor := range identity {
-		if monitor != "" && monitor != d.seen[connector] {
-			d.owed = true
-		}
-	}
-	d.seen, d.settled = identity, d.now()
+// What the compositor reported. Every output global that
+// arrives or leaves starts the settling window again, and an output
+// the watch saw re-created owes the restart. The operator's own
+// restarts end the watch's connection and start a new baseline, so
+// they report nothing here.
+func (d *displayControl) outputsMoved(recreated bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.settled = d.now()
+	d.owed = d.owed || recreated
 }
 
-// What a connector carries, as one string: the monitor's own
-// identity when it names one, the bare fact of a monitor when the EDID
-// names nothing, and nothing at all for a dark connector.
-func outputIdentity(output Output) string {
-	if !output.Connected {
-		return ""
-	}
-	if monitor := monitorID(output.Monitor); monitor != "" {
-		return monitor
-	}
-	return output.Connector + " carries a monitor"
+// The debt and the settling window, read together under one
+// lock so the heal decides on one consistent pair.
+func (d *displayControl) canvasDebt() (bool, time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.owed, d.settled
+}
+
+func (d *displayControl) canvasHealed() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.owed = false
 }
 
 // One line per debt, whatever holds it up. A line on every pass
@@ -866,7 +861,7 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	status.WidthMillimeters = output.Monitor.WidthMillimeters
 	status.HeightMillimeters = output.Monitor.HeightMillimeters
 	status.AttachedInput = derivedInput(output, facts)
-	status.CurrentMode = output.CurrentMode
+	status.Mode = displayMode(output.CurrentMode, d.servedMode(output.Connector))
 	status.Modes = output.OfferedModes
 	status.Capabilities = facts.Capabilities
 	if observed := observedValues(facts.Observed); observed != nil {
@@ -876,6 +871,28 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 		"PanelAttached", output.Connector+" carries this panel"))
 	status.Conditions = setCondition(status.Conditions, d.responsive(facts))
 	return status
+}
+
+// The mode block of one output, and nothing at all when
+// neither side names a mode: a connector that drives nothing, with
+// no compositor serving it.
+func displayMode(kernel, weston string) *DisplayMode {
+	if kernel == "" && weston == "" {
+		return nil
+	}
+	return &DisplayMode{Kernel: kernel, Weston: weston}
+}
+
+// What the compositor reports it serves on one connector, and
+// nothing at all while this operator holds no connection to one. A
+// restart clears every answer, so the field goes absent until the
+// compositor that comes back states its outputs again. An absent
+// value is honest where a carried-over one would be a guess.
+func (d *displayControl) servedMode(connector string) string {
+	if d.served == nil {
+		return ""
+	}
+	return d.served().modes[connector]
 }
 
 // The panel's answer to the protocol itself. The message names

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -88,6 +89,10 @@ type displayFixture struct {
 	held     map[string]bool
 	modeSets []string
 	restarts int
+	// What the compositor reports it serves on each connector,
+	// which is the other half of the mode status reports. It is empty
+	// on a bench with no compositor answering.
+	serving map[string]string
 }
 
 func (f *displayFixture) clock() time.Time { return f.at }
@@ -115,6 +120,7 @@ func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
 		journal:  &journal{},
 		present:  map[string]bool{},
 		waiting:  make(chan struct{}, 8),
+		serving:  map[string]string{},
 	}
 	panels := map[string]*fakeMonitor{}
 	fixture.current = map[string]string{}
@@ -134,6 +140,12 @@ func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
 	// that rate-limits a second ask is measured on it.
 	controls.now = fixture.clock
 	fixture.control.prepared = func() (map[string]bool, error) { return fixture.held, nil }
+	// What the compositor reports, which the standing Wayland
+	// connection carries on the machine. A bench states one session,
+	// because nothing here restarts a compositor.
+	fixture.control.served = func() servedOutputs {
+		return servedOutputs{session: 1, modes: maps.Clone(fixture.serving)}
+	}
 	// The mode seam stands for the prepare path's whole switch,
 	// so the fixture records what was ordered and moves the screen to
 	// it, the way the compositor's restart does.
@@ -1195,8 +1207,65 @@ func TestStatusReportsTheScreen(t *testing.T) {
 		t.Errorf("size = %dx%dmm, want %dx%dmm", status.WidthMillimeters, status.HeightMillimeters,
 			screen.Monitor.WidthMillimeters, screen.Monitor.HeightMillimeters)
 	}
-	if status.CurrentMode != "3840x1600@60" {
-		t.Errorf("currentMode = %q, want the mode the card drives", status.CurrentMode)
+	if status.Mode == nil || status.Mode.Kernel != "3840x1600@60" {
+		t.Errorf("mode = %+v, want the kernel at the mode the card drives", status.Mode)
+	}
+}
+
+// The card syncing a mode on a connector and the compositor
+// serving canvases at that mode are two facts. A client draws at the
+// second one, so the Display reports both and a person reads the
+// gap.
+func TestStatusReportsBothWitnessesOfTheMode(t *testing.T) {
+	screen := labScreen(t, "HDMI-A-1")
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   screen.Monitor,
+		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Modes:     offeredModes(screen),
+		Current:   "1920x1080@60",
+	})
+	fixture.serving["HDMI-A-1"] = "3840x1600@60"
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	mode := fixture.displayNamed(monitorID(screen.Monitor)).Status.Mode
+	if mode == nil {
+		t.Fatal("status reports no mode at all")
+	}
+	if mode.Kernel != "1920x1080@60" {
+		t.Errorf("mode.kernel = %q, want the mode the card is synced to", mode.Kernel)
+	}
+	if mode.Weston != "3840x1600@60" {
+		t.Errorf("mode.weston = %q, want the mode the compositor serves", mode.Weston)
+	}
+}
+
+// A compositor the operator holds no connection to states
+// nothing, and an absent value is honest where a carried-over one
+// would be a guess.
+func TestStatusReportsNoCanvasWhileNoCompositorAnswers(t *testing.T) {
+	screen := labScreen(t, "HDMI-A-1")
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   screen.Monitor,
+		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Modes:     offeredModes(screen),
+		Current:   "3840x1600@60",
+	})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	mode := fixture.displayNamed(monitorID(screen.Monitor)).Status.Mode
+	if mode == nil || mode.Kernel != "3840x1600@60" {
+		t.Fatalf("mode = %+v, want the kernel at the mode the card drives", mode)
+	}
+	if mode.Weston != "" {
+		t.Errorf("mode.weston = %q, want nothing while no compositor answers", mode.Weston)
 	}
 }
 
@@ -1348,13 +1417,15 @@ func TestTheRestingModeReturnsWhenTheClaimEnds(t *testing.T) {
 // re-created leaves the clients on the surviving screens with a canvas
 // sized for the output that went. A fresh compositor lays every canvas
 // out again.
-func (f *displayFixture) flap(t *testing.T, connector string) {
+//
+// The compositor reports the flap on the operator's standing
+// Wayland connection, so the fixture reports it the same way.
+// Nothing about the connectors sysfs lists has to change: the
+// monitor that slept and woke is the same monitor on the same
+// connector.
+func (f *displayFixture) flap(t *testing.T) {
 	t.Helper()
-	f.present[connector] = false
-	if err := f.pass(); err != nil {
-		t.Fatal(err)
-	}
-	f.present[connector] = true
+	f.control.outputsMoved(true)
 	if err := f.pass(); err != nil {
 		t.Fatal(err)
 	}
@@ -1366,7 +1437,7 @@ func TestTheHealRestartsTheCompositorAfterAFlap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fixture.flap(t, "HDMI-A-1")
+	fixture.flap(t)
 	if fixture.restarts != 0 {
 		t.Fatalf("the compositor restarted %d times inside the flap", fixture.restarts)
 	}
@@ -1399,7 +1470,7 @@ func TestTheHealWaitsForTheClaimToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fixture.flap(t, "HDMI-A-1")
+	fixture.flap(t)
 	fixture.advance(canvasSettleWindow)
 	if err := fixture.pass(); err != nil {
 		t.Fatal(err)
@@ -1436,6 +1507,36 @@ func TestTheFirstPassOwesNoRestart(t *testing.T) {
 	}
 }
 
+// The connectors sysfs lists state nothing about what the
+// compositor did with them. A monitor that leaves and returns
+// between two passes is a monitor the compositor may never have
+// destroyed an output for, and a monitor that never moved may have
+// had its output re-created under it. The compositor is the only
+// source of the debt.
+func TestOnlyTheCompositorSaysAnOutputWasReCreated(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture.present["HDMI-A-1"] = false
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	fixture.present["HDMI-A-1"] = true
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	fixture.advance(canvasSettleWindow)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.restarts != 0 {
+		t.Errorf("the compositor restarted %d times on a monitor that moved with no word from the compositor", fixture.restarts)
+	}
+}
+
 // The two repairs are on two wires, the compositor's and the
 // panel's, and they do not fight. The heal still waits for a restore:
 // a panel on its way back from an override has enough to do, and the
@@ -1451,7 +1552,7 @@ func TestTheHealWaitsForARestore(t *testing.T) {
 	}
 	<-fixture.waiting
 
-	fixture.flap(t, "HDMI-A-1")
+	fixture.flap(t)
 	fixture.advance(canvasSettleWindow)
 	if err := fixture.pass(); err != nil {
 		t.Fatal(err)

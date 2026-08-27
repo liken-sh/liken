@@ -102,21 +102,37 @@ type DisplayStatus struct {
 	// The panel's physical size, as the monitor states it.
 	WidthMillimeters  int `json:"widthMillimeters,omitempty"`
 	HeightMillimeters int `json:"heightMillimeters,omitempty"`
-	// The mode the output drives now, absent while it drives
-	// nothing, and every mode the card offers for this connector.
-	// Status has no attribute-length limit, so this list is whole
-	// where the slice's is cut to fit.
+	// The mode the output runs, as the card and the compositor
+	// each report it, and every mode the card offers for this
+	// connector. Status has no attribute-length limit, so this list
+	// is whole where the slice's is cut to fit.
 	// The input this machine's cable occupies, as the operator
 	// derived it from the EDID's physical address. A declaration in
 	// spec.attachedInput wins over it, and this field always reports
 	// what was derived, so a person can check it against the cabling.
 	AttachedInput string                     `json:"attachedInput,omitempty"`
-	CurrentMode   string                     `json:"currentMode,omitempty"`
+	Mode          *DisplayMode               `json:"mode,omitempty"`
 	Modes         []string                   `json:"modes,omitempty"`
 	Capabilities  map[string]panelCapability `json:"capabilities,omitempty"`
 	Observed      *DisplayValues             `json:"observed,omitempty"`
 	Captured      *DisplayValues             `json:"captured,omitempty"`
 	Conditions    []DisplayCondition         `json:"conditions,omitempty"`
+}
+
+// The mode this output runs, from the two parties that each
+// report one. Kernel is the mode the card's connector is synced to.
+// Weston is the mode the compositor serves canvases at, from its own
+// wl_output events.
+//
+// They are two facts, not one fact read twice. A client draws
+// at the mode weston serves, whatever the connector is synced to,
+// and a gap between the two values is the canvas defect the operator
+// heals. Weston is absent while this operator holds no connection to
+// a compositor, because an absent value is honest and a carried-over
+// one is a guess.
+type DisplayMode struct {
+	Kernel string `json:"kernel,omitempty"`
+	Weston string `json:"weston,omitempty"`
 }
 
 // One value of each control, in the panel's own numbers for the

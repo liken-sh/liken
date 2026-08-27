@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,6 +68,9 @@ type fakeCompositor struct {
 	republishes int
 	declines    bool
 	readErr     error
+	// Which compositor is answering. Every restart is a new one,
+	// and a readback takes no answer from the compositor it ended.
+	session uint64
 }
 
 // modes is the GETCRTC readback: what each connector runs right now.
@@ -107,11 +111,24 @@ func (f *fakeCompositor) applied(connector, mode string) string {
 	return mode
 }
 
+// What the compositor itself reports about the outputs it
+// serves, which is what a mode readback reads. The fixture serves
+// what the card runs, because one compositor drives one card and the
+// modes it serves are the modes the card is set to.
+func (f *fakeCompositor) serving() servedOutputs {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return servedOutputs{session: f.session, modes: maps.Clone(f.current)}
+}
+
 // end is the SIGTERM and the kubelet's restart in one step.
 func (f *fakeCompositor) end() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.kills++
+	// The compositor that comes back is a new one whether or
+	// not it takes the mode the record states.
+	f.session++
 	if f.declines {
 		return nil
 	}
@@ -185,6 +202,7 @@ func labPluginWithConfig(t *testing.T, results []AllocatedDevice, config string)
 		currentModes:   compositor.modes,
 		connectorModes: compositor.connectors,
 		endCompositor:  compositor.end,
+		served:         compositor.serving,
 		republish:      compositor.republish,
 		switchTimeout:  200 * time.Millisecond,
 		switchInterval: time.Millisecond,

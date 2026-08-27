@@ -43,6 +43,21 @@ claim's lifetime, a `spec.mode` edit during a claim waits for the
 claim to end, and the unprepare that frees the screen restores the
 declaration promptly.
 
+## The two values of the mode
+
+`status.mode` reports the mode twice, because two parties each
+report one and they can disagree. `kernel` is the mode the graphics
+card is synced to on the connector. `weston` is the mode the
+compositor lays canvases out at, read from the compositor's own
+`wl_output` events over a standing connection the operator holds.
+A client draws at the second one. When the two values differ, the
+clients on that screen are drawn at the wrong size, and the
+operator restarts the compositor to correct it once the screens are
+free. `weston` is absent while the operator holds no connection to
+a compositor, and `kernel` is absent while the connector drives
+nothing. `kubectl get displays` shows the two as the `MODE` and
+`CANVAS` columns.
+
 ## The attached input
 
 A monitor with several inputs dims all of them at once, because
