@@ -1,0 +1,15 @@
+# This is the coverage gate, enforced in CI (see
+# .github/workflows/ci.yaml).
+#
+# The thresholds only rise over time. Each one is set just under what
+# the tests measure today. So a change that loses coverage fails the
+# check, and a change that gains coverage should raise the number
+# here to keep the gain.
+#
+# The gate measures on a pinned toolchain. The CI step says why.
+
+profile: coverage.out
+
+threshold:
+  # One package, so the total is the whole gate.
+  total: 74

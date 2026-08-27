@@ -15,7 +15,7 @@
 # pattern puts the compositor in a separate repository: a machine with
 # no screens does not download weston.
 
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.
