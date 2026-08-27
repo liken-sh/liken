@@ -35,7 +35,7 @@ material:
   [498](https://gitlab.freedesktop.org/wayland/weston/-/issues/498),
   [1023](https://gitlab.freedesktop.org/wayland/weston/-/issues/1023).
 
-[Plan 10](../10-the-compositor-heals-the-canvas.md) works around
+[Plan 10](../completed/10-the-compositor-heals-the-canvas.md) works around
 the defect with a compositor restart when the screens are free. The
 answer this problem waits for is upstream: kiosk-shell clearing
 `appid_output_assigned` when a surface's output is destroyed, and

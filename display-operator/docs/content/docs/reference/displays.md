@@ -168,6 +168,31 @@ block. That failure is visible: `kubectl get display` shows the
 standing override, and the block's field manager names the writer
 that owes the lift.
 
+## The resting mode
+
+`spec.mode` follows the resting pattern with one difference in
+weight: a mode lands through the compositor, and applying it
+restarts the compositor once, which ends every Wayland client on
+the card. So the operator applies a resting mode only while no
+claim holds the screen. A claim's own `mode` parameter wins for the
+claim's lifetime, a `spec.mode` edit during a claim waits for the
+claim to end, and the unprepare that frees the screen restores the
+declaration promptly.
+
+## The attached input
+
+A monitor with several inputs dims all of them at once, because
+brightness and power are panel-global. So the operator obeys a
+darkening override only after a fresh read of the panel's shown
+input answers and matches this machine's own input; a read that
+fails, or answers another input, leaves the override standing
+unactuated until the panel returns. The machine's own input usually
+needs no configuration: an HDMI sink serves each of its ports an
+EDID that names the port, and the operator publishes what it
+derived as `status.attachedInput`. Declare `spec.attachedInput`
+only where the EDID cannot say it, a DisplayPort cable, or a panel
+that serves the same address on every port.
+
 ## Observed values
 
 `status.observed` is what the operator last read or wrote. The

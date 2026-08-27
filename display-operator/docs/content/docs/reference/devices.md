@@ -185,7 +185,9 @@ and never against this attribute, so a mode the attribute's
 name the connector does not offer fails the prepare, and the
 failure names the whole list. A refresh the connector does not
 offer for that name also fails the prepare, and the failure names
-the refreshes that exist.
+the refreshes that exist. The whole list, with every refresh,
+is on the panel's [`Display`](/docs/reference/displays/) under
+`status.modes`, which has no length limit.
 
 A `DeviceClass` can carry the same block as cluster policy. The
 scheduler resolves the class's config and the claim's into one list

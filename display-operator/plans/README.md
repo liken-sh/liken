@@ -77,33 +77,59 @@ say why it is built the way it is.
   an input switch fires no event. The claim parameters, the power
   record file, and the `-control` device retire only after plan 18
   deploys everywhere that holds a control claim.
-* [09, The Display reports the screen](09-the-display-reports-the-screen.md).
-  Built, and not yet drilled. `status` gains `currentMode`, the
+* [09, The Display reports the screen](completed/09-the-display-reports-the-screen.md).
+  Built, and drilled on liken-1 on 2026-08-27 in releases 2026.08.27-006
+  and -007. `status` gains `currentMode`, the
   kernel's whole mode list where the slice attribute is cut to the
   API's value limit, the EDID identity, and the physical size.
   `spec.mode` declares the mode the screen rests at: a claim's own
   mode wins for its lifetime, and the unprepare that frees the screen
   restores the declaration, waking the controller so the restore is
-  prompt.
-* [10, The compositor heals the canvas](10-the-compositor-heals-the-canvas.md).
-  Built, and not yet drilled. kiosk-shell orphans a surface when its
+  prompt. Drilled end to end: both panels derived their identity and
+  full lists, a declared 1280x720@60 landed in 5 seconds and the
+  1080 declaration returned in 15, and a film's claim held 720p for
+  its run with the resting mode read back under a second after the
+  delete. The same evening the panel refused to sync 720p it had
+  accepted that morning, which became the open problem
+  [a stuck mode prepare restarts the compositor without bound](open-problems/a-stuck-mode-prepare-restarts-the-compositor-without-bound.md).
+* [10, The compositor heals the canvas](completed/10-the-compositor-heals-the-canvas.md).
+  Built 2026-08-27, and drilled to a recovery by a rougher road.
+  kiosk-shell orphans a surface when its
   output is destroyed and never re-sizes it, unfixed upstream through
   16.0.0, so a flap left the lab's portable panel cropped to an
   ultrawide canvas. The operator now restarts the compositor when an
   output is re-created, the outputs have settled for 5 seconds, and
   no claim holds a screen; the media layer's window watchdog carries
-  every idle client through. The open problem
+  every idle client through. The drill forced a disconnect through
+  the kernel's debugfs connector force, and Weston segfaulted on the
+  flap, exit 139, the crash upstream documents unreleased guards
+  for, before the heal could act: the kubelet's supervision and the
+  media watchdog recovered every client with correct canvases and no
+  hands. So hard flaps are covered by crash-plus-supervision on this
+  Weston, and the heal is the designed path for the gentle
+  re-creations that mis-size surfaces without a crash, the case the
+  morning's cropped canvas proved exists; it is unit-proven and
+  waits for one to fire live. The open problem
   [kiosk-shell loses a surface's output](open-problems/kiosk-shell-loses-a-surfaces-output.md)
   records the upstream contribution this works around.
-* [11, Darkening respects the attached input](11-darkening-respects-the-attached-input.md).
-  Built, and not yet drilled. A shared monitor dims every input at
+* [11, Darkening respects the attached input](completed/11-darkening-respects-the-attached-input.md).
+  Built, and drilled on liken-1 on 2026-08-27 in release
+  2026.08.27-007. A shared monitor dims every input at
   once, so a darkening override now waits while the panel shows an
   input other than this machine's own. The machine's input derives
   from the EDID: an HDMI sink serves each port an EDID whose vendor
   block names that port, proven on both lab panels, published as
   `status.attachedInput`; `spec.attachedInput` overrides the
   derivation for DisplayPort cables and panels that serve one address
-  everywhere.
+  everywhere. The first build compared against the last observed
+  input and dimmed the ultrawide over the other machine's picture,
+  because that panel answers the input query with an invalid reply
+  while it shows another source and a failed poll keeps the last
+  value; -007 reads the shown input fresh at decision time, and a
+  read that fails defers. Drilled eyes-on: the override stood
+  unactuated through a working session on the other input, and the
+  deferred blank landed capture-first within a poll window of the
+  switch back.
 
 ## Open problems
 
@@ -125,3 +151,7 @@ decided yet what work they become.
   DDC/CI runs to the panel with no compositor, but `prepareClaim` and a
   second gate hold every claim on Weston's socket, so a control-only pod
   waits for a compositor it does not need.
+* [A stuck mode prepare restarts the compositor without bound](open-problems/a-stuck-mode-prepare-restarts-the-compositor-without-bound.md).
+  A claim stating a mode the panel will not sync loops the kubelet's
+  prepare retries through compositor restarts until the whole card
+  taints and the compositor sits in restart backoff.
