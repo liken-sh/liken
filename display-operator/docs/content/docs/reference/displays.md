@@ -61,9 +61,11 @@ The settings the panel rests at, and the override above them. Every field is opt
 | <span id="spec--contrast"></span>`contrast` | integer | no | The panel's own contrast number. |
 | <span id="spec--sharpness"></span>`sharpness` | integer | no | The panel's own sharpness number. |
 | <span id="spec--colorpreset"></span>`colorPreset` | string | no | One of status.capabilities.colorPreset.values. |
-| <span id="spec--input"></span>`input` | string | no | One of status.capabilities.input.values. |
+| <span id="spec--input"></span>`input` | string | no | One of status.capabilities.input.values: the resting declaration that forces the panel to show that input. On a shared panel it writes the panel back to this machine within a poll window of every switch away, so declare it only on a panel that should always show this machine. |
+| <span id="spec--attachedinput"></span>`attachedInput` | string | no | The panel input this machine's cable occupies, one of status.capabilities.input.values. A declared fact, never written to the panel: it defers a darkening override while the panel shows another input, because brightness and power are panel-global. Declare it only where the EDID says nothing; status.attachedInput carries what the operator derived, and this declaration wins over it. Beside spec.input on a shared panel, the resting write would fight every switch away. |
 | <span id="spec--audiovolume"></span>`audioVolume` | integer | no | The panel's own volume number. |
 | <span id="spec--audiomute"></span>`audioMute` | boolean | no | Whether the panel's own speakers are muted. |
+| <span id="spec--mode"></span>`mode` | string | no | The mode the screen rests at, one of status.modes, in the 1920x1080@60 form. A claim's own mode parameter wins while the claim holds the screen, and a change here waits for the claim to end. Applying it restarts the compositor once, which ends every Wayland client on this card. |
 | <span id="spec--override"></span>`override` | [object](#specoverride) | no | The temporary layer. A writer adds the block, the operator saves what stood and obeys it, and the writer deletes the block. The operator then restores the declared resting value, or the saved one where the spec declares none. |
 
 ### spec.override
@@ -83,6 +85,14 @@ What the operator read and what it last wrote. The operator owns every field her
 | --- | --- | --- | --- |
 | <span id="status--node"></span>`node` | string | no | The machine whose graphics card drives this panel. |
 | <span id="status--connector"></span>`connector` | string | no | The connector on that card, in the kernel's own spelling. |
+| <span id="status--manufacturer"></span>`manufacturer` | string | no | The monitor's manufacturer, from its EDID, the same value the device attribute carries. |
+| <span id="status--model"></span>`model` | string | no | The monitor's model name, from its EDID. |
+| <span id="status--serial"></span>`serial` | string | no | The monitor's serial, from its EDID, and absent when the monitor states none. |
+| <span id="status--widthmillimeters"></span>`widthMillimeters` | integer | no | The panel's physical width, as the monitor states it. |
+| <span id="status--heightmillimeters"></span>`heightMillimeters` | integer | no | The panel's physical height, as the monitor states it. |
+| <span id="status--attachedinput"></span>`attachedInput` | string | no | The input this machine's cable occupies, as the operator derived it from the EDID: an HDMI sink serves each of its ports an EDID naming that port. It is published so a person can check the derivation against the cabling, and a declared spec.attachedInput wins over it. A DisplayPort cable, and a panel that serves the same address on every port, derive nothing; those are the panels the owner declares for. |
+| <span id="status--currentmode"></span>`currentMode` | string | no | The mode this output drives now, read from the card, absent while it drives nothing. |
+| <span id="status--modes"></span>`modes` | []string | no | Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels. |
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator. |

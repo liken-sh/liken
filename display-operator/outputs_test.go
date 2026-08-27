@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -196,5 +197,35 @@ func TestCardNodeWithoutADisplayClaim(t *testing.T) {
 	}
 	if len(cards) != 0 {
 		t.Fatalf("cards = %v", cards)
+	}
+}
+
+// The card reports one entry per timing, so a resolution a
+// monitor accepts at one refresh through several timings arrives more
+// than once. The Display publishes each name and refresh once.
+func TestWithOfferedModesCarriesTheCardsWholeList(t *testing.T) {
+	outputs := []Output{
+		{Connector: "HDMI-A-1", Connected: true},
+		{Connector: "DP-1"},
+	}
+	offered := map[string][]drmMode{
+		"HDMI-A-1": {
+			{Name: "3840x1600", Refresh: 60},
+			{Name: "3840x1600", Refresh: 60},
+			{Name: "3840x1600", Refresh: 24},
+			{Name: "1920x1080", Refresh: 60},
+		},
+	}
+
+	carried := withOfferedModes(outputs, offered)
+
+	want := []string{"3840x1600@60", "3840x1600@24", "1920x1080@60"}
+	if !slices.Equal(carried[0].OfferedModes, want) {
+		t.Errorf("modes = %q, want %q", carried[0].OfferedModes, want)
+	}
+	// A connector the card answered nothing for carries no
+	// list, and the resource publishes no field.
+	if carried[1].OfferedModes != nil {
+		t.Errorf("the connector the card skipped carries %q", carried[1].OfferedModes)
 	}
 }

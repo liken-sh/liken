@@ -60,14 +60,27 @@ type DisplayMeta struct {
 // because the absence of a field is what says the operator invents
 // nothing, and zero is a value a panel takes.
 type DisplaySpec struct {
-	Brightness  *int             `json:"brightness,omitempty"`
-	Contrast    *int             `json:"contrast,omitempty"`
-	Sharpness   *int             `json:"sharpness,omitempty"`
-	ColorPreset *string          `json:"colorPreset,omitempty"`
-	Input       *string          `json:"input,omitempty"`
-	AudioVolume *int             `json:"audioVolume,omitempty"`
-	AudioMute   *bool            `json:"audioMute,omitempty"`
-	Override    *DisplayOverride `json:"override,omitempty"`
+	Brightness  *int    `json:"brightness,omitempty"`
+	Contrast    *int    `json:"contrast,omitempty"`
+	Sharpness   *int    `json:"sharpness,omitempty"`
+	ColorPreset *string `json:"colorPreset,omitempty"`
+	Input       *string `json:"input,omitempty"`
+	AudioVolume *int    `json:"audioVolume,omitempty"`
+	AudioMute   *bool   `json:"audioMute,omitempty"`
+	// The mode the screen rests at, one string in the
+	// status.modes form. It is not an override: a temporary mode is
+	// what a claim's own mode parameter is. The operator applies it
+	// only while no claim holds the screen, because a mode lands
+	// through the compositor and a mode change restarts it.
+	Mode *string `json:"mode,omitempty"`
+	// The panel input this machine's cable occupies, one of
+	// status.capabilities.input.values. It is a declared fact and not
+	// a request: the operator never writes it to the panel. What it
+	// governs is the darkening override, which waits while the panel
+	// shows another input, because brightness and power are
+	// panel-global and darkening would dim somebody else's picture.
+	AttachedInput *string          `json:"attachedInput,omitempty"`
+	Override      *DisplayOverride `json:"override,omitempty"`
 }
 
 // The temporary layer above the resting one, and the two states
@@ -78,12 +91,32 @@ type DisplayOverride struct {
 }
 
 type DisplayStatus struct {
-	Node         string                     `json:"node,omitempty"`
-	Connector    string                     `json:"connector,omitempty"`
-	Capabilities map[string]panelCapability `json:"capabilities,omitempty"`
-	Observed     *DisplayValues             `json:"observed,omitempty"`
-	Captured     *DisplayValues             `json:"captured,omitempty"`
-	Conditions   []DisplayCondition         `json:"conditions,omitempty"`
+	Node      string `json:"node,omitempty"`
+	Connector string `json:"connector,omitempty"`
+	// The monitor's own identity, the same three facts the
+	// slice publishes as attributes, so a person reading the resource
+	// knows which screen it is without crossing to the slice.
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Serial       string `json:"serial,omitempty"`
+	// The panel's physical size, as the monitor states it.
+	WidthMillimeters  int `json:"widthMillimeters,omitempty"`
+	HeightMillimeters int `json:"heightMillimeters,omitempty"`
+	// The mode the output drives now, absent while it drives
+	// nothing, and every mode the card offers for this connector.
+	// Status has no attribute-length limit, so this list is whole
+	// where the slice's is cut to fit.
+	// The input this machine's cable occupies, as the operator
+	// derived it from the EDID's physical address. A declaration in
+	// spec.attachedInput wins over it, and this field always reports
+	// what was derived, so a person can check it against the cabling.
+	AttachedInput string                     `json:"attachedInput,omitempty"`
+	CurrentMode   string                     `json:"currentMode,omitempty"`
+	Modes         []string                   `json:"modes,omitempty"`
+	Capabilities  map[string]panelCapability `json:"capabilities,omitempty"`
+	Observed      *DisplayValues             `json:"observed,omitempty"`
+	Captured      *DisplayValues             `json:"captured,omitempty"`
+	Conditions    []DisplayCondition         `json:"conditions,omitempty"`
 }
 
 // One value of each control, in the panel's own numbers for the

@@ -50,6 +50,11 @@ type wiredPanel struct {
 	Connector string
 	Monitor   EDID
 	Panel     *fakeMonitor
+	// What the card says about this connector: the modes it
+	// offers, in the form spec.mode states, and the mode it drives
+	// when the fixture starts.
+	Modes   []string
+	Current string
 }
 
 type displayFixture struct {
@@ -76,6 +81,13 @@ type displayFixture struct {
 	stall bool
 	// The clock both the controller and the probe cache read.
 	at time.Time
+	// The screens' side of the card: what each connector drives
+	// now, what the prepared claims hold, the mode writes the
+	// controller ordered, and the compositor restarts it ordered.
+	current  map[string]string
+	held     map[string]bool
+	modeSets []string
+	restarts int
 }
 
 func (f *displayFixture) clock() time.Time { return f.at }
@@ -105,10 +117,12 @@ func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
 		waiting:  make(chan struct{}, 8),
 	}
 	panels := map[string]*fakeMonitor{}
+	fixture.current = map[string]string{}
 	for _, one := range wired {
 		one.Panel.journal = fixture.journal
 		panels[one.Connector] = one.Panel
 		fixture.present[one.Connector] = true
+		fixture.current[one.Connector] = one.Current
 	}
 	controls, bench := benchPanels(t, t.TempDir(), "card1", panels)
 	fixture.bench = bench
@@ -119,6 +133,19 @@ func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
 	// The probe cache reads the same clock, because the window
 	// that rate-limits a second ask is measured on it.
 	controls.now = fixture.clock
+	fixture.control.prepared = func() (map[string]bool, error) { return fixture.held, nil }
+	// The mode seam stands for the prepare path's whole switch,
+	// so the fixture records what was ordered and moves the screen to
+	// it, the way the compositor's restart does.
+	fixture.control.setMode = func(_ context.Context, output Output, mode string) error {
+		fixture.modeSets = append(fixture.modeSets, output.Connector+"="+mode)
+		fixture.current[output.Connector] = mode
+		return nil
+	}
+	fixture.control.restart = func() error {
+		fixture.restarts++
+		return nil
+	}
 	fixture.control.wait = func(ctx context.Context, _ time.Duration) error {
 		fixture.waits.Add(1)
 		select {
@@ -139,6 +166,8 @@ func (f *displayFixture) outputs() []Output {
 	for _, one := range f.wired {
 		output := litOutput(one.Connector, one.Monitor)
 		output.Connected = f.present[one.Connector]
+		output.OfferedModes = one.Modes
+		output.CurrentMode = f.current[one.Connector]
 		outputs = append(outputs, output)
 	}
 	return outputs
@@ -281,6 +310,17 @@ func (f *displayFixture) display() *Display {
 
 func (f *displayFixture) lines() []string {
 	return f.journal.read()
+}
+
+// One resource by name, for a bench with more than one panel
+// on the card.
+func (f *displayFixture) displayNamed(name string) *Display {
+	f.t.Helper()
+	display, held := f.displays[name]
+	if !held {
+		f.t.Fatalf("the operator published no Display named %s; it published %v", name, f.names())
+	}
+	return display
 }
 
 func (f *displayFixture) names() []string {
@@ -1100,5 +1140,683 @@ func TestTheWatchWakesOnEveryEvent(t *testing.T) {
 	}
 	if wakes != events {
 		t.Errorf("the watch woke the loop %d times, want %d", wakes, events)
+	}
+}
+
+// The monitor of the lab drill as its own EDID states it, read
+// from the fixture the slice tests read, so the identity and the size
+// this resource publishes are proven against a real monitor's bytes
+// and not against a struct written by hand.
+func labScreen(t *testing.T, connector string) Output {
+	t.Helper()
+	for _, output := range discoverOutputs(labSysfs(t), "card1") {
+		if output.Connector == connector {
+			return output
+		}
+	}
+	t.Fatalf("the lab fixture wires no %s", connector)
+	return Output{}
+}
+
+// Every mode the fixture's connector offers, in the form the
+// card reports them, one refresh each.
+func offeredModes(output Output) []string {
+	var modes []string
+	for _, name := range output.Modes {
+		modes = append(modes, name+"@60")
+	}
+	return modes
+}
+
+func TestStatusReportsTheScreen(t *testing.T) {
+	screen := labScreen(t, "HDMI-A-1")
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   screen.Monitor,
+		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Modes:     offeredModes(screen),
+		Current:   "3840x1600@60",
+	})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	status := fixture.displayNamed(monitorID(screen.Monitor)).Status
+	if status.Manufacturer != screen.Monitor.Manufacturer || status.Model != screen.Monitor.ModelName {
+		t.Errorf("status names %s %s, want %s %s",
+			status.Manufacturer, status.Model, screen.Monitor.Manufacturer, screen.Monitor.ModelName)
+	}
+	if status.Serial != screen.Monitor.Serial {
+		t.Errorf("serial = %q, want %q", status.Serial, screen.Monitor.Serial)
+	}
+	if status.WidthMillimeters != screen.Monitor.WidthMillimeters ||
+		status.HeightMillimeters != screen.Monitor.HeightMillimeters {
+		t.Errorf("size = %dx%dmm, want %dx%dmm", status.WidthMillimeters, status.HeightMillimeters,
+			screen.Monitor.WidthMillimeters, screen.Monitor.HeightMillimeters)
+	}
+	if status.CurrentMode != "3840x1600@60" {
+		t.Errorf("currentMode = %q, want the mode the card drives", status.CurrentMode)
+	}
+}
+
+// status has no attribute-length limit, so the list it carries
+// is the card's own and not the cut the slice publishes. The lab's
+// ultrawide offers more modes than the attribute can hold, which is
+// what makes the two lists differ.
+func TestTheFullModeListOutgrowsTheSliceAttribute(t *testing.T) {
+	screen := labScreen(t, "HDMI-A-1")
+	offered := offeredModes(screen)
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   screen.Monitor,
+		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Modes:     offered,
+	})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	published := fixture.displayNamed(monitorID(screen.Monitor)).Status.Modes
+	if !slices.Equal(published, offered) {
+		t.Errorf("modes = %q, want the card's whole list %q", published, offered)
+	}
+	attribute := strings.Fields(attributeList(screen.Modes))
+	if len(attribute) >= len(published) {
+		t.Fatalf("the slice attribute carries %d of the %d modes, so this panel proves no truncation",
+			len(attribute), len(published))
+	}
+}
+
+func TestTheRestingModeFollowsTheClaim(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    *string
+		current string
+		held    map[string]bool
+		want    []string
+		says    string
+	}{
+		{
+			name:    "a declared mode on a free screen",
+			mode:    stringOf("1920x1080@60"),
+			current: "3840x1600@60",
+			want:    []string{"HDMI-A-1=1920x1080@60"},
+		},
+		{
+			// write-on-divergence, the rule every other
+			// declared value follows.
+			name:    "a declared mode the screen already runs",
+			mode:    stringOf("1920x1080@60"),
+			current: "1920x1080@60",
+		},
+		{
+			// The claim's own mode wins for its lifetime, so
+			// an edit made during a claim waits for the claim to end.
+			name:    "a declared mode while a claim holds the screen",
+			mode:    stringOf("1920x1080@60"),
+			current: "3840x1600@60",
+			held:    map[string]bool{"hdmi-a-1": true},
+		},
+		{
+			// A draw claim shares the screen and owns no mode,
+			// so it holds nothing back.
+			name:    "a declared mode while a draw claim shares the screen",
+			mode:    stringOf("1920x1080@60"),
+			current: "3840x1600@60",
+			held:    map[string]bool{"hdmi-a-2": true},
+			want:    []string{"HDMI-A-1=1920x1080@60"},
+		},
+		{
+			name:    "a mode the card does not offer",
+			mode:    stringOf("800x600@60"),
+			current: "3840x1600@60",
+			says:    "offers",
+		},
+		{
+			name:    "no declaration at all",
+			current: "3840x1600@60",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newDisplayBench(t, wiredPanel{
+				Connector: "HDMI-A-1",
+				Monitor:   labMonitor(),
+				Panel:     drillPanel(t, "lg-hdr-wqhd"),
+				Modes:     []string{"3840x1600@60", "1920x1080@60"},
+				Current:   c.current,
+			})
+			fixture.held = c.held
+			fixture.declare(DisplaySpec{Mode: c.mode})
+
+			err := fixture.pass()
+			if c.says == "" && err != nil {
+				t.Fatal(err)
+			}
+			if c.says != "" && (err == nil || !strings.Contains(err.Error(), c.says)) {
+				t.Fatalf("the pass reported %v, want a failure that says %q", err, c.says)
+			}
+			if !slices.Equal(fixture.modeSets, c.want) {
+				t.Errorf("the controller set %q, want %q", fixture.modeSets, c.want)
+			}
+		})
+	}
+}
+
+// The claim ends, the screen is free, and the pass that finds
+// it free puts the resting mode back. This is the restore the plan
+// asks for, and it happens through the same mode switch a prepare
+// makes.
+func TestTheRestingModeReturnsWhenTheClaimEnds(t *testing.T) {
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   labMonitor(),
+		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Modes:     []string{"3840x1600@60", "1920x1080@60"},
+		Current:   "3840x1600@60",
+	})
+	fixture.held = map[string]bool{"hdmi-a-1": true}
+	fixture.declare(DisplaySpec{Mode: stringOf("1920x1080@60")})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.modeSets) != 0 {
+		t.Fatalf("the controller set %q while a claim held the screen", fixture.modeSets)
+	}
+
+	fixture.held = nil
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"HDMI-A-1=1920x1080@60"}; !slices.Equal(fixture.modeSets, want) {
+		t.Errorf("the controller set %q, want %q", fixture.modeSets, want)
+	}
+	// The screen runs the declaration now, so a later pass
+	// finds no divergence and restarts nothing.
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.modeSets) != 1 {
+		t.Errorf("the controller set %q, want the one switch", fixture.modeSets)
+	}
+}
+
+// The flap the drill saw on the metal: an output destroyed and
+// re-created leaves the clients on the surviving screens with a canvas
+// sized for the output that went. A fresh compositor lays every canvas
+// out again.
+func (f *displayFixture) flap(t *testing.T, connector string) {
+	t.Helper()
+	f.present[connector] = false
+	if err := f.pass(); err != nil {
+		t.Fatal(err)
+	}
+	f.present[connector] = true
+	if err := f.pass(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTheHealRestartsTheCompositorAfterAFlap(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture.flap(t, "HDMI-A-1")
+	if fixture.restarts != 0 {
+		t.Fatalf("the compositor restarted %d times inside the flap", fixture.restarts)
+	}
+
+	fixture.advance(canvasSettleWindow)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.restarts != 1 {
+		t.Errorf("the compositor restarted %d times, want 1", fixture.restarts)
+	}
+
+	// The debt is paid, so the passes that follow restart
+	// nothing.
+	fixture.advance(canvasSettleWindow)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.restarts != 1 {
+		t.Errorf("the compositor restarted %d times, want the one restart of one flap", fixture.restarts)
+	}
+}
+
+// A restart would end the film. The debt stands across the
+// claim and the restart happens after the last unprepare.
+func TestTheHealWaitsForTheClaimToEnd(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture.held = map[string]bool{"hdmi-a-1": true}
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture.flap(t, "HDMI-A-1")
+	fixture.advance(canvasSettleWindow)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.restarts != 0 {
+		t.Fatalf("the compositor restarted %d times while a claim held a screen", fixture.restarts)
+	}
+
+	fixture.held = nil
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.restarts != 1 {
+		t.Errorf("the compositor restarted %d times after the claim ended, want 1", fixture.restarts)
+	}
+}
+
+// An operator that starts finds every output for the first
+// time, and a compositor that just started has every canvas right.
+func TestTheFirstPassOwesNoRestart(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	fixture.advance(canvasSettleWindow)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.restarts != 0 {
+		t.Errorf("the compositor restarted %d times with no output re-created", fixture.restarts)
+	}
+}
+
+// The two repairs are on two wires, the compositor's and the
+// panel's, and they do not fight. The heal still waits for a restore:
+// a panel on its way back from an override has enough to do, and the
+// debt costs nothing to hold one more pass.
+func TestTheHealWaitsForARestore(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.stubborn[vcpBrightness] = 1000
+	fixture := newDisplayFixture(t, panel)
+	fixture.stall = true
+	fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Brightness: intOf(70)})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	<-fixture.waiting
+
+	fixture.flap(t, "HDMI-A-1")
+	fixture.advance(canvasSettleWindow)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.restarts != 0 {
+		t.Errorf("the compositor restarted %d times while a restore was still writing", fixture.restarts)
+	}
+}
+
+// The film ends, and the screen goes back to what it rests at
+// without waiting for the loop's own tick. The unprepare raises the
+// same wake the slice pass raises, and the pass it wakes finds the
+// screen free because the claim's spec file is already gone.
+func TestAnUnprepareRestoresTheRestingMode(t *testing.T) {
+	restoreCDIDir := cdiDir
+	t.Cleanup(func() { cdiDir = restoreCDIDir })
+	// The plugin's own fixture owns the spec directory, so the
+	// claim this test prepares by hand is the claim its unprepare
+	// takes away.
+	plugin, _ := labPluginWithConfig(t, screenRequest(), "")
+	if err := writeCDISpec("film", []cdiDevice{{
+		Name:           "film-hdmi-a-1",
+		ContainerEdits: outputEdits("/var/run/display.liken.sh", "wayland-0", "hdmi-a-1"),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   labMonitor(),
+		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Modes:     []string{"3840x1600@60", "1920x1080@60"},
+		Current:   "3840x1600@60",
+	})
+	fixture.control.prepared = preparedOutputs
+	fixture.declare(DisplaySpec{Mode: stringOf("1920x1080@60")})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.modeSets) != 0 {
+		t.Fatalf("the controller set %q while the film held the screen", fixture.modeSets)
+	}
+
+	// What the claims held at the moment of the wake, which is
+	// what says the spec was gone before the wake went out.
+	var heldAtWake map[string]bool
+	plugin.republish = func() {
+		heldAtWake, _ = preparedOutputs()
+		fixture.control.wake()
+	}
+	if err := plugin.unprepareClaim("film"); err != nil {
+		t.Fatal(err)
+	}
+	if len(heldAtWake) != 0 {
+		t.Errorf("the wake went out while %v still held a screen", heldAtWake)
+	}
+
+	select {
+	case <-fixture.control.wakes:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the unprepare raised no wake")
+	}
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"HDMI-A-1=1920x1080@60"}; !slices.Equal(fixture.modeSets, want) {
+		t.Errorf("the controller set %q on the woken pass, want %q", fixture.modeSets, want)
+	}
+}
+
+// The values the lab's ultrawide declares, so the guard is
+// proven against the panel that failed: this machine's cable is on
+// HDMI-2 and the panel was showing the laptop on DP-1.
+const (
+	labAttachedInput = "HDMI-2"
+	labOtherInput    = "DP-1"
+)
+
+func TestADarkeningOverrideRespectsTheAttachedInput(t *testing.T) {
+	cases := []struct {
+		name     string
+		attached *string
+		override *DisplayOverride
+		shown    uint16
+		blanks   bool
+		says     string
+	}{
+		{
+			// The failure of 2026-08-27, and the whole reason
+			// for the field.
+			name:     "a panel showing another machine's input",
+			attached: stringOf(labAttachedInput),
+			override: &DisplayOverride{Backlight: overrideOff},
+			shown:    0x0f,
+		},
+		{
+			name:     "a panel showing this machine's input",
+			attached: stringOf(labAttachedInput),
+			override: &DisplayOverride{Backlight: overrideOff},
+			shown:    0x12,
+			blanks:   true,
+		},
+		{
+			// Every single-input panel and every panel nobody
+			// shares stays out of this entirely.
+			name:     "a panel with no declaration",
+			override: &DisplayOverride{Backlight: overrideOff},
+			shown:    0x0f,
+			blanks:   true,
+		},
+		{
+			name:     "a power override while another input is shown",
+			attached: stringOf(labAttachedInput),
+			override: &DisplayOverride{Power: overrideOff},
+			shown:    0x0f,
+		},
+		{
+			name:     "an attached input the panel does not carry",
+			attached: stringOf("VGA-1"),
+			override: &DisplayOverride{Backlight: overrideOff},
+			shown:    0x0f,
+			says:     "the panel accepts",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			panel := drillPanel(t, "lg-hdr-wqhd")
+			panel.turnedTo(vcpInput, c.shown)
+			fixture := newDisplayFixture(t, panel)
+			fixture.declare(DisplaySpec{AttachedInput: c.attached, Override: c.override})
+
+			err := fixture.pass()
+			if c.says == "" && err != nil {
+				t.Fatal(err)
+			}
+			if c.says != "" && (err == nil || !strings.Contains(err.Error(), c.says)) {
+				t.Fatalf("the pass reported %v, want a failure that says %q", err, c.says)
+			}
+
+			blanked := fixture.holds(vcpBrightness) == 0 || fixture.holds(vcpPowerMode) != powerModeOn
+			if blanked != c.blanks {
+				t.Errorf("the panel holds brightness %d and power %#02x, want blanked=%v",
+					fixture.holds(vcpBrightness), fixture.holds(vcpPowerMode), c.blanks)
+			}
+			// nothing is saved until the blank lands, so a
+			// deferred override leaves the captured block empty.
+			if captured := fixture.display().Status.Captured; captured.empty() == c.blanks {
+				t.Errorf("captured = %+v with blanked=%v", captured, c.blanks)
+			}
+		})
+	}
+}
+
+// The deferral is a state, not a failure, so it is reported
+// once and the panel is left alone until the input comes back.
+func TestADeferredDarkeningIsReportedOnce(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.turnedTo(vcpInput, 0x0f)
+	fixture := newDisplayFixture(t, panel)
+	fixture.declare(DisplaySpec{
+		AttachedInput: stringOf(labAttachedInput),
+		Override:      &DisplayOverride{Backlight: overrideOff},
+	})
+
+	for range 3 {
+		fixture.advance(pollInterval)
+		if err := fixture.pass(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(fixture.control.darkFaults) != 1 {
+		t.Errorf("the deferrals standing are %v, want the one this connector holds", fixture.control.darkFaults)
+	}
+	if got := fixture.holds(vcpBrightness); got != 50 {
+		t.Errorf("the panel holds a brightness of %d, want the 50 the other machine is watching", got)
+	}
+}
+
+// The poll is what lifts the deferral. The panel comes back to
+// this machine's input, the pass that reads it obeys the override that
+// was waiting, and the capture runs first, as it does for every blank.
+func TestADeferredDarkeningLandsWhenTheInputReturns(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.turnedTo(vcpInput, 0x0f)
+	fixture := newDisplayFixture(t, panel)
+	fixture.declare(DisplaySpec{
+		AttachedInput: stringOf(labAttachedInput),
+		Override:      &DisplayOverride{Backlight: overrideOff},
+	})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	panel.turnedTo(vcpInput, 0x12)
+	fixture.advance(pollInterval)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := fixture.lines()
+	captured := slices.Index(journal, "status captured=brightness 50")
+	blanked := slices.Index(journal, "set brightness=0")
+	if captured < 0 || blanked < 0 || captured > blanked {
+		t.Fatalf("journal = %q, want the capture before the blank once the input returned", journal)
+	}
+	if got := fixture.holds(vcpBrightness); got != 0 {
+		t.Errorf("the panel holds a brightness of %d, want 0", got)
+	}
+	if len(fixture.control.darkFaults) != 0 {
+		t.Errorf("the deferral %v still stands after the override acted", fixture.control.darkFaults)
+	}
+}
+
+// A lift always obeys. The captured value was only ever saved
+// while the panel showed this machine's input, so restoring it can
+// surprise no other viewer.
+func TestALiftObeysWhileAnotherInputIsShown(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.turnedTo(vcpInput, 0x0f)
+	panel.turnedTo(vcpBrightness, 0)
+	fixture := newDisplayFixture(t, panel)
+	display := fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Brightness: intOf(70)})
+	display.Spec.AttachedInput = stringOf(labAttachedInput)
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	fixture.awaitRestore()
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := fixture.holds(vcpBrightness); got != 70 {
+		t.Errorf("the panel holds a brightness of %d, want the 70 the capture saved", got)
+	}
+	if captured := fixture.display().Status.Captured; !captured.empty() {
+		t.Errorf("captured = %+v, want it cleared after the restore", captured)
+	}
+}
+
+// The panel's own EDID answers which of its ports this cable is
+// in, so the guard protects a shared panel that nobody declared
+// anything about. The derivation publishes either way, so a person can
+// read it against the cabling.
+func TestTheAttachedInputIsDerivedFromTheEDID(t *testing.T) {
+	cases := []struct {
+		name      string
+		connector string
+		monitor   EDID
+		derived   string
+	}{
+		{
+			// The lab's ultrawide, on this machine's HDMI 2.
+			name:      "the port the ultrawide's EDID names",
+			connector: "HDMI-A-1",
+			monitor:   labScreenEDID(t, "HDMI-A-1"),
+			derived:   "HDMI-2",
+		},
+		{
+			// An address in a DisplayPort EDID describes the
+			// sink's HDMI topology, not the port this cable is in.
+			name:      "a DisplayPort cable into the same panel",
+			connector: "DP-1",
+			monitor:   labScreenEDID(t, "HDMI-A-1"),
+		},
+		{
+			name:      "a panel whose EDID names no port",
+			connector: "HDMI-A-1",
+			monitor:   labMonitor(),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newDisplayBench(t, wiredPanel{
+				Connector: c.connector,
+				Monitor:   c.monitor,
+				Panel:     drillPanel(t, "lg-hdr-wqhd"),
+			})
+
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+
+			status := fixture.displayNamed(monitorID(c.monitor)).Status
+			if status.AttachedInput != c.derived {
+				t.Errorf("status.attachedInput = %q, want %q", status.AttachedInput, c.derived)
+			}
+		})
+	}
+}
+
+func labScreenEDID(t *testing.T, connector string) EDID {
+	t.Helper()
+	return labScreen(t, connector).Monitor
+}
+
+// A panel the EDID speaks for needs no declaration: the guard
+// defers the blank while the panel shows another machine, exactly as
+// it does for a declared one.
+func TestADerivedInputGuardsTheDarkening(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.turnedTo(vcpInput, 0x0f)
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   labScreenEDID(t, "HDMI-A-1"),
+		Panel:     panel,
+	})
+	name := monitorID(labScreenEDID(t, "HDMI-A-1"))
+	fixture.declareFor(name, DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := panel.holds(vcpBrightness); got != 50 {
+		t.Errorf("the panel holds a brightness of %d, want the 50 the other input is watching", got)
+	}
+	if captured := fixture.displayNamed(name).Status.Captured; !captured.empty() {
+		t.Errorf("captured = %+v, want nothing saved on a deferred override", captured)
+	}
+
+	// The panel comes back to this machine's port and the
+	// deferred blank lands, capture first.
+	panel.turnedTo(vcpInput, 0x12)
+	fixture.advance(pollInterval)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if got := panel.holds(vcpBrightness); got != 0 {
+		t.Errorf("the panel holds a brightness of %d, want 0", got)
+	}
+}
+
+// The owner's declaration wins over the derivation, because the
+// person who plugged the cable in knows what the EDID cannot say: a
+// panel that serves the same address on every port, or a cable moved
+// since the sink was built.
+func TestADeclarationWinsOverTheDerivation(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.turnedTo(vcpInput, 0x0f)
+	screen := labScreenEDID(t, "HDMI-A-1")
+	fixture := newDisplayBench(t, wiredPanel{
+		Connector: "HDMI-A-1",
+		Monitor:   screen,
+		Panel:     panel,
+	})
+	// The EDID derives HDMI-2, and the owner says the cable is
+	// on the input the panel is showing now.
+	fixture.declareFor(monitorID(screen), DisplaySpec{
+		AttachedInput: stringOf(labOtherInput),
+		Override:      &DisplayOverride{Backlight: overrideOff},
+	})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := panel.holds(vcpBrightness); got != 0 {
+		t.Errorf("the panel holds a brightness of %d, want the blank the declaration allowed", got)
+	}
+	if status := fixture.displayNamed(monitorID(screen)).Status; status.AttachedInput != "HDMI-2" {
+		t.Errorf("status.attachedInput = %q, want the derivation to publish beside the declaration",
+			status.AttachedInput)
 	}
 }

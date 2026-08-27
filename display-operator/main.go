@@ -212,8 +212,16 @@ func operate() {
 	// Its own loop is what keeps an override off the slice publisher's
 	// settle window.
 	panels := newDisplayControl(client, nodeName, plugin.controls, func() []Output {
-		return discoverOutputs(sysRoot, card)
+		return screens(card, plugin.currentModes, plugin.connectorModes)
 	})
+	// The mode seams are the prepare path's own, so a resting
+	// mode and a claim's mode take one road to the compositor and hold
+	// one lock between them. The heal's restart is that road with no
+	// config change.
+	panels.setMode = func(ctx context.Context, output Output, mode string) error {
+		return plugin.applyMode(ctx, output, mode, socketPath)
+	}
+	panels.restart = plugin.restartCompositor
 	go panels.run(ctx)
 	go watchDisplays(ctx, client, panels.wake)
 
@@ -275,6 +283,28 @@ func operate() {
 			publish()
 		}
 	}
+}
+
+// One walk of the card for the Display controller: the
+// connectors from sysfs, the mode each output drives, and the modes
+// each connector offers. It is the same pair of reads the slice pass
+// makes, through the same seams, so the resource and the slice report
+// one card and cannot disagree about it. A read that fails costs the
+// field it fills and nothing else.
+func screens(card string,
+	currentModes func() (map[string]string, error),
+	connectorModes func() (map[string][]drmMode, error),
+) []Output {
+	outputs := discoverOutputs(sysRoot, card)
+	current, err := currentModes()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the mode each output runs: %v\n", err)
+	}
+	offered, err := connectorModes()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "reading the modes each connector offers: %v\n", err)
+	}
+	return withOfferedModes(withCurrentModes(outputs, current), offered)
 }
 
 // eventsEnded says what a closed wake channel means.

@@ -88,6 +88,14 @@ type EDID struct {
 	// size.
 	WidthMillimeters  int
 	HeightMillimeters int
+	// HDMIInput is the number of the sink's own port that this
+	// cable occupies, read from the CEC physical address in the HDMI
+	// vendor block. An HDMI sink serves each of its ports an EDID
+	// carrying that port's address, so this is the one channel where
+	// the panel names which input is ours. It is zero when the monitor
+	// serves no address, serves the degenerate one, or serves an
+	// address deeper than a single port.
+	HDMIInput int
 }
 
 // ParseEDID reads the facts this operator publishes out of one
@@ -239,7 +247,60 @@ func (edid *EDID) readExtensions(raw []byte, count int) {
 			}
 			edid.readDescriptor(descriptor)
 		}
+		if input := hdmiInput(extension); input != 0 {
+			edid.HDMIInput = input
+		}
 	}
+}
+
+// The CTA-861 data block collection sits between the header
+// and the descriptors, one block after another. Each block starts with
+// a byte carrying the block's tag in its top three bits and the length
+// of what follows in its low five, so the walk needs no other table to
+// step through blocks it does not read.
+const (
+	ceaBlocksStart = 4
+	ceaVendorTag   = 3
+)
+
+// The HDMI Licensing OUI, 00-0C-03, as the block stores it:
+// least significant byte first.
+var hdmiVendorOUI = [3]byte{0x03, 0x0c, 0x00}
+
+// hdmiInput walks the data blocks for the HDMI vendor block and
+// reads the port out of the physical address behind the OUI. A block
+// with another OUI, another tag, or too few bytes to carry an address
+// states nothing about this cable.
+func hdmiInput(extension []byte) int {
+	end := int(extension[2])
+	if end > blockSize {
+		return 0
+	}
+	for offset := ceaBlocksStart; offset < end; {
+		header := extension[offset]
+		tag, length := int(header>>5), int(header&0x1f)
+		payload := offset + 1
+		if payload+length > end {
+			return 0
+		}
+		if tag == ceaVendorTag && length >= 5 &&
+			[3]byte(extension[payload:payload+3]) == hdmiVendorOUI {
+			return physicalAddressPort(extension[payload+3], extension[payload+4])
+		}
+		offset = payload + length
+	}
+	return 0
+}
+
+// The physical address is four nibbles, A.B.C.D, packed into
+// two bytes. Only the form N.0.0.0 names a port of this sink: 0.0.0.0
+// is what a sink serves when it states none, and anything deeper names
+// a device behind a repeater rather than the port this cable is in.
+func physicalAddressPort(high, low byte) int {
+	if low != 0x00 || high&0x0f != 0x00 {
+		return 0
+	}
+	return int(high >> 4)
 }
 
 // manufacturerID decodes the PNP id. The two bytes are big-endian,

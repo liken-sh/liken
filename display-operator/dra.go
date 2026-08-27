@@ -445,7 +445,15 @@ func (p *draPlugin) unprepareClaim(claimUID string) error {
 	// and an unprepare that ran again after it was gone would have
 	// nothing left to read.
 	p.releasePower(devices)
-	return removeCDISpec(claimUID)
+	if err := removeCDISpec(claimUID); err != nil {
+		return err
+	}
+	// The pass that follows an unprepare is what puts a resting
+	// mode back and what pays a deferred canvas restart, and both wait
+	// on the screen being free. The wake comes after the spec is gone,
+	// because the spec is what says a claim still holds the screen.
+	p.republishSlice()
+	return nil
 }
 
 // draHealth is the device-health stream. The driver keeps it open and

@@ -31,6 +31,7 @@ package main
 // card: /dev/dri/card1 makes the walk read the card1-* directories.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -67,6 +68,12 @@ type Output struct {
 	// cached against the monitor, so carrying this costs a walk
 	// nothing.
 	Controls supportedControls
+	// OfferedModes is every mode the card reports for this
+	// connector, with the refresh, in the form a claim and spec.mode
+	// state: 1920x1080@60. It comes from the same ioctl the prepare
+	// path validates a mode against, where Modes above is the sysfs
+	// list of bare names. It is empty until withOfferedModes has run.
+	OfferedModes []string
 	// CurrentMode is the mode this output runs right now, with the
 	// refresh the card reports: 3840x1600@24, the vocabulary a claim
 	// states, while Modes stays name-only. It comes from the card
@@ -89,6 +96,32 @@ func withCurrentModes(outputs []Output, modes map[string]string) []Output {
 		out[i].CurrentMode = modes[output.Connector]
 	}
 	return out
+}
+
+// withOfferedModes puts the card's own mode list beside what
+// sysfs said, the way withCurrentModes puts the readback there. The
+// list is deduplicated on the name and refresh together, because the
+// card reports one entry per timing and two timings can share both.
+func withOfferedModes(outputs []Output, offered map[string][]drmMode) []Output {
+	out := make([]Output, len(outputs))
+	for i, output := range outputs {
+		out[i] = output
+		out[i].OfferedModes = modeStrings(offered[output.Connector])
+	}
+	return out
+}
+
+// One mode as a person states it, name and refresh joined by
+// the @ the claim parameter uses.
+func modeStrings(offered []drmMode) []string {
+	var modes []string
+	for _, mode := range offered {
+		name := fmt.Sprintf("%s@%d", mode.Name, mode.Refresh)
+		if !slices.Contains(modes, name) {
+			modes = append(modes, name)
+		}
+	}
+	return modes
 }
 
 // discoverOutputs lists every connector on one card, sorted by

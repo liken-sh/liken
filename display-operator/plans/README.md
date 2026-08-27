@@ -77,6 +77,33 @@ say why it is built the way it is.
   an input switch fires no event. The claim parameters, the power
   record file, and the `-control` device retire only after plan 18
   deploys everywhere that holds a control claim.
+* [09, The Display reports the screen](09-the-display-reports-the-screen.md).
+  Built, and not yet drilled. `status` gains `currentMode`, the
+  kernel's whole mode list where the slice attribute is cut to the
+  API's value limit, the EDID identity, and the physical size.
+  `spec.mode` declares the mode the screen rests at: a claim's own
+  mode wins for its lifetime, and the unprepare that frees the screen
+  restores the declaration, waking the controller so the restore is
+  prompt.
+* [10, The compositor heals the canvas](10-the-compositor-heals-the-canvas.md).
+  Built, and not yet drilled. kiosk-shell orphans a surface when its
+  output is destroyed and never re-sizes it, unfixed upstream through
+  16.0.0, so a flap left the lab's portable panel cropped to an
+  ultrawide canvas. The operator now restarts the compositor when an
+  output is re-created, the outputs have settled for 5 seconds, and
+  no claim holds a screen; the media layer's window watchdog carries
+  every idle client through. The open problem
+  [kiosk-shell loses a surface's output](open-problems/kiosk-shell-loses-a-surfaces-output.md)
+  records the upstream contribution this works around.
+* [11, Darkening respects the attached input](11-darkening-respects-the-attached-input.md).
+  Built, and not yet drilled. A shared monitor dims every input at
+  once, so a darkening override now waits while the panel shows an
+  input other than this machine's own. The machine's input derives
+  from the EDID: an HDMI sink serves each port an EDID whose vendor
+  block names that port, proven on both lab panels, published as
+  `status.attachedInput`; `spec.attachedInput` overrides the
+  derivation for DisplayPort cables and panels that serve one address
+  everywhere.
 
 ## Open problems
 

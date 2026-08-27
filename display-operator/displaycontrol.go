@@ -11,9 +11,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,6 +50,9 @@ type displayControl struct {
 	// The last poll failure reported for each connector, so a
 	// panel that stays quiet prints one line and not one a minute.
 	pollFaults map[string]string
+	// The deferral standing for each connector, in the same
+	// shape and for the same reason as the poll's faults above.
+	darkFaults map[string]string
 	// How often the loop looks, and it is the poll's window: a
 	// window that comes due needs a pass to act on it. A field for the
 	// reason the clock is one.
@@ -56,6 +61,25 @@ type displayControl struct {
 	// what holds the listing to the slower cadence.
 	swept   []string
 	sweptAt time.Time
+	// The output devices a prepared claim holds. A claim's own
+	// mode wins for its lifetime, and a compositor restart would end
+	// the workload drawing on the screen, so both wait on this.
+	prepared func() (map[string]bool, error)
+	// The mode machinery of the prepare path, reused whole:
+	// setMode writes the record, rewrites the config, restarts the
+	// compositor, and reads the mode back; restart is the same restart
+	// with no config change. Both are nil until the operator wires
+	// them, and a nil seam does nothing.
+	setMode func(ctx context.Context, output Output, mode string) error
+	restart func() error
+	// What each connector carried on the pass before, which is
+	// how an output that was re-created is told from one that never
+	// moved, and when the set last changed. The debt an output that
+	// came back raises stands until the restart that pays it.
+	seen     map[string]string
+	settled  time.Time
+	owed     bool
+	deferred bool
 }
 
 func newDisplayControl(client *Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
@@ -67,9 +91,11 @@ func newDisplayControl(client *Client, node string, controls *panelControls, out
 		now:        time.Now,
 		wait:       waitFor,
 		tick:       pollInterval,
+		prepared:   preparedOutputs,
 		wakes:      make(chan struct{}, 1),
 		restoring:  map[string]bool{},
 		pollFaults: map[string]string{},
+		darkFaults: map[string]string{},
 	}
 }
 
@@ -118,8 +144,9 @@ func (d *displayControl) run(ctx context.Context) {
 // deleted: it holds the captured state, and Connected is what reports
 // the absence.
 func (d *displayControl) pass(ctx context.Context) error {
+	outputs := d.outputs()
 	present := map[string]Output{}
-	for _, output := range d.outputs() {
+	for _, output := range outputs {
 		if !output.Connected {
 			continue
 		}
@@ -141,9 +168,15 @@ func (d *displayControl) pass(ctx context.Context) error {
 		}
 		published = listed
 	}
+	// One read of what the claims hold answers every panel of
+	// the pass, and the compositor heal below reads the same answer.
 	var failures []error
+	held, err := d.claimed()
+	if err != nil {
+		failures = append(failures, err)
+	}
 	for name, output := range present {
-		if err := d.reconcile(ctx, name, output); err != nil {
+		if err := d.reconcile(ctx, name, output, held); err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", name, err))
 		}
 	}
@@ -158,13 +191,125 @@ func (d *displayControl) pass(ctx context.Context) error {
 			failures = append(failures, fmt.Errorf("%s: %w", display.Metadata.Name, err))
 		}
 	}
+	// The canvas heal runs last, after every panel is reconciled
+	// and its status written. A compositor restart ends the Wayland
+	// clients and touches no DDC wire, so it can follow the panels'
+	// own work without disturbing it.
+	d.healCanvas(outputs, held)
 	return errors.Join(failures...)
+}
+
+// How long the outputs must hold still before the compositor
+// restarts. Weston defers an output's destruction across a pending
+// flip, and a restart inside that window can hit the crash the open
+// problem records, so the heal waits for the flap to end.
+const canvasSettleWindow = 5 * time.Second
+
+// The canvas heal. An output that is present now and was absent
+// or another monitor on the pass before was re-created, and Weston
+// never gives the clients on the surviving screens a corrected size.
+// A fresh compositor places every surface at its own output's size,
+// so the restart is the repair.
+//
+// it waits on three things: a claim that holds any screen on
+// this card, an output set that is still moving, and a panel whose
+// restore is still writing. The first is the workload's screen, the
+// second is the hazard window upstream documents, and the third is a
+// panel on its way back that has enough to do.
+func (d *displayControl) healCanvas(outputs []Output, held map[string]bool) {
+	d.track(outputs)
+	if !d.owed || d.restart == nil {
+		return
+	}
+	switch {
+	case len(held) > 0:
+		d.deferHeal("a prepared claim holds a screen on this card")
+	case d.now().Before(d.settled.Add(canvasSettleWindow)):
+		d.deferHeal("the outputs are still settling")
+	case d.restoresRunning():
+		d.deferHeal("a panel is still being restored")
+	default:
+		if err := d.restart(); err != nil {
+			fmt.Fprintf(os.Stderr, "restarting the compositor to heal the canvas: %v\n", err)
+			return
+		}
+		d.owed, d.deferred = false, false
+		fmt.Printf("an output was re-created: the compositor restarts and every canvas is laid out again\n")
+	}
+}
+
+// What each connector carried, compared against the pass
+// before. An output that is present now and was not the same then owes
+// a restart, and the whole set holding still is what starts the
+// settling window. The first pass of an operator learns the set and
+// owes nothing: a compositor that just started has every canvas right.
+func (d *displayControl) track(outputs []Output) {
+	identity := map[string]string{}
+	for _, output := range outputs {
+		identity[output.Connector] = outputIdentity(output)
+	}
+	if d.seen == nil {
+		d.seen, d.settled = identity, d.now()
+		return
+	}
+	if maps.Equal(identity, d.seen) {
+		return
+	}
+	for connector, monitor := range identity {
+		if monitor != "" && monitor != d.seen[connector] {
+			d.owed = true
+		}
+	}
+	d.seen, d.settled = identity, d.now()
+}
+
+// What a connector carries, as one string: the monitor's own
+// identity when it names one, the bare fact of a monitor when the EDID
+// names nothing, and nothing at all for a dark connector.
+func outputIdentity(output Output) string {
+	if !output.Connected {
+		return ""
+	}
+	if monitor := monitorID(output.Monitor); monitor != "" {
+		return monitor
+	}
+	return output.Connector + " carries a monitor"
+}
+
+// One line per debt, whatever holds it up. A line on every pass
+// would print six times a minute for as long as a film runs.
+func (d *displayControl) deferHeal(reason string) {
+	if d.deferred {
+		return
+	}
+	d.deferred = true
+	fmt.Printf("an output was re-created: the compositor restart waits because %s\n", reason)
+}
+
+func (d *displayControl) restoresRunning() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.restoring) > 0
+}
+
+// What the prepared claims hold, and nothing when this operator
+// has no way to read them. A failure here is reported and treated as
+// no claims, because the seam reads the specs this driver wrote.
+func (d *displayControl) claimed() (map[string]bool, error) {
+	if d.prepared == nil {
+		return nil, nil
+	}
+	held, err := d.prepared()
+	if err != nil {
+		return nil, fmt.Errorf("reading the claims the kubelet prepared: %w", err)
+	}
+	return held, nil
 }
 
 // One panel. The resource is created empty when it is absent,
 // the panel is actuated, and the status is written last, so it reports
 // what the actuation left behind.
-func (d *displayControl) reconcile(ctx context.Context, name string, output Output) error {
+func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held map[string]bool) error {
 	display, err := getDisplay(d.client, name)
 	if errors.Is(err, ErrNotFound) {
 		display, err = createDisplay(d.client, name)
@@ -174,8 +319,35 @@ func (d *displayControl) reconcile(ctx context.Context, name string, output Outp
 	}
 	facts := d.controls.factsFor(output)
 	actuated := d.actuate(ctx, display, output, facts)
+	// The mode is the screen's, not the panel's: it lands
+	// through the compositor and not on the DDC wire, so it runs
+	// beside the controls rather than among them.
+	rested := d.restMode(ctx, display, output, held)
 	published := d.publish(display, d.statusOf(display, output, d.controls.factsFor(output)))
-	return errors.Join(actuated, published)
+	return errors.Join(actuated, rested, published)
+}
+
+// The resting mode. A claim's own mode wins while the claim
+// holds the screen, so a declaration edited during a claim waits for
+// the claim to end, and the pass that finds the screen free applies
+// it. The apply is the prepare path's own, so it restarts the
+// compositor once and reads the mode back.
+func (d *displayControl) restMode(ctx context.Context, display *Display, output Output, held map[string]bool) error {
+	if display.Spec.Mode == nil {
+		return nil
+	}
+	want := *display.Spec.Mode
+	if !slices.Contains(output.OfferedModes, want) {
+		return fmt.Errorf("the spec states the mode %s, and %s offers %s",
+			want, output.Connector, strings.Join(output.OfferedModes, " "))
+	}
+	if held[deviceName(output.Connector)] || d.setMode == nil {
+		return nil
+	}
+	if modeMatches(want, output.CurrentMode) {
+		return nil
+	}
+	return d.setMode(ctx, output, want)
 }
 
 // What one pass writes to the panel. The override wins over the
@@ -192,6 +364,19 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 		if !facts.Responsive {
 			return nil
 		}
+		// brightness and power are panel-global, so darkening a
+		// panel that shows another machine's input dims that machine's
+		// picture. The declared attached input is the only fact that
+		// says which input is ours, and the override waits until the
+		// panel shows it.
+		obeys, err := d.attached(display.Spec, output, facts)
+		if err != nil {
+			return err
+		}
+		if !obeys {
+			return nil
+		}
+		d.reportDeferral(output.Connector, "")
 		if held == powerControl {
 			return d.holdPower(display, output, facts)
 		}
@@ -217,6 +402,60 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 	// panel's own buttons and writes the declaration back over it.
 	d.poll(output, facts)
 	return d.rest(display, output, d.controls.factsFor(output))
+}
+
+// Whether the panel shows this machine's own input, and so
+// whether a darkening override may act. A panel with no declaration
+// answers yes, which is every single-input panel and every panel
+// nobody shares. The read that lifts a deferral is the poll: it keeps
+// the shown input fresh, so the pass that finds the panel back on this
+// machine's input obeys the override that was waiting.
+func (d *displayControl) attached(spec DisplaySpec, output Output, facts panelFacts) (bool, error) {
+	attached, declared, err := attachedInput(spec, output, facts)
+	if err != nil {
+		return false, err
+	}
+	if !declared {
+		return true, nil
+	}
+	if shown, known := facts.Observed[vcpInput]; known && shown == attached {
+		return true, nil
+	}
+	d.poll(output, facts)
+	shown, known := d.controls.factsFor(output).Observed[vcpInput]
+	if known && shown == attached {
+		return true, nil
+	}
+	d.reportDeferral(output.Connector, fmt.Sprintf("%s shows %s and this machine is on %s",
+		output.Connector, shownInput(shown, known), valueName(vcpInput, attached)))
+	return false, nil
+}
+
+// What the panel is showing, in one word, for the line that
+// says why the darkening waits.
+func shownInput(shown uint16, known bool) string {
+	if !known {
+		return "an input this operator has not read"
+	}
+	return valueName(vcpInput, shown)
+}
+
+// One line per connector while a deferral stands, and the mark
+// is cleared when the override finally acts, so the next deferral is
+// reported again. A line on every pass would print six times a minute
+// for a whole evening of somebody else's film.
+func (d *displayControl) reportDeferral(connector, reason string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if reason == "" {
+		delete(d.darkFaults, connector)
+		return
+	}
+	if d.darkFaults[connector] == reason {
+		return
+	}
+	d.darkFaults[connector] = reason
+	fmt.Printf("%s: the darkening override waits\n", reason)
 }
 
 // The guarded read. A DDC read is a wake stimulus on some
@@ -460,6 +699,13 @@ func (d *displayControl) restoreOne(ctx context.Context, connector string, code 
 // never written.
 func (d *displayControl) rest(display *Display, output Output, facts panelFacts) error {
 	var failures []error
+	// The attached input is judged here with every other
+	// declared value, and it is the one this operator never writes: it
+	// states which input this machine's cable occupies, and the panel
+	// is not asked to change anything by it.
+	if _, _, err := attachedInput(display.Spec, output, facts); err != nil {
+		failures = append(failures, err)
+	}
 	for _, control := range coreControls {
 		want, stated := display.Spec.raw(control.Code)
 		if !stated {
@@ -501,6 +747,58 @@ func declarable(code byte, want uint16, facts panelFacts) error {
 	return nil
 }
 
+// The declared attached input as the number the panel reports
+// for it, and whether one is declared at all. The value is judged
+// against the panel's own input list, the way every declared value is,
+// and it is never written: a fact about which cable is ours is not a
+// request to switch the panel to it.
+func attachedInput(spec DisplaySpec, output Output, facts panelFacts) (uint16, bool, error) {
+	if spec.AttachedInput == nil {
+		// The EDID is the second source and the owner's
+		// declaration is the first, so this is read only when no
+		// declaration stands.
+		derived := derivedInput(output, facts)
+		if derived == "" {
+			return 0, false, nil
+		}
+		raw, named := valueRaw(vcpInput, derived)
+		return raw, named, nil
+	}
+	name := *spec.AttachedInput
+	capability, carried := facts.Capabilities[inputControl]
+	if !carried {
+		return 0, false, fmt.Errorf(
+			"the spec states the attached input %s, and the panel carries no input control", name)
+	}
+	if !slices.Contains(capability.Values, name) {
+		return 0, false, fmt.Errorf("the spec states the attached input %s, and the panel accepts %v",
+			name, capability.Values)
+	}
+	raw, named := valueRaw(vcpInput, name)
+	if !named {
+		return 0, false, fmt.Errorf("the spec states the attached input %s, and no input carries that name", name)
+	}
+	return raw, true, nil
+}
+
+// The input this machine's cable occupies, as the panel's own
+// EDID states it. The derivation holds only where the sink names the
+// port: an HDMI connector, an address in the form one port has, and an
+// input list that carries the name it maps to. A DisplayPort cable
+// derives nothing, because an address in that EDID describes the
+// sink's HDMI topology and not the port this cable is in.
+func derivedInput(output Output, facts panelFacts) string {
+	if output.Monitor.HDMIInput == 0 || !strings.HasPrefix(output.Connector, "HDMI") {
+		return ""
+	}
+	name := fmt.Sprintf("HDMI-%d", output.Monitor.HDMIInput)
+	capability, carried := facts.Capabilities[inputControl]
+	if !carried || !slices.Contains(capability.Values, name) {
+		return ""
+	}
+	return name
+}
+
 // The value a power-down writes. A panel implements the subset
 // of the power code that it chooses, so the write is the first of
 // these the panel declared.
@@ -532,6 +830,17 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	status := display.Status
 	status.Node = d.node
 	status.Connector = output.Connector
+	// The identity, the size, and the modes come from the walk
+	// this pass already made, so the resource and the slice report one
+	// set of reads and cannot drift.
+	status.Manufacturer = output.Monitor.Manufacturer
+	status.Model = output.Monitor.ModelName
+	status.Serial = output.Monitor.Serial
+	status.WidthMillimeters = output.Monitor.WidthMillimeters
+	status.HeightMillimeters = output.Monitor.HeightMillimeters
+	status.AttachedInput = derivedInput(output, facts)
+	status.CurrentMode = output.CurrentMode
+	status.Modes = output.OfferedModes
 	status.Capabilities = facts.Capabilities
 	if observed := observedValues(facts.Observed); observed != nil {
 		status.Observed = observed

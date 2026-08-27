@@ -207,3 +207,59 @@ func TestRemoveCDISpecIsIdempotent(t *testing.T) {
 		t.Fatalf("removing an absent spec: %v", err)
 	}
 }
+
+// What a resting mode and a compositor restart wait on. Both
+// take the screen away from whatever draws on it, and the specs this
+// driver wrote are where the operator reads which screens a workload
+// holds.
+func TestPreparedOutputsNamesTheScreensClaimsHold(t *testing.T) {
+	restoreCDIDir := cdiDir
+	t.Cleanup(func() { cdiDir = restoreCDIDir })
+	cdiDir = t.TempDir()
+
+	if err := writeCDISpec("film", []cdiDevice{{
+		Name:           "film-hdmi-a-1",
+		ContainerEdits: outputEdits("/var/run/display.liken.sh", "wayland-0", "hdmi-a-1"),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// The idle client's own claim: a shared draw device and the
+	// panel's control wire, and neither owns a screen's mode.
+	if err := writeCDISpec("idle", []cdiDevice{
+		{
+			Name:           "idle-hdmi-a-2-draw",
+			ContainerEdits: outputEdits("/var/run/display.liken.sh", "wayland-0", "hdmi-a-2"),
+		},
+		{
+			Name:           "idle-hdmi-a-2-control",
+			ContainerEdits: controlEdits("/dev/i2c-4"),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	held, err := preparedOutputs()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(held) != 1 || !held["hdmi-a-1"] {
+		t.Errorf("the prepared outputs are %v, want the one screen the film holds", held)
+	}
+}
+
+// A node where the kubelet has prepared nothing has no
+// directory at all, and that is no failure.
+func TestPreparedOutputsReadsANodeWithNoClaims(t *testing.T) {
+	restoreCDIDir := cdiDir
+	t.Cleanup(func() { cdiDir = restoreCDIDir })
+	cdiDir = filepath.Join(t.TempDir(), "never-written")
+
+	held, err := preparedOutputs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != 0 {
+		t.Errorf("the prepared outputs are %v, want none", held)
+	}
+}

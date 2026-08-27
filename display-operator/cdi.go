@@ -47,6 +47,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,4 +248,65 @@ func removeCDISpec(claimUID string) error {
 
 func cdiSpecPath(claimUID string) string {
 	return filepath.Join(cdiDir, cdiPrefix+claimUID+".json")
+}
+
+// preparedOutputs names the output devices a prepared claim
+// holds right now, read from the specs this driver wrote. It is what
+// tells a resting mode and a compositor restart to wait: both take the
+// screen away from whatever is drawing on it, and a claim is a
+// workload's hold on that screen.
+//
+// The control and draw companions are not in the answer. A
+// control claim drives the panel's own wire and no screen, and many
+// draw claims share one screen and none of them owns its mode.
+//
+// The read runs once per pass of the Display controller, a
+// directory listing and one small file per prepared claim, on a
+// tmpfs. If the pass ever runs faster than it does now, the lever is
+// to hold this answer between passes and drop it on a prepare or an
+// unprepare.
+func preparedOutputs() (map[string]bool, error) {
+	cdiWrites.Lock()
+	defer cdiWrites.Unlock()
+
+	entries, err := os.ReadDir(cdiDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	held := map[string]bool{}
+	for _, entry := range entries {
+		claim, mine := strings.CutPrefix(entry.Name(), cdiPrefix)
+		if !mine {
+			continue
+		}
+		claim, named := strings.CutSuffix(claim, ".json")
+		if !named {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(cdiDir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		var spec cdiSpec
+		if err := json.Unmarshal(raw, &spec); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", entry.Name(), err)
+		}
+		for _, device := range spec.Devices {
+			name, prefixed := strings.CutPrefix(device.Name, claim+"-")
+			if !prefixed {
+				continue
+			}
+			if _, control := outputOfControl(name); control {
+				continue
+			}
+			if _, draw := outputOfDraw(name); draw {
+				continue
+			}
+			held[name] = true
+		}
+	}
+	return held, nil
 }

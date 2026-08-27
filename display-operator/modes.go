@@ -486,6 +486,18 @@ func (p *draPlugin) awaitMode(ctx context.Context, connector, mode, socketPath s
 // serve nobody. The screen keeps the mode until the next compositor
 // start, which comes up at the mode the monitor prefers, and the
 // slice's currentMode says what it runs meanwhile.
+// restartCompositor ends the compositor with no config change,
+// the restart half of the path a mode prepare takes. It holds the
+// same lock, so a restart and a mode switch never run at once: a
+// restart in the middle of a switch would end the compositor the
+// switch is waiting on and fail the prepare.
+func (p *draPlugin) restartCompositor() error {
+	p.modeSwitches.Lock()
+	defer p.modeSwitches.Unlock()
+
+	return p.endCompositor()
+}
+
 func (p *draPlugin) releaseModes(devices []string) error {
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()

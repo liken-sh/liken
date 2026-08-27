@@ -81,7 +81,10 @@ spec:
                   description: "One of status.capabilities.colorPreset.values."
                 input:
                   type: string
-                  description: "One of status.capabilities.input.values."
+                  description: "One of status.capabilities.input.values: the resting declaration that forces the panel to show that input. On a shared panel it writes the panel back to this machine within a poll window of every switch away, so declare it only on a panel that should always show this machine."
+                attachedInput:
+                  type: string
+                  description: "The panel input this machine's cable occupies, one of status.capabilities.input.values. A declared fact, never written to the panel: it defers a darkening override while the panel shows another input, because brightness and power are panel-global. Declare it only where the EDID says nothing; status.attachedInput carries what the operator derived, and this declaration wins over it. Beside spec.input on a shared panel, the resting write would fight every switch away."
                 audioVolume:
                   type: integer
                   minimum: 0
@@ -90,6 +93,9 @@ spec:
                 audioMute:
                   type: boolean
                   description: "Whether the panel's own speakers are muted."
+                mode:
+                  type: string
+                  description: "The mode the screen rests at, one of status.modes, in the 1920x1080@60 form. A claim's own mode parameter wins while the claim holds the screen, and a change here waits for the claim to end. Applying it restarts the compositor once, which ends every Wayland client on this card."
                 override:
                   type: object
                   description: "The temporary layer. A writer adds the block, the operator saves what stood and obeys it, and the writer deletes the block. The operator then restores the declared resting value, or the saved one where the spec declares none."
@@ -115,6 +121,32 @@ spec:
                 connector:
                   type: string
                   description: "The connector on that card, in the kernel's own spelling."
+                manufacturer:
+                  type: string
+                  description: "The monitor's manufacturer, from its EDID, the same value the device attribute carries."
+                model:
+                  type: string
+                  description: "The monitor's model name, from its EDID."
+                serial:
+                  type: string
+                  description: "The monitor's serial, from its EDID, and absent when the monitor states none."
+                widthMillimeters:
+                  type: integer
+                  description: "The panel's physical width, as the monitor states it."
+                heightMillimeters:
+                  type: integer
+                  description: "The panel's physical height, as the monitor states it."
+                attachedInput:
+                  type: string
+                  description: "The input this machine's cable occupies, as the operator derived it from the EDID: an HDMI sink serves each of its ports an EDID naming that port. It is published so a person can check the derivation against the cabling, and a declared spec.attachedInput wins over it. A DisplayPort cable, and a panel that serves the same address on every port, derive nothing; those are the panels the owner declares for."
+                currentMode:
+                  type: string
+                  description: "The mode this output drives now, read from the card, absent while it drives nothing."
+                modes:
+                  type: array
+                  items:
+                    type: string
+                  description: "Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against."
                 capabilities:
                   type: object
                   description: "The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it."
