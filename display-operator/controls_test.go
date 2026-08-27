@@ -335,6 +335,15 @@ func deafMonitor() *fakeMonitor {
 	return monitor
 }
 
+// The panel starts answering, which is what a person switching
+// the monitor's input or turning DDC/CI on in its menu does. Neither
+// fires a uevent and neither changes the EDID.
+func (m *fakeMonitor) answers() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.silent = false
+}
+
 // A panel that carries one control and not the other is the ordinary
 // case, because a display implements the subset of the standard it
 // chooses.
@@ -621,6 +630,75 @@ func TestProbeAsksOncePerMonitor(t *testing.T) {
 	}
 	if panel.closes != 1 {
 		t.Errorf("the probe left %d of its opens unclosed", bench.opened()-panel.closes)
+	}
+}
+
+// A bench whose clock the test moves, for the window that
+// rate-limits the second ask.
+func benchAtTime(t *testing.T, monitors map[string]*fakeMonitor) (*panelControls, *panelBench, *time.Time) {
+	t.Helper()
+	controls, bench := benchPanels(t, t.TempDir(), "card1", monitors)
+	at := time.Unix(0, 0).UTC()
+	controls.now = func() time.Time { return at }
+	return controls, bench, &at
+}
+
+// A panel that refused DDC/CI is asked again, because a refusal
+// is a state a person changes at the monitor's own menu, with no
+// uevent and no change of EDID to say so. The lab's LG did exactly
+// this and stayed unresponsive in the cluster until it was asked
+// again.
+func TestARefusalIsAskedAgainAfterTheWindow(t *testing.T) {
+	panel := deafMonitor()
+	controls, bench, at := benchAtTime(t, map[string]*fakeMonitor{"HDMI-A-1": panel})
+	output := litOutput("HDMI-A-1", labMonitor())
+
+	if got := controls.of(output); got != (supportedControls{}) {
+		t.Fatalf("controls = %+v, want none from a panel that answers nothing", got)
+	}
+
+	panel.answers()
+	*at = at.Add(probeRetryInterval)
+	got := controls.of(output)
+
+	if !got.Brightness || !got.Power {
+		t.Errorf("controls = %+v, want the answers of the panel that is talking now", got)
+	}
+	if bench.opened() != 2 {
+		t.Errorf("the wire was opened %d times, want one probe and one ask again", bench.opened())
+	}
+}
+
+// The window is what keeps a burst of passes off the wire. The
+// uevents of one cable arrive in a burst, and each one is a pass.
+func TestARefusalIsAskedAgainOncePerWindow(t *testing.T) {
+	controls, bench, at := benchAtTime(t, map[string]*fakeMonitor{"HDMI-A-1": deafMonitor()})
+	output := litOutput("HDMI-A-1", labMonitor())
+
+	controls.of(output)
+	*at = at.Add(probeRetryInterval / 2)
+	controls.of(output)
+	controls.of(output)
+
+	if bench.opened() != 1 {
+		t.Errorf("the wire was opened %d times inside one window, want 1", bench.opened())
+	}
+}
+
+// The invariant the cache exists for. A panel that answers is
+// never asked twice, so a steady pass over answering hardware sends
+// nothing on any wire.
+func TestAnAnsweringPanelIsNeverAskedAgain(t *testing.T) {
+	controls, bench, at := benchAtTime(t, map[string]*fakeMonitor{"HDMI-A-1": newFakeMonitor()})
+	output := litOutput("HDMI-A-1", labMonitor())
+
+	controls.of(output)
+	*at = at.Add(10 * probeRetryInterval)
+	controls.of(output)
+	controls.of(output)
+
+	if bench.opened() != 1 {
+		t.Errorf("the wire was opened %d times for one answering panel, want 1", bench.opened())
 	}
 }
 

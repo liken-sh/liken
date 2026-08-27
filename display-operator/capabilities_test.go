@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // One fragment of a capability reply, built the way a display
@@ -55,6 +56,29 @@ func TestCapabilitiesReadsEveryFragment(t *testing.T) {
 	}
 	if want := []uint16{0, 32, 34}; !slices.Equal(offsets, want) {
 		t.Errorf("asked for offsets %v, want %v", offsets, want)
+	}
+}
+
+// The capability string is the first thing the probe asks for,
+// so a panel that answers late must get the same growing wait the
+// controls get. The lab's LG is that panel.
+func TestCapabilitiesWaitsLongerOnEachAttempt(t *testing.T) {
+	panel := &slowPanel{
+		answers: 2 * ddcReplyDelay,
+		reply:   paddedCapabilitiesReply(0, "(vcp(10))"),
+	}
+	client := newDDC(panel)
+	client.sleep = func(waited time.Duration) { panel.waited = waited }
+
+	fragment, err := client.capabilitiesFragment(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(fragment) != "(vcp(10))" {
+		t.Errorf("fragment = %q, want the panel's own string", fragment)
+	}
+	if panel.reads != 2 {
+		t.Errorf("the panel was read %d times, want 2", panel.reads)
 	}
 }
 

@@ -317,6 +317,17 @@ type panelControls struct {
 	open    func(path string) (controlBus, error)
 	sleep   func(time.Duration)
 	probed  map[string]probedPanel
+	// The clock the retry window is measured on, a field for
+	// the reason sleep is one.
+	now func() time.Time
+}
+
+// The clock a cache with no clock wired reads.
+func (c *panelControls) clock() time.Time {
+	if c.now == nil {
+		return time.Now()
+	}
+	return c.now()
 }
 
 // One cache entry holds the answer and the monitor it answered for.
@@ -329,6 +340,9 @@ type panelControls struct {
 type probedPanel struct {
 	monitor EDID
 	facts   *panelFacts
+	// When the probe ran, which is what the retry window of a
+	// refusal is measured from.
+	asked time.Time
 }
 
 // NewPanelControls wires the real i2c-dev nodes. A test supplies its

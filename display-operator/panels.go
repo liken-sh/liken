@@ -43,15 +43,34 @@ func (c *panelControls) factsFor(output Output) panelFacts {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor {
+	if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor && !c.askAgain(probed) {
 		return probed.facts.copy()
 	}
 	facts := c.probe(output.Connector)
 	if c.probed == nil {
 		c.probed = map[string]probedPanel{}
 	}
-	c.probed[output.Connector] = probedPanel{monitor: output.Monitor, facts: &facts}
+	c.probed[output.Connector] = probedPanel{monitor: output.Monitor, facts: &facts, asked: c.clock()}
 	return facts.copy()
+}
+
+// How long a refusal is held before the panel is asked again.
+// One window per backstop tick, because a cable's uevents arrive in
+// bursts and each burst is a pass, and a probe of a silent panel
+// spends its full delay on every code.
+const probeRetryInterval = backstopInterval
+
+// Whether a cached answer is asked again. Only a refusal is:
+// DDC/CI is a state the monitor's own menu turns on, and an input
+// switch fires no uevent and changes no EDID, so nothing but this
+// window would ever tell the operator to look. A panel that answered
+// is never asked twice, which is what keeps a steady pass off the
+// wire.
+func (c *panelControls) askAgain(probed probedPanel) bool {
+	if probed.facts == nil || probed.facts.Responsive {
+		return false
+	}
+	return !c.clock().Before(probed.asked.Add(probeRetryInterval))
 }
 
 // The caller gets its own values, because the entry behind them

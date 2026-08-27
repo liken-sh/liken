@@ -73,7 +73,15 @@ type displayFixture struct {
 	// operator's context ends, which is what a panel that answers
 	// nothing costs a real operator.
 	stall bool
+	// The clock both the controller and the probe cache read.
+	at time.Time
 }
+
+func (f *displayFixture) clock() time.Time { return f.at }
+
+// The clock moves, which is how a test reaches the far side of
+// the window that holds a second probe back.
+func (f *displayFixture) advance(waited time.Duration) { f.at = f.at.Add(waited) }
 
 // The panel of the drill on one connector, the API server that
 // holds its resource, and the controller between them.
@@ -105,7 +113,11 @@ func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
 	fixture.bench = bench
 	fixture.client = testClient(t, fixture.handler())
 	fixture.control = newDisplayControl(fixture.client, "liken-1", controls, fixture.outputs)
-	fixture.control.now = func() time.Time { return time.Unix(0, 0).UTC() }
+	fixture.at = time.Unix(0, 0).UTC()
+	fixture.control.now = fixture.clock
+	// The probe cache reads the same clock, because the window
+	// that rate-limits a second ask is measured on it.
+	controls.now = fixture.clock
 	fixture.control.wait = func(ctx context.Context, _ time.Duration) error {
 		fixture.waits.Add(1)
 		select {
@@ -600,6 +612,38 @@ func TestAPanelThatAnswersNothingIsNotResponsive(t *testing.T) {
 	}
 	if len(display.Status.Capabilities) != 0 {
 		t.Errorf("capabilities = %v, want none", display.Status.Capabilities)
+	}
+}
+
+// The panel that refused DDC/CI starts answering, and the next
+// pass past the window publishes what it carries. Nothing about the
+// connector or the EDID changed, so nothing else could have told the
+// operator to look again.
+func TestAPanelThatStartsAnsweringBecomesResponsive(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.silent = true
+	fixture := newDisplayFixture(t, panel)
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if got := condition(fixture.display(), ResponsiveCondition).Status; got != conditionFalse {
+		t.Fatalf("Responsive = %q, want %q from a panel that answers nothing", got, conditionFalse)
+	}
+
+	panel.answers()
+	fixture.advance(probeRetryInterval)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	display := fixture.display()
+	responsive := condition(display, ResponsiveCondition)
+	if responsive.Status != conditionTrue {
+		t.Errorf("Responsive = %q/%q, want %q", responsive.Status, responsive.Reason, conditionTrue)
+	}
+	if _, carried := display.Status.Capabilities[brightnessControl]; !carried {
+		t.Errorf("capabilities = %v, want what the panel declares now", display.Status.Capabilities)
 	}
 }
 

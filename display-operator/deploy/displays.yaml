@@ -54,6 +54,12 @@ spec:
             spec:
               type: object
               description: "The settings the panel rests at, and the override above them. Every field is optional: the operator writes a declared field back when the panel diverges from it, and it never writes a field the spec leaves out."
+              # A writer lifts an override by applying a spec with
+              # nothing in it. Server-side apply prunes the empty
+              # object away, and validation would then read spec as
+              # null and refuse the write. The default puts the empty
+              # object back after the pruning.
+              default: {}
               properties:
                 brightness:
                   type: integer

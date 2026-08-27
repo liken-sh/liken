@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -212,12 +213,69 @@ func TestGetVCPRetriesUntilTheDisplayAnswersWell(t *testing.T) {
 		t.Errorf("wrote %d messages, want 2", len(fixture.bus.writes))
 	}
 	// The waits, in order: the reply delay of the first attempt, the
-	// delay the specification puts before a retry, and the reply
-	// delay of the second attempt.
-	want := []time.Duration{ddcReplyDelay, ddcRetryDelay, ddcReplyDelay}
-	if len(fixture.slept) != len(want) || fixture.slept[1] != ddcRetryDelay {
+	// delay the specification puts before a retry, and the second
+	// attempt's reply delay, which is twice the first.
+	want := []time.Duration{ddcReplyDelay, ddcRetryDelay, 2 * ddcReplyDelay}
+	if !slices.Equal(fixture.slept, want) {
 		t.Errorf("waited %v, want %v", fixture.slept, want)
 	}
+}
+
+// The lab's LG answers DDC/CI and answers it late. It passes
+// ddcutil, which waits generously, and it read as a panel with no
+// DDC/CI here until the reply delay grew across the attempts. The
+// first attempt keeps the specification's 40ms, so a panel that
+// answers on time costs nothing.
+func TestGetVCPWaitsLongerOnEachAttempt(t *testing.T) {
+	cases := []struct {
+		name     string
+		answers  time.Duration
+		attempts int
+	}{
+		{name: "a panel that answers on time", answers: ddcReplyDelay, attempts: 1},
+		{name: "a panel that answers at twice the delay", answers: 2 * ddcReplyDelay, attempts: 2},
+		{name: "a panel that answers at four times the delay", answers: 4 * ddcReplyDelay, attempts: 3},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			panel := &slowPanel{answers: c.answers, reply: getReply(0x10, 50, 100)}
+			client := newDDC(panel)
+			client.sleep = func(waited time.Duration) { panel.waited = waited }
+
+			current, max, err := client.GetVCP(0x10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current != 50 || max != 100 {
+				t.Errorf("got %d of %d, want 50 of 100", current, max)
+			}
+			if panel.reads != c.attempts {
+				t.Errorf("the panel was read %d times, want %d", panel.reads, c.attempts)
+			}
+		})
+	}
+}
+
+// A panel that answers only once the host has waited long
+// enough. The wire is silent before that, which is the same thing an
+// absent panel looks like, and the whole point of waiting longer.
+type slowPanel struct {
+	answers time.Duration
+	waited  time.Duration
+	reply   []byte
+	reads   int
+}
+
+func (p *slowPanel) Write([]byte) error { return nil }
+
+func (p *slowPanel) Read(reply []byte) error {
+	p.reads++
+	if p.waited < p.answers {
+		copy(reply, bytes.Repeat([]byte{0xff}, len(reply)))
+		return nil
+	}
+	copy(reply, p.reply)
+	return nil
 }
 
 func TestGetVCPTellsSilenceFromGarbage(t *testing.T) {

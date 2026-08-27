@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The two opcodes of the capability exchange. The reply carries the
@@ -189,14 +190,19 @@ func (d *DDC) Capabilities() (string, error) {
 
 // The retry, for the reason GetVCP retries: one refusal says
 // nothing about a monitor.
+//
+// The wait before each read doubles with the attempt, the same
+// ladder GetVCP climbs and for the same panel.
 func (d *DDC) capabilitiesFragment(offset uint16) ([]byte, error) {
 	var err error
+	wait := ddcReplyDelay
 	for attempt := 0; attempt < ddcGetAttempts; attempt++ {
 		if attempt > 0 {
 			d.sleep(ddcRetryDelay)
+			wait *= 2
 		}
 		var fragment []byte
-		fragment, err = d.capabilitiesOnce(offset)
+		fragment, err = d.capabilitiesOnce(offset, wait)
 		if err == nil {
 			return fragment, nil
 		}
@@ -205,11 +211,11 @@ func (d *DDC) capabilitiesFragment(offset uint16) ([]byte, error) {
 }
 
 // One exchange, on the timing every other message follows.
-func (d *DDC) capabilitiesOnce(offset uint16) ([]byte, error) {
+func (d *DDC) capabilitiesOnce(offset uint16, wait time.Duration) ([]byte, error) {
 	if err := d.bus.Write(capabilitiesRequest(offset)); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNoAnswer, err)
 	}
-	d.sleep(ddcReplyDelay)
+	d.sleep(wait)
 	reply := make([]byte, capabilitiesReplyLength)
 	if err := d.bus.Read(reply); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNoAnswer, err)

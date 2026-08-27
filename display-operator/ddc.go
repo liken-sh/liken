@@ -98,6 +98,13 @@ const (
 // it (sections 4.3 and 6.6). After a Set, a display needs 50ms before
 // it accepts the next message (section 4.4). Between a failed attempt
 // and its retry, the host waits 40ms (section 5).
+//
+// The reply delay is the first attempt's wait, and each retry
+// doubles it: 40ms, then 80ms, then 160ms. The lab's LG answers
+// DDC/CI later than the specification's number, and a probe that
+// waited 40ms three times read it as a panel with no DDC/CI at all.
+// ddcutil finds the same panel because it waits longer. Doubling
+// keeps a panel that answers on time at 40ms.
 const (
 	ddcReplyDelay = 40 * time.Millisecond
 	ddcSetDelay   = 50 * time.Millisecond
@@ -164,12 +171,14 @@ func newDDC(bus i2cBus) *DDC {
 // loop.
 func (d *DDC) GetVCP(code byte) (uint16, uint16, error) {
 	var err error
+	wait := ddcReplyDelay
 	for attempt := 0; attempt < ddcGetAttempts; attempt++ {
 		if attempt > 0 {
 			d.sleep(ddcRetryDelay)
+			wait *= 2
 		}
 		var current, max uint16
-		current, max, err = d.getOnce(code)
+		current, max, err = d.getOnce(code, wait)
 		if err == nil {
 			return current, max, nil
 		}
@@ -187,11 +196,14 @@ func (d *DDC) GetVCP(code byte) (uint16, uint16, error) {
 // fixed-length reply. Reading a fixed length is safe even when the
 // display's answer is shorter, because section 6.5 makes a display
 // pad a short answer rather than hold the bus.
-func (d *DDC) getOnce(code byte) (uint16, uint16, error) {
+//
+// The caller states the wait, because the wait grows with each
+// attempt.
+func (d *DDC) getOnce(code byte, wait time.Duration) (uint16, uint16, error) {
 	if err := d.bus.Write(getRequest(code)); err != nil {
 		return 0, 0, fmt.Errorf("%w: %w", ErrNoAnswer, err)
 	}
-	d.sleep(ddcReplyDelay)
+	d.sleep(wait)
 	reply := make([]byte, getReplyLength)
 	if err := d.bus.Read(reply); err != nil {
 		return 0, 0, fmt.Errorf("%w: %w", ErrNoAnswer, err)
