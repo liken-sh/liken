@@ -67,11 +67,23 @@ assets/liken.css: liken.css
 	cp $< $@
 
 # The checks for this module's Go packages, linkcheck and crdref.
-# staticcheck is a pinned tool dependency in go.mod, the way the
-# sites pin Hugo, so `go tool` is the whole toolchain.
+# staticcheck and go-test-coverage are pinned tool dependencies in
+# go.mod, the way the sites pin Hugo, so `go tool` is the whole
+# toolchain.
+#
+# The coverage gate measures on its own run, on a pinned toolchain.
+# Go 1.27 splits a basic block into one profile row per run of code
+# inside it, and repeats the whole block's statement count on every
+# row. Every reader sums those rows, `go tool cover` included, so a
+# block counts once more for each comment that interrupts it. Go 1.26
+# counts each block once, which is what .testcoverage.yml's
+# thresholds were set against. Move this pin to the newest toolchain
+# that counts each block once.
 test:
 	go vet ./...
 	go tool staticcheck ./...
 	go test ./...
+	GOTOOLCHAIN=go1.26.7 go test -coverprofile=coverage.out ./...
+	GOTOOLCHAIN=go1.26.7 go tool go-test-coverage --config=.testcoverage.yml
 
 .PHONY: all test

@@ -1,0 +1,25 @@
+# This is the coverage gate, enforced by `make test`, which is what
+# CI runs (see .github/workflows/ci.yaml).
+#
+# The thresholds only rise over time. Each one is set just under what
+# the tests measure today. So a change that loses coverage fails the
+# check, and a change that gains coverage should raise the number
+# here to keep the gain.
+#
+# The gate measures on a pinned toolchain. The Makefile says why.
+
+profile: coverage.out
+
+threshold:
+  total: 90
+
+override:
+  # crdref reads a CRD's schema and writes the reference page. The
+  # tests run it against real CRDs. What stays untested is a
+  # scattering of I/O error returns.
+  - path: ^crdref$
+    threshold: 88
+  # linkcheck resolves every link in a built site against the pages
+  # and anchors it finds. The tests cover it against fixture trees.
+  - path: ^linkcheck$
+    threshold: 95

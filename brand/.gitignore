@@ -1,0 +1,3 @@
+# The coverage profile the gate measures. `make test` writes it on
+# every run and reads it once; it never belongs to the tree.
+/coverage.out
