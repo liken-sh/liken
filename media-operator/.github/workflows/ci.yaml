@@ -30,3 +30,23 @@ jobs:
 
       - run: go vet ./...
       - run: go test -race ./...
+
+      # The coverage gate measures on its own run, on a pinned
+      # toolchain. Go 1.27 splits a basic block into one profile row
+      # per run of code inside it, and repeats the whole block's
+      # statement count on every row. Every reader sums those rows,
+      # `go tool cover` included, so a block counts once more for
+      # each comment that interrupts it. Go 1.26 counts each block
+      # once, which is what .testcoverage.yml's thresholds were set
+      # against. Move this pin to the newest toolchain that counts
+      # each block once.
+      #
+      # go-test-coverage is a pinned tool dependency (the `tool`
+      # directive in go.mod), so the gate needs nothing installed
+      # beyond the Go toolchain.
+      - run: go test -coverprofile=coverage.out ./...
+        env:
+          GOTOOLCHAIN: go1.26.7
+      - run: go tool go-test-coverage --config=.testcoverage.yml
+        env:
+          GOTOOLCHAIN: go1.26.7

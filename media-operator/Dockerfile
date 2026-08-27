@@ -5,7 +5,7 @@
 # binary as supervisor, builds from Dockerfile.player beside this
 # file, and the release ships the two together.
 
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.

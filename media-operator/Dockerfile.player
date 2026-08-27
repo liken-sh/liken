@@ -8,7 +8,7 @@
 
 # The build stage repeats the operator image's, so both images carry
 # the same binary from the same source at the same commit.
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.
