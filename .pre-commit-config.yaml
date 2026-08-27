@@ -51,22 +51,39 @@ repos:
         language: system
         files: \.go$|^go\.(mod|sum)$
         pass_filenames: false
-      # The tests write a coverage profile so the next hook can gate
-      # on it. The profile itself is gitignored.
+      # The tests run on the toolchain that builds what ships, which
+      # is the `toolchain` directive in go.mod.
       - id: go-test
         name: go test
-        entry: bash -c 'go test -coverprofile=coverage.out ./...'
+        entry: bash -c 'go test ./...'
         language: system
         files: \.go$|^go\.(mod|sum)$
         pass_filenames: false
+      # The gate measures coverage on its own run, on its own pinned
+      # toolchain, and the pin is the point.
+      #
+      # Go 1.27 splits a basic block into one profile row per run of
+      # code, so a comment inside a function ends that row and starts
+      # another. Each row repeats the whole block's statement count,
+      # and every reader sums the rows, `go tool cover` included. A
+      # block written as three runs of code therefore counts three
+      # times. The error is not a constant: it grows with the
+      # comments inside a function, so it moves a package's number up
+      # or down when someone only reflows a comment. On this repo it
+      # moves machine-operator down 11.6 points and disks up 5.9.
+      #
+      # Go 1.26 counts each block once, so the pin below measures
+      # what .testcoverage.yml's thresholds were set against. Move it
+      # to the newest toolchain that counts each block once.
+      #
       # go-test-coverage is a pinned tool dependency (the `tool`
-      # directive in go.mod). So the gate needs nothing installed
+      # directive in go.mod), so the gate needs nothing installed
       # beyond the Go toolchain. Its thresholds live in
-      # .testcoverage.yml, which explains how the thresholds are
-      # chosen.
+      # .testcoverage.yml, which explains how they are chosen. The
+      # profile itself is gitignored.
       - id: go-test-coverage
         name: go test coverage
-        entry: bash -c 'go tool go-test-coverage --config=.testcoverage.yml'
+        entry: bash -c 'GOTOOLCHAIN=go1.26.7 go test -coverprofile=coverage.out ./... && GOTOOLCHAIN=go1.26.7 go tool go-test-coverage --config=.testcoverage.yml'
         language: system
         files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$
         pass_filenames: false
