@@ -1538,6 +1538,7 @@ func TestADarkeningOverrideRespectsTheAttachedInput(t *testing.T) {
 		attached *string
 		override *DisplayOverride
 		shown    uint16
+		garbles  bool
 		blanks   bool
 		says     string
 	}{
@@ -1548,6 +1549,18 @@ func TestADarkeningOverrideRespectsTheAttachedInput(t *testing.T) {
 			attached: stringOf(labAttachedInput),
 			override: &DisplayOverride{Backlight: overrideOff},
 			shown:    0x0f,
+		},
+		{
+			// The failure the metal drill found. The
+			// ultrawide answers the input query with a reply that
+			// parses wrong while it shows another source, and a
+			// panel that cannot say what it shows is treated as
+			// showing somebody else.
+			name:     "a panel that answers the input query with nonsense",
+			attached: stringOf(labAttachedInput),
+			override: &DisplayOverride{Backlight: overrideOff},
+			shown:    0x12,
+			garbles:  true,
 		},
 		{
 			name:     "a panel showing this machine's input",
@@ -1581,9 +1594,16 @@ func TestADarkeningOverrideRespectsTheAttachedInput(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			panel := drillPanel(t, "lg-hdr-wqhd")
-			panel.turnedTo(vcpInput, c.shown)
 			fixture := newDisplayFixture(t, panel)
-			fixture.declare(DisplaySpec{AttachedInput: c.attached, Override: c.override})
+			display := fixture.declare(DisplaySpec{AttachedInput: c.attached})
+			// The panel answers everything at the probe, the
+			// way the ultrawide does while it shows this machine, and
+			// the switch to another source comes after: the input it
+			// reports changes, or it stops reporting one at all.
+			_ = fixture.pass()
+			panel.turnedTo(vcpInput, c.shown)
+			panel.garble(vcpInput, c.garbles)
+			display.Spec.Override = c.override
 
 			err := fixture.pass()
 			if c.says == "" && err != nil {
@@ -1648,8 +1668,10 @@ func TestADeferredDarkeningLandsWhenTheInputReturns(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// No clock moves here. The guard reads the panel itself, so
+	// the blank lands on the very pass whose read answers this
+	// machine's input, and not a poll window later.
 	panel.turnedTo(vcpInput, 0x12)
-	fixture.advance(pollInterval)
 	if err := fixture.pass(); err != nil {
 		t.Fatal(err)
 	}
@@ -1818,5 +1840,64 @@ func TestADeclarationWinsOverTheDerivation(t *testing.T) {
 	if status := fixture.displayNamed(monitorID(screen)).Status; status.AttachedInput != "HDMI-2" {
 		t.Errorf("status.attachedInput = %q, want the derivation to publish beside the declaration",
 			status.AttachedInput)
+	}
+}
+
+// The guard's read is a read like any other, so what it learns
+// reaches the resource. A person looking at a deferred override can
+// see which input the panel answered with.
+func TestTheGuardsReadReachesTheObservedInput(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	fixture := newDisplayFixture(t, panel)
+	display := fixture.declare(DisplaySpec{AttachedInput: stringOf(labAttachedInput)})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The panel moves to a third input, and no poll window is
+	// open, so the guard's own read is the only thing that could learn
+	// it.
+	panel.turnedTo(vcpInput, 0x11)
+	display.Spec.Override = &DisplayOverride{Backlight: overrideOff}
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	observed := fixture.display().Status.Observed
+	if observed == nil || observed.Input == nil || *observed.Input != "HDMI-1" {
+		t.Errorf("observed.input = %+v, want the HDMI-1 the guard read", observed)
+	}
+	if got := fixture.holds(vcpBrightness); got != 50 {
+		t.Errorf("the panel holds a brightness of %d, want the 50 the other input is watching", got)
+	}
+}
+
+// The darkening that landed asks nothing more of the panel. A
+// DDC read is a wake stimulus, so a panel held dark is not read again
+// on every pass to check an input it cannot change while it is dark.
+func TestAnObeyedOverrideReadsThePanelNoFurther(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.turnedTo(vcpInput, 0x12)
+	fixture := newDisplayFixture(t, panel)
+	fixture.declare(DisplaySpec{
+		AttachedInput: stringOf(labAttachedInput),
+		Override:      &DisplayOverride{Backlight: overrideOff},
+	})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixture.holds(vcpBrightness); got != 0 {
+		t.Fatalf("the panel holds a brightness of %d, want the blank", got)
+	}
+
+	opens := fixture.bench.opened()
+	for range 3 {
+		if err := fixture.pass(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := fixture.bench.opened(); got != opens {
+		t.Errorf("the passes after the blank opened the wire %d more times, want none", got-opens)
 	}
 }

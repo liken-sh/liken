@@ -48,14 +48,21 @@ The attached input has two sources, in order:
   can check the derivation against the cabling, and a declaration
   always wins over it.
 
-The guard: the operator obeys a darkening override, `backlight` or
-`power`, only when no attached input is known from either source or
-`status.observed.input` equals it. Otherwise the override stands in
-the spec, unactuated, and the operator logs the deferral once. The
-poll keeps `observed.input` fresh, so when the panel returns to the
-declared input within a quiet unit, the deferred override obeys
-then, capture first as always. The idle policy still works on a
-shared panel; it waits for the panel to actually be ours.
+The guard: when an attached input is known from either source, the
+operator obeys a darkening override, `backlight` or `power`, only
+after a fresh read of the shown input answers and matches it. The
+read must be fresh because the last observed value can be a fossil:
+the lab's ultrawide answers the input query with an invalid
+response while it shows another source, a failed poll keeps the
+last value by design, and a guard that trusted `observed.input`
+darkened the panel over the other machine's picture. A read that
+fails defers, because a panel that cannot say what it shows is
+treated as showing someone else. Otherwise the override stands in
+the spec, unactuated, and the operator logs the deferral once. When
+the panel returns to the attached input, the next pass's read
+answers, and the deferred override obeys then, capture first as
+always. The idle policy still works on a shared panel; it waits for
+the panel to actually be ours.
 
 Lifts always obey. A restore writes back what the capture saved,
 and the capture only ever ran while the panel showed the declared

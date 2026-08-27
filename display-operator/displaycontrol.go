@@ -364,19 +364,6 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 		if !facts.Responsive {
 			return nil
 		}
-		// brightness and power are panel-global, so darkening a
-		// panel that shows another machine's input dims that machine's
-		// picture. The declared attached input is the only fact that
-		// says which input is ours, and the override waits until the
-		// panel shows it.
-		obeys, err := d.attached(display.Spec, output, facts)
-		if err != nil {
-			return err
-		}
-		if !obeys {
-			return nil
-		}
-		d.reportDeferral(output.Connector, "")
 		if held == powerControl {
 			return d.holdPower(display, output, facts)
 		}
@@ -384,7 +371,7 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 			return fmt.Errorf("%s answers no brightness control, and the override states backlight off",
 				output.Connector)
 		}
-		return d.hold(display, output, vcpBrightness, 0)
+		return d.hold(display, output, facts, vcpBrightness, 0)
 	}
 	// A capture that stands is restored even against a panel
 	// that answers nothing now, because a panel the operator powered
@@ -418,16 +405,27 @@ func (d *displayControl) attached(spec DisplaySpec, output Output, facts panelFa
 	if !declared {
 		return true, nil
 	}
-	if shown, known := facts.Observed[vcpInput]; known && shown == attached {
-		return true, nil
+	// The read is made here and now, and the last observed
+	// value is not consulted at all. A poll that failed keeps the last
+	// value by design, and the lab's ultrawide answers this query with
+	// a reply that parses wrong while it shows another source, so the
+	// fossil said the panel was ours and the operator darkened
+	// somebody else's picture. The read records what it reads, so the
+	// observed input follows it.
+	shown, _, err := d.controls.readControl(output.Connector, vcpInput)
+	if err != nil {
+		// A panel that cannot say what it shows is treated as
+		// showing somebody else. This is the whole of the metal
+		// drill's lesson.
+		d.reportDeferral(output.Connector,
+			fmt.Sprintf("%s does not answer which input it shows: %v", output.Connector, err))
+		return false, nil
 	}
-	d.poll(output, facts)
-	shown, known := d.controls.factsFor(output).Observed[vcpInput]
-	if known && shown == attached {
+	if shown == attached {
 		return true, nil
 	}
 	d.reportDeferral(output.Connector, fmt.Sprintf("%s shows %s and this machine is on %s",
-		output.Connector, shownInput(shown, known), valueName(vcpInput, attached)))
+		output.Connector, valueName(vcpInput, shown), valueName(vcpInput, attached)))
 	return false, nil
 }
 
@@ -501,8 +499,25 @@ func (d *displayControl) reportPoll(connector string, err error) {
 // The capture commits before the wire write. A status write that
 // failed leaves the panel lit, because the value that brings it back is
 // the whole reason this resource exists.
-func (d *displayControl) hold(display *Display, output Output, code byte, held uint16) error {
-	if _, captured := capturedRaw(display.Status.Captured, code); !captured {
+func (d *displayControl) hold(display *Display, output Output, facts panelFacts, code byte, held uint16) error {
+	_, captured := capturedRaw(display.Status.Captured, code)
+	current, known := d.controls.factsFor(output).Observed[code]
+	// An override already obeyed asks nothing more of the
+	// panel, and a panel held dark must not be read: a DDC read is a
+	// wake stimulus. So the fresh read below happens only while the
+	// darkening is pending and unactuated.
+	if captured && known && current == held {
+		return nil
+	}
+	obeys, err := d.attached(display.Spec, output, facts)
+	if err != nil {
+		return err
+	}
+	if !obeys {
+		return nil
+	}
+	d.reportDeferral(output.Connector, "")
+	if !captured {
 		if err := d.capture(display, output, code); err != nil {
 			return err
 		}
@@ -521,7 +536,19 @@ func (d *displayControl) holdPower(display *Display, output Output, facts panelF
 	if !carried {
 		return fmt.Errorf("%s answers no power control, and the override states power off", output.Connector)
 	}
-	if _, captured := capturedRaw(display.Status.Captured, vcpPowerMode); !captured {
+	_, saved := capturedRaw(display.Status.Captured, vcpPowerMode)
+	if down, known := facts.Observed[vcpPowerMode]; saved && known && down == off {
+		return nil
+	}
+	obeys, err := d.attached(display.Spec, output, facts)
+	if err != nil {
+		return err
+	}
+	if !obeys {
+		return nil
+	}
+	d.reportDeferral(output.Connector, "")
+	if !saved {
 		if err := d.capture(display, output, vcpPowerMode); err != nil {
 			if current, known := facts.Observed[vcpPowerMode]; known && current == off {
 				return nil

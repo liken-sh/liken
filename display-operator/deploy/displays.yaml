@@ -37,6 +37,12 @@ spec:
         - name: Connector
           type: string
           jsonPath: .status.connector
+        - name: Attached
+          type: string
+          jsonPath: .status.attachedInput
+        - name: Mode
+          type: string
+          jsonPath: .status.currentMode
         - name: Connected
           type: string
           jsonPath: .status.conditions[?(@.type=="Connected")].status
