@@ -88,6 +88,22 @@ rules:
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
     verbs: [get, create, delete]
+  # The drivers' published inventory. The operator lists it to read
+  # the attributes of the devices its own claims hold, which is how
+  # an allocated screen names its Display. Read-only, and one list a
+  # pass answers every unit.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [list]
+  # The display-operator's panels. The operator reads a screen's
+  # Display to fold what the panel last showed into the Player status,
+  # and patches spec.override under its own field manager when the idle
+  # screen states the panel should go dark. Server-side apply keeps the
+  # write to that one block, so the cluster owner's resting fields stay
+  # the cluster owner's.
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
+    verbs: [get, patch]
   # The playback pods and the standing pods, on the same terms as the
   # claims: created once, and deleted to replace a stale one, a playback
   # pod at the film's place or a standing pod on a template that

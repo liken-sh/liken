@@ -94,22 +94,15 @@ const (
 	idleRemoteKeymapTopicsVariable = "IDLE_REMOTE_KEYMAP_TOPICS"
 	idleRemoteFocusTopicsVariable  = "IDLE_REMOTE_FOCUS_TOPICS"
 
-	// The idle sidecar's hardware wiring: the off window in seconds,
-	// where zero never darkens the panel, and the mode the sidecar
-	// writes when it runs out. Both travel on every pod the way the
-	// fade window does, because the operator settles them.
+	// The off window in seconds, where zero leaves the panel lit. It
+	// is set on every pod the way the fade window is, because the
+	// operator settles it.
 	idleOffAfterSecondsVariable = "IDLE_OFF_AFTER_SECONDS"
-	idleOffModeVariable         = "IDLE_OFF_MODE"
 
-	// The topic the sidecar publishes the panel state on. The operator
-	// builds it whole, the way it builds the commands and status
-	// topics, so the sidecar parses no topic.
+	// The topic the sidecar states the panel desire on. The
+	// operator builds it whole, the way it builds the commands and
+	// status topics, so the sidecar parses no topic.
 	idlePanelTopicVariable = "IDLE_PANEL_TOPIC"
-
-	// The i2c node path the display-operator's CDI edit delivers with
-	// the control device. The wire is the gate: with none delivered,
-	// the sidecar writes no hardware at all.
-	displayControlBusVariable = "DISPLAY_CONTROL_BUS"
 
 	// The command sidecar carries every item's presentation block, baked
 	// into the pod when the operator creates it. The sidecar swaps to the

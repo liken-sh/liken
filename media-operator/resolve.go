@@ -251,20 +251,22 @@ func firstStatedList(tiers [][]string) []string {
 // nothing takes: ten minutes of quiet, then the idle screen fades.
 const defaultFadeAfterSeconds int64 = 600
 
-// Darkening hardware is opt-in twice, the control device and the
-// window, so a cluster that states neither keeps the panel lit.
+// Darkening hardware is opt-in, so a cluster that states no
+// window keeps its panels lit.
 const defaultOffAfterSeconds int64 = 0
 
 // The built-in mode is the backlight, because a panel at zero
-// backlight still answers DDC and a wake cannot strand.
+// backlight still answers DDC and the restore cannot strand.
 const defaultOffMode = offModeBacklight
 
-// resolvedIdle is one Player's settled idle policy, every field a plain
-// value the idle pod's environment can carry.
+// resolvedIdle is one Player's settled idle policy. The two windows
+// are set on the idle pod as plain values, and the off mode stays
+// with the operator, which writes the override.
 type resolvedIdle struct {
 	FadeAfterSeconds int64
 
-	// The settled hardware window and the mode the sidecar writes.
+	// The settled off window, and the override the operator
+	// applies when it runs out.
 	OffAfterSeconds int64
 	OffMode         string
 }
@@ -292,8 +294,8 @@ func resolveIdle(player, defaults *IdlePolicy) resolvedIdle {
 	}
 }
 
-// firstStatedIdleMode is firstStatedString with the built-in mode as
-// the floor, so an off mode no tier states is the backlight.
+// firstStatedIdleMode is firstStatedString with the built-in
+// mode as the floor, so an off mode no tier states is the backlight.
 func firstStatedIdleMode(tiers []string) string {
 	if mode := firstStatedString(tiers); mode != "" {
 		return mode

@@ -26,6 +26,27 @@ type fakeCluster struct {
 	claims     map[string]*ResourceClaim
 	pods       map[string]*Pod
 	requests   []string
+
+	// The hardware the display-operator publishes: one Display
+	// per panel, and the slices that name each allocated device. applies
+	// is every apply this operator sent, in order, the refused ones
+	// included.
+	displays map[string]*Display
+	slices   []ResourceSlice
+	applies  []displayApplied
+
+	// applyFails is a Display the API server refuses to write,
+	// the failure a pass answers by leaving the panel where it stands
+	// and trying again.
+	applyFails bool
+}
+
+// One apply the operator made: the Display it named, the block
+// it wrote, and the field manager it wrote under.
+type displayApplied struct {
+	name     string
+	override *DisplayOverride
+	manager  string
 }
 
 func newFakeCluster() *fakeCluster {
@@ -37,6 +58,7 @@ func newFakeCluster() *fakeCluster {
 		mediaprefs: map[string]*MediaPreferences{},
 		claims:     map[string]*ResourceClaim{},
 		pods:       map[string]*Pod{},
+		displays:   map[string]*Display{},
 	}
 }
 
@@ -96,6 +118,13 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			answer(w, f.keymaps[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/mediapreferences/"):
 			answer(w, f.mediaprefs[name])
+		case r.Method == http.MethodGet && r.URL.Path == slicesPath:
+			_ = json.NewEncoder(w).Encode(ResourceSliceList{
+				Metadata: ListMeta{ResourceVersion: "1"}, Items: f.slices})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/displays/"):
+			answer(w, f.displays[name])
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/displays/"):
+			f.apply(w, r, name)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/resourceclaims/"):
 			answer(w, f.claims[name])
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/resourceclaims"):
@@ -124,6 +153,36 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
+}
+
+// apply folds one server-side apply onto a Display. The
+// override the body carries replaces the one the Display holds, and an
+// apply with no override lifts it, which is what the API server does
+// with a field the applying manager owned and no longer states.
+func (f *fakeCluster) apply(w http.ResponseWriter, r *http.Request, name string) {
+	held, standing := f.displays[name]
+	if !standing {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var applied displayApply
+	_ = json.NewDecoder(r.Body).Decode(&applied)
+	if f.applyFails {
+		f.applies = append(f.applies, displayApplied{
+			name:     name,
+			override: applied.Spec.Override,
+			manager:  r.URL.Query().Get("fieldManager"),
+		})
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	held.Spec.Override = applied.Spec.Override
+	f.applies = append(f.applies, displayApplied{
+		name:     name,
+		override: applied.Spec.Override,
+		manager:  r.URL.Query().Get("fieldManager"),
+	})
+	_ = json.NewEncoder(w).Encode(held)
 }
 
 // An object the cluster does not hold is a 404, which is the answer the
@@ -159,6 +218,8 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		focus:                 newFocusDesk(wake),
 		presence:              newPresenceDesk(wake),
 		panels:                newPanelDesk(wake),
+		panelOverrides:        map[string]panelOverride{},
+		panelFaults:           map[string]string{},
 		volumes:               newVolumeDesk(),
 		positionWrites:        map[string]time.Time{},
 		keymapPublished:       map[string]string{},

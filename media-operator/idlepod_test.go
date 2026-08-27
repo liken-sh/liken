@@ -215,7 +215,6 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 		playerStatusTopicVariable:    playerStatusTopic(testTopicBase, "house", "theater"),
 		idleFadeAfterSecondsVariable: "600",
 		idleOffAfterSecondsVariable:  "0",
-		idleOffModeVariable:          offModeBacklight,
 		idlePanelTopicVariable:       playerPanelTopic(testTopicBase, "house", "theater"),
 	}
 	if !reflect.DeepEqual(env, wantEnv) {
@@ -546,83 +545,11 @@ func TestGatherIdleRemotesLeavesAMissingRemoteWithoutAKeymap(t *testing.T) {
 	}
 }
 
-// A Player that states a control device claims the panel's DDC wire
-// beside the draw device, and the constraint on the monitor attribute
-// makes the wire and the screen one panel.
-func TestBuildIdleClaimHoldsTheControlDevice(t *testing.T) {
-	player := standingIdlePlayer()
-	player.Spec.Control = &PlayerDevice{
-		Class:    "display-control",
-		Selector: `device.attributes["monitor.liken.sh"].id == "DP-1"`,
-	}
-
-	claim := buildIdleClaim(player, "display-draw")
-
-	requests := claim.Spec.Devices.Requests
-	if len(requests) != 3 {
-		t.Fatalf("requests = %+v, want three", requests)
-	}
-	control := requests[2]
-	mustMatch(t, control.Name, idleControlRequest)
-	if control.Exactly == nil || control.Exactly.DeviceClassName != "display-control" {
-		t.Fatalf("control request = %+v, want the display-control class", control)
-	}
-	selectors := []DeviceSelector{{CEL: &CELDeviceSelector{
-		Expression: `device.attributes["monitor.liken.sh"].id == "DP-1"`,
-	}}}
-	if !reflect.DeepEqual(control.Exactly.Selectors, selectors) {
-		t.Errorf("control selectors = %+v, want %+v", control.Exactly.Selectors, selectors)
-	}
-
-	constraints := []DeviceConstraint{{
-		Requests:       []string{idleDrawRequest, idleControlRequest},
-		MatchAttribute: monitorIDAttribute,
-	}}
-	if !reflect.DeepEqual(claim.Spec.Devices.Constraints, constraints) {
-		t.Errorf("constraints = %+v, want %+v", claim.Spec.Devices.Constraints, constraints)
-	}
-}
-
-// A panel that refuses DDC/CI publishes no control device, so a
-// Player that states none claims no wire and carries no constraint to
-// tie one to the screen.
-func TestBuildIdleClaimOmitsTheControlDeviceWhenUnstated(t *testing.T) {
-	claim := buildIdleClaim(standingIdlePlayer(), "display-draw")
-
-	mustMatch(t, len(claim.Spec.Devices.Requests), 2)
-	mustMatch(t, len(claim.Spec.Devices.Constraints), 0)
-}
-
-// The control wire is the sidecar's one device claim, because the
-// sidecar writes the panel and mpv draws pixels. The
-// display-operator's CDI edit delivers the i2c node to that
-// container.
-func TestBuildIdlePodGivesTheControlRequestToTheSidecar(t *testing.T) {
-	player := standingIdlePlayer()
-	player.Spec.Control = &PlayerDevice{Class: "display-control"}
-	claim := buildIdleClaim(player, "display-draw")
-
-	pod := plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "")
-
-	sidecarClaims := []ContainerClaim{{Name: podClaimName, Request: idleControlRequest}}
-	if !reflect.DeepEqual(pod.Spec.InitContainers[0].Resources.Claims, sidecarClaims) {
-		t.Errorf("sidecar claims = %+v, want %+v",
-			pod.Spec.InitContainers[0].Resources.Claims, sidecarClaims)
-	}
-	idleClaims := []ContainerClaim{
-		{Name: podClaimName, Request: idleDrawRequest},
-		{Name: podClaimName, Request: renderRequest},
-	}
-	if !reflect.DeepEqual(pod.Spec.Containers[0].Resources.Claims, idleClaims) {
-		t.Errorf("idle claims = %+v, want %+v",
-			pod.Spec.Containers[0].Resources.Claims, idleClaims)
-	}
-}
-
-// The hardware window, the mode, and the panel topic travel on every
-// idle pod, because the resolver settles all three for every Player
-// and zero is a policy the sidecar reads.
-func TestBuildIdlePodCarriesTheHardwarePolicy(t *testing.T) {
+// The off window and the panel topic are set on every idle pod,
+// because the resolver settles both for every Player and zero is a
+// policy the sidecar reads. The off mode stays with the operator, so
+// the pod carries none.
+func TestBuildIdlePodCarriesTheOffWindow(t *testing.T) {
 	player := standingIdlePlayer()
 	idle := resolveIdle(&IdlePolicy{
 		OffAfterSeconds: ptr(int64(1800)),
@@ -637,7 +564,6 @@ func TestBuildIdlePodCarriesTheHardwarePolicy(t *testing.T) {
 		env[entry.Name] = entry.Value
 	}
 	mustMatch(t, env[idleOffAfterSecondsVariable], "1800")
-	mustMatch(t, env[idleOffModeVariable], offModePower)
 	mustMatch(t, env[idlePanelTopicVariable],
 		playerPanelTopic(testTopicBase, "house", "theater"))
 }

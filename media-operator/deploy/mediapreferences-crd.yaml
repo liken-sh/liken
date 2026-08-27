@@ -113,17 +113,20 @@ spec:
                       format: int64
                       minimum: 0
                       description: >-
-                        Seconds of quiet before an idle panel goes
-                        dark, at least fadeAfterSeconds. Zero or
-                        unset means panels never go dark on their
-                        own. It acts only on a Player that states a
-                        control device.
+                        Seconds of quiet before an idle panel
+                        goes dark, at least fadeAfterSeconds. Zero or
+                        unset means panels never go dark on their own.
+                        A panel goes dark only where the cluster runs
+                        a display-operator that publishes a Display
+                        for the screen.
                     offMode:
                       type: string
                       enum: [backlight, power]
                       description: >-
-                        What the off window writes: backlight, the
-                        default, writes the backlight to zero and
-                        always wakes over DDC; power writes DPM
-                        off, which is deeper. State power only for
-                        a panel that woke from it in a drill.
+                        Which override the off window applies to the
+                        screen's Display. The default, backlight,
+                        holds the panel at brightness zero, which
+                        still answers DDC. Power off stops some
+                        panels from answering DDC at all; state it
+                        only for a panel that woke from it in a
+                        drill.

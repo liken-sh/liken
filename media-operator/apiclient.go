@@ -88,9 +88,22 @@ func InClusterClient() (*Client, error) {
 	}, serviceAccountDir), nil
 }
 
+// The two content types this client sends. A body is JSON,
+// except an apply, which the API server reads as a partial object
+// under the caller's field manager. The apply media type is named for
+// YAML and accepts JSON, because YAML is its superset.
+const (
+	jsonContentType  = "application/json"
+	applyContentType = "application/apply-patch+yaml"
+)
+
 // Do sends one request and hands back the open response, which is
 // what the watch needs and what RequestJSON is built on.
 func (c *Client) Do(method, path string, body []byte) (*http.Response, error) {
+	return c.send(method, path, jsonContentType, body)
+}
+
+func (c *Client) send(method, path, contentType string, body []byte) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -112,7 +125,7 @@ func (c *Client) Do(method, path string, body []byte) (*http.Response, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	return c.http.Do(req)
 }
@@ -121,7 +134,11 @@ func (c *Client) Do(method, path string, body []byte) (*http.Response, error) {
 // every non-2xx status into an error that carries the server's own
 // message.
 func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
-	resp, err := c.Do(method, path, body)
+	return c.requestJSON(method, path, jsonContentType, body, out)
+}
+
+func (c *Client) requestJSON(method, path, contentType string, body []byte, out any) error {
+	resp, err := c.send(method, path, contentType, body)
 	if err != nil {
 		return err
 	}
@@ -165,6 +182,8 @@ const (
 	mediaPrefsPath = "/apis/" + mediaAPIVersion + "/mediapreferences"
 	mediaPrefix    = "/apis/" + mediaAPIVersion + "/namespaces/"
 	claimPrefix    = "/apis/" + claimAPIVersion + "/namespaces/"
+	slicesPath     = "/apis/" + claimAPIVersion + "/resourceslices"
+	displaysPath   = "/apis/" + displayAPIVersion + "/displays"
 	podPrefix      = "/api/v1/namespaces/"
 	podsAllPath    = "/api/v1/pods"
 )
@@ -423,6 +442,46 @@ func DeletePod(c *Client, namespace, name string) error {
 		return nil
 	}
 	return err
+}
+
+// Every driver's slices in one request. The operator reads
+// them for the attributes of the devices its own claims hold, so one
+// list a pass answers every unit.
+func ListResourceSlices(c *Client) (*ResourceSliceList, error) {
+	list := &ResourceSliceList{}
+	if err := c.RequestJSON(http.MethodGet, slicesPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// A Display is cluster-scoped, so the path carries no
+// namespace. A screen whose cluster runs no display-operator answers
+// ErrNotFound, and the panel then stays lit.
+func GetDisplay(c *Client, name string) (*Display, error) {
+	display := &Display{}
+	if err := c.RequestJSON(http.MethodGet, displaysPath+"/"+name, nil, display); err != nil {
+		return nil, err
+	}
+	return display, nil
+}
+
+// ApplyDisplayOverride writes spec.override and nothing else,
+// under this operator's own field manager. A nil override applies an
+// empty spec, and the API server then removes the block this manager
+// owns, which is how the panel comes back.
+func ApplyDisplayOverride(c *Client, name string, override *DisplayOverride) error {
+	body, err := json.Marshal(&displayApply{
+		APIVersion: displayAPIVersion,
+		Kind:       "Display",
+		Metadata:   ObjectMeta{Name: name},
+		Spec:       DisplaySpec{Override: override},
+	})
+	if err != nil {
+		return err
+	}
+	path := displaysPath + "/" + name + "?fieldManager=" + displayFieldManager
+	return c.requestJSON(http.MethodPatch, path, applyContentType, body, nil)
 }
 
 // DeleteResourceClaim removes one playback claim. The operator deletes

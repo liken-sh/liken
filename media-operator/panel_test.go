@@ -1,79 +1,23 @@
 package main
 
-// These tests cover the panel desk and the fold: what the idle
-// sidecar published on the bus reaches the Player's status, and a
-// unit no sidecar reported carries no panel at all.
+// These tests cover the panel desk and the fold: the desire
+// the idle sidecar published reaches the desk, and the Display's
+// observed values become the word the Player's status carries.
 
 import "testing"
 
-// panelPlayer is one Player that drives a screen and holds the
-// panel's wire.
-func panelPlayer() Player {
-	return Player{
-		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
-		Spec: PlayerSpec{
-			Display: &PlayerDevice{Class: "display-output"},
-			Control: &PlayerDevice{Class: "display-control"},
-		},
-	}
-}
-
-// A retained panel message reaches the operator on the panel topic,
-// and the next pass folds it into the Player's status, so a person
-// reads in kubectl what the sidecar actuated.
-func TestABusPanelStateReachesThePlayerStatus(t *testing.T) {
-	cluster := newFakeCluster()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
-	player := panelPlayer()
-
-	media.handleBusMessage(playerPanelTopic(defaultTopicBase, "house", "theater"),
-		[]byte(`{"state":"BacklightOff"}`))
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-
-	mustMatch(t, cluster.players["theater"].Status.Panel, panelBacklightOff)
-}
-
-// The wake reaches the status the same way, so the panel reads On
-// again on the pass after the sidecar published it.
-func TestABusPanelWakeReachesThePlayerStatus(t *testing.T) {
-	cluster := newFakeCluster()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
-	player := panelPlayer()
-	topic := playerPanelTopic(defaultTopicBase, "house", "theater")
-
-	media.handleBusMessage(topic, []byte(`{"state":"Off"}`))
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-	mustMatch(t, cluster.players["theater"].Status.Panel, panelOff)
-
-	media.handleBusMessage(topic, []byte(`{"state":"On"}`))
-	media.reconcilePlayers([]Player{*cluster.players["theater"]}, nil, "", nil)
-
-	mustMatch(t, cluster.players["theater"].Status.Panel, panelOn)
-}
-
-// A unit no sidecar reported carries no panel, because a Player that
-// states no control device darkens nothing and reports nothing.
-func TestAPlayerWithNoPanelMessageCarriesNoPanel(t *testing.T) {
-	cluster := newFakeCluster()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
-
-	media.reconcilePlayers([]Player{panelPlayer()}, nil, "", nil)
-
-	mustMatch(t, cluster.players["theater"].Status.Panel, "")
-}
-
-// An empty payload is a cleared retained value and not a live
-// signal, so the desk holds the state it had.
-func TestAClearedPanelTopicLeavesTheStateAlone(t *testing.T) {
+// A cleared retained value is not a live signal, so the desk
+// holds the desire it had.
+func TestAClearedPanelTopicLeavesTheDesireAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	topic := playerPanelTopic(defaultTopicBase, "house", "theater")
 
-	media.handleBusMessage(topic, []byte(`{"state":"BacklightOff"}`))
+	media.handleBusMessage(topic, []byte(`{"desire":"off"}`))
 	media.handleBusMessage(topic, nil)
 	media.handleBusMessage(topic, []byte("not json"))
 
-	mustMatch(t, media.panels.stateFor(playerKey("house", "theater")), panelBacklightOff)
+	mustMatch(t, media.panels.stateFor(playerKey("house", "theater")), panelDesireOff)
 }
 
 // The desk wakes the loop on a state it did not hold and on a
@@ -84,14 +28,14 @@ func TestThePanelDeskWakesOnlyOnChange(t *testing.T) {
 	desk := newPanelDesk(wake)
 	key := playerKey("house", "theater")
 
-	desk.setState(key, panelBacklightOff)
+	desk.setState(key, panelDesireOff)
 	mustMatch(t, len(wake), 1)
 
 	<-wake
-	desk.setState(key, panelBacklightOff)
+	desk.setState(key, panelDesireOff)
 	mustMatch(t, len(wake), 0)
 
-	desk.setState(key, panelOn)
+	desk.setState(key, panelDesireOn)
 	mustMatch(t, len(wake), 1)
 }
 
@@ -99,11 +43,61 @@ func TestThePanelDeskWakesOnlyOnChange(t *testing.T) {
 // long-running operator keeps no key for a deleted Player.
 func TestThePanelDeskDropsADeletedPlayer(t *testing.T) {
 	desk := newPanelDesk(make(chan struct{}, 1))
-	desk.setState(playerKey("house", "theater"), panelOff)
-	desk.setState(playerKey("house", "studio"), panelOn)
+	desk.setState(playerKey("house", "theater"), panelDesireOff)
+	desk.setState(playerKey("house", "studio"), panelDesireOn)
 
 	desk.retain(map[string]bool{playerKey("house", "studio"): true})
 
 	mustMatch(t, desk.stateFor(playerKey("house", "theater")), "")
-	mustMatch(t, desk.stateFor(playerKey("house", "studio")), panelOn)
+	mustMatch(t, desk.stateFor(playerKey("house", "studio")), panelDesireOn)
+}
+
+// The display-operator observes five power words, and its
+// override writes whichever of off, hardOff, and standby the panel
+// declares. Every word but on is a panel held down, so every one of
+// them reads Off.
+func TestThePanelWordReadsEveryPowerDownWord(t *testing.T) {
+	cases := []struct {
+		power string
+		want  string
+	}{
+		{power: "on", want: panelOn},
+		{power: "standby", want: panelOff},
+		{power: "suspend", want: panelOff},
+		{power: "off", want: panelOff},
+		{power: "hardOff", want: panelOff},
+	}
+	for _, one := range cases {
+		t.Run(one.power, func(t *testing.T) {
+			observed := DisplayObserved{Brightness: ptr(70), Power: one.power}
+			mustMatch(t, panelFromDisplay(observed), one.want)
+		})
+	}
+}
+
+// The status word is folded from what the display-operator
+// last observed, so a panel a person turned down by hand still reads
+// On, and a Display that observed nothing carries no word at all.
+func TestThePanelWordFoldsTheObservedState(t *testing.T) {
+	cases := []struct {
+		name     string
+		observed DisplayObserved
+		want     string
+	}{
+		{name: "a lit panel", observed: DisplayObserved{Brightness: ptr(70), Power: "on"}, want: panelOn},
+		{name: "the backlight at zero",
+			observed: DisplayObserved{Brightness: ptr(0), Power: "on"}, want: panelBacklightOff},
+		{name: "the power off",
+			observed: DisplayObserved{Brightness: ptr(0), Power: "off"}, want: panelOff},
+		{name: "the power off with the backlight up",
+			observed: DisplayObserved{Brightness: ptr(70), Power: "off"}, want: panelOff},
+		{name: "a panel with a brightness alone",
+			observed: DisplayObserved{Brightness: ptr(35)}, want: panelOn},
+		{name: "nothing observed yet"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, panelFromDisplay(one.observed), one.want)
+		})
+	}
 }

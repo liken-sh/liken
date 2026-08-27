@@ -79,18 +79,17 @@ type PlayerStatus struct {
 	Activity string `json:"activity,omitempty"`
 	Play     string `json:"play,omitempty"`
 
-	// Panel is the state the idle sidecar last actuated on the unit's
-	// screen, empty until a sidecar reports one.
+	// Panel is what the screen's Display last observed, empty
+	// until a Display carries an observation.
 	Panel string `json:"panel,omitempty"`
 }
 
-// The four panel states. Each is what the sidecar actuated over the
-// wire, not what a person hopes the glass shows.
+// The three panel states, each folded from the Display's
+// observed values and not from what the media layer asked for.
 const (
 	panelOn           = "On"
 	panelBacklightOff = "BacklightOff"
 	panelOff          = "Off"
-	panelUnresponsive = "Unresponsive"
 )
 
 // A Player's activity is the coarse state a person scans for: it
@@ -131,12 +130,6 @@ type PlayerSpec struct {
 	Render  *PlayerDevice  `json:"render,omitempty"`
 	Remotes []PlayerRemote `json:"remotes,omitempty"`
 
-	// Control is the panel's DDC/CI control device, an opt-in. The
-	// idle pod holds it, and its sidecar writes the panel dark and
-	// back up. A panel that refuses DDC/CI publishes no control
-	// device, so the field stays unset there.
-	Control *PlayerDevice `json:"control,omitempty"`
-
 	// The per-Player override of the audio and subtitle language preferences.
 	// A nil list, or an empty Subtitles, means this Player states nothing, so
 	// resolution reads the default MediaPreferences instead.
@@ -164,16 +157,16 @@ type IdlePolicy struct {
 	// same reason the fade window is one.
 	OffAfterSeconds *int64 `json:"offAfterSeconds,omitempty"`
 
-	// OffMode is what the sidecar writes at the off window, the
-	// backlight to zero or the panel's power mode to off. Empty defers
-	// to the next tier.
+	// OffMode is which override the operator applies at the off
+	// window, the backlight or the panel's power. Empty defers to the
+	// next tier.
 	OffMode string `json:"offMode,omitempty"`
 }
 
-// The two ways the sidecar darkens a panel. The backlight is the
-// state that always answers DDC. Power is deeper, and some panels
-// never answer DDC from it again, so a Player states it only for a
-// panel the drill proved wakes.
+// The two ways a panel goes dark, and the two override blocks they
+// become. A backlight at zero still answers DDC. Power off stops
+// some panels from answering DDC at all, so a Player states it only
+// for a panel the drill proved wakes.
 const (
 	offModeBacklight = "backlight"
 	offModePower     = "power"
@@ -565,15 +558,16 @@ type KeymapAxis struct {
 	Repeat *KeymapRepeat `json:"repeat,omitempty"`
 }
 
-// A ResourceClaim is the request for hardware. The operator writes
-// only the spec; the scheduler writes an allocation into the status,
-// and nothing here reads it, because the pod's own phase already
-// says whether the devices were found.
+// A ResourceClaim is the request for hardware. The operator
+// writes only the spec. The scheduler writes the allocation into the
+// status, and the pass reads it for one question: which screen the
+// idle pod's draw request took.
 type ResourceClaim struct {
-	APIVersion string            `json:"apiVersion,omitempty"`
-	Kind       string            `json:"kind,omitempty"`
-	Metadata   ObjectMeta        `json:"metadata"`
-	Spec       ResourceClaimSpec `json:"spec"`
+	APIVersion string               `json:"apiVersion,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   ObjectMeta           `json:"metadata"`
+	Spec       ResourceClaimSpec    `json:"spec"`
+	Status     *ResourceClaimStatus `json:"status,omitempty"`
 }
 
 type ResourceClaimSpec struct {

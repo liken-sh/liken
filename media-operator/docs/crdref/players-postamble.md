@@ -8,7 +8,7 @@ rules every topic follows.
 |---|---|---|---|
 | `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
 | `players/{namespace}/{name}/volume` | the operator and the pods | yes | the listening level |
-| `players/{namespace}/{name}/panel` | the idle pod | yes | the panel state |
+| `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
 | `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
 
 ### `status`
@@ -57,14 +57,15 @@ outside 0 to 100 is clamped to the range.
 
 ### `panel`
 
-What the idle sidecar last actuated on the unit's screen:
+The desire the idle sidecar states for the unit's screen:
 
-    {"state": "On"}
+    {"desire": "off"}
 
-The states are the four the `Player` status carries: `On`,
-`BacklightOff`, `Off`, and `Unresponsive`. The sidecar holds no API
-credentials, so the operator folds this topic into
-`status.panel`.
+The two desires are `on` and `off`. The sidecar holds no API
+credentials and writes no hardware, so the operator reads this topic
+and applies or lifts `spec.override` on the screen's `Display`. What
+the panel actually shows comes back the other way, from the
+`Display`'s observed state into `status.panel`.
 
 ### `commands`
 

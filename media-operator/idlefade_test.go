@@ -147,9 +147,9 @@ func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string
 		marks:         marks,
 		fadeAfter:     fade,
 		tables:        map[string][]compiledBinding{},
-		// The panel is lit when a pod starts, the same state the
-		// sidecar assumes on the metal.
-		panel:   panelOn,
+		// A pod that starts holds the on desire, the same value
+		// the sidecar starts with on the metal.
+		desire:  panelDesireOn,
 		repeats: map[uint16]context.CancelFunc{},
 	}
 	t.Cleanup(func() {

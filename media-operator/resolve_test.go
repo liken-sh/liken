@@ -587,8 +587,9 @@ func TestResolveIdleOffAfterTierWins(t *testing.T) {
 	}
 }
 
-// The mode resolves the same way, field by field, and an unstated
-// mode takes the backlight, the state that always answers DDC.
+// The mode resolves the same way, field by field, and an
+// unstated mode takes the backlight, the state that always answers
+// DDC.
 func TestResolveIdleOffModeTierWins(t *testing.T) {
 	cases := []struct {
 		name     string

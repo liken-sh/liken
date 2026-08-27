@@ -54,8 +54,8 @@ The cluster's default for what a display does while nothing plays, read for each
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before an idle screen fades to black. Zero disables the automatic fade; unset, every screen fades after 600. |
-| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before an idle panel goes dark, at least fadeAfterSeconds. Zero or unset means panels never go dark on their own. It acts only on a Player that states a control device. |
-| <span id="specidle--offmode"></span>`offMode` | string | no | What the off window writes: backlight, the default, writes the backlight to zero and always wakes over DDC; power writes DPM off, which is deeper. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
+| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before an idle panel goes dark, at least fadeAfterSeconds. Zero or unset means panels never go dark on their own. A panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
+| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display: backlight, the default, or power, which is deeper. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
 
 ## How a Play resolves it
 

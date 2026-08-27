@@ -37,14 +37,6 @@ const (
 // the idle clock draws to the screen without owning its resolution.
 const idleDrawRequest = "draw"
 
-// The claim's request for the panel's exclusive control device, the
-// DDC/CI wire the sidecar writes the panel down and up on.
-const idleControlRequest = "control"
-
-// The pairing attribute both of a connector's devices carry, so a
-// constraint on it ties the wire and the screen to one panel.
-const monitorIDAttribute = "monitor.liken.sh/id"
-
 // idlePodName is a Player's standing idle pod, the Player's name plus its
 // job, so a person reading either object finds the other.
 func idlePodName(player string) string {
@@ -201,17 +193,6 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 		// and go while the machine runs.
 		claim.add(renderRequest, *player.Spec.Render, nil)
 	}
-	// A panel that refuses DDC/CI publishes no control device, so the
-	// field is the opt-in and a Player that states none keeps the fade
-	// alone. The constraint is what makes the wire and the screen the
-	// same panel.
-	if player.Spec.Control != nil {
-		claim.add(idleControlRequest, *player.Spec.Control, nil)
-		claim.Spec.Devices.Constraints = []DeviceConstraint{{
-			Requests:       []string{idleDrawRequest, idleControlRequest},
-			MatchAttribute: monitorIDAttribute,
-		}}
-	}
 	return claim
 }
 
@@ -258,22 +239,19 @@ func buildIdlePod(
 			EnvVar{Name: idlePlayerComponentsVariable, Value: strings.Join(components, "\n")})
 	}
 
-	// The idle container holds every request but the control wire,
-	// because mpv draws pixels and only the sidecar writes the panel.
+	// The idle container holds every request the claim carries,
+	// because the pod's one job is to draw.
 	for _, request := range claimRequests(claim) {
-		if request == idleControlRequest {
-			continue
-		}
 		container.Resources.Claims = append(container.Resources.Claims,
 			ContainerClaim{Name: podClaimName, Request: request})
 	}
 
-	// The idle command sidecar subscribes to the Player's commands and
-	// status topics and drives the idle mpv over the shared ipc socket,
-	// so it mounts the ipc volume. Its one device claim is the control
-	// wire, added below when the Player states one. Every topic is
-	// pre-built here, because the operator holds the topic base and
-	// the sidecar parses no topic of its own.
+	// The idle command sidecar subscribes to the Player's
+	// commands and status topics and drives the idle mpv over the
+	// shared ipc socket, so it mounts the ipc volume. It holds no
+	// device at all. Every topic is pre-built here, because the
+	// operator holds the topic base and the sidecar parses no topic of
+	// its own.
 	sidecar := Container{
 		Name:    idleCommandContainer,
 		Image:   image,
@@ -297,15 +275,15 @@ func buildIdlePod(
 		Name:  idleFadeAfterSecondsVariable,
 		Value: strconv.FormatInt(idle.FadeAfterSeconds, 10),
 	})
-	// The hardware window and the mode travel on every pod for the
-	// same reason the fade window does, and the panel topic arrives
-	// whole.
+	// The off window is set on every pod for the same reason the fade
+	// window is, and the panel topic arrives whole. The off mode
+	// stays with the operator, because the operator writes the
+	// override.
 	sidecar.Env = append(sidecar.Env,
 		EnvVar{
 			Name:  idleOffAfterSecondsVariable,
 			Value: strconv.FormatInt(idle.OffAfterSeconds, 10),
 		},
-		EnvVar{Name: idleOffModeVariable, Value: idle.OffMode},
 		EnvVar{
 			Name:  idlePanelTopicVariable,
 			Value: playerPanelTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name),
@@ -319,13 +297,6 @@ func buildIdlePod(
 			Name:  playerVolumeTopicVariable,
 			Value: playerVolumeTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name),
 		})
-	}
-	// The control request is the sidecar's one device claim. The
-	// display-operator's CDI edit delivers the i2c node and its path
-	// to this container, and the media side wires none of it.
-	if player.Spec.Control != nil {
-		sidecar.Resources.Claims = append(sidecar.Resources.Claims,
-			ContainerClaim{Name: podClaimName, Request: idleControlRequest})
 	}
 	// The three remote lists stay index-aligned, so the sidecar pairs each
 	// events topic with the keymap that names its presses and the focus

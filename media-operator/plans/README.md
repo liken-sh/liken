@@ -25,6 +25,14 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
+* [18, Blanking moves to the Display](18-blanking-moves-to-the-display.md).
+  Built, and not yet drilled. The idle sidecar states a panel
+  desire on its retained topic and writes no hardware. The operator
+  turns that desire into `spec.override` on the screen's `Display`,
+  and `PlayerStatus.Panel` folds what the `Display` observed. The
+  `-control` device, the DDC client, and `Player.spec.control`
+  retire with it. The drill waits on the display-operator's plan 08.
+
 ## Completed
 
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and

@@ -1,12 +1,36 @@
 package main
 
-// The panel desk is the boundary between the bus and the reconcile
-// loop for one unit's panel, the way the presence desk is for a
-// controller. The idle sidecar holds no API credentials, so it
-// publishes what it actuated on the panel topic, and the pass folds
-// the desk's newest state into the Player's status.
+// The panel desk is the boundary between the bus and the
+// reconcile loop for one unit's panel, the way the presence desk is
+// for a controller. The idle sidecar holds no API credentials, so it
+// publishes its desire for the panel, and the pass turns the desk's
+// newest desire into an override on the screen's Display.
 
 import "sync"
+
+// The two desires a sidecar states. They are the values on the
+// panel topic, not the states the Player status carries.
+const (
+	panelDesireOn  = "on"
+	panelDesireOff = "off"
+)
+
+// panelFromDisplay is the Player status word for what the
+// display-operator last observed on the panel. The power word is one
+// of on, standby, suspend, off, and hardOff, and every one but on is
+// a panel held down, so all four read Off. A Display that observed
+// nothing yet folds to no panel field at all.
+func panelFromDisplay(observed DisplayObserved) string {
+	switch {
+	case observed.Power != "" && observed.Power != displayPowerOn:
+		return panelOff
+	case observed.Brightness != nil && *observed.Brightness == 0:
+		return panelBacklightOff
+	case observed.Power == "" && observed.Brightness == nil:
+		return ""
+	}
+	return panelOn
+}
 
 // panelDesk holds the newest state per unit under one mutex, because
 // the bus handler runs on the bus reader's goroutine and the loop
@@ -27,10 +51,11 @@ func playerKey(namespace, name string) string {
 	return namespace + "/" + name
 }
 
-// setState folds one report. A panel that went dark or came back is
-// a change a person reads in kubectl, so it wakes the loop at once. A
-// repeat of the state already held wakes nothing, because the
-// retained topic delivers the same message again on every reconnect.
+// setState folds one desire. A desire that changed is a write
+// the next pass owes the screen's Display, so it wakes the loop at
+// once. A repeat of the desire already held wakes nothing, because
+// the retained topic delivers the same message again on every
+// reconnect.
 func (p *panelDesk) setState(key, state string) {
 	p.mutex.Lock()
 	previous, had := p.state[key]
@@ -41,9 +66,9 @@ func (p *panelDesk) setState(key, state string) {
 	}
 }
 
-// stateFor is one unit's panel state, empty for a unit no sidecar
-// has reported, so a Player with no control device carries no panel
-// field at all.
+// stateFor is one unit's panel desire, empty for a unit no
+// sidecar has stated one for, and the pass then writes no override
+// and reads no Display.
 func (p *panelDesk) stateFor(key string) string {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()

@@ -114,10 +114,21 @@ type operator struct {
 	// pass that republishes the Player status the idle screen reads.
 	presence *presenceDesk
 
-	// panels is the desk for each unit's panel state, built on the same
-	// wake: a panel that goes dark wakes the pass that writes the
-	// Player status a person reads it from.
+	// panels is the desk for each unit's panel desire, built on
+	// the same wake: a desire that changed wakes the pass that writes
+	// the override onto the screen's Display.
 	panels *panelDesk
+
+	// panelOverrides holds the override this operator last
+	// applied per unit, so a pass writes the Display only when the
+	// desire changed, and a deleted Player's dark panel still has a
+	// screen to lift. Only the pass goroutine touches it.
+	panelOverrides map[string]panelOverride
+
+	// panelFaults holds the last panel fault reported per unit,
+	// so a screen with no Display logs once and not once a pass. Only
+	// the pass goroutine touches it.
+	panelFaults map[string]string
 
 	// volumes is the desk for each unit's level. Unlike the desks
 	// above, it wakes no pass, because the level folds into no status.
@@ -223,6 +234,8 @@ func operate() {
 		focus:                 focusDesk,
 		presence:              presenceDesk,
 		panels:                panels,
+		panelOverrides:        map[string]panelOverride{},
+		panelFaults:           map[string]string{},
 		volumes:               newVolumeDesk(),
 		positionWrites:        map[string]time.Time{},
 		keymapPublished:       map[string]string{},
@@ -444,11 +457,11 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		if len(payload) == 0 {
 			return
 		}
-		var panel panelReport
+		var panel panelDesire
 		if err := json.Unmarshal(payload, &panel); err != nil {
 			return
 		}
-		o.panels.setState(playerKey(namespace, name), panel.State)
+		o.panels.setState(playerKey(namespace, name), panel.Desire)
 		return
 	}
 	// The operator reads the level only to learn that one stands, so
@@ -656,15 +669,19 @@ func (o *operator) reconcileKeymaps() {
 func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string, defaultIdle *IdlePolicy) {
 	published := make(map[string]bool, len(players))
 	live := make(map[string]bool, len(players))
+	// One screens for the pass, so the driver's ResourceSlices
+	// are listed at most once however many units the cluster holds.
+	lookup := newScreens(o.client)
 	for index := range players {
 		player := &players[index]
 		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 		live[key] = true
 		desired := derivePlayerStatus(player, plays, o.reports)
-		// The panel state is what the idle sidecar actuated, so the
-		// status reports the wire's answer and not what the operator
-		// asked for.
-		desired.Panel = o.panels.stateFor(key)
+		// The panel state is what the screen's Display last
+		// observed, so the status reports the hardware and not what
+		// the media layer asked for.
+		desired.Panel = o.reconcilePanel(player, key, lookup,
+			resolveIdle(player.Spec.Idle, defaultIdle).OffMode)
 		o.seedVolume(player, key)
 		// The status goes out before the re-present, and the order is what
 		// the returning idle screen draws from. The display animates the
@@ -701,6 +718,9 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// The panel desk shrinks to the Players the cluster still holds,
 	// the way the presence desk shrinks to its Remotes.
 	o.panels.retain(live)
+	// The overrides shrink the same way, and a unit dropped
+	// while its panel was dark takes a lift on the way out.
+	o.retainPanels(live)
 	// The volume desk shrinks the same way. The retained level itself
 	// stays on the broker, so a Player recreated under the same name
 	// keeps the level the room was left at.

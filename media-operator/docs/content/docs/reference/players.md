@@ -57,7 +57,6 @@ The devices that form the unit, each selected from what a hardware operator publ
 | <span id="spec--display"></span>`display` | [object](#specdisplay) | no | The display this Player shows video on. Omit it for an audio-only Player. |
 | <span id="spec--sinks"></span>`sinks` | [\[\]object](#specsinks) | no | The audio outputs this Player plays sound through. |
 | <span id="spec--render"></span>`render` | [object](#specrender) | no | The GPU render node the player program decodes and draws with. Omit it only for an audio-only Player; mpv needs a GPU to put video on a display. |
-| <span id="spec--control"></span>`control` | [object](#speccontrol) | no | The panel's DDC/CI control device, an opt-in. The idle pod holds it, and its sidecar darkens the panel after idle.offAfterSeconds and lights it on a press. A panel that refuses DDC/CI publishes no control device, so omit this there. |
 | <span id="spec--remotes"></span>`remotes` | [\[\]object](#specremotes) | no | The controllers this unit owns, each naming a Remote in the same namespace. The Play's pod builds one translator sidecar per entry. |
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Player override of the audio language order; omit it to inherit the default MediaPreferences. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Player override of the subtitle language order; omit it to inherit the default MediaPreferences. |
@@ -114,26 +113,6 @@ The GPU render node the player program decodes and draws with. Omit it only for 
 | <span id="specrender--displayname"></span>`displayName` | string | no | The human name of this selection, the one the idle screen shows in its parts list. Omit it, and the idle screen falls back to the DeviceClass name. |
 | <span id="specrender--selector"></span>`selector` | string | no | A CEL expression over device.attributes, for a machine with more than one GPU. |
 
-### spec.control
-
-The panel's DDC/CI control device, an opt-in. The idle pod holds it, and its sidecar darkens the panel after idle.offAfterSeconds and lights it on a press. A panel that refuses DDC/CI publishes no control device, so omit this there.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="speccontrol--class"></span>`class` | string | yes | The cluster's control DeviceClass. A constraint ties the device to the display selection's own panel, so no selector is needed to name the screen twice. |
-| <span id="speccontrol--displayname"></span>`displayName` | string | no | The human name of this selection, shown where the idle screen lists the unit's parts. |
-| <span id="speccontrol--selector"></span>`selector` | string | no | A CEL expression over device.attributes that narrows which control device the claim takes. Usually omitted: the constraint already ties it to the display's panel. |
-| <span id="speccontrol--parameters"></span>`parameters` | [object](#speccontrolparameters) | no | Opaque driver configuration for the control selection, passed through on the claim. |
-
-#### spec.control.parameters
-
-Opaque driver configuration for the control selection, passed through on the claim.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="speccontrolparameters--driver"></span>`driver` | string | yes | The driver these parameters are for. |
-| <span id="speccontrolparameters--values"></span>`values` | object | no | The parameters themselves, defined by the driver. |
-
 ### spec.remotes[]
 
 The controllers this unit owns, each naming a Remote in the same namespace. The Play's pod builds one translator sidecar per entry.
@@ -151,8 +130,8 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
-| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. It acts only on a Player that states a control device. |
-| <span id="specidle--offmode"></span>`offMode` | string | no | What the off window writes: backlight, the default, writes the backlight to zero and always wakes over DDC; power writes DPM off, which is deeper and which some panels never answer from. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
+| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
+| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display: backlight, the default, or power, which is deeper and which some panels never answer DDC from again. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
 
 ## status
 
@@ -162,7 +141,7 @@ What plays on this Player now, written only by the media operator. It is derived
 | --- | --- | --- | --- |
 | <span id="status--activity"></span>`activity` | string | no | Whether the Player performs a run now. Playing is a Play running on it, Starting is a Play whose pod has not begun, and Idle is no Play at all. One of: `Playing`, `Starting`, `Idle`. |
 | <span id="status--play"></span>`play` | string | no | The name of the Play on this Player, in the same namespace. Empty while the Player is Idle. |
-| <span id="status--panel"></span>`panel` | string | no | The panel state the idle sidecar last actuated: On, BacklightOff, Off, or Unresponsive. Empty until a sidecar with a control device reports one. |
+| <span id="status--panel"></span>`panel` | string | no | What the screen's Display last observed: On, BacklightOff, or Off. Empty until a Display carries an observation for the unit's screen. |
 
 ## On the bus
 
@@ -174,7 +153,7 @@ rules every topic follows.
 |---|---|---|---|
 | `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
 | `players/{namespace}/{name}/volume` | the operator and the pods | yes | the listening level |
-| `players/{namespace}/{name}/panel` | the idle pod | yes | the panel state |
+| `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
 | `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
 
 ### `status`
@@ -223,14 +202,15 @@ outside 0 to 100 is clamped to the range.
 
 ### `panel`
 
-What the idle sidecar last actuated on the unit's screen:
+The state the idle sidecar wants the unit's screen in:
 
-    {"state": "On"}
+    {"desire": "off"}
 
-The states are the four the `Player` status carries: `On`,
-`BacklightOff`, `Off`, and `Unresponsive`. The sidecar holds no API
-credentials, so the operator folds this topic into
-`status.panel`.
+The two desires are `on` and `off`. The sidecar holds no API
+credentials and writes no hardware, so the operator reads this topic
+and applies or lifts `spec.override` on the screen's `Display`. What
+the panel actually shows comes back the other way, from the
+`Display`'s observed state into `status.panel`.
 
 ### `commands`
 

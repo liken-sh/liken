@@ -230,53 +230,6 @@ spec:
                       description: >-
                         A CEL expression over device.attributes, for
                         a machine with more than one GPU.
-                control:
-                  type: object
-                  required: [class]
-                  description: >-
-                    The panel's DDC/CI control device, an opt-in.
-                    The idle pod holds it, and its sidecar darkens
-                    the panel after idle.offAfterSeconds and lights
-                    it on a press. A panel that refuses DDC/CI
-                    publishes no control device, so omit this there.
-                  properties:
-                    class:
-                      type: string
-                      description: >-
-                        The cluster's control DeviceClass. A
-                        constraint ties the device to the display
-                        selection's own panel, so no selector is
-                        needed to name the screen twice.
-                    displayName:
-                      type: string
-                      description: >-
-                        The human name of this selection, shown
-                        where the idle screen lists the unit's
-                        parts.
-                    selector:
-                      type: string
-                      description: >-
-                        A CEL expression over device.attributes
-                        that narrows which control device the claim
-                        takes. Usually omitted: the constraint
-                        already ties it to the display's panel.
-                    parameters:
-                      type: object
-                      required: [driver]
-                      description: >-
-                        Opaque driver configuration for the control
-                        selection, passed through on the claim.
-                      properties:
-                        driver:
-                          type: string
-                          description: >-
-                            The driver these parameters are for.
-                        values:
-                          type: object
-                          x-kubernetes-preserve-unknown-fields: true
-                          description: >-
-                            The parameters themselves, defined by
-                            the driver.
                 remotes:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -359,21 +312,23 @@ spec:
                       format: int64
                       minimum: 0
                       description: >-
-                        Seconds of quiet before the panel itself
-                        goes dark, at least fadeAfterSeconds. Zero
-                        or unset means the panel never goes dark on
-                        its own. It acts only on a Player that
-                        states a control device.
+                        Seconds of quiet before the panel
+                        itself goes dark, at least fadeAfterSeconds.
+                        Zero or unset means the panel never goes dark
+                        on its own. The panel goes dark only where the
+                        cluster runs a display-operator that publishes
+                        a Display for the screen.
                     offMode:
                       type: string
                       enum: [backlight, power]
                       description: >-
-                        What the off window writes: backlight, the
-                        default, writes the backlight to zero and
-                        always wakes over DDC; power writes DPM
-                        off, which is deeper and which some panels
-                        never answer from. State power only for a
-                        panel that woke from it in a drill.
+                        Which override the off window applies to the
+                        screen's Display. The default, backlight,
+                        holds the panel at brightness zero, which
+                        still answers DDC. Power off stops some
+                        panels from answering DDC at all; state it
+                        only for a panel that woke from it in a
+                        drill.
             status:
               type: object
               description: >-
@@ -396,7 +351,6 @@ spec:
                 panel:
                   type: string
                   description: >-
-                    The panel state the idle sidecar last actuated:
-                    On, BacklightOff, Off, or Unresponsive. Empty
-                    until a sidecar with a control device reports
-                    one.
+                    What the screen's Display last observed:
+                    On, BacklightOff, or Off. Empty until a Display
+                    carries an observation for the unit's screen.
