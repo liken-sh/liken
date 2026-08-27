@@ -11,7 +11,7 @@ package main
 // may hold a staged copy, and the read order is staged then image,
 // the same order the cluster document resolves in. Nothing writes the
 // staged copy today; rotation, when it arrives, becomes a writer of
-// that copy and changes nothing here (plans/62-wifi.md).
+// that copy and changes nothing here (plans/completed/62-wifi.md).
 //
 // The generated file uses only value forms that carry no syntax. The
 // supplicant's parser reads a value as hex whenever the value does

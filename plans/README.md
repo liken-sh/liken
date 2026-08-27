@@ -14,7 +14,7 @@ A document's directory states its status:
   built yet.
 
 The numbers run in one sequence across all three directories. The next
-milestone is 64.
+milestone is 65.
 
 [`open-problems/`](open-problems/) holds the questions that liken owes
 an answer to. Those documents have no number, because nobody has
@@ -159,6 +159,11 @@ decided yet what work they become.
   spec: the machine operator reports that lag as `UpdatePending`
   instead of a fault, and the conductor sends a leader first while
   the applied template is behind the target.
+* **55.** [Kernel module parameters](completed/55-kernel-module-parameters.md).
+  `spec.moduleParameters` maps `<module>.<parameter>` to the value
+  init passes to `finit_module`. A live load applies what it can and
+  records only the parameters it delivered, so an undelivered one
+  drifts and the ordinary reboot path reconciles it.
 * **56.** [Device operators](completed/56-device-operators.md). The
   pattern milestones 57, 58, and 59 build: an operator claims raw
   hardware through an ordinary `liken.sh` claim, runs the daemon that
@@ -195,6 +200,15 @@ decided yet what work they become.
   so a CEL selector never does bit arithmetic. A Bluetooth device
   carries its class and service flags, a monitor its refresh rates,
   and an audio output its LPCM rates.
+* **62.** [Wifi](completed/62-wifi.md). A machine joins over a wireless
+  interface, declared in `spec.network` the way a wired one is. The
+  image vendors `wpa_supplicant`, init supervises it and reads its
+  events, and the passphrase rides the stick beside the join token.
+* **64.** [The boot does not wait for radios](completed/64-the-boot-does-not-wait-for-radios.md).
+  Wired interfaces settle in line; radios raise under a deadline and
+  join behind the boot when the wired path already reaches the
+  cluster and carries the node address. A wedged radio driver costs
+  the machine its radio, not its boot.
 
 ## Rejected
 
@@ -228,15 +242,6 @@ decided yet what work they become.
   The netbooted report posts to the cluster as an `Enrollment`, and
   approval is applying the proposed `Machine`, with a CLI verb as
   sugar.
-* **55.** [Kernel module parameters](55-kernel-module-parameters.md).
-  `spec.moduleParameters` maps `<module>.<parameter>` to the value
-  init passes to `finit_module`; a parameter on a loaded module is a
-  reboot-class change, and the status reads the result back from
-  `/sys/module` without comparing it.
-* **62.** [Wifi](62-wifi.md). A machine joins over a wireless
-  interface, declared in `spec.network` the way a wired one is. The
-  image vendors `wpa_supplicant`, init supervises it and reads its
-  events, and the passphrase rides the stick beside the join token.
 * **63.** [eMMC storage](63-emmc.md). A machine installs to and boots
   from an eMMC disk. A stub: the report drops class `0805`
   controllers as `system`, the boot archive carries no eMMC driver,

@@ -201,7 +201,7 @@ func (p interfacePasses) foreground(interfaces []machine.InterfaceSpec, conns []
 	}
 	conns = inSpecOrder(interfaces, conns)
 
-	// The park (plans/62-wifi.md). Every interface has settled by
+	// The park (plans/completed/62-wifi.md). Every interface has settled by
 	// this line, so the decision has everything it needs. The hold
 	// ends on a join event rather than a keypress, and the
 	// addressing that follows is the same addressing a radio that

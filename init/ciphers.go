@@ -9,7 +9,7 @@ package main
 // supplicant reports that as WRONG_KEY, which reads as a wrong
 // passphrase and would even park a radio-only machine. So the
 // wireless bring-up loads the ciphers itself, before any supplicant
-// starts (plans/62-wifi.md names the incident that proved this on
+// starts (plans/completed/62-wifi.md names the incident that proved this on
 // metal).
 
 import (

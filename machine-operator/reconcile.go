@@ -244,7 +244,7 @@ func reconcile(c *kubernetes.Client, m *machine.Machine, clusterName string, f *
 	// a freshly declared wireless entry is SpecConverged's concern
 	// until a reboot joins it. A machine that joined nothing and
 	// still reached this line reached it over some other interface,
-	// which is the degraded case plans/62-wifi.md describes.
+	// which is the degraded case plans/completed/62-wifi.md describes.
 	status.Conditions = api.SetCondition(status.Conditions,
 		wirelessCondition(status.Network.Interfaces), now)
 

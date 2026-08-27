@@ -9,7 +9,7 @@ package main
 // address. The events on the supplicant's control socket
 // matter because the kernel cannot tell a wrong passphrase apart from
 // an access point that is switched off; only the supplicant can say
-// which one it is (plans/62-wifi.md).
+// which one it is (plans/completed/62-wifi.md).
 
 import (
 	"context"

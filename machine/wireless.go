@@ -5,7 +5,7 @@ package machine
 // how the machine joins it. The passphrase is deliberately absent. A
 // manifest travels on install sticks and in deployment git, so the
 // secret lives in a file on the machine instead, and the SSID is the
-// key that finds it (plans/62-wifi.md).
+// key that finds it (plans/completed/62-wifi.md).
 
 import (
 	"fmt"
