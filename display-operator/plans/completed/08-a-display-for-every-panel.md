@@ -11,7 +11,7 @@ operator becomes the only process that writes the wire, and the
 control device retires.
 
 The consumer half is the media-operator's
-[plan 18](https://github.com/liken-sh/media-operator/blob/main/plans/18-blanking-moves-to-the-display.md).
+[plan 18](https://github.com/liken-sh/media-operator/blob/main/plans/completed/18-blanking-moves-to-the-display.md).
 
 ## The problem
 
@@ -143,7 +143,7 @@ channels retire in order:
    parameters during the rollout.
 2. The media-operator switches to overrides, stops requesting the
    control device, and drops its DDC client
-   ([plan 18](https://github.com/liken-sh/media-operator/blob/main/plans/18-blanking-moves-to-the-display.md)).
+   ([plan 18](https://github.com/liken-sh/media-operator/blob/main/plans/completed/18-blanking-moves-to-the-display.md)).
 3. The `brightness` and `power` claim parameters, the power record
    file, and the `-control` device retire. A claim parameter and an
    override that write the same VCP code would be the two-writer
