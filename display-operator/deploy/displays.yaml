@@ -131,7 +131,7 @@ spec:
                         description: "Every value the panel accepts for a non-continuous control."
                 observed:
                   type: object
-                  description: "The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about once a minute for a panel that is lit and under no override. The once-a-minute read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels."
+                  description: "The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels."
                   properties: &values
                     brightness:
                       type: integer

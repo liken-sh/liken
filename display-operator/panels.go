@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 )
 
 // What one probe answered. Responsive is the panel's answer to
@@ -59,11 +60,13 @@ func (c *panelControls) factsFor(output Output) panelFacts {
 	return facts.copy()
 }
 
-// how long the operator leaves a panel alone between reads of
-// what it holds. One window per backstop tick: a person at the panel's
-// buttons is found within a minute, and a burst of passes costs one
-// read.
-const pollInterval = backstopInterval
+// How long the operator leaves a panel alone between reads of what
+// it holds. A person at the panel's buttons is found within about
+// ten seconds, and a burst of passes inside one window costs one
+// read. The refusal's window above stays at the slower backstop,
+// because a probe of a silent panel spends the whole retry ladder
+// on every code and gains nothing from running sooner.
+const pollInterval = 10 * time.Second
 
 // Whether this connector's window has passed, and the stamp
 // that opens the next one. The check and the stamp are one step under

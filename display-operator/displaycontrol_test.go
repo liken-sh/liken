@@ -62,6 +62,7 @@ type displayFixture struct {
 	displays map[string]*Display
 	journal  *journal
 	refuse   int
+	lists    int
 	present  map[string]bool
 	version  int
 	// The restore's own goroutine reaches these, so the count
@@ -165,6 +166,7 @@ func (f *displayFixture) handler() http.Handler {
 		name := strings.TrimPrefix(r.URL.Path, DisplaysPath+"/")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == DisplaysPath:
+			f.lists++
 			list := DisplayList{}
 			for _, display := range f.displays {
 				list.Items = append(list.Items, *display)
@@ -1014,6 +1016,63 @@ func TestTheLoopPassesOnEveryWake(t *testing.T) {
 	fixture.control.wake()
 	<-passed
 	stop()
+}
+
+// The loop's own tick is what brings a poll window that came
+// due to a pass. Nothing wakes this loop: the panel changed at its own
+// buttons, and no event says so anywhere.
+func TestTheLoopPassesOnItsTick(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	if fixture.control.tick != pollInterval {
+		t.Errorf("the loop ticks every %s, want the poll's window of %s", fixture.control.tick, pollInterval)
+	}
+	fixture.control.tick = time.Millisecond
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	passed := make(chan struct{}, 4)
+	fixture.control.outputs = func() []Output {
+		passed <- struct{}{}
+		return fixture.outputs()
+	}
+
+	go fixture.control.run(ctx)
+	<-passed
+
+	select {
+	case <-passed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loop made no second pass, and its tick came due")
+	}
+}
+
+// The sweep for panels that left is the pass's one API listing,
+// and it keeps the slower cadence: a panel that leaves raises a uevent
+// that wakes this loop, so nothing has to be found by listing on the
+// poll's cadence.
+func TestTheSweepKeepsTheSlowerCadence(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 3 {
+		fixture.advance(pollInterval)
+		if err := fixture.pass(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fixture.lists != 1 {
+		t.Errorf("the poll's passes listed the displays %d times, want the one listing of the first pass",
+			fixture.lists)
+	}
+
+	fixture.advance(backstopInterval)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.lists != 2 {
+		t.Errorf("the displays were listed %d times, want a listing on the slower cadence", fixture.lists)
+	}
 }
 
 func intOf(value int) *int { return &value }

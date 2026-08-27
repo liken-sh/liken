@@ -36,9 +36,10 @@ that owes the lift.
 
 `status.observed` is what the operator last read or wrote. The
 operator touches the wire when it probes, when it captures before
-an override, when it actuates, and about once a minute for a panel
-that is lit and under no override. That last read is what finds a
-change a person made at the panel's own menu, and it is what makes
+an override, when it actuates, and about every ten seconds for a
+panel that is lit and under no override. That last read is what
+finds a change a person made at the panel's own menu, and it is
+what makes
 a resting declaration hold: the pass that finds the divergence
 writes the declaration back. A panel in standby or off, a panel an
 override holds, and a panel that answers nothing are never read on

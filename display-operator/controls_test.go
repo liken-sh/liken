@@ -688,17 +688,29 @@ func TestARefusalIsAskedAgainAfterTheWindow(t *testing.T) {
 
 // The window is what keeps a burst of passes off the wire. The
 // uevents of one cable arrive in a burst, and each one is a pass.
+//
+// The passes now arrive at the poll's cadence, and a refusal
+// keeps its own slower window: a probe of a silent panel spends the
+// whole retry ladder on every code, which is the cost this window
+// holds back.
 func TestARefusalIsAskedAgainOncePerWindow(t *testing.T) {
 	controls, bench, at := benchAtTime(t, map[string]*fakeMonitor{"HDMI-A-1": deafMonitor()})
 	output := litOutput("HDMI-A-1", labMonitor())
 
 	controls.of(output)
-	*at = at.Add(probeRetryInterval / 2)
-	controls.of(output)
-	controls.of(output)
-
+	for waited := pollInterval; waited < probeRetryInterval; waited += pollInterval {
+		*at = at.Add(pollInterval)
+		controls.of(output)
+	}
 	if bench.opened() != 1 {
 		t.Errorf("the wire was opened %d times inside one window, want 1", bench.opened())
+	}
+
+	*at = at.Add(pollInterval)
+	controls.of(output)
+
+	if bench.opened() != 2 {
+		t.Errorf("the wire was opened %d times, want one probe and one ask again", bench.opened())
 	}
 }
 

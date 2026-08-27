@@ -84,7 +84,7 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--node"></span>`node` | string | no | The machine whose graphics card drives this panel. |
 | <span id="status--connector"></span>`connector` | string | no | The connector on that card, in the kernel's own spelling. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
-| <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about once a minute for a panel that is lit and under no override. The once-a-minute read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels. |
+| <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels. |
 | <span id="status--captured"></span>`captured` | object | no | The values the operator saved before it obeyed an override. The save commits before the panel goes dark, so the value that brings the panel back survives a restart of the operator. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector, and Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. |
 
@@ -99,7 +99,7 @@ The controls the panel declares, of the MCCS common core. A control with a value
 
 ### status.observed
 
-The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about once a minute for a panel that is lit and under no override. The once-a-minute read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels.
+The last value the operator read or wrote for each control. The operator reads the panel when it probes, when it captures before an override, when it actuates, and about every ten seconds for a panel that is lit and under no override. The ten-second read is what finds a change a person made at the panel's own buttons. A panel in standby or off is never read, because a DDC read wakes some panels.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -162,9 +162,10 @@ that owes the lift.
 
 `status.observed` is what the operator last read or wrote. The
 operator touches the wire when it probes, when it captures before
-an override, when it actuates, and about once a minute for a panel
-that is lit and under no override. That last read is what finds a
-change a person made at the panel's own menu, and it is what makes
+an override, when it actuates, and about every ten seconds for a
+panel that is lit and under no override. That last read is what
+finds a change a person made at the panel's own menu, and it is
+what makes
 a resting declaration hold: the pass that finds the divergence
 writes the declaration back. A panel in standby or off, a panel an
 override holds, and a panel that answers nothing are never read on

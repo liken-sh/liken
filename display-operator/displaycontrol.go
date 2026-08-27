@@ -48,6 +48,14 @@ type displayControl struct {
 	// The last poll failure reported for each connector, so a
 	// panel that stays quiet prints one line and not one a minute.
 	pollFaults map[string]string
+	// How often the loop looks, and it is the poll's window: a
+	// window that comes due needs a pass to act on it. A field for the
+	// reason the clock is one.
+	tick time.Duration
+	// The panels of the last sweep and when it ran, which is
+	// what holds the listing to the slower cadence.
+	swept   []string
+	sweptAt time.Time
 }
 
 func newDisplayControl(client *Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
@@ -58,6 +66,7 @@ func newDisplayControl(client *Client, node string, controls *panelControls, out
 		outputs:    outputs,
 		now:        time.Now,
 		wait:       waitFor,
+		tick:       pollInterval,
 		wakes:      make(chan struct{}, 1),
 		restoring:  map[string]bool{},
 		pollFaults: map[string]string{},
@@ -89,7 +98,7 @@ func (d *displayControl) wake() {
 // slice publisher wakes it on hardware that moved, and the tick is the
 // backstop that covers a dropped watch.
 func (d *displayControl) run(ctx context.Context) {
-	tick := time.NewTicker(backstopInterval)
+	tick := time.NewTicker(d.tick)
 	defer tick.Stop()
 	for {
 		if err := d.pass(ctx); err != nil {
@@ -118,9 +127,19 @@ func (d *displayControl) pass(ctx context.Context) error {
 			present[name] = output
 		}
 	}
-	published, err := listDisplays(d.client)
-	if err != nil {
-		return err
+	// The sweep for panels that left is the only work in a pass
+	// that reads every resource, and nothing about it follows the
+	// poll's cadence: a panel that leaves raises a uevent, and the
+	// uevent wakes this loop. So the listing keeps the slower cadence
+	// and runs at once when the panels on this node change.
+	sweep := d.sweepDue(present)
+	var published []Display
+	if sweep {
+		listed, err := listDisplays(d.client)
+		if err != nil {
+			return err
+		}
+		published = listed
 	}
 	var failures []error
 	for name, output := range present {
@@ -364,6 +383,27 @@ func (d *displayControl) startRestore(ctx context.Context, connector string, tar
 // and records what the panel took, and it writes no status: the wake
 // it ends with brings the pass back, and the pass is the one writer of
 // status.
+// Whether this pass lists the resources. It does when the
+// panels on this node are not the panels of the last sweep, so a panel
+// that arrives or leaves is answered on the pass that finds it, and
+// otherwise once per backstop interval.
+func (d *displayControl) sweepDue(present map[string]Output) bool {
+	panels := make([]string, 0, len(present))
+	for name := range present {
+		panels = append(panels, name)
+	}
+	slices.Sort(panels)
+	if !slices.Equal(panels, d.swept) {
+		d.swept, d.sweptAt = panels, d.now()
+		return true
+	}
+	if d.now().Before(d.sweptAt.Add(backstopInterval)) {
+		return false
+	}
+	d.sweptAt = d.now()
+	return true
+}
+
 func (d *displayControl) runRestore(ctx context.Context, connector string, targets []controlTarget) {
 	defer func() {
 		d.mu.Lock()
