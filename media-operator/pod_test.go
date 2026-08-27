@@ -159,6 +159,19 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	}
 }
 
+// A playback pod arms no window watchdog. A Play on an
+// audio-only unit expects no window at all, and an exit there would
+// kill a run that is playing sound correctly.
+func TestBuildPodArmsNoWindowWatchdog(t *testing.T) {
+	pod := testPod(t)
+
+	for _, entry := range pod.Spec.Containers[0].Env {
+		if entry.Name == idleWindowGraceVariable {
+			t.Errorf("the player container carries %s", idleWindowGraceVariable)
+		}
+	}
+}
+
 // The pod names the claim once and the player container repeats that
 // name for each role, because the playback claim holds the player's
 // roles alone.

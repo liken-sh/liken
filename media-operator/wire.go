@@ -72,6 +72,14 @@ const (
 	// tz database to show the household's wall-clock zone.
 	timeZoneVariable = "TZ"
 
+	// The seconds the display script waits for mpv's window
+	// before it exits non-zero. It arms the watchdog, so a pod that
+	// expects no window sets it nowhere and the script never exits for
+	// a missing one. The operator sets it on the idle container alone,
+	// because the idle client holds a window for its whole life and a
+	// playback pod may be audio-only.
+	idleWindowGraceVariable = "IDLE_WINDOW_GRACE_SECONDS"
+
 	// The Player's friendly name and its parts, which the idle screen draws
 	// in the bottom-left. The operator sets the name always, resolved from
 	// spec.displayName or the object name, and sets the parts only when the

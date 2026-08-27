@@ -8,6 +8,7 @@ package main
 import (
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -136,6 +137,7 @@ func TestBuildIdlePodRunsTheIdleMode(t *testing.T) {
 	}
 	wantEnv := map[string]string{
 		timeZoneVariable:             "America/New_York",
+		idleWindowGraceVariable:      strconv.Itoa(idleWindowGraceSeconds),
 		idlePlayerNameVariable:       "theater",
 		idlePlayerComponentsVariable: "display-output",
 	}
@@ -222,6 +224,22 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 	}
 }
 
+// The idle mpv holds a window for its whole life, so its
+// container carries the grace the display script waits for one. The
+// script exits non-zero when the window never arrives, and the kubelet
+// restarts the container until the compositor is back.
+func TestBuildIdlePodArmsTheWindowWatchdog(t *testing.T) {
+	player := standingIdlePlayer()
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testImage, testBusAddress, testTopicBase, "")
+
+	env := map[string]string{}
+	for _, entry := range pod.Spec.Containers[0].Env {
+		env[entry.Name] = entry.Value
+	}
+	mustMatch(t, env[idleWindowGraceVariable], strconv.Itoa(idleWindowGraceSeconds))
+}
+
 // An unset household zone carries no TZ, so the clock stays on UTC. The
 // identity variables still travel, because they name the unit and do not
 // depend on the zone.
@@ -237,6 +255,7 @@ func TestBuildIdlePodOmitsTheTimeZoneWhenUnset(t *testing.T) {
 		t.Errorf("env carries %s, want it omitted: %+v", timeZoneVariable, env)
 	}
 	wantEnv := map[string]string{
+		idleWindowGraceVariable:      strconv.Itoa(idleWindowGraceSeconds),
 		idlePlayerNameVariable:       "theater",
 		idlePlayerComponentsVariable: "display-output",
 	}

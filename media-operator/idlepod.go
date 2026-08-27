@@ -37,6 +37,12 @@ const (
 // the idle clock draws to the screen without owning its resolution.
 const idleDrawRequest = "draw"
 
+// How long the display script waits for mpv's window before it
+// exits and lets the kubelet restart the container. It is longer than
+// a compositor restart takes and shorter than a person waits at a
+// black screen.
+const idleWindowGraceSeconds = 15
+
 // idlePodName is a Player's standing idle pod, the Player's name plus its
 // job, so a person reading either object finds the other.
 func idlePodName(player string) string {
@@ -233,6 +239,15 @@ func buildIdlePod(
 	// newlines and travel in one variable, and the display Lua splits them. A
 	// Player with no listed parts sends no parts variable, so the idle screen
 	// draws the name alone.
+	// The idle client holds a window for its whole life, so it
+	// arms the display script's watchdog. A compositor that restarts
+	// takes mpv's window with it, and mpv keeps running windowless
+	// because idle mode tolerates a missing video output. The screen
+	// then shows the compositor's background until a person deletes
+	// the pod, so the script exits instead and the kubelet restarts
+	// the container with backoff until the compositor is back.
+	container.Env = append(container.Env,
+		EnvVar{Name: idleWindowGraceVariable, Value: strconv.Itoa(idleWindowGraceSeconds)})
 	container.Env = append(container.Env, EnvVar{Name: idlePlayerNameVariable, Value: idlePlayerName(player)})
 	if components := idleComponents(player); len(components) > 0 {
 		container.Env = append(container.Env,

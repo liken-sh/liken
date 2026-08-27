@@ -17,6 +17,7 @@ local energy = require("energy")
 local activity = require("activity")
 local shade = require("shade")
 local preview = require("preview")
+local window = require("window")
 local utils = require("mp.utils")
 
 -- The remote reaches this client by its directory basename. The log names it
@@ -401,6 +402,12 @@ end
 
 mp.register_script_message("player-sleep", on_sleep)
 mp.register_script_message("player-wake", on_wake)
+
+-- The window watchdog is armed by the operator's own variable,
+-- which the idle container carries and a playback container does not.
+-- The idle client draws nothing at all without a window, so it exits
+-- and the kubelet restarts it until the compositor is back.
+window.arm(os.getenv("IDLE_WINDOW_GRACE_SECONDS"))
 
 -- The preview keys exist only under IDLE_PREVIEW=1, which local/idle sets and
 -- the operator never sets on an idle pod. So a workstation can play each edge of
