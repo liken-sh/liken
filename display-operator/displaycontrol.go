@@ -45,18 +45,22 @@ type displayControl struct {
 	// what keeps a second pass from starting a second one.
 	mu        sync.Mutex
 	restoring map[string]bool
+	// The last poll failure reported for each connector, so a
+	// panel that stays quiet prints one line and not one a minute.
+	pollFaults map[string]string
 }
 
 func newDisplayControl(client *Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
 	return &displayControl{
-		client:    client,
-		node:      node,
-		controls:  controls,
-		outputs:   outputs,
-		now:       time.Now,
-		wait:      waitFor,
-		wakes:     make(chan struct{}, 1),
-		restoring: map[string]bool{},
+		client:     client,
+		node:       node,
+		controls:   controls,
+		outputs:    outputs,
+		now:        time.Now,
+		wait:       waitFor,
+		wakes:      make(chan struct{}, 1),
+		restoring:  map[string]bool{},
+		pollFaults: map[string]string{},
 	}
 }
 
@@ -189,7 +193,51 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 	if !facts.Responsive {
 		return nil
 	}
-	return d.rest(display, output, facts)
+	// The read of what the panel holds now runs before the
+	// resting layer, so one pass finds a value a person changed at the
+	// panel's own buttons and writes the declaration back over it.
+	d.poll(output, facts)
+	return d.rest(display, output, d.controls.factsFor(output))
+}
+
+// The guarded read. A DDC read is a wake stimulus on some
+// panels, so it happens only against a panel that answers, that no
+// override holds, that no restore is writing, and whose last power
+// value reads on. A panel last seen in standby or off is never
+// touched.
+func (d *displayControl) poll(output Output, facts panelFacts) {
+	if !lit(facts) || !d.controls.pollDue(output.Connector) {
+		return
+	}
+	err := d.controls.pollControls(output.Connector)
+	d.reportPoll(output.Connector, err)
+}
+
+// Whether the last power value the operator read says the
+// panel is lit. A panel with no power value counts as lit, which is
+// every panel that carries no power control.
+func lit(facts panelFacts) bool {
+	power, known := facts.Observed[vcpPowerMode]
+	return !known || power == powerModeOn
+}
+
+// A poll that failed says the panel went quiet between the
+// probe and this read. It fails no pass and moves no condition:
+// Responsive reports what the probe found, and the next window reads
+// again. The message prints once, because a panel that stays quiet
+// would otherwise print one line a minute for as long as it lasts.
+func (d *displayControl) reportPoll(connector string, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err == nil {
+		delete(d.pollFaults, connector)
+		return
+	}
+	if d.pollFaults[connector] == err.Error() {
+		return
+	}
+	d.pollFaults[connector] = err.Error()
+	fmt.Fprintf(os.Stderr, "reading what %s holds: %v\n", connector, err)
 }
 
 // The capture commits before the wire write. A status write that

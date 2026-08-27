@@ -32,15 +32,20 @@ block. That failure is visible: `kubectl get display` shows the
 standing override, and the block's field manager names the writer
 that owes the lift.
 
-## Observed values are last-known
+## Observed values
 
-`status.observed` is what the operator last read or wrote, not a
-live reading. The operator touches the wire when it probes,
-captures, or actuates, and at no other time, because a DDC/CI read
-is itself a wake stimulus on some panels, and a polling loop would
-relight every screen an override darkened. A person who changes a
-control at the panel's own menu diverges from `observed` until the
-operator next touches that panel.
+`status.observed` is what the operator last read or wrote. The
+operator touches the wire when it probes, when it captures before
+an override, when it actuates, and about once a minute for a panel
+that is lit and under no override. That last read is what finds a
+change a person made at the panel's own menu, and it is what makes
+a resting declaration hold: the pass that finds the divergence
+writes the declaration back. A panel in standby or off, a panel an
+override holds, and a panel that answers nothing are never read on
+a timer, because a DDC/CI read is itself a wake stimulus on some
+panels, and a polling loop would relight the screens the override
+layer darkened. For those panels, `observed` stays what the
+operator last saw.
 
 ## One writer per wire
 

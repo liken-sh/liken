@@ -343,6 +343,12 @@ type probedPanel struct {
 	// When the probe ran, which is what the retry window of a
 	// refusal is measured from.
 	asked time.Time
+	// when the operator last read the carried controls of a
+	// panel that answers. It is its own timestamp because it measures
+	// its own window: the refusal is asked again to find a panel that
+	// started answering, and this one finds a value a person changed
+	// at the panel.
+	polled time.Time
 }
 
 // NewPanelControls wires the real i2c-dev nodes. A test supplies its

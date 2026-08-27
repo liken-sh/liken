@@ -344,6 +344,23 @@ func (m *fakeMonitor) answers() {
 	m.silent = false
 }
 
+// The panel stops answering, which a monitor does when it goes
+// to sleep or when its menu is open.
+func (m *fakeMonitor) silence() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.silent = true
+}
+
+// A person turns one control at the panel's own buttons. No
+// message reaches the host, which is the whole reason the operator
+// polls.
+func (m *fakeMonitor) turnedTo(code byte, value uint16) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.values[code] = value
+}
+
 // A panel that carries one control and not the other is the ordinary
 // case, because a display implements the subset of the standard it
 // chooses.

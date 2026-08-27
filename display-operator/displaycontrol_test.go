@@ -615,6 +615,146 @@ func TestAPanelThatAnswersNothingIsNotResponsive(t *testing.T) {
 	}
 }
 
+// A person at the panel's own buttons is the one writer this
+// operator cannot see. The poll is what finds the change, and this is
+// the pass that publishes it.
+func TestAPanelsOwnMenuReachesTheObservedValues(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	fixture := newDisplayFixture(t, panel)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	panel.turnedTo(vcpBrightness, 80)
+	fixture.advance(pollInterval)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	observed := fixture.display().Status.Observed
+	if observed == nil || observed.Brightness == nil || *observed.Brightness != 80 {
+		t.Errorf("observed = %+v, want the 80 a person set at the panel", observed)
+	}
+}
+
+// The point of the poll. A declared resting value is what the
+// panel rests at, so a change at the panel's own buttons is a
+// divergence, and the pass that reads it writes it back.
+func TestADeclaredValueHealsAfterAChangeAtThePanel(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	fixture := newDisplayFixture(t, panel)
+	fixture.declare(DisplaySpec{Brightness: intOf(30)})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixture.holds(vcpBrightness); got != 30 {
+		t.Fatalf("the panel holds a brightness of %d, want the 30 its spec states", got)
+	}
+
+	panel.turnedTo(vcpBrightness, 80)
+	fixture.advance(pollInterval)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := fixture.holds(vcpBrightness); got != 30 {
+		t.Errorf("the panel holds a brightness of %d, want the declared 30 written back", got)
+	}
+}
+
+// The guards. A read is a wake stimulus on some panels, so the
+// poll never touches a panel that is held dark, believed asleep, or
+// powered down.
+func TestThePollLeavesAPanelAlone(t *testing.T) {
+	cases := []struct {
+		name  string
+		spec  DisplaySpec
+		power uint16
+	}{
+		{
+			name:  "a panel held dark by an override",
+			spec:  DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}},
+			power: powerModeOn,
+		},
+		{
+			name:  "a panel in standby",
+			power: powerModeStandby,
+		},
+		{
+			name:  "a panel that is powered off",
+			power: powerModeOff,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			panel := drillPanel(t, "lg-hdr-wqhd")
+			panel.turnedTo(vcpPowerMode, c.power)
+			fixture := newDisplayFixture(t, panel)
+			fixture.declare(c.spec)
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+
+			opens := fixture.bench.opened()
+			panel.turnedTo(vcpBrightness, 80)
+			fixture.advance(pollInterval)
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := fixture.bench.opened(); got != opens {
+				t.Errorf("the pass opened the wire %d more times, want none", got-opens)
+			}
+		})
+	}
+}
+
+// The window, for the reason the refusal's window exists: a
+// cable's uevents arrive in a burst, and every one of them is a pass.
+func TestThePollReadsOncePerWindow(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	opens := fixture.bench.opened()
+	fixture.advance(pollInterval)
+	for range 3 {
+		if err := fixture.pass(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := fixture.bench.opened() - opens; got != 1 {
+		t.Errorf("three passes in one window read the wire %d times, want 1", got)
+	}
+}
+
+// A panel that stops answering between the probe and the poll
+// is not a panel that answers no DDC/CI. The condition reports what
+// the probe found, and the next window asks again.
+func TestAPollThatFailsLeavesThePanelResponsive(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	fixture := newDisplayFixture(t, panel)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	panel.silence()
+	fixture.advance(pollInterval)
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	display := fixture.display()
+	if got := condition(display, ResponsiveCondition).Status; got != conditionTrue {
+		t.Errorf("Responsive = %q, want %q", got, conditionTrue)
+	}
+	if observed := display.Status.Observed; observed == nil || *observed.Brightness != 50 {
+		t.Errorf("observed = %+v, want the values the probe read", observed)
+	}
+}
+
 // The panel that refused DDC/CI starts answering, and the next
 // pass past the window publishes what it carries. Nothing about the
 // connector or the EDID changed, so nothing else could have told the

@@ -50,8 +50,80 @@ func (c *panelControls) factsFor(output Output) panelFacts {
 	if c.probed == nil {
 		c.probed = map[string]probedPanel{}
 	}
-	c.probed[output.Connector] = probedPanel{monitor: output.Monitor, facts: &facts, asked: c.clock()}
+	// The probe just read every carried control, so the poll's
+	// window starts here too.
+	asked := c.clock()
+	c.probed[output.Connector] = probedPanel{
+		monitor: output.Monitor, facts: &facts, asked: asked, polled: asked,
+	}
 	return facts.copy()
+}
+
+// how long the operator leaves a panel alone between reads of
+// what it holds. One window per backstop tick: a person at the panel's
+// buttons is found within a minute, and a burst of passes costs one
+// read.
+const pollInterval = backstopInterval
+
+// Whether this connector's window has passed, and the stamp
+// that opens the next one. The check and the stamp are one step under
+// the lock, so two goroutines that pass at once read the wire once.
+func (c *panelControls) pollDue(connector string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	probed, known := c.probed[connector]
+	if !known || probed.facts == nil {
+		return false
+	}
+	if c.clock().Before(probed.polled.Add(pollInterval)) {
+		return false
+	}
+	probed.polled = c.clock()
+	c.probed[connector] = probed
+	return true
+}
+
+// The read itself: every carried core control on one open bus,
+// with each answer recorded the way an actuation's readback is. A code
+// that fails to answer is reported and leaves its last value standing,
+// because one control that went quiet says nothing about the others.
+func (c *panelControls) pollControls(connector string) error {
+	facts, known := c.cached(connector)
+	if !known {
+		return nil
+	}
+	bus, err := c.busFor(connector)
+	if err != nil {
+		return err
+	}
+	defer bus.Close()
+
+	ddc := c.client(bus)
+	var failures []error
+	for _, control := range coreControls {
+		if _, carried := facts.Capabilities[control.Name]; !carried {
+			continue
+		}
+		current, _, err := ddc.GetVCP(control.Code)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("reading the %s of %s: %w", control.Name, connector, err))
+			continue
+		}
+		c.observe(connector, control.Code, current)
+	}
+	return errors.Join(failures...)
+}
+
+// The cached facts of one connector, without the probe that
+// factsFor would run. The poll holds no lock while it reads the wire.
+func (c *panelControls) cached(connector string) (panelFacts, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	probed, known := c.probed[connector]
+	if !known || probed.facts == nil {
+		return panelFacts{}, false
+	}
+	return probed.facts.copy(), true
 }
 
 // How long a refusal is held before the panel is asked again.
