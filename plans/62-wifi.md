@@ -145,10 +145,13 @@ explicit failure events qualify.
 
 Two facts about the platform come before any of the above:
 
-* Machines ship with radios soft-blocked. Init opens `/dev/rfkill`
-  and unblocks the radio before the supplicant starts. A blocked
-  radio otherwise reports "no AP in range", the one failure this
-  design treats as always transient.
+* liken does not touch rfkill. The kernel starts radios unblocked, a
+  soft block does not survive a reboot, and nothing in liken writes
+  one, so there is no block to clear. An earlier draft unblocked the
+  radio through `/dev/rfkill` before the supplicant started; the
+  first metal boot hung in that code (a non-blocking fd handed to
+  `os.NewFile` parks the reader in Go's poller instead of returning
+  `EAGAIN`), and the guard it implemented had nothing to guard.
 * The kernel limits 5GHz channels until it loads `regulatory.db`
   from firmware. The linux-firmware release does not carry that
   file; it comes from the wireless-regdb project, so the

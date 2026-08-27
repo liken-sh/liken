@@ -286,8 +286,8 @@ func notAttemptedRadio(ifc machine.InterfaceSpec, stuck string) *connection {
 
 // joinRadio is the 802.11 session, a variable holding the real join
 // below it, so a test can drive the addressing that follows a join
-// with no radio, no supplicant, and no rfkill device. It is the seam
-// startSupplicant and parkConsole already are.
+// with no radio and no supplicant. It is the seam startSupplicant
+// and parkConsole already are.
 var joinRadio = joinWireless
 
 // bringUpRadio is the wireless half of bringUpInterface, moved here

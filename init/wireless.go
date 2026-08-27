@@ -5,8 +5,8 @@ package main
 // session, the association, the keys, and the rekeys, and nothing
 // else. Init keeps its own addressing, so once a radio associates the
 // interface takes DHCP or a static address on the same code a wired
-// port does. The order is rfkill, then the supplicant, then the join,
-// then the address. The events on the supplicant's control socket
+// port does. The order is the supplicant, then the join, then the
+// address. The events on the supplicant's control socket
 // matter because the kernel cannot tell a wrong passphrase apart from
 // an access point that is switched off; only the supplicant can say
 // which one it is (plans/62-wifi.md).
@@ -86,22 +86,19 @@ func (r *radio) wirelessStatus() *machine.WirelessStatus {
 }
 
 // joinWireless runs the wireless half of one interface's bring-up: it
-// unblocks the radio, generates the supplicant's configuration, starts
-// the supplicant under supervision, and waits for the association. It
-// returns a radio in every case, because a radio that failed to join is
-// exactly what the status must report.
+// generates the supplicant's configuration, starts the supplicant
+// under supervision, and waits for the association. It returns a
+// radio in every case, because a radio that failed to join is exactly
+// what the status must report.
 //
-// The rfkill step runs here rather than at boot because only a spec
-// that names a wireless interface reaches this function. A machine
-// with no radio never opens the device, which is the plan's rule:
-// nothing wireless runs unless the spec asks for it.
+// liken does not touch rfkill. The kernel starts radios unblocked, a
+// soft block does not survive a reboot, and nothing in liken writes
+// one, so there is no block to clear. A hardware kill switch shows up
+// as a radio that never associates, and no software unblock can clear
+// that either.
 func joinWireless(ifc machine.InterfaceSpec, stateRoot string) *radio {
 	w := *ifc.Wireless
 	r := &radio{ifname: ifc.Name, ssid: w.SSID, state: machine.WirelessAssociating}
-
-	if err := unblockRadios(); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: wireless: %v\n", err)
-	}
 
 	config, err := wirelessConfig(w, stateRoot, controlSocketDir(ifc.Name))
 	if err != nil {
