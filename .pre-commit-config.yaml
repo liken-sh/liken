@@ -35,7 +35,16 @@ repos:
         # -w rewrites files in place. pre-commit fails the commit when
         # a hook modifies files. So an unformatted commit becomes a
         # formatted retry.
-        entry: gofmt -l -w
+        #
+        # The gofmt that runs is the one belonging to the toolchain
+        # go.mod names, not whichever gofmt sits earliest on PATH.
+        # gofmt is a plain binary, so it never re-execs into the
+        # declared toolchain the way `go` does, and its formatting
+        # changes between releases: 1.27 indents a composite literal
+        # inside a return differently from 1.26. A workstation with an
+        # older Go installed would otherwise reformat files one way
+        # and CI would reformat them back.
+        entry: bash -c 'exec "$(go env GOROOT)/bin/gofmt" -l -w "$@"' --
         language: system
         types: [go]
       # The repo's programs are one Go module (see go.mod at the

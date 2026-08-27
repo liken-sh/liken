@@ -65,15 +65,15 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 // disproved a narrower rule.
 func gpu() ([]hardware.Device, func(hardware.Device) hardware.Delivery) {
 	return []hardware.Device{{
-			Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display",
-			ClassCode: "030000", Name: "Alder Lake-N [UHD Graphics]", Vendor: "8086", Product: "46d2",
-		}}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
-			{Path: "/dev/dri/card0", Subsystem: "drm"},
-			{Path: "/dev/dri/renderD128", Subsystem: "drm"},
-			{Path: "/dev/fb0", Subsystem: "graphics"},
-			{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
-			{Path: "/dev/i2c-1", Subsystem: "i2c-dev"},
-		}})
+		Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display",
+		ClassCode: "030000", Name: "Alder Lake-N [UHD Graphics]", Vendor: "8086", Product: "46d2",
+	}}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/dri/card0", Subsystem: "drm"},
+		{Path: "/dev/dri/renderD128", Subsystem: "drm"},
+		{Path: "/dev/fb0", Subsystem: "graphics"},
+		{Path: "/dev/i2c-0", Subsystem: "i2c-dev"},
+		{Path: "/dev/i2c-1", Subsystem: "i2c-dev"},
+	}})
 }
 
 func TestInventorySplitsTheGPUAndSharesTheGraphicsHalf(t *testing.T) {
