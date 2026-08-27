@@ -4,7 +4,7 @@
 # every liken machine boots. That pairing is the device operator
 # pattern's whole reason for a separate repository.
 
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.
