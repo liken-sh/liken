@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -268,6 +270,42 @@ type fakeMonitor struct {
 	opens   int
 	closes  int
 	pending []byte
+	// The capability string this panel declares, and nothing
+	// when it declares none. A panel that declares none is the panel
+	// the probe falls back to asking, code by code.
+	capabilities string
+	// The writes this panel drops before it starts taking them,
+	// which is what a panel that is waking does.
+	stubborn map[byte]int
+	// How many writes a silent panel takes before it answers
+	// again.
+	wakesAfter int
+	// The shared record of what reached the panel and what
+	// reached the API server, so a test reads the two in the order
+	// they happened.
+	journal *journal
+	// A restore runs on its own goroutine, so the panel it
+	// writes to is reached from two goroutines at once.
+	mu sync.Mutex
+}
+
+// The shared record. Both the panel and the API server write
+// it, from goroutines of their own, and a test reads the whole of it.
+type journal struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (j *journal) add(format string, args ...any) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.lines = append(j.lines, fmt.Sprintf(format, args...))
+}
+
+func (j *journal) read() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.lines)
 }
 
 // A monitorSet is one write the panel took, so a test reads what
@@ -307,8 +345,17 @@ func monitorWithout(code byte) *fakeMonitor {
 }
 
 func (m *fakeMonitor) Write(request []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.silent {
 		m.pending = bytes.Repeat([]byte{0xff}, getReplyLength)
+		// A panel that is waking takes this many writes before
+		// it answers again, which is what a panel coming out of a
+		// power-down does.
+		if request[2] == vcpSetRequest && m.wakesAfter > 0 {
+			m.wakesAfter--
+			m.silent = m.wakesAfter > 0
+		}
 		return nil
 	}
 	code := request[3]
@@ -323,15 +370,47 @@ func (m *fakeMonitor) Write(request []byte) error {
 	case vcpSetRequest:
 		value := uint16(request[4])<<8 | uint16(request[5])
 		m.sets = append(m.sets, monitorSet{Code: code, Value: value})
+		m.record("set %s=%d", capabilityName(code), value)
+		if m.stubborn[code] > 0 {
+			m.stubborn[code]--
+			return nil
+		}
 		if clamped, limited := m.clamps[code]; limited {
 			value = clamped
 		}
 		m.values[code] = value
+	case vcpCapabilitiesRequest:
+		if m.capabilities == "" {
+			return nil
+		}
+		offset := int(request[3])<<8 | int(request[4])
+		m.pending = capabilitiesFragmentOf(m.capabilities, offset)
 	}
 	return nil
 }
 
+// One fragment of this panel's capability string, padded to the
+// length a host reads.
+func capabilitiesFragmentOf(capabilities string, offset int) []byte {
+	if offset > len(capabilities) {
+		offset = len(capabilities)
+	}
+	end := min(offset+capabilitiesFragmentBytes, len(capabilities))
+	return paddedCapabilitiesReply(uint16(offset), capabilities[offset:end])
+}
+
+// One line of the shared record, for the fixtures that keep
+// one.
+func (m *fakeMonitor) record(format string, args ...any) {
+	if m.journal == nil {
+		return
+	}
+	m.journal.add(format, args...)
+}
+
 func (m *fakeMonitor) Read(reply []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if len(m.pending) != len(reply) {
 		return errors.New("the panel has no reply of that length to give")
 	}
@@ -340,15 +419,39 @@ func (m *fakeMonitor) Read(reply []byte) error {
 }
 
 func (m *fakeMonitor) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closes++
 	return nil
+}
+
+// One open of this panel's node, counted under the same lock
+// as everything else the panel records.
+func (m *fakeMonitor) opened() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.opens++
+}
+
+// What one control holds now.
+func (m *fakeMonitor) holds(code byte) uint16 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.values[code]
+}
+
+// Every write the panel took, in order.
+func (m *fakeMonitor) writes() []monitorSet {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.sets)
 }
 
 // Took lists what the panel took for one code, in order, so a test
 // reads the values and the count together.
 func (m *fakeMonitor) took(code byte) []uint16 {
 	var values []uint16
-	for _, set := range m.sets {
+	for _, set := range m.writes() {
 		if set.Code == code {
 			values = append(values, set.Value)
 		}
@@ -370,17 +473,22 @@ var labAdapters = map[string]string{
 // the probe cache is measured in opens.
 type panelBench struct {
 	monitors map[string]*fakeMonitor
-	opens    int
+	opens    atomic.Int64
 }
 
 func (b *panelBench) open(path string) (controlBus, error) {
-	b.opens++
+	b.opens.Add(1)
 	monitor, wired := b.monitors[path]
 	if !wired {
 		return nil, fmt.Errorf("nothing answers on %s", path)
 	}
-	monitor.opens++
+	monitor.opened()
 	return monitor, nil
+}
+
+// How many times the bench handed out a bus.
+func (b *panelBench) opened() int {
+	return int(b.opens.Load())
 }
 
 // BenchPanels writes the ddc symlink the kernel writes beside a
@@ -488,8 +596,8 @@ func TestProbeReadsNoWireItCannotReach(t *testing.T) {
 			if got := controls.of(c.output); got != (supportedControls{}) {
 				t.Errorf("controls = %+v, want none", got)
 			}
-			if bench.opens != 0 {
-				t.Errorf("the probe opened %d buses, want none", bench.opens)
+			if bench.opened() != 0 {
+				t.Errorf("the probe opened %d buses, want none", bench.opened())
 			}
 		})
 	}
@@ -508,11 +616,11 @@ func TestProbeAsksOncePerMonitor(t *testing.T) {
 	controls.of(output)
 	controls.of(output)
 
-	if bench.opens != 1 {
-		t.Errorf("the probe opened the bus %d times for one monitor, want 1", bench.opens)
+	if bench.opened() != 1 {
+		t.Errorf("the probe opened the bus %d times for one monitor, want 1", bench.opened())
 	}
 	if panel.closes != 1 {
-		t.Errorf("the probe left %d of its opens unclosed", bench.opens-panel.closes)
+		t.Errorf("the probe left %d of its opens unclosed", bench.opened()-panel.closes)
 	}
 }
 
@@ -524,8 +632,8 @@ func TestProbeAsksAgainWhenTheMonitorChanges(t *testing.T) {
 	other := EDID{Manufacturer: "BOE", ProductCode: 0x095f}
 	got := controls.of(litOutput("HDMI-A-1", other))
 
-	if bench.opens != 2 {
-		t.Errorf("the probe opened the bus %d times for two monitors, want 2", bench.opens)
+	if bench.opened() != 2 {
+		t.Errorf("the probe opened the bus %d times for two monitors, want 2", bench.opened())
 	}
 	if !got.Brightness {
 		t.Errorf("controls = %+v, want the answer of the monitor there now", got)
@@ -708,8 +816,8 @@ func TestPrepareWithNoControlOpensNoBus(t *testing.T) {
 		t.Fatal(claim.Error)
 	}
 
-	if bench.opens != 0 {
-		t.Errorf("prepare opened %d buses for a claim that states no control", bench.opens)
+	if bench.opened() != 0 {
+		t.Errorf("prepare opened %d buses for a claim that states no control", bench.opened())
 	}
 }
 

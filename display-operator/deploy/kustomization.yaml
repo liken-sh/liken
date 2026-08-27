@@ -4,14 +4,18 @@
 # and does not name it. Take it through your own GitOps with patches
 # of your own, or read it and write your own manifests.
 #
-# The base ships two DeviceClasses, display-gpu and display-render,
-# because the claim template in operator.yaml names them and the
-# operator's own pod cannot start without them: they are wiring, not
-# policy. The class workloads claim through is the cluster owner's
-# to create, because it is cluster policy, and the install guide at
-# https://display.liken.sh/docs/guides/install/ gives the YAML for
-# display-output, the one to start with. An owner who renames a
-# wiring class patches both the class and the template.
+# The base ships three DeviceClasses, display-gpu, display-render,
+# and display-i2c, because the claim template in operator.yaml names
+# them and the operator's own pod cannot start without them: they
+# are wiring, not policy. The class workloads claim through is the
+# cluster owner's to create, because it is cluster policy, and the
+# install guide at https://display.liken.sh/docs/guides/install/
+# gives the YAML for display-output, the one to start with. An owner
+# who renames a wiring class patches both the class and the template.
+#
+# The base also ships the Display CustomResourceDefinition, because
+# the operator creates a Display for every monitor it probes, and it
+# cannot do that against a cluster the kind is missing from.
 #
 # kustomize stamps the namespace below onto the DeviceClasses too,
 # because resource.k8s.io/v1 is not in its compiled OpenAPI schema
@@ -25,6 +29,7 @@ kind: Kustomization
 namespace: liken-system
 
 resources:
+  - displays.yaml
   - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml

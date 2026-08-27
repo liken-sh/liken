@@ -12,4 +12,4 @@ profile: coverage.out
 
 threshold:
   # One package, so the total is the whole gate.
-  total: 74
+  total: 77

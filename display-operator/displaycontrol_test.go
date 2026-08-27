@@ -1,0 +1,861 @@
+package main
+
+// One fixture holds both ends of the operator: an API server that
+// stores Displays and a panel that answers DDC/CI, and both write
+// one journal, so a test reads the order the two were touched in.
+// The order is the whole of the capture rule: the captured value
+// commits before the panel goes dark.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// A panel of the lab drill, answering the capability string it
+// answered there and holding a value for every core control it
+// declares.
+func drillPanel(t *testing.T, name string) *fakeMonitor {
+	t.Helper()
+	panel := &fakeMonitor{
+		values:       map[byte]uint16{},
+		maxima:       map[byte]uint16{},
+		clamps:       map[byte]uint16{},
+		stubborn:     map[byte]int{},
+		capabilities: labCapabilities(t, name),
+	}
+	for code, values := range capabilityCodes(panel.capabilities) {
+		if capabilityName(code) == "" {
+			continue
+		}
+		if len(values) == 0 {
+			panel.values[code], panel.maxima[code] = 50, 100
+			continue
+		}
+		panel.values[code], panel.maxima[code] = values[0], values[len(values)-1]
+	}
+	return panel
+}
+
+// One panel of the bench: the connector it is on, the monitor
+// the connector reads, and the panel that answers DDC/CI behind it.
+type wiredPanel struct {
+	Connector string
+	Monitor   EDID
+	Panel     *fakeMonitor
+}
+
+type displayFixture struct {
+	t        *testing.T
+	client   *Client
+	control  *displayControl
+	panel    *fakeMonitor
+	bench    *panelBench
+	wired    []wiredPanel
+	displays map[string]*Display
+	journal  *journal
+	refuse   int
+	present  map[string]bool
+	version  int
+	// The restore's own goroutine reaches these, so the count
+	// is atomic and the channel is what a test waits on to know the
+	// restore is between attempts.
+	waits   atomic.Int64
+	waiting chan struct{}
+	// A restore that never lands. The wait holds until the
+	// operator's context ends, which is what a panel that answers
+	// nothing costs a real operator.
+	stall bool
+}
+
+// The panel of the drill on one connector, the API server that
+// holds its resource, and the controller between them.
+func newDisplayFixture(t *testing.T, panel *fakeMonitor) *displayFixture {
+	t.Helper()
+	return newDisplayBench(t, wiredPanel{Connector: "HDMI-A-1", Monitor: labMonitor(), Panel: panel})
+}
+
+// The same bench with more than one panel on the card, for the
+// tests that prove one panel does not hold up another.
+func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
+	t.Helper()
+	fixture := &displayFixture{
+		t:        t,
+		wired:    wired,
+		panel:    wired[0].Panel,
+		displays: map[string]*Display{},
+		journal:  &journal{},
+		present:  map[string]bool{},
+		waiting:  make(chan struct{}, 8),
+	}
+	panels := map[string]*fakeMonitor{}
+	for _, one := range wired {
+		one.Panel.journal = fixture.journal
+		panels[one.Connector] = one.Panel
+		fixture.present[one.Connector] = true
+	}
+	controls, bench := benchPanels(t, t.TempDir(), "card1", panels)
+	fixture.bench = bench
+	fixture.client = testClient(t, fixture.handler())
+	fixture.control = newDisplayControl(fixture.client, "liken-1", controls, fixture.outputs)
+	fixture.control.now = func() time.Time { return time.Unix(0, 0).UTC() }
+	fixture.control.wait = func(ctx context.Context, _ time.Duration) error {
+		fixture.waits.Add(1)
+		select {
+		case fixture.waiting <- struct{}{}:
+		default:
+		}
+		if !fixture.stall {
+			return nil
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return fixture
+}
+
+func (f *displayFixture) outputs() []Output {
+	var outputs []Output
+	for _, one := range f.wired {
+		output := litOutput(one.Connector, one.Monitor)
+		output.Connected = f.present[one.Connector]
+		outputs = append(outputs, output)
+	}
+	return outputs
+}
+
+// The wake the restore raises when it lands or gives up, which
+// is what brings the pass back to clear the capture.
+func (f *displayFixture) awaitRestore() {
+	f.t.Helper()
+	select {
+	case <-f.control.wakes:
+	case <-time.After(5 * time.Second):
+		f.t.Fatal("the restore raised no wake")
+	}
+}
+
+// The name the drill's ultrawide publishes under, built the
+// same way the slice's pairing attribute is.
+func labDisplayName() string {
+	return monitorID(labMonitor())
+}
+
+func (f *displayFixture) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, DisplaysPath+"/")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == DisplaysPath:
+			list := DisplayList{}
+			for _, display := range f.displays {
+				list.Items = append(list.Items, *display)
+			}
+			slices.SortFunc(list.Items, func(a, b Display) int {
+				return strings.Compare(a.Metadata.Name, b.Metadata.Name)
+			})
+			_ = json.NewEncoder(w).Encode(list)
+		case r.Method == http.MethodGet:
+			display, held := f.displays[name]
+			if !held {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(display)
+		case r.Method == http.MethodPost:
+			created := &Display{}
+			_ = json.NewDecoder(r.Body).Decode(created)
+			f.store(created)
+			f.journal.add("create %s", created.Metadata.Name)
+			_ = json.NewEncoder(w).Encode(created)
+		case r.Method == http.MethodPut && strings.HasSuffix(name, "/status"):
+			f.writeStatus(w, r, strings.TrimSuffix(name, "/status"))
+		default:
+			f.t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+}
+
+// The status write, and the refusal a test asks for. A refused
+// write is the API server that was restarting, and the operator must
+// leave the panel as it is.
+func (f *displayFixture) writeStatus(w http.ResponseWriter, r *http.Request, name string) {
+	written := &Display{}
+	_ = json.NewDecoder(r.Body).Decode(written)
+	if f.refuse > 0 {
+		f.refuse--
+		f.journal.add("status refused")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	held, stored := f.displays[name]
+	if !stored {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	held.Status = written.Status
+	f.store(held)
+	f.journal.add("status %s", captureLine(held.Status))
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// What one status write says about the captured block, which is
+// what the ordering test reads.
+func captureLine(status DisplayStatus) string {
+	if status.Captured.empty() {
+		return "captured=none"
+	}
+	if status.Captured.Brightness != nil {
+		return "captured=brightness " + strconv.Itoa(*status.Captured.Brightness)
+	}
+	if status.Captured.Power != nil {
+		return "captured=power " + *status.Captured.Power
+	}
+	return "captured=other"
+}
+
+func (f *displayFixture) store(display *Display) {
+	f.version++
+	display.Metadata.ResourceVersion = strconv.Itoa(f.version)
+	f.displays[display.Metadata.Name] = display
+}
+
+// A resource a person or a machine writer already wrote.
+func (f *displayFixture) declare(spec DisplaySpec) *Display {
+	return f.declareFor(labDisplayName(), spec)
+}
+
+func (f *displayFixture) declareFor(name string, spec DisplaySpec) *Display {
+	display := &Display{
+		APIVersion: DisplayAPIVersion,
+		Kind:       "Display",
+		Metadata:   DisplayMeta{Name: name},
+		Spec:       spec,
+	}
+	f.store(display)
+	return display
+}
+
+// The resource of a panel that stands with a capture and no
+// override, which is the state an operator that restarted comes back
+// to.
+func (f *displayFixture) captured(name, connector string, values DisplayValues) *Display {
+	display := f.declareFor(name, DisplaySpec{})
+	display.Status = DisplayStatus{Node: "liken-1", Connector: connector, Captured: &values}
+	return display
+}
+
+func (f *displayFixture) pass() error {
+	f.t.Helper()
+	return f.control.pass(f.t.Context())
+}
+
+func (f *displayFixture) display() *Display {
+	f.t.Helper()
+	display, held := f.displays[labDisplayName()]
+	if !held {
+		f.t.Fatalf("the operator published no Display; it published %v", f.names())
+	}
+	return display
+}
+
+func (f *displayFixture) lines() []string {
+	return f.journal.read()
+}
+
+func (f *displayFixture) names() []string {
+	var names []string
+	for name := range f.displays {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// What the panel holds now for one control.
+func (f *displayFixture) holds(code byte) uint16 {
+	return f.panel.holds(code)
+}
+
+func condition(display *Display, kind string) DisplayCondition {
+	for _, current := range display.Status.Conditions {
+		if current.Type == kind {
+			return current
+		}
+	}
+	return DisplayCondition{}
+}
+
+func TestADisplayIsPublishedForEveryPanel(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	display := fixture.display()
+	if display.Status.Node != "liken-1" || display.Status.Connector != "HDMI-A-1" {
+		t.Errorf("status places the panel on %s/%s, want liken-1/HDMI-A-1",
+			display.Status.Node, display.Status.Connector)
+	}
+	// The capability list is the panel's own, in plain names.
+	brightness, carried := display.Status.Capabilities[brightnessControl]
+	if !carried || brightness.Max != 100 {
+		t.Errorf("brightness = %+v, want a maximum of 100", brightness)
+	}
+	input := display.Status.Capabilities[inputControl]
+	if want := []string{"DP-1", "DP-2", "HDMI-1", "HDMI-2"}; !slices.Equal(input.Values, want) {
+		t.Errorf("input = %q, want %q", input.Values, want)
+	}
+	if _, carried := display.Status.Capabilities[sharpnessControl]; carried {
+		t.Error("status publishes a sharpness control, and this panel declares none")
+	}
+	// The probe is a read, so the values it read publish.
+	if display.Status.Observed == nil || *display.Status.Observed.Brightness != 50 {
+		t.Errorf("observed = %+v, want the brightness the probe read", display.Status.Observed)
+	}
+	if got := condition(display, ConnectedCondition).Status; got != conditionTrue {
+		t.Errorf("Connected = %q, want %q", got, conditionTrue)
+	}
+	if got := condition(display, ResponsiveCondition).Status; got != conditionTrue {
+		t.Errorf("Responsive = %q, want %q", got, conditionTrue)
+	}
+}
+
+// The failure that plan 17 could not survive. The value that
+// brings the panel back is durable before the panel goes dark.
+func TestTheCaptureCommitsBeforeThePanelGoesDark(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture.declare(DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := fixture.lines()
+	captured := slices.Index(journal, "status captured=brightness 50")
+	blanked := slices.Index(journal, "set brightness=0")
+	if captured < 0 || blanked < 0 || captured > blanked {
+		t.Fatalf("journal = %q, want the captured brightness written before the panel went dark", journal)
+	}
+	if fixture.holds(vcpBrightness) != 0 {
+		t.Errorf("the panel holds a brightness of %d, want 0", fixture.holds(vcpBrightness))
+	}
+}
+
+// A status write that fails leaves the panel lit, because a
+// panel that went dark with no captured value stays dark.
+func TestAFailedCaptureLeavesThePanelLit(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture.declare(DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
+	fixture.refuse = 1
+
+	if err := fixture.pass(); err == nil {
+		t.Fatal("the pass reported no failure, and the status write failed")
+	}
+
+	if journal := fixture.lines(); slices.Contains(journal, "set brightness=0") {
+		t.Errorf("journal = %q, want no write to the panel", journal)
+	}
+	if fixture.holds(vcpBrightness) != 50 {
+		t.Errorf("the panel holds a brightness of %d, want the 50 it was lit at", fixture.holds(vcpBrightness))
+	}
+	if captured := fixture.display().Status.Captured; !captured.empty() {
+		t.Errorf("captured = %+v, want nothing captured", captured)
+	}
+}
+
+// An override that stands over a restart of the operator finds
+// the value in status and blanks nothing twice.
+func TestAStandingOverrideCapturesOnce(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture.declare(DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	writes := len(fixture.panel.took(vcpBrightness))
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(fixture.panel.took(vcpBrightness)); got != writes {
+		t.Errorf("the second pass wrote the brightness %d more times, want none", got-writes)
+	}
+	if brightness := fixture.display().Status.Captured.Brightness; brightness == nil || *brightness != 50 {
+		t.Errorf("captured brightness = %v, want the 50 the first pass saved", brightness)
+	}
+}
+
+func TestTheOverrideLiftsToTheRightValue(t *testing.T) {
+	cases := []struct {
+		name string
+		spec DisplaySpec
+		want uint16
+	}{
+		{
+			// With no declaration, the panel goes back to what
+			// stood before the override.
+			name: "the captured value",
+			spec: DisplaySpec{},
+			want: 50,
+		},
+		{
+			// The declaration is what the panel rests at, so it
+			// wins over the value the override displaced.
+			name: "the resting declaration over the captured value",
+			spec: DisplaySpec{Brightness: intOf(40)},
+			want: 40,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+			held := c.spec
+			held.Override = &DisplayOverride{Backlight: overrideOff}
+			display := fixture.declare(held)
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+
+			display.Spec.Override = nil
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+			fixture.awaitRestore()
+			if err := fixture.pass(); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := fixture.holds(vcpBrightness); got != c.want {
+				t.Errorf("the panel holds a brightness of %d, want %d", got, c.want)
+			}
+			if captured := fixture.display().Status.Captured; !captured.empty() {
+				t.Errorf("captured = %+v, want it cleared after the restore", captured)
+			}
+		})
+	}
+}
+
+// A panel that is waking answers slowly, and the restore
+// repeats until the readback matches. This is what replaced the
+// consumer's wake ladder.
+func TestTheRestoreRepeatsUntilTheReadbackMatches(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	fixture := newDisplayFixture(t, panel)
+	display := fixture.declare(DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	panel.stubborn[vcpBrightness] = 2
+	display.Spec.Override = nil
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	fixture.awaitRestore()
+
+	if got := fixture.waits.Load(); got != 2 {
+		t.Errorf("the restore waited %d times, want 2", got)
+	}
+	if got := fixture.holds(vcpBrightness); got != 50 {
+		t.Errorf("the panel holds a brightness of %d, want the 50 it was lit at", got)
+	}
+}
+
+// The override that powers the panel down, and the capture that
+// records the state to bring it back to.
+func TestThePowerOverrideCapturesThePowerState(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	display := fixture.declare(DisplaySpec{Override: &DisplayOverride{Power: overrideOff}})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	journal := fixture.lines()
+	captured := slices.Index(journal, "status captured=power on")
+	powered := slices.Index(journal, "set power=4")
+	if captured < 0 || powered < 0 || captured > powered {
+		t.Fatalf("journal = %q, want the captured power written before the panel went down", journal)
+	}
+
+	display.Spec.Override = nil
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	fixture.awaitRestore()
+	if got := fixture.holds(vcpPowerMode); got != powerModeOn {
+		t.Errorf("the panel holds the power mode %#02x, want %#02x", got, powerModeOn)
+	}
+}
+
+// The parameters-only rule. An empty spec states nothing, so
+// the operator writes nothing.
+func TestAnEmptySpecWritesNothing(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fixture.panel.writes()) != 0 {
+		t.Errorf("the operator wrote %v to a panel no spec states anything about", fixture.panel.writes())
+	}
+}
+
+// The resting layer is reconciled by writing where the panel
+// diverges from the declaration, and not otherwise. A DDC read wakes
+// some panels, so a steady pass must send nothing.
+func TestTheRestingSpecWritesOnlyOnDivergence(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture.declare(DisplaySpec{Brightness: intOf(30), Input: stringOf("HDMI-1")})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixture.holds(vcpBrightness); got != 30 {
+		t.Errorf("the panel holds a brightness of %d, want 30", got)
+	}
+	if got := fixture.holds(vcpInput); got != 0x11 {
+		t.Errorf("the panel holds the input %#02x, want %#02x", got, 0x11)
+	}
+
+	opens, writes := fixture.bench.opened(), len(fixture.panel.writes())
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.panel.writes()) != writes {
+		t.Errorf("the second pass wrote %v, want nothing", fixture.panel.writes()[writes:])
+	}
+	if fixture.bench.opened() != opens {
+		t.Errorf("the second pass opened the wire %d times, want none", fixture.bench.opened()-opens)
+	}
+}
+
+// A value the panel does not carry is reported and never
+// written, because the capability list is what says a control exists.
+func TestTheRestingSpecIsJudgedAgainstTheCapabilityList(t *testing.T) {
+	cases := []struct {
+		name string
+		spec DisplaySpec
+		says string
+	}{
+		{
+			name: "a control the panel does not carry",
+			spec: DisplaySpec{Sharpness: intOf(3)},
+			says: "no sharpness control",
+		},
+		{
+			name: "a number above the panel's maximum",
+			spec: DisplaySpec{Brightness: intOf(120)},
+			says: "accepts up to 100",
+		},
+		{
+			name: "a value outside the panel's list",
+			spec: DisplaySpec{Input: stringOf("VGA-1")},
+			says: "accepts [DP-1 DP-2 HDMI-1 HDMI-2]",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+			fixture.declare(c.spec)
+
+			err := fixture.pass()
+			if err == nil || !strings.Contains(err.Error(), c.says) {
+				t.Fatalf("the pass reported %v, want a failure that says %q", err, c.says)
+			}
+			if len(fixture.panel.writes()) != 0 {
+				t.Errorf("the operator wrote %v to the panel", fixture.panel.writes())
+			}
+		})
+	}
+}
+
+// The lab's other panel refuses the protocol outright, and the
+// resource reports it rather than publishing an empty control list
+// with nothing to explain it.
+func TestAPanelThatAnswersNothingIsNotResponsive(t *testing.T) {
+	fixture := newDisplayFixture(t, deafMonitor())
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	display := fixture.display()
+	responsive := condition(display, ResponsiveCondition)
+	if responsive.Status != conditionFalse || responsive.Reason != NoDDCReplyReason {
+		t.Errorf("Responsive = %q/%q, want %q/%q",
+			responsive.Status, responsive.Reason, conditionFalse, NoDDCReplyReason)
+	}
+	if got := condition(display, ConnectedCondition).Status; got != conditionTrue {
+		t.Errorf("Connected = %q, want %q: the panel is on the wire", got, conditionTrue)
+	}
+	if len(display.Status.Capabilities) != 0 {
+		t.Errorf("capabilities = %v, want none", display.Status.Capabilities)
+	}
+}
+
+// The resource holds the captured state, so it outlives the
+// panel's absence and reports it.
+func TestADisplayOutlivesItsPanel(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	fixture.present["HDMI-A-1"] = false
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	display := fixture.display()
+	connected := condition(display, ConnectedCondition)
+	if connected.Status != conditionFalse {
+		t.Errorf("Connected = %q, want %q", connected.Status, conditionFalse)
+	}
+	if display.Status.Connector != "HDMI-A-1" {
+		t.Errorf("connector = %q, want the connector the panel was last on", display.Status.Connector)
+	}
+}
+
+// A panel that answers no capability string is asked for the
+// core codes one by one, and what it answers publishes.
+func TestAPanelWithNoCapabilityStringIsAsked(t *testing.T) {
+	fixture := newDisplayFixture(t, newFakeMonitor())
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	capabilities := fixture.display().Status.Capabilities
+	carried := []string{}
+	for name := range capabilities {
+		carried = append(carried, name)
+	}
+	slices.Sort(carried)
+	if want := []string{brightnessControl, powerControl}; !slices.Equal(carried, want) {
+		t.Errorf("capabilities = %q, want %q", carried, want)
+	}
+}
+
+func TestTheConditionKeepsItsTimestampWhileNothingChanges(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	first := condition(fixture.display(), ConnectedCondition).LastTransitionTime
+
+	fixture.control.now = func() time.Time { return time.Unix(3600, 0).UTC() }
+	writes := len(fixture.lines())
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := condition(fixture.display(), ConnectedCondition).LastTransitionTime; got != first {
+		t.Errorf("the timestamp moved to %s, and nothing about the condition changed", got)
+	}
+	if journal := fixture.lines(); len(journal) != writes {
+		t.Errorf("the second pass wrote %q, want nothing", journal[writes:])
+	}
+}
+
+// The second panel of the bench, so a test can prove one
+// panel's restore holds up nothing on the other.
+func portableMonitor() EDID {
+	return EDID{Manufacturer: "BOE", ProductCode: 0x095f, ModelName: "Portable"}
+}
+
+// A restore waits on the panel, and the pass must not wait on
+// the restore. A panel that never answers would otherwise stop every
+// other panel's reconcile and the whole watch behind it.
+func TestARestoreThatWaitsHoldsUpNoOtherPanel(t *testing.T) {
+	stuck, other := drillPanel(t, "lg-hdr-wqhd"), drillPanel(t, "portable-display")
+	stuck.stubborn[vcpBrightness] = 1000
+	fixture := newDisplayBench(t,
+		wiredPanel{Connector: "HDMI-A-1", Monitor: labMonitor(), Panel: stuck},
+		wiredPanel{Connector: "HDMI-A-2", Monitor: portableMonitor(), Panel: other})
+	fixture.stall = true
+	fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Brightness: intOf(70)})
+	fixture.declareFor(monitorID(portableMonitor()), DisplaySpec{Brightness: intOf(30)})
+
+	passed := make(chan error, 1)
+	go func() { passed <- fixture.pass() }()
+	select {
+	case err := <-passed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pass did not return while a restore was still waiting on its panel")
+	}
+
+	<-fixture.waiting
+	if got := other.holds(vcpBrightness); got != 30 {
+		t.Errorf("the other panel holds a brightness of %d, want the 30 its spec states", got)
+	}
+}
+
+// One restore per connector. A pass that finds one running
+// leaves it alone, so a panel is never written by two restores.
+func TestTwoPassesRunOneRestoreForOneConnector(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.stubborn[vcpBrightness] = 1000
+	fixture := newDisplayFixture(t, panel)
+	fixture.stall = true
+	fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Brightness: intOf(70)})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	<-fixture.waiting
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second restore would take the wire and wait on it too,
+	// so the wait of one is the proof that only one runs.
+	select {
+	case <-fixture.waiting:
+		t.Error("a second restore started for a connector that already had one")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if took := panel.took(vcpBrightness); len(took) != 1 {
+		t.Errorf("the panel took %d writes, want the one write of a single restore", len(took))
+	}
+	if captured := fixture.display().Status.Captured; captured.empty() {
+		t.Error("the capture was cleared while the restore had not landed")
+	}
+}
+
+// The restore writes no status. It wakes the pass, and the pass
+// is what clears the capture, so one goroutine writes status.
+func TestARestoreThatLandsWakesThePassThatClearsTheCapture(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	display := fixture.declare(DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	display.Spec.Override = nil
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if captured := fixture.display().Status.Captured; captured.empty() {
+		t.Fatal("the pass that started the restore cleared the capture")
+	}
+
+	fixture.awaitRestore()
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if captured := fixture.display().Status.Captured; !captured.empty() {
+		t.Errorf("captured = %+v, want the woken pass to have cleared it", captured)
+	}
+	if got := fixture.holds(vcpBrightness); got != 50 {
+		t.Errorf("the panel holds a brightness of %d, want the 50 it was lit at", got)
+	}
+}
+
+// The failure the plan proves on the bench: the operator's pod
+// is deleted while the override stands, and the panel still comes back
+// when the override is deleted. The captured value is in the resource,
+// and a panel that is powered down answers nothing until the restore
+// wakes it.
+func TestARestoreWakesAPanelThatAnswersNothingYet(t *testing.T) {
+	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel.values[vcpPowerMode] = powerModeOff
+	panel.silent = true
+	panel.wakesAfter = 2
+	fixture := newDisplayFixture(t, panel)
+	fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Power: stringOf("on")})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+	fixture.awaitRestore()
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := fixture.holds(vcpPowerMode); got != powerModeOn {
+		t.Errorf("the panel holds the power mode %#02x, want %#02x", got, powerModeOn)
+	}
+	if fixture.waits.Load() == 0 {
+		t.Error("the restore matched on its first write, and the panel was answering nothing")
+	}
+	if captured := fixture.display().Status.Captured; !captured.empty() {
+		t.Errorf("captured = %+v, want it cleared after the restore", captured)
+	}
+}
+
+// The mute is a boolean in the spec and two values on the
+// wire, and this is where the two meet.
+func TestTheSpecMutesThePanelsSpeakers(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture.declare(DisplaySpec{AudioMute: boolOf(true)})
+
+	if err := fixture.pass(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := fixture.holds(vcpAudioMute); got != 0x01 {
+		t.Errorf("the panel holds the mute value %#02x, want %#02x", got, 0x01)
+	}
+	if muted := fixture.display().Status.Observed.AudioMute; muted == nil || !*muted {
+		t.Errorf("observed mute = %v, want true", muted)
+	}
+}
+
+// The loop takes its passes from the wakes, which is what the
+// watch and the slice publisher raise.
+func TestTheLoopPassesOnEveryWake(t *testing.T) {
+	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	ctx, stop := context.WithCancel(t.Context())
+	passed := make(chan struct{}, 2)
+	fixture.control.outputs = func() []Output {
+		passed <- struct{}{}
+		return fixture.outputs()
+	}
+
+	go fixture.control.run(ctx)
+	<-passed
+	fixture.control.wake()
+	<-passed
+	stop()
+}
+
+func intOf(value int) *int { return &value }
+
+func boolOf(value bool) *bool { return &value }
+
+func stringOf(value string) *string { return &value }
+
+// The watch turns each event into one wake, which is all the
+// pass needs from it.
+func TestTheWatchWakesOnEveryEvent(t *testing.T) {
+	events := 2
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") != "true" {
+			t.Errorf("the operator opened %s, want a watch", r.URL)
+		}
+		for i := 0; i < events; i++ {
+			fmt.Fprintf(w, `{"type":"MODIFIED","object":{"metadata":{"name":"panel-%d"}}}`, i)
+		}
+	}))
+
+	wakes := 0
+	if err := streamDisplays(t.Context(), client, func() { wakes++ }); err != nil {
+		t.Fatal(err)
+	}
+	if wakes != events {
+		t.Errorf("the watch woke the loop %d times, want %d", wakes, events)
+	}
+}

@@ -17,6 +17,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -48,14 +49,22 @@ var (
 type Client struct {
 	base        string
 	http        *http.Client
+	stream      *http.Client
 	credentials string
 }
 
 // NewClient builds a client from its three parts. InClusterClient
 // gets these parts from the pod's environment, and tests get them
 // from an httptest server.
+//
+// The second client is the same transport with no deadline on
+// the whole request. A watch holds its response open for as long as
+// the API server keeps it, and the timeout that bounds a read of one
+// object would end it every half minute.
 func NewClient(base string, httpClient *http.Client, credentials string) *Client {
-	return &Client{base: base, http: httpClient, credentials: credentials}
+	stream := *httpClient
+	stream.Timeout = 0
+	return &Client{base: base, http: httpClient, stream: &stream, credentials: credentials}
 }
 
 func InClusterClient() (*Client, error) {
@@ -94,6 +103,22 @@ func InClusterClient() (*Client, error) {
 	}, serviceAccountDir), nil
 }
 
+// The in-cluster client reads its token from disk on every
+// request. The tokens are short-lived and the kubelet refreshes
+// the mounted file as each one nears its expiry, so a client that
+// holds a token in memory eventually gets 401 responses.
+func (c *Client) authorize(req *http.Request) error {
+	if c.credentials == "" {
+		return nil
+	}
+	token, err := os.ReadFile(c.credentials + "/token")
+	if err != nil {
+		return fmt.Errorf("reading service account token: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	return nil
+}
+
 // RequestJSON sends one request and decodes the JSON response into
 // out. It turns any non-2xx status into an error that includes the
 // server's own message.
@@ -106,16 +131,8 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 	if err != nil {
 		return err
 	}
-	// The in-cluster client reads its token from disk on every
-	// request. The tokens are short-lived and the kubelet refreshes
-	// the mounted file as each one nears its expiry, so a client that
-	// holds a token in memory eventually gets 401 responses.
-	if c.credentials != "" {
-		token, err := os.ReadFile(c.credentials + "/token")
-		if err != nil {
-			return fmt.Errorf("reading service account token: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+string(token))
+	if err := c.authorize(req); err != nil {
+		return err
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -142,6 +159,31 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// Watch opens a streaming request and hands the caller the open
+// body. The caller reads events until the stream ends and closes the
+// body, and the context is what ends the request early.
+func (c *Client) Watch(ctx context.Context, path string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.authorize(req); err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.stream.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		drain(resp.Body)
+		return nil, fmt.Errorf("GET %s: %s: %s", path, resp.Status, message)
+	}
+	return resp.Body, nil
 }
 
 // get sends a GET request for a single object.

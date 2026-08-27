@@ -322,9 +322,13 @@ type panelControls struct {
 // One cache entry holds the answer and the monitor it answered for.
 // A connector whose EDID reads differently now carries a different
 // panel, and this answer is not that panel's.
+//
+// The entry holds a pointer because the operator's later reads
+// and writes of the panel record their values in it, and the entry is
+// what the Display's observed values are built from.
 type probedPanel struct {
-	monitor  EDID
-	controls supportedControls
+	monitor EDID
+	facts   *panelFacts
 }
 
 // NewPanelControls wires the real i2c-dev nodes. A test supplies its
@@ -338,52 +342,12 @@ func newPanelControls(sysRoot, card string) *panelControls {
 	}
 }
 
-// Of answers what one output's panel carries, from the cache when the
-// same monitor was probed before and from the wire otherwise. A nil
-// panelControls answers no controls and opens nothing, which is what
-// the tests that publish slices with no probe wired rely on.
-//
-// A connector with nothing on it is never probed. A dark connector
-// can still hold the last EDID its driver read, and there is no panel
-// behind it to answer.
+// Of answers the two booleans the slice publishes, out of the
+// panel facts the probe read. The facts carry the whole capability
+// list, and the slice publishes the two controls a claim parameter
+// states.
 func (c *panelControls) of(output Output) supportedControls {
-	if c == nil || !output.Connected {
-		return supportedControls{}
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor {
-		return probed.controls
-	}
-	controls := c.probe(output.Connector)
-	if c.probed == nil {
-		c.probed = map[string]probedPanel{}
-	}
-	c.probed[output.Connector] = probedPanel{monitor: output.Monitor, controls: controls}
-	return controls
-}
-
-// The probe is a Get of each code, and the Get is the whole test: a
-// panel that answers a code carries it, and every other answer,
-// silence included, means the operator cannot set it. The probe
-// writes nothing.
-func (c *panelControls) probe(connector string) supportedControls {
-	bus, err := c.busFor(connector)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading the controls %s carries: %v\n", connector, err)
-		return supportedControls{}
-	}
-	defer bus.Close()
-
-	ddc := c.client(bus)
-	controls := supportedControls{}
-	if _, _, err := ddc.GetVCP(vcpBrightness); err == nil {
-		controls.Brightness = true
-	}
-	if _, _, err := ddc.GetVCP(vcpPowerMode); err == nil {
-		controls.Power = true
-	}
-	return controls
+	return c.factsFor(output).controls()
 }
 
 // WithControls puts each panel's answer beside what sysfs said, the

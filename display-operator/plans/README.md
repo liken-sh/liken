@@ -59,6 +59,16 @@ say why it is built the way it is.
   [plan 17](https://github.com/liken-sh/media-operator/blob/main/plans/completed/17-the-idle-screen-powers-the-panel.md)
   is that holder, drilled 2026-08-24 with the backlight read at 0 over
   DDC and restored on a press.
+* [08, A Display for every panel](08-a-display-for-every-panel.md).
+  Built, and not yet drilled. One cluster-scoped `Display` per probed
+  monitor: `status` publishes the capability string's common core and
+  the last observed values, the resting `spec` is the cluster owner's,
+  and `spec.override` is the temporary layer the media-operator's
+  [plan 18](https://github.com/liken-sh/media-operator/blob/main/plans/18-blanking-moves-to-the-display.md)
+  writes. The capture commits to `status` before the panel goes dark,
+  which answers the lost-brightness failure of the sidecar's process
+  memory. The claim parameters, the power record file, and the
+  `-control` device retire only after plan 18 deploys.
 
 ## Open problems
 

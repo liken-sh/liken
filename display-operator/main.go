@@ -206,6 +206,17 @@ func operate() {
 		fatal("watching for kernel events: %v", err)
 	}
 
+	// The Display controller runs beside the slice publisher and
+	// writes the panels' own resources. It reads the same connectors
+	// and shares the probe cache, so the two never ask one panel twice.
+	// Its own loop is what keeps an override off the slice publisher's
+	// settle window.
+	panels := newDisplayControl(client, nodeName, plugin.controls, func() []Output {
+		return discoverOutputs(sysRoot, card)
+	})
+	go panels.run(ctx)
+	go watchDisplays(ctx, client, panels.wake)
+
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses. The retry costs the loop no
 	// time and takes the same settle window.
@@ -220,6 +231,10 @@ func operate() {
 				}
 			})
 		}
+		// Hardware that moved reaches the Display controller
+		// through the same settled pass, so one burst of uevents costs
+		// one pass over the resources.
+		panels.wake()
 	}
 
 	// A prepare republishes through the same pass every event takes,

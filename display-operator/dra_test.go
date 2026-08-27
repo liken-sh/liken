@@ -833,8 +833,8 @@ func TestPrepareDeliversTheControlNodeAndItsPath(t *testing.T) {
 	}
 	// The consumer holds the wire and makes every write on it, so this
 	// prepare puts nothing on the bus and never wakes the panel.
-	if bench.opens != 0 {
-		t.Errorf("prepare opened %d buses for a control device", bench.opens)
+	if bench.opened() != 0 {
+		t.Errorf("prepare opened %d buses for a control device", bench.opened())
 	}
 	if len(panel.sets) != 0 {
 		t.Errorf("prepare wrote %+v to the panel", panel.sets)
@@ -913,8 +913,8 @@ func TestPrepareRefusesParametersOnAControlRequest(t *testing.T) {
 					t.Errorf("error = %q, want it to say %q", claim.Error, want)
 				}
 			}
-			if bench.opens != 0 {
-				t.Errorf("a refused claim opened %d buses", bench.opens)
+			if bench.opened() != 0 {
+				t.Errorf("a refused claim opened %d buses", bench.opened())
 			}
 			if got := specFiles(t); len(got) != 0 {
 				t.Errorf("a refused claim left %v behind", got)
@@ -980,8 +980,8 @@ func TestUnprepareOfAControlWritesNothingToThePanel(t *testing.T) {
 	if len(panel.sets) != 0 {
 		t.Errorf("unprepare wrote %+v to the panel", panel.sets)
 	}
-	if bench.opens != 0 {
-		t.Errorf("unprepare opened %d buses", bench.opens)
+	if bench.opened() != 0 {
+		t.Errorf("unprepare opened %d buses", bench.opened())
 	}
 	if got := specFiles(t); len(got) != 0 {
 		t.Errorf("unprepare left %v behind", got)
@@ -1055,8 +1055,8 @@ func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
 	}
 	// No panel power: nothing reached the i2c wire and the power record
 	// stays empty, so the draw device owes the panel nothing.
-	if bench.opens != 0 {
-		t.Errorf("the draw device opened %d buses", bench.opens)
+	if bench.opened() != 0 {
+		t.Errorf("the draw device opened %d buses", bench.opened())
 	}
 	if len(panel.sets) != 0 {
 		t.Errorf("the draw device wrote %+v to the panel", panel.sets)

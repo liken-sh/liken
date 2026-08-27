@@ -39,6 +39,19 @@ rules:
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
     verbs: [get]
+  # The panels' own resources (displays.go, displaycontrol.go).
+  # The operator creates one Display for every monitor it probes and
+  # writes the whole of its status. The list and the watch are here
+  # because a spec a person or a machine writer edited is what the
+  # operator reconciles, and because a panel that left the node is
+  # found by listing the resources this node owns. No delete: a
+  # Display holds the captured state of a panel that may come back.
+  - apiGroups: [display.liken.sh]
+    resources: [displays]
+    verbs: [get, list, watch, create, update]
+  - apiGroups: [display.liken.sh]
+    resources: [displays/status]
+    verbs: [get, update]
   # This node, read once at startup for the UID that the slice's owner
   # reference needs. The Node owns the slice, so a Node that leaves the
   # cluster takes the slice with it, and the garbage collector cleans
