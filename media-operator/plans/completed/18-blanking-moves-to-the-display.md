@@ -10,7 +10,7 @@ actuates it. MQTT stays the media layer's bus; the hardware layer
 never reads it.
 
 The hardware half is the display-operator's
-[plan 08](https://github.com/liken-sh/display-operator/blob/main/plans/08-a-display-for-every-panel.md).
+[plan 08](https://github.com/liken-sh/display-operator/blob/main/plans/completed/08-a-display-for-every-panel.md).
 
 ## The problem
 

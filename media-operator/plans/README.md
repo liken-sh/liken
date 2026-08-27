@@ -25,14 +25,6 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [18, Blanking moves to the Display](18-blanking-moves-to-the-display.md).
-  Built, and not yet drilled. The idle sidecar states a panel
-  desire on its retained topic and writes no hardware. The operator
-  turns that desire into `spec.override` on the screen's `Display`,
-  and `PlayerStatus.Panel` folds what the `Display` observed. The
-  `-control` device, the DDC client, and `Player.spec.control`
-  retire with it. The drill waits on the display-operator's plan 08.
-
 ## Completed
 
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
@@ -165,6 +157,19 @@ These plans are designed. Each keeps its number and moves to
   first press after a controller's Bluetooth reconnect woke it,
   eyewitnessed. `offMode: power` stays gated on the metal drill in
   the plan.
+* [18, Blanking moves to the Display](completed/18-blanking-moves-to-the-display.md).
+  Built, and drilled on `liken-1` on 2026-08-27 in release
+  2026.08.27-002. The idle sidecar states a panel desire on its
+  retained topic and writes no hardware; the operator turns the
+  desire into `spec.override` on the screen's `Display`, and
+  `PlayerStatus.Panel` folds what the `Display` observed. The
+  `-control` claim request, the DDC client, and `Player.spec.control`
+  retire with the wire. The drill blanked the BOE 50 seconds after
+  the shortened quiet window with the capture committed first, and an
+  idle pod deleted while the panel was dark relit it in 5 seconds,
+  the failure plan 17's process memory could not survive. The lift
+  needed the display-operator's 2026.08.27-003 (`spec` defaults to
+  `{}`, because server-side apply prunes an empty spec).
 
 ## Open problems
 
