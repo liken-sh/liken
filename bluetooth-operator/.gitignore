@@ -8,3 +8,7 @@
 /docs/dist/
 /docs/public/
 /docs/.hugo_build.lock
+
+# The coverage profile the gate measures. CI writes it on every
+# run and reads it once; it never belongs to the tree.
+/coverage.out

@@ -1,0 +1,27 @@
+# This is the coverage gate, enforced in CI (see
+# .github/workflows/ci.yaml).
+#
+# The thresholds only rise over time. Each one is set just under what
+# the tests measure today. So a change that loses coverage fails the
+# check, and a change that gains coverage should raise the number
+# here to keep the gain.
+#
+# The gate measures on a pinned toolchain. The CI step says why.
+
+profile: coverage.out
+
+threshold:
+  total: 66
+
+override:
+  # The bluetoothd supervisor: what is testable is the argument
+  # building. Starting the daemon needs a real bus.
+  - path: ^bluetoothd$
+    threshold: 43
+  # bondfetch: the fetch loop needs a real adapter; the parsing does
+  # not.
+  - path: ^bondfetch$
+    threshold: 52
+  # bonds: the on-disk bond format, which is pure byte layout.
+  - path: ^bonds$
+    threshold: 90

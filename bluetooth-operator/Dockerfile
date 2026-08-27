@@ -9,7 +9,7 @@
 # daemon side needs is in the bluetoothd image, which the same pod
 # runs beside this one.
 
-FROM golang:1.26.5-bookworm AS build
+FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached
 # download layer.
