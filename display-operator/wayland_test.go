@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -54,9 +55,8 @@ type westonOutput struct {
 	modes     [][]uint32
 }
 
-// What the lab's ultrawide states: the mode it serves, which
-// its monitor also prefers, then a mode it offers and does not
-// run.
+// What a served output states: the mode it runs, which its
+// monitor also prefers, then a mode it offers and does not run.
 func labWestonModes() [][]uint32 {
 	return [][]uint32{{3, 3840, 1600, 59997}, {0, 1920, 1080, 60000}}
 }
@@ -565,6 +565,21 @@ func TestTheReadbackTakesNoAnswerFromTheCompositorItEnded(t *testing.T) {
 	if err == nil {
 		t.Fatal("the readback took the answer of the compositor the switch ended")
 	}
+}
+
+// A dead compositor serves nothing: its answers empty when
+// the connection ends, not when the next one opens, so the window
+// between two compositors reports no mode instead of the last
+// answer of the one that died.
+func TestTheModesOfACompositorDieWithIt(t *testing.T) {
+	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
+	bench := newWatchBench(t, server)
+	session := server.client()
+	bench.awaitMode("HDMI-A-1", "3840x1600@60")
+
+	_ = os.Remove(bench.watch.socketPath)
+	server.end(session)
+	bench.awaitMode("HDMI-A-1", "")
 }
 
 // Weston states a refresh in millihertz, and everything else

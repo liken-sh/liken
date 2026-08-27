@@ -1413,7 +1413,7 @@ func TestTheRestingModeReturnsWhenTheClaimEnds(t *testing.T) {
 	}
 }
 
-// The flap the drill saw on the metal: an output destroyed and
+// The flap the heal exists for: an output destroyed and
 // re-created leaves the clients on the surviving screens with a canvas
 // sized for the output that went. A fresh compositor lays every canvas
 // out again.

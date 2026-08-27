@@ -131,15 +131,24 @@ say why it is built the way it is.
   deferred blank landed capture-first within a poll window of the
   switch back.
 
-* [12, The compositor reports its outputs](12-the-compositor-reports-its-outputs.md).
-  Built 2026-08-27, not yet drilled on the metal. The operator holds
-  one standing, listen-only Wayland connection to its compositor.
-  The registry's own output events replace plan 10's comparison of
-  monitor identities, which was blind to the flap the studio
-  produces nightly: the same monitor sleeping and waking. The
-  `wl_output` mode events replace the kernel poll as the mode
-  switch's readback, and `status.mode` reports the mode's two
-  values, `kernel` and `weston`, whose gap is the canvas defect.
+* [12, The compositor reports its outputs](completed/12-the-compositor-reports-its-outputs.md).
+  Built and drilled on liken-1 on 2026-08-27, in releases
+  2026.08.27-008 and -009. The operator holds one standing,
+  listen-only Wayland connection to its compositor. The registry's
+  own output events replace plan 10's comparison of monitor
+  identities, which was blind to the flap every sleeping monitor
+  produces: the same monitor sleeping and waking. The `wl_output`
+  mode events replace the kernel poll as the mode switch's readback,
+  and `status.mode` reports the mode's two values, `kernel` and
+  `weston`, whose gap is the canvas defect. The drill forced a
+  disconnect and return through the connector's sysfs `status` file,
+  and the heal fired on its designed path for the first time: the
+  deferral while the outputs settled, then the restart, with every
+  canvas correct and the compositor alive throughout. The same drill
+  caught the -008 defect that -009 fixes: the watch kept a dead
+  compositor's modes until the next connection opened, so a readback
+  failure named a fossil; the answers now empty the moment a
+  connection ends.
 
 ## Open problems
 

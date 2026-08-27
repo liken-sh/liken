@@ -4,7 +4,7 @@
 
 Two parts of this operator guessed at facts the compositor owns.
 
-The canvas heal of [plan 10](completed/10-the-compositor-heals-the-canvas.md)
+The canvas heal of [plan 10](10-the-compositor-heals-the-canvas.md)
 inferred "an output was re-created" by comparing which monitor each
 connector carried against the pass before. That comparison is blind
 to the flap a studio produces nightly: the same monitor sleeps and
@@ -79,3 +79,23 @@ bind order for output events, and the wire format were read from the
 weston 14.0.2 and wayland 1.26 sources, and the tests in
 `wayland_test.go` drive a fake compositor that serves that wire
 format, re-creations, restarts, and slow mode batches included.
+
+The build was drilled on the lab machine the same night, in release
+2026.08.27-008. A resting `1280x720@60` landed in 5 seconds with
+both of `status.mode`'s values agreeing, so the switch's readback
+ran through the compositor's events on the metal. A forced
+disconnect and return of the ultrawide's connector, written through
+the connector's own sysfs `status` file, ran the heal end to end:
+the disconnect taints stood while the connector was off, the release
+printed the deferral line while the outputs settled, and the heal
+restarted the compositor 5 seconds later with every canvas laid out
+correctly. The compositor survived this flap without a crash, which
+is the exact case plan 10 was built for and could never fire on.
+
+The drill also caught a defect the bench had not: a restore whose
+compositor restart crossed the kubelet's backoff printed a readback
+failure naming the dead compositor's mode, because the watch kept
+its answers between connections. The maps now empty the moment a
+connection ends, `status.mode.weston` goes absent while no
+compositor answers, and the failure line reports `no mode`, which is
+the truth.

@@ -10,8 +10,8 @@ package main
 // The registry replaces a comparison of monitor identities. A
 // monitor that sleeps and wakes changes the kernel mode on its
 // connector and never changes its identity, and weston destroys and
-// re-creates the output for it, so a comparison of identities missed
-// the one flap a studio produces nightly. The compositor is the
+// re-creates the output for it, so a comparison of identities misses
+// the flap every sleeping monitor produces. The compositor is the
 // party that re-creates outputs, so it is the one source that cannot
 // miss one.
 //
@@ -282,6 +282,16 @@ func (w *outputWatch) forget(global uint32) {
 	delete(w.names, global)
 }
 
+// A dead compositor serves nothing. Its answers empty the
+// moment the connection ends, not when the next one opens, so the
+// window between two compositors reports no mode instead of the
+// last answer of the one that died.
+func (w *outputWatch) closed() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.names, w.modes = map[uint32]string{}, map[string]string{}
+}
+
 // A new connection starts from nothing. Everything the ended
 // compositor reported about its outputs goes with it, because a dead
 // compositor serves no canvases at any mode.
@@ -317,6 +327,7 @@ func westonMode(width, height, refreshMilliHertz uint32) string {
 func (w *outputWatch) run(ctx context.Context) {
 	for {
 		_ = w.connection(ctx)
+		w.closed()
 		select {
 		case <-ctx.Done():
 			return
