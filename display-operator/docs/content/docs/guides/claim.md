@@ -207,7 +207,10 @@ refresh included.
 ## Set the panel's brightness and power
 
 A claim can state the panel's own brightness and power the way it
-states a mode, with two more parameters in the same opaque block:
+states a mode, with two more parameters in the same opaque block.
+The parameters follow the claim's lifetime. For a setting the panel
+should hold with no claim attached, declare it on the panel's
+[`Display`](/docs/reference/displays/) instead.
 
     config:
       - opaque:
@@ -246,10 +249,12 @@ these delivers without the dark second a mode costs.
 
 ## Hold the panel's control channel
 
-The parameters above are set once, at prepare. A pod that changes
-the panel while it runs, live brightness, the panel's input source,
-claims the connector's control device instead, and receives the raw
-i2c node. One claim can take a screen and its control channel
+The parameters above are set once, at prepare. A pod that speaks the
+panel's protocol itself while it runs claims the connector's control
+device instead, and receives the raw i2c node. Most pods never need
+the wire: setting or temporarily overriding the panel goes through
+the [`Display`](/docs/reference/displays/), and the operator writes
+the bus. One claim can take a screen and its control channel
 together, with a `matchAttribute` constraint tying the two requests
 to one monitor:
 

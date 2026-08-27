@@ -35,6 +35,9 @@ Start here:
   `Deployment`, and what the container receives.
 * [Devices](/docs/reference/devices/): every attribute a claim can
   select on.
+* [Displays](/docs/reference/displays/): the resource the operator
+  creates for every monitor, with the panel's controls and the
+  declarations it takes.
 
 The operator is one of the
 [hardware operators](https://liken.sh/docs/concepts/hardware-operators/),

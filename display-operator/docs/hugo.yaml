@@ -5,6 +5,15 @@
 # the driver's DRA name, display.liken.sh, so the address a claim
 # names is also the address the manual answers on.
 baseURL: https://display.liken.sh/
+
+# The generated reference page marks each field's table row with an
+# id, a raw-HTML span the crdref generator emits, so a link can land
+# on exactly one field. Goldmark drops raw HTML unless this is set,
+# and everything this site renders is authored in this repository.
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
 title: display.liken.sh
 theme: brand
 

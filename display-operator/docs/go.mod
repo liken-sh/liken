@@ -13,7 +13,10 @@ module github.com/liken-sh/display-operator/docs
 
 go 1.26.5
 
-tool github.com/gohugoio/hugo
+tool (
+	github.com/gohugoio/hugo
+	github.com/liken-sh/brand/crdref
+)
 
 require github.com/liken-sh/brand v0.0.0-20260825124703-c6b8a07974d4
 
@@ -193,6 +196,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.1 // indirect
 	rsc.io/qr v0.2.0 // indirect
 	software.sslmate.com/src/go-pkcs12 v0.7.0 // indirect

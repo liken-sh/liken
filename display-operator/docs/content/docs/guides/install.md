@@ -21,7 +21,8 @@ You need:
 * `kubectl` with cluster-admin access, because the install touches
   cluster scope: the
   [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-  you create in step 2 and a `ClusterRole`.
+  you create in step 2, a `ClusterRole`, and the `Display`
+  `CustomResourceDefinition`.
 
 ## 1. Check that the card publishes
 
@@ -114,19 +115,25 @@ reads a missing attribute fails the whole allocation.
 ## 3. Apply the manifests
 
 This site serves the repository's [`deploy/`](/deploy/kustomization.yaml)
-directory as raw YAML, so the install needs no clone. Three files
+directory as raw YAML, so the install needs no clone. Four files
 are the rest of the install:
 
     kubectl apply -n liken-system \
+      -f https://display.liken.sh/deploy/displays.yaml \
       -f https://display.liken.sh/deploy/deviceclasses.yaml \
       -f https://display.liken.sh/deploy/rbac.yaml \
       -f https://display.liken.sh/deploy/operator.yaml
 
+`displays.yaml` is the `Display` `CustomResourceDefinition`. The
+operator creates a [`Display`](/docs/reference/displays/) for every
+monitor it probes, and it cannot do that on a cluster the kind is
+missing from.
+
 The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 `liken-system`, the namespace every `liken` cluster has. The
 `ClusterRoleBinding`'s subject names that namespace, so the binding
-only works there. `DeviceClass` is cluster-scoped, so the flag
-leaves it alone.
+only works there. `DeviceClass` and the `CustomResourceDefinition`
+are cluster-scoped, so the flag leaves them alone.
 
 For GitOps, point a `Kustomization` at your specific classes and the
 same URLs. `kustomize` takes a raw YAML URL as a resource:
@@ -136,6 +143,7 @@ same URLs. `kustomize` takes a raw YAML URL as a resource:
     namespace: liken-system
     resources:
       - classes.yaml
+      - https://display.liken.sh/deploy/displays.yaml
       - https://display.liken.sh/deploy/deviceclasses.yaml
       - https://display.liken.sh/deploy/rbac.yaml
       - https://display.liken.sh/deploy/operator.yaml
@@ -172,6 +180,14 @@ empty connector publishes too, with a `disconnected` taint, so a
 claim on it parks until a monitor arrives.
 [Devices](/docs/reference/devices/) describes every attribute.
 
+The operator also creates one `Display` per monitor, the
+cluster-scoped resource that carries the panel's controls and takes
+declarations:
+
+    kubectl get displays
+
+[Displays](/docs/reference/displays/) describes the resource.
+
 Now [put a window on a screen](/docs/guides/claim/).
 
 ## Remove the operator
@@ -190,3 +206,9 @@ it strands the kubelet's prepare call. So the operator taints
 devices instead of removing them, and the slice outlives every pod.
 The device classes are yours too. When nothing else claims through
 them, delete them.
+
+**Deleting the `Display` CRD deletes every `Display` with it**,
+including the brightness a standing override captured, so a panel an
+override darkened has nothing left to restore it. Lift every
+override, and confirm every panel shows what you expect, before you
+delete `displays.yaml`.

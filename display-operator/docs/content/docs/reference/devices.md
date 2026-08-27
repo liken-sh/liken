@@ -241,15 +241,22 @@ and one refuses it, and a panel that answers at all may still carry
 only some controls.
 
 So the operator asks instead of assuming. At inventory it probes each
-connected panel, read-only, for the two controls it can set, and it
-publishes what the panel answered:
+connected panel, read-only: it reads the panel's own feature list,
+the MCCS capability string, and asks each declared core control for
+its value. Two of the answers publish on the devices as attributes:
 
 * `controlsBrightness`: the panel answered VCP code `0x10`.
 * `controlsPower`: the panel answered VCP code `0xD6`.
 
-Each attribute is present and true, or absent. The probe runs once
-per monitor and its answer is cached against the monitor's EDID, so
-steady hardware costs no bus traffic.
+Each attribute is present and true, or absent. The whole list,
+brightness and power beside contrast, sharpness, color preset, input
+source, and the audio controls, publishes on the panel's
+[`Display`](/docs/reference/displays/) under `status.capabilities`.
+The probe runs once per monitor and its answer is cached against the
+monitor's EDID, so steady hardware costs no bus traffic. A panel
+that refused the probe is asked again about once a minute, because
+DDC/CI can arrive later than the panel: an input switch or a menu
+toggle turns it on with no event the operator could see.
 
 A claim states what it wants with two opaque parameters, beside
 `mode`:
@@ -278,9 +285,12 @@ them would blink the screen on every rollout. The power-down writes
 standby first and falls back to off, because some panels implement
 only a subset of the power values.
 
-The operator writes to a panel only when a claim states one of these
-parameters. A claim with no parameters changes nothing, at prepare or
-after.
+For a claim, the operator writes to a panel only when the claim
+states one of these parameters. A claim with no parameters changes
+nothing, at prepare or after. The panel's
+[`Display`](/docs/reference/displays/) is the declarative write
+path beside this one: a resting declaration or an override there is
+also written by the operator, and only the operator.
 
 The scheduler reads no opaque parameter, so a selector is what keeps
 a claim off a panel that cannot serve it. Select on the attribute
@@ -297,9 +307,12 @@ attribute, fails at prepare with the missing capability named.
 A connector whose panel answered at least one control publishes a
 second device, named after the output with a `-control` suffix:
 `hdmi-a-2` and `hdmi-a-2-control`. Its claim is for a pod that drives
-the panel itself while it runs, live brightness, the panel's input
-source, its own `ddcutil`, rather than a value stated once at
-prepare.
+the panel itself while it runs, with its own `ddcutil` and its own
+protocol code, rather than a value stated once at prepare. For a
+panel that only needs its settings held or temporarily overridden,
+the [`Display`](/docs/reference/displays/) does the same job with no
+wire handover: state the desire on the resource, and the operator
+writes it.
 
 The control device's attributes are `connector`, the
 `monitor.liken.sh/id` pairing identity, the two control booleans, and
@@ -348,12 +361,15 @@ monitor's identity block on every machine it ever plugs into, until
 someone reprograms the chip. Tools built for DDC/CI, such as
 `ddcutil`, stay on the right address.
 
-**One writer per wire.** The operator itself writes this bus when a
-claim on the same connector states `brightness` or `power`, at prepare
-and at unprepare, and the i2c layer does not arbitrate between two
-userspace writers. So on a screen whose control device a pod holds, no
-claim states `power`: the holder owns the panel's power for as long as
-it holds the wire. A claim may still state `brightness`. That write
+**One writer per wire.** The operator itself writes this bus for two
+of its surfaces, a claim on the same connector that states
+`brightness` or `power`, at prepare and at unprepare, and the
+panel's [`Display`](/docs/reference/displays/), whenever its spec
+diverges from the panel. The i2c layer does not arbitrate between
+two userspace writers. So on a screen whose control device a pod
+holds, the holder owns the panel: no claim states `power`, no
+`Display` spec declares a resting value, and no writer sets an
+override there. A claim may still state `brightness`. That write
 lands once at the claim's prepare, and a holder that dims the panel
 restores the value it last read from the panel, so the two writers
 never pull in opposite directions.

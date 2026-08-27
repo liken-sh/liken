@@ -7,7 +7,8 @@ title: Manual
 This manual tells you how to install `display-operator` on a
 [`liken`](https://liken.sh/docs/) cluster and how to put a workload's
 window on a screen. The guides give the steps. The reference
-describes the devices, their attributes, and what a claim delivers.
+describes the devices, their attributes, what a claim delivers, and
+the `Display` resource that carries each panel's controls.
 
 The operator publishes each monitor output of a graphics card as a
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)

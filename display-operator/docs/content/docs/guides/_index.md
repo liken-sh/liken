@@ -45,3 +45,8 @@ then asks this driver to prepare the claim, and the driver delivers
 the device to the container. For a monitor output, the delivery is
 the compositor's Wayland socket and the app-id that puts your window
 on that screen.
+
+Beside the claim path, the operator creates one
+[`Display`](/docs/reference/displays/) per monitor: a cluster-scoped
+resource that reports the panel's controls and takes declarations
+for them, with no claim and no pod involved.

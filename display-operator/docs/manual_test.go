@@ -16,6 +16,7 @@ import (
 // publish through a module mount in hugo.yaml.
 var exceptions = []string{
 	"/deploy/deviceclasses.yaml",
+	"/deploy/displays.yaml",
 	"/deploy/kustomization.yaml",
 	"/deploy/operator.yaml",
 }
