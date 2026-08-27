@@ -32,8 +32,9 @@ with every device claim, toleration, and socket built from the
 button events to the cluster's [message bus](/docs/reference/bus/),
 and the playback pod applies the bindings. Between runs, each
 `Player`'s idle pod holds its display: it shows a clock and the
-unit's name, fades them after minutes of no activity, and powers
-the panel down after longer.
+unit's name and fades them after minutes of no activity. After
+longer, the operator darkens the panel through the display layer's
+own resource for the screen.
 
 Media you can run this way:
 

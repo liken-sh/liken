@@ -131,7 +131,7 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 | --- | --- | --- | --- |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
 | <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
-| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display: backlight, the default, or power, which is deeper and which some panels never answer DDC from again. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
+| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; state it only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
 
 ## status
 
@@ -202,7 +202,7 @@ outside 0 to 100 is clamped to the range.
 
 ### `panel`
 
-The state the idle sidecar wants the unit's screen in:
+The desire the idle sidecar states for the unit's screen:
 
     {"desire": "off"}
 
