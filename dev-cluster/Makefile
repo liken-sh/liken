@@ -375,9 +375,8 @@ BOOT ?= disk
 # rootfstype=ramfs: a -kernel boot's initrd carries the whole OS, and
 # the unpack writes hundreds of megabytes into rootfs. The default
 # memory filesystem caps itself at half the memory the kernel has
-# accounted when rootfs mounts, and early in boot that accounting can
-# still be racing page initialization, so the cap can bind far below
-# the guest's real memory and corrupt the unpack partway. ramfs has no
+# accounted when rootfs mounts, and that cap has bound far below the
+# guest's real memory and corrupted the unpack partway. ramfs has no
 # capacity, so the unpack is bounded by the initrd itself. The
 # ramRootParam comment in image/stick.go carries the full story; the
 # stick's install entries make the same choice for the same reason.

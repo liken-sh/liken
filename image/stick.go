@@ -53,18 +53,35 @@ const attendedParam = "liken.attended"
 // ramRootParam makes the kernel build rootfs on ramfs, which has no
 // capacity limit, instead of the default memory filesystem, which caps
 // itself at half the memory the kernel has accounted when rootfs
-// mounts. A stick boot's initrd carries the whole OS, and its unpack
-// writes hundreds of megabytes into rootfs. Early in boot, page
-// initialization can still be running, so the default cap can bind far
-// below the machine's real memory. An unpack that hits the cap fails
-// partway, and the file it was writing keeps its full size with a
-// corrupt tail, which no later check can tell from a good file until a
-// mount rejects it. ramfs bounds the unpack by the initrd's own
-// contents instead, which the slot sizes already bound. Boots from an
-// installed slot do not carry this parameter: their initrd holds only
-// the boot archive and microcode, two orders of magnitude below any
-// observed cap, and the entries that name them belong to the boot
-// chain that init alone rewrites.
+// mounts. That cap is mm/shmem.c's shmem_default_max_blocks, and it
+// returns totalram_pages() / 2. A stick boot's initrd carries the
+// whole OS, and its unpack writes hundreds of megabytes into rootfs.
+//
+// On kernel 7.1.5 the cap bound far below a 4GB guest's real memory on
+// some boots, and 3 of 6 boots failed the unpack partway. The file
+// being written kept its full size with a corrupt tail, which no later
+// check can tell from a good file until a mount rejects it. All 6
+// boots unpacked byte-perfect under this parameter.
+//
+// What made the cap bind low is not established, and the failure no
+// longer reproduces. Twenty lab boots with this parameter removed, ten
+// on 7.1.5 and ten on 7.2, all unpacked clean, and every one of them
+// reported the same 2.95GB of a 4GB guest. So the guest kernel was
+// never the variable, and neither was deferred page initialization:
+// both kernels leave CONFIG_DEFERRED_STRUCT_PAGE_INIT off, and memory
+// accounting finishes in mm_core_init before rootfs mounts from
+// vfs_caches_init.
+//
+// The parameter stays anyway. The failure was measured, nobody found
+// what caused it, and a machine with less memory than the lab guest
+// reaches the cap sooner. ramfs bounds the unpack by the initrd's own
+// contents, which the slot sizes already bound, so no cap can bind at
+// all, whatever the cause was.
+//
+// Boots from an installed slot do not carry this parameter: their
+// initrd holds only the boot archive and microcode, two orders of
+// magnitude below any observed cap, and the entries that name them
+// belong to the boot chain that init alone rewrites.
 const ramRootParam = "rootfstype=ramfs"
 
 // sortKeySeparator divides a machine name from the action in a menu
