@@ -18,22 +18,8 @@ is built the way it is, and what it still owes an answer to.
 
 ## Planned
 
-These plans are designed. Each keeps its number and moves to
-[`completed/`](completed/) when it is built and drilled.
-
-* [07, Sinks and sources](07-sinks-and-sources.md). A cluster-scoped
-  `Sink` for every playback endpoint and a `Source` for every
-  capture endpoint, with a `status` that reports the card's own
-  controls and what the operator last observed, and a `spec` that
-  declares what the endpoint rests at. A claim stays the channel for
-  bytes, and the resource becomes the channel for state. The device
-  name changes to one built from the hardware's identity, and
-  `observed` follows the control device's events and `pw-dump -m`
-  in place of a poll. Built, and drilled on `liken-1` and `stick-1`
-  on 2026-08-28 through release 2026.08.28-005: the names, the
-  monitor link, the DAC's controls, and the declared level and mute
-  on idle endpoints. Still to drill: a level under a playing claim,
-  a Bluetooth speaker's volume over AVRCP, and a card that leaves.
+Nothing is planned right now. A new plan keeps its number and moves
+to [`completed/`](completed/) when it is built and drilled.
 
 ## Designs
 
@@ -76,6 +62,21 @@ These plans are designed. Each keeps its number and moves to
   to the restart, with PipeWire and the card's sinks left running.
   Answers and removes the open problem "A2DP does not survive a
   Bluetooth pod restart".
+
+* [07, Sinks and sources](completed/07-sinks-and-sources.md).
+  Built, and drilled on `liken-1` and `stick-1` on 2026-08-28,
+  through release 2026.08.28-005. A cluster-scoped `Sink` for every
+  playback endpoint and a `Source` for every capture endpoint, with
+  a `status` that reports the card's own controls and what the
+  operator last observed, and a `spec` that declares what the
+  endpoint rests at. A claim stays the channel for bytes, and the
+  resource becomes the channel for state. The device name is built
+  from the hardware's identity, and `observed` follows the control
+  device's events and `pw-dump -m` in place of a poll. The drill
+  covered the names, the DAC's controls, the level and mute under a
+  playing claim on an HDMI slot and on a Bluetooth adapter over
+  AVRCP, and the analog jack once liken loaded the codec driver
+  first. Still to drill: a card that leaves.
 
 ## Open problems
 

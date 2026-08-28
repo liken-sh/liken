@@ -484,7 +484,45 @@ On `liken-1` and `stick-1`, with the USB DAC on `liken-1`:
   declared value in place, because the declaration is on the
   object and not in the pod.
 
-The analog controls on `stick-1`'s Realtek codec are proved when
-the `liken` image ships the codec's driver module. Today the card
-reports `Realtek ID 269`, the generic driver's name, and publishes
-no analog PCM.
+## The drill
+
+Run on `liken-1` and `stick-1` on 2026-08-28, through releases
+`2026.08.28-001` to `2026.08.28-005`. The first two releases named
+no endpoint: the container runtime masks `/proc/asound`, so the PCM
+id now comes from `SNDRV_CTL_IOCTL_PCM_INFO` on the control device.
+
+What ran, against the list above:
+
+* `kubectl get sinks` listed four HDMI slots on `liken-1`, three on
+  `stick-1`, the DAC as `usb-0573-1573-a34004801402-usb-audio`, and
+  the BOE's slot with `status.monitor.display: boe-1080-display`.
+  `kubectl get sources` listed the DAC's capture endpoint.
+* The DAC's `PCM Playback Volume` (0 to 896, -64 to -8 dB) showed
+  in `status.capabilities`, a turn of its knob reached
+  `status.observed.controls` through the control device's events,
+  and a declared value wrote back. A name the card lacks and a value
+  out of range were refused and logged.
+* `spec.volume` and `spec.mute` on the BOE's slot moved the level
+  under a playing claim, and `observed` followed within 4 seconds. A
+  `pw-cli` write behind the operator showed in `observed` within 2
+  seconds and was written back within 4.
+* A Bluetooth-to-RCA adapter paired on `stick-1` published its
+  Route with `volumeStep`, so `spec.volume` moved the adapter's own
+  level over AVRCP under a playing claim, and `spec.mute` landed the
+  same way. `spec.codec` on the held adapter changed nothing, as
+  designed, though the hold is silent in the log.
+* A declared level survived a pod restart, and a removed field left
+  the hardware where it was.
+* The analog endpoints on `stick-1` appeared once liken loaded
+  `snd_hda_codec_alc269` ahead of `snd_hda_intel` (liken
+  `2026.08.28-001` made the order part of convergence). The codec
+  boots with `Master Playback Switch` off, so a declaration is the
+  only way to hear it.
+
+Two findings changed the design as built. A `Props` write on a
+suspended node is applied and kept but never announced in PipeWire
+1.4.2, so `observed` reports the last written level for an idle
+endpoint. A `PortConfig` write re-derives the format and turned an
+HDMI node into eight ports, so the operator never writes one.
+
+Not yet drilled: a card that leaves while its `Sink` is declared.
