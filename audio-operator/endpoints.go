@@ -116,7 +116,7 @@ func endpointsRegistered() {
 	case adapters == 0:
 		fmt.Printf("bluetoothd published no adapter; there is no radio to advertise on\n")
 	case registered:
-		fmt.Printf("the adapter advertises a media profile that bluetoothd hosts; "+
+		fmt.Printf("the adapter advertises a media profile that bluetoothd hosts; " +
 			"WirePlumber holds its endpoints\n")
 	default:
 		fatal("the adapter advertises none of the %d media profile(s) bluetoothd hosts; "+

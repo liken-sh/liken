@@ -3,10 +3,12 @@ package main
 // Reading ALSA through the control interface, without ALSA's own
 // library.
 //
-// The operator needs two facts from the card: which PCM devices it
-// plays through, and the ELD block for each one that drives an HDMI
-// or a DisplayPort output. Both come from the nodes the raw claim
-// already delivers, so this file opens /dev/snd and nothing else.
+// The operator needs three facts from the card: which PCM devices
+// it plays through, which it records through, and the ELD block for
+// each one that drives an HDMI or a DisplayPort output. All three
+// come from the nodes the raw claim delivers, so this file opens
+// /dev/snd and nothing else. What the card is, and where it is on the
+// machine, is cards.go.
 //
 // The ELD comes from the control element named ELD, and not from
 // /proc/asound/card<N>/eld#<codec>.<pin>. The two hold the same
@@ -37,11 +39,11 @@ import (
 // the tests can point it at a directory they control.
 var sndDir = "/dev/snd"
 
-// playbackPCMPattern matches an ALSA playback PCM node,
-// pcmC<card>D<device>p. The trailing letter is the stream direction,
-// p for playback and c for capture, so the pattern excludes a
-// microphone from a list of outputs.
-var playbackPCMPattern = regexp.MustCompile(`^pcmC(\d+)D(\d+)p$`)
+// pcmNodePattern matches an ALSA PCM node, pcmC<card>D<device><p|c>.
+// The trailing letter is the stream direction, p for playback and c
+// for capture, and the operator publishes both: a playback PCM is a
+// sink and a capture PCM is a source.
+var pcmNodePattern = regexp.MustCompile(`^pcmC(\d+)D(\d+)([pc])$`)
 
 // The control interface's structure sizes, in bytes, on a 64-bit
 // kernel. The ioctl number encodes the size of its argument, so these
@@ -139,58 +141,94 @@ type ctlElemValue struct {
 const maxBytesElement = 512
 
 // name reads an element's name out of its fixed-length field.
-func (id ctlElemID) name() string {
-	for i, c := range id.Name {
-		if c == 0 {
-			return string(id.Name[:i])
-		}
-	}
-	return string(id.Name[:])
-}
+func (id ctlElemID) name() string { return cText(id.Name[:]) }
 
-// alsaOutput is one physical output of one card: one playback PCM
-// device, and what the card says about the monitor behind it.
+// alsaEndpoint is one endpoint of one card: one PCM device in one
+// direction, what the card says about the monitor behind it, and the
+// identity its device name is built from.
 //
-// HDMI reports whether the PCM device has an ELD element. An output
-// that has one is an HDMI or a DisplayPort output, and an output that
-// has none is the analog jack. Monitor reports whether that element
-// currently holds a block this operator could parse. That tells a
-// connected monitor from an HDMI cable with no monitor on it.
-type alsaOutput struct {
-	Card    int
+// Capture says the PCM device records instead of plays. HDMI says
+// the card declares an ELD element for the device, which is what an
+// HDMI or DisplayPort output has and the analog jack does not, and
+// Monitor says the block read and a monitor answers. Identity and
+// PCMID are the parts endpointName builds the device name from, and
+// DeviceName is what nameEndpoints stamped, empty until it did.
+type alsaEndpoint struct {
+	Card       int
+	PCM        int
+	Capture    bool
+	HDMI       bool
+	Monitor    bool
+	ELD        eld
+	Identity   cardIdentity
+	PCMID      string
+	DeviceName string
+}
+
+// Name is the DRA device name this endpoint publishes under, and it
+// is empty until nameEndpoints stamps it.
+func (o alsaEndpoint) Name() string { return o.DeviceName }
+
+// Address is the card and device number the kernel assigned this
+// boot. It names the PipeWire node and it reads well in a log line,
+// and nothing durable is keyed to it.
+func (o alsaEndpoint) Address() string { return alsaAddress(o.Card, o.PCM) }
+
+// direction is the half of the graph this endpoint's node is in. It
+// is the endpoint's own and not the card's: one PCM device of a USB
+// card carries a playback endpoint and a capture endpoint, and each
+// one has a node of its own.
+func (o alsaEndpoint) direction() pwDirection {
+	if o.Capture {
+		return directionSource
+	}
+	return directionSink
+}
+
+// graphAddress is where this endpoint's node is in PipeWire's graph:
+// the card and PCM numbers and the direction together name one node,
+// and the graph read builds its index on that key.
+func (o alsaEndpoint) graphAddress() nodeAddress {
+	return nodeAddress{pcmAddress: pcmAddress{Card: o.Card, PCM: o.PCM}, Direction: o.direction()}
+}
+
+// connectionType is the value of the device's attribute. An
+// endpoint with an ELD element is an HDMI or DisplayPort output, and
+// one whose block is absent or unreadable publishes no connection
+// type, because the operator cannot tell an HDMI cable from a
+// DisplayPort one without the block. A card on the USB bus publishes
+// usb whichever direction the endpoint runs in, and every other
+// endpoint is the analog jack.
+func (o alsaEndpoint) connectionType() string {
+	if o.HDMI {
+		if !o.Monitor {
+			return ""
+		}
+		return o.ELD.ConnectionType
+	}
+	if o.Identity.Bus == usbBus {
+		return usbBus
+	}
+	return "analog"
+}
+
+// pcmDevice is one PCM device of one card and the direction it runs
+// in.
+type pcmDevice struct {
 	PCM     int
-	HDMI    bool
-	Monitor bool
-	ELD     eld
+	Capture bool
 }
 
-// Name is the DRA device name this output publishes under.
-func (o alsaOutput) Name() string { return deviceName(o.Card, o.PCM) }
-
-// connectionType is the value of the device's attribute. An output
-// with no ELD element is the analog jack. An output whose ELD block
-// is absent or unreadable publishes no connection type, because the
-// operator cannot tell an HDMI cable from a DisplayPort one without
-// the block.
-func (o alsaOutput) connectionType() string {
-	if !o.HDMI {
-		return "analog"
-	}
-	if !o.Monitor {
-		return ""
-	}
-	return o.ELD.ConnectionType
-}
-
-// readOutputs enumerates every playback PCM the delivered nodes hold,
-// and reads the ELD element of each one that has one.
+// readEndpoints enumerates every PCM device the delivered nodes hold in
+// both directions, reads the ELD element of each playback one that
+// has one, and reads what each card says about itself.
 //
 // The membership of this list does not depend on PipeWire. A card's
-// playback PCM devices are the physical outputs it has, whether a
-// monitor is connected to one or not and whether a sound server holds
-// one or not, so the published inventory does not change while
-// monitors and sinks come and go.
-func readOutputs() ([]alsaOutput, error) {
+// PCM devices are the physical endpoints it has, whether a monitor is
+// connected to one or not and whether a sound server holds one or
+// not, so the published inventory does not change while monitors and
+// sinks come and go.
+func readEndpoints() ([]alsaEndpoint, error) {
 	entries, err := os.ReadDir(sndDir)
 	if errors.Is(err, os.ErrNotExist) {
 		// A node with no sound card has no /dev/snd for the claim to
@@ -205,19 +243,19 @@ func readOutputs() ([]alsaOutput, error) {
 		return nil, fmt.Errorf("reading %s: %w", sndDir, err)
 	}
 
-	var outputs []alsaOutput
-	byCard := map[int][]int{}
+	var outputs []alsaEndpoint
+	byCard := map[int][]pcmDevice{}
 	for _, entry := range entries {
-		match := playbackPCMPattern.FindStringSubmatch(entry.Name())
+		match := pcmNodePattern.FindStringSubmatch(entry.Name())
 		if match == nil {
 			continue
 		}
 		card, _ := strconv.Atoi(match[1])
 		pcm, _ := strconv.Atoi(match[2])
-		byCard[card] = append(byCard[card], pcm)
+		byCard[card] = append(byCard[card], pcmDevice{PCM: pcm, Capture: match[3] == "c"})
 	}
 
-	for card, pcms := range byCard {
+	for card, devices := range byCard {
 		blocks, err := readELDElements(card)
 		if err != nil {
 			// A card whose control node this operator cannot read still
@@ -226,13 +264,24 @@ func readOutputs() ([]alsaOutput, error) {
 			// because the sinks still work.
 			fmt.Fprintf(os.Stderr, "reading the ELD elements of card %d: %v\n", card, err)
 		}
-		for _, pcm := range pcms {
-			output := alsaOutput{Card: card, PCM: pcm}
-			block, hasElement := blocks[pcm]
-			output.HDMI = hasElement
-			if block != nil {
-				output.Monitor = true
-				output.ELD = *block
+		identity := readCardIdentity(card)
+		for _, device := range devices {
+			output := alsaEndpoint{
+				Card:     card,
+				PCM:      device.PCM,
+				Capture:  device.Capture,
+				Identity: identity,
+				PCMID:    readPCMID(card, device.PCM, device.Capture),
+			}
+			// An ELD element belongs to a playback PCM. A capture PCM of
+			// the same device number is a different endpoint, and the
+			// monitor behind the speakers says nothing about it.
+			if block, hasElement := blocks[device.PCM]; hasElement && !device.Capture {
+				output.HDMI = true
+				if block != nil {
+					output.Monitor = true
+					output.ELD = *block
+				}
 			}
 			outputs = append(outputs, output)
 		}

@@ -5,15 +5,18 @@ title: Manual
 # The `audio.liken.sh` manual
 
 This manual tells you how to install `audio-operator` on a
-[`liken`](https://liken.sh/docs/) cluster and how to play a
-workload's sound through a physical output. The guides give the
-steps. The reference describes the devices, their attributes, and
-what a claim delivers.
+[`liken`](https://liken.sh/docs/) cluster, how to play a workload's
+sound through a physical output, and how to set what an output
+rests at. The guides give the steps. The reference describes the
+devices, their attributes, what a claim delivers, and the `Sink`
+and `Source` resources.
 
-The operator publishes each physical audio output of a machine as a
+The operator publishes each physical audio endpoint of a machine as
+a
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device. A workload claims one through the `audio-output` device
-class, the way
+device, and as a `Sink` or `Source` resource of its own. A workload
+claims one through the `audio-sink` or `audio-source` device class,
+the way
 [Give a workload a device](https://liken.sh/docs/guides/devices/)
 shows for `liken`'s own devices.
 

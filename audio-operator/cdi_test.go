@@ -8,6 +8,29 @@ import (
 	"testing"
 )
 
+// The lab card's endpoints, by the names a reconcile pass stamps on
+// them. The HDMI slot's PCM device is 3 and the analog jack's is 0,
+// which is what the graph fixtures key on, and the capture side of
+// the analog jack is the source.
+const (
+	testSinkName   = "liken-1-pci-0000-00-1f-3-hdmi-0"
+	testAnalogName = "liken-1-pci-0000-00-1f-3-alc236-analog"
+	testSourceName = testAnalogName + captureSuffix
+)
+
+// testInventory is what a reconcile pass would have published for
+// that card. The refresh and the prepare call both resolve a device
+// name through it, because the name holds no card and no PCM number.
+func testInventory() *endpointInventory {
+	inventory := &endpointInventory{}
+	inventory.publish([]alsaEndpoint{
+		{Card: 0, PCM: 3, DeviceName: testSinkName},
+		{Card: 0, PCM: 0, DeviceName: testAnalogName},
+		{Card: 0, PCM: 0, Capture: true, DeviceName: testSourceName},
+	})
+	return inventory
+}
+
 // specDirectory points the CDI writes at a directory the test owns.
 func specDirectory(t *testing.T) string {
 	t.Helper()
@@ -17,8 +40,8 @@ func specDirectory(t *testing.T) string {
 	return dir
 }
 
-func TestSinkEdits(t *testing.T) {
-	edits := sinkEdits("alsa_output.pci-0000_00_1f.3.hdmi-stereo")
+func TestEndpointEdits(t *testing.T) {
+	edits := endpointEdits("alsa_output.pci-0000_00_1f.3.hdmi-stereo")
 
 	want := []string{
 		"PIPEWIRE_REMOTE=/var/run/audio.liken.sh/pipewire-0",
@@ -68,13 +91,14 @@ func TestClaimUIDFromSpecName(t *testing.T) {
 func TestRefreshRewritesASinkThatCameBackUnderANewName(t *testing.T) {
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
-		Name:           "claim-1-card0-pcm3",
-		ContainerEdits: sinkEdits("alsa_output.old-name"),
+		Name:           "claim-1-" + testSinkName,
+		ContainerEdits: endpointEdits("alsa_output.old-name"),
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	refreshCDISpecs(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"}))
+	refreshCDISpecs(testInventory(),
+		outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"}))
 
 	spec := readSpec(t, filepath.Join(dir, "audio.liken.sh-claim-1.json"))
 	want := "PIPEWIRE_NODE=alsa_output.new-name"
@@ -89,13 +113,13 @@ func TestRefreshKeepsTheNameWhenTheSinkIsGone(t *testing.T) {
 	// hold that pod back until the output can play again.
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
-		Name:           "claim-1-card0-pcm3",
-		ContainerEdits: sinkEdits("alsa_output.old-name"),
+		Name:           "claim-1-" + testSinkName,
+		ContainerEdits: endpointEdits("alsa_output.old-name"),
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	refreshCDISpecs(outputGraph(map[pcmAddress]string{}))
+	refreshCDISpecs(testInventory(), outputGraph(map[pcmAddress]string{}))
 
 	spec := readSpec(t, filepath.Join(dir, "audio.liken.sh-claim-1.json"))
 	want := "PIPEWIRE_NODE=alsa_output.old-name"
@@ -111,12 +135,12 @@ func TestRefreshRewritesASpeakersNodeAfterAReconnect(t *testing.T) {
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
 		Name:           "claim-1-" + testSpeakerName,
-		ContainerEdits: sinkEdits("bluez_output.A0_AB_51_33_B7_12.1"),
+		ContainerEdits: endpointEdits("bluez_output.A0_AB_51_33_B7_12.1"),
 	}}); err != nil {
 		t.Fatal(err)
 	}
 
-	refreshCDISpecs(speakerGraph(map[string]bluezSink{
+	refreshCDISpecs(testInventory(), speakerGraph(map[string]bluezSink{
 		testSpeakerAddress: {Node: "bluez_output.A0_AB_51_33_B7_12.7", Codec: "sbc"},
 	}))
 
@@ -134,7 +158,8 @@ func TestRefreshLeavesAnotherDriversSpecAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	refreshCDISpecs(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"}))
+	refreshCDISpecs(testInventory(),
+		outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.new-name"}))
 
 	raw, err := os.ReadFile(other)
 	if err != nil {
@@ -149,7 +174,7 @@ func TestRemoveCDISpecIsIdempotent(t *testing.T) {
 	// The kubelet repeats unprepare whenever it has no record that the
 	// call succeeded.
 	specDirectory(t)
-	if err := writeCDISpec("claim-1", []cdiDevice{{Name: "claim-1-card0-pcm3"}}); err != nil {
+	if err := writeCDISpec("claim-1", []cdiDevice{{Name: "claim-1-" + testSinkName}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := removeCDISpec("claim-1"); err != nil {

@@ -1,6 +1,7 @@
 package main
 
-// The level a sink plays at, and who decides it.
+// The level a node plays or records at, and how a percent in a spec
+// becomes a gain in the graph.
 //
 // This pod stores no volumes: WirePlumber's persistent storage is
 // off, because nothing durable backs a pod's filesystem. So every
@@ -9,13 +10,16 @@ package main
 // ears. An appliance wants unity instead. Every stage below 1.0
 // multiplies the samples down before a codec encodes them, and
 // loudness belongs to the consumer's own stream volume and to the
-// hardware behind the jack. This file holds both halves of that
-// stance: the settings fragment that starts every sink at unity,
-// and the write that sets a delivered sink there.
+// hardware behind the jack. This file holds the settings fragment
+// that starts every sink at unity, the write that sets a delivered
+// sink there, and the write behind spec.volume and spec.mute, which
+// is the one channel a person has to a level below the consumer's
+// own.
 
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -72,6 +76,17 @@ func writeVolumeConfig() error {
 	return nil
 }
 
+// levelList spells the levels for a pod. pw-cli's pod holds bare
+// numbers, and the shortest exact print of each level is what goes
+// in it, so 1 and 0.5 print as themselves.
+func levelList(volumes []float64) string {
+	levels := make([]string, 0, len(volumes))
+	for _, volume := range volumes {
+		levels = append(levels, strconv.FormatFloat(volume, 'f', -1, 64))
+	}
+	return strings.Join(levels, ", ")
+}
+
 // volumeProps is the pod that sets one node's per-channel levels.
 //
 // The write names channelVolumes, not the single volume value
@@ -81,16 +96,61 @@ func writeVolumeConfig() error {
 // that moves. The numbers are linear gain per channel, and 1.0 is
 // unity.
 func volumeProps(volumes []float64) string {
-	levels := make([]string, 0, len(volumes))
-	for _, volume := range volumes {
-		levels = append(levels, strconv.FormatFloat(volume, 'f', -1, 64))
-	}
-	return fmt.Sprintf("{ channelVolumes: [ %s ] }", strings.Join(levels, ", "))
+	return fmt.Sprintf("{ channelVolumes: [ %s ] }", levelList(volumes))
 }
 
 // setNodeVolumes writes the levels on one node.
 func setNodeVolumes(ctx context.Context, node int, volumes []float64) error {
-	return setParam(ctx, node, volumeProps(volumes))
+	return setParam(ctx, node, "Props", volumeProps(volumes))
+}
+
+// levelProps is the pod that sets one node's levels and its mute
+// together. They go in one write because PipeWire applies one Props
+// pod at once, and a reader that saw the level move without the mute
+// would report a state the endpoint was never in.
+func levelProps(volumes []float64, mute bool) string {
+	return fmt.Sprintf("{ channelVolumes: [ %s ], mute: %t }", levelList(volumes), mute)
+}
+
+// setNodeLevel is the write behind spec.volume and spec.mute on an
+// ALSA endpoint, and on a speaker with no absolute volume. The
+// channel count is the node's own, so that a six-channel node does
+// not keep four channels at the old level.
+func setNodeLevel(ctx context.Context, node pwNode, volume int, mute bool) error {
+	levels := volumeLevels(volume, channelCount(node.Volumes))
+	return setParam(ctx, node.ID, "Props", levelProps(levels, mute))
+}
+
+// sinkNode is the speaker's node as a level write sees it. A
+// speaker's node takes the same Props write an ALSA node does, and
+// the operator writes it only when the speaker reports no absolute
+// volume, because on a speaker that does, the Route is the level
+// that moves.
+func (s bluezSink) sinkNode() pwNode {
+	return pwNode{ID: s.NodeID, Name: s.Node, Mute: s.Mute, Volumes: s.Volumes, Format: s.Format}
+}
+
+// volumeLevels maps the spec's percent onto PipeWire's gain:
+// volume/100 on every channel, not cubed. channelVolumes is the
+// applied gain, and the cube is WirePlumber's own curve for a desktop
+// fader, which a number in a resource has no reason to follow.
+func volumeLevels(volume, channels int) []float64 {
+	levels := make([]float64, channels)
+	for channel := range levels {
+		levels[channel] = float64(volume) / 100
+	}
+	return levels
+}
+
+// volumePercent is the read side of volumeLevels. The first channel
+// is the level the status reports, because the operator writes every
+// channel alike, and a node with no levels reports none rather than
+// zero.
+func volumePercent(volumes []float64) (int, bool) {
+	if len(volumes) == 0 {
+		return 0, false
+	}
+	return int(math.Round(volumes[0] * 100)), true
 }
 
 // stereoChannels is the channel count a speaker's sink is assumed to
@@ -100,6 +160,19 @@ func setNodeVolumes(ctx context.Context, node int, volumes []float64) error {
 // read reported no levels is written as stereo rather than not
 // written at all.
 const stereoChannels = 2
+
+// channelCount is how many channels a level write covers: the count
+// the graph reported, or stereo when it reported none, which is what
+// a suspended node prints in channelVolumes.
+func channelCount(volumes []float64) int {
+	if len(volumes) == 0 {
+		return stereoChannels
+	}
+	return len(volumes)
+}
+
+// unityPercent is the level a delivered sink arrives at.
+const unityPercent = 100
 
 // unityLevels is the level a delivered sink arrives at: 1.0 on every
 // channel the node has.
@@ -116,13 +189,5 @@ const stereoChannels = 2
 // sink written as stereo would keep four channels at the old
 // level.
 func unityLevels(sink bluezSink) []float64 {
-	channels := len(sink.Volumes)
-	if channels == 0 {
-		channels = stereoChannels
-	}
-	levels := make([]float64, channels)
-	for channel := range levels {
-		levels[channel] = 1
-	}
-	return levels
+	return volumeLevels(unityPercent, channelCount(sink.Volumes))
 }

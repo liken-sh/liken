@@ -31,7 +31,7 @@ func declaredObjects(t *testing.T, document string) []staticNode {
 // one holds the ALSA device it opens and the two properties that map
 // it back to the output the operator publishes.
 func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
-	outputs := []alsaOutput{
+	outputs := []alsaEndpoint{
 		{Card: 0, PCM: 3, HDMI: true},
 		{Card: 0, PCM: 0},
 	}
@@ -77,13 +77,56 @@ func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
 	}
 }
 
+// A capture PCM device is declared beside the playback ones, as a
+// source. The card's PCM device 0 runs in both directions, which is
+// what a USB card does, so the two nodes share an ALSA address and
+// must not share a name.
+func TestNodeConfigDeclaresASourceForEachCapturePCM(t *testing.T) {
+	objects := declaredObjects(t, nodeConfig([]alsaEndpoint{
+		{Card: 1, PCM: 0, Capture: true},
+		{Card: 1, PCM: 0},
+	}))
+	if len(objects) != 2 {
+		t.Fatalf("declared %d objects, want two", len(objects))
+	}
+
+	// Playback comes first for one PCM device, so the same card always
+	// makes the same document.
+	sink, source := objects[0], objects[1]
+	if got := sink.Args["factory.name"]; got != "api.alsa.pcm.sink" {
+		t.Errorf("the playback object's factory = %q", got)
+	}
+	args := map[string]string{
+		"factory.name":      "api.alsa.pcm.source",
+		"media.class":       "Audio/Source",
+		"api.alsa.path":     "hw:1,0",
+		"api.alsa.pcm.card": "1",
+		"node.name":         sourceNodeName(1, 0),
+		nodeCardProperty:    "1",
+		nodePCMProperty:     "0",
+	}
+	for key, want := range args {
+		if got := source.Args[key]; got != want {
+			t.Errorf("the capture object's %s = %q, want %q", key, got, want)
+		}
+	}
+	// One PCM device that cannot be opened for capture must not stop
+	// PipeWire from starting, the same way a playback one must not.
+	if !slices.Contains(source.Flags, nofail) {
+		t.Errorf("the capture object's flags = %v, want %s among them", source.Flags, nofail)
+	}
+	if sink.Args["node.name"] == source.Args["node.name"] {
+		t.Errorf("both directions of one PCM device declare the node name %q", sink.Args["node.name"])
+	}
+}
+
 // An HDMI output with no monitor on it is declared like any other. The
 // PCM device is what the card has, and the operator must not build a
 // graph that changes when somebody moves a cable, because PipeWire
 // reads these declarations once.
 func TestNodeConfigDeclaresAnHDMIOutputWithNoMonitor(t *testing.T) {
-	connected := nodeConfig([]alsaOutput{{Card: 0, PCM: 3, HDMI: true, Monitor: true}})
-	unplugged := nodeConfig([]alsaOutput{{Card: 0, PCM: 3, HDMI: true}})
+	connected := nodeConfig([]alsaEndpoint{{Card: 0, PCM: 3, HDMI: true, Monitor: true}})
+	unplugged := nodeConfig([]alsaEndpoint{{Card: 0, PCM: 3, HDMI: true}})
 	if connected != unplugged {
 		t.Errorf("a monitor changed the declaration:\n%s\n%s", connected, unplugged)
 	}
@@ -94,8 +137,8 @@ func TestNodeConfigDeclaresAnHDMIOutputWithNoMonitor(t *testing.T) {
 // A generator whose output moved with the enumeration order would
 // restart the pod forever.
 func TestNodeConfigDoesNotMoveWithTheEnumerationOrder(t *testing.T) {
-	one := nodeConfig([]alsaOutput{{Card: 0, PCM: 0}, {Card: 0, PCM: 3}, {Card: 1, PCM: 0}})
-	other := nodeConfig([]alsaOutput{{Card: 1, PCM: 0}, {Card: 0, PCM: 3}, {Card: 0, PCM: 0}})
+	one := nodeConfig([]alsaEndpoint{{Card: 0, PCM: 0}, {Card: 0, PCM: 3}, {Card: 1, PCM: 0}})
+	other := nodeConfig([]alsaEndpoint{{Card: 1, PCM: 0}, {Card: 0, PCM: 3}, {Card: 0, PCM: 0}})
 	if one != other {
 		t.Errorf("the enumeration order changed the declaration:\n%s\n%s", one, other)
 	}
@@ -112,7 +155,7 @@ func TestNodeConfigDeclaresNothingForACardWithNoOutputs(t *testing.T) {
 // Two outputs must never claim one node name. A name that collided
 // would give one PCM device no sink and the other one two.
 func TestNodeConfigNamesEveryOutputOnce(t *testing.T) {
-	outputs := []alsaOutput{{Card: 0, PCM: 0}, {Card: 0, PCM: 3}, {Card: 1, PCM: 0}, {Card: 1, PCM: 3}}
+	outputs := []alsaEndpoint{{Card: 0, PCM: 0}, {Card: 0, PCM: 3}, {Card: 1, PCM: 0}, {Card: 1, PCM: 3}}
 	seen := map[string]bool{}
 	for _, object := range declaredObjects(t, nodeConfig(outputs)) {
 		name := object.Args["node.name"]
@@ -130,7 +173,7 @@ func TestWriteNodeConfigLandsWherePipeWireReadsIt(t *testing.T) {
 	pipewireConfigDir = filepath.Join(t.TempDir(), "pipewire.conf.d")
 	t.Cleanup(func() { pipewireConfigDir = "/etc/pipewire/pipewire.conf.d" })
 
-	document, err := writeNodeConfig([]alsaOutput{{Card: 0, PCM: 3, HDMI: true}})
+	document, err := writeNodeConfig([]alsaEndpoint{{Card: 0, PCM: 3, HDMI: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

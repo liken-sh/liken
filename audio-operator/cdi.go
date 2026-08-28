@@ -89,21 +89,23 @@ type cdiMount struct {
 	Options       []string `json:"options,omitempty"`
 }
 
-// sinkEdits builds what one allocated device grants a container:
+// endpointEdits builds what one allocated device grants a container:
 // the directory that holds PipeWire's socket, the absolute path to
-// that socket, and the name of the sink the claim allocated. A
-// Bluetooth speaker and an HDMI output deliver the identical three
-// things.
+// that socket, and the name of the node the claim allocated. A
+// Bluetooth speaker, an HDMI output, and a microphone deliver the
+// identical three things, because PIPEWIRE_NODE sets target.object
+// on every stream a client creates, and a capture stream honors it
+// the way a playback stream does.
 //
 // The mount is read-only. Connecting to a Unix socket needs write
 // permission on the socket itself and not on the file system that
 // holds it, so a read-only mount still connects, and a consumer has
 // no reason to create anything in this directory.
-func sinkEdits(sink string) cdiEdits {
+func endpointEdits(node string) cdiEdits {
 	return cdiEdits{
 		Env: []string{
 			remoteVariable + "=" + socketPath,
-			nodeVariable + "=" + sink,
+			nodeVariable + "=" + node,
 		},
 		Mounts: []cdiMount{{
 			HostPath:      runtimeDir,
@@ -177,10 +179,10 @@ func claimUIDFromSpecName(name string) (string, bool) {
 	return uid, true
 }
 
-// refreshCDISpecs rewrites each prepared claim's spec with the sink
-// its output has now. It resolves each device the same way prepare
-// does, from one graph read, so a spec written by a refresh and a
-// spec written by a prepare always agree.
+// refreshCDISpecs rewrites each prepared claim's spec with the node
+// its endpoint has now. It resolves each device the same way prepare
+// does, from one inventory and one graph read, so a spec written by
+// a refresh and a spec written by a prepare always agree.
 //
 // This cannot repair a container that already runs. The runtime
 // applies the edits when it creates the container, and a variable
@@ -190,7 +192,7 @@ func claimUIDFromSpecName(name string) (string, bool) {
 // name would give the next pod a PIPEWIRE_NODE that names nothing,
 // and its streams would play into whichever sink PipeWire chose by
 // default.
-func refreshCDISpecs(graph pwGraph) {
+func refreshCDISpecs(endpoints *endpointInventory, graph pwGraph) {
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
 		// No directory means no claim has been prepared on this boot.
@@ -201,7 +203,7 @@ func refreshCDISpecs(graph pwGraph) {
 		if !ok {
 			continue
 		}
-		if err := refreshCDISpec(claimUID, graph); err != nil {
+		if err := refreshCDISpec(claimUID, endpoints, graph); err != nil {
 			fmt.Fprintf(os.Stderr, "refreshing the spec for claim %s: %v\n", claimUID, err)
 		}
 	}
@@ -214,7 +216,7 @@ func refreshCDISpecs(graph pwGraph) {
 // PIPEWIRE_NODE would start the next pod against PipeWire's default
 // sink with no error. The taints on the device hold that pod back
 // until the output can play again.
-func refreshCDISpec(claimUID string, graph pwGraph) error {
+func refreshCDISpec(claimUID string, endpoints *endpointInventory, graph pwGraph) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
 
@@ -243,11 +245,11 @@ func refreshCDISpec(claimUID string, graph pwGraph) error {
 		// A device this pass cannot resolve keeps the name the file
 		// already holds, which is the same rule a sink that is gone
 		// gets.
-		sink, err := deliveredSink(allocated, graph)
+		node, err := endpointNode(endpoints, allocated, graph)
 		if err != nil {
 			continue
 		}
-		edits := sinkEdits(sink)
+		edits := endpointEdits(node)
 		if slices.Equal(edits.Env, device.ContainerEdits.Env) {
 			continue
 		}

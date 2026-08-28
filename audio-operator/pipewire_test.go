@@ -18,7 +18,7 @@ func TestParseGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sinks := graph.Outputs
+	sinks := sinkNames(graph)
 	if len(sinks) != 2 {
 		t.Fatalf("sinks = %v, want two", sinks)
 	}
@@ -53,7 +53,7 @@ func TestParseGraphMapsTheNodesTheOperatorDeclares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sinks := graph.Outputs
+	sinks := sinkNames(graph)
 	if len(sinks) != 2 {
 		t.Fatalf("sinks = %v, want two", sinks)
 	}
@@ -62,6 +62,65 @@ func TestParseGraphMapsTheNodesTheOperatorDeclares(t *testing.T) {
 	}
 	if got := sinks[pcmAddress{Card: 0, PCM: 0}]; got != sinkNodeName(0, 0) {
 		t.Errorf("the analog sink = %q, want %q", got, sinkNodeName(0, 0))
+	}
+}
+
+// A capture PCM declares its own node under the
+// same two properties as the playback one, so the direction is what
+// separates them, and that a source never enters the playback index
+// the delivery reads.
+func TestParseGraphMapsACaptureNode(t *testing.T) {
+	graph, err := parseGraph(fixture(t, "pw-dump-declared.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	analog := pcmAddress{Card: 0, PCM: 0}
+	source := graph.Nodes[nodeAddress{pcmAddress: analog, Direction: directionSource}]
+	if source.Name != "liken.audio.card0-pcm0c" {
+		t.Errorf("the capture node = %q", source.Name)
+	}
+	if source.ID != 50 {
+		t.Errorf("the capture node's id = %d, want 50", source.ID)
+	}
+	sink := graph.Nodes[nodeAddress{pcmAddress: analog, Direction: directionSink}]
+	if sink.Name != sinkNodeName(0, 0) {
+		t.Errorf("the playback node on the same PCM device = %q", sink.Name)
+	}
+	if got, has := sinkNames(graph)[analog]; got == source.Name || !has {
+		t.Errorf("the playback index holds %q for the analog PCM", got)
+	}
+}
+
+// The three facts the endpoint's status reads off a
+// node, and the two shapes a declared node prints them in: a running
+// node carries its levels and its negotiated format, and a suspended
+// one carries an empty list for each.
+func TestParseGraphReadsTheFactsAStatusReports(t *testing.T) {
+	graph, err := parseGraph(fixture(t, "pw-dump-declared.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	running := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 3}, Direction: directionSink}]
+	if !running.Mute {
+		t.Error("the muted node reports itself unmuted")
+	}
+	if want := []float64{0.5, 0.5}; !reflect.DeepEqual(running.Volumes, want) {
+		t.Errorf("levels = %v, want %v", running.Volumes, want)
+	}
+	want := pwFormat{Rate: 48000, Channels: 2, Positions: []string{"FL", "FR"}}
+	if !reflect.DeepEqual(running.Format, want) {
+		t.Errorf("format = %+v, want %+v", running.Format, want)
+	}
+
+	suspended := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}]
+	if len(suspended.Volumes) != 0 {
+		t.Errorf("a suspended node reports the levels %v", suspended.Volumes)
+	}
+	if !reflect.DeepEqual(suspended.Format, pwFormat{}) {
+		t.Errorf("a suspended node reports the format %+v", suspended.Format)
+	}
+	if suspended.Mute {
+		t.Error("a suspended node's mute was read from the ALSA Props block")
 	}
 }
 
@@ -83,13 +142,29 @@ const (
 // outputGraph is a graph with the card's sinks in it and no
 // Bluetooth speaker, which is what a machine with no radio holds.
 func outputGraph(sinks map[pcmAddress]string) pwGraph {
-	return pwGraph{Outputs: sinks, Speakers: map[string]bluezSink{}}
+	nodes := map[nodeAddress]pwNode{}
+	for address, name := range sinks {
+		nodes[nodeAddress{pcmAddress: address, Direction: directionSink}] = pwNode{Name: name}
+	}
+	return pwGraph{Nodes: nodes, Speakers: map[string]bluezSink{}}
+}
+
+// sinkNames reads back the playback node of each PCM device, which is
+// what the tests below assert a parse produced.
+func sinkNames(graph pwGraph) map[pcmAddress]string {
+	names := map[pcmAddress]string{}
+	for address, node := range graph.Nodes {
+		if address.Direction == directionSink {
+			names[address.pcmAddress] = node.Name
+		}
+	}
+	return names
 }
 
 // speakerGraph is the other half: a graph with Bluetooth sinks in
 // it and no card.
 func speakerGraph(speakers map[string]bluezSink) pwGraph {
-	return pwGraph{Outputs: map[pcmAddress]string{}, Speakers: speakers}
+	return pwGraph{Nodes: map[nodeAddress]pwNode{}, Speakers: speakers}
 }
 
 // staticGraph reads back one fixed graph, so a test drives a pass
@@ -142,19 +217,49 @@ func TestParseGraphReadsABluetoothSink(t *testing.T) {
 	if !reflect.DeepEqual(sink.Codecs, codecs) {
 		t.Errorf("codecs = %+v, want %+v", sink.Codecs, codecs)
 	}
+	// The speaker's level lives on the device's
+	// Route, that the Output route is the speaker's and the Input one
+	// is the headset microphone this pod does not open, and that
+	// volumeStep is the graph saying the transport reports a volume.
+	route := sink.Route
+	if route == nil {
+		t.Fatal("the device published no output route")
+	}
+	if route.Index != 1 || route.Device != 0 {
+		t.Errorf("route = index %d device %d, want index 1 device 0", route.Index, route.Device)
+	}
+	if !route.Mute {
+		t.Error("the muted route reports itself unmuted")
+	}
+	if want := []float64{0.25, 0.25}; !reflect.DeepEqual(route.Volumes, want) {
+		t.Errorf("route levels = %v, want %v", route.Volumes, want)
+	}
+	if !route.AbsoluteVolume {
+		t.Error("a route with a volumeStep reports no absolute volume")
+	}
+	// The speaker's own node carries the format the transport
+	// negotiated.
+	if want := (pwFormat{Rate: 44100, Channels: 2, Positions: []string{"FL", "FR"}}); !reflect.DeepEqual(sink.Format, want) {
+		t.Errorf("format = %+v, want %+v", sink.Format, want)
+	}
+
 	// The card's own sink is in the same document, and a Bluetooth
 	// node has no ALSA address for it to be mistaken for.
-	if got := graph.Outputs[pcmAddress{Card: 0, PCM: 0}]; got != sinkNodeName(0, 0) {
+	sinks := sinkNames(graph)
+	if got := sinks[pcmAddress{Card: 0, PCM: 0}]; got != sinkNodeName(0, 0) {
 		t.Errorf("the analog sink = %q, want %q", got, sinkNodeName(0, 0))
 	}
-	if len(graph.Outputs) != 1 {
-		t.Errorf("outputs = %v, want one", graph.Outputs)
+	if len(sinks) != 1 {
+		t.Errorf("outputs = %v, want one", sinks)
 	}
 }
 
 // The declared outputs and a graph that holds a sink for each one.
-func testOutputs() []alsaOutput {
-	return []alsaOutput{{Card: 0, PCM: 0}, {Card: 0, PCM: 3, HDMI: true, Monitor: true}}
+func testOutputs() []alsaEndpoint {
+	return []alsaEndpoint{
+		{Card: 0, PCM: 0, DeviceName: "liken-1-pci-0000-00-1f-3-alc236-analog"},
+		{Card: 0, PCM: 3, HDMI: true, Monitor: true, DeviceName: testSinkName},
+	}
 }
 
 func testSinks() map[pcmAddress]string {
@@ -239,17 +344,17 @@ func TestMissingNodesNamesTheOutputsWithNoSink(t *testing.T) {
 		{
 			name:  "none of them do",
 			sinks: map[pcmAddress]string{},
-			want:  []string{"card0-pcm0", "card0-pcm3"},
+			want:  []string{"liken-1-pci-0000-00-1f-3-alc236-analog", testSinkName},
 		},
 		{
 			name:  "one of them does",
 			sinks: map[pcmAddress]string{{Card: 0, PCM: 3}: sinkNodeName(0, 3)},
-			want:  []string{"card0-pcm0"},
+			want:  []string{"liken-1-pci-0000-00-1f-3-alc236-analog"},
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := missingNodes(testOutputs(), c.sinks)
+			got := missingNodes(testOutputs(), outputGraph(c.sinks))
 			if len(got) != len(c.want) {
 				t.Fatalf("missing = %v, want %v", got, c.want)
 			}

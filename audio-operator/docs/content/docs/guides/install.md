@@ -25,9 +25,10 @@ You need:
   machine. Its media bus is what puts the sound server on
   `bluetoothd`'s bus, and it is optional: a machine with a card and
   no radio installs nothing extra.
-* `kubectl` with cluster-admin access. You create two cluster-scoped
+* `kubectl` with cluster-admin access. You create cluster-scoped
   [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-  yourself, and the base creates a `ClusterRole`.
+  yourself, and the base creates a `ClusterRole` and two
+  `CustomResourceDefinitions`.
 
 ## 1. Check that the card publishes
 
@@ -57,25 +58,36 @@ owner:
   it, and the claim template in the served
   [`operator.yaml`](/deploy/operator.yaml) names it literally, so
   the operator cannot start without it. Do not delete it.
-* The class your workloads claim through is yours to create,
-  because it is your cluster's vocabulary, and the base ships no
-  policy. `audio-output` is the one to start with. It covers every
-  device this driver publishes:
+* The classes your workloads claim through are yours to create,
+  because they are your cluster's vocabulary, and the base ships no
+  policy. `audio-sink` and `audio-source` are the ones to start
+  with. Each covers one direction of what this driver publishes: a
+  playback endpoint carries the `sink` attribute and a capture
+  endpoint carries `source`:
 
         apiVersion: resource.k8s.io/v1
         kind: DeviceClass
         metadata:
-          name: audio-output
+          name: audio-sink
         spec:
           selectors:
             - cel:
-                expression: device.driver == "audio.liken.sh"
+                expression: has(device.attributes["audio.liken.sh"].sink)
+        ---
+        apiVersion: resource.k8s.io/v1
+        kind: DeviceClass
+        metadata:
+          name: audio-source
+        spec:
+          selectors:
+            - cel:
+                expression: has(device.attributes["audio.liken.sh"].source)
 
 ### Generic or specific
 
 A class is the cluster's vocabulary for a kind of device, and you
-choose its grain. `audio-output` above is generic: it matches every
-audio output, it keeps the class list short, and it leaves the
+choose its grain. `audio-sink` above is generic: it matches every
+playback endpoint, it keeps the class list short, and it leaves the
 choice of output to each claim's CEL selector. A specific class
 holds the selector itself. A claim then names the class and writes
 no CEL, and you make the choice once, in cluster policy you
@@ -89,7 +101,7 @@ control:
       selectors:
         - cel:
             expression: |
-              device.driver == "audio.liken.sh" &&
+              has(device.attributes["audio.liken.sh"].sink) &&
               has(device.attributes["audio.liken.sh"].connectionType) &&
               device.attributes["audio.liken.sh"].connectionType == "analog"
 
@@ -105,12 +117,19 @@ workload's manifest, create a specific class.
 
 This site serves the repository's
 [`deploy/`](/deploy/kustomization.yaml) directory as raw YAML, so
-the install needs no clone. Three files are the rest of the install:
+the install needs no clone. Four files are the rest of the install:
 
     kubectl apply -n liken-system \
+      -f https://audio.liken.sh/deploy/crds.yaml \
       -f https://audio.liken.sh/deploy/deviceclasses.yaml \
       -f https://audio.liken.sh/deploy/rbac.yaml \
       -f https://audio.liken.sh/deploy/operator.yaml
+
+`crds.yaml` holds the `Sink` and `Source`
+`CustomResourceDefinitions`, the resources the operator creates for
+every endpoint it publishes. The
+[`Sink`](/docs/reference/sinks/) and
+[`Source`](/docs/reference/sources/) references describe them.
 
 The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 `liken-system`, the namespace every `liken` cluster has. The
@@ -127,6 +146,7 @@ takes a raw YAML URL as a resource:
     namespace: liken-system
     resources:
       - classes.yaml
+      - https://audio.liken.sh/deploy/crds.yaml
       - https://audio.liken.sh/deploy/deviceclasses.yaml
       - https://audio.liken.sh/deploy/rbac.yaml
       - https://audio.liken.sh/deploy/operator.yaml
@@ -175,11 +195,24 @@ reads and writes the graph's settings, for example
 
 ## 5. See the devices
 
-The operator publishes one device for each playback PCM device on
-the claimed card, into a `ResourceSlice` named
+The operator publishes one device for each PCM device on the
+claimed card, sinks and sources alike, into a `ResourceSlice` named
 `<node>-audio.liken.sh`:
 
     kubectl get resourceslice <node>-audio.liken.sh -o yaml
+
+The same endpoints are resources of their own, one `Sink` per
+playback endpoint and one `Source` per capture endpoint, named
+like the devices:
+
+    kubectl get sinks
+    NAME                                    NODE      CONNECTION   VOLUME   MUTE    CLAIM   CONNECTED   READY   AGE
+    kitchen-pci-0000-00-1f-3-hdmi-0         kitchen   hdmi         100      false           True        True    2m
+    usb-0573-1573-a34004801402-usb-audio    kitchen   usb          100      false           True        True    2m
+
+    kubectl get sources
+    NAME                                            NODE      CONNECTION   VOLUME   MUTE    CLAIM   CONNECTED   READY   AGE
+    usb-0573-1573-a34004801402-usb-audio-capture    kitchen   usb          100      false           True        True    2m
 
 An output whose monitor answers publishes the monitor's attributes.
 An HDMI output with no monitor publishes too, with taints, so a
@@ -191,7 +224,8 @@ slice holds one device for each paired Bluetooth speaker. A speaker
 that is switched off publishes with taints, the same way an HDMI
 output with no monitor does.
 
-Now [play sound to an output](/docs/guides/claim/).
+Now [play sound to an output](/docs/guides/claim/), or
+[set what an endpoint rests at](/docs/guides/rest/).
 
 ## Remove the operator
 
@@ -204,10 +238,12 @@ published one:
     kubectl delete resourceslice <node>-audio.liken.sh
 
 This leaves the `DeviceClasses` in place: `sound-card` from the
-base, and the consumer class you created. Delete them when no
-other claim names them:
+base, and the consumer classes you created. Delete them when no
+other claim names them. Deleting `crds.yaml` deletes every `Sink`
+and `Source` with it, and the declarations they hold:
 
-    kubectl delete deviceclass sound-card audio-output
+    kubectl delete deviceclass sound-card audio-sink audio-source
+    kubectl delete -f https://audio.liken.sh/deploy/crds.yaml
 
 The second step is yours because the operator never deletes its
 slice. A device that leaves the inventory while a claim still names

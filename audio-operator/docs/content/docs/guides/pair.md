@@ -50,7 +50,7 @@ to one monitor, whichever connector it is on.
                   tolerationSeconds: 30
           - name: speakers
             exactly:
-              deviceClassName: audio-output
+              deviceClassName: audio-sink
               tolerations:
                 - key: audio.liken.sh/disconnected
                   operator: Exists
@@ -123,7 +123,7 @@ Each driver applies its own edits, and they do not collide:
 | display | `DISPLAY_APP_ID` | the allocated output's app-id |
 | audio | mount | `/var/run/audio.liken.sh`, read-only |
 | audio | `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
-| audio | `PIPEWIRE_NODE` | the allocated output's sink name |
+| audio | `PIPEWIRE_NODE` | the allocated output's node name |
 
 The display operator points `XDG_RUNTIME_DIR` at its own directory,
 and that does not misroute the audio: a `PIPEWIRE_REMOTE` that

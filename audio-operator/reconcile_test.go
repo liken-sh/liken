@@ -28,7 +28,7 @@ func testReconciler(t *testing.T, api *slicePublishFixture, graph func(context.C
 	// PipeWire starts, and every later pass compares against that
 	// document, so a reconciler starts out agreeing with the card it
 	// was built over.
-	outputs, err := readOutputs()
+	outputs, err := readEndpoints()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,14 +102,15 @@ func TestReconcileForgetsFailuresAfterAGoodRead(t *testing.T) {
 
 // An empty enumeration is never a real state of a machine this
 // operator runs on, so the pass publishes nothing and does not read
-// the graph.
-func TestReconcileSkipsTheWriteWhenTheCardHasNoOutput(t *testing.T) {
+// the graph. A capture node is not an empty enumeration: it is the
+// card's microphone, and the operator publishes it as a source.
+func TestReconcileSkipsTheWriteWhenTheCardHasNoPCMDevice(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	read := false
 	operator := testReconciler(t, api, func(context.Context) (pwGraph, error) {
 		read = true
 		return outputGraph(map[pcmAddress]string{}), nil
-	}, "controlC0", "pcmC0D0c")
+	}, "controlC0", "timer", "seq")
 
 	if err := operator.reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -137,8 +138,8 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 	if len(devices) != 2 {
 		t.Fatalf("devices = %+v, want two", devices)
 	}
-	if got := stringAttribute(t, devices[0], "output"); got != "card0-pcm0" {
-		t.Errorf("output = %q", got)
+	if got := stringAttribute(t, devices[0], sinkAttribute); got != testAnalogName {
+		t.Errorf("sink = %q", got)
 	}
 	if len(devices[0].Taints) != 0 {
 		t.Errorf("the output with a sink is tainted: %+v", devices[0].Taints)
@@ -187,7 +188,9 @@ func TestReconcilePublishesWhenTheCardsPCMDevicesChange(t *testing.T) {
 func TestReconcilePublishesTheSpeakersBluetoothdReports(t *testing.T) {
 	api := &slicePublishFixture{}
 	operator := testReconciler(t, api, staticGraph(pwGraph{
-		Outputs: map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)},
+		Nodes: map[nodeAddress]pwNode{
+			{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}: {Name: sinkNodeName(0, 0)},
+		},
 		Speakers: map[string]bluezSink{
 			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
 		},
@@ -201,7 +204,7 @@ func TestReconcilePublishesTheSpeakersBluetoothdReports(t *testing.T) {
 	if len(devices) != 2 {
 		t.Fatalf("devices = %+v, want the output and the speaker", devices)
 	}
-	if devices[0].Name != testSpeakerName || devices[1].Name != "card0-pcm0" {
+	if devices[0].Name != testSpeakerName || devices[1].Name != testAnalogName {
 		t.Fatalf("names = %q, %q", devices[0].Name, devices[1].Name)
 	}
 	if len(devices[0].Taints) != 0 {
@@ -216,7 +219,9 @@ func TestReconcilePublishesTheSpeakersBluetoothdReports(t *testing.T) {
 func TestReconcileKeepsTheSpeakersWhenBluetoothdStopsAnswering(t *testing.T) {
 	api := &slicePublishFixture{}
 	graph := pwGraph{
-		Outputs: map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)},
+		Nodes: map[nodeAddress]pwNode{
+			{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}: {Name: sinkNodeName(0, 0)},
+		},
 		Speakers: map[string]bluezSink{
 			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
 		},
@@ -226,7 +231,7 @@ func TestReconcileKeepsTheSpeakersWhenBluetoothdStopsAnswering(t *testing.T) {
 		if answering {
 			return graph, nil
 		}
-		return outputGraph(graph.Outputs), nil
+		return pwGraph{Nodes: graph.Nodes, Speakers: map[string]bluezSink{}}, nil
 	}, "pcmC0D0p")
 	operator.speakers = func() (map[string]speaker, error) {
 		if answering {

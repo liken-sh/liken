@@ -1,0 +1,166 @@
+[
+  {
+    "id": 32,
+    "type": "PipeWire:Interface:Core",
+    "info": {
+      "props": {
+        "core.name": "pipewire-0"
+      }
+    }
+  },
+  {
+    "id": 49,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.alsa.pcm.sink",
+        "media.class": "Audio/Sink",
+        "node.name": "liken.audio.card0-pcm0",
+        "api.alsa.path": "hw:0,0",
+        "liken.audio.card": "0",
+        "liken.audio.pcm": "0",
+        "object.serial": 49
+      },
+      "params": {
+        "Props": [
+          {
+            "volume": 1.0,
+            "mute": false,
+            "channelVolumes": [ 1.0, 1.0 ],
+            "channelMap": [ "FL", "FR" ]
+          }
+        ],
+        "Format": []
+      }
+    }
+  }
+]
+[
+  {
+    "id": 62,
+    "type": "PipeWire:Interface:Device",
+    "info": {
+      "props": {
+        "device.api": "bluez5",
+        "device.name": "bluez_card.A0_AB_51_33_B7_12",
+        "api.bluez5.address": "A0:AB:51:33:B7:12",
+        "api.bluez5.connection": "connected",
+        "object.serial": 62
+      },
+      "params": {
+        "PropInfo": [
+          {
+            "id": "bluetoothAudioCodec",
+            "description": "Air codec",
+            "type": { "default": 1, "alt1": 1, "alt2": 6 },
+            "labels": [ 1, "SBC", 6, "aptX" ]
+          }
+        ],
+        "Props": [
+          {
+            "bluetoothAudioCodec": "sbc"
+          }
+        ],
+        "Route": [
+          {
+            "index": 1,
+            "direction": "Output",
+            "device": 0,
+            "name": "speaker-output",
+            "description": "Speaker",
+            "priority": 0,
+            "available": "unknown",
+            "profiles": [ 1 ],
+            "devices": [ 0 ],
+            "props": {
+              "mute": false,
+              "channelVolumes": [ 0.5, 0.5 ],
+              "volumeStep": 0.0078125,
+              "channelMap": [ "FL", "FR" ]
+            },
+            "save": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": 63,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.bluez5.media.sink",
+        "media.class": "Audio/Sink",
+        "node.name": "bluez_output.A0_AB_51_33_B7_12.1",
+        "device.api": "bluez5",
+        "device.id": 62,
+        "api.bluez5.address": "A0:AB:51:33:B7:12",
+        "api.bluez5.codec": "sbc",
+        "api.bluez5.profile": "a2dp-sink",
+        "card.profile.device": "0",
+        "object.serial": 63
+      },
+      "params": {
+        "Props": [
+          {
+            "volume": 0.4,
+            "mute": false,
+            "channelVolumes": [ 0.5, 0.5 ],
+            "channelMap": [ "FL", "FR" ]
+          }
+        ],
+        "Format": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S16LE",
+            "rate": 44100,
+            "channels": 2,
+            "position": [ "FL", "FR" ]
+          }
+        ]
+      }
+    }
+  }
+]
+[
+  {
+    "id": 63,
+    "info": null
+  },
+  {
+    "id": 49,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.alsa.pcm.sink",
+        "media.class": "Audio/Sink",
+        "node.name": "liken.audio.card0-pcm0",
+        "api.alsa.path": "hw:0,0",
+        "liken.audio.card": "0",
+        "liken.audio.pcm": "0",
+        "object.serial": 49
+      },
+      "params": {
+        "Props": [
+          {
+            "volume": 1.0,
+            "mute": true,
+            "channelVolumes": [ 0.25, 0.25 ],
+            "channelMap": [ "FL", "FR" ]
+          }
+        ],
+        "Format": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S32LE",
+            "rate": 48000,
+            "channels": 2,
+            "position": [ "FL", "FR" ]
+          }
+        ]
+      }
+    }
+  }
+]

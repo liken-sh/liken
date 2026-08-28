@@ -1,0 +1,474 @@
+# The endpoint API: a Sink for every playback endpoint and a Source
+# for every capture endpoint the operator publishes. The operator
+# creates both, names them by the device name the ResourceSlice
+# carries, and writes the whole of status. The spec fields are the
+# cluster owner's to write, and the operator writes a declared field
+# back to the hardware when the endpoint diverges from it.
+#
+# The claim and the resource answer two different needs. A pod that
+# plays or records still holds the endpoint through a claim, and it
+# still has its own stream volume. The resource holds everything else
+# about the endpoint: its resting level, its mute, and the card's own
+# controls. Any writer with the right RBAC can set those, whether or
+# not a claim holds the endpoint.
+#
+# The two kinds have the same shape. They are two kinds and not one
+# kind with a direction field because `kubectl get sinks` and
+# `kubectl get sources` answer two different questions, and because a
+# Role can grant one without the other.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sinks.audio.liken.sh
+spec:
+  group: audio.liken.sh
+  # An endpoint is hardware on a machine and belongs to no
+  # namespace, so the resource is cluster-scoped, like a Node.
+  scope: Cluster
+  names:
+    kind: Sink
+    listKind: SinkList
+    plural: sinks
+    singular: sink
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        # status is a subresource so that the operator's writes of
+        # status and a person's writes of spec never overwrite each
+        # other.
+        status: {}
+      additionalPrinterColumns:
+        - name: Node
+          type: string
+          jsonPath: .status.node
+        - name: Connection
+          type: string
+          jsonPath: .status.connectionType
+        - name: Volume
+          type: integer
+          jsonPath: .status.observed.volume
+        - name: Mute
+          type: boolean
+          jsonPath: .status.observed.mute
+        - name: Claim
+          type: string
+          jsonPath: .status.claim.name
+        - name: Connected
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Connected")].status
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "One playback endpoint: an analog jack, an HDMI or DisplayPort output, a USB card's playback side, or a Bluetooth speaker. It carries what the hardware declares and what the endpoint rests at."
+          properties:
+            spec:
+              type: object
+              description: "The settings the endpoint rests at. Every field is optional: the operator writes a declared field back when the endpoint diverges from it, and it never writes a field the spec leaves out."
+              # A writer clears the spec by applying one with nothing
+              # in it. Server-side apply prunes the empty object away,
+              # and validation would then read spec as null and refuse
+              # the write. The default puts the empty object back.
+              default: {}
+              properties:
+                volume:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                  description: "The level the endpoint plays at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. It applies at once, under a claim or not, and a claim holder's own stream fader is a separate level above it."
+                mute:
+                  type: boolean
+                  description: "Whether the endpoint is silent. It lands where volume lands, and it applies at once."
+                controls:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: "The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range, a boolean control takes on or off, and an enumerated control takes one of its values. The operator writes a control only when it is stated here, and a card with two endpoints that share a control obeys the write that came last, because the hardware has one register."
+                codec:
+                  type: string
+                  description: "The A2DP codec a Bluetooth speaker rests at, one of status.bluetooth.codecs. A claim's own codec parameter wins while the claim holds the speaker, and a change here waits for the claim to end, because a codec switch replaces the speaker's node and interrupts playback. It is ignored on an ALSA endpoint."
+            status:
+              type: object
+              description: "What the hardware declares and what the operator last read. The operator owns every field here."
+              properties:
+                node:
+                  type: string
+                  description: "The machine that holds the endpoint now. For a USB card with a serial, and for a Bluetooth speaker, the value changes when the hardware moves."
+                location:
+                  type: string
+                  description: "Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6. Absent on a Bluetooth speaker."
+                connectionType:
+                  type: string
+                  enum: [analog, hdmi, displayport, usb, bluetooth]
+                  description: "How sound leaves the machine."
+                card:
+                  type: object
+                  description: "The ALSA card the endpoint is on. The number and the id are this boot's, and a second card can change both, so nothing durable is keyed to them."
+                  properties:
+                    number:
+                      type: integer
+                      description: "The card number the kernel assigned this boot."
+                    id:
+                      type: string
+                      description: "The card's short id, such as PCH, with the suffix the kernel appends on a clash, such as PCH_1."
+                    driver:
+                      type: string
+                      description: "The kernel driver that binds the card, such as HDA-Intel."
+                    name:
+                      type: string
+                      description: "The card's name, as the driver states it, such as HDA Intel PCH."
+                pcm:
+                  type: object
+                  description: "The PCM device the endpoint plays through."
+                  properties:
+                    device:
+                      type: integer
+                      description: "The PCM device number on the card, this boot."
+                    id:
+                      type: string
+                      description: "The driver's name for the PCM, such as HDMI 0 or USB Audio. It is the part of the endpoint's name that outlives the number."
+                monitor:
+                  type: object
+                  description: "The monitor an HDMI or DisplayPort slot feeds, from the ELD the graphics driver wrote into the card. Absent while no monitor answers, and absent on every other connection type. An Intel HDMI codec binds a pin to the first free slot when a monitor appears, so a card with two monitors can swap which slot feeds which between plug events, and this object is where that shows."
+                  properties:
+                    display:
+                      type: string
+                      description: "The name of the Display the display operator publishes for the same monitor, which is the pairing identity monitor.liken.sh/id."
+                    manufacturer:
+                      type: string
+                      description: "The monitor's three-letter PNP id, such as GSM."
+                    product:
+                      type: string
+                      description: "The monitor's product code, four lowercase hexadecimal digits."
+                    name:
+                      type: string
+                      description: "The monitor's name, from the same EDID descriptor the Display reports as model."
+                bluetooth:
+                  type: object
+                  description: "The speaker behind a Bluetooth endpoint. Absent on every other connection type."
+                  properties:
+                    address:
+                      type: string
+                      description: "The speaker's address, uppercase with colons."
+                    name:
+                      type: string
+                      description: "The name the speaker reports for itself."
+                    pairing:
+                      type: string
+                      description: "The name of the Pairing the bluetooth operator holds for this speaker, which is the address in lowercase with dashes."
+                    codec:
+                      type: string
+                      description: "The A2DP codec the transport negotiated, present while the speaker is connected."
+                    codecs:
+                      type: array
+                      items:
+                        type: string
+                      description: "Every codec the speaker and this image both support, the one playing first."
+                nodeName:
+                  type: string
+                  description: "The PipeWire node a consumer's streams target, the same value a prepared claim delivers as PIPEWIRE_NODE. Absent while PipeWire holds no node for the endpoint."
+                format:
+                  type: object
+                  description: "The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running."
+                  properties:
+                    rate:
+                      type: integer
+                      description: "The sample rate in hertz."
+                    channels:
+                      type: integer
+                      description: "The channel count."
+                    positions:
+                      type: array
+                      items:
+                        type: string
+                      description: "The channel positions in order, in PipeWire's names: FL, FR, FC, LFE, RL, RR."
+                capabilities:
+                  type: object
+                  description: "The card's own controls that belong to this endpoint, keyed by the kernel's control name. A Playback control goes to the card's analog and USB sinks, and so does a control that names no direction, such as Auto-Mute Mode. An IEC958 Playback Switch goes to the HDMI slot of the same ordinal, and it is the only control an HDMI slot lists, because an HDMI PCM has no volume element. A jack control is not listed because it is read-only and feeds the Connected condition. A Bluetooth speaker lists nothing."
+                  additionalProperties:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [integer, boolean, enumerated]
+                        description: "What the control takes."
+                      min:
+                        type: integer
+                        description: "The smallest number an integer control accepts."
+                      max:
+                        type: integer
+                        description: "The largest number an integer control accepts."
+                      step:
+                        type: integer
+                        description: "The step between numbers an integer control accepts, absent when every number in the range is accepted."
+                      minDecibels:
+                        type: string
+                        description: "The level at min, in decibels, when the control declares one, as a decimal string such as -65.25. The string form keeps the value exact where a float would not."
+                      maxDecibels:
+                        type: string
+                        description: "The level at max, in decibels, when the control declares one."
+                      values:
+                        type: array
+                        items:
+                          type: string
+                        description: "Every value an enumerated control accepts."
+                      channels:
+                        type: integer
+                        description: "How many channels the control carries. A write from spec sets every channel to the same value."
+                observed:
+                  type: object
+                  description: "The last value the operator read for each setting. The operator reads the card's control device on every event it delivers, and PipeWire's graph on every change it prints, so a change a person made with a knob or a client shows here without a poll."
+                  properties:
+                    volume:
+                      type: integer
+                      description: "The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume."
+                    mute:
+                      type: boolean
+                      description: "Whether the endpoint is silent."
+                    codec:
+                      type: string
+                      description: "The codec a Bluetooth speaker plays with now."
+                    controls:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value."
+                claim:
+                  type: object
+                  description: "The claim that holds the endpoint now, and absent between holders. It answers which workload has the speakers."
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                conditions:
+                  type: array
+                  description: "Connected reports that the endpoint can play now: a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and always on USB. Ready reports that PipeWire holds a node for it. The two carry the same facts as the no-monitor and no-sink taints on the device, for a person rather than the scheduler."
+                  items:
+                    type: object
+                    required: [type, status, reason, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sources.audio.liken.sh
+spec:
+  group: audio.liken.sh
+  scope: Cluster
+  names:
+    kind: Source
+    listKind: SourceList
+    plural: sources
+    singular: source
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Node
+          type: string
+          jsonPath: .status.node
+        - name: Connection
+          type: string
+          jsonPath: .status.connectionType
+        - name: Volume
+          type: integer
+          jsonPath: .status.observed.volume
+        - name: Mute
+          type: boolean
+          jsonPath: .status.observed.mute
+        - name: Claim
+          type: string
+          jsonPath: .status.claim.name
+        - name: Connected
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Connected")].status
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "One capture endpoint: an analog input, or a USB card's capture side. A Bluetooth headset's microphone is not published yet. An HDA card serves several input jacks through one capture PCM and picks the live jack with its Input Source control, so the Source is the PCM and the jack is a control."
+          properties:
+            spec:
+              type: object
+              description: "The settings the endpoint rests at. Every field is optional: the operator writes a declared field back when the endpoint diverges from it, and it never writes a field the spec leaves out."
+              default: {}
+              properties:
+                volume:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                  description: "The gain PipeWire applies to what the endpoint captures, as a percent of unity, applied to every channel alike. It applies at once, under a claim or not."
+                mute:
+                  type: boolean
+                  description: "Whether the endpoint captures silence. It applies at once. A closed microphone is this field, on every Source, and kubectl get sources shows which ones are open."
+                controls:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: "The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Capture Volume or Input Source. An integer control takes a number within its range, a boolean control takes on or off, and an enumerated control takes one of its values. The operator writes a control only when it is stated here."
+            status:
+              type: object
+              description: "What the hardware declares and what the operator last read. The operator owns every field here."
+              properties:
+                node:
+                  type: string
+                  description: "The machine that holds the endpoint now. For a USB card with a serial, the value changes when the card moves."
+                location:
+                  type: string
+                  description: "Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6."
+                connectionType:
+                  type: string
+                  enum: [analog, usb]
+                  description: "How sound enters the machine."
+                card:
+                  type: object
+                  description: "The ALSA card the endpoint is on. The number and the id are this boot's, and a second card can change both, so nothing durable is keyed to them."
+                  properties:
+                    number:
+                      type: integer
+                      description: "The card number the kernel assigned this boot."
+                    id:
+                      type: string
+                      description: "The card's short id, such as PCH, with the suffix the kernel appends on a clash, such as PCH_1."
+                    driver:
+                      type: string
+                      description: "The kernel driver that binds the card, such as USB-Audio."
+                    name:
+                      type: string
+                      description: "The card's name, as the driver states it, such as HDA Intel PCH."
+                pcm:
+                  type: object
+                  description: "The PCM device the endpoint captures through."
+                  properties:
+                    device:
+                      type: integer
+                      description: "The PCM device number on the card, this boot."
+                    id:
+                      type: string
+                      description: "The driver's name for the PCM, such as USB Audio. It is the part of the endpoint's name that outlives the number."
+                nodeName:
+                  type: string
+                  description: "The PipeWire node a consumer's capture streams target, the same value a prepared claim delivers as PIPEWIRE_NODE. Absent while PipeWire holds no node for the endpoint."
+                format:
+                  type: object
+                  description: "The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running."
+                  properties:
+                    rate:
+                      type: integer
+                      description: "The sample rate in hertz."
+                    channels:
+                      type: integer
+                      description: "The channel count."
+                    positions:
+                      type: array
+                      items:
+                        type: string
+                      description: "The channel positions in order, in PipeWire's names: FL, FR, MONO."
+                capabilities:
+                  type: object
+                  description: "The card's own controls that belong to this endpoint, keyed by the kernel's control name. A Capture control goes to the card's sources, and a jack control is not listed because it is read-only and feeds the Connected condition."
+                  additionalProperties:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        enum: [integer, boolean, enumerated]
+                        description: "What the control takes."
+                      min:
+                        type: integer
+                        description: "The smallest number an integer control accepts."
+                      max:
+                        type: integer
+                        description: "The largest number an integer control accepts."
+                      step:
+                        type: integer
+                        description: "The step between numbers an integer control accepts, absent when every number in the range is accepted."
+                      minDecibels:
+                        type: string
+                        description: "The level at min, in decibels, when the control declares one, as a decimal string such as -65.25."
+                      maxDecibels:
+                        type: string
+                        description: "The level at max, in decibels, when the control declares one."
+                      values:
+                        type: array
+                        items:
+                          type: string
+                        description: "Every value an enumerated control accepts."
+                      channels:
+                        type: integer
+                        description: "How many channels the control carries. A write from spec sets every channel to the same value."
+                observed:
+                  type: object
+                  description: "The last value the operator read for each setting. The operator reads the card's control device on every event it delivers, and PipeWire's graph on every change it prints, so a change a person made with a knob or a client shows here without a poll."
+                  properties:
+                    volume:
+                      type: integer
+                      description: "The gain PipeWire applies, as a percent of unity."
+                    mute:
+                      type: boolean
+                      description: "Whether the endpoint captures silence."
+                    controls:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value."
+                claim:
+                  type: object
+                  description: "The claim that holds the endpoint now, and absent between holders."
+                  properties:
+                    namespace:
+                      type: string
+                    name:
+                      type: string
+                conditions:
+                  type: array
+                  description: "Connected reports that the endpoint can capture now: a plug in an analog jack, and always on USB. Ready reports that PipeWire holds a node for it."
+                  items:
+                    type: object
+                    required: [type, status, reason, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]

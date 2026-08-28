@@ -24,6 +24,34 @@
         "liken.audio.card": "0",
         "liken.audio.pcm": "3",
         "object.serial": 46
+      },
+      "params": {
+        "Props": [
+          {
+            "volume": 1.0,
+            "mute": true,
+            "channelVolumes": [ 0.5, 0.5 ],
+            "channelMap": [ "FL", "FR" ],
+            "softMute": false,
+            "softVolumes": [ 0.5, 0.5 ]
+          },
+          {
+            "device": "hw:0,3",
+            "deviceName": "",
+            "cardName": "",
+            "latencyOffsetNsec": 0
+          }
+        ],
+        "Format": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S32LE",
+            "rate": 48000,
+            "channels": 2,
+            "position": [ "FL", "FR" ]
+          }
+        ]
       }
     }
   },
@@ -43,6 +71,62 @@
         "liken.audio.card": "0",
         "liken.audio.pcm": "0",
         "object.serial": 49
+      },
+      "params": {
+        "Props": [
+          {
+            "volume": 1.0,
+            "mute": false,
+            "channelVolumes": [],
+            "channelMap": [],
+            "softMute": false,
+            "softVolumes": []
+          },
+          {
+            "device": "hw:0,0",
+            "deviceName": "",
+            "cardName": "",
+            "latencyOffsetNsec": 0
+          }
+        ],
+        "Format": []
+      }
+    }
+  },
+  {
+    "id": 50,
+    "type": "PipeWire:Interface:Node",
+    "info": {
+      "props": {
+        "factory.name": "api.alsa.pcm.source",
+        "media.class": "Audio/Source",
+        "node.name": "liken.audio.card0-pcm0c",
+        "node.description": "liken audio input, ALSA card 0 device 0",
+        "api.alsa.path": "hw:0,0",
+        "api.alsa.pcm.card": "0",
+        "liken.audio.card": "0",
+        "liken.audio.pcm": "0",
+        "object.serial": 50
+      },
+      "params": {
+        "Props": [
+          {
+            "volume": 1.0,
+            "mute": false,
+            "channelVolumes": [ 1.0 ],
+            "channelMap": [ "MONO" ]
+          }
+        ],
+        "Format": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S16LE",
+            "rate": 44100,
+            "channels": 1,
+            "position": [ "MONO" ]
+          }
+        ]
       }
     }
   },

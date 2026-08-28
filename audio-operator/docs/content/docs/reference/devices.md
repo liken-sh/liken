@@ -8,12 +8,20 @@ toc: true
 
 `audio-operator` publishes one
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device for each playback PCM device on the sound card its pod
-claims from [`liken`](https://liken.sh/docs/): each HDMI or
-DisplayPort output, and the analog jack. Membership follows the
-card's playback PCM devices, whether or not a cable is plugged into
-each one. An output whose monitor is unplugged stays in the slice,
-with taints, so a claim on it parks instead of failing.
+device for each PCM device on the sound card its pod claims from
+[`liken`](https://liken.sh/docs/): a sink for each HDMI or
+DisplayPort output, the analog jack, and a USB card's playback
+side, and a source for each capture side. Membership follows the
+card's PCM devices, whether or not a cable is plugged into each
+one. An output whose monitor is unplugged stays in the slice, with
+taints, so a claim on it parks instead of failing.
+
+Every device is also a resource of its own, a
+[`Sink`](/docs/reference/sinks/) or a
+[`Source`](/docs/reference/sources/) with the same name. A claim
+selects a device from the slice. The resource is where you read
+what the endpoint is doing and set what it should rest at, with no
+claim involved.
 
 On a machine whose pod also claimed a Bluetooth media bus from the
 `bluetooth.liken.sh` driver, the operator publishes one more device
@@ -21,9 +29,9 @@ for each paired Bluetooth speaker. Membership there is the paired
 set: a speaker that is switched off stays in the slice with taints,
 and a speaker leaves it only when somebody unpairs it.
 
-To a consumer, a speaker and an HDMI output are the same kind of
-device. Both publish under `audio.liken.sh`, both select the same
-way, and both deliver the same socket and a node name.
+To a consumer, a speaker, an HDMI output, and a microphone are the
+same kind of device. All publish under `audio.liken.sh`, all select
+the same way, and all deliver the same socket and a node name.
 
 The operator publishes only A2DP sinks. HFP and HSP, the headset
 profiles that add a microphone, would need a socket in the host's
@@ -41,17 +49,17 @@ itself publishes:
       devices:
         - name: a0-ab-51-33-b7-12
           attributes:
-            output: {string: a0-ab-51-33-b7-12}
+            sink: {string: a0-ab-51-33-b7-12}
             address: {string: "A0:AB:51:33:B7:12"}
             name: {string: Kitchen Speaker}
             connectionType: {string: bluetooth}
             connected: {bool: true}
             codec: {string: sbc}
             codecs: {string: "sbc aptx sbc_xq aptx_ll"}
-            sinkName: {string: bluez_output.A0_AB_51_33_B7_12.1}
-        - name: card0-pcm3
+            nodeName: {string: bluez_output.A0_AB_51_33_B7_12.1}
+        - name: kitchen-pci-0000-00-1f-3-hdmi-0
           attributes:
-            output: {string: card0-pcm3}
+            sink: {string: kitchen-pci-0000-00-1f-3-hdmi-0}
             card: {int: 0}
             pcm: {int: 3}
             connectionType: {string: hdmi}
@@ -62,41 +70,59 @@ itself publishes:
             lpcmMaxRateHz: {int: 48000}
             lpcmBitDepths: {string: "16 20 24"}
             speakers: {string: FL/FR}
-            sinkName: {string: liken.audio.card0-pcm3}
+            nodeName: {string: liken.audio.card0-pcm3}
             monitor.liken.sh/id: {string: gsm-5b09-lg-ultrawide}
-        - name: card0-pcm7
+        - name: usb-0573-1573-a34004801402-usb-audio-capture
           attributes:
-            output: {string: card0-pcm7}
+            source: {string: usb-0573-1573-a34004801402-usb-audio-capture}
+            card: {int: 1}
+            pcm: {int: 0}
+            connectionType: {string: usb}
+            nodeName: {string: liken.audio.card1-pcm0c}
+        - name: kitchen-pci-0000-00-1f-3-hdmi-1
+          attributes:
+            sink: {string: kitchen-pci-0000-00-1f-3-hdmi-1}
             card: {int: 0}
             pcm: {int: 7}
-            sinkName: {string: liken.audio.card0-pcm7}
+            nodeName: {string: liken.audio.card0-pcm7}
           taints:
             - key: audio.liken.sh/disconnected
               effect: NoExecute
             - key: audio.liken.sh/no-monitor
               effect: NoSchedule
 
-## The device class
+## The device classes
 
 A consumer claims through a
 [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-that selects every device this driver publishes:
+that selects one direction of what this driver publishes. A sink
+carries the `sink` attribute and a source carries `source`, so a
+class selects on the presence of one:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
     metadata:
-      name: audio-output
+      name: audio-sink
     spec:
       selectors:
         - cel:
-            expression: device.driver == "audio.liken.sh"
+            expression: has(device.attributes["audio.liken.sh"].sink)
+    ---
+    apiVersion: resource.k8s.io/v1
+    kind: DeviceClass
+    metadata:
+      name: audio-source
+    spec:
+      selectors:
+        - cel:
+            expression: has(device.attributes["audio.liken.sh"].source)
 
-You create this class, because a class a workload claims through
-is cluster policy, and this manual calls it `audio-output`
-throughout; it is yours to rename or narrow, the way a
-`StorageClass` is. The class alone allocates any output on the
-card. To name one, add a selector on the attributes below, as
-[Play sound to an output](/docs/guides/claim/) shows.
+You create these classes, because a class a workload claims through
+is cluster policy, and this manual calls them `audio-sink` and
+`audio-source` throughout; they are yours to rename or narrow, the
+way a `StorageClass` is. A class alone allocates any endpoint of
+its direction. To name one, add a selector on the attributes
+below, as [Play sound to an output](/docs/guides/claim/) shows.
 
 The base ships one class of its own, `sound-card`, and that one is
 not for consumers: the operator's own claim template names it, and
@@ -107,13 +133,15 @@ manual describes those raw devices.
 
 ## The attributes
 
-The device name is the ALSA card and PCM number, `card0-pcm3`. The
-number comes from the codec's pin order, which the driver enumerates
-the same way at every boot on the same hardware and kernel. It is
-not stable across machines, and a claim that must survive a kernel
-change selects on the monitor attributes instead. The name repeats
-as the `output` attribute because a CEL selector reads attributes
-and never the device's name.
+The device name is built from the hardware's own identity, so it
+survives a reboot and a second card: the node and the PCI address
+for an onboard card, the vendor, product, and serial for a USB card
+that has one, and the driver's own name for the PCM on the end,
+`hdmi-0` or `usb-audio`. A capture endpoint's name ends in
+`-capture`. The [`Sink` reference](/docs/reference/sinks/#the-name)
+gives the three forms. The name repeats as the `sink` or `source`
+attribute because a CEL selector reads attributes and never the
+device's name.
 
 A Bluetooth speaker's name is its peer MAC address in lowercase
 with dashes, `a0-ab-51-33-b7-12`, because a DRA device name must be
@@ -122,10 +150,11 @@ identity BlueZ carries that survives a reboot.
 
 | Attribute | Type | What it is |
 |---|---|---|
-| `output` | string | the device's name: `card0-pcm3` or `a0-ab-51-33-b7-12` |
-| `connectionType` | string | `hdmi`, `displayport`, `analog`, or `bluetooth` |
-| `sinkName` | string | the PipeWire node name a consumer's streams target |
-| `card` | int | the ALSA card number |
+| `sink` | string | a playback endpoint's name: `kitchen-pci-0000-00-1f-3-hdmi-0` or `a0-ab-51-33-b7-12` |
+| `source` | string | a capture endpoint's name: `usb-0573-1573-a34004801402-usb-audio-capture` |
+| `connectionType` | string | `hdmi`, `displayport`, `analog`, `usb`, or `bluetooth` |
+| `nodeName` | string | the PipeWire node name a consumer's streams target |
+| `card` | int | the ALSA card number, this boot |
 | `pcm` | int | the PCM device number on that card |
 | `manufacturer` | string | the monitor's three-letter PNP id, from the ELD: `GSM` is LG |
 | `product` | string | the monitor's product code, four lowercase hexadecimal digits |
@@ -142,24 +171,25 @@ identity BlueZ carries that survives a reboot.
 | `codecs` | string | every codec the speaker and this image both support, space separated, the one playing first, in the same spelling as `codec` |
 
 A selector reads an unqualified attribute through the driver's
-domain: `device.attributes["audio.liken.sh"].output`. The pairing
+domain: `device.attributes["audio.liken.sh"].sink`. The pairing
 attribute is the one exception; it reads as the key `id` under the
 domain `monitor.liken.sh`.
 
-Only `output` is always present. The rest divide by the kind of
-device that carries them: `card`, `pcm`, and the monitor attributes
-are an ALSA output's, and `address`, `name`, `connected`, and
-`codec` are a speaker's.
+Every device carries exactly one of `sink` and `source`. The rest
+divide by the kind of device that carries them: `card`, `pcm`, and
+the monitor attributes are an ALSA endpoint's, and `address`,
+`name`, `connected`, and `codec` are a speaker's.
 
 * The monitor attributes, `manufacturer` through
   `monitor.liken.sh/id`, are present on an HDMI or DisplayPort
   output whose monitor answers, and absent otherwise. They come from
   the ELD (EDID-Like Data), the block the graphics driver writes
   into the audio driver when a monitor answers.
-* `connectionType` is `analog` on the jack and `bluetooth` on a
-  speaker. On an HDMI or DisplayPort output it comes from the ELD
-  block, so an output with no monitor publishes no connection type.
-* `sinkName` is present while PipeWire holds a sink for the device,
+* `connectionType` is `analog` on the jack, `usb` on a USB card,
+  and `bluetooth` on a speaker. On an HDMI or DisplayPort output it
+  comes from the ELD block, so an output with no monitor publishes
+  no connection type.
+* `nodeName` is present while PipeWire holds a node for the device,
   and left out when the name passes the API's 64-character limit on
   a string attribute.
 * `codec` is present only while the speaker is connected, because a
@@ -215,7 +245,7 @@ A speaker leaves the slice only when somebody unpairs it.
 |---|---|---|---|
 | `audio.liken.sh/disconnected` | `NoExecute` | the output cannot play now | the consumer, with its own `tolerationSeconds` |
 | `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor answers on this HDMI or DisplayPort output | nobody |
-| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this device | nobody |
+| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this device, sink or source | nobody |
 
 A paired speaker that is switched off carries the `disconnected`
 and `no-sink` taints, which is what lets a consumer claim it before
@@ -250,12 +280,14 @@ holds every PCM device on the card.
 |---|---|
 | mount | `/var/run/audio.liken.sh`, read-only, the directory that holds PipeWire's socket |
 | `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
-| `PIPEWIRE_NODE` | the allocated device's sink name |
+| `PIPEWIRE_NODE` | the allocated device's node name |
 
-A Bluetooth speaker delivers the same three things. One PipeWire
-holds the card's sinks and the radio's, so a pod that claims an
-HDMI output and a speaker at once receives one socket and two node
-names.
+A Bluetooth speaker delivers the same three things, and so does a
+source: `PIPEWIRE_NODE` then names the capture node, which
+`target.object` honors for a capture stream as it does for
+playback. One PipeWire holds the card's nodes and the radio's, so a
+pod that claims an HDMI output and a speaker at once receives one
+socket and two node names.
 
 
 PipeWire's own client library reads both variables. A
@@ -268,19 +300,21 @@ Each variable holds one value, so two allocations delivered to one
 container overwrite, and the last wins. One container holds at most
 one output; a pod that plays into two outputs runs two containers.
 
-## The sinks PipeWire holds
+## The nodes PipeWire holds
 
-The sink a consumer targets is one this operator declared.
+The node a consumer targets is one this operator declared.
 WirePlumber's ALSA monitor enumerates cards through libudev, and a
 `liken` machine runs no udevd, so the monitor would build nothing.
 Instead, the pod's `declare` init container enumerates the card's
-playback PCM devices through the ALSA control interface and writes
-one sink declaration for each into a PipeWire configuration drop-in,
-before the daemons start. The sink name is derived from the ALSA
-address alone, `liken.audio.` plus the device name, so it is the
-same at every start on the same card:
+PCM devices through the ALSA control interface and writes one node
+declaration for each into a PipeWire configuration drop-in, before
+the daemons start: a sink for a playback PCM and a source for a
+capture PCM. The node name is derived from the ALSA address alone,
+`liken.audio.` plus the card and PCM numbers, with a `c` on a
+capture node, so it is the same at every start on the same card:
 
     liken.audio.card0-pcm3
+    liken.audio.card1-pcm0c
 
 Every PCM device is declared, monitor or not. PipeWire reads the
 declarations once, so the set is fixed while the daemon runs. A set
@@ -290,9 +324,13 @@ A PCM device that appears or leaves after that publishes with the
 `no-sink` taint until the pod is replaced.
 
 This path gives some things up. The card-profile machinery needs the
-ALSA monitor, so there is no hardware mixer volume and no profile
-switching: volume is PipeWire's software volume, and the channel
-layout comes from what is connected when PipeWire starts.
+ALSA monitor, so there is no profile switching, and the channel
+layout comes from what is connected when PipeWire starts. A node's
+volume is PipeWire's software gain. The card's own mixer controls
+are a separate surface, which the operator reads and writes through
+the ALSA control interface and publishes on the endpoint's
+[`Sink`](/docs/reference/sinks/) or
+[`Source`](/docs/reference/sources/).
 
 ## The Bluetooth sinks
 
@@ -349,7 +387,7 @@ driver for its own parameters:
         requests:
           - name: speaker
             exactly:
-              deviceClassName: audio-output
+              deviceClassName: audio-sink
 
 `codec` is the only parameter this driver reads, and an unknown
 key fails the prepare, so a typo stops the pod instead of playing
@@ -386,8 +424,11 @@ hands the pick back to WirePlumber.
 Every sink this pod builds is born at unity. The pod stores no
 volumes, and WirePlumber's own default for an unstored sink is 40
 percent, a desktop guard that would cost resolution on a machine
-that plays only what a claim delivers. Loudness belongs to the
-consumer's stream volume and to the hardware behind the jack.
+that plays only what a claim delivers. A consumer's stream fader is
+the consumer's own level. The endpoint's level is declared on its
+`Sink` as `spec.volume`, which
+[Set what an endpoint rests at](/docs/guides/rest/) shows, and an
+endpoint with no declaration rests at unity.
 
 A prepare on a Bluetooth speaker also writes unity on every
 channel of the sink it delivers, switch or no switch. A speaker

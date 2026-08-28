@@ -1,7 +1,7 @@
 package main
 
-// The sink nodes this operator declares to PipeWire, and why it
-// declares them instead of letting WirePlumber find them.
+// The sink and source nodes this operator declares to PipeWire, and
+// why it declares them instead of letting WirePlumber find them.
 //
 // WirePlumber finds ALSA cards through libudev. Its ALSA monitor asks
 // udev for the sound subsystem, builds one PipeWire device for each
@@ -11,12 +11,13 @@ package main
 // this operator publishes then has the no-sink taint, and no pod can
 // play through a machine that has working speakers.
 //
-// The operator needs no udev to find the hardware. readOutputs
-// enumerates the card's playback PCM devices from the nodes the claim
-// delivers, and reads each one's ELD through the control interface. So
-// the operator writes the nodes down for PipeWire rather than asking
-// it to discover them: one adapter object for each playback PCM,
-// declared in a PipeWire configuration drop-in.
+// The operator needs no udev to find the hardware. readEndpoints
+// enumerates the card's PCM devices from the nodes the claim
+// delivers, and reads each playback one's ELD through the control
+// interface. So the operator writes the nodes down for PipeWire
+// rather than asking it to discover them: one adapter object for each
+// PCM device, a sink for playback and a source for capture, declared
+// in a PipeWire configuration drop-in.
 //
 // An init container writes the drop-in and exits, and the PipeWire
 // container starts after it, so the pod's own container order puts
@@ -82,6 +83,19 @@ const (
 // collide with a node that anything else in the graph created.
 const nodeNamePrefix = "liken.audio."
 
+// sinkEndpoints picks the playback endpoints out of an inventory.
+// The startup wait asks PipeWire for a sink node, and only a
+// playback endpoint has one.
+func sinkEndpoints(outputs []alsaEndpoint) []alsaEndpoint {
+	playback := make([]alsaEndpoint, 0, len(outputs))
+	for _, output := range outputs {
+		if !output.Capture {
+			playback = append(playback, output)
+		}
+	}
+	return playback
+}
+
 // staticNode is one entry of PipeWire's context.objects list: the
 // factory that creates the object, the flags that say what happens
 // when it cannot be created, and the properties it is created with.
@@ -99,35 +113,51 @@ type staticNode struct {
 // operator publishes that one output with the no-sink taint.
 const nofail = "nofail"
 
-// sinkNodeName is the PipeWire node name for one output. It is derived
-// from the ALSA address and nothing else, so it is the same at every
-// start on the same card, which the sink name of a monitor-built node
-// is not.
+// sinkNodeName is the PipeWire node name for one playback PCM
+// device.
+//
+// The name is derived from the ALSA address and nothing else, so it
+// is the same at every start on the same card. It is not the device
+// name, which is built from the hardware's identity, for two
+// reasons. The declare init container writes this file before
+// PipeWire starts and receives no machine name to build that
+// identity with. And a node lives only as long as the graph does,
+// where a device name has to outlive a reboot.
 func sinkNodeName(card, pcm int) string {
-	return nodeNamePrefix + deviceName(card, pcm)
+	return nodeNamePrefix + alsaAddress(card, pcm)
 }
 
-// nodeConfig builds the whole drop-in for one card's outputs.
-//
-// Every playback PCM device gets a node, including an HDMI PCM with no
-// monitor on it. The PCM device is what the card has, and a monitor is
-// what somebody plugs into it. A node set that followed the cables
-// would change under a running graph, and a node set that follows the
-// card does not. An HDMI output with no monitor still has the
-// disconnected and no-monitor taints, because those two read the ELD
-// and not the node, so nothing schedules onto it while the cable is
-// out. Its node is there, so it has no no-sink taint.
-func nodeConfig(outputs []alsaOutput) string {
+// sourceNodeName is the PipeWire node name for one capture PCM
+// device. The trailing c is ALSA's own direction letter, the one
+// /dev/snd/pcmC0D0c carries. A card that records and plays through
+// one PCM device would otherwise declare two nodes under one name.
+func sourceNodeName(card, pcm int) string {
+	return sinkNodeName(card, pcm) + "c"
+}
+
+// nodeConfig builds the whole drop-in for one card's endpoints:
+// one sink node for every playback PCM device, monitor or not, and
+// one source node for every capture PCM device. A PCM device that
+// runs in both directions declares its sink first, so the file reads
+// in the order the devices appear.
+func nodeConfig(outputs []alsaEndpoint) string {
 	sorted := slices.Clone(outputs)
-	slices.SortFunc(sorted, func(a, b alsaOutput) int {
+	slices.SortFunc(sorted, func(a, b alsaEndpoint) int {
 		if a.Card != b.Card {
 			return a.Card - b.Card
 		}
-		return a.PCM - b.PCM
+		if a.PCM != b.PCM {
+			return a.PCM - b.PCM
+		}
+		return boolOrder(a.Capture) - boolOrder(b.Capture)
 	})
 
 	objects := make([]staticNode, 0, len(sorted))
 	for _, output := range sorted {
+		if output.Capture {
+			objects = append(objects, sourceObject(output.Card, output.PCM))
+			continue
+		}
 		objects = append(objects, sinkObject(output.Card, output.PCM))
 	}
 	// encoding/json cannot fail on a slice of strings and maps of
@@ -148,16 +178,16 @@ func nodeConfig(outputs []alsaOutput) string {
 
 // configHeader explains the file to whoever finds it on a machine.
 // PipeWire's parser takes # to the end of the line as a comment.
-const configHeader = `# The claimed card's playback outputs, written by the pod's declare
-# init container before PipeWire starts, and written again by every
+const configHeader = `# The claimed card's endpoints, written by the pod's declare init
+# container before PipeWire starts, and written again by every
 # replacement pod. Editing this file achieves nothing.
 #
 # WirePlumber's ALSA monitor enumerates cards through libudev, and a
 # liken machine runs no udevd, so the monitor finds no card and builds
 # no sink. The operator enumerates the card itself, through the ALSA
 # control interface, and declares one sink node for each playback PCM
-# device here. The monitor stays off, on every host, so the graph has
-# one source.
+# device and one source node for each capture PCM device here. The
+# monitor stays off, on every host, so the graph has one writer.
 #
 # The syntax below is strict JSON, which is a subset of the SPA-JSON
 # that PipeWire reads. That is why every key is quoted and sorted, and
@@ -213,6 +243,41 @@ func sinkObject(card, pcm int) staticNode {
 	}
 }
 
+// sourceObject declares one capture PCM device as an audio source.
+//
+// It is the same adapter object as a sink with two values changed:
+// api.alsa.pcm.source opens the PCM device for capture, and the
+// media class puts the node on the other side of the graph. The
+// source node takes the same Props a sink does
+// (spa/plugins/alsa/alsa-pcm-source.c in pipewire 1.4.2), so a
+// volume and a mute reach it through the same write.
+func sourceObject(card, pcm int) staticNode {
+	return staticNode{
+		Factory: "adapter",
+		Flags:   []string{nofail},
+		Args: map[string]string{
+			"factory.name":      "api.alsa.pcm.source",
+			"api.alsa.path":     fmt.Sprintf("hw:%d,%d", card, pcm),
+			"api.alsa.pcm.card": fmt.Sprint(card),
+			"node.name":         sourceNodeName(card, pcm),
+			"node.description": fmt.Sprintf("liken audio input, ALSA card %d device %d",
+				card, pcm),
+			"media.class":    "Audio/Source",
+			nodeCardProperty: fmt.Sprint(card),
+			nodePCMProperty:  fmt.Sprint(pcm),
+		},
+	}
+}
+
+// boolOrder sorts false ahead of true, which puts a PCM device's
+// playback node ahead of its capture node.
+func boolOrder(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 // declareMode is the argument that selects the declaration mode. The
 // pod runs the image once in this mode, as an init container, and the
 // container exits when the drop-in is on disk.
@@ -230,7 +295,7 @@ const declareMode = "declare"
 // because its environment is where the claim's delivery states
 // whether a media bus came with it (bluez.go).
 func declare() {
-	outputs, err := readOutputs()
+	outputs, err := readEndpoints()
 	if err != nil {
 		fatal("reading the card's outputs: %v", err)
 	}
@@ -250,7 +315,7 @@ func declare() {
 
 // writeNodeConfig generates the drop-in and writes it where PipeWire
 // reads it. It returns the document it wrote.
-func writeNodeConfig(outputs []alsaOutput) (string, error) {
+func writeNodeConfig(outputs []alsaEndpoint) (string, error) {
 	document := nodeConfig(outputs)
 	if err := os.MkdirAll(pipewireConfigDir, 0o755); err != nil {
 		return "", fmt.Errorf("making %s: %w", pipewireConfigDir, err)
@@ -259,7 +324,8 @@ func writeNodeConfig(outputs []alsaOutput) (string, error) {
 	if err := os.WriteFile(path, []byte(document), 0o644); err != nil {
 		return "", fmt.Errorf("writing %s: %w", path, err)
 	}
-	fmt.Printf("declared %d sink node(s) to PipeWire in %s\n", len(outputs), path)
+	fmt.Printf("declared %d sink node(s) and %d source node(s) to PipeWire in %s\n",
+		len(sinkEndpoints(outputs)), len(outputs)-len(sinkEndpoints(outputs)), path)
 	return document, nil
 }
 

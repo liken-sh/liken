@@ -56,6 +56,47 @@
           {
             "bluetoothAudioCodec": "sbc"
           }
+        ],
+        "Route": [
+          {
+            "index": 0,
+            "direction": "Input",
+            "device": 1,
+            "name": "bluetooth-input",
+            "description": "Bluetooth Input",
+            "priority": 0,
+            "available": "unknown",
+            "info": { "props": [ "port.type", "bluetooth" ] },
+            "profiles": [ 2 ],
+            "devices": [ 1 ],
+            "props": {
+              "mute": false,
+              "channelVolumes": [ 1.0 ],
+              "channelMap": [ "MONO" ]
+            },
+            "save": false
+          },
+          {
+            "index": 1,
+            "direction": "Output",
+            "device": 0,
+            "name": "speaker-output",
+            "description": "Speaker",
+            "priority": 0,
+            "available": "unknown",
+            "info": { "props": [ "port.type", "speaker" ] },
+            "profiles": [ 1 ],
+            "devices": [ 0 ],
+            "props": {
+              "mute": true,
+              "channelVolumes": [ 0.25, 0.25 ],
+              "volumeStep": 0.0078125,
+              "channelMap": [ "FL", "FR" ],
+              "softVolumes": [ 0.25, 0.25 ],
+              "latencyOffsetNsec": 0
+            },
+            "save": false
+          }
         ]
       }
     }
@@ -88,6 +129,16 @@
             "mute": false,
             "channelVolumes": [ 0.064, 0.064 ],
             "channelMap": [ "FL", "FR" ]
+          }
+        ],
+        "Format": [
+          {
+            "mediaType": "audio",
+            "mediaSubtype": "raw",
+            "format": "S16LE",
+            "rate": 44100,
+            "channels": 2,
+            "position": [ "FL", "FR" ]
           }
         ]
       }

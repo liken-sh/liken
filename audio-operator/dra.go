@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -56,6 +57,15 @@ var (
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client *Client
+	// endpoints is what the last reconcile pass read from the
+	// hardware. A prepare call carries a device name and nothing
+	// else, and the name no longer holds the card and PCM numbers, so
+	// this is what resolves one.
+	endpoints *endpointInventory
+	// claims is which claim holds each device now. The plugin writes
+	// it and the reconcile pass reads it, so the two hold one object
+	// between them, the way they hold the inventory.
+	claims *preparedClaims
 	// graph reads PipeWire's graph. It is a field rather than a call
 	// to readGraph, so a test drives a prepare without a PipeWire
 	// behind it.
@@ -75,9 +85,11 @@ type draPlugin struct {
 // Every seam takes its real implementation here and a stand-in
 // only in a test, so this is the one place the production graph
 // read and the two writes are named together.
-func newDRAPlugin(client *Client) *draPlugin {
+func newDRAPlugin(client *Client, endpoints *endpointInventory, claims *preparedClaims) *draPlugin {
 	return &draPlugin{
 		client:        client,
+		endpoints:     endpoints,
+		claims:        claims,
 		graph:         readGraph,
 		setCodec:      setDeviceCodec,
 		setVolumes:    setNodeVolumes,
@@ -118,7 +130,7 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 // registration. The function removes stale sockets from a previous
 // pod first, because a bind to an orphaned socket file fails even
 // when nothing is listening on it.
-func serveDRAPlugin(ctx context.Context, client *Client) error {
+func serveDRAPlugin(ctx context.Context, client *Client, endpoints *endpointInventory, claims *preparedClaims) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
 	}
@@ -129,7 +141,7 @@ func serveDRAPlugin(ctx context.Context, client *Client) error {
 		return fmt.Errorf("the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
-	drav1.RegisterDRAPluginServer(pluginServer, newDRAPlugin(client))
+	drav1.RegisterDRAPluginServer(pluginServer, newDRAPlugin(client, endpoints, claims))
 	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")
@@ -207,6 +219,7 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 
 	var specDevices []cdiDevice
 	var devices []*drav1.Device
+	var held []string
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != DriverName {
 			// This is another driver's allocation in the same claim.
@@ -224,11 +237,11 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			return fail("the claim states the codec %s for %s, which is not a Bluetooth speaker",
 				codec, result.Device)
 		}
-		// A device with no sink right now leaves no name to give the
+		// A device with no node right now leaves no name to give the
 		// consumer. The pod waits in ContainerCreating, and the device's
 		// taints are what the scheduler and the eviction controller act
 		// on.
-		sink, err := deliveredSink(result.Device, graph)
+		node, err := endpointNode(p.endpoints, result.Device, graph)
 		if err != nil {
 			return fail("%v", err)
 		}
@@ -245,7 +258,7 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 					return fail("%v", err)
 				}
 				speakerSink = switched
-				sink = switched.Node
+				node = switched.Node
 			}
 			// The unity write sits on the delivery path, not inside
 			// the switch, so a claim that states no codec and a claim
@@ -255,10 +268,11 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 				return fail("%v", err)
 			}
 		}
+		held = append(held, result.Device)
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
-			ContainerEdits: sinkEdits(sink),
+			ContainerEdits: endpointEdits(node),
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,
@@ -272,6 +286,9 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			return fail("writing the CDI spec: %v", err)
 		}
 	}
+	// The record is written after the spec, so that a device the
+	// resource reports as held is a device whose consumer can start.
+	p.claims.prepared(claim.Uid, EndpointClaim{Namespace: claim.Namespace, Name: claim.Name}, held)
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
@@ -298,20 +315,22 @@ func (p *draPlugin) deliverAtUnity(ctx context.Context, address string, sink blu
 	return nil
 }
 
-// deliveredSink resolves one allocated device name to the PipeWire
-// node a consumer's streams must target. The name is the whole of
-// what a prepare call carries, so its shape decides which half of
-// the graph answers: card<n>-pcm<n> is an ALSA output, and six
-// dashed hexadecimal octets are a Bluetooth speaker. The two shapes
-// cannot collide, because an output's name always holds the word
-// card and a MAC never does.
-func deliveredSink(device string, graph pwGraph) (string, error) {
-	if card, pcm, ok := outputFromDeviceName(device); ok {
-		sink, ok := graph.Outputs[pcmAddress{Card: card, PCM: pcm}]
-		if !ok {
-			return "", fmt.Errorf("output %s has no PipeWire sink right now", device)
+// endpointNode resolves one allocated device name to the PipeWire
+// node a consumer's streams must target.
+//
+// The name is a lookup and not a parse. It is built from the
+// hardware's identity, so it holds no card and no PCM number, and
+// the inventory the reconcile pass published is what holds the
+// pair. A Bluetooth speaker is still six dashed hexadecimal octets
+// and still resolves from the name alone, because the address is
+// both the identity and the key.
+func endpointNode(endpoints *endpointInventory, device string, graph pwGraph) (string, error) {
+	if output, published := endpoints.lookup(device); published {
+		node, running := graph.Nodes[output.graphAddress()]
+		if !running {
+			return "", fmt.Errorf("%s %s has no PipeWire node right now", output.direction(), device)
 		}
-		return sink, nil
+		return node.Name, nil
 	}
 	if address, ok := speakerFromDeviceName(device); ok {
 		sink, ok := graph.Speakers[address]
@@ -334,9 +353,72 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 			resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{Error: err.Error()}
 			continue
 		}
+		p.claims.released(claim.Uid)
 		resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{}
 	}
 	return resp, nil
+}
+
+// preparedClaims is which claim holds each device now.
+//
+// The record is in memory and nowhere else. A prepare call is where
+// the claim's namespace and name arrive, and the CDI file the prepare
+// leaves behind carries the claim's UID alone, which names no claim a
+// reader can ask the API server for. So the plugin keeps the pair,
+// the resource reports it, and a pod that started before this pod
+// shows no claim until the kubelet prepares its claim again.
+//
+// The kubelet's calls and the reconcile pass both reach it, which is
+// why it holds a lock.
+type preparedClaims struct {
+	mutex sync.RWMutex
+	// holders answers status.claim, keyed by the allocated device
+	// name. devices is the other direction, because an unprepare call
+	// carries the claim's UID and no device at all.
+	holders map[string]EndpointClaim
+	devices map[string][]string
+}
+
+// prepared records one claim's devices. A nil record takes the write
+// and drops it, so a plugin built without one needs no branch.
+func (p *preparedClaims) prepared(uid string, claim EndpointClaim, devices []string) {
+	if p == nil || len(devices) == 0 {
+		return
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if p.holders == nil {
+		p.holders, p.devices = map[string]EndpointClaim{}, map[string][]string{}
+	}
+	for _, device := range devices {
+		p.holders[device] = claim
+	}
+	p.devices[uid] = devices
+}
+
+// released drops what one claim held.
+func (p *preparedClaims) released(uid string) {
+	if p == nil {
+		return
+	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	for _, device := range p.devices[uid] {
+		delete(p.holders, device)
+	}
+	delete(p.devices, uid)
+}
+
+// holder answers which claim holds one device, and nothing between
+// holders.
+func (p *preparedClaims) holder(device string) (EndpointClaim, bool) {
+	if p == nil {
+		return EndpointClaim{}, false
+	}
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+	claim, held := p.holders[device]
+	return claim, held
 }
 
 // draHealth is the device-health stream. The driver keeps it open and

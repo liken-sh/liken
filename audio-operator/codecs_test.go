@@ -414,9 +414,9 @@ func (f *fakePipeWire) read(context.Context) (pwGraph, error) {
 	defer f.mu.Unlock()
 	f.reads++
 	f.settle()
-	graph := pwGraph{Outputs: map[pcmAddress]string{}, Speakers: map[string]bluezSink{}}
+	graph := pwGraph{Nodes: map[nodeAddress]pwNode{}, Speakers: map[string]bluezSink{}}
 	for output, node := range f.outputs {
-		graph.Outputs[output] = node
+		graph.Nodes[nodeAddress{pcmAddress: output, Direction: directionSink}] = pwNode{Name: node}
 	}
 	if f.sink.Node != "" {
 		graph.Speakers[testSpeakerAddress] = f.sink
@@ -478,9 +478,9 @@ func codecPlugin(t *testing.T, claim string, pipewire *fakePipeWire) *draPlugin 
 	return plugin
 }
 
-// deliveredNode is the node name the claim's CDI file gives the
+// nodeInSpec is the node name the claim's CDI file gives the
 // consumer.
-func deliveredNode(t *testing.T, dir string) string {
+func nodeInSpec(t *testing.T, dir string) string {
 	t.Helper()
 	spec := readSpec(t, dir+"/audio.liken.sh-claim-1.json")
 	for _, variable := range spec.Devices[0].ContainerEdits.Env {
@@ -514,7 +514,7 @@ func TestPrepareSwitchesTheCodecTheClaimStates(t *testing.T) {
 	if !reflect.DeepEqual(pipewire.volumeWrites, unity) {
 		t.Errorf("volume writes = %+v, want %+v", pipewire.volumeWrites, unity)
 	}
-	if got := deliveredNode(t, dir); got != testSpeakerNode {
+	if got := nodeInSpec(t, dir); got != testSpeakerNode {
 		t.Errorf("delivered node = %q, want %q", got, testSpeakerNode)
 	}
 }
@@ -562,7 +562,7 @@ func TestPrepareDeliversASpeakerAtUnity(t *testing.T) {
 			if levels := pipewire.volumeWrites[0].Volumes; !reflect.DeepEqual(levels, []float64{1, 1}) {
 				t.Errorf("levels = %v, want unity on both channels", levels)
 			}
-			if got := deliveredNode(t, dir); got != testSpeakerNode {
+			if got := nodeInSpec(t, dir); got != testSpeakerNode {
 				t.Errorf("delivered node = %q, want %q", got, testSpeakerNode)
 			}
 		})
@@ -678,7 +678,7 @@ func TestPrepareRefusesACodecItCannotDeliver(t *testing.T) {
 		},
 		{
 			name:   "a codec on the card's own output",
-			device: "card0-pcm3",
+			device: testSinkName,
 			config: opaqueCodec(`{"codec": "sbc"}`),
 			says:   "not a Bluetooth speaker",
 		},
@@ -735,7 +735,7 @@ func TestPrepareLeavesTheCodecAloneWithNoConfigBlock(t *testing.T) {
 	if len(pipewire.codecWrites) != 0 {
 		t.Errorf("the driver wrote %+v for a claim that stated no codec", pipewire.codecWrites)
 	}
-	if got := deliveredNode(t, dir); got != testSpeakerNode {
+	if got := nodeInSpec(t, dir); got != testSpeakerNode {
 		t.Errorf("delivered node = %q, want %q", got, testSpeakerNode)
 	}
 }
@@ -764,5 +764,44 @@ func TestUnprepareLeavesTheCodecWhereTheClaimPutIt(t *testing.T) {
 	}
 	if len(pipewire.codecWrites) != writes {
 		t.Errorf("unprepare wrote %+v", pipewire.codecWrites[writes:])
+	}
+}
+
+// The resting switch and the prepare's switch are
+// the same code with the same bounds, and that the reconciler passes
+// the graph read it already has.
+func TestSpeakerCodecSwitchTakesTheProductionBounds(t *testing.T) {
+	sink := currentSink()
+	sink.Codec = "aptx"
+	read := staticGraph(speakerGraph(map[string]bluezSink{testSpeakerAddress: sink}))
+
+	change := speakerCodecSwitch(read)
+	if change.timeout != codecSwitchTimeout {
+		t.Errorf("timeout = %s, want %s", change.timeout, codecSwitchTimeout)
+	}
+	if change.interval != codecSwitchInterval {
+		t.Errorf("interval = %s, want %s", change.interval, codecSwitchInterval)
+	}
+
+	// The graph already reports the codec, so the wait answers with
+	// the speaker and writes nothing.
+	got, err := change.await(context.Background(), testSpeakerAddress, "aptx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Node != testSpeakerNode {
+		t.Errorf("sink = %+v", got)
+	}
+}
+
+// The codec list a status reports is read off the
+// graph value, in the device's own order.
+func TestCodecNamesReadOffTheGraphValue(t *testing.T) {
+	sink := bluezSink{Codecs: []bluezCodec{{ID: 1, Name: "sbc"}, {ID: 6, Name: "aptx"}}}
+	if got := sink.codecNames(); !reflect.DeepEqual(got, []string{"sbc", "aptx"}) {
+		t.Errorf("names = %v", got)
+	}
+	if got := (bluezSink{}).codecNames(); len(got) != 0 {
+		t.Errorf("a speaker that offers nothing lists %v", got)
 	}
 }

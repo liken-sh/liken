@@ -116,3 +116,42 @@ func assertQuiet(t *testing.T, out <-chan struct{}, within time.Duration) {
 	case <-time.After(within):
 	}
 }
+
+// Every event source ends in one wake, and one pass covers whatever
+// woke it. A control a person turned on the card and a spec somebody
+// edited both arrive here.
+func TestWakesCarriesEverySource(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	jacks := make(chan jackEvent, 1)
+	cards := make(chan controlEvent, 1)
+	pokes := make(chan struct{}, 1)
+	out := wakes(ctx, jacks, nil, cards, pokes)
+
+	cards <- controlEvent{Card: 0, Name: "Master Playback Volume", Mask: ctlEventMaskValue}
+	waitForWake(t, out, testLimit)
+
+	pokes <- struct{}{}
+	waitForWake(t, out, testLimit)
+}
+
+// A source that closes ends the merge, so the operator stops rather
+// than run on with no way to notice a monitor again.
+func TestWakesEndsWhenACardWatcherCloses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cards := make(chan controlEvent)
+	out := wakes(ctx, make(chan jackEvent), nil, cards, make(chan struct{}))
+	close(cards)
+
+	select {
+	case _, open := <-out:
+		if open {
+			t.Fatal("the merge emitted a wake after its source closed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the merge did not end when a source closed")
+	}
+}

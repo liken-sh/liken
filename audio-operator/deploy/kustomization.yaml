@@ -23,6 +23,7 @@ namespace: liken-system
 # object, and kubectl routes the request by the scope it reads from
 # discovery, not from the object.
 resources:
+  - crds.yaml
   - deviceclasses.yaml
   - rbac.yaml
   - operator.yaml

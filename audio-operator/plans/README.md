@@ -16,6 +16,21 @@ and this operator's own instance,
 The README states how to use the operator. These documents state why it
 is built the way it is, and what it still owes an answer to.
 
+## Planned
+
+These plans are designed. Each keeps its number and moves to
+[`completed/`](completed/) when it is built and drilled.
+
+* [07, Sinks and sources](07-sinks-and-sources.md). A cluster-scoped
+  `Sink` for every playback endpoint and a `Source` for every
+  capture endpoint, with a `status` that reports the card's own
+  controls and what the operator last observed, and a `spec` that
+  declares what the endpoint rests at. A claim stays the channel for
+  bytes, and the resource becomes the channel for state. The device
+  name changes to one built from the hardware's identity, and
+  `observed` follows the control device's events and `pw-dump -m`
+  in place of a poll.
+
 ## Designs
 
 * [01, The taints on an output](completed/01-the-taints-an-output-carries.md).

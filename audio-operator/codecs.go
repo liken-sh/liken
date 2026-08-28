@@ -64,6 +64,19 @@ type bluezCodec struct {
 	Name string
 }
 
+// pwPropInfo describes one property an object accepts: its name, the
+// values it takes, and a display label for each one.
+//
+// type and labels stay raw because their shape depends on the
+// property: a choice prints an object of alternatives, a plain
+// property prints a bare value, and only the codec reader knows
+// which one it is looking at.
+type pwPropInfo struct {
+	ID     string          `json:"id"`
+	Type   json.RawMessage `json:"type"`
+	Labels json.RawMessage `json:"labels"`
+}
+
 // codecOptions reads the codecs a bluez5 device offers out of its
 // PropInfo list, in the order the device enumerated them.
 //
@@ -177,6 +190,18 @@ func codecList(codecs []bluezCodec) string {
 	return list
 }
 
+// codecNames lists the codecs the speaker offers by name, in the
+// device's own order with the one playing first. It is the list
+// status.bluetooth.codecs carries, read from the graph value alone,
+// so the reconciler answers it with no prepare in flight.
+func (s bluezSink) codecNames() []string {
+	names := make([]string, 0, len(s.Codecs))
+	for _, codec := range s.Codecs {
+		names = append(names, codec.Name)
+	}
+	return names
+}
+
 // findCodec resolves a published name back to the id a write names.
 func findCodec(codecs []bluezCodec, name string) (bluezCodec, bool) {
 	for _, codec := range codecs {
@@ -198,7 +223,33 @@ func codecProps(id int) string {
 
 // setDeviceCodec writes the codec on one bluez5 device.
 func setDeviceCodec(ctx context.Context, device, codec int) error {
-	return setParam(ctx, device, codecProps(codec))
+	return setParam(ctx, device, "Props", codecProps(codec))
+}
+
+// codecSwitch is one codec change: a write on the device, and a wait
+// for the rebuilt node to report the codec. The prepare path and the
+// resting declaration both switch a codec, and they share this one
+// implementation. The write and the read are fields so that a test
+// drives them with no PipeWire behind it.
+type codecSwitch struct {
+	write    func(ctx context.Context, device, codec int) error
+	read     func(context.Context) (pwGraph, error)
+	timeout  time.Duration
+	interval time.Duration
+}
+
+// speakerCodecSwitch is the switch the reconciler makes for
+// Sink.spec.codec. It makes it only while no claim holds the
+// speaker, because a switch replaces the node and interrupts
+// whatever plays, and a claim's own codec parameter wins while the
+// claim lasts.
+func speakerCodecSwitch(read func(context.Context) (pwGraph, error)) codecSwitch {
+	return codecSwitch{
+		write:    setDeviceCodec,
+		read:     read,
+		timeout:  codecSwitchTimeout,
+		interval: codecSwitchInterval,
+	}
 }
 
 // AllocatedConfig is one entry of the configuration the scheduler
@@ -362,6 +413,24 @@ func codecParameters(raw json.RawMessage) (string, error) {
 // means anything until the new node stands. The delivery's unity
 // write follows in prepareClaim, on whichever node this returns.
 func (p *draPlugin) selectCodec(ctx context.Context, address, codec string, sink bluezSink) (bluezSink, error) {
+	return p.codecSwitch().choose(ctx, address, codec, sink)
+}
+
+// codecSwitch is the switch a prepare makes, built from the plugin's
+// own seams, which are the production values outside a test.
+func (p *draPlugin) codecSwitch() codecSwitch {
+	return codecSwitch{
+		write:    p.setCodec,
+		read:     p.graph,
+		timeout:  p.codecTimeout,
+		interval: p.codecInterval,
+	}
+}
+
+// choose makes the speaker play one codec and answers with the node
+// that came back. A codec the speaker does not offer fails before any
+// write, and the message names the offered list.
+func (c codecSwitch) choose(ctx context.Context, address, codec string, sink bluezSink) (bluezSink, error) {
 	chosen, offered := findCodec(sink.Codecs, codec)
 	if !offered {
 		return bluezSink{}, fmt.Errorf("speaker %s does not offer the codec %q; it offers %s",
@@ -371,10 +440,10 @@ func (p *draPlugin) selectCodec(ctx context.Context, address, codec string, sink
 		return sink, nil
 	}
 
-	if err := p.setCodec(ctx, sink.Device, chosen.ID); err != nil {
+	if err := c.write(ctx, sink.Device, chosen.ID); err != nil {
 		return bluezSink{}, fmt.Errorf("switching speaker %s to %s: %w", speakerName(address), codec, err)
 	}
-	return p.awaitCodec(ctx, address, codec)
+	return c.await(ctx, address, codec)
 }
 
 // awaitCodec reads the graph until the speaker's node reports the
@@ -386,9 +455,15 @@ func (p *draPlugin) selectCodec(ctx context.Context, address, codec string, sink
 // fails the prepare rather than falling back to what plays,
 // because what plays is the wrong codec by definition.
 func (p *draPlugin) awaitCodec(ctx context.Context, address, codec string) (bluezSink, error) {
-	deadline := time.Now().Add(p.codecTimeout)
+	return p.codecSwitch().await(ctx, address, codec)
+}
+
+// await reads the graph until the speaker's node reports the codec,
+// or until the timeout passes.
+func (c codecSwitch) await(ctx context.Context, address, codec string) (bluezSink, error) {
+	deadline := time.Now().Add(c.timeout)
 	for {
-		graph, err := p.graph(ctx)
+		graph, err := c.read(ctx)
 		if err == nil {
 			if sink, playing := graph.Speakers[address]; playing && sink.Codec == codec {
 				return sink, nil
@@ -396,12 +471,12 @@ func (p *draPlugin) awaitCodec(ctx context.Context, address, codec string) (blue
 		}
 		if !time.Now().Before(deadline) {
 			return bluezSink{}, fmt.Errorf("speaker %s did not report the codec %s within %s",
-				speakerName(address), codec, p.codecTimeout)
+				speakerName(address), codec, c.timeout)
 		}
 		select {
 		case <-ctx.Done():
 			return bluezSink{}, ctx.Err()
-		case <-time.After(p.codecInterval):
+		case <-time.After(c.interval):
 		}
 	}
 }

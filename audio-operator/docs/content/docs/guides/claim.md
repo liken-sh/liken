@@ -25,14 +25,15 @@ List what a node offers:
 
     kubectl get resourceslice <node>-audio.liken.sh -o yaml
 
-Each device is one playback PCM device of the card, with the
-attached monitor's facts as attributes. Write a CEL selector against
-them. If the Dynamic Resource Allocation (DRA) objects are new to
-you, read [How the pieces fit](/docs/guides/#how-the-pieces-fit)
-first. Four useful forms:
+Each device is one PCM device of the card, with the attached
+monitor's facts as attributes. A playback endpoint carries the
+`sink` attribute. Write a CEL selector against them. If the Dynamic
+Resource Allocation (DRA) objects are new to you, read
+[How the pieces fit](/docs/guides/#how-the-pieces-fit) first. Four
+useful forms:
 
-    # by output
-    device.attributes["audio.liken.sh"].output == "card0-pcm3"
+    # by name, the same name kubectl get sinks shows
+    device.attributes["audio.liken.sh"].sink == "kitchen-pci-0000-00-1f-3-hdmi-0"
 
     # the analog jack
     has(device.attributes["audio.liken.sh"].connectionType) &&
@@ -54,8 +55,9 @@ codec, and a claim selects it the same way it selects an output.
 Guard `connectionType` and `monitor.liken.sh/id` with `has()`, as
 above. On an HDMI or DisplayPort output both come from the monitor,
 so an output with no monitor publishes neither, and a selector that
-reads a missing attribute fails the whole allocation. `output` needs
-no guard, because every device publishes it. Guard `address` the
+reads a missing attribute fails the whole allocation. `sink` needs
+no guard inside the `audio-sink` class, because every device the
+class selects publishes it. Guard `address` the
 same way: only a Bluetooth speaker publishes it, so an unguarded
 read fails the allocation on every one of the card's outputs.
 [Devices](/docs/reference/devices/) lists every attribute, and
@@ -74,11 +76,11 @@ explains why the pairing attribute reads under its own domain,
         requests:
           - name: output
             exactly:
-              deviceClassName: audio-output
+              deviceClassName: audio-sink
               selectors:
                 - cel:
                     expression: |
-                      device.attributes["audio.liken.sh"].output == "card0-pcm3"
+                      device.attributes["audio.liken.sh"].sink == "kitchen-pci-0000-00-1f-3-hdmi-0"
               tolerations:
                 - key: audio.liken.sh/disconnected
                   operator: Exists
@@ -163,7 +165,7 @@ holds every PCM device on the card.
 |---|---|
 | mount | `/var/run/audio.liken.sh`, read-only, the directory that holds PipeWire's socket |
 | `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
-| `PIPEWIRE_NODE` | the allocated output's sink name, such as `liken.audio.card0-pcm3` |
+| `PIPEWIRE_NODE` | the allocated output's node name, such as `liken.audio.card0-pcm3` |
 
 The mount is read-only because connecting to a Unix socket needs
 write permission on the socket itself, not on the directory that
@@ -193,7 +195,7 @@ bitrate and holds together.
         requests:
           - name: speaker
             exactly:
-              deviceClassName: audio-output
+              deviceClassName: audio-sink
               selectors:
                 - cel:
                     expression: |
@@ -223,8 +225,38 @@ in the class when every workload through it does.
 
 The switch takes a second or two, and the pod's start waits for
 it. The speaker's sink arrives at unity volume on every prepare, so
-set loudness in your player's own stream volume, never by leaving a
-level on the sink.
+set loudness in your player's own stream volume. The level the
+speaker itself rests at is declared on its `Sink`, which
+[Set what an endpoint rests at](/docs/guides/rest/) shows, and a
+codec declared there is the resting choice a claim's own parameter
+wins over.
+
+## Record from a source
+
+A capture endpoint is claimed the same way through the
+`audio-source` class, and the container receives the same socket
+with `PIPEWIRE_NODE` naming the capture node:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-microphone
+      namespace: media
+    spec:
+      devices:
+        requests:
+          - name: microphone
+            exactly:
+              deviceClassName: audio-source
+              selectors:
+                - cel:
+                    expression: |
+                      device.attributes["audio.liken.sh"].source == "usb-0573-1573-a34004801402-usb-audio-capture"
+
+A recorder on PipeWire's stream API, such as `pw-record`, reads the
+two variables and captures from that node with no flag. The
+`Source`'s `spec.mute` is the switch that closes the microphone for
+everyone, whether a claim holds it or not.
 
 ## Unplugged monitors, restarts, and a second claim
 
@@ -232,7 +264,7 @@ level on the sink.
 gains the `disconnected` taint. After your `tolerationSeconds`, the
 eviction controller ends the pod. A cable reseated within the
 toleration costs nothing. A claim that selects by
-`monitor.liken.sh/id` instead of by `output` follows the monitor to
+`monitor.liken.sh/id` instead of by `sink` follows the monitor to
 whichever output its cable lands on next.
 
 **A PipeWire restart ends every client's audio.** The socket belongs

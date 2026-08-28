@@ -1,9 +1,10 @@
 # The class this operator's own pod claims through. It ships with
 # the base because the claim template in operator.yaml names it
 # literally: it is wiring, not policy, and the operator cannot
-# start without it. The classes your workloads claim through, such
-# as an output class, are the cluster owner's vocabulary to create,
-# and the install guide gives the YAML.
+# start without it. The classes your workloads claim through, one
+# for the speakers and one for the microphones, are the cluster
+# owner's vocabulary to create, and the manual gives the YAML: each
+# one selects on the presence of the sink or the source attribute.
 ---
 # Any device that supports a sound server. Today that is the sound
 # card liken publishes and the media bus the Bluetooth operator
