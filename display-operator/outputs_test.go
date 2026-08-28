@@ -18,37 +18,48 @@ func fakeSysfs(t *testing.T, card string, connectors map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
 	for connector, fixture := range connectors {
-		dir := filepath.Join(root, "class", "drm", card+"-"+connector)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		status, edid, modes := "disconnected\n", []byte{}, []byte{}
-		if fixture != "" {
-			text, err := os.ReadFile("testdata/" + fixture + ".edid.hex")
-			if err != nil {
-				t.Fatal(err)
-			}
-			edid, err = hex.DecodeString(strings.TrimSpace(string(text)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			modes, err = os.ReadFile("testdata/" + fixture + ".modes")
-			if err != nil {
-				t.Fatal(err)
-			}
-			status = "connected\n"
-		}
-		if err := os.WriteFile(filepath.Join(dir, "status"), []byte(status), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "edid"), edid, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "modes"), modes, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeConnector(t, root, card, connector, fixture)
 	}
 	return root
+}
+
+// writeConnector writes one connector's three files. A monitor that
+// arrives is these same files changing under a connector that is
+// already there, so a test drives a hotplug by writing the connected
+// form over the dark one. status is written last: a reader in another
+// goroutine takes the connector as dark until status says otherwise,
+// so the EDID it reads next is whole.
+func writeConnector(t *testing.T, root, card, connector, fixture string) {
+	t.Helper()
+	dir := filepath.Join(root, "class", "drm", card+"-"+connector)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	status, edid, modes := "disconnected\n", []byte{}, []byte{}
+	if fixture != "" {
+		text, err := os.ReadFile("testdata/" + fixture + ".edid.hex")
+		if err != nil {
+			t.Fatal(err)
+		}
+		edid, err = hex.DecodeString(strings.TrimSpace(string(text)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		modes, err = os.ReadFile("testdata/" + fixture + ".modes")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status = "connected\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "edid"), edid, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "modes"), modes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "status"), []byte(status), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // labSysfs is the lab machine's own arrangement: an ultrawide, a

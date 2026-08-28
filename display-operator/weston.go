@@ -188,11 +188,11 @@ func declare() {
 	}
 	live := connected(outputs)
 	if len(live) == 0 {
-		// Every connector still publishes, tainted, so a person can
-		// claim a screen that is cabled and asleep and the pod parks
-		// until somebody wakes it. The operator does not test whether
-		// the compositor starts with no output: a compositor that
-		// refuses exits, and that exit is the report.
+		// Every connector still gets a config section below, so
+		// weston can light whichever connector a monitor arrives on.
+		// The weston container holds its own start until one does
+		// (monitorwait.go), so this line is a report and not a
+		// failure.
 		fmt.Fprintf(os.Stderr, "%s has no monitor on any of its %d connectors\n", card, len(outputs))
 	}
 	for _, output := range live {
@@ -287,6 +287,11 @@ func endCompositor(procRoot string) error {
 // The binary finds the card the claim delivered, which no manifest
 // can name, then execs weston, so the container holds one process
 // and its exit is the exit the kubelet acts on.
+//
+// Between the two it blocks until one of the card's connectors has a
+// monitor, because weston exits at once on a card with none. The
+// container is Running for the whole of that wait, so a machine with
+// no monitor shows no restarts.
 func compose() {
 	card := claimedCard()
 	socketDir := envOr("SOCKET_DIR", defaultSocketDir)
@@ -298,6 +303,23 @@ func compose() {
 	if err := waitForFile(context.Background(), westonConfigPath, configWaitTimeout); err != nil {
 		fatal("%v", err)
 	}
+
+	// The listener opens before the wait reads sysfs, so a monitor
+	// that arrives between the read and the listen is not missed. A
+	// listener that cannot open ends the container, because a wait
+	// with no wake would hold weston back forever. The listener stops
+	// as soon as the wait ends: the wait is its one reader, and
+	// weston subscribes to the same events itself.
+	listening, stopListening := context.WithCancel(context.Background())
+	uevents, err := listenForUevents(listening)
+	if err != nil {
+		fatal("watching for kernel events: %v", err)
+	}
+	if _, err := waitForMonitor(listening, sysRoot, card, uevents); err != nil {
+		fatal("%v", err)
+	}
+	stopListening()
+
 	if err := os.MkdirAll(socketDir, 0o755); err != nil {
 		fatal("making %s: %v", socketDir, err)
 	}

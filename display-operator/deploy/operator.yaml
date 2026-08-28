@@ -123,6 +123,11 @@ spec:
         # the image's binary in the mode that execs weston, so weston
         # is this container's one process and its exit is what the
         # kubelet acts on.
+        # Before the exec, the entrypoint waits for a monitor on one of
+        # the card's connectors. Weston alone exits at once on a card
+        # with none and climbs the kubelet's backoff, so the wait is
+        # why a machine with no monitor shows this container Running
+        # with no restarts.
         - name: weston
           image: ghcr.io/liken-sh/display-operator:latest
           args: ["weston"]
