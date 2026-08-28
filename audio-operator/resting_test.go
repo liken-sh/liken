@@ -97,7 +97,7 @@ func TestPlannedWrites(t *testing.T) {
 			name:    "a sink whose node is new goes to unity",
 			facts:   alsaSink(40, false),
 			newNode: true,
-			level:   &levelWrite{Volume: 100},
+			level:   &levelWrite{Volume: pointerTo(100)},
 		},
 		{
 			name:    "a new node already at unity is left alone",
@@ -119,7 +119,7 @@ func TestPlannedWrites(t *testing.T) {
 			name:  "a declared level the endpoint does not hold",
 			spec:  declaration{Volume: pointerTo(50)},
 			facts: alsaSink(100, false),
-			level: &levelWrite{Volume: 50},
+			level: &levelWrite{Volume: pointerTo(50)},
 		},
 		{
 			name:  "a declared level the endpoint already holds",
@@ -127,12 +127,12 @@ func TestPlannedWrites(t *testing.T) {
 			facts: alsaSink(50, false),
 		},
 		{
-			// The two go in one write, so a reader never sees the level
-			// move without the mute.
-			name:  "a declared mute keeps the level the endpoint holds",
+			// The write carries the mute alone, so the level the
+			// endpoint holds is not written beside it.
+			name:  "a declared mute leaves the level the endpoint holds",
 			spec:  declaration{Mute: pointerTo(true)},
 			facts: alsaSink(50, false),
-			level: &levelWrite{Volume: 50, Mute: true},
+			level: &levelWrite{Mute: pointerTo(true)},
 		},
 		{
 			name:  "a declaration on an endpoint with no node writes nothing",
@@ -200,26 +200,26 @@ func TestPlannedWrites(t *testing.T) {
 			name:  "a declared level on a speaker",
 			spec:  declaration{Volume: pointerTo(25)},
 			facts: speakerSink(50, "sbc"),
-			level: &levelWrite{Volume: 25},
+			level: &levelWrite{Volume: pointerTo(25)},
 		},
 		{
 			name:  "a declaration on a suspended node nothing was written to",
 			spec:  declaration{Mute: pointerTo(true)},
 			facts: suspendedSink(),
-			level: &levelWrite{Volume: 0, Mute: true},
+			level: &levelWrite{Mute: pointerTo(true)},
 		},
 		{
 			name:    "the same declaration on a suspended node already written",
 			spec:    declaration{Mute: pointerTo(true)},
 			facts:   suspendedSink(),
-			written: &levelWrite{Volume: 0, Mute: true},
+			written: &levelWrite{Mute: pointerTo(true)},
 		},
 		{
 			name:    "a changed declaration on a suspended node",
 			spec:    declaration{Volume: pointerTo(40), Mute: pointerTo(true)},
 			facts:   suspendedSink(),
-			written: &levelWrite{Volume: 0, Mute: true},
-			level:   &levelWrite{Volume: 40, Mute: true},
+			written: &levelWrite{Mute: pointerTo(true)},
+			level:   &levelWrite{Volume: pointerTo(40), Mute: pointerTo(true)},
 		},
 		{
 			name:  "no declaration on a suspended node",
@@ -249,7 +249,7 @@ func sameLevel(got, want *levelWrite) bool {
 	if got == nil || want == nil {
 		return got == want
 	}
-	return *got == *want
+	return got.same(*want)
 }
 
 func sameControlWrite(got, want controlWrite) bool {
@@ -265,8 +265,7 @@ type writeRecord struct {
 	node   *pwNode
 	route  *pwRoute
 	device int
-	volume int
-	mute   bool
+	level  levelWrite
 	codec  string
 }
 
@@ -274,12 +273,12 @@ func recordingControl(record *writeRecord) *endpointControl {
 	return &endpointControl{
 		nodes:    map[string]nodeRecord{},
 		refusals: map[string]string{},
-		setLevel: func(_ context.Context, node pwNode, volume int, mute bool) error {
-			record.node, record.volume, record.mute = &node, volume, mute
+		setLevel: func(_ context.Context, node pwNode, level levelWrite) error {
+			record.node, record.level = &node, level
 			return nil
 		},
-		setRoute: func(_ context.Context, device int, route pwRoute, volume int, mute bool) error {
-			record.route, record.device, record.volume, record.mute = &route, device, volume, mute
+		setRoute: func(_ context.Context, device int, route pwRoute, level levelWrite) error {
+			record.route, record.device, record.level = &route, device, level
 			return nil
 		},
 		switchCodec: func(_ context.Context, _, codec string, sink bluezSink) (bluezSink, error) {
@@ -314,15 +313,15 @@ func TestLevelWritesLandWhereTheLevelLives(t *testing.T) {
 			record := &writeRecord{}
 			control := recordingControl(record)
 			err := control.apply(context.Background(), endpoint{facts: c.facts},
-				endpointWrites{Level: &levelWrite{Volume: 25}})
+				endpointWrites{Level: &levelWrite{Volume: pointerTo(25)}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if (record.route != nil) != c.route {
 				t.Errorf("route write = %+v, node write = %+v", record.route, record.node)
 			}
-			if record.volume != 25 {
-				t.Errorf("volume = %d, want 25", record.volume)
+			if record.level.Volume == nil || *record.level.Volume != 25 {
+				t.Errorf("level = %s, want volume 25", record.level)
 			}
 		})
 	}
@@ -348,12 +347,12 @@ func TestAnEmptySpecWritesNothing(t *testing.T) {
 // The next event or the backstop tick tries again.
 func TestAFailedLevelWriteIsReported(t *testing.T) {
 	control := recordingControl(&writeRecord{})
-	control.setLevel = func(context.Context, pwNode, int, bool) error {
+	control.setLevel = func(context.Context, pwNode, levelWrite) error {
 		return errors.New("pw-cli set-param: no such object")
 	}
 
 	err := control.apply(context.Background(), endpoint{facts: alsaSink(100, false)},
-		endpointWrites{Level: &levelWrite{Volume: 25}})
+		endpointWrites{Level: &levelWrite{Volume: pointerTo(25)}})
 	if err == nil {
 		t.Fatal("a failed write reported nothing")
 	}

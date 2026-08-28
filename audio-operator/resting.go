@@ -20,14 +20,41 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 )
 
 // levelWrite is one write of a level: the volume as a percent of
-// unity and the mute, which go in one write because PipeWire applies
-// one Props pod at once.
+// unity, the mute, or both, which go in one write because PipeWire
+// applies one Props pod at once. A field the spec leaves out is nil
+// and stays out of the pod, so a declared mute on a node whose level
+// is unknown never writes a gain of zero beside it.
 type levelWrite struct {
-	Volume int
-	Mute   bool
+	Volume *int
+	Mute   *bool
+}
+
+// same reports whether two level writes state the same thing.
+func (l levelWrite) same(other levelWrite) bool {
+	return optionalEqual(l.Volume, other.Volume) && optionalEqual(l.Mute, other.Mute)
+}
+
+func optionalEqual[T comparable](a, b *T) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// String names the write for a log line.
+func (l levelWrite) String() string {
+	var parts []string
+	if l.Volume != nil {
+		parts = append(parts, fmt.Sprintf("volume %d%%", *l.Volume))
+	}
+	if l.Mute != nil {
+		parts = append(parts, fmt.Sprintf("mute %t", *l.Mute))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // controlWrite is one write of one of the card's own controls.
@@ -76,13 +103,7 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 		// shows, and the controls below still write, because they
 		// are the card's and not the node's.
 	case spec.Volume != nil || spec.Mute != nil:
-		want := levelWrite{Volume: volume, Mute: mute}
-		if spec.Volume != nil {
-			want.Volume = *spec.Volume
-		}
-		if spec.Mute != nil {
-			want.Mute = *spec.Mute
-		}
+		want := levelWrite{Volume: spec.Volume, Mute: spec.Mute}
 		// A suspended node reports no levels at all, so a declared
 		// level on one is judged against the level this operator last
 		// wrote to it: it is written when the node is new, when nothing
@@ -91,14 +112,15 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 		// own event and answer it forever.
 		switch {
 		case known:
-			if want.Volume != volume || want.Mute != mute {
+			if (want.Volume != nil && *want.Volume != volume) || (want.Mute != nil && *want.Mute != mute) {
 				writes.Level = &want
 			}
-		case node.New || node.Written == nil || *node.Written != want:
+		case node.New || node.Written == nil || !node.Written.same(want):
 			writes.Level = &want
 		}
 	case facts.Direction == directionSink && node.New && known && volume != unityPercent:
-		writes.Level = &levelWrite{Volume: unityPercent, Mute: mute}
+		unity := unityPercent
+		writes.Level = &levelWrite{Volume: &unity}
 	}
 
 	for _, name := range slices.Sorted(maps.Keys(spec.Controls)) {
@@ -178,7 +200,7 @@ func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes en
 		if err := e.applyLevel(ctx, facts, *level); err != nil {
 			failures = append(failures, err)
 		} else {
-			fmt.Printf("%s: volume %d%%, mute %t\n", facts.Name, level.Volume, level.Mute)
+			fmt.Printf("%s: %s\n", facts.Name, level)
 		}
 	}
 	// A control write goes through the same descriptor the value was
@@ -207,7 +229,7 @@ func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes en
 // applyLevel writes one level where the endpoint's level lives.
 func (e *endpointControl) applyLevel(ctx context.Context, facts endpointFacts, level levelWrite) error {
 	if device, route, absolute := facts.absoluteRoute(); absolute {
-		return e.setRoute(ctx, device, route, level.Volume, level.Mute)
+		return e.setRoute(ctx, device, route, level)
 	}
-	return e.setLevel(ctx, facts.Node, level.Volume, level.Mute)
+	return e.setLevel(ctx, facts.Node, level)
 }

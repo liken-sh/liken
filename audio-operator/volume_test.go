@@ -127,13 +127,17 @@ func TestLevelProps(t *testing.T) {
 	cases := []struct {
 		name    string
 		volumes []float64
-		mute    bool
+		mute    *bool
 		want    string
 	}{
-		{name: "half, playing", volumes: []float64{0.5, 0.5},
+		{name: "half, playing", volumes: []float64{0.5, 0.5}, mute: pointerTo(false),
 			want: "{ channelVolumes: [ 0.5, 0.5 ], mute: false }"},
-		{name: "unity, muted", volumes: []float64{1, 1}, mute: true,
+		{name: "unity, muted", volumes: []float64{1, 1}, mute: pointerTo(true),
 			want: "{ channelVolumes: [ 1, 1 ], mute: true }"},
+		{name: "the level alone", volumes: []float64{0.5, 0.5},
+			want: "{ channelVolumes: [ 0.5, 0.5 ] }"},
+		{name: "the mute alone", mute: pointerTo(true),
+			want: "{ mute: true }"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

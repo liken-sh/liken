@@ -18,20 +18,21 @@ func TestRouteProps(t *testing.T) {
 		name    string
 		route   pwRoute
 		volumes []float64
-		mute    bool
+		mute    *bool
 		want    string
 	}{
 		{
 			name:    "half volume on a stereo speaker",
 			route:   pwRoute{Index: 1, Device: 0},
 			volumes: []float64{0.5, 0.5},
+			mute:    pointerTo(false),
 			want:    "{ index: 1, device: 0, props: { channelVolumes: [ 0.5, 0.5 ], mute: false }, save: false }",
 		},
 		{
 			name:    "muted",
 			route:   pwRoute{Index: 2, Device: 1},
 			volumes: []float64{1, 1},
-			mute:    true,
+			mute:    pointerTo(true),
 			want:    "{ index: 2, device: 1, props: { channelVolumes: [ 1, 1 ], mute: true }, save: false }",
 		},
 	}

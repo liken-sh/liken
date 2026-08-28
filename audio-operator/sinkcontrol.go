@@ -49,8 +49,8 @@ type endpointControl struct {
 
 	// setLevel writes a level on a node, and setRoute writes one on a
 	// Bluetooth device's Route.
-	setLevel func(ctx context.Context, node pwNode, volume int, mute bool) error
-	setRoute func(ctx context.Context, device int, route pwRoute, volume int, mute bool) error
+	setLevel func(ctx context.Context, node pwNode, level levelWrite) error
+	setRoute func(ctx context.Context, device int, route pwRoute, level levelWrite) error
 
 	// switchCodec makes a speaker play one codec and answers with the
 	// sink that came back.

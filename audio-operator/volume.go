@@ -104,21 +104,33 @@ func setNodeVolumes(ctx context.Context, node int, volumes []float64) error {
 	return setParam(ctx, node, "Props", volumeProps(volumes))
 }
 
-// levelProps is the pod that sets one node's levels and its mute
-// together. They go in one write because PipeWire applies one Props
-// pod at once, and a reader that saw the level move without the mute
-// would report a state the endpoint was never in.
-func levelProps(volumes []float64, mute bool) string {
-	return fmt.Sprintf("{ channelVolumes: [ %s ], mute: %t }", levelList(volumes), mute)
+// levelProps is the pod that sets one node's levels, its mute, or
+// both. They go in one write because PipeWire applies one Props pod
+// at once, and a reader that saw the level move without the mute
+// would report a state the endpoint was never in. A part the write
+// does not state stays out of the pod, so the other one keeps its
+// value.
+func levelProps(volumes []float64, mute *bool) string {
+	var parts []string
+	if volumes != nil {
+		parts = append(parts, fmt.Sprintf("channelVolumes: [ %s ]", levelList(volumes)))
+	}
+	if mute != nil {
+		parts = append(parts, fmt.Sprintf("mute: %t", *mute))
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 // setNodeLevel is the write behind spec.volume and spec.mute on an
 // ALSA endpoint, and on a speaker with no absolute volume. The
 // channel count is the node's own, so that a six-channel node does
 // not keep four channels at the old level.
-func setNodeLevel(ctx context.Context, node pwNode, volume int, mute bool) error {
-	levels := volumeLevels(volume, channelCount(node.Volumes))
-	return setParam(ctx, node.ID, "Props", levelProps(levels, mute))
+func setNodeLevel(ctx context.Context, node pwNode, level levelWrite) error {
+	var levels []float64
+	if level.Volume != nil {
+		levels = volumeLevels(*level.Volume, channelCount(node.Volumes))
+	}
+	return setParam(ctx, node.ID, "Props", levelProps(levels, level.Mute))
 }
 
 // sinkNode is the speaker's node as a level write sees it. A

@@ -87,15 +87,18 @@ func outputRoute(params []json.RawMessage) *pwRoute {
 // name the route, the props carry the level, and save is false
 // because WirePlumber stores nothing in this pod: the operator's own
 // declaration is what a restart re-applies.
-func routeProps(route pwRoute, volumes []float64, mute bool) string {
-	return fmt.Sprintf("{ index: %d, device: %d, props: { channelVolumes: [ %s ], mute: %t }, save: false }",
-		route.Index, route.Device, levelList(volumes), mute)
+func routeProps(route pwRoute, volumes []float64, mute *bool) string {
+	return fmt.Sprintf("{ index: %d, device: %d, props: %s, save: false }",
+		route.Index, route.Device, levelProps(volumes, mute))
 }
 
 // setRouteLevel writes a level on a speaker's Route. The write names
 // the device object and not the node, and the channel count comes
 // from the route's own levels.
-func setRouteLevel(ctx context.Context, device int, route pwRoute, volume int, mute bool) error {
-	levels := volumeLevels(volume, channelCount(route.Volumes))
-	return setParam(ctx, device, "Route", routeProps(route, levels, mute))
+func setRouteLevel(ctx context.Context, device int, route pwRoute, level levelWrite) error {
+	var levels []float64
+	if level.Volume != nil {
+		levels = volumeLevels(*level.Volume, channelCount(route.Volumes))
+	}
+	return setParam(ctx, device, "Route", routeProps(route, levels, level.Mute))
 }

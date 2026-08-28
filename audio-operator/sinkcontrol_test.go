@@ -148,14 +148,14 @@ func TestUnityIsWrittenOnceForEachNode(t *testing.T) {
 	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
 		t.Fatal(err)
 	}
-	if record.node == nil || record.volume != unityPercent {
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
 		t.Fatalf("a new node was left at 40 percent: %+v", record)
 	}
 
 	// The same node, still at the level the graph reports, is left
 	// alone: the operator wrote it once and a person may have moved it
 	// since.
-	record.node, record.volume = nil, 0
+	record.node, record.level = nil, levelWrite{}
 	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestUnityIsWrittenOnceForEachNode(t *testing.T) {
 	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
 		t.Fatal(err)
 	}
-	if record.node == nil || record.volume != unityPercent {
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
 		t.Errorf("a node that was built again was left at 40 percent: %+v", record)
 	}
 }
@@ -190,7 +190,7 @@ func TestPassCarriesADeclaredLevel(t *testing.T) {
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph()); err != nil {
 		t.Fatal(err)
 	}
-	if record.node == nil || record.volume != 25 || !record.mute {
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != 25 || record.level.Mute == nil || !*record.level.Mute {
 		t.Fatalf("the declaration reached the node as %+v", record)
 	}
 }
@@ -301,7 +301,7 @@ func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
 	api := newEndpointAPI()
 	record := &writeRecord{}
 	control := testEndpointControl(t, api, record)
-	control.setLevel = func(context.Context, pwNode, int, bool) error {
+	control.setLevel = func(context.Context, pwNode, levelWrite) error {
 		return errors.New("pw-cli set-param: no such object")
 	}
 
@@ -318,14 +318,14 @@ func TestAFailedUnityWriteIsTriedAgain(t *testing.T) {
 		t.Fatal("a failed write reported nothing")
 	}
 
-	control.setLevel = func(_ context.Context, node pwNode, volume int, mute bool) error {
-		record.node, record.volume, record.mute = &node, volume, mute
+	control.setLevel = func(_ context.Context, node pwNode, level levelWrite) error {
+		record.node, record.level = &node, level
 		return nil
 	}
 	if err := control.pass(ctx, labEndpoints(), nil, graph); err != nil {
 		t.Fatal(err)
 	}
-	if record.node == nil || record.volume != unityPercent {
+	if record.node == nil || record.level.Volume == nil || *record.level.Volume != unityPercent {
 		t.Fatalf("the write was not tried again: %+v", record)
 	}
 }
