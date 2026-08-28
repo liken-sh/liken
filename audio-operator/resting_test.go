@@ -28,6 +28,14 @@ func alsaSink(volume int, mute bool) endpointFacts {
 	}
 }
 
+// suspendedSink is an endpoint whose node stands and runs no stream,
+// which is a node that reports no levels at all.
+func suspendedSink() endpointFacts {
+	facts := alsaSink(0, false)
+	facts.Node.Volumes = nil
+	return facts
+}
+
 // withControls gives an endpoint the card's controls and the value
 // each one reads now.
 func withControls(facts endpointFacts, controls []control, values map[string]string) endpointFacts {
@@ -75,6 +83,7 @@ func TestPlannedWrites(t *testing.T) {
 		spec     declaration
 		facts    endpointFacts
 		newNode  bool
+		written  *levelWrite
 		level    *levelWrite
 		controls []controlWrite
 		codec    string
@@ -193,10 +202,33 @@ func TestPlannedWrites(t *testing.T) {
 			facts: speakerSink(50, "sbc"),
 			level: &levelWrite{Volume: 25},
 		},
+		{
+			name:  "a declaration on a suspended node nothing was written to",
+			spec:  declaration{Mute: pointerTo(true)},
+			facts: suspendedSink(),
+			level: &levelWrite{Volume: 0, Mute: true},
+		},
+		{
+			name:    "the same declaration on a suspended node already written",
+			spec:    declaration{Mute: pointerTo(true)},
+			facts:   suspendedSink(),
+			written: &levelWrite{Volume: 0, Mute: true},
+		},
+		{
+			name:    "a changed declaration on a suspended node",
+			spec:    declaration{Volume: pointerTo(40), Mute: pointerTo(true)},
+			facts:   suspendedSink(),
+			written: &levelWrite{Volume: 0, Mute: true},
+			level:   &levelWrite{Volume: 40, Mute: true},
+		},
+		{
+			name:  "no declaration on a suspended node",
+			facts: suspendedSink(),
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			writes, refusals := plannedWrites(c.spec, c.facts, c.newNode)
+			writes, refusals := plannedWrites(c.spec, c.facts, nodeMemory{New: c.newNode, Written: c.written})
 			if !sameLevel(writes.Level, c.level) {
 				t.Errorf("level = %+v, want %+v", writes.Level, c.level)
 			}
@@ -240,7 +272,7 @@ type writeRecord struct {
 
 func recordingControl(record *writeRecord) *endpointControl {
 	return &endpointControl{
-		nodes:    map[string]int{},
+		nodes:    map[string]nodeRecord{},
 		refusals: map[string]string{},
 		setLevel: func(_ context.Context, node pwNode, volume int, mute bool) error {
 			record.node, record.volume, record.mute = &node, volume, mute
@@ -300,7 +332,7 @@ func TestLevelWritesLandWhereTheLevelLives(t *testing.T) {
 func TestAnEmptySpecWritesNothing(t *testing.T) {
 	record := &writeRecord{}
 	control := recordingControl(record)
-	writes, refusals := plannedWrites(declaration{}, alsaSink(50, false), false)
+	writes, refusals := plannedWrites(declaration{}, alsaSink(50, false), nodeMemory{})
 	if err := control.apply(context.Background(), endpoint{facts: alsaSink(50, false)}, writes); err != nil {
 		t.Fatal(err)
 	}

@@ -45,6 +45,16 @@ type endpointWrites struct {
 	Codec    string
 }
 
+// nodeMemory is what the controller remembers about an endpoint's
+// node: whether PipeWire built it since the last pass, and the level
+// this operator last wrote to it, if any. A suspended node reports no
+// level, so the last write is the only thing a declaration on it can
+// be judged against.
+type nodeMemory struct {
+	New     bool
+	Written *levelWrite
+}
+
 // plannedWrites is the resting layer's whole decision: what the
 // declaration and the endpoint disagree on, and what the declaration
 // states that the endpoint cannot take.
@@ -54,7 +64,7 @@ type endpointWrites struct {
 // apart from the unity default a new sink node takes. A value the
 // hardware refuses is reported and never written, so a typo in a
 // control name costs one log line and no register.
-func plannedWrites(spec declaration, facts endpointFacts, newNode bool) (endpointWrites, []string) {
+func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endpointWrites, []string) {
 	var writes endpointWrites
 	var refusals []string
 
@@ -74,13 +84,20 @@ func plannedWrites(spec declaration, facts endpointFacts, newNode bool) (endpoin
 			want.Mute = *spec.Mute
 		}
 		// A suspended node reports no levels at all, so a declared
-		// level on one is written once, when the node is new, and
-		// not on every pass: a write that repeated would raise its
+		// level on one is judged against the level this operator last
+		// wrote to it: it is written when the node is new, when nothing
+		// was written yet, and when the declaration changed, and not
+		// on every pass, because a write that repeated would raise its
 		// own event and answer it forever.
-		if (!known && newNode) || (known && (want.Volume != volume || want.Mute != mute)) {
+		switch {
+		case known:
+			if want.Volume != volume || want.Mute != mute {
+				writes.Level = &want
+			}
+		case node.New || node.Written == nil || *node.Written != want:
 			writes.Level = &want
 		}
-	case facts.Direction == directionSink && newNode && known && volume != unityPercent:
+	case facts.Direction == directionSink && node.New && known && volume != unityPercent:
 		writes.Level = &levelWrite{Volume: unityPercent, Mute: mute}
 	}
 

@@ -56,11 +56,12 @@ type endpointControl struct {
 	// sink that came back.
 	switchCodec func(ctx context.Context, address, codec string, sink bluezSink) (bluezSink, error)
 
-	// nodes is the PipeWire object id each endpoint's node had when
-	// this operator last looked. A node whose id is not this one is a
-	// node PipeWire built since, and the unity default writes to a new
-	// node alone.
-	nodes map[string]int
+	// nodes is what this operator remembers about each endpoint's
+	// node: the PipeWire object id it had when the operator last
+	// looked, and the level last written to it. A node whose id is
+	// not this one is a node PipeWire built since, and the unity
+	// default writes to a new node alone.
+	nodes map[string]nodeRecord
 
 	// refusals keeps the report of a declaration this operator cannot
 	// write to one line for each run of passes that finds it.
@@ -86,9 +87,15 @@ func newEndpointControl(client *Client, machine string, claims *preparedClaims,
 		setLevel:    setNodeLevel,
 		setRoute:    setRouteLevel,
 		switchCodec: speakerCodecSwitch(graph).choose,
-		nodes:       map[string]int{},
+		nodes:       map[string]nodeRecord{},
 		refusals:    map[string]string{},
 	}
+}
+
+// nodeRecord is one endpoint's node as the controller last saw it.
+type nodeRecord struct {
+	id      int
+	written *levelWrite
 }
 
 // endpoint is one endpoint of one pass: the facts it read, and the
@@ -323,33 +330,43 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 
 // actuate writes what the declaration and the endpoint disagree on.
 func (e *endpointControl) actuate(ctx context.Context, spec declaration, reading endpoint) error {
-	writes, refusals := plannedWrites(spec, reading.facts, e.newNode(reading.facts))
+	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts))
 	e.report(reading.facts.Name, refusals)
 	err := e.apply(ctx, reading, writes)
-	if err != nil && writes.Level != nil {
-		// The node is recorded as seen before the write, and a level
-		// that did not land has to be tried again, so the failure
-		// forgets it and the next pass reads it as a new node.
-		delete(e.nodes, reading.facts.Name)
+	if writes.Level != nil {
+		if err != nil {
+			// The node is recorded as seen before the write, and a
+			// level that did not land has to be tried again, so the
+			// failure forgets it and the next pass reads it as a new
+			// node.
+			delete(e.nodes, reading.facts.Name)
+		} else {
+			e.nodes[reading.facts.Name] = nodeRecord{id: reading.facts.Node.ID, written: writes.Level}
+		}
 	}
 	return err
 }
 
-// newNode reports whether PipeWire built this endpoint's node since
-// the operator last looked, and records the node it sees now.
+// remember reports whether PipeWire built this endpoint's node since
+// the operator last looked, with the level last written to the node
+// that stands, and records the node it sees now.
 //
-// This is what the unity default reads. A new node is written to
-// unity once. A level a person set by hand on a node that stands is
-// left alone: it reaches status.observed and nothing else, because
-// the spec declares no level and the operator invents none.
-func (e *endpointControl) newNode(facts endpointFacts) bool {
+// This is what the unity default and a declaration on a suspended
+// node read. A new node is written to unity once. A level a person
+// set by hand on a node that stands is left alone: it reaches
+// status.observed and nothing else, because the spec declares no
+// level and the operator invents none.
+func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
 	if !facts.HasNode {
 		delete(e.nodes, facts.Name)
-		return false
+		return nodeMemory{}
 	}
 	last, seen := e.nodes[facts.Name]
-	e.nodes[facts.Name] = facts.Node.ID
-	return !seen || last != facts.Node.ID
+	if !seen || last.id != facts.Node.ID {
+		e.nodes[facts.Name] = nodeRecord{id: facts.Node.ID}
+		return nodeMemory{New: true}
+	}
+	return nodeMemory{Written: last.written}
 }
 
 // report prints one line for each run of passes that finds the same
