@@ -303,6 +303,7 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 		return err
 	}
 	actuated := e.actuate(ctx, sink.Spec.declaration(), reading)
+	reading.facts.Written = e.nodes[reading.facts.Name].written
 	status := reading.facts.status(sink.Status, e.now())
 	if sameStatus(sink.Status, status) {
 		return actuated
@@ -320,6 +321,7 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 		return err
 	}
 	actuated := e.actuate(ctx, source.Spec.declaration(), reading)
+	reading.facts.Written = e.nodes[reading.facts.Name].written
 	status := reading.facts.status(source.Status, e.now())
 	if sameStatus(source.Status, status) {
 		return actuated

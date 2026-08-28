@@ -387,6 +387,24 @@ func TestObservedIsAbsentWhileTheNodeReportsNoLevels(t *testing.T) {
 	}
 }
 
+// A suspended node reports no level, and PipeWire announces no
+// change to one, so an idle endpoint reports the level the operator
+// last wrote, which is the level the node will run at.
+func TestObservedIsTheLastWriteWhileTheNodeReportsNoLevels(t *testing.T) {
+	facts := endpointFacts{
+		HasNode: true,
+		Node:    pwNode{ID: 7, Name: sinkNodeName(0, 0)},
+		Written: &levelWrite{Mute: pointerTo(true)},
+	}
+	status := facts.status(EndpointStatus{}, factsTime)
+	if status.Observed == nil || status.Observed.Mute == nil || !*status.Observed.Mute {
+		t.Errorf("observed = %+v, want the written mute", status.Observed)
+	}
+	if status.Observed != nil && status.Observed.Volume != nil {
+		t.Errorf("observed volume = %d, want none: the write carried no volume", *status.Observed.Volume)
+	}
+}
+
 func connectedCondition(met bool, reason, message string) EndpointCondition {
 	return condition(ConnectedCondition, met, reason, message, factsTime)
 }

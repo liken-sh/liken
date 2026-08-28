@@ -229,10 +229,10 @@ spec:
                   properties:
                     volume:
                       type: integer
-                      description: "The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume."
+                      description: "The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, which is the level it will run at, and nothing until a level is declared."
                     mute:
                       type: boolean
-                      description: "Whether the endpoint is silent."
+                      description: "Whether the endpoint is silent, on the same terms as volume."
                     codec:
                       type: string
                       description: "The codec a Bluetooth speaker plays with now."
@@ -434,10 +434,10 @@ spec:
                   properties:
                     volume:
                       type: integer
-                      description: "The gain PipeWire applies, as a percent of unity."
+                      description: "The gain PipeWire applies, as a percent of unity. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, and nothing until a level is declared."
                     mute:
                       type: boolean
-                      description: "Whether the endpoint captures silence."
+                      description: "Whether the endpoint captures silence, on the same terms as volume."
                     controls:
                       type: object
                       additionalProperties:

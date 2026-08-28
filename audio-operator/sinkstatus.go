@@ -55,6 +55,12 @@ type endpointFacts struct {
 
 	// The claim that holds the endpoint now, and nil between holders.
 	Claim *EndpointClaim
+
+	// The level this operator last wrote to the node that stands,
+	// and nil when it wrote none. A suspended node reports no level
+	// and PipeWire 1.4.2 announces no change to one, so this is what
+	// observed reports for an idle endpoint.
+	Written *levelWrite
 }
 
 // speakerFacts is one Bluetooth speaker: what bluetoothd says about
@@ -242,10 +248,20 @@ func (f endpointFacts) format() *EndpointFormat {
 
 // observed is the last value the operator read for each setting, and
 // nothing at all when it read none.
+//
+// A suspended node reports no level, and a Props write to one is
+// applied and kept but never announced (spa/plugins/audioconvert/
+// audioadapter.c in pipewire 1.4.2 compares parameter flags and not
+// the serial, so the cached copy every reader sees stays stale). So
+// an idle endpoint reports the level this operator last wrote, which
+// is the level the node will run at, and the graph takes over once
+// the node runs.
 func (f endpointFacts) observed() *EndpointObserved {
 	values := &EndpointObserved{Controls: f.Values}
 	if volume, mute, known := f.level(); known {
 		values.Volume, values.Mute = &volume, &mute
+	} else if f.HasNode && f.Written != nil {
+		values.Volume, values.Mute = f.Written.Volume, f.Written.Mute
 	}
 	if f.Speaker != nil && f.Speaker.HasSink {
 		values.Codec = f.Speaker.Sink.Codec
