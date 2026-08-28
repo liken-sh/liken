@@ -144,8 +144,8 @@ The last value the operator read for each setting. The operator reads the card's
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusobserved--volume"></span>`volume` | integer | no | The gain PipeWire applies, as a percent of unity. |
-| <span id="statusobserved--mute"></span>`mute` | boolean | no | Whether the endpoint captures silence. |
+| <span id="statusobserved--volume"></span>`volume` | integer | no | The gain PipeWire applies, as a percent of unity. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, and nothing until a level is declared. |
+| <span id="statusobserved--mute"></span>`mute` | boolean | no | Whether the endpoint captures silence, on the same terms as volume. |
 | <span id="statusobserved--controls"></span>`controls` | map[string]string | no | The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value. |
 
 ### status.claim

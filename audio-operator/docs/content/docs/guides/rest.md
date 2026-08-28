@@ -40,7 +40,10 @@ range or the choices each one takes. `observed` is the last value
 the operator read for each setting. It keeps up with the hardware
 on its own: turn a knob on a USB DAC, press the volume button on a
 Bluetooth speaker, or let a client change the graph, and the new
-value shows here within about a second.
+value shows here within about a second. An endpoint that nothing is
+playing through has no level of its own to read, so `observed`
+shows the level you declared, which is the level it will start at,
+and no level at all until you declare one.
 
 ## 2. Set the volume
 

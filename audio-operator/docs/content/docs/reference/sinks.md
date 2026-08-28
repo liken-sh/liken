@@ -180,8 +180,8 @@ The last value the operator read for each setting. The operator reads the card's
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusobserved--volume"></span>`volume` | integer | no | The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. |
-| <span id="statusobserved--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. |
+| <span id="statusobserved--volume"></span>`volume` | integer | no | The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, which is the level it will run at, and nothing until a level is declared. |
+| <span id="statusobserved--mute"></span>`mute` | boolean | no | Whether the endpoint is silent, on the same terms as volume. |
 | <span id="statusobserved--codec"></span>`codec` | string | no | The codec a Bluetooth speaker plays with now. |
 | <span id="statusobserved--controls"></span>`controls` | map[string]string | no | The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value. |
 

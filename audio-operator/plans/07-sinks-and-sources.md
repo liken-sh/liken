@@ -338,6 +338,23 @@ A write the operator did not make and the spec does not cover
 lands in `observed` and nowhere else. A write the spec does cover
 is divergence, and the operator writes the declaration back.
 
+One gap in the graph's events was found on the first drill. A
+`Props` write on a suspended `adapter` node is applied and kept,
+and it is the level the node runs at when it starts, but PipeWire
+1.4.2 never announces it: the adapter compares a parameter's flags
+and not its serial (`audioadapter.c`, `convert_node_info`), so
+`pw-dump` and the monitor stream serve a stale copy while the node
+is suspended. So an idle endpoint reports the level the operator
+last wrote as `observed`, and the graph takes over once the node
+runs. A `PortConfig` write would flush the cache, and it is set
+aside because it re-derives the format and turned a stereo HDMI
+node into eight ports on the drill.
+
+The same drill found that the container runtime masks
+`/proc/asound` with an empty tmpfs, so the PCM id is read with
+`SNDRV_CTL_IOCTL_PCM_INFO` on the control device, which answers the
+same id the proc file prints.
+
 ### No override layer
 
 `Display.spec.override` exists because the idle sidecar needs a
