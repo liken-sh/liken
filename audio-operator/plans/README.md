@@ -29,7 +29,11 @@ These plans are designed. Each keeps its number and moves to
   bytes, and the resource becomes the channel for state. The device
   name changes to one built from the hardware's identity, and
   `observed` follows the control device's events and `pw-dump -m`
-  in place of a poll.
+  in place of a poll. Built, and drilled on `liken-1` and `stick-1`
+  on 2026-08-28 through release 2026.08.28-005: the names, the
+  monitor link, the DAC's controls, and the declared level and mute
+  on idle endpoints. Still to drill: a level under a playing claim,
+  a Bluetooth speaker's volume over AVRCP, and a card that leaves.
 
 ## Designs
 
