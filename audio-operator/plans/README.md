@@ -62,7 +62,6 @@ to [`completed/`](completed/) when it is built and drilled.
   to the restart, with PipeWire and the card's sinks left running.
   Answers and removes the open problem "A2DP does not survive a
   Bluetooth pod restart".
-
 * [07, Sinks and sources](completed/07-sinks-and-sources.md).
   Built, and drilled on `liken-1` and `stick-1` on 2026-08-28,
   through release 2026.08.28-005. A cluster-scoped `Sink` for every
