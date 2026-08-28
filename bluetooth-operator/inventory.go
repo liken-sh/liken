@@ -61,6 +61,10 @@ type inventory struct {
 	// slice.
 	retiring map[bonds.Address]bool
 
+	// connects pages the bonded audio devices that are not connected,
+	// and holds the backoff each device carries between passes.
+	connects *connector
+
 	// windowOpen records that this operator has the radio discoverable
 	// and pairable for a request. The radio's own report of that state
 	// lags a pass, because the pass reads the tree before it opens
@@ -69,7 +73,7 @@ type inventory struct {
 }
 
 func newInventory(client *Client, radio radio, nodeName, namespace string) *inventory {
-	return &inventory{
+	i := &inventory{
 		client:    client,
 		radio:     radio,
 		nodeName:  nodeName,
@@ -78,6 +82,11 @@ func newInventory(client *Client, radio radio, nodeName, namespace string) *inve
 		retired:   map[bonds.Address]bool{},
 		retiring:  map[bonds.Address]bool{},
 	}
+	// The connector reads the clock through a closure, because the
+	// inventory's clock is a field a test replaces after construction,
+	// and both must run on the same time.
+	i.connects = newConnector(radio, func() time.Time { return i.now() })
+	return i
 }
 
 // inventoryPass holds one pass's results for the rest of the loop.
@@ -134,9 +143,11 @@ func (i *inventory) reconcile() inventoryPass {
 	i.releaseDepartedAdapters(snapshot.Adapter.Address)
 
 	// A radio that is not connectable answers no bonded device: page
-	// scan is off, so a controller's reconnect button and a speaker's
-	// own connect loop reach nothing, and no error appears anywhere. A
-	// fresh bluetoothd starts the adapter that way, so every pass
+	// scan is off, so a controller's reconnect button reaches nothing,
+	// and no error appears anywhere. The outbound direction is this
+	// operator's own: connect.go pages a bonded speaker instead of
+	// waiting for one to page the radio. A fresh bluetoothd starts the
+	// adapter with page scan off, so every pass
 	// asserts the setting instead of trusting the startup state, the
 	// same write-on-divergence rule the rest of the reconcile follows.
 	// It runs before the API-server writes below, because the radio's
@@ -156,6 +167,10 @@ func (i *inventory) reconcile() inventoryPass {
 	}
 
 	i.reconcilePairings(adapter, snapshot, &pass)
+	// The connects run after the Pairings, because the Pairing pass
+	// marks the bonds a teardown works through, and a device under
+	// teardown must not be paged.
+	i.connects.reconcile(snapshot, &pass)
 	i.reconcileRequests(adapter, snapshot, &pass)
 	return pass
 }

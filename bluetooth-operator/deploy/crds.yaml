@@ -194,12 +194,15 @@ spec:
                   type: boolean
                   default: true
                   description: >-
-                    Whether the controller may reconnect on its own,
+                    Whether the device may connect with no agent,
                     written into BlueZ's Device1.Trusted. With this off,
                     BlueZ asks an agent to authorize each service on
                     every connection, and no agent is registered
-                    outside a pairing window, so the controller does
-                    not reconnect.
+                    outside a pairing window, so the device does not
+                    connect. A trusted controller connects when its
+                    own button is pressed. A trusted speaker is
+                    connected by the operator whenever it is powered
+                    on and in range.
             status:
               type: object
               description: What the operator observes about the bond.

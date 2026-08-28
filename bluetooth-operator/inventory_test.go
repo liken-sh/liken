@@ -1,8 +1,9 @@
 package main
 
-// The fixtures the three pairing controllers are driven with: an API
-// server that holds the custom resources the way Kubernetes holds
-// them, and a radio that records what the operator asked it to do.
+// The fixture here is the API server that holds the custom resources
+// the way Kubernetes holds them. The fake radio the controllers are
+// driven through is in radio_test.go, beside the snapshot it answers
+// with.
 //
 // The API fixture keeps the two behaviors these controllers depend on.
 // A delete against an object that has a finalizer stamps a
@@ -18,8 +19,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 // testNow is the clock every one of these tests runs on, so that a
@@ -293,145 +292,6 @@ func writeJSON(t *testing.T, w http.ResponseWriter, object any) {
 	if err := json.NewEncoder(w).Encode(object); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// fakeRadio returns a snapshot the test supplies, and records
-// every call the controllers make into bluetoothd.
-type fakeRadio struct {
-	snapshot radioSnapshot
-	err      error
-	calls    []string
-
-	// pairErr makes Pair fail, the way bluetoothd does for a controller
-	// that stopped answering mid-pairing.
-	pairErr error
-}
-
-func (r *fakeRadio) record(format string, args ...any) {
-	r.calls = append(r.calls, fmt.Sprintf(format, args...))
-}
-
-// called reports whether this call was recorded, matched by prefix,
-// so a test names the call and not its arguments when the arguments
-// do not matter.
-func (r *fakeRadio) called(prefix string) bool {
-	for _, call := range r.calls {
-		if strings.HasPrefix(call, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *fakeRadio) Snapshot() (radioSnapshot, error) {
-	if r.err != nil {
-		return radioSnapshot{}, r.err
-	}
-	return r.snapshot, nil
-}
-
-func (r *fakeRadio) SetAdapterAlias(alias string) error {
-	r.record("SetAdapterAlias %s", alias)
-	r.snapshot.Adapter.Alias = alias
-	return nil
-}
-
-func (r *fakeRadio) SetAdapterConnectable(connectable bool) error {
-	r.record("SetAdapterConnectable %t", connectable)
-	r.snapshot.Adapter.Connectable = connectable
-	return nil
-}
-
-func (r *fakeRadio) SetDeviceAlias(device bonds.Address, alias string) error {
-	r.record("SetDeviceAlias %s %s", device.Key(), alias)
-	r.update(device, func(state *deviceState) { state.Alias = alias })
-	return nil
-}
-
-func (r *fakeRadio) SetDeviceTrusted(device bonds.Address, trusted bool) error {
-	r.record("SetDeviceTrusted %s %t", device.Key(), trusted)
-	r.update(device, func(state *deviceState) { state.Trusted = trusted })
-	return nil
-}
-
-func (r *fakeRadio) OpenWindow(window time.Duration) error {
-	r.record("OpenWindow %s", window)
-	r.snapshot.Adapter.Discoverable = true
-	r.snapshot.Adapter.Pairable = true
-	r.snapshot.Adapter.Discovering = true
-	return nil
-}
-
-func (r *fakeRadio) CloseWindow() error {
-	r.record("CloseWindow")
-	r.snapshot.Adapter.Discoverable = false
-	r.snapshot.Adapter.Pairable = false
-	r.snapshot.Adapter.Discovering = false
-	return nil
-}
-
-func (r *fakeRadio) Pair(device bonds.Address) error {
-	r.record("Pair %s", device.Key())
-	if r.pairErr != nil {
-		return r.pairErr
-	}
-	r.update(device, func(state *deviceState) { state.Paired = true })
-	return nil
-}
-
-func (r *fakeRadio) Disconnect(device bonds.Address) error {
-	r.record("Disconnect %s", device.Key())
-	r.update(device, func(state *deviceState) { state.Connected = false })
-	return nil
-}
-
-func (r *fakeRadio) Remove(device bonds.Address) error {
-	r.record("Remove %s", device.Key())
-	kept := make([]deviceState, 0, len(r.snapshot.Devices))
-	for _, state := range r.snapshot.Devices {
-		if state.Address != device {
-			kept = append(kept, state)
-		}
-	}
-	r.snapshot.Devices = kept
-	return nil
-}
-
-func (r *fakeRadio) update(device bonds.Address, change func(*deviceState)) {
-	for index := range r.snapshot.Devices {
-		if r.snapshot.Devices[index].Address == device {
-			change(&r.snapshot.Devices[index])
-		}
-	}
-}
-
-// testRadio is one adapter with the devices a test names.
-func testRadio(t *testing.T, devices ...deviceState) *fakeRadio {
-	t.Helper()
-	return &fakeRadio{snapshot: radioSnapshot{
-		Adapter: adapterState{Address: testAdapterAddress(t), Powered: true, Connectable: true, Alias: "liken-1"},
-		Devices: devices,
-	}}
-}
-
-// pairedDevice is a controller with a bond, as bluetoothd reports it.
-func pairedDevice(t *testing.T, address string) deviceState {
-	t.Helper()
-	return deviceState{
-		Address:   testAddress(t, address),
-		Name:      "DualSense Wireless Controller",
-		Alias:     "DualSense Wireless Controller",
-		Paired:    true,
-		Connected: true,
-		Trusted:   true,
-	}
-}
-
-// seenDevice is a controller the radio has observed and holds no bond
-// with, which is the kind of device a pairing window reports.
-func seenDevice(t *testing.T, address, name string) deviceState {
-	t.Helper()
-	return deviceState{Address: testAddress(t, address), Name: name, Alias: name}
 }
 
 // testInventory wires an inventory to the fixtures, with the CDI

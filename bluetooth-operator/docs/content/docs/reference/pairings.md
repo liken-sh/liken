@@ -25,7 +25,7 @@ What the operator makes true about the device.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--alias"></span>`alias` | string | no | The name for this controller, written into BlueZ's Device1.Alias. bluetoothd stores the alias in the bond's own file, so the name is stored with the keys. Leave it empty to keep the name the controller reports for itself. |
-| <span id="spec--trusted"></span>`trusted` | boolean | no | Whether the controller may reconnect on its own, written into BlueZ's Device1.Trusted. With this off, BlueZ asks an agent to authorize each service on every connection, and no agent is registered outside a pairing window, so the controller does not reconnect. Default: `true`. |
+| <span id="spec--trusted"></span>`trusted` | boolean | no | Whether the device may connect with no agent, written into BlueZ's Device1.Trusted. With this off, BlueZ asks an agent to authorize each service on every connection, and no agent is registered outside a pairing window, so the device does not connect. A trusted controller connects when its own button is pressed. A trusted speaker is connected by the operator whenever it is powered on and in range. Default: `true`. |
 
 ## status
 

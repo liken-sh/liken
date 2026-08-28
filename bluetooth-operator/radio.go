@@ -61,6 +61,13 @@ const (
 	// reaches the radio link.
 	pairTimeout = 30 * time.Second
 
+	// connectTimeout bounds Device1.Connect, which returns only when
+	// the link is up or the page failed. A page at a speaker that is
+	// switched off takes several seconds. The call runs off the
+	// reconcile loop, so the bound is on the attempt and not on the
+	// pass.
+	connectTimeout = 30 * time.Second
+
 	// callTimeout bounds every other call. Each one is a local method
 	// call to a daemon in the same pod, so a call that takes seconds
 	// means the daemon has already failed.
@@ -77,9 +84,10 @@ var ErrNoDevice = errors.New("bluetoothd holds no object for that device")
 // adapterState is the radio itself, as bluetoothd reports it.
 //
 // Connectable is whether the radio answers a page: the inbound
-// connection a bonded controller's reconnect button or a speaker's
-// own connect loop makes. It is separate from Discoverable, which
-// only controls the inquiry scan a pairing needs.
+// connection a bonded controller's reconnect button makes. The
+// operator pages a bonded speaker itself (connect.go), so the setting
+// covers the inbound direction only. It is separate from
+// Discoverable, which only controls the inquiry scan a pairing needs.
 type adapterState struct {
 	Address      bonds.Address
 	Alias        string
@@ -94,6 +102,10 @@ type adapterState struct {
 // object exists for every device the radio detected recently as well as
 // for every device it holds a bond with, and Paired is what separates
 // the two.
+//
+// UUIDs are the profile UUIDs from the SDP browse. classify.go decodes
+// them, so the pass tells an audio sink from an input device out of
+// the same snapshot it reads everything else from.
 type deviceState struct {
 	Address   bonds.Address
 	Name      string
@@ -101,6 +113,7 @@ type deviceState struct {
 	Paired    bool
 	Connected bool
 	Trusted   bool
+	UUIDs     []string
 }
 
 // radioSnapshot is one read of bluetoothd's whole object tree. Every
@@ -149,6 +162,12 @@ type radio interface {
 	CloseWindow() error
 
 	Pair(device bonds.Address) error
+
+	// Connect pages a bonded device and returns when the link is up
+	// or when the page failed, so the caller runs it off the reconcile
+	// loop.
+	Connect(device bonds.Address) error
+
 	Disconnect(device bonds.Address) error
 	Remove(device bonds.Address) error
 }
@@ -248,6 +267,7 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 		paired, _ := properties["Paired"].Value().(bool)
 		connected, _ := properties["Connected"].Value().(bool)
 		trusted, _ := properties["Trusted"].Value().(bool)
+		uuids, _ := properties["UUIDs"].Value().([]string)
 		snapshot.Devices = append(snapshot.Devices, deviceState{
 			Address:   parsed,
 			Name:      name,
@@ -255,6 +275,7 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 			Paired:    paired,
 			Connected: connected,
 			Trusted:   trusted,
+			UUIDs:     uuids,
 		})
 	}
 	return snapshot, nil
@@ -427,6 +448,14 @@ func (r *blueZRadio) Pair(device bonds.Address) error {
 		return err
 	}
 	return r.call(path, deviceInterface+".Pair", pairTimeout)
+}
+
+func (r *blueZRadio) Connect(device bonds.Address) error {
+	path, err := r.devicePath(device)
+	if err != nil {
+		return err
+	}
+	return r.call(path, deviceInterface+".Connect", connectTimeout)
 }
 
 func (r *blueZRadio) Disconnect(device bonds.Address) error {

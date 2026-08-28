@@ -55,12 +55,19 @@ Approval is a write to the request's spec:
     kubectl patch pairingrequest new-gamepad -n liken-system \
       --type merge -p '{"spec":{"device":"A0:AB:51:33:B7:12"}}'
 
-The operator pairs that device, trusts it so it reconnects on its
-own, records the bond as a `Pairing`, and closes the window. The
-request's `status.phase` goes to `Paired`. A request nobody approves
-only scans: an empty `spec.device` never pairs anything, the window
-expires on its own, and the finished request is collected after
-`spec.ttlSecondsAfterFinished`, a day by default.
+The operator pairs that device, trusts it, records the bond as a
+`Pairing`, and closes the window. Trust lets a later connection run
+with no agent registered; it does not make the device connect. Who
+connects depends on the device. A controller connects when you press
+its own button. A speaker is connected by the operator itself,
+whenever the speaker is powered on and in range: a failed attempt is
+retried, and the wait between attempts doubles from 10 seconds up to
+two minutes.
+
+The request's `status.phase` goes to `Paired`. A request nobody
+approves only scans: an empty `spec.device` never pairs anything, the
+window expires on its own, and the finished request is collected
+after `spec.ttlSecondsAfterFinished`, a day by default.
 
 To re-pair a device the cluster already records, set `spec.device`
 when you create the request. An address set at creation is an

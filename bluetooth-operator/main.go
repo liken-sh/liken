@@ -185,14 +185,17 @@ func main() {
 	objects := newInventory(client, newBlueZRadio(conn), nodeName, namespace)
 	readPairedSet := func() (map[string]controller, error) { return pairedControllers(conn) }
 	readAdapter := func() (bonds.Address, error) { return adapterAddress(conn) }
-	wakeSoon := func(after time.Duration) {
-		time.AfterFunc(after, func() {
-			select {
-			case retries <- struct{}{}:
-			default:
-			}
-		})
+	wake := func() {
+		select {
+		case retries <- struct{}{}:
+		default:
+		}
 	}
+	wakeSoon := func(after time.Duration) { time.AfterFunc(after, wake) }
+	// The connector pages a device from its own goroutine, and the
+	// pass that reads the result is the loop's, so a finished call is
+	// a wake like the kernel's and the bus's.
+	objects.connects.wake = wake
 	retryScheduled := false
 	pass := func() {
 		// The three parts of a pass run in order and all of them run. The
