@@ -58,19 +58,17 @@ a compositor, and `kernel` is absent while the connector drives
 nothing. `kubectl get displays` shows the two as the `MODE` and
 `CANVAS` columns.
 
-## The attached input
+## Shared screens
 
 A monitor with several inputs dims all of them at once, because
-brightness and power are panel-global. So the operator obeys a
-darkening override only after a fresh read of the panel's shown
-input answers and matches this machine's own input; a read that
-fails, or answers another input, leaves the override standing
-unactuated until the panel returns. The machine's own input usually
-needs no configuration: an HDMI sink serves each of its ports an
-EDID that names the port, and the operator publishes what it
-derived as `status.attachedInput`. Declare `spec.attachedInput`
-only where the EDID cannot say it, a DisplayPort cable, or a panel
-that serves the same address on every port.
+brightness and power are panel-global, and the operator writes what
+an override states whenever the panel answers. Panels do not say
+reliably which input they show: the query is optional, and a panel
+can answer it with the name of the port the question arrived on. So
+whether a screen should ever go dark is its owner's declaration,
+not the operator's guess. State it in the layer that writes the
+override; the media operator's `Player` carries an idle policy
+whose `offAfterSeconds: 0` keeps a shared screen's panel untouched.
 
 ## Observed values
 

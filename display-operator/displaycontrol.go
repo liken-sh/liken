@@ -49,9 +49,6 @@ type displayControl struct {
 	// The last poll failure reported for each connector, so a
 	// panel that stays quiet prints one line and not one a minute.
 	pollFaults map[string]string
-	// The deferral standing for each connector, in the same
-	// shape and for the same reason as the poll's faults above.
-	darkFaults map[string]string
 	// How often the loop looks, and it is the poll's window: a
 	// window that comes due needs a pass to act on it. A field for the
 	// reason the clock is one.
@@ -101,7 +98,6 @@ func newDisplayControl(client *Client, node string, controls *panelControls, out
 		wakes:      make(chan struct{}, 1),
 		restoring:  map[string]bool{},
 		pollFaults: map[string]string{},
-		darkFaults: map[string]string{},
 	}
 }
 
@@ -366,7 +362,7 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 			return fmt.Errorf("%s answers no brightness control, and the override states backlight off",
 				output.Connector)
 		}
-		return d.hold(display, output, facts, vcpBrightness, 0)
+		return d.hold(display, output, vcpBrightness, 0)
 	}
 	// A capture that stands is restored even against a panel
 	// that answers nothing now, because a panel the operator powered
@@ -384,71 +380,6 @@ func (d *displayControl) actuate(ctx context.Context, display *Display, output O
 	// panel's own buttons and writes the declaration back over it.
 	d.poll(output, facts)
 	return d.rest(display, output, d.controls.factsFor(output))
-}
-
-// Whether the panel shows this machine's own input, and so
-// whether a darkening override may act. A panel with no declaration
-// answers yes, which is every single-input panel and every panel
-// nobody shares. The read that lifts a deferral is the poll: it keeps
-// the shown input fresh, so the pass that finds the panel back on this
-// machine's input obeys the override that was waiting.
-func (d *displayControl) attached(spec DisplaySpec, output Output, facts panelFacts) (bool, error) {
-	attached, declared, err := attachedInput(spec, output, facts)
-	if err != nil {
-		return false, err
-	}
-	if !declared {
-		return true, nil
-	}
-	// The read is made here and now, and the last observed
-	// value is not consulted at all. A poll that failed keeps the last
-	// value by design, and the lab's ultrawide answers this query with
-	// a reply that parses wrong while it shows another source, so the
-	// fossil said the panel was ours and the operator darkened
-	// somebody else's picture. The read records what it reads, so the
-	// observed input follows it.
-	shown, _, err := d.controls.readControl(output.Connector, vcpInput)
-	if err != nil {
-		// A panel that cannot say what it shows is treated as
-		// showing somebody else. This is the whole of the metal
-		// drill's lesson.
-		d.reportDeferral(output.Connector,
-			fmt.Sprintf("%s does not answer which input it shows: %v", output.Connector, err))
-		return false, nil
-	}
-	if shown == attached {
-		return true, nil
-	}
-	d.reportDeferral(output.Connector, fmt.Sprintf("%s shows %s and this machine is on %s",
-		output.Connector, valueName(vcpInput, shown), valueName(vcpInput, attached)))
-	return false, nil
-}
-
-// What the panel is showing, in one word, for the line that
-// says why the darkening waits.
-func shownInput(shown uint16, known bool) string {
-	if !known {
-		return "an input this operator has not read"
-	}
-	return valueName(vcpInput, shown)
-}
-
-// One line per connector while a deferral stands, and the mark
-// is cleared when the override finally acts, so the next deferral is
-// reported again. A line on every pass would print six times a minute
-// for a whole evening of somebody else's film.
-func (d *displayControl) reportDeferral(connector, reason string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if reason == "" {
-		delete(d.darkFaults, connector)
-		return
-	}
-	if d.darkFaults[connector] == reason {
-		return
-	}
-	d.darkFaults[connector] = reason
-	fmt.Printf("%s: the darkening override waits\n", reason)
 }
 
 // The guarded read. A DDC read is a wake stimulus on some
@@ -494,25 +425,8 @@ func (d *displayControl) reportPoll(connector string, err error) {
 // The capture commits before the wire write. A status write that
 // failed leaves the panel lit, because the value that brings it back is
 // the whole reason this resource exists.
-func (d *displayControl) hold(display *Display, output Output, facts panelFacts, code byte, held uint16) error {
-	_, captured := capturedRaw(display.Status.Captured, code)
-	current, known := d.controls.factsFor(output).Observed[code]
-	// An override already obeyed asks nothing more of the
-	// panel, and a panel held dark must not be read: a DDC read is a
-	// wake stimulus. So the fresh read below happens only while the
-	// darkening is pending and unactuated.
-	if captured && known && current == held {
-		return nil
-	}
-	obeys, err := d.attached(display.Spec, output, facts)
-	if err != nil {
-		return err
-	}
-	if !obeys {
-		return nil
-	}
-	d.reportDeferral(output.Connector, "")
-	if !captured {
+func (d *displayControl) hold(display *Display, output Output, code byte, held uint16) error {
+	if _, captured := capturedRaw(display.Status.Captured, code); !captured {
 		if err := d.capture(display, output, code); err != nil {
 			return err
 		}
@@ -531,19 +445,7 @@ func (d *displayControl) holdPower(display *Display, output Output, facts panelF
 	if !carried {
 		return fmt.Errorf("%s answers no power control, and the override states power off", output.Connector)
 	}
-	_, saved := capturedRaw(display.Status.Captured, vcpPowerMode)
-	if down, known := facts.Observed[vcpPowerMode]; saved && known && down == off {
-		return nil
-	}
-	obeys, err := d.attached(display.Spec, output, facts)
-	if err != nil {
-		return err
-	}
-	if !obeys {
-		return nil
-	}
-	d.reportDeferral(output.Connector, "")
-	if !saved {
+	if _, captured := capturedRaw(display.Status.Captured, vcpPowerMode); !captured {
 		if err := d.capture(display, output, vcpPowerMode); err != nil {
 			if current, known := facts.Observed[vcpPowerMode]; known && current == off {
 				return nil
@@ -721,13 +623,6 @@ func (d *displayControl) restoreOne(ctx context.Context, connector string, code 
 // never written.
 func (d *displayControl) rest(display *Display, output Output, facts panelFacts) error {
 	var failures []error
-	// The attached input is judged here with every other
-	// declared value, and it is the one this operator never writes: it
-	// states which input this machine's cable occupies, and the panel
-	// is not asked to change anything by it.
-	if _, _, err := attachedInput(display.Spec, output, facts); err != nil {
-		failures = append(failures, err)
-	}
 	for _, control := range coreControls {
 		want, stated := display.Spec.raw(control.Code)
 		if !stated {
@@ -769,58 +664,6 @@ func declarable(code byte, want uint16, facts panelFacts) error {
 	return nil
 }
 
-// The declared attached input as the number the panel reports
-// for it, and whether one is declared at all. The value is judged
-// against the panel's own input list, the way every declared value is,
-// and it is never written: a fact about which cable is ours is not a
-// request to switch the panel to it.
-func attachedInput(spec DisplaySpec, output Output, facts panelFacts) (uint16, bool, error) {
-	if spec.AttachedInput == nil {
-		// The EDID is the second source and the owner's
-		// declaration is the first, so this is read only when no
-		// declaration stands.
-		derived := derivedInput(output, facts)
-		if derived == "" {
-			return 0, false, nil
-		}
-		raw, named := valueRaw(vcpInput, derived)
-		return raw, named, nil
-	}
-	name := *spec.AttachedInput
-	capability, carried := facts.Capabilities[inputControl]
-	if !carried {
-		return 0, false, fmt.Errorf(
-			"the spec states the attached input %s, and the panel carries no input control", name)
-	}
-	if !slices.Contains(capability.Values, name) {
-		return 0, false, fmt.Errorf("the spec states the attached input %s, and the panel accepts %v",
-			name, capability.Values)
-	}
-	raw, named := valueRaw(vcpInput, name)
-	if !named {
-		return 0, false, fmt.Errorf("the spec states the attached input %s, and no input carries that name", name)
-	}
-	return raw, true, nil
-}
-
-// The input this machine's cable occupies, as the panel's own
-// EDID states it. The derivation holds only where the sink names the
-// port: an HDMI connector, an address in the form one port has, and an
-// input list that carries the name it maps to. A DisplayPort cable
-// derives nothing, because an address in that EDID describes the
-// sink's HDMI topology and not the port this cable is in.
-func derivedInput(output Output, facts panelFacts) string {
-	if output.Monitor.HDMIInput == 0 || !strings.HasPrefix(output.Connector, "HDMI") {
-		return ""
-	}
-	name := fmt.Sprintf("HDMI-%d", output.Monitor.HDMIInput)
-	capability, carried := facts.Capabilities[inputControl]
-	if !carried || !slices.Contains(capability.Values, name) {
-		return ""
-	}
-	return name
-}
-
 // The value a power-down writes. A panel implements the subset
 // of the power code that it chooses, so the write is the first of
 // these the panel declared.
@@ -860,7 +703,6 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	status.Serial = output.Monitor.Serial
 	status.WidthMillimeters = output.Monitor.WidthMillimeters
 	status.HeightMillimeters = output.Monitor.HeightMillimeters
-	status.AttachedInput = derivedInput(output, facts)
 	status.Mode = displayMode(output.CurrentMode, d.servedMode(output.Connector))
 	status.Modes = output.OfferedModes
 	status.Capabilities = facts.Capabilities

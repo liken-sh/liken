@@ -72,15 +72,8 @@ type DisplaySpec struct {
 	// what a claim's own mode parameter is. The operator applies it
 	// only while no claim holds the screen, because a mode lands
 	// through the compositor and a mode change restarts it.
-	Mode *string `json:"mode,omitempty"`
-	// The panel input this machine's cable occupies, one of
-	// status.capabilities.input.values. It is a declared fact and not
-	// a request: the operator never writes it to the panel. What it
-	// governs is the darkening override, which waits while the panel
-	// shows another input, because brightness and power are
-	// panel-global and darkening would dim somebody else's picture.
-	AttachedInput *string          `json:"attachedInput,omitempty"`
-	Override      *DisplayOverride `json:"override,omitempty"`
+	Mode     *string          `json:"mode,omitempty"`
+	Override *DisplayOverride `json:"override,omitempty"`
 }
 
 // The temporary layer above the resting one, and the two states
@@ -106,17 +99,12 @@ type DisplayStatus struct {
 	// each report it, and every mode the card offers for this
 	// connector. Status has no attribute-length limit, so this list
 	// is whole where the slice's is cut to fit.
-	// The input this machine's cable occupies, as the operator
-	// derived it from the EDID's physical address. A declaration in
-	// spec.attachedInput wins over it, and this field always reports
-	// what was derived, so a person can check it against the cabling.
-	AttachedInput string                     `json:"attachedInput,omitempty"`
-	Mode          *DisplayMode               `json:"mode,omitempty"`
-	Modes         []string                   `json:"modes,omitempty"`
-	Capabilities  map[string]panelCapability `json:"capabilities,omitempty"`
-	Observed      *DisplayValues             `json:"observed,omitempty"`
-	Captured      *DisplayValues             `json:"captured,omitempty"`
-	Conditions    []DisplayCondition         `json:"conditions,omitempty"`
+	Mode         *DisplayMode               `json:"mode,omitempty"`
+	Modes        []string                   `json:"modes,omitempty"`
+	Capabilities map[string]panelCapability `json:"capabilities,omitempty"`
+	Observed     *DisplayValues             `json:"observed,omitempty"`
+	Captured     *DisplayValues             `json:"captured,omitempty"`
+	Conditions   []DisplayCondition         `json:"conditions,omitempty"`
 }
 
 // The mode this output runs, from the two parties that each

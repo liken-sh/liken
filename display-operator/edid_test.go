@@ -52,7 +52,6 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 				RefreshMillihertz: 59999,
 				WidthMillimeters:  879,
 				HeightMillimeters: 366,
-				HDMIInput:         2,
 			},
 		},
 		{
@@ -67,7 +66,6 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 				RefreshMillihertz: 60000,
 				WidthMillimeters:  344,
 				HeightMillimeters: 196,
-				HDMIInput:         1,
 			},
 		},
 		{
@@ -279,129 +277,5 @@ func TestDescriptorText(t *testing.T) {
 				t.Fatalf("descriptorText = %q, want %q", got, c.want)
 			}
 		})
-	}
-}
-
-// The sink names the port itself. An HDMI monitor serves each
-// of its inputs an EDID whose vendor block carries that port's CEC
-// physical address, so the address in the EDID this machine reads is
-// the number of the port this machine's cable occupies. Both fixtures
-// are the lab panels' own bytes, and they differ: the ultrawide serves
-// 2.0.0.0 on this machine's cable and the portable serves 1.0.0.0.
-func TestParseEDIDReadsThePortItIsPluggedInto(t *testing.T) {
-	cases := []struct {
-		fixture string
-		input   int
-	}{
-		{fixture: "lg-hdr-wqhd", input: 2},
-		{fixture: "portable-display", input: 1},
-		// A laptop's built-in panel is on no HDMI port and
-		// carries no vendor block at all.
-		{fixture: "framework-edp", input: 0},
-	}
-	for _, c := range cases {
-		t.Run(c.fixture, func(t *testing.T) {
-			edid, err := ParseEDID(loadEDID(t, c.fixture))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if edid.HDMIInput != c.input {
-				t.Errorf("HDMIInput = %d, want %d", edid.HDMIInput, c.input)
-			}
-		})
-	}
-}
-
-// An extension block built by hand, so a test can state one
-// data block and read what the walk makes of it.
-func ceaExtension(blocks ...[]byte) []byte {
-	extension := []byte{0x02, 0x03, 0x00, 0x00}
-	for _, block := range blocks {
-		extension = append(extension, block...)
-	}
-	extension[2] = byte(len(extension))
-	extension = append(extension, make([]byte, blockSize-len(extension))...)
-	var sum byte
-	for _, b := range extension[:blockSize-1] {
-		sum += b
-	}
-	extension[blockSize-1] = -sum
-	return extension
-}
-
-// One data block: the tag in the top three bits, the payload
-// length in the low five.
-func ceaBlock(tag int, payload ...byte) []byte {
-	return append([]byte{byte(tag<<5 | len(payload))}, payload...)
-}
-
-func TestThePhysicalAddressIsReadOnlyInTheFormOnePortHas(t *testing.T) {
-	cases := []struct {
-		name  string
-		block []byte
-		input int
-	}{
-		{
-			// The bytes the drill read off the lab's ultrawide.
-			name:  "the vendor block of an HDMI sink's second port",
-			block: ceaBlock(3, 0x03, 0x0c, 0x00, 0x20, 0x00, 0xb8, 0x3c, 0x20),
-			input: 2,
-		},
-		{
-			// A sink that states no address at all says
-			// nothing about which port this cable is in.
-			name:  "a degenerate address",
-			block: ceaBlock(3, 0x03, 0x0c, 0x00, 0x00, 0x00),
-		},
-		{
-			// An address below the root names a device behind
-			// a repeater, and the port it names is not this panel's.
-			name:  "an address deeper than one port",
-			block: ceaBlock(3, 0x03, 0x0c, 0x00, 0x21, 0x00),
-		},
-		{
-			name:  "another vendor's block",
-			block: ceaBlock(3, 0x2d, 0x79, 0x03, 0x20, 0x00),
-		},
-		{
-			name:  "a block that is not a vendor block",
-			block: ceaBlock(2, 0x03, 0x0c, 0x00, 0x20, 0x00),
-		},
-		{
-			name:  "a vendor block cut short before the address",
-			block: ceaBlock(3, 0x03, 0x0c, 0x00),
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			raw := append(baseBlockOf(t, "lg-hdr-wqhd"), ceaExtension(c.block)...)
-
-			edid, err := ParseEDID(raw)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if edid.HDMIInput != c.input {
-				t.Errorf("HDMIInput = %d, want %d", edid.HDMIInput, c.input)
-			}
-		})
-	}
-}
-
-// One fixture's first block, the part that carries the
-// identity, with whatever extension a test wants behind it.
-func baseBlockOf(t *testing.T, fixture string) []byte {
-	t.Helper()
-	return loadEDID(t, fixture)[:blockSize]
-}
-
-// A monitor that serves one block and no extension states no
-// port, and the parse says so rather than guessing.
-func TestAnEDIDWithNoExtensionStatesNoPort(t *testing.T) {
-	edid, err := ParseEDID(baseBlockOf(t, "lg-hdr-wqhd"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if edid.HDMIInput != 0 {
-		t.Errorf("HDMIInput = %d, want none", edid.HDMIInput)
 	}
 }

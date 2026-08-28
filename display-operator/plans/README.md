@@ -129,7 +129,11 @@ say why it is built the way it is.
   read that fails defers. Drilled eyes-on: the override stood
   unactuated through a working session on the other input, and the
   deferred blank landed capture-first within a poll window of the
-  switch back.
+  switch back. Superseded by
+  [plan 13](13-the-attached-input-retires.md) the same week: the
+  same panel also answers the query with the name of the port the
+  question arrived on, so the guard read a mirror, and the decision
+  moved to the media layer's per-`Player` idle policy.
 
 * [12, The compositor reports its outputs](completed/12-the-compositor-reports-its-outputs.md).
   Built and drilled on liken-1 on 2026-08-27, in releases
@@ -149,6 +153,14 @@ say why it is built the way it is.
   compositor's modes until the next connection opened, so a readback
   failure named a fossil; the answers now empty the moment a
   connection ends.
+* [13, The attached input retires](13-the-attached-input-retires.md).
+  Plan 11's guard asked the panel which input it shows, and the
+  bench proved the answer is a mirror: the shared monitor names the
+  port the question arrived on, always. The attached input is
+  removed entirely, a darkening override actuates whenever the
+  panel answers, and the decision the guard guessed at lives in the
+  media layer's per-`Player` idle policy, where the screen's owner
+  states it once.
 
 ## Open problems
 

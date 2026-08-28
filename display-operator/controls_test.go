@@ -280,10 +280,6 @@ type fakeMonitor struct {
 	// How many writes a silent panel takes before it answers
 	// again.
 	wakesAfter int
-	// The codes this panel answers with a reply that parses
-	// wrong. The lab's ultrawide does this to the input query while it
-	// shows another source: not silence, an invalid response.
-	garbles map[byte]bool
 	// The shared record of what reached the panel and what
 	// reached the API server, so a test reads the two in the order
 	// they happened.
@@ -356,19 +352,6 @@ func (m *fakeMonitor) silence() {
 	m.silent = true
 }
 
-// The panel starts, or stops, answering one code with a reply
-// that parses wrong. This is what the lab's ultrawide does to the
-// input query while it shows another source: not silence, a reply the
-// protocol cannot read.
-func (m *fakeMonitor) garble(code byte, garbles bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.garbles == nil {
-		m.garbles = map[byte]bool{}
-	}
-	m.garbles[code] = garbles
-}
-
 // A person turns one control at the panel's own buttons. No
 // message reaches the host, which is the whole reason the operator
 // polls.
@@ -404,10 +387,6 @@ func (m *fakeMonitor) Write(request []byte) error {
 	code := request[3]
 	switch request[2] {
 	case vcpGetRequest:
-		if m.garbles[code] {
-			m.pending = corrupt(getReply(code, m.values[code], m.maxima[code]), 0, ddcHostAddress)
-			return nil
-		}
 		current, carried := m.values[code]
 		if !carried {
 			m.pending = corrupt(getReply(code, 0, 0), 3, vcpResultUnsupported)

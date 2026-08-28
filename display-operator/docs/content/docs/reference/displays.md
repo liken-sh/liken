@@ -62,7 +62,6 @@ The settings the panel rests at, and the override above them. Every field is opt
 | <span id="spec--sharpness"></span>`sharpness` | integer | no | The panel's own sharpness number. |
 | <span id="spec--colorpreset"></span>`colorPreset` | string | no | One of status.capabilities.colorPreset.values. |
 | <span id="spec--input"></span>`input` | string | no | One of status.capabilities.input.values: the resting declaration that forces the panel to show that input. On a shared panel it writes the panel back to this machine within a poll window of every switch away, so declare it only on a panel that should always show this machine. |
-| <span id="spec--attachedinput"></span>`attachedInput` | string | no | The panel input this machine's cable occupies, one of status.capabilities.input.values. A declared fact, never written to the panel: it defers a darkening override while the panel shows another input, because brightness and power are panel-global. Declare it only where the EDID says nothing; status.attachedInput carries what the operator derived, and this declaration wins over it. Beside spec.input on a shared panel, the resting write would fight every switch away. |
 | <span id="spec--audiovolume"></span>`audioVolume` | integer | no | The panel's own volume number. |
 | <span id="spec--audiomute"></span>`audioMute` | boolean | no | Whether the panel's own speakers are muted. |
 | <span id="spec--mode"></span>`mode` | string | no | The mode the screen rests at, one of status.modes, in the 1920x1080@60 form. A claim's own mode parameter wins while the claim holds the screen, and a change here waits for the claim to end. Applying it restarts the compositor once, which ends every Wayland client on this card. |
@@ -90,7 +89,6 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--serial"></span>`serial` | string | no | The monitor's serial, from its EDID, and absent when the monitor states none. |
 | <span id="status--widthmillimeters"></span>`widthMillimeters` | integer | no | The panel's physical width, as the monitor states it. |
 | <span id="status--heightmillimeters"></span>`heightMillimeters` | integer | no | The panel's physical height, as the monitor states it. |
-| <span id="status--attachedinput"></span>`attachedInput` | string | no | The input this machine's cable occupies, as the operator derived it from the EDID: an HDMI sink serves each of its ports an EDID naming that port. It is published so a person can check the derivation against the cabling, and a declared spec.attachedInput wins over it. A DisplayPort cable, and a panel that serves the same address on every port, derive nothing; those are the panels the owner declares for. |
 | <span id="status--mode"></span>`mode` | [object](#statusmode) | no | The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows. |
 | <span id="status--modes"></span>`modes` | []string | no | Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it. |
@@ -203,19 +201,17 @@ a compositor, and `kernel` is absent while the connector drives
 nothing. `kubectl get displays` shows the two as the `MODE` and
 `CANVAS` columns.
 
-## The attached input
+## Shared screens
 
 A monitor with several inputs dims all of them at once, because
-brightness and power are panel-global. So the operator obeys a
-darkening override only after a fresh read of the panel's shown
-input answers and matches this machine's own input; a read that
-fails, or answers another input, leaves the override standing
-unactuated until the panel returns. The machine's own input usually
-needs no configuration: an HDMI sink serves each of its ports an
-EDID that names the port, and the operator publishes what it
-derived as `status.attachedInput`. Declare `spec.attachedInput`
-only where the EDID cannot say it, a DisplayPort cable, or a panel
-that serves the same address on every port.
+brightness and power are panel-global, and the operator writes what
+an override states whenever the panel answers. Panels do not say
+reliably which input they show: the query is optional, and a panel
+can answer it with the name of the port the question arrived on. So
+whether a screen should ever go dark is its owner's declaration,
+not the operator's guess. State it in the layer that writes the
+override; the media operator's `Player` carries an idle policy
+whose `offAfterSeconds: 0` keeps a shared screen's panel untouched.
 
 ## Observed values
 

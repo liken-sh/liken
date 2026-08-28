@@ -37,9 +37,6 @@ spec:
         - name: Connector
           type: string
           jsonPath: .status.connector
-        - name: Attached
-          type: string
-          jsonPath: .status.attachedInput
         - name: Mode
           type: string
           jsonPath: .status.mode.kernel
@@ -91,9 +88,6 @@ spec:
                 input:
                   type: string
                   description: "One of status.capabilities.input.values: the resting declaration that forces the panel to show that input. On a shared panel it writes the panel back to this machine within a poll window of every switch away, so declare it only on a panel that should always show this machine."
-                attachedInput:
-                  type: string
-                  description: "The panel input this machine's cable occupies, one of status.capabilities.input.values. A declared fact, never written to the panel: it defers a darkening override while the panel shows another input, because brightness and power are panel-global. Declare it only where the EDID says nothing; status.attachedInput carries what the operator derived, and this declaration wins over it. Beside spec.input on a shared panel, the resting write would fight every switch away."
                 audioVolume:
                   type: integer
                   minimum: 0
@@ -145,9 +139,6 @@ spec:
                 heightMillimeters:
                   type: integer
                   description: "The panel's physical height, as the monitor states it."
-                attachedInput:
-                  type: string
-                  description: "The input this machine's cable occupies, as the operator derived it from the EDID: an HDMI sink serves each of its ports an EDID naming that port. It is published so a person can check the derivation against the cabling, and a declared spec.attachedInput wins over it. A DisplayPort cable, and a panel that serves the same address on every port, derive nothing; those are the panels the owner declares for."
                 mode:
                   type: object
                   description: "The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows."
