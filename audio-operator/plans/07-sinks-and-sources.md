@@ -129,8 +129,12 @@ itself, the way `liken` builds `path_id` for disks.
 | USB card with no serial | node, USB port path, PCM id | `liken-1-usb-1-6-usb-audio` |
 | Bluetooth speaker | address | `7c-66-ef-01-23-45`, unchanged |
 
-The PCM id is the `id` field of `/proc/asound/card<N>/pcm<D>p/info`
-(`HDMI 0`, `USB Audio`), lowercased with dashes. It is the driver's
+The PCM id is the driver's own name for the PCM device (`HDMI 0`,
+`USB Audio`), read with `SNDRV_CTL_IOCTL_PCM_INFO` on the control
+device and lowercased with dashes. It is the same `id` that
+`/proc/asound/card<N>/pcm<D>p/info` prints, and the ioctl is used
+because the container runtime masks `/proc/asound` with an empty
+tmpfs. It is the driver's
 name for the endpoint and not its device number, and on HDA it is
 stable per codec: the HDMI codec numbers its converters in order
 and the device slots for each PCM type are a fixed table

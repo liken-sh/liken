@@ -6,8 +6,9 @@ package main
 // with the card's own id, driver, and name. sysfs says where the
 // card is: the PCI function or the USB port it is on, and for a USB
 // card the vendor, product, and serial of the device above the
-// interface. And /proc/asound holds the driver's own name for each
-// PCM device. liken runs no udev, so the operator reads the same
+// interface. And the control device answers with the driver's own
+// name for each PCM device, the same name /proc/asound prints, which
+// the container runtime masks. liken runs no udev, so the operator reads the same
 // attributes that 60-persistent-alsa.rules reads to build
 // /dev/snd/by-id and by-path, and names.go builds the same names.
 
@@ -172,6 +173,58 @@ func sysfsAttribute(dir, name string) string {
 	return strings.TrimSpace(string(raw))
 }
 
+// pcmInfoSize is the size of struct snd_pcm_info in bytes, and
+// ctlIoctlPCMInfo is the request that fills one through the control
+// device: the caller states the device, the subdevice, and the
+// stream, and the kernel answers with the driver's own id and name
+// for that PCM. It is the same answer /proc/asound/card<N>/pcm<D>p/info
+// prints, from a device node this pod is given where the proc file is
+// not: the container runtime masks /proc/asound with an empty tmpfs.
+const pcmInfoSize = 288
+
+var ctlIoctlPCMInfo = iowr(0x31, pcmInfoSize)
+
+// The two stream directions struct snd_pcm_info names.
+const (
+	pcmStreamPlayback = 0
+	pcmStreamCapture  = 1
+)
+
+// sndPCMInfo mirrors struct snd_pcm_info field for field. The fields
+// after the name are here because the layout is the protocol.
+type sndPCMInfo struct {
+	Device          uint32
+	Subdevice       uint32
+	Stream          int32
+	Card            int32
+	ID              [64]byte
+	Name            [80]byte
+	Subname         [32]byte
+	DevClass        int32
+	DevSubclass     int32
+	SubdevicesCount uint32
+	SubdevicesAvail uint32
+	Pad1            [16]byte
+	Reserved        [64]byte
+}
+
+// readPCMInfo asks the card's control device about one PCM device.
+func readPCMInfo(card, pcm int, capture bool) (sndPCMInfo, error) {
+	info := sndPCMInfo{Device: uint32(pcm), Stream: pcmStreamPlayback}
+	if capture {
+		info.Stream = pcmStreamCapture
+	}
+	control, err := os.Open(fmt.Sprintf("%s/controlC%d", sndDir, card))
+	if err != nil {
+		return info, err
+	}
+	defer control.Close()
+	if err := ioctl(control, ctlIoctlPCMInfo, unsafe.Pointer(&info)); err != nil {
+		return info, fmt.Errorf("reading the PCM information: %w", err)
+	}
+	return info, nil
+}
+
 // pcmIDKey is the field of a PCM's info file that holds the driver's
 // name for it.
 const pcmIDKey = "id:"
@@ -183,7 +236,17 @@ const pcmIDKey = "id:"
 // sound/hda/common/codec.c), so the numbers are stable on one card,
 // but a second card or a kernel change can move them, and the id
 // names the same converter either way.
+//
+// The control device answers first, because the pod is given the
+// device nodes and not /proc/asound. The proc file is the fallback
+// for a control device that refuses the request, and it is what the
+// fixtures in testdata answer through.
 func readPCMID(card, pcm int, capture bool) string {
+	if info, err := readPCMInfo(card, pcm, capture); err == nil {
+		if id := cText(info.ID[:]); id != "" {
+			return id
+		}
+	}
 	direction := "p"
 	if capture {
 		direction = "c"

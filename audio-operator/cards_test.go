@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"unsafe"
 )
 
 // machineFixture points the three trees this operator reads at a
@@ -140,5 +141,17 @@ func TestCardInfoReadsTheKernelsFixedFields(t *testing.T) {
 	}
 	if got := len(cText(filled[:])); got != len(filled) {
 		t.Errorf("length = %d, want %d", got, len(filled))
+	}
+}
+
+// The PCM info request carries its argument size, so a structure
+// that disagrees with the kernel's builds a number the kernel does
+// not answer.
+func TestPCMInfoLayout(t *testing.T) {
+	if got := unsafe.Sizeof(sndPCMInfo{}); got != pcmInfoSize {
+		t.Errorf("sizeof(snd_pcm_info) = %d, want %d", got, pcmInfoSize)
+	}
+	if got, want := ctlIoctlPCMInfo, uintptr(0xc1205531); got != want {
+		t.Errorf("SNDRV_CTL_IOCTL_PCM_INFO = %#x, want %#x", got, want)
 	}
 }
