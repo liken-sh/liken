@@ -272,7 +272,12 @@ func main() {
 	// reference: rebooting with the same image would request the same
 	// modules). The statuses keep the results, bound for
 	// status.modules through the facts tree.
-	boot.Modules = slices.Sorted(slices.Values(m.Spec.Modules))
+	// The record keeps the order this pass loads the modules in, which
+	// is the manifest's order. The order decides which driver claims a
+	// device, so the operator compares it against the spec
+	// (machine-operator/converge.go). A sorted record would report an
+	// order no machine ever loaded.
+	boot.Modules = slices.Clone(m.Spec.Modules)
 	boot.ModuleParameters = m.Spec.ModuleParameters
 	moduleStatuses := loadDeclaredModules(m.Spec.Modules, m.Spec.ModuleParameters)
 

@@ -1,6 +1,7 @@
 package machine
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -306,6 +307,63 @@ func TestModulesDriftIgnoresOrderAndRepetition(t *testing.T) {
 	diffs := ModulesDrift([]string{"nvidia", "zram", "nvidia"}, []string{"zram", "nvidia"}, nil, nil)
 	if len(diffs) != 0 {
 		t.Errorf("the lists are the same set: %v", diffs)
+	}
+}
+
+// The set diff above answers what loads. This comparison answers in
+// which order, which decides whether a codec's driver reaches the
+// codec before the controller binds it to the generic driver.
+func TestModuleOrderDrift(t *testing.T) {
+	cases := []struct {
+		name     string
+		desired  []string
+		actuated []string
+		want     []string
+	}{
+		{
+			name:     "the same order",
+			desired:  []string{"i915", "snd_hda_intel"},
+			actuated: []string{"i915", "snd_hda_intel"},
+		},
+		{
+			name:     "nothing on either side",
+			desired:  nil,
+			actuated: []string{},
+		},
+		{
+			name:     "a codec driver moved ahead of its controller",
+			desired:  []string{"snd_hda_codec_hdmi", "snd_hda_codec_alc269", "snd_hda_intel"},
+			actuated: []string{"snd_hda_codec_hdmi", "snd_hda_intel", "snd_hda_codec_alc269"},
+			want:     []string{"modules: the declared order changed: snd_hda_codec_alc269 now loads before snd_hda_intel"},
+		},
+		{
+			name:     "an added module is no reorder",
+			desired:  []string{"i915", "btusb", "snd_hda_intel"},
+			actuated: []string{"i915", "snd_hda_intel"},
+		},
+		{
+			name:     "a retracted module is no reorder",
+			desired:  []string{"i915", "snd_hda_intel"},
+			actuated: []string{"i915", "btusb", "snd_hda_intel"},
+		},
+		{
+			name:     "repetition carries no meaning",
+			desired:  []string{"i915", "snd_hda_intel", "i915"},
+			actuated: []string{"i915", "snd_hda_intel"},
+		},
+		{
+			name:     "the earliest place that changed names the change",
+			desired:  []string{"a", "b", "c"},
+			actuated: []string{"c", "b", "a"},
+			want:     []string{"modules: the declared order changed: a now loads before c"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if diffs := ModuleOrderDrift(c.desired, c.actuated); !slices.Equal(diffs, c.want) {
+				t.Errorf("got %v, want %v", diffs, c.want)
+			}
+		})
 	}
 }
 

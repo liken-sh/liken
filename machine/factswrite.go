@@ -410,6 +410,8 @@ func (t FactsTree) WriteBootRestarts(n int) error {
 
 // WriteBootModules publishes the module list the winning manifest
 // declared, recorded as actuated regardless of each load's outcome.
+// The list keeps the order the machine loaded the modules in, and the
+// operator compares that order against the declared one.
 func (t FactsTree) WriteBootModules(modules []string) error {
 	return t.report(t.writeListFact("boot/modules", modules))
 }

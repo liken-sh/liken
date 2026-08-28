@@ -281,6 +281,26 @@ func TestLiveLoadLoadsInTheOrderTheManifestLists(t *testing.T) {
 	}
 }
 
+// boot/modules records the order this machine loaded, not the order
+// the manifest lists. The modules the boot loaded keep their places
+// in the running kernel, so a live load appends what it loaded and
+// leaves a declared reorder to the next boot.
+func TestLiveLoadRecordsTheOrderTheMachineLoaded(t *testing.T) {
+	staged := liveLoadable()
+	staged.Modules = []string{"aardvark", "zebra", "badger"}
+	store, base, loader, hash := liveLoadFixture(t, staged, []string{"zebra"})
+	fakeModuleTree(t, base, "aardvark", "badger")
+	fakeFinitModule(t)
+
+	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
+
+	boot := bootManifestRecord(t, loader)
+	want := []string{"zebra", "aardvark", "badger"}
+	if !slices.Equal(boot.Modules, want) {
+		t.Errorf("boot/modules = %v, want %v", boot.Modules, want)
+	}
+}
+
 // A resident module loads nothing and its parameter must stay out
 // of the boot record, while the rest of the edit still applies and
 // promotes.

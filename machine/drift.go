@@ -226,6 +226,45 @@ func ModulesDrift(desired, actuated []string, desiredParameters, actuatedParamet
 	return append(diffs, ModuleParameterDrift(desired, actuated, desiredParameters, actuatedParameters)...)
 }
 
+// ModuleOrderDrift writes one line when the declared order of the
+// modules differs from the order the boot loaded them in.
+//
+// Order is drift because the position of a name decides which driver
+// claims the hardware. When a sound controller loads before the
+// codec's own driver, the kernel binds the codec to the generic
+// driver, and the codec's outputs never appear. Only a boot can load
+// the list again in a new order, so a reorder stages the manifest
+// and asks for no disruption (machine-operator/converge.go).
+//
+// The comparison is its own function beside the set diff above, and
+// it uses only the modules both lists hold. An addition or a
+// retraction is then never read as a reorder. It reports the earliest
+// pair that changed places, because one pair names the change.
+func ModuleOrderDrift(desired, actuated []string) []string {
+	shared := sharedModules(desired, actuated)
+	declared := sharedOrder(desired, shared)
+	loaded := sharedOrder(actuated, shared)
+	for i := range declared {
+		if declared[i] != loaded[i] {
+			return []string{fmt.Sprintf("modules: the declared order changed: %s now loads before %s", declared[i], loaded[i])}
+		}
+	}
+	return nil
+}
+
+// sharedOrder reduces a list to the shared modules alone, in the
+// list's own order and with repetition dropped. The two reduced lists
+// hold the same names, so they compare position by position.
+func sharedOrder(names []string, shared map[string]bool) []string {
+	var order []string
+	for _, name := range names {
+		if shared[name] && !slices.Contains(order, name) {
+			order = append(order, name)
+		}
+	}
+	return order
+}
+
 // ModuleParameterDrift writes a line only for a module that both the
 // desired and the actuated sets declare. A parameter that arrives
 // with a module the boot never loaded is part of that module's own

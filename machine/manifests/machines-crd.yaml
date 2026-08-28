@@ -534,7 +534,16 @@ spec:
                     the load that follows a later edit, can determine
                     whether the name exists. A module's load-time
                     settings go in moduleParameters, and they apply
-                    when the module loads, not after.
+                    when the module loads, not after. The boot loads
+                    the list in this order, and the order decides
+                    which driver claims a device. A sound codec's own
+                    driver must come before the controller's driver,
+                    or the controller binds the codec to the generic
+                    driver and the codec's outputs never appear. A
+                    change in the order alone stages for the next
+                    boot: the machine asks for no reboot, and it
+                    loads the new order at its next boot, whatever
+                    the cause of that boot is.
                   # This is a set for admission: the API server
                   # refuses duplicates instead of trusting the
                   # caller. The order still matters to the load: the
@@ -2708,7 +2717,10 @@ spec:
                         was. A boot with the same image asks for the
                         same modules, so this field is the drift
                         reference, and status.modules gives the state
-                        of each module.
+                        of each module. The list is in the order the
+                        machine loaded the modules in, so it shows
+                        whether the machine loaded them in the order
+                        spec.modules now gives.
                       x-kubernetes-list-type: atomic
                       items:
                         type: string

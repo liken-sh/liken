@@ -327,12 +327,20 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		machine.ModulesDrift(m.Spec.Modules, facts.Boot.Modules,
 			m.Spec.ModuleParameters, facts.Boot.ModuleParameters),
 		machine.RlimitDrift(m.Spec.Rlimits, facts.Boot.Rlimits))
-	if len(drift) == 0 {
+	// The order difference stays apart from drift and never joins it.
+	// The lines in drift are the count that decides the live-load
+	// tier below, and every line there names something a load or a
+	// reboot can actuate. Only a boot actuates a reorder, and a
+	// reorder is worth no boot of its own, so it takes neither tier.
+	// It stages, and any later boot loads the list in the order the
+	// spec now gives.
+	orderDiffs := machine.ModuleOrderDrift(m.Spec.Modules, facts.Boot.Modules)
+	if len(drift) == 0 && len(orderDiffs) == 0 {
 		return convergedWithCleanup(
 			converged("SpecConverged", "Converged", "this boot actuated the current spec"),
 			stagedHash, rejection)
 	}
-	diffs := strings.Join(drift, "; ")
+	diffs := strings.Join(slices.Concat(drift, orderDiffs), "; ")
 
 	manifest, hash, err := renderManifest(m.Metadata.Name, m.Spec)
 	if err != nil {
@@ -343,12 +351,16 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		return convergence{condition: notConverged("SpecConverged", "RejectedLastBoot",
 			fmt.Sprintf("init rejected this exact spec at boot: %s; edit the spec to something different", rejection.Reason))}
 	}
-	// The one drift shape a matching hash may legitimately carry:
-	// every line is a module parameter on an unchanged module set,
-	// which is what a live load leaves when it could not deliver a
-	// parameter (list item 4 above). The test is structural, a count
-	// over the drift's parts, so no drift text is ever matched and
-	// any other shape stays a contradiction.
+	// A matching hash may legitimately carry two shapes, and both are
+	// what a live load leaves behind. The first is a parameter the
+	// load could not deliver (list item 4 above): every drift line is
+	// a module parameter on an unchanged module set. The second is an
+	// order the load could not change, because the modules the boot
+	// loaded keep their places in the running kernel. An order
+	// difference lives outside drift, so it passes this test with no
+	// term of its own. The test is structural, a count over the
+	// drift's parts, so no drift text is ever matched and any other
+	// shape stays a contradiction.
 	parametersOnly := len(storageDiffs) == 0 && len(networkDiffs) == 0 &&
 		len(added) == 0 && len(retracted) == 0 && len(parameterDiffs) == len(drift)
 	if facts.Boot.ManifestHash == hash && !parametersOnly {
@@ -386,6 +398,20 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		stage:    stagedHash != hash, // idempotence: skip the write when these exact bytes are already staged
 	}
 
+	// The next-boot tier comes first, because a difference in nothing
+	// but the declared order is the lightest answer here. Nothing can
+	// load a resident module again in a new place, so no load applies
+	// a reorder. Nothing on the machine is wrong while the reorder
+	// waits, so no reboot is worth asking for. Staging is the whole of
+	// the work, and the next boot, whatever its cause, loads the list
+	// in the new order. The cluster document has the same tier for the
+	// same reason (cluster.go).
+	if len(drift) == 0 {
+		c.condition = notConverged("SpecConverged", "StagedForNextBoot",
+			fmt.Sprintf("spec staged for the next boot (%.12s); the machine loads the modules in the new order at its next boot and asks for no turn: %s", hash, diffs))
+		return c
+	}
+
 	// Adding modules is the one machine-spec change that needs no
 	// disruption. Loading can happen while the system runs: the
 	// kernel binds a resident driver to hardware that is already
@@ -409,6 +435,11 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	// and init's live loader promotes the staged manifest to proven
 	// whether or not it applied anything. A machine would then report
 	// itself converged on a spec it never actuated.
+	//
+	// A declared reorder rides along with the additions. The load
+	// applies the additions in the order the manifest lists them, and
+	// the reorder of what the boot already loaded stays staged for the
+	// next boot.
 	if len(retracted) == 0 && len(drift) == len(added) {
 		c.requestLoad = true
 		c.condition = notConverged("SpecConverged", "LoadRequested",

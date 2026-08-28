@@ -139,7 +139,13 @@ func (l *moduleLoader) apply(intent machine.ModulesIntent, store machine.Manifes
 		return
 	}
 
-	l.bootModules = slices.Sorted(slices.Values(doc.Spec.Modules))
+	// The record appends what this load added. It does not take the
+	// manifest's list, because the modules the boot loaded keep their
+	// places in the running kernel, and only the additions loaded
+	// now, at the end. A record in the manifest's order would claim
+	// an order this machine never loaded, and the operator would then
+	// report a declared reorder as converged.
+	l.bootModules = slices.Concat(l.bootModules, load)
 	l.bootParameters = deliveredParameters(doc.Spec.ModuleParameters, outcomes)
 	l.statuses = mergeModuleStatuses(l.statuses, outcomes)
 	// The write order is the commit protocol. boot/modules and modules/

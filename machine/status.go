@@ -773,6 +773,12 @@ type BootStatus struct {
 	// signal and live in status.modules instead; a module the image
 	// lacked still counts as actuated here, because rebooting again
 	// with the same image would not change anything.
+	//
+	// The list is in the order this machine loaded the modules in,
+	// because the order decides which driver claims a device. A live
+	// load appends what it loaded and does not adopt the manifest's
+	// order (init/liveload.go). The operator compares this order
+	// against spec.modules and stages a reorder for the next boot.
 	Modules []string `json:"modules,omitempty"`
 
 	// Rlimits is the resource limit map the winning manifest declared,
