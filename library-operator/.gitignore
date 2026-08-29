@@ -1,0 +1,16 @@
+# Built binaries and the Rust build tree. The plans name the browser and
+# the scanners as separate images, and each build lands here.
+/library-operator
+/bin/
+/target/
+
+# Hugo's build output, once the site exists.
+/docs/dist/
+/docs/.hugo_build.lock
+/docs/public/
+
+# The coverage profile the gate measures.
+/coverage.out
+
+# State the local harness writes: catalogs, agent logs, and captures.
+/local/state/
