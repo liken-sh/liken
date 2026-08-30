@@ -426,7 +426,7 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(c, &Pod{}); return err }},
 		{name: "DeletePod", call: func(c *Client) error { return DeletePod(c, "house", "movies-scanner") }},
 		{name: "GetEndpointSlice", call: func(c *Client) error {
-			_, err := GetEndpointSlice(c, "liken-system", "catalog")
+			_, err := GetEndpointSlice(c, "house", "catalog")
 			return err
 		}},
 		{name: "CreateEndpointSlice", call: func(c *Client) error {
@@ -435,6 +435,18 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		}},
 		{name: "UpdateEndpointSlice", call: func(c *Client) error {
 			_, err := UpdateEndpointSlice(c, &EndpointSlice{})
+			return err
+		}},
+		{name: "GetService", call: func(c *Client) error {
+			_, err := GetService(c, "house", "catalog")
+			return err
+		}},
+		{name: "CreateService", call: func(c *Client) error {
+			_, err := CreateService(c, &Service{})
+			return err
+		}},
+		{name: "UpdateService", call: func(c *Client) error {
+			_, err := UpdateService(c, &Service{})
 			return err
 		}},
 	}

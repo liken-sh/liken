@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,27 +24,23 @@ import (
 // Deployment can give it, and it names the one that is missing.
 func TestOperateRequiresItsEnvironment(t *testing.T) {
 	cases := []struct {
-		name      string
-		unset     string
-		scanner   string
-		catalog   string
-		namespace string
-		bus       string
+		name    string
+		unset   string
+		scanner string
+		catalog string
+		bus     string
 	}{
 		{name: "no scanner image", unset: scannerImageVariable,
-			catalog: testCorrosionImage, namespace: testOperatorNamespace, bus: testBusAddress},
+			catalog: testCorrosionImage, bus: testBusAddress},
 		{name: "no catalog image", unset: corrosionImageVariable,
-			scanner: testScannerImage, namespace: testOperatorNamespace, bus: testBusAddress},
-		{name: "no namespace", unset: namespaceVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage, bus: testBusAddress},
+			scanner: testScannerImage, bus: testBusAddress},
 		{name: "no broker", unset: busAddressVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage, namespace: testOperatorNamespace},
+			scanner: testScannerImage, catalog: testCorrosionImage},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Setenv(scannerImageVariable, one.scanner)
 			t.Setenv(corrosionImageVariable, one.catalog)
-			t.Setenv(namespaceVariable, one.namespace)
 			t.Setenv(busAddressVariable, one.bus)
 
 			err := operate()
@@ -58,7 +55,6 @@ func TestOperateRequiresItsEnvironment(t *testing.T) {
 func TestOperateRefusesOutsideACluster(t *testing.T) {
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
-	t.Setenv(namespaceVariable, testOperatorNamespace)
 	t.Setenv(busAddressVariable, testBusAddress)
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
@@ -96,7 +92,6 @@ func testClusterEnvironment(t *testing.T, cluster *fakeCluster) chan struct{} {
 	t.Setenv("KUBERNETES_SERVICE_PORT", port)
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
-	t.Setenv(namespaceVariable, testOperatorNamespace)
 	// Port 1 answers nothing, so the bus reconnects for the length of
 	// the test and no pass waits on it.
 	t.Setenv(busAddressVariable, "127.0.0.1:1")
@@ -246,6 +241,100 @@ func TestPassStopsWhenTheCollectionCannotBeRead(t *testing.T) {
 
 	if cluster.countRequests(http.MethodPost, "pods") != 0 {
 		t.Error("the pass created a pod without reading the collection")
+	}
+}
+
+// A pass stands one catalog Service and one EndpointSlice in every
+// namespace that holds a Library, each over that namespace's scanner
+// pods and owned by that namespace's Library objects.
+func TestPassStandsACatalogInEveryNamespaceThatHoldsALibrary(t *testing.T) {
+	cluster := newFakeCluster()
+	house := boundHouse(cluster)
+	studio := boundStudio(cluster)
+	for _, one := range []struct {
+		library *Library
+		address string
+	}{{house, "10.42.1.7"}, {studio, "10.42.3.2"}} {
+		pod := standingPod(t, one.library, podRunning, true)
+		pod.Spec.NodeName = "nuc-1"
+		pod.Status.PodIP = one.address
+		cluster.pods[pod.Metadata.Name] = pod
+	}
+
+	testOperator(t, cluster).pass()
+
+	for _, one := range []struct {
+		namespace string
+		owner     string
+		address   string
+	}{{"house", "movies", "10.42.1.7"}, {"studio", "series", "10.42.3.2"}} {
+		service := cluster.heldService(one.namespace, catalogServiceName)
+		if service == nil {
+			t.Fatalf("the pass wrote no catalog Service in %s", one.namespace)
+		}
+		if len(service.Metadata.OwnerReferences) != 1 ||
+			service.Metadata.OwnerReferences[0].Name != one.owner {
+			t.Errorf("ownerReferences = %+v, want the Library %s",
+				service.Metadata.OwnerReferences, one.owner)
+		}
+		slice := cluster.heldEndpointSlice(one.namespace, catalogServiceName)
+		if slice == nil {
+			t.Fatalf("the pass wrote no catalog slice in %s", one.namespace)
+		}
+		if len(slice.Endpoints) != 1 || slice.Endpoints[0].Addresses[0] != one.address {
+			t.Errorf("endpoints = %+v, want the scanner pod of %s alone",
+				slice.Endpoints, one.namespace)
+		}
+	}
+}
+
+// A failure to list the pods, to read a Service, or to read a slice is
+// reported and does not stop the pass. Every Library still gets its
+// status.
+func TestPassCarriesOnPastABrokenCatalogObject(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "the pods cannot be listed", path: podsAllPath},
+		{name: "the Service cannot be read",
+			path: servicesPath(testLibraryNamespace) + "/" + catalogServiceName},
+		{name: "the slice cannot be read",
+			path: endpointSlicesPath(testLibraryNamespace) + "/" + catalogServiceName},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			boundHouse(cluster)
+			cluster.broken[one.path] = http.StatusInternalServerError
+
+			testOperator(t, cluster).pass()
+
+			if cluster.heldLibrary("movies").Status.Conditions == nil {
+				t.Error("the pass wrote no status for the library")
+			}
+		})
+	}
+}
+
+// The owners of one namespace's catalog objects are every Library in
+// that namespace, in name order, so two passes build the same object.
+func TestCatalogOwnersGroupByNamespaceAndSortByName(t *testing.T) {
+	owners := catalogOwners([]Library{
+		{Metadata: ObjectMeta{Name: "shows", Namespace: "house", UID: "shows-uid"}},
+		{Metadata: ObjectMeta{Name: "series", Namespace: "studio", UID: "series-uid"}},
+		{Metadata: ObjectMeta{Name: "movies", Namespace: "house", UID: "movies-uid"}},
+	})
+
+	if len(owners) != 2 {
+		t.Fatalf("namespaces = %v, want the two that hold a Library", owners)
+	}
+	want := []OwnerReference{catalogOwner("movies", "movies-uid"), catalogOwner("shows", "shows-uid")}
+	if !slices.Equal(owners["house"], want) {
+		t.Errorf("owners = %+v, want %+v", owners["house"], want)
+	}
+	if !slices.Equal(owners["studio"], []OwnerReference{catalogOwner("series", "series-uid")}) {
+		t.Errorf("owners = %+v, want the one Library of the namespace", owners["studio"])
 	}
 }
 

@@ -1,14 +1,14 @@
 # The operator's identity in the cluster, and deliberately nothing
 # more. It reads libraries, writes their statuses, reads the storage
-# behind each one, and creates the scanner pod each one becomes. It
-# deletes a scanner pod only to replace a stale one, whose template
-# hash no longer matches what the pass builds. Otherwise the teardown
-# is the garbage collector's, through the ownerReference every scanner
-# pod carries, so deleting the Library is the whole stop. It deletes no
-# object a person created. One grant is namespaced: the operator writes
-# the catalog EndpointSlice in its own namespace, through the Role
-# below, and that slice is the only object it writes outside a
-# Library's own namespace.
+# behind each one, creates the scanner pod each one becomes, and
+# stands the catalog Service and EndpointSlice of each namespace that
+# holds a Library. It deletes a scanner pod only to replace a stale
+# one, whose template hash no longer matches what the pass builds.
+# Every other teardown is the garbage collector's, through the
+# ownerReferences the pod and the two catalog objects carry, so
+# deleting the last Library of a namespace is the whole stop. It
+# deletes no object a person created. Every grant is cluster-wide,
+# because a Library can be in any namespace.
 #
 # The scanner pods hold no credential of their own. They report over
 # the bus, and the operator writes what they report, so nothing in this
@@ -60,35 +60,22 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
----
-# The catalog EndpointSlice, written in the operator's own namespace
-# and nowhere else. This is a Role and not a rule on the ClusterRole,
-# because the operator writes exactly one slice in one namespace, and a
-# cluster-wide grant over endpointslices would let it rewrite the
-# endpoints of every Service in the cluster. There is no delete and no
-# list: the slice is read by name, and it exists as long as the
-# operator does.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: library-operator
-rules:
+  # The headless catalog Service of each namespace that holds a
+  # Library. The grant is cluster-wide because a Library can be in any
+  # namespace and the operator is one Deployment for the cluster. There
+  # is no delete verb: the Service is owned by the Library objects of its
+  # namespace, and the garbage collector removes it when the last one
+  # goes. There is no list and no watch: the Service is read by name, in
+  # the namespaces the Library list already named.
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, create, update]
+  # The EndpointSlice behind each of those Services, on the same terms
+  # and for the same reasons. The operator writes the slice itself
+  # because the Service names no selector.
   - apiGroups: [discovery.k8s.io]
     resources: [endpointslices]
     verbs: [get, create, update]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: library-operator
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: library-operator
-subjects:
-  - kind: ServiceAccount
-    name: library-operator
-    namespace: liken-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

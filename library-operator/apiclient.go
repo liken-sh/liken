@@ -184,8 +184,8 @@ const (
 	volumesPath   = "/api/v1/persistentvolumes"
 	podsAllPath   = "/api/v1/pods"
 
-	// The slice behind the catalog Service, written in the operator's
-	// own namespace and nowhere else.
+	// The slices behind the catalog Services, one in every namespace that
+	// holds a Library.
 	endpointSlicePrefix = "/apis/" + endpointSliceAPIVersion + "/namespaces/"
 )
 
@@ -209,6 +209,10 @@ func podsPath(namespace string) string {
 
 func endpointSlicesPath(namespace string) string {
 	return endpointSlicePrefix + namespace + "/endpointslices"
+}
+
+func servicesPath(namespace string) string {
+	return corePrefix + namespace + "/services"
 }
 
 // ListLibraries answers a whole pass with one request, and the list's
@@ -304,10 +308,10 @@ func DeletePod(c *Client, namespace, name string) error {
 	return err
 }
 
-// GetEndpointSlice reads the live catalog slice, for the endpoints it
-// holds now and for the resourceVersion the write is made conditional
-// on. An absent slice is ErrNotFound, which the pass answers by
-// creating one.
+// GetEndpointSlice reads the live catalog slice of one namespace, for
+// the owners and endpoints it holds now and for the resourceVersion
+// the write is made conditional on. An absent slice is ErrNotFound,
+// which the pass answers by creating one.
 func GetEndpointSlice(c *Client, namespace, name string) (*EndpointSlice, error) {
 	slice := &EndpointSlice{}
 	if err := c.RequestJSON(http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
@@ -339,6 +343,47 @@ func UpdateEndpointSlice(c *Client, slice *EndpointSlice) (*EndpointSlice, error
 	}
 	written := &EndpointSlice{}
 	path := endpointSlicesPath(slice.Metadata.Namespace) + "/" + slice.Metadata.Name
+	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+// GetService reads the live catalog Service of one namespace. The
+// read answers the fields the operator compares, and it answers the
+// resourceVersion and the addresses the API server assigned, which
+// the update carries back unchanged.
+func GetService(c *Client, namespace, name string) (*Service, error) {
+	service := &Service{}
+	if err := c.RequestJSON(http.MethodGet, servicesPath(namespace)+"/"+name, nil, service); err != nil {
+		return nil, err
+	}
+	return service, nil
+}
+
+func CreateService(c *Client, service *Service) (*Service, error) {
+	body, err := json.Marshal(service)
+	if err != nil {
+		return nil, err
+	}
+	created := &Service{}
+	path := servicesPath(service.Metadata.Namespace)
+	if err := c.RequestJSON(http.MethodPost, path, body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// UpdateService writes the whole Service back. The resourceVersion in
+// the body makes the write conditional, so a Service that changed
+// underneath answers ErrConflict, and the next pass reads it again.
+func UpdateService(c *Client, service *Service) (*Service, error) {
+	body, err := json.Marshal(service)
+	if err != nil {
+		return nil, err
+	}
+	written := &Service{}
+	path := servicesPath(service.Metadata.Namespace) + "/" + service.Metadata.Name
 	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}

@@ -26,9 +26,11 @@ type fakeCluster struct {
 	libraries map[string]*Library
 	claims    map[string]*PersistentVolumeClaim
 	pods      map[string]*Pod
-	// The EndpointSlices the operator writes, by name. Only the catalog
-	// slice reaches here.
-	slices map[string]*EndpointSlice
+	// The catalog objects the operator writes, by namespace and name,
+	// because the operator stands one of each in every namespace that
+	// holds a Library.
+	slices   map[string]*EndpointSlice
+	services map[string]*Service
 
 	// A PersistentVolume is held as the body the API server serves,
 	// because a volume names its storage with a key on the spec and
@@ -42,8 +44,8 @@ type fakeCluster struct {
 	// carries on from.
 	broken map[string]int
 
-	// refuseCreate answers every creation, of a pod or of the catalog
-	// slice, with a conflict: the state a second writer leaves behind.
+	// refuseCreate answers every creation, of a pod or of a catalog
+	// object, with a conflict: the state a second writer leaves behind.
 	refuseCreate bool
 
 	// parked holds every watch request open, because a watcher has no
@@ -58,6 +60,7 @@ func newFakeCluster() *fakeCluster {
 		volumes:   map[string]string{},
 		pods:      map[string]*Pod{},
 		slices:    map[string]*EndpointSlice{},
+		services:  map[string]*Service{},
 		broken:    map[string]int{},
 		parked:    make(chan struct{}),
 	}
@@ -115,7 +118,9 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = io.WriteString(w, body)
 	case strings.Contains(r.URL.Path, "/endpointslices"):
-		f.serveEndpointSlice(w, r, name)
+		f.serveEndpointSlice(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/services"):
+		f.serveService(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case r.Method == http.MethodPost:
 		if f.refuseCreate {
 			w.WriteHeader(http.StatusConflict)
@@ -132,11 +137,24 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// serveEndpointSlice answers the catalog slice the way the API server
+// namespaceOf reads the namespace out of a collection path, which is
+// how the fake cluster keys the objects a namespaced verb writes. A
+// path with no namespace segment answers an empty string, and no verb
+// the operator sends takes one.
+func namespaceOf(urlPath string) string {
+	_, after, found := strings.Cut(urlPath, "/namespaces/")
+	if !found {
+		return ""
+	}
+	namespace, _, _ := strings.Cut(after, "/")
+	return namespace
+}
+
+// serveEndpointSlice answers a catalog slice the way the API server
 // does: an absent slice is a 404, a create stores what the body
 // carries, and an update replaces it. The stored resourceVersion is
 // what a conditional write is checked against.
-func (f *fakeCluster) serveEndpointSlice(w http.ResponseWriter, r *http.Request, name string) {
+func (f *fakeCluster) serveEndpointSlice(w http.ResponseWriter, r *http.Request, key string) {
 	switch r.Method {
 	case http.MethodPost:
 		if f.refuseCreate {
@@ -147,7 +165,7 @@ func (f *fakeCluster) serveEndpointSlice(w http.ResponseWriter, r *http.Request,
 	case http.MethodPut:
 		f.writeEndpointSlice(w, r, "2")
 	default:
-		answer(w, f.slices[name])
+		answer(w, f.slices[key])
 	}
 }
 
@@ -155,7 +173,38 @@ func (f *fakeCluster) writeEndpointSlice(w http.ResponseWriter, r *http.Request,
 	var written EndpointSlice
 	_ = json.NewDecoder(r.Body).Decode(&written)
 	written.Metadata.ResourceVersion = resourceVersion
-	f.slices[written.Metadata.Name] = &written
+	f.slices[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
+	_ = json.NewEncoder(w).Encode(written)
+}
+
+// serveService answers a catalog Service the same way, and it assigns
+// the clusterIP the API server would: a headless Service is created
+// with the None the operator asked for, and the value is the API
+// server's from then on, which is what an update must carry back
+// untouched.
+func (f *fakeCluster) serveService(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		f.writeService(w, r, "1")
+	case http.MethodPut:
+		f.writeService(w, r, "2")
+	default:
+		answer(w, f.services[key])
+	}
+}
+
+func (f *fakeCluster) writeService(w http.ResponseWriter, r *http.Request, resourceVersion string) {
+	var written Service
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	written.Metadata.ResourceVersion = resourceVersion
+	if written.Spec.ClusterIPs == nil {
+		written.Spec.ClusterIPs = []string{written.Spec.ClusterIP}
+	}
+	f.services[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
 	_ = json.NewEncoder(w).Encode(written)
 }
 
@@ -174,10 +223,16 @@ func (f *fakeCluster) heldLibrary(name string) *Library {
 	return f.libraries[name]
 }
 
-func (f *fakeCluster) heldEndpointSlice(name string) *EndpointSlice {
+func (f *fakeCluster) heldEndpointSlice(namespace, name string) *EndpointSlice {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	return f.slices[name]
+	return f.slices[namespace+"/"+name]
+}
+
+func (f *fakeCluster) heldService(namespace, name string) *Service {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.services[namespace+"/"+name]
 }
 
 // countRequests counts the requests of one method against one kind of
@@ -212,9 +267,9 @@ func sortedNames[T any](objects map[string]*T) []string {
 	return names
 }
 
-// The namespace the operator itself runs in, where it writes the
-// catalog EndpointSlice.
-const testOperatorNamespace = "liken-system"
+// The namespace the seeded Library is in, and so the namespace its
+// catalog Service and EndpointSlice are in.
+const testLibraryNamespace = "house"
 
 // testOperator builds the operator around one fake cluster. Its bus is
 // never run by the tests that only take a pass, so a publish finds no
@@ -227,7 +282,7 @@ const testOperatorNamespace = "liken-system"
 func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
-	return newOperator(NewClient(server.URL, server.Client(), ""), testOperatorNamespace,
+	return newOperator(NewClient(server.URL, server.Client(), ""),
 		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 
@@ -238,6 +293,13 @@ func testRunContext(t *testing.T) context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// catalogOwner is one ownerReference as a pass builds it, so a test
+// states the owners it expects in the same shape. Controller is unset,
+// because an object with several owners has no single one.
+func catalogOwner(name, uid string) OwnerReference {
+	return OwnerReference{APIVersion: libraryAPIVersion, Kind: "Library", Name: name, UID: uid}
 }
 
 // boundHouse seeds the cluster with a movies Library over a claim bound
@@ -254,5 +316,25 @@ func boundHouse(cluster *fakeCluster) *Library {
 	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
 		`{"capacity":{"storage":"4Ti"},"accessModes":["ReadOnlyMany"],` +
 		`"nfs":{"server":"syn.example","path":"/volume1/movies"}}}`
+	return library
+}
+
+// boundStudio seeds a second Library in a second namespace, over a
+// claim of its own, so a test sees two catalog clusters stand apart.
+func boundStudio(cluster *fakeCluster) *Library {
+	library := &Library{
+		Metadata: ObjectMeta{Name: "series", Namespace: "studio", UID: "series-uid"},
+		Spec: LibrarySpec{
+			Storage: LibraryStorage{Claim: "shows", Root: "/"},
+			Kind:    libraryKindSeries,
+			Series:  &LibrarySettings{},
+		},
+	}
+	cluster.libraries["series"] = library
+	cluster.claims["shows"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "shows", Namespace: "studio"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
+		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
+	}
 	return library
 }

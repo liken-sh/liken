@@ -1,13 +1,13 @@
 package main
 
-// Every Corrosion sidecar finds its peers through one name,
-// catalog.liken-system.svc:8787. That name is in the sidecar image's
-// configuration file, because Corrosion reads no bootstrap list from
-// the environment. A headless Service with a selector cannot serve
-// that name: a selector sees only its own namespace, and a Library
-// can be in any namespace. So the Service carries no selector, and this
-// operator writes the EndpointSlice behind it: every scanner pod that
-// has an address, wherever it runs.
+// Every Corrosion sidecar finds its peers through the short name
+// catalog. That name is in the sidecar image's configuration file,
+// because Corrosion reads no bootstrap list from the environment. The
+// pod's own search path resolves the name to the Service in the pod's
+// namespace, in service.go. That Service names no selector, so this
+// operator writes the slice behind it, over the scanner pods of that
+// namespace and no other. So an agent joins its namespace's cluster
+// and no other.
 
 import (
 	"errors"
@@ -26,7 +26,8 @@ const (
 
 // The Service the slice belongs to, and the port the agents gossip
 // on. The protocol is UDP because Corrosion gossips over QUIC. The
-// port name matches the port name in deploy/catalog-service.yaml.
+// Service in service.go is built from these same constants, so the
+// port names cannot drift apart.
 const (
 	catalogServiceName  = "catalog"
 	catalogPortName     = "gossip"
@@ -93,16 +94,23 @@ type EndpointPort struct {
 	Port     int32  `json:"port"`
 }
 
-// buildCatalogEndpoints builds the slice the scanner pods become. It
-// is a function of the namespace and the pods alone, so two passes
-// over the same pods build the same object. A pod with no address is
-// not a peer yet, and a pod with a deletion timestamp is a peer no
-// longer. The endpoints sort by address, so the order the list arrived
-// in never counts as a divergence.
-func buildCatalogEndpoints(namespace string, pods []Pod) *EndpointSlice {
+// buildCatalogEndpoints builds the slice for one namespace. It is a
+// function of the namespace, the owners, and the pods alone, so two
+// passes over the same cluster build the same object. The pass hands
+// in every scanner pod in the cluster, and this reads only the ones in
+// its namespace, which is what keeps one namespace's agents out of
+// another's cluster. A pod with no address is not a peer yet, and a
+// pod with a deletion timestamp is a peer no longer. The endpoints
+// sort by address, so the order the list arrived in never counts as a
+// divergence. The owners are every Library in the namespace, so the
+// garbage collector removes the slice when the last one goes.
+func buildCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod) *EndpointSlice {
 	endpoints := []Endpoint{}
 	for index := range pods {
 		pod := &pods[index]
+		if pod.Metadata.Namespace != namespace {
+			continue
+		}
 		if pod.Status.PodIP == "" || pod.Metadata.DeletionTimestamp != "" {
 			continue
 		}
@@ -131,6 +139,7 @@ func buildCatalogEndpoints(namespace string, pods []Pod) *EndpointSlice {
 				serviceNameLabel: catalogServiceName,
 				managedByLabel:   endpointSliceManager,
 			},
+			OwnerReferences: owners,
 		},
 		AddressType: endpointSliceAddressType,
 		Endpoints:   endpoints,
@@ -140,22 +149,22 @@ func buildCatalogEndpoints(namespace string, pods []Pod) *EndpointSlice {
 	}
 }
 
-// standCatalogEndpoints brings the live slice into line with the one
-// this pass built. It writes on divergence only: it reads the live
-// slice, compares the endpoints and the ports, and writes only when
-// they differ. That is this project's rule for an object a pass
-// rebuilds every ten seconds, because an unconditional write wakes
-// every watcher of the object for nothing.
+// standCatalogEndpoints brings the live slice of one namespace into
+// line with the one this pass built. It writes on divergence only: it
+// reads the live slice, compares the owners, the endpoints, and the
+// ports, and writes only when they differ. That is this project's rule
+// for an object a pass rebuilds every ten seconds, because an
+// unconditional write wakes every watcher of the object for nothing.
 //
 // The live slice's resourceVersion makes the write conditional, so a
 // slice that something else changed underneath answers a conflict
 // instead of being overwritten. A conflict on the create means another
 // writer got there first, which is success: the next pass reads what
 // that writer wrote.
-func (o *operator) standCatalogEndpoints(pods []Pod) error {
-	desired := buildCatalogEndpoints(o.namespace, pods)
+func (o *operator) standCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod) error {
+	desired := buildCatalogEndpoints(namespace, owners, pods)
 
-	live, err := GetEndpointSlice(o.client, o.namespace, catalogServiceName)
+	live, err := GetEndpointSlice(o.client, namespace, catalogServiceName)
 	if errors.Is(err, ErrNotFound) {
 		_, err := CreateEndpointSlice(o.client, desired)
 		if errors.Is(err, ErrConflict) {
@@ -175,12 +184,15 @@ func (o *operator) standCatalogEndpoints(pods []Pod) error {
 	return err
 }
 
-// sameEndpoints compares only what this operator states: the
-// endpoints and the ports. It compares the counts first, so an absent
-// list and an empty list read as the same thing. A cluster with no
-// scanner pod leaves an absent list behind, and without this rule it
-// would be rewritten every pass.
+// sameEndpoints compares only what this operator states: the owners,
+// the endpoints, and the ports. It compares the counts first, so an
+// absent list and an empty list read as the same thing. A namespace
+// with no scanner pod leaves an absent list behind, and without this
+// rule it would be rewritten every pass.
 func sameEndpoints(live, desired *EndpointSlice) bool {
+	if !slices.Equal(live.Metadata.OwnerReferences, desired.Metadata.OwnerReferences) {
+		return false
+	}
 	if len(live.Endpoints) != len(desired.Endpoints) || len(live.Ports) != len(desired.Ports) {
 		return false
 	}

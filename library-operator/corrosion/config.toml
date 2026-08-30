@@ -56,12 +56,12 @@ addr = "0.0.0.0:8787"
 # TLS needs a certificate per pod that nothing in this project mints.
 plaintext = true
 
-# The bootstrap list names the headless `Service` `catalog` in
-# `liken-system`. That `Service` has no selector, because a selector
-# sees only its own namespace, and a `Library` can be in any namespace.
-# The operator writes the `Service`'s `EndpointSlice` with the address
-# of every pod that runs an agent, so an agent resolves this one name
-# and dials the rest of the cluster.
+# The bootstrap list names `catalog`, a short name with no namespace.
+# The pod's own search path resolves it to the `catalog` `Service` in
+# the pod's namespace. The operator creates that `Service` in every
+# namespace that holds a `Library`, with no selector, and writes its
+# `EndpointSlice` over that namespace's pods. So an agent joins its
+# namespace's cluster and no other.
 #
 # The list is in this file and not in the pod, because Corrosion loads
 # its configuration with the `config` crate 0.13, which cannot parse a
@@ -73,7 +73,7 @@ plaintext = true
 # from 5 s to 120 s, and ignores its own address in the answer. So a
 # pod that starts before its peers joins them when they arrive, and
 # one name serves every agent.
-bootstrap = ["catalog.liken-system.svc:8787"]
+bootstrap = ["catalog:8787"]
 
 [admin]
 # The admin socket answers `corrosion cluster members` and the other
