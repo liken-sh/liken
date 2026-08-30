@@ -186,10 +186,7 @@ func TestScannerContainerCarriesTheIgnoreList(t *testing.T) {
 func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
 	pod := testScannerPod(studioMovies())
 
-	catalog := pod.Spec.Containers[1]
-	if catalog.Name != catalogContainer {
-		t.Fatalf("second container = %q, want %s", catalog.Name, catalogContainer)
-	}
+	catalog := catalogSidecarOf(t, pod)
 	if catalog.Image != testCorrosionImage {
 		t.Errorf("image = %q, want %q", catalog.Image, testCorrosionImage)
 	}
@@ -220,7 +217,7 @@ func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
 func TestCatalogContainerWritesToItsDurableClaim(t *testing.T) {
 	pod := testScannerPod(studioMovies())
 
-	catalog := pod.Spec.Containers[1]
+	catalog := catalogSidecarOf(t, pod)
 	if len(catalog.VolumeMounts) != 1 {
 		t.Fatalf("volumeMounts = %v, want one", catalog.VolumeMounts)
 	}
@@ -240,9 +237,73 @@ func TestCatalogContainerWritesToItsDurableClaim(t *testing.T) {
 	}
 }
 
+// The catalog agent is a native sidecar: an initContainer with
+// restartPolicy Always, so the kubelet starts it and passes its
+// startupProbe before it starts the scanner. The scanner is the only
+// ordinary container, so its first walk cannot race a catalog API that
+// is not listening.
+func TestCatalogContainerIsANativeSidecar(t *testing.T) {
+	pod := testScannerPod(studioMovies())
+
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("initContainers = %v, want the catalog agent alone", pod.Spec.InitContainers)
+	}
+	catalog := pod.Spec.InitContainers[0]
+	if catalog.Name != catalogContainer {
+		t.Errorf("initContainer = %q, want %s", catalog.Name, catalogContainer)
+	}
+	if catalog.RestartPolicy != "Always" {
+		t.Errorf("restartPolicy = %q, want Always", catalog.RestartPolicy)
+	}
+	if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != scannerContainer {
+		t.Errorf("containers = %v, want the scanner alone", pod.Spec.Containers)
+	}
+}
+
+// The three probes open a TCP connection to the catalog agent's API
+// port. The startupProbe gates the scanner's start, and the readiness
+// and liveness probes cover the agent's running life. The probe is a
+// TCP connection and not an httpGet on /v1/health, which answers 503
+// until the agent replicates.
+func TestCatalogContainerProbesItsApiPort(t *testing.T) {
+	catalog := catalogSidecarOf(t, testScannerPod(studioMovies()))
+
+	cases := []struct {
+		name             string
+		probe            *Probe
+		period           int
+		failureThreshold int
+	}{
+		{"startup", catalog.StartupProbe, 1, 60},
+		{"readiness", catalog.ReadinessProbe, 10, 3},
+		{"liveness", catalog.LivenessProbe, 10, 3},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if one.probe == nil {
+				t.Fatal("the probe is unset")
+			}
+			if one.probe.TCPSocket == nil {
+				t.Fatalf("probe = %+v, want a TCP connection", one.probe)
+			}
+			if one.probe.TCPSocket.Port != catalogAPIPort {
+				t.Errorf("port = %d, want %d", one.probe.TCPSocket.Port, catalogAPIPort)
+			}
+			if one.probe.PeriodSeconds != one.period {
+				t.Errorf("periodSeconds = %d, want %d", one.probe.PeriodSeconds, one.period)
+			}
+			if one.probe.FailureThreshold != one.failureThreshold {
+				t.Errorf("failureThreshold = %d, want %d", one.probe.FailureThreshold, one.failureThreshold)
+			}
+		})
+	}
+}
+
 // Neither container needs a capability, and neither may gain one.
 func TestBothContainersDropEveryCapability(t *testing.T) {
-	for _, container := range testScannerPod(studioMovies()).Spec.Containers {
+	pod := testScannerPod(studioMovies())
+	both := append(append([]Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...)
+	for _, container := range both {
 		t.Run(container.Name, func(t *testing.T) {
 			security := container.SecurityContext
 			if security == nil || security.Capabilities == nil {
@@ -272,9 +333,9 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 		{container: catalogContainer, cpuRequest: "10m", memoryLimit: "512Mi"},
 	}
 	pod := testScannerPod(studioMovies())
-	for index, one := range cases {
+	for _, one := range cases {
 		t.Run(one.container, func(t *testing.T) {
-			resources := pod.Spec.Containers[index].Resources
+			resources := podContainer(t, pod, one.container).Resources
 			if resources.Requests["cpu"] != one.cpuRequest {
 				t.Errorf("cpu request = %q, want %q", resources.Requests["cpu"], one.cpuRequest)
 			}
@@ -289,6 +350,28 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 			}
 		})
 	}
+}
+
+// podContainer reads one container the pod carries by name, across the
+// scanner in containers and the catalog agent in initContainers, so a
+// test names a container and never an index into either list.
+func podContainer(t *testing.T, pod *Pod, name string) Container {
+	t.Helper()
+	both := append(append([]Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...)
+	for _, container := range both {
+		if container.Name == name {
+			return container
+		}
+	}
+	t.Fatalf("the pod carries no container named %s", name)
+	return Container{}
+}
+
+// catalogSidecarOf reads the catalog agent, which the pod carries as a
+// native sidecar in initContainers.
+func catalogSidecarOf(t *testing.T, pod *Pod) Container {
+	t.Helper()
+	return podContainer(t, pod, catalogContainer)
 }
 
 // podVolume reads the pod volume one mount names, so a test proves the

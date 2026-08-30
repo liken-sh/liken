@@ -214,8 +214,9 @@ func TestReconcileCreatesTheScannerPod(t *testing.T) {
 	if pod == nil {
 		t.Fatal("no scanner pod was created")
 	}
-	if len(pod.Spec.Containers) != 2 {
-		t.Errorf("containers = %d, want the scanner and the catalog agent", len(pod.Spec.Containers))
+	if len(pod.Spec.Containers) != 1 || len(pod.Spec.InitContainers) != 1 {
+		t.Errorf("containers = %d, initContainers = %d, want the scanner and the catalog sidecar",
+			len(pod.Spec.Containers), len(pod.Spec.InitContainers))
 	}
 	if pod.Metadata.Annotations[templateHashAnnotation] == "" {
 		t.Error("the pod carries no template hash")

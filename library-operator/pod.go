@@ -56,6 +56,11 @@ const (
 	gossipAddress         = "$(" + podIPVariable + "):8787"
 )
 
+// catalogAPIPort is the loopback port the catalog agent binds
+// its HTTP API on, from corrosion/config.toml. The scanner posts its
+// writes there, and the kubelet's probes open a TCP connection to it.
+const catalogAPIPort = 8080
+
 // scannerGracePeriod is how long the kubelet waits between the SIGTERM
 // and the kill. A busy catalog agent flushes its database on the way
 // out, so the pod asks for a minute rather than the default 30
@@ -119,9 +124,19 @@ func buildScannerPod(library *Library, scannerImage, corrosionImage, busAddress,
 			RestartPolicy:                 "Always",
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,
+			// The catalog agent is a native sidecar in
+			// initContainers, so the kubelet starts it and passes its
+			// startupProbe before it starts the scanner. The scanner's
+			// first walk then cannot reach a catalog API that is not
+			// listening. A native sidecar shares the pod's network and
+			// volumes like any container, so the scanner still writes the
+			// agent on the pod's loopback and both still mount the catalog
+			// volume.
+			InitContainers: []Container{
+				catalogSidecar(corrosionImage),
+			},
 			Containers: []Container{
 				scannerSidecar(library, scannerImage, busAddress, topicBase),
-				catalogSidecar(corrosionImage),
 			},
 			Volumes: []Volume{
 				{
@@ -203,11 +218,21 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 // states only what the image cannot know: the address the agent
 // announces, and the directory it writes.
 //
-// The container carries no probe. Corrosion answers /v1/health with a
-// 503 while it has no peers, and an agent that holds one pod's catalog
-// alone is the ordinary state in this plan, so a health probe would
-// restart a working agent forever.
+// The agent is a native sidecar: an initContainer with
+// restartPolicy Always. The kubelet starts it and waits for its
+// startupProbe before it starts the scanner, so the scanner's first
+// walk never races a catalog API that is not listening.
+//
+// The three probes open a TCP connection to the API port, not
+// an httpGet on /v1/health. Corrosion answers /v1/health with a 503
+// carrying "no p99 lag information available" until the agent
+// replicates something, and an agent that holds one pod's catalog alone
+// never replicates, so a health probe would keep the agent from ever
+// passing its startupProbe. A TCP connection to the API port passes as
+// soon as the agent opens its API, which is the signal the scanner and
+// the readers need.
 func catalogSidecar(image string) Container {
+	always := "Always"
 	return Container{
 		Name:  catalogContainer,
 		Image: image,
@@ -225,6 +250,25 @@ func catalogSidecar(image string) Container {
 			Limits:   map[string]string{"memory": catalogMemoryLimit},
 		},
 		SecurityContext: unprivileged(),
+		RestartPolicy:   always,
+		// The startupProbe gives the agent up to a minute to open
+		// its API, checking every second, and gates the scanner's start.
+		StartupProbe: catalogProbe(1, 1, 60),
+		// The readiness and liveness probes cover the agent's
+		// running life once the startupProbe passes.
+		ReadinessProbe: catalogProbe(0, 10, 3),
+		LivenessProbe:  catalogProbe(0, 10, 3),
+	}
+}
+
+// catalogProbe builds a probe that opens a TCP connection to the
+// catalog agent's API port on the given schedule.
+func catalogProbe(initialDelay, period, failureThreshold int) *Probe {
+	return &Probe{
+		TCPSocket:           &TCPSocketAction{Port: catalogAPIPort},
+		InitialDelaySeconds: initialDelay,
+		PeriodSeconds:       period,
+		FailureThreshold:    failureThreshold,
 	}
 }
 

@@ -176,9 +176,14 @@ type PodSpec struct {
 	// AutomountServiceAccountToken is a pointer because the field's
 	// default is true, and only an explicit false keeps the namespace's
 	// default ServiceAccount token out of the pod.
-	AutomountServiceAccountToken *bool       `json:"automountServiceAccountToken,omitempty"`
-	Containers                   []Container `json:"containers"`
-	Volumes                      []Volume    `json:"volumes,omitempty"`
+	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
+	// initContainers holds the native sidecar. A container here
+	// with restartPolicy Always starts before the containers below and
+	// keeps running beside them, so the kubelet brings the catalog agent
+	// up and passes its startupProbe before it starts the scanner.
+	InitContainers []Container `json:"initContainers,omitempty"`
+	Containers     []Container `json:"containers"`
+	Volumes        []Volume    `json:"volumes,omitempty"`
 }
 
 // Command replaces the image's entrypoint, which is how one image runs
@@ -192,6 +197,35 @@ type Container struct {
 	Resources       ResourceRequirements `json:"resources,omitzero"`
 	VolumeMounts    []VolumeMount        `json:"volumeMounts,omitempty"`
 	SecurityContext *SecurityContext     `json:"securityContext,omitempty"`
+	// RestartPolicy is set to Always on an initContainer to make
+	// it a native sidecar: the kubelet keeps it running for the life of
+	// the pod rather than waiting for it to exit before the next
+	// container starts.
+	RestartPolicy string `json:"restartPolicy,omitempty"`
+	// The three probes on the catalog agent. The startupProbe
+	// gates the scanner's start, and the readiness and liveness probes
+	// cover the agent's running life.
+	StartupProbe   *Probe `json:"startupProbe,omitempty"`
+	ReadinessProbe *Probe `json:"readinessProbe,omitempty"`
+	LivenessProbe  *Probe `json:"livenessProbe,omitempty"`
+}
+
+// A Probe is the check the kubelet runs on a container. This
+// operator probes the catalog agent over a TCP connection to its API
+// port, because the port answers as soon as the agent opens its API,
+// where the /v1/health endpoint returns 503 until the agent replicates.
+type Probe struct {
+	TCPSocket           *TCPSocketAction `json:"tcpSocket,omitempty"`
+	InitialDelaySeconds int              `json:"initialDelaySeconds,omitempty"`
+	PeriodSeconds       int              `json:"periodSeconds,omitempty"`
+	TimeoutSeconds      int              `json:"timeoutSeconds,omitempty"`
+	FailureThreshold    int              `json:"failureThreshold,omitempty"`
+}
+
+// A TCPSocketAction opens a TCP connection to a port. A
+// connection that the kubelet completes is the check passing.
+type TCPSocketAction struct {
+	Port int `json:"port"`
 }
 
 // ResourceRequirements is the room a container asks for and the
