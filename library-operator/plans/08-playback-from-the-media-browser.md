@@ -24,22 +24,20 @@ screen's one path out, and a media browser of another make that speaks
 the same topic gets the same service.
 
 **Resolving an item.** The operator builds the `Play` from the catalog
-and the `Library`. The item's path becomes a media reference from the
-volume behind the claim, checked against the schemes the `Player`
-accepts. The `.trickplay` path becomes the trickplay reference the
-display reads. A series item becomes a list, the chosen episode first
+and the `Library`. The item's path and the library's claim become
+`claim://<claim>/<path>`, and the `.trickplay` path becomes the
+trickplay reference in the same form. A series item becomes a list, the chosen episode first
 and the rest of the season after it, so one `Play` plays the season. The
 start position is the beginning, because there is no watch state yet.
 
 **The change below: a reference that names a claim.** `media-operator`
-resolves `https://` and `nfs://`, so an NFS-backed volume yields an
-`nfs://` reference and needs no change. A Longhorn volume or a local
-disk has no address a URI can name. For those, this plan adds to
-`media-operator` a media reference that names a claim in the `Play`'s
-namespace and a path inside it, resolved to a volume mount on the
-playback pod. The library operator then creates a claim for the
-library's volume in the `Player`'s namespace, or documents that the
-person does. Which of the two is decided when the plan is built.
+plan 19 adds the `claim://` scheme: a claim in the `Play`'s namespace
+and a path inside it, mounted read-only on the playback pod. This plan
+depends on it and adds nothing to the scheme. The `Library` and the
+`Player` share a namespace, so the `Play` names the library's own claim
+and no second claim is created. An `nfs://` reference is never built:
+the claim form covers NFS and every other volume alike, and it keeps
+the storage server's name out of every `Play`.
 
 **The change below: the current item.** `Play.status` reports the
 position inside the current item and not which item. Resume of a list

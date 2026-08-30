@@ -74,11 +74,13 @@ read-only. The enricher and the organizer mount it read-write. Nothing
 in this operator depends on the volume's kind.
 
 A `Play` reaches the files by a media reference the `Player` accepts.
-The operator derives that reference from the item's path and from the
-volume behind the claim. `media-operator` resolves `https://` and
-`nfs://` today, so an NFS-backed volume yields an `nfs://` reference. A
-volume of another kind needs a reference that names the claim itself,
-which is a change in `media-operator` that the playback plan describes.
+The operator builds it from the library's claim and the item's path:
+`claim://<claim>/<path>`, the scheme `media-operator`'s plan 19 adds.
+The playback pod mounts the same claim the scanner mounts, so no layer
+reads the volume's kind or names a server, and a library on a Longhorn
+volume or a local disk plays the same way one on NFS does. The
+`PersistentVolume` behind the claim is reported in the `Library`'s
+status for a person to read, and playback does not depend on it.
 
 ## The catalog
 
@@ -177,7 +179,8 @@ it and names the repository it lands in. Four are known.
 - A `Player` field for the idle client image.
 - A way to add containers and volumes to the idle pod.
 - A `Play` status field for the current item of a list.
-- A media reference that names a claim.
+- A media reference that names a claim: `media-operator` plan 19,
+  the `claim://` scheme.
 
 ## Technology
 
