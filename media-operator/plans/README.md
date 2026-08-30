@@ -25,6 +25,12 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
+* [19, A claim as a media reference](19-a-claim-as-a-media-reference.md).
+  A third URI scheme, `claim://`, names a `PersistentVolumeClaim` in
+  the `Play`'s namespace and a path inside it, so a `Play` plays from
+  any volume the cluster can mount and names no server. The library
+  layer depends on it.
+
 ## Completed
 
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
