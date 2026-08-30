@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<episodedetails>
+  <title>Breakage</title>
+  <season>2</season>
+  <episode>5</episode>
+  <aired>2009-04-05</aired>
+  <plot>Jesse sets up his own drug operation.</plot>
+  <director>Johan Renck</director>
+  <credits>Moira Walley-Beckett</credits>
+  <actor><name>Aaron Paul</name><role>Jesse Pinkman</role></actor>
+  <uniqueid type="tvdb">340124</uniqueid>
+  <fileinfo>
+    <streamdetails>
+      <video><codec>h264</codec><width>1280</width><height>720</height><durationinseconds>2820</durationinseconds></video>
+      <audio><codec>ac3</codec></audio>
+    </streamdetails>
+  </fileinfo>
+</episodedetails>

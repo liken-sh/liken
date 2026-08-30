@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <title>Breaking Bad</title>
+  <year>2008</year>
+  <premiered>2008-01-20</premiered>
+  <plot>A chemistry teacher turns to making methamphetamine.</plot>
+  <genre>Drama</genre>
+  <genre>Crime</genre>
+  <studio>AMC</studio>
+  <creator>Vince Gilligan</creator>
+  <country>United States</country>
+  <mpaa>TV-MA</mpaa>
+  <actor><name>Bryan Cranston</name><role>Walter White</role></actor>
+  <uniqueid type="tvdb" default="true">81189</uniqueid>
+  <uniqueid type="tmdb">1396</uniqueid>
+</tvshow>

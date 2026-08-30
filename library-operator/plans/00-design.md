@@ -114,10 +114,28 @@ in the path. A media browser receives each change from its agent's
 update stream, which names the primary keys that changed, and re-reads
 those rows from its own file.
 
-The catalog's schema is one file that every agent loads. Each item has a
-header, the columns every kind shares and every list sorts on, and a
-body in the kind's own shape, stored as JSON. One table type with every
-kind's columns as optional fields is the shape this rule prevents.
+The catalog separates three things. An item is a logical work: a movie,
+a series, an episode. A file is a physical file on the volume that holds
+an item, and one item has many files, because an upgrade to 4K or a
+second encoding is another file and not another work. An alias is one of
+the several ids that name one item, so a movie's `tmdb` id and its
+`imdb` id resolve to the same work.
+
+An item's id is derived from the strongest durable fact the volume
+already holds: the provider id in the `.nfo`, scoped by kind, such as
+`movie:tmdb:603`. The project trusts the public databases' ids over an
+id of its own. The scanner reads the id off the volume on every walk and
+mints nothing, so a lost catalog rebuilds with the same ids by a rescan,
+and watch state keyed on them re-links. A folder with no provider id,
+about a fifth of the lab's movies, takes an id derived from its path,
+which a move of that folder breaks. Writing a cleaner id back to the
+volume would fix that, and it waits in
+[`open-problems/`](open-problems/).
+
+The schema is one file that every agent loads. An item carries a header,
+the columns every kind shares and every list sorts on, and a body in the
+kind's own shape, stored as JSON. One table with every kind's columns as
+optional fields is the shape the header-and-body rule prevents.
 
 A proof of concept confirmed the fit. A change written on one node
 reached a subscriber on another in 17 ms at the median, and an agent

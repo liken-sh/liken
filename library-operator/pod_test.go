@@ -138,6 +138,7 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		libraryRootVariable:      "/movies",
 		busAddressVariable:       testBusAddress,
 		topicBaseVariable:        defaultTopicBase,
+		catalogAPIVariable:       defaultCatalogAPI,
 	}
 	got := containerEnvironment(pod.Spec.Containers[0])
 	for name, value := range want {

@@ -49,10 +49,10 @@ of grouping folders, as the lab's volume groups by genre. The settings
 block holds the naming convention for a folder with no sidecar, in the
 form the `*arr` tools use, so the folder still yields a title and a
 year. A folder with `movie.nfo` takes its identity, plot, cast, set,
-genres, and provider ids from it. The scanner records the paths of the
-art beside the file and the path of the `.trickplay` directory, so the
-media browser and the display draw them from the volume and the scanner
-copies nothing. A folder with neither a sidecar nor a confident parse is
+genres, and provider ids from it. The scanner records the folder's
+art on the item, and the path of a file's `.trickplay` directory on the
+file, so the media browser and the display draw them from the volume and
+the scanner copies nothing. A folder with neither a sidecar nor a confident parse is
 counted as unidentified and cataloged by its folder name, so it is
 browsable and the count is accurate.
 
@@ -61,17 +61,41 @@ browsable and the count is accurate.
 A series library is one folder per series, with `tvshow.nfo`, season
 folders, and episode files with an `.nfo` each. The settings block holds
 the season folder and episode naming conventions, in the `*arr` form.
-The catalog has a series row and an episode row per file. The episode
-row has the season and episode numbers, the aired date, and the
-episode's own art and thumbnails, so the media browser draws series,
-then seasons, then episodes from the catalog alone.
+The catalog has a series item and an episode item for each episode, and
+each episode's file attaches to its episode item. The episode item has
+the season and episode numbers, the aired date, and the episode's own
+art and thumbnails, so the media browser draws series, then seasons,
+then episodes from the catalog alone. A season is a grouping the media
+browser draws from the episodes' season numbers, not an item of its own.
 
 ## The catalog's shape for these kinds
 
-Both kinds use the item header from plan 03. The movie body has what
-`movie.nfo` has. The series body has what `tvshow.nfo` has, and the
-episode row has what an episode `.nfo` has. The scanner sets the sort
-key, so "The Matrix" sorts under M in every media browser.
+The catalog holds three kinds of row: items, files, and aliases. An item
+is a logical work. A movie is one item. A series is an item, and each of
+its episodes is an item under it. An item carries the header from plan
+03, the columns every kind sorts on, and a body in the kind's own shape.
+The movie body has what `movie.nfo` has. The series body has what
+`tvshow.nfo` has, and the episode body has what an episode `.nfo` has.
+
+A file is one physical file on the volume: its path, its technical
+attributes, and the path of its own `.trickplay` directory. One item has
+many files, because an upgrade to 4K or a second encoding is another
+file and not another work.
+
+An alias maps one of an item's ids to the item. Every provider id in a
+folder's `.nfo`, and the folder's own name, become aliases of the item,
+so several names resolve to one work and a lost sidecar still resolves
+the folder.
+
+An item's id is derived from the provider id in the `.nfo`, scoped by
+kind: `movie:tmdb:603`, `series:tvdb:81189`, and
+`episode:tvdb:81189:s02e05` for an episode. The scanner reads the id off
+the volume and mints nothing. A folder with no provider id takes an id
+derived from its path, and the scanner extends it with a hash where the
+path alone does not separate two folders. This is the weak case: a move
+of a sidecar-less folder breaks its id. The scanner sets the sort key,
+so "The Matrix" sorts under M in every media browser, and a display
+slug, so a URL and a screen read `the-matrix-1999` and not the id.
 
 ## The local harness
 
@@ -89,6 +113,13 @@ a `Play`.
 Generating thumbnails. Jellyfin's `.trickplay` tiles are its own layout.
 The project will write WebVTT thumbnail sidecars of its own, and that is
 the enrichment plan's job.
+
+Writing a cleaner id back to the volume. The provider-scoped id is
+stable for a title with a sidecar, but a sidecar-less folder's id rests
+on its path, and a move breaks it. Writing a minted id back to the
+volume as a durable fact would fix that. The project trusts the public
+databases' ids for now and defers writing its own, recorded in
+[`open-problems/`](open-problems/writing-ids-back-to-the-volume.md).
 
 ## Proof
 

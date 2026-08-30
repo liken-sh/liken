@@ -172,6 +172,7 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 			{Name: libraryRootVariable, Value: library.Spec.Storage.Root},
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
+			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 		},
 		VolumeMounts: []VolumeMount{
 			{Name: libraryVolumeName, MountPath: libraryMountPath, ReadOnly: true},

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -61,6 +62,12 @@ func scanEnvironment(t *testing.T, address string) {
 	flushWas := scanFlushGrace
 	t.Cleanup(func() { scanFlushGrace = flushWas })
 	scanFlushGrace = 5 * time.Millisecond
+
+	// The webhook binds an ephemeral loopback port, so two tests that
+	// each start a scanner never contend for one fixed port.
+	webhookWas := webhookAddress
+	t.Cleanup(func() { webhookAddress = webhookWas })
+	webhookAddress = "127.0.0.1:0"
 }
 
 // startScanner runs one scanner and ends it before the test returns,
@@ -134,8 +141,14 @@ func TestTheScannerPublishesARetainedReportOfZeroTitlesOnConnect(t *testing.T) {
 	if report.Titles != 0 || report.Unidentified != 0 {
 		t.Errorf("report = %+v, want zero counts", report)
 	}
-	if !report.LastWalk.Equal(started) || !report.LastChange.Equal(started) {
-		t.Errorf("report times = (%v, %v), want both %v", report.LastWalk, report.LastChange, started)
+	// The initial walk of a root that holds nothing reports zero titles
+	// and no change, so the last-change time stands at the moment the
+	// scanner came up while the last-walk time moved to the walk.
+	if !report.LastChange.Equal(started) {
+		t.Errorf("report last change = %v, want %v", report.LastChange, started)
+	}
+	if report.LastWalk.IsZero() {
+		t.Error("report last walk was not set by the initial walk")
 	}
 }
 
@@ -228,5 +241,125 @@ func TestRunScanPublishesOfflineOnSIGTERMAndReturns(t *testing.T) {
 	case <-returned:
 	case <-time.After(scanTestTimeout):
 		t.Fatal("runScan did not return after SIGTERM")
+	}
+}
+
+// serveScanner builds a scanner over a fixture root, wired to the test
+// broker and a recording catalog, so serve runs a real walk and a real
+// connection with no cluster.
+func serveScanner(t *testing.T, address, root, kind string) (*scanner, *catalogRecorder) {
+	t.Helper()
+	catalog, recorder := recordingCatalog(t)
+	now := time.Now().UTC()
+	scan := &scanner{
+		statusTopic:       libraryStatusTopic(defaultTopicBase, "house", "movies"),
+		availabilityTopic: libraryAvailabilityTopic(defaultTopicBase, "house", "movies"),
+		root:              root,
+		library:           "house/movies",
+		kind:              kind,
+		catalog:           catalog,
+		report:            libraryReport{LastWalk: now, LastChange: now},
+		state:             newCatalogState(),
+	}
+	scan.bus = newBus(address, "library-house-movies",
+		&busWill{Topic: scan.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
+		scan.onConnect, nil)
+	return scan, recorder
+}
+
+// The initial walk runs before the bus connects, so the first report
+// the broker holds already carries the volume's title count.
+func TestServeRunsTheInitialWalkAndReportsTitles(t *testing.T) {
+	webhookWas := webhookAddress
+	t.Cleanup(func() { webhookAddress = webhookWas })
+	webhookAddress = "127.0.0.1:0"
+	flushWas := scanFlushGrace
+	t.Cleanup(func() { scanFlushGrace = flushWas })
+	scanFlushGrace = 5 * time.Millisecond
+
+	address, accepted := testBroker(t)
+	scan, _ := serveScanner(t, address, "testdata/movies", libraryKindMovies)
+	startScanner(t, scan)
+
+	broker := waitForBroker(t, accepted)
+	got := waitForTopic(t, broker, scan.statusTopic)
+	var report libraryReport
+	if err := json.Unmarshal(got.payload, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Titles != 3 {
+		t.Errorf("titles = %d, want the three movies from the initial walk", report.Titles)
+	}
+}
+
+// The slow timer re-walks the whole root, so a second report reaches
+// the broker without any webhook.
+func TestServeRepublishesOnTheSlowTimer(t *testing.T) {
+	webhookWas := webhookAddress
+	t.Cleanup(func() { webhookAddress = webhookWas })
+	webhookAddress = "127.0.0.1:0"
+	flushWas := scanFlushGrace
+	t.Cleanup(func() { scanFlushGrace = flushWas })
+	scanFlushGrace = 5 * time.Millisecond
+	intervalWas := scanInterval
+	t.Cleanup(func() { scanInterval = intervalWas })
+	scanInterval = 20 * time.Millisecond
+
+	address, accepted := testBroker(t)
+	scan, _ := serveScanner(t, address, "testdata/movies", libraryKindMovies)
+	startScanner(t, scan)
+
+	broker := waitForBroker(t, accepted)
+	waitForTopic(t, broker, scan.statusTopic)
+	waitForTopic(t, broker, scan.statusTopic)
+}
+
+// A rescan reads the one folder a path names and merges it, the work a
+// webhook drives for a series library.
+func TestScannerRescanReadsOneSeriesFolder(t *testing.T) {
+	scan, _ := testScanner(t, "testdata/series", libraryKindSeries)
+	episode := filepath.Join("testdata", "series", "Breaking Bad", "Season 02", "Breaking Bad - S02E05.mkv")
+
+	scan.rescan(context.Background(), episode)
+
+	if !scan.state.series["series:tvdb:81189"] {
+		t.Error("the rescan did not record the series in the state")
+	}
+	if !scan.state.episodes["episode:tvdb:81189:s02e05"] {
+		t.Error("the rescan did not record the episode in the state")
+	}
+}
+
+// A rescan reads a title folder at the root, so the direct
+// title-folder path is taken and not the grouping one.
+func TestScannerRescanReadsARootTitle(t *testing.T) {
+	scan, _ := testScanner(t, "testdata/movies", libraryKindMovies)
+	title := filepath.Join("testdata", "movies", "The.Thing.1982.1080p.BluRay.x264-GROUP")
+
+	scan.rescan(context.Background(), title)
+
+	if !scan.state.movies["movie:path:the-thing-1982-1080p-bluray-x264-group"] {
+		t.Errorf("state = %v, want The Thing", scan.state.movies)
+	}
+}
+
+// A path outside the root names no folder, so the rescan falls back to
+// a full walk.
+func TestScannerRescanFallsBackToAFullWalk(t *testing.T) {
+	scan, _ := testScanner(t, "testdata/movies", libraryKindMovies)
+
+	scan.rescan(context.Background(), "/outside/the/root/x.mkv")
+
+	if scan.report.Titles != 3 {
+		t.Errorf("titles = %d, want a full walk after an unresolvable path", scan.report.Titles)
+	}
+}
+
+// A kind with no walk reads nothing, so an unknown kind reports zero
+// rather than failing.
+func TestWalkOnAnUnknownKindIsEmpty(t *testing.T) {
+	scan, _ := testScanner(t, "testdata/movies", "audiobooks")
+	if result := scan.walk(); result.titles != 0 || len(result.movies) != 0 {
+		t.Errorf("result = %+v, want an empty walk for an unknown kind", result)
 	}
 }

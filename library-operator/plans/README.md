@@ -104,6 +104,10 @@ for a later agent to shape.
 * [Clients that cannot run an
   agent](open-problems/clients-that-cannot-run-an-agent.md). Phones and
   laptops have no path to the catalog.
+* [Writing ids back to the
+  volume](open-problems/writing-ids-back-to-the-volume.md). The
+  sidecar-less fifth rest their id on a path a move breaks; a minted id
+  written back would fix it.
 
 ## Rejected
 

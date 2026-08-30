@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# local/scan runs the scanner in its scan role against a directory of media on
+# this workstation, into the local three-agent Corrosion cluster local/catalog
+# starts, so a parser change shows in the catalog without a cluster.
+#
+# Usage:
+#   local/scan <media-directory> [kind]   walk the directory into the catalog;
+#                                         kind is movies (the default) or series
+set -euo pipefail
+
+# The repository is the directory above this file, so every path resolves
+# from this script's own directory and none is absolute.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/.." && pwd)"
+
+# The scanner runs from the image the root Dockerfile builds, not from a
+# go build on the workstation, so it runs the same bytes here and in the
+# cluster.
+image="library-operator:local"
+
+# The scanner posts to one local agent's HTTP API, the first the
+# local/catalog harness answers on. The other two replicate the writes,
+# so a read against any of them shows the walk.
+catalog_api="http://127.0.0.1:20081"
+
+# How long the scanner runs. The walk runs once at start, before the bus
+# and the webhook, so a short window captures it and the timer sends TERM
+# to end the standing service.
+run_seconds="${RUN_SECONDS:-15}"
+
+# The mount point inside the container, the path the pod mounts the claim
+# at. The media directory is mounted here read-only and the root is the
+# whole mount, so the scanner reads the workstation directory the way it
+# reads a claim.
+container_mount="/library"
+
+usage() {
+  sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+media="${1:-}"
+kind="${2:-movies}"
+[ -n "$media" ] || usage
+if [ ! -d "$media" ]; then
+  echo "local/scan: $media is not a directory" >&2
+  exit 1
+fi
+media="$(cd "$media" && pwd)"
+
+# The local cluster must be up, because the scanner writes through an
+# agent's API and reports nothing a read can find without one.
+if ! curl --silent --fail --max-time 2 \
+  --header 'content-type: application/json' \
+  --data '"SELECT 1"' "$catalog_api/v1/queries" >/dev/null 2>&1; then
+  echo "local/scan: no catalog agent answers on $catalog_api; run 'local/catalog up' first" >&2
+  exit 1
+fi
+
+# A missing image is built here rather than reported, and the build is
+# the same one CI runs.
+if [ -z "$(docker images --quiet "$image")" ]; then
+  echo "local/scan: building $image" >&2
+  docker build "$repo" --tag "$image" >&2
+fi
+
+# --network host puts the scanner on loopback, where the catalog API port
+# is the address it posts to. The bus address is empty, because the walk
+# runs before the scanner connects to a bus and this harness watches the
+# catalog and not the report. --user runs it as the person at the
+# keyboard, so it reads a media directory they own.
+echo "local/scan: walking $media as a $kind library into $catalog_api" >&2
+timeout --signal=TERM "$run_seconds" docker run --rm \
+  --network host \
+  --user "$(id -u):$(id -g)" \
+  --volume "$media:$container_mount:ro" \
+  --env LIBRARY_NAMESPACE=local \
+  --env LIBRARY_NAME="$kind" \
+  --env LIBRARY_KIND="$kind" \
+  --env LIBRARY_ROOT=/ \
+  --env LIBRARY_CATALOG_API="$catalog_api" \
+  --env LIBRARY_BUS_ADDRESS= \
+  --env LIBRARY_TOPIC_BASE= \
+  "$image" scan || true
+
+# The row count the walk left, read straight off the agent, so a person
+# sees the walk landed without opening the database.
+count="$(curl --silent --fail --max-time 5 \
+  --header 'content-type: application/json' \
+  --data "\"SELECT count(*) FROM $kind\"" \
+  "$catalog_api/v1/queries" 2>/dev/null | grep -o '\[[0-9]*\]' | head -1 || true)"
+echo "local/scan: the $kind table holds ${count:-an unknown number of} rows" >&2
