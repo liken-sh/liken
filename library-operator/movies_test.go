@@ -178,3 +178,31 @@ func TestWalkMoviesSkipsIgnoredFolders(t *testing.T) {
 		t.Errorf("titles with no ignore = %d, want both, including the recycled folder", all.titles)
 	}
 }
+
+// A title nested under two grouping folders, genre then studio, is still
+// found. The walk descends through a folder that has no movie.nfo and no
+// video rather than cataloging it as a title, so Comics/Marvel is a path on
+// the way to a film, not a film itself.
+func TestWalkMoviesDescendsThroughNestedGroupingFolders(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Comics", "Marvel", "Iron Man (2008)", "movie.nfo"),
+		`<movie><title>Iron Man</title><year>2008</year><uniqueid type="tmdb">1726</uniqueid></movie>`)
+	writeFile(t, filepath.Join(root, "Comics", "Marvel", "Iron Man (2008)", "Iron Man.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Comics", "300 (2007)", "300.mkv"), "video")
+
+	result := walkMovies(root, "house/movies", nil)
+	if result.titles != 2 {
+		t.Fatalf("titles = %d, want the deep title and the shallow one, not the grouping folders", result.titles)
+	}
+	titles := moviesByTitle(result)
+	if _, grouped := titles["Marvel"]; grouped {
+		t.Errorf("the Marvel grouping folder was cataloged as a title")
+	}
+	iron, found := titles["Iron Man"]
+	if !found {
+		t.Fatalf("the nested Comics/Marvel title was not found")
+	}
+	if iron.Path != "Comics/Marvel/Iron Man (2008)" {
+		t.Errorf("path = %q, want Comics/Marvel/Iron Man (2008)", iron.Path)
+	}
+}

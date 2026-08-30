@@ -119,8 +119,12 @@ agent releases it, are the `Catalog` object's concern.
 
 ## Movies
 
-A movies library is one folder per title, at the root or under one level
-of grouping folders, as the lab's volume groups by genre. For a folder with
+A movies library is one folder per title, at the root or under grouping
+folders. A grouping folder holds no `movie.nfo` and no video, so the walk
+descends into it and keeps descending until it reaches title folders. This
+finds a title a volume nests under a genre and then a studio, such as
+`Comics/Marvel/Iron Man (2008)`, and a grouping folder is never a title
+itself. For a folder with
 no sidecar, the scanner reads the title and year from the folder name,
 in the `Title (Year)` and `Title [Year]` forms the `*arr` tools and
 Jellyfin write. A folder with `movie.nfo` takes its identity, plot, cast, set,

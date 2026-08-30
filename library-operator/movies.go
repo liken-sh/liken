@@ -18,12 +18,19 @@ func walkMovies(root, library string, ignore ignoreSet) *walkResult {
 	return collectFolders(walkMovieFolders(root, library, ignore))
 }
 
+// movieGroupingDepth bounds how deep the walk descends through grouping
+// folders. A volume that groups by genre and then by studio nests a title
+// two levels down, so the cap leaves room for that and more, and it stops a
+// deep or looping tree from running the walk away.
+const movieGroupingDepth = 8
+
 // walkMovieFolders streams a movies root one title folder at a time. A directory
-// under the root that holds a movie.nfo or a video file is a title folder. A
-// directory that holds neither is a grouping folder, and its own children are
-// title folders. The walk descends one level, because the lab groups by genre
-// and no volume nests deeper. A read error at the root yields one result marked
-// with the error and nothing else, so the caller keeps the catalog.
+// that holds a movie.nfo or a video file is a title folder. A directory that
+// holds neither is a grouping folder, and the walk descends into it and keeps
+// descending, so a title nested under a genre and then a studio is still found.
+// A grouping folder is never a title itself. The descent stops at
+// movieGroupingDepth. A read error at the root yields one result marked with the
+// error and nothing else, so the caller keeps the catalog.
 func walkMovieFolders(root, library string, ignore ignoreSet) iter.Seq[*walkResult] {
 	return func(yield func(*walkResult) bool) {
 		emit := func(dir string) bool {
@@ -36,29 +43,33 @@ func walkMovieFolders(root, library string, ignore ignoreSet) iter.Seq[*walkResu
 			yield(&walkResult{readError: true})
 			return
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() || ignore.skips(entry.Name()) {
-				continue
-			}
-			dir := filepath.Join(root, entry.Name())
-			if isMovieTitleFolder(dir) {
-				if !emit(dir) {
-					return
+		var descend func(dir string, entries []os.DirEntry, depth int) bool
+		descend = func(dir string, entries []os.DirEntry, depth int) bool {
+			for _, entry := range entries {
+				if !entry.IsDir() || ignore.skips(entry.Name()) {
+					continue
 				}
-				continue
-			}
-			grouped, err := os.ReadDir(dir)
-			if err != nil {
-				continue
-			}
-			for _, child := range grouped {
-				if child.IsDir() && !ignore.skips(child.Name()) {
-					if !emit(filepath.Join(dir, child.Name())) {
-						return
+				child := filepath.Join(dir, entry.Name())
+				if isMovieTitleFolder(child) {
+					if !emit(child) {
+						return false
 					}
+					continue
+				}
+				if depth >= movieGroupingDepth {
+					continue
+				}
+				grouped, err := os.ReadDir(child)
+				if err != nil {
+					continue
+				}
+				if !descend(child, grouped, depth+1) {
+					return false
 				}
 			}
+			return true
 		}
+		descend(root, entries, 0)
 	}
 }
 
