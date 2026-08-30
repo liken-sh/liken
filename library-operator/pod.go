@@ -15,6 +15,9 @@ package main
 // The two containers, and the pod-local names of the two volumes they
 // mount. The container names reach a person through kubectl logs, so
 // they say what the container does rather than what it runs.
+
+import "encoding/json"
+
 const (
 	scannerContainer = "scanner"
 	catalogContainer = "catalog"
@@ -161,6 +164,9 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 	if settings := library.Spec.settings(); settings != nil && settings.Image != "" {
 		image = settings.Image
 	}
+	// The ignore list travels as one JSON value, so a folder name of any
+	// character reaches the scanner whole.
+	ignore, _ := json.Marshal(library.Spec.Ignore)
 	return Container{
 		Name:    scannerContainer,
 		Image:   image,
@@ -173,6 +179,7 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
+			{Name: libraryIgnoreVariable, Value: string(ignore)},
 		},
 		VolumeMounts: []VolumeMount{
 			{Name: libraryVolumeName, MountPath: libraryMountPath, ReadOnly: true},

@@ -207,6 +207,51 @@ func TestTheScannerFallsBackToTheMountRootAndTheDefaultBase(t *testing.T) {
 	}
 }
 
+// The scanner reads the ignore list the operator JSON-encodes into the
+// environment, so the walk skips the folders the Library declares.
+func TestNewScannerReadsTheIgnoreList(t *testing.T) {
+	address, _ := testBroker(t)
+	scanEnvironment(t, address)
+	t.Setenv(libraryIgnoreVariable, `["#recycle",".incoming"]`)
+
+	scan := newScanner(time.Now().UTC(), io.Discard)
+
+	if !scan.ignore.skips("#recycle") || !scan.ignore.skips(".incoming") {
+		t.Errorf("ignore = %v, want both declared folders", scan.ignore)
+	}
+	if scan.ignore.skips("Action") {
+		t.Error("the ignore set skips a folder it was not given")
+	}
+}
+
+// parseIgnore reads the JSON list into a set, and an empty or
+// unreadable value is an empty set the walk skips nothing for.
+func TestParseIgnore(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{name: "an empty value is an empty set", raw: "", want: nil},
+		{name: "a list of names", raw: `["#recycle",".incoming"]`, want: []string{"#recycle", ".incoming"}},
+		{name: "an unreadable value is an empty set", raw: `{`, want: nil},
+		{name: "an empty list", raw: `[]`, want: nil},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			set := parseIgnore(testCase.raw)
+			for _, name := range testCase.want {
+				if !set.skips(name) {
+					t.Errorf("set does not skip %q", name)
+				}
+			}
+			if len(set) != len(testCase.want) {
+				t.Errorf("set = %v, want %v", set, testCase.want)
+			}
+		})
+	}
+}
+
 // The kubelet stops a pod with SIGTERM. The scanner marks itself
 // offline and returns, and it leaves the retained report where it is,
 // because a library outlives the pod that walked it.

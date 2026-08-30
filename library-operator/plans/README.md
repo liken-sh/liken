@@ -108,6 +108,9 @@ for a later agent to shape.
   volume](open-problems/writing-ids-back-to-the-volume.md). The
   sidecar-less fifth rest their id on a path a move breaks; a minted id
   written back would fix it.
+* [Richer file facts](open-problems/richer-file-facts.md). A future
+  enhancement reads a file's container metadata for a measured duration,
+  the bitrate, the HDR format, and the encode's quality.
 
 ## Rejected
 

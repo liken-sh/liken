@@ -22,6 +22,9 @@ contract is the same for every kind.
 
 - It reads the library's mount read-only, at the root the `Library`
   names. It writes nothing to the volume.
+- It skips the paths the `Library` names to ignore, and everything
+  under them, so a volume's non-media folders, a recycle bin or a
+  staging directory, stay out of the catalog.
 - It receives its `Library`'s name, kind, and settings block, and the
   addresses of its sidecar's API and the bus.
 - It writes to the catalog only through its sidecar's transaction API,
@@ -45,10 +48,10 @@ image, which is how a person supplies a scanner of their own.
 ## Movies
 
 A movies library is one folder per title, at the root or under one level
-of grouping folders, as the lab's volume groups by genre. The settings
-block holds the naming convention for a folder with no sidecar, in the
-form the `*arr` tools use, so the folder still yields a title and a
-year. A folder with `movie.nfo` takes its identity, plot, cast, set,
+of grouping folders, as the lab's volume groups by genre. For a folder with
+no sidecar, the scanner reads the title and year from the folder name,
+in the `Title (Year)` and `Title [Year]` forms the `*arr` tools and
+Jellyfin write. A folder with `movie.nfo` takes its identity, plot, cast, set,
 genres, and provider ids from it. The scanner records the folder's
 art on the item, and the path of a file's `.trickplay` directory on the
 file, so the media browser and the display draw them from the volume and
@@ -59,8 +62,8 @@ browsable and the count is accurate.
 ## Series
 
 A series library is one folder per series, with `tvshow.nfo`, season
-folders, and episode files with an `.nfo` each. The settings block holds
-the season folder and episode naming conventions, in the `*arr` form.
+folders, and episode files with an `.nfo` each. The scanner reads the season from a `Season NN` folder and the episode
+from an `s02e05` or `2x05` marker, the forms the `*arr` tools write.
 The catalog has a series item and an episode item for each episode, and
 each episode's file attaches to its episode item. The episode item has
 the season and episode numbers, the aired date, and the episode's own
@@ -91,9 +94,9 @@ An item's id is derived from the provider id in the `.nfo`, scoped by
 kind: `movie:tmdb:603`, `series:tvdb:81189`, and
 `episode:tvdb:81189:s02e05` for an episode. The scanner reads the id off
 the volume and mints nothing. A folder with no provider id takes an id
-derived from its path, and the scanner extends it with a hash where the
-path alone does not separate two folders. This is the weak case: a move
-of a sidecar-less folder breaks its id. The scanner sets the sort key,
+derived from its folder name, so two sidecar-less folders that name the
+same title fold to one item. This is the weak case: a move of a
+sidecar-less folder breaks its id. The scanner sets the sort key,
 so "The Matrix" sorts under M in every media browser, and a display
 slug, so a URL and a screen read `the-matrix-1999` and not the id.
 

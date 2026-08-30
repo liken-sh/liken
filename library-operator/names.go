@@ -47,8 +47,10 @@ var releaseCodecPrefixes = map[string]bool{
 }
 
 var (
-	// yearInParens reads the year off a Title (Year) folder.
-	yearInParens = regexp.MustCompile(`\((\d{4})\)`)
+	// yearDelimited reads the year off a Title (Year) or Title [Year]
+	// folder. The year comes only from a parenthesized or bracketed
+	// token, so a bare number in the name is never read as a year.
+	yearDelimited = regexp.MustCompile(`\((\d{4})\)|\[(\d{4})\]`)
 	// resolutionToken reads a 720p or 1080i token.
 	resolutionToken = regexp.MustCompile(`^\d{3,4}[pi]$`)
 	// seasonFolder reads the number off a Season 02 folder.
@@ -58,14 +60,14 @@ var (
 	episodeMarker = regexp.MustCompile(`(?i)s(\d{1,3})[ ._-]?e(\d{1,3})|(\d{1,2})x(\d{1,3})`)
 )
 
-// parseReleaseName reads a title and a year off a folder or file name in the
-// *arr form. A Title (Year) name takes the parenthesized year; a dotted release
-// name is cut at its first release token and reads a trailing year before the
-// cut. The year is 0 where the name carries none, the signal the walk counts as
-// unidentified.
+// parseReleaseName reads a title and a year off a folder or file name in
+// the *arr form. A parenthesized or bracketed year wins; with none, a
+// dotted release name is cut at its first release token and reads a year
+// off a token before the cut. The year is 0 where the name carries none,
+// the signal the walk counts as unidentified.
 func parseReleaseName(name string) (string, int) {
 	name = strings.TrimSpace(stripExtension(name))
-	if match := yearInParens.FindStringIndex(name); match != nil {
+	if match := yearDelimited.FindStringIndex(name); match != nil {
 		year, _ := strconv.Atoi(name[match[0]+1 : match[1]-1])
 		return cleanTitle(name[:match[0]]), year
 	}
@@ -77,8 +79,10 @@ func parseReleaseName(name string) (string, int) {
 			break
 		}
 	}
+	// Read a year off a token after the first, so a folder named only by
+	// a four-digit number keeps that number as its title, not its year.
 	year, yearIndex := 0, -1
-	for i := 0; i < cut; i++ {
+	for i := 1; i < cut; i++ {
 		if value, ok := releaseYear(tokens[i]); ok {
 			year, yearIndex = value, i
 		}

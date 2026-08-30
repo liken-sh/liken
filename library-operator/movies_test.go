@@ -32,7 +32,7 @@ func fileByItem(result *walkResult, item string) (fileRow, bool) {
 }
 
 func TestWalkMoviesCountsAndIdentifies(t *testing.T) {
-	result := walkMovies("testdata/movies", "house/movies")
+	result := walkMovies("testdata/movies", "house/movies", nil)
 
 	if result.titles != 3 {
 		t.Errorf("titles = %d, want 3", result.titles)
@@ -67,7 +67,7 @@ func TestWalkMoviesCountsAndIdentifies(t *testing.T) {
 }
 
 func TestWalkMoviesReadsFileAttributesFromStreamdetails(t *testing.T) {
-	result := walkMovies("testdata/movies", "house/movies")
+	result := walkMovies("testdata/movies", "house/movies", nil)
 	file, held := fileByItem(result, "movie:tmdb:603")
 	if !held {
 		t.Fatal("The Matrix has no file linked")
@@ -87,7 +87,7 @@ func TestWalkMoviesReadsFileAttributesFromStreamdetails(t *testing.T) {
 }
 
 func TestWalkMoviesReadsResolutionFromTheNameWithoutASidecar(t *testing.T) {
-	result := walkMovies("testdata/movies", "house/movies")
+	result := walkMovies("testdata/movies", "house/movies", nil)
 	movies := moviesByTitle(result)
 	thing, held := movies["The Thing"]
 	if !held {
@@ -103,7 +103,7 @@ func TestWalkMoviesReadsResolutionFromTheNameWithoutASidecar(t *testing.T) {
 }
 
 func TestWalkMoviesCatalogsAnUnidentifiedFolderByName(t *testing.T) {
-	result := walkMovies("testdata/movies", "house/movies")
+	result := walkMovies("testdata/movies", "house/movies", nil)
 	movies := moviesByTitle(result)
 	mystery, held := movies["Mystery Folder"]
 	if !held {
@@ -115,7 +115,7 @@ func TestWalkMoviesCatalogsAnUnidentifiedFolderByName(t *testing.T) {
 }
 
 func TestWalkMoviesEmitsEveryProviderAlias(t *testing.T) {
-	result := walkMovies("testdata/movies", "house/movies")
+	result := walkMovies("testdata/movies", "house/movies", nil)
 	aliases := map[string]string{}
 	for _, row := range result.aliases {
 		aliases[row.Alias] = row.Item
@@ -134,7 +134,7 @@ func TestWalkMoviesEmitsEveryProviderAlias(t *testing.T) {
 }
 
 func TestWalkMoviesOnAMissingRoot(t *testing.T) {
-	result := walkMovies("testdata/does-not-exist", "house/movies")
+	result := walkMovies("testdata/does-not-exist", "house/movies", nil)
 	if result.titles != 0 || len(result.movies) != 0 {
 		t.Errorf("result = %+v, want an empty walk", result)
 	}
@@ -149,11 +149,32 @@ func TestWalkMoviesReadsARootLevelSidecarTitle(t *testing.T) {
 	writeFile(t, filepath.Join(root, "Solaris (1972)", "movie.nfo"), `<movie><title>Solaris</title><year>1972</year><uniqueid type="tmdb">7451</uniqueid></movie>`)
 	writeFile(t, filepath.Join(root, "Solaris (1972)", "Solaris.mkv"), "video")
 
-	result := walkMovies(root, "house/movies")
+	result := walkMovies(root, "house/movies", nil)
 	if result.titles != 1 {
 		t.Fatalf("titles = %d, want the one sidecar title and not the loose file", result.titles)
 	}
 	if result.movies[0].Id != "movie:tmdb:7451" {
 		t.Errorf("id = %q, want the sidecar id", result.movies[0].Id)
+	}
+}
+
+// A folder named in the ignore list, and everything under it, is left
+// out of the walk, while a nil set catalogs it, so the ignore list is
+// what keeps a recycle bin off the catalog.
+func TestWalkMoviesSkipsIgnoredFolders(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "The Matrix (1999)", "movie.nfo"), `<movie><title>The Matrix</title><year>1999</year></movie>`)
+	writeFile(t, filepath.Join(root, "#recycle", "Old Movie (2001)", "old.mkv"), "video")
+
+	kept := walkMovies(root, "house/movies", ignoreSet{"#recycle": true})
+	if kept.titles != 1 {
+		t.Fatalf("titles = %d, want only the title outside the recycle bin", kept.titles)
+	}
+	if kept.movies[0].Title != "The Matrix" {
+		t.Errorf("title = %q, want The Matrix", kept.movies[0].Title)
+	}
+
+	if all := walkMovies(root, "house/movies", nil); all.titles != 2 {
+		t.Errorf("titles with no ignore = %d, want both, including the recycled folder", all.titles)
 	}
 }

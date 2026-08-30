@@ -91,6 +91,12 @@ type LibrarySpec struct {
 	// The metadata providers to ask about a title, in the order they
 	// are asked. Enrichment reads the list; nothing acts on it yet.
 	Sources []string `json:"sources,omitempty"`
+
+	// The path components the walk skips, wherever they sit under the
+	// library root. An owner names the junk their storage keeps, such as
+	// a recycle bin or a staging folder, because no fixed list can
+	// anticipate every volume's layout.
+	Ignore []string `json:"ignore,omitempty"`
 }
 
 // The kinds of media a Library holds. Each one names a settings block

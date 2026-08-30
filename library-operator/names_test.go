@@ -24,6 +24,11 @@ func TestParseReleaseName(t *testing.T) {
 		{name: "plain title with no markers", input: "Mystery Folder", title: "Mystery Folder", year: 0},
 		{name: "video extension is stripped", input: "The.Thing.1982.1080p.mkv", title: "The Thing", year: 1982},
 		{name: "a four-digit part of a name is not a year", input: "Blade Runner 2049 (2017)", title: "Blade Runner 2049", year: 2017},
+		{name: "bracketed year", input: "Civil War [2024]", title: "Civil War", year: 2024},
+		{name: "a numeric title with a bracketed year", input: "2012 [2009]", title: "2012", year: 2009},
+		{name: "a numeric run in the title with a bracketed year", input: "Blade Runner 2049 [2017]", title: "Blade Runner 2049", year: 2017},
+		{name: "a numeric title with a parenthesized year", input: "300 (2006)", title: "300", year: 2006},
+		{name: "a bare numeric title is not a year", input: "2012", title: "2012", year: 0},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

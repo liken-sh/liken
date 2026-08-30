@@ -115,6 +115,18 @@ func TestTheSettingsBlockFollowsTheKind(t *testing.T) {
 	}
 }
 
+// The spec carries the ignore list as a top-level array, so the walk
+// reads the folders to skip whatever kind the library holds.
+func TestLibrarySpecDecodesTheIgnoreList(t *testing.T) {
+	var spec LibrarySpec
+	if err := json.Unmarshal([]byte(`{"kind":"movies","ignore":["#recycle",".incoming"]}`), &spec); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(spec.Ignore, []string{"#recycle", ".incoming"}) {
+		t.Errorf("ignore = %v, want the two folders", spec.Ignore)
+	}
+}
+
 // The decoder names the volume's source key, whichever driver serves
 // it, and reads an NFS volume in full because a media reference over
 // NFS is the server and the export path.

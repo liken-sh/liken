@@ -11,7 +11,7 @@ import (
 )
 
 func TestWalkSeries(t *testing.T) {
-	result := walkSeries("testdata/series", "house/series")
+	result := walkSeries("testdata/series", "house/series", nil)
 
 	if result.titles != 1 {
 		t.Errorf("titles = %d, want the one series", result.titles)
@@ -49,7 +49,7 @@ func TestWalkSeries(t *testing.T) {
 }
 
 func TestWalkSeriesEpisodeFile(t *testing.T) {
-	result := walkSeries("testdata/series", "house/series")
+	result := walkSeries("testdata/series", "house/series", nil)
 	file, held := fileByItem(result, "episode:tvdb:81189:s02e05")
 	if !held {
 		t.Fatal("the episode has no file linked")
@@ -63,7 +63,7 @@ func TestWalkSeriesEpisodeFile(t *testing.T) {
 }
 
 func TestWalkSeriesEmitsEpisodeAlias(t *testing.T) {
-	result := walkSeries("testdata/series", "house/series")
+	result := walkSeries("testdata/series", "house/series", nil)
 	found := false
 	for _, alias := range result.aliases {
 		if alias.Alias == "episode:tvdb:340124" && alias.Item == "episode:tvdb:81189:s02e05" {
@@ -85,7 +85,7 @@ func TestWalkSeriesSkipsAnUnnumberedEpisode(t *testing.T) {
 	writeFile(t, filepath.Join(seasonDir, "S01E01.mkv"), "video")
 	writeFile(t, filepath.Join(seasonDir, "Bonus Feature.mkv"), "video")
 
-	result := walkSeries(root, "house/series")
+	result := walkSeries(root, "house/series", nil)
 	if len(result.episodes) != 1 {
 		t.Errorf("episodes = %d, want only the numbered one", len(result.episodes))
 	}
@@ -100,12 +100,34 @@ func TestWalkSeriesTakesSeasonFromTheFolder(t *testing.T) {
 	writeFile(t, filepath.Join(seasonDir, "ep.mkv"), "video")
 	writeFile(t, filepath.Join(seasonDir, "ep.nfo"), `<episodedetails><title>Seven</title><episode>7</episode></episodedetails>`)
 
-	result := walkSeries(root, "house/series")
+	result := walkSeries(root, "house/series", nil)
 	if len(result.episodes) != 1 {
 		t.Fatalf("episodes = %d, want 1", len(result.episodes))
 	}
 	if result.episodes[0].Season != 3 || result.episodes[0].Episode != 7 {
 		t.Errorf("placement = s%02de%02d, want s03e07 from the folder and the sidecar", result.episodes[0].Season, result.episodes[0].Episode)
+	}
+}
+
+// The ignore list skips a folder at the series root and one inside a
+// series, so neither a recycle bin beside the series nor a staging
+// folder within it reaches the catalog.
+func TestWalkSeriesSkipsIgnoredFolders(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Show", "tvshow.nfo"), `<tvshow><title>Show</title><uniqueid type="tvdb">9</uniqueid></tvshow>`)
+	writeFile(t, filepath.Join(root, "Show", "Season 01", "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Show", "#recycle", "Show S09E09.mkv"), "video")
+	writeFile(t, filepath.Join(root, "#recycle", "Other", "Other S01E01.mkv"), "video")
+
+	result := walkSeries(root, "house/series", ignoreSet{"#recycle": true})
+	if result.titles != 1 {
+		t.Fatalf("titles = %d, want only the series outside the recycle bin", result.titles)
+	}
+	if len(result.episodes) != 1 {
+		t.Errorf("episodes = %d, want only the one below the season folder", len(result.episodes))
+	}
+	if result.episodes[0].Episode != 1 {
+		t.Errorf("episode = %d, want the numbered one, not the staged file", result.episodes[0].Episode)
 	}
 }
 
@@ -122,7 +144,7 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestWalkSeriesOnAMissingRoot(t *testing.T) {
-	if result := walkSeries("testdata/nowhere", "house/series"); result.titles != 0 {
+	if result := walkSeries("testdata/nowhere", "house/series", nil); result.titles != 0 {
 		t.Errorf("titles = %d, want an empty walk", result.titles)
 	}
 }
@@ -136,7 +158,7 @@ func TestWalkSeriesFallsBackToFolderNames(t *testing.T) {
 	writeFile(t, filepath.Join(root, "The Show (2010)", "The Show S01E01.mkv"), "video")
 	writeFile(t, filepath.Join(root, "Nameless", "Nameless S03E02.mkv"), "video")
 
-	result := walkSeries(root, "house/series")
+	result := walkSeries(root, "house/series", nil)
 	if result.titles != 2 {
 		t.Fatalf("titles = %d, want both series", result.titles)
 	}

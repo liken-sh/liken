@@ -139,6 +139,7 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		busAddressVariable:       testBusAddress,
 		topicBaseVariable:        defaultTopicBase,
 		catalogAPIVariable:       defaultCatalogAPI,
+		libraryIgnoreVariable:    "null",
 	}
 	got := containerEnvironment(pod.Spec.Containers[0])
 	for name, value := range want {
@@ -161,6 +162,20 @@ func TestScannerContainerPrefersTheSettingsImage(t *testing.T) {
 
 	if pod.Spec.Containers[0].Image != "registry.example/my-scanner:1" {
 		t.Errorf("image = %q, want the settings block's own", pod.Spec.Containers[0].Image)
+	}
+}
+
+// The ignore list travels as one JSON value, so the scanner reads the
+// folders to skip whole, whatever characters a folder name holds.
+func TestScannerContainerCarriesTheIgnoreList(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Ignore = []string{"#recycle", ".incoming"}
+
+	pod := testScannerPod(library)
+
+	got := containerEnvironment(pod.Spec.Containers[0])
+	if got[libraryIgnoreVariable] != `["#recycle",".incoming"]` {
+		t.Errorf("%s = %q, want the JSON-encoded list", libraryIgnoreVariable, got[libraryIgnoreVariable])
 	}
 }
 

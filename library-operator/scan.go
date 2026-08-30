@@ -47,7 +47,35 @@ const (
 	busAddressVariable       = "LIBRARY_BUS_ADDRESS"
 	topicBaseVariable        = "LIBRARY_TOPIC_BASE"
 	catalogAPIVariable       = "LIBRARY_CATALOG_API"
+	libraryIgnoreVariable    = "LIBRARY_IGNORE"
 )
+
+// ignoreSet is the folder names the walk skips, and the test for one. A
+// folder whose name is in the set, and everything under it, is left out
+// of the walk. A nil set skips nothing.
+type ignoreSet map[string]bool
+
+func (s ignoreSet) skips(name string) bool {
+	return s[name]
+}
+
+// parseIgnore reads the ignore list the operator JSON-encodes into the
+// environment. A single JSON value carries a folder name of any
+// character, and an empty or unreadable value is an empty set.
+func parseIgnore(raw string) ignoreSet {
+	set := ignoreSet{}
+	if raw == "" {
+		return set
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(raw), &names); err != nil {
+		return set
+	}
+	for _, name := range names {
+		set[name] = true
+	}
+	return set
+}
 
 // The catalog API address the scanner posts to when the environment
 // names none. The agent binds it on the pod's loopback, so the scanner
@@ -91,6 +119,7 @@ type scanner struct {
 	root              string
 	library           string
 	kind              string
+	ignore            ignoreSet
 	catalog           *Catalog
 	bus               *Bus
 
@@ -141,6 +170,7 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 	if api == "" {
 		api = defaultCatalogAPI
 	}
+	ignore := parseIgnore(os.Getenv(libraryIgnoreVariable))
 	mountRoot := path.Join(libraryMountPath, root)
 
 	// One line in the pod's log says what this container was given, so
@@ -155,6 +185,7 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 		root:              mountRoot,
 		library:           libraryKey(namespace, name),
 		kind:              kind,
+		ignore:            ignore,
 		catalog:           NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
 		report:            libraryReport{LastWalk: started, LastChange: started},
 		state:             newCatalogState(),
@@ -244,9 +275,9 @@ func (s *scanner) runTimer(ctx context.Context) {
 func (s *scanner) walk() *walkResult {
 	switch s.kind {
 	case libraryKindMovies:
-		return walkMovies(s.root, s.library)
+		return walkMovies(s.root, s.library, s.ignore)
 	case libraryKindSeries:
-		return walkSeries(s.root, s.library)
+		return walkSeries(s.root, s.library, s.ignore)
 	}
 	return &walkResult{}
 }
@@ -298,7 +329,7 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 	case libraryKindMovies:
 		scanMovieFolder(s.root, folder, s.library, result)
 	case libraryKindSeries:
-		scanSeriesFolder(s.root, folder, s.library, result)
+		scanSeriesFolder(s.root, folder, s.library, s.ignore, result)
 	default:
 		return
 	}

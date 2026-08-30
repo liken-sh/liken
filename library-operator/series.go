@@ -14,15 +14,15 @@ import (
 // walkSeries reads a series root into a walkResult. Every directory under the
 // root is one series, with a tvshow.nfo, season folders, and an episode file
 // with its own .nfo.
-func walkSeries(root, library string) *walkResult {
+func walkSeries(root, library string, ignore ignoreSet) *walkResult {
 	result := &walkResult{}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return result
 	}
 	for _, entry := range entries {
-		if entry.IsDir() {
-			scanSeriesFolder(root, filepath.Join(root, entry.Name()), library, result)
+		if entry.IsDir() && !ignore.skips(entry.Name()) {
+			scanSeriesFolder(root, filepath.Join(root, entry.Name()), library, ignore, result)
 		}
 	}
 	return result
@@ -32,7 +32,7 @@ func walkSeries(root, library string) *walkResult {
 // and an episode item and a file for every episode under it. The identity comes
 // from tvshow.nfo where the folder holds one, and from the folder name where it
 // does not.
-func scanSeriesFolder(root, dir, library string, result *walkResult) {
+func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkResult) {
 	name := filepath.Base(dir)
 	meta, identified := seriesIdentity(dir, name)
 
@@ -68,7 +68,7 @@ func scanSeriesFolder(root, dir, library string, result *walkResult) {
 		result.unidentified++
 	}
 
-	for _, episode := range collectEpisodeFiles(dir) {
+	for _, episode := range collectEpisodeFiles(dir, ignore) {
 		scanEpisode(root, library, seriesID, episode, result)
 	}
 }
@@ -100,7 +100,7 @@ type episodeFile struct {
 // season folder one level down, and any file directly in the series folder. The
 // walk goes one level deep, because a season folder is the only nesting a series
 // volume uses.
-func collectEpisodeFiles(seriesDir string) []episodeFile {
+func collectEpisodeFiles(seriesDir string, ignore ignoreSet) []episodeFile {
 	var files []episodeFile
 	for _, file := range listVideoFiles(seriesDir) {
 		files = append(files, episodeFile{dir: seriesDir, file: file})
@@ -110,7 +110,7 @@ func collectEpisodeFiles(seriesDir string) []episodeFile {
 		return files
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || ignore.skips(entry.Name()) {
 			continue
 		}
 		seasonDir := filepath.Join(seriesDir, entry.Name())

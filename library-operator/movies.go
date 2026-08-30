@@ -16,14 +16,14 @@ import (
 // holds neither is a grouping folder, and its own children are title folders.
 // The walk descends one level, because the lab groups by genre and no volume
 // nests deeper.
-func walkMovies(root, library string) *walkResult {
+func walkMovies(root, library string, ignore ignoreSet) *walkResult {
 	result := &walkResult{}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return result
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || ignore.skips(entry.Name()) {
 			continue
 		}
 		dir := filepath.Join(root, entry.Name())
@@ -36,7 +36,7 @@ func walkMovies(root, library string) *walkResult {
 			continue
 		}
 		for _, child := range grouped {
-			if child.IsDir() {
+			if child.IsDir() && !ignore.skips(child.Name()) {
 				scanMovieFolder(root, filepath.Join(dir, child.Name()), library, result)
 			}
 		}
