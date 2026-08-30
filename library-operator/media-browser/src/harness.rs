@@ -52,7 +52,7 @@ pub trait Screen {
     /// `up`, `down`, `left`, `right`.
     fn key(&mut self, name: &str);
 
-    /// Move the screen's clock to `at` seconds since the process started. Every
+    /// Move the screen's clock to `at` seconds since the first frame. Every
     /// animation reads that clock, so a frame is a pure function of it.
     fn tick(&mut self, at: f64);
 
@@ -65,15 +65,16 @@ pub trait Screen {
 
 /// Run a screen to the end of its script and write what it measured.
 pub fn run<S: Screen + 'static>(screen: S, options: Options) -> Result<(), String> {
-    // The clock starts here, so every measured time counts the whole life of
-    // the process: the wgpu setup, the first window, and the first frame.
-    let started = std::time::Instant::now();
+    // The launch is measured from here, so the time to the first frame
+    // counts the whole life of the process: the wgpu setup, the first
+    // window, and the first draw.
+    let launched = std::time::Instant::now();
 
     let event_loop = EventLoop::new().map_err(|error| error.to_string())?;
     let mut app = App::Loading {
         screen: Some(screen),
         options,
-        started,
+        launched,
     };
 
     event_loop
@@ -98,7 +99,13 @@ pub struct Ready<S: Screen> {
     pub(crate) modifiers: ModifiersState,
     pub(crate) events: Vec<Event>,
     pub(crate) resized: bool,
-    pub(crate) start: std::time::Instant,
+    /// When the process began, for the time to the first frame.
+    pub(crate) launched: std::time::Instant,
+    /// The timeline's zero: the first frame, not the launch. A compositor
+    /// can take seconds to give a window, and a script or a capture that
+    /// counted from the launch would fire on the first frame, before a
+    /// resize arrived and before anything was drawn.
+    pub(crate) start: Option<std::time::Instant>,
     pub(crate) stats: Stats,
     pub(crate) finished: bool,
 }
@@ -107,7 +114,7 @@ enum App<S: Screen> {
     Loading {
         screen: Option<S>,
         options: Options,
-        started: std::time::Instant,
+        launched: std::time::Instant,
     },
     Ready(Box<Ready<S>>),
     /// The run is over and the graphics are already gone.
@@ -119,12 +126,12 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         let Self::Loading {
             screen,
             options,
-            started,
+            launched,
         } = self
         else {
             return;
         };
-        let started = *started;
+        let launched = *launched;
         let screen = screen.take().expect("one window per run");
         let Options {
             script,
@@ -165,7 +172,8 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             modifiers: ModifiersState::default(),
             events: Vec::new(),
             resized: false,
-            start: started,
+            launched,
+            start: None,
             stats,
             finished: false,
         }));
@@ -217,10 +225,10 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         };
 
         // The deadline is checked here as well as in the frame, so a run ends
-        // even if the compositor stops asking for frames.
-        if ready
-            .timeline
-            .past_deadline(ready.start.elapsed().as_secs_f64())
+        // even if the compositor stops asking for frames. Before the first
+        // frame there is no timeline yet, so there is no deadline.
+        if let Some(start) = ready.start
+            && ready.timeline.past_deadline(start.elapsed().as_secs_f64())
         {
             ready.stop(event_loop);
             return;

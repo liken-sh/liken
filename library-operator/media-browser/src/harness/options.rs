@@ -8,7 +8,7 @@ use std::path::PathBuf;
 pub const HELP: &str = "\
 media-browser [FLAGS]
 
-  --script \"0.0:p,3.0:o\"   key events at seconds from the start of the process
+  --script \"0.0:p,3.0:o\"   key events at seconds from the first frame
   --capture DIR            where captured PNGs go
   --capture-at \"0.5,3.2\"   one PNG of the rendered frame at each second listed;
                            the run ends after the last one

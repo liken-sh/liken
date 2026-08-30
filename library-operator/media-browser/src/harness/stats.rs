@@ -44,13 +44,15 @@ impl Stats {
         self.loop_ms.clear();
     }
 
+    /// The first frame arrived, `seconds` after the launch.
+    pub fn first_frame(&mut self, seconds: f64) {
+        self.first_frame = Some(seconds);
+    }
+
     /// Record one frame. `counted` is false for a captured frame, which draws
     /// twice and waits on a readback.
-    pub fn frame(&mut self, at: f64, build_ms: f64, loop_ms: f64, counted: bool) {
+    pub fn frame(&mut self, build_ms: f64, loop_ms: f64, counted: bool) {
         self.frames += 1;
-        if self.first_frame.is_none() {
-            self.first_frame = Some(at);
-        }
         if counted {
             self.build_ms.push(build_ms);
             self.loop_ms.push(loop_ms);
@@ -166,10 +168,11 @@ mod tests {
 
     fn measured() -> Stats {
         let mut stats = Stats::new("Vulkan".into(), "an adapter".into(), (1920, 1080));
+        stats.first_frame(1.0);
         for step in 1..=10 {
-            stats.frame(f64::from(step), f64::from(step), 16.0, true);
+            stats.frame(f64::from(step), 16.0, true);
         }
-        stats.frame(11.0, 40.0, 40.0, false);
+        stats.frame(40.0, 40.0, false);
         stats
     }
 

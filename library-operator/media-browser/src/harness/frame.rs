@@ -31,7 +31,15 @@ impl<S: Screen> Ready<S> {
     /// Build, draw, capture, and present one frame.
     pub(crate) fn frame(&mut self, event_loop: &ActiveEventLoop) {
         let loop_start = std::time::Instant::now();
-        let at = self.start.elapsed().as_secs_f64();
+        let at = match self.start {
+            Some(start) => start.elapsed().as_secs_f64(),
+            None => {
+                self.start = Some(loop_start);
+                self.stats
+                    .first_frame(millis(self.launched.elapsed()) / 1000.0);
+                0.0
+            }
+        };
 
         let due = self.timeline.due(at);
         for key in &due.keys {
@@ -146,7 +154,7 @@ impl<S: Screen> Ready<S> {
         let loop_ms = millis(loop_start.elapsed());
         // A captured frame draws twice and blocks on a readback, so it says
         // nothing about the cost of a frame and stays out of the numbers.
-        self.stats.frame(at, build_ms, loop_ms, capture.is_none());
+        self.stats.frame(build_ms, loop_ms, capture.is_none());
 
         if self.timeline.ended(at) {
             self.stop(event_loop);
