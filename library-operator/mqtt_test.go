@@ -130,7 +130,7 @@ func TestEncodePingreqIsTwoBytes(t *testing.T) {
 // A PUBLISH encoded by this codec reads back through readPacket and
 // parsePublish as the topic and payload it went in as.
 func TestReadPacketReadsBackAPublish(t *testing.T) {
-	frame := encodePublish("libraries/house/films/status", []byte(`{"titles":12}`), true)
+	frame := encodePublish("libraries/house/movies/status", []byte(`{"titles":12}`), true)
 	reader := bufio.NewReader(bytes.NewReader(frame))
 
 	first, body, err := readPacket(reader)
@@ -144,7 +144,7 @@ func TestReadPacketReadsBackAPublish(t *testing.T) {
 	if !ok {
 		t.Fatal("the publish body did not parse")
 	}
-	if topic != "libraries/house/films/status" {
+	if topic != "libraries/house/movies/status" {
 		t.Errorf("topic = %q", topic)
 	}
 	if string(payload) != `{"titles":12}` {

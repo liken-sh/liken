@@ -1,6 +1,6 @@
 # The Library API, declared to Kubernetes.
 #
-# A Library is one declaration of "this volume holds films". It names
+# A Library is one declaration of "this volume holds movies". It names
 # a PersistentVolumeClaim, a directory inside it, and the kind of
 # media that directory holds. The library operator reconciles it into
 # one scanner pod that walks the volume and writes what it finds into
@@ -74,7 +74,7 @@ spec:
           description: >-
             A Library is a volume of media of one kind, indexed into
             the catalog the screens read. Create one for each volume
-            and kind you hold: a Library of films over the film
+            and kind you hold: a Library of movies over the movie
             volume, a Library of series over the series volume.
           properties:
             spec:
@@ -95,12 +95,12 @@ spec:
               # kind under a scanner for another.
               x-kubernetes-validations:
                 - rule: >-
-                    has(self.films) == (self.kind == 'films') &&
+                    has(self.movies) == (self.kind == 'movies') &&
                     has(self.series) == (self.kind == 'series')
                   message: >-
-                    the settings block must match the kind: a films
-                    library carries films and no series, and a series
-                    library carries series and no films
+                    the settings block must match the kind: a movies
+                    library carries movies and no series, and a series
+                    library carries series and no movies
                 - rule: self.kind == oldSelf.kind
                   message: >-
                     a Library's kind is immutable; create another
@@ -146,21 +146,21 @@ spec:
                         starts at, as an absolute path from the root
                         of the volume. One volume may hold several
                         libraries, each with its own root, such as
-                        /films beside /kids-films. Omitted, it is /,
+                        /movies beside /kids-movies. Omitted, it is /,
                         the whole volume.
                 kind:
                   type: string
-                  enum: [films, series]
+                  enum: [movies, series]
                   description: >-
                     What this library holds. The kind selects the
                     scanner that walks the volume and the shape the
                     catalog stores each title in. The settings block
                     of the same name must be present, and no other.
-                films:
+                movies:
                   type: object
                   description: >-
-                    The settings for a library of films, one folder
-                    per title. Present exactly when kind is films,
+                    The settings for a library of movies, one folder
+                    per title. Present exactly when kind is movies,
                     and empty is a complete block: every setting has
                     a default.
                   properties:
@@ -169,7 +169,7 @@ spec:
                       minLength: 1
                       description: >-
                         The scanner image to run in place of the one
-                        this project ships for films. Set it to run a
+                        this project ships for movies. Set it to run a
                         scanner of your own, which must speak the
                         scanner contract: mount the volume read-only,
                         write through the catalog sidecar, and
@@ -189,7 +189,7 @@ spec:
                       description: >-
                         The scanner image to run in place of the one
                         this project ships for series, on the same
-                        terms as the films image.
+                        terms as the movies image.
                 sources:
                   type: array
                   x-kubernetes-list-type: atomic

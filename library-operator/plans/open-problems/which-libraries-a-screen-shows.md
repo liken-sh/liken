@@ -1,7 +1,7 @@
 # Which libraries a screen shows
 
 The media browser in plan 07 shows every library in the catalog. A
-children's room should show the children's film library and nothing
+children's room should show the children's movie library and nothing
 else, and a living room should open on "continue watching" and "recently
 added" rather than a list of libraries. Both are facts of this layer. By
 the one-way rule they cannot be fields of the `Player`.

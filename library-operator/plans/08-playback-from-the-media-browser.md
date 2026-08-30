@@ -71,9 +71,9 @@ reports enough for it.
 
 ## Proof
 
-On `liken-1`: from the wall, select on a film creates a `Play` on that
-`Player` within a second, the film starts, the scrub bar shows the
+On `liken-1`: from the wall, select on a movie creates a `Play` on that
+`Player` within a second, the movie starts, the scrub bar shows the
 thumbnails, and `kubectl get plays` shows it running. Back, or the end
-of the film, returns the screen to the wall at the same focus. Select on
+of the movie, returns the screen to the wall at the same focus. Select on
 an episode plays it and the rest of its season in order, and the `Play`
 status names the current item as it advances.

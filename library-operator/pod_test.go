@@ -19,21 +19,21 @@ const (
 	testBusAddress     = "bus.liken-system.svc:1883"
 )
 
-// houseFilms is the Library every test in this package starts from: a
-// films library over a claim in the house namespace.
-func houseFilms() *Library {
+// studioMovies is the Library every test in this package starts from: a
+// movies library over a claim in the house namespace.
+func studioMovies() *Library {
 	return &Library{
 		Metadata: ObjectMeta{
-			Name:            "films",
+			Name:            "movies",
 			Namespace:       "house",
 			UID:             "library-uid",
 			Generation:      3,
 			ResourceVersion: "9",
 		},
 		Spec: LibrarySpec{
-			Storage: LibraryStorage{Claim: "films", Root: "/movies"},
-			Kind:    libraryKindFilms,
-			Films:   &LibrarySettings{},
+			Storage: LibraryStorage{Claim: "movies", Root: "/movies"},
+			Kind:    libraryKindMovies,
+			Movies:  &LibrarySettings{},
 		},
 	}
 }
@@ -46,10 +46,10 @@ func testScannerPod(library *Library) *Pod {
 // Library: the owner reference is the whole teardown, and the labels
 // are what the pod watch and a person's kubectl select on.
 func TestScannerPodBelongsToItsLibrary(t *testing.T) {
-	pod := testScannerPod(houseFilms())
+	pod := testScannerPod(studioMovies())
 
-	if pod.Metadata.Name != "films-scanner" {
-		t.Errorf("name = %q, want films-scanner", pod.Metadata.Name)
+	if pod.Metadata.Name != "movies-scanner" {
+		t.Errorf("name = %q, want movies-scanner", pod.Metadata.Name)
 	}
 	if pod.Metadata.Namespace != "house" {
 		t.Errorf("namespace = %q, want house", pod.Metadata.Namespace)
@@ -61,13 +61,13 @@ func TestScannerPodBelongsToItsLibrary(t *testing.T) {
 	if owner.APIVersion != libraryAPIVersion || owner.Kind != "Library" {
 		t.Errorf("owner = %+v, want the Library kind", owner)
 	}
-	if owner.Name != "films" || owner.UID != "library-uid" || !owner.Controller {
-		t.Errorf("owner = %+v, want the controlling Library films", owner)
+	if owner.Name != "movies" || owner.UID != "library-uid" || !owner.Controller {
+		t.Errorf("owner = %+v, want the controlling Library movies", owner)
 	}
 	if pod.Metadata.Labels[scannerLabelKey] != scannerLabelValue {
 		t.Errorf("labels = %v, want the scanner name label", pod.Metadata.Labels)
 	}
-	if pod.Metadata.Labels[libraryLabelKey] != "films" {
+	if pod.Metadata.Labels[libraryLabelKey] != "movies" {
 		t.Errorf("labels = %v, want the library label", pod.Metadata.Labels)
 	}
 }
@@ -76,7 +76,7 @@ func TestScannerPodBelongsToItsLibrary(t *testing.T) {
 // the grace period is long enough for the catalog agent to finish its
 // exit.
 func TestScannerPodStandsAndStopsSlowly(t *testing.T) {
-	pod := testScannerPod(houseFilms())
+	pod := testScannerPod(studioMovies())
 
 	if pod.Spec.RestartPolicy != "Always" {
 		t.Errorf("restartPolicy = %q, want Always", pod.Spec.RestartPolicy)
@@ -96,7 +96,7 @@ func TestScannerPodStandsAndStopsSlowly(t *testing.T) {
 // The scanner runs this same image in its scan role, mounts the claim
 // read-only, and learns its Library from the environment alone.
 func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
-	pod := testScannerPod(houseFilms())
+	pod := testScannerPod(studioMovies())
 
 	scanner := pod.Spec.Containers[0]
 	if scanner.Name != scannerContainer {
@@ -120,18 +120,18 @@ func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	if source.PersistentVolumeClaim == nil {
 		t.Fatalf("volume %s = %+v, want the Library's claim", mount.Name, source)
 	}
-	if source.PersistentVolumeClaim.ClaimName != "films" || !source.PersistentVolumeClaim.ReadOnly {
-		t.Errorf("claim = %+v, want films read-only", source.PersistentVolumeClaim)
+	if source.PersistentVolumeClaim.ClaimName != "movies" || !source.PersistentVolumeClaim.ReadOnly {
+		t.Errorf("claim = %+v, want movies read-only", source.PersistentVolumeClaim)
 	}
 }
 
 func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
-	pod := testScannerPod(houseFilms())
+	pod := testScannerPod(studioMovies())
 
 	want := map[string]string{
 		libraryNamespaceVariable: "house",
-		libraryNameVariable:      "films",
-		libraryKindVariable:      libraryKindFilms,
+		libraryNameVariable:      "movies",
+		libraryKindVariable:      libraryKindMovies,
 		libraryRootVariable:      "/movies",
 		busAddressVariable:       testBusAddress,
 		topicBaseVariable:        defaultTopicBase,
@@ -150,8 +150,8 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 // A settings block that names an image runs that image, which is how a
 // person supplies a scanner of their own.
 func TestScannerContainerPrefersTheSettingsImage(t *testing.T) {
-	library := houseFilms()
-	library.Spec.Films.Image = "registry.example/my-scanner:1"
+	library := studioMovies()
+	library.Spec.Movies.Image = "registry.example/my-scanner:1"
 
 	pod := testScannerPod(library)
 
@@ -165,7 +165,7 @@ func TestScannerContainerPrefersTheSettingsImage(t *testing.T) {
 // downward API reads it into POD_IP and the gossip address is built
 // from that variable.
 func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
-	pod := testScannerPod(houseFilms())
+	pod := testScannerPod(studioMovies())
 
 	catalog := pod.Spec.Containers[1]
 	if catalog.Name != catalogContainer {
@@ -197,7 +197,7 @@ func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
 // The catalog is derived from a walk, so its database lives in a
 // directory the kubelet creates with the pod and deletes with it.
 func TestCatalogContainerWritesToAnEmptyDirectory(t *testing.T) {
-	pod := testScannerPod(houseFilms())
+	pod := testScannerPod(studioMovies())
 
 	catalog := pod.Spec.Containers[1]
 	if len(catalog.VolumeMounts) != 1 {
@@ -214,7 +214,7 @@ func TestCatalogContainerWritesToAnEmptyDirectory(t *testing.T) {
 
 // Neither container needs a capability, and neither may gain one.
 func TestBothContainersDropEveryCapability(t *testing.T) {
-	for _, container := range testScannerPod(houseFilms()).Spec.Containers {
+	for _, container := range testScannerPod(studioMovies()).Spec.Containers {
 		t.Run(container.Name, func(t *testing.T) {
 			security := container.SecurityContext
 			if security == nil || security.Capabilities == nil {
@@ -243,7 +243,7 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 		{container: scannerContainer, cpuRequest: "10m", memoryLimit: "64Mi"},
 		{container: catalogContainer, cpuRequest: "10m", memoryLimit: "512Mi"},
 	}
-	pod := testScannerPod(houseFilms())
+	pod := testScannerPod(studioMovies())
 	for index, one := range cases {
 		t.Run(one.container, func(t *testing.T) {
 			resources := pod.Spec.Containers[index].Resources

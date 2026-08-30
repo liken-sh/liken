@@ -85,7 +85,7 @@ type LibraryList struct {
 type LibrarySpec struct {
 	Storage LibraryStorage   `json:"storage"`
 	Kind    string           `json:"kind"`
-	Films   *LibrarySettings `json:"films,omitempty"`
+	Movies  *LibrarySettings `json:"movies,omitempty"`
 	Series  *LibrarySettings `json:"series,omitempty"`
 
 	// The metadata providers to ask about a title, in the order they
@@ -97,7 +97,7 @@ type LibrarySpec struct {
 // on the spec and a scanner to run, and a new kind is a new block
 // beside the ones here.
 const (
-	libraryKindFilms  = "films"
+	libraryKindMovies = "movies"
 	libraryKindSeries = "series"
 )
 
@@ -107,8 +107,8 @@ const (
 // here and one more clause there.
 func (s LibrarySpec) settings() *LibrarySettings {
 	switch s.Kind {
-	case libraryKindFilms:
-		return s.Films
+	case libraryKindMovies:
+		return s.Movies
 	case libraryKindSeries:
 		return s.Series
 	}

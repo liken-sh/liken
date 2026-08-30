@@ -197,19 +197,19 @@ func testRunContext(t *testing.T) context.Context {
 	return ctx
 }
 
-// boundHouse seeds the cluster with a films Library over a claim bound
+// boundHouse seeds the cluster with a movies Library over a claim bound
 // to an NFS volume, which is the ordinary state every other state is
 // read against.
 func boundHouse(cluster *fakeCluster) *Library {
-	library := houseFilms()
-	cluster.libraries["films"] = library
-	cluster.claims["films"] = &PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "films", Namespace: "house"},
-		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-films"},
+	library := studioMovies()
+	cluster.libraries["movies"] = library
+	cluster.claims["movies"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	}
-	cluster.volumes["pv-films"] = `{"metadata":{"name":"pv-films"},"spec":` +
+	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
 		`{"capacity":{"storage":"4Ti"},"accessModes":["ReadOnlyMany"],` +
-		`"nfs":{"server":"syn.example","path":"/volume1/films"}}}`
+		`"nfs":{"server":"syn.example","path":"/volume1/movies"}}}`
 	return library
 }

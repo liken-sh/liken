@@ -21,20 +21,20 @@ is a different `Library`.
     apiVersion: library.liken.sh/v1alpha1
     kind: Library
     metadata:
-      name: films
+      name: movies
       namespace: media
     spec:
       storage:
-        claim: films
+        claim: movies
         root: /
-      kind: films
-      films: {}
+      kind: movies
+      movies: {}
 
 The block named by `kind` must be present and the other kinds' blocks
 must not. Each block holds that kind's own settings, and an empty
 block is a complete one.
 
-A Library is a volume of media of one kind, indexed into the catalog the screens read. Create one for each volume and kind you hold: a Library of films over the film volume, a Library of series over the series volume.
+A Library is a volume of media of one kind, indexed into the catalog the screens read. Create one for each volume and kind you hold: a Library of movies over the movie volume, a Library of series over the series volume.
 
 ## spec
 
@@ -43,8 +43,8 @@ The volume this library covers, the kind of media it holds, and the settings for
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | Where the media is: a claim, and a directory inside it. |
-| <span id="spec--kind"></span>`kind` | string | yes | What this library holds. The kind selects the scanner that walks the volume and the shape the catalog stores each title in. The settings block of the same name must be present, and no other. One of: `films`, `series`. |
-| <span id="spec--films"></span>`films` | [object](#specfilms) | no | The settings for a library of films, one folder per title. Present exactly when kind is films, and empty is a complete block: every setting has a default. |
+| <span id="spec--kind"></span>`kind` | string | yes | What this library holds. The kind selects the scanner that walks the volume and the shape the catalog stores each title in. The settings block of the same name must be present, and no other. One of: `movies`, `series`. |
+| <span id="spec--movies"></span>`movies` | [object](#specmovies) | no | The settings for a library of movies, one folder per title. Present exactly when kind is movies, and empty is a complete block: every setting has a default. |
 | <span id="spec--series"></span>`series` | [object](#specseries) | no | The settings for a library of series, one folder per series with a folder per season inside it. Present exactly when kind is series, and empty is a complete block. |
 | <span id="spec--sources"></span>`sources` | []string | no | The metadata providers to ask about a title, in the order they are asked: the first that answers supplies the title's metadata. Enrichment reads this list. Nothing acts on it yet, and a library that omits it takes what the files themselves carry. |
 
@@ -55,15 +55,15 @@ Where the media is: a claim, and a directory inside it.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specstorage--claim"></span>`claim` | string | yes | The PersistentVolumeClaim in this namespace that holds the media. Any volume the cluster can mount will do, an NFS export or a CSI volume or a disk on one node. The scanner mounts it read-only and writes nothing to it. The operator reads the PersistentVolume behind the claim and reports it in the status, because playing a title needs to know how the volume is served. |
-| <span id="specstorage--root"></span>`root` | string | no | The directory inside the claim this library starts at, as an absolute path from the root of the volume. One volume may hold several libraries, each with its own root, such as /films beside /kids-films. Omitted, it is /, the whole volume. Default: `/`. |
+| <span id="specstorage--root"></span>`root` | string | no | The directory inside the claim this library starts at, as an absolute path from the root of the volume. One volume may hold several libraries, each with its own root, such as /movies beside /kids-movies. Omitted, it is /, the whole volume. Default: `/`. |
 
-### spec.films
+### spec.movies
 
-The settings for a library of films, one folder per title. Present exactly when kind is films, and empty is a complete block: every setting has a default.
+The settings for a library of movies, one folder per title. Present exactly when kind is movies, and empty is a complete block: every setting has a default.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specfilms--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for films. Set it to run a scanner of your own, which must speak the scanner contract: mount the volume read-only, write through the catalog sidecar, and publish its report to the bus. Omitted, the operator runs the project's own image. |
+| <span id="specmovies--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for movies. Set it to run a scanner of your own, which must speak the scanner contract: mount the volume read-only, write through the catalog sidecar, and publish its report to the bus. Omitted, the operator runs the project's own image. |
 
 ### spec.series
 
@@ -71,7 +71,7 @@ The settings for a library of series, one folder per series with a folder per se
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specseries--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for series, on the same terms as the films image. |
+| <span id="specseries--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for series, on the same terms as the movies image. |
 
 ## status
 

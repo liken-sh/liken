@@ -191,10 +191,10 @@ func TestBusPublishesToTheBroker(t *testing.T) {
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 
-	bus.Publish("liken/library/libraries/house/films/status", []byte(`{"titles":12}`), true)
+	bus.Publish("liken/library/libraries/house/movies/status", []byte(`{"titles":12}`), true)
 
 	got := waitForPublish(t, brokers[0].pubs)
-	if got.topic != "liken/library/libraries/house/films/status" {
+	if got.topic != "liken/library/libraries/house/movies/status" {
 		t.Errorf("topic = %q", got.topic)
 	}
 	if string(got.payload) != `{"titles":12}` {
@@ -215,11 +215,11 @@ func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
 	_, brokers, connected := startBus(t, 1, nil, handler)
 	waitForConnect(t, connected)
 
-	brokers[0].push("liken/library/libraries/house/films/status", []byte(`{"titles":0}`))
+	brokers[0].push("liken/library/libraries/house/movies/status", []byte(`{"titles":0}`))
 
 	select {
 	case got := <-received:
-		if got.topic != "liken/library/libraries/house/films/status" {
+		if got.topic != "liken/library/libraries/house/movies/status" {
 			t.Errorf("topic = %q", got.topic)
 		}
 		if string(got.payload) != `{"titles":0}` {
@@ -259,7 +259,7 @@ func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
 	bus := newBus("pipe", "library-operator", nil, nil, nil)
 	// No connection is ever dialed, so out stays nil and the publish
 	// has nowhere to go.
-	bus.Publish("liken/library/libraries/house/films/status", []byte("x"), true)
+	bus.Publish("liken/library/libraries/house/movies/status", []byte("x"), true)
 	// The test proves only that the call returns and panics on nothing.
 }
 
@@ -320,7 +320,7 @@ func TestBusDialsAgainWhenTheHandshakeFails(t *testing.T) {
 			go bus.Run(ctx)
 
 			waitForConnect(t, connected)
-			bus.Publish("liken/library/libraries/house/films/availability", []byte(availabilityOnline), true)
+			bus.Publish("liken/library/libraries/house/movies/availability", []byte(availabilityOnline), true)
 			if got := waitForPublish(t, broker.pubs); string(got.payload) != availabilityOnline {
 				t.Errorf("payload = %q, want %q", got.payload, availabilityOnline)
 			}

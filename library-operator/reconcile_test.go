@@ -53,7 +53,7 @@ func TestReconcileReportsStorageThatIsNotBound(t *testing.T) {
 		{
 			name: "a claim waiting on a volume",
 			claim: &PersistentVolumeClaim{
-				Metadata: ObjectMeta{Name: "films", Namespace: "house"},
+				Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 				Status:   PersistentVolumeClaimStatus{Phase: "Pending"},
 			},
 			reason: reasonClaimUnbound,
@@ -61,15 +61,15 @@ func TestReconcileReportsStorageThatIsNotBound(t *testing.T) {
 		{
 			name: "a claim the binder has not answered",
 			claim: &PersistentVolumeClaim{
-				Metadata: ObjectMeta{Name: "films", Namespace: "house"},
+				Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 			},
 			reason: reasonClaimUnbound,
 		},
 		{
 			name: "a claim whose volume is gone",
 			claim: &PersistentVolumeClaim{
-				Metadata: ObjectMeta{Name: "films", Namespace: "house"},
-				Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-films"},
+				Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
+				Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
 				Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 			},
 			reason: reasonVolumeNotFound,
@@ -79,17 +79,17 @@ func TestReconcileReportsStorageThatIsNotBound(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			library := boundHouse(cluster)
-			delete(cluster.claims, "films")
-			delete(cluster.volumes, "pv-films")
+			delete(cluster.claims, "movies")
+			delete(cluster.volumes, "pv-movies")
 			if one.claim != nil {
-				cluster.claims["films"] = one.claim
+				cluster.claims["movies"] = one.claim
 			}
 
 			if err := testOperator(t, cluster).reconcile(library); err != nil {
 				t.Fatal(err)
 			}
 
-			status := cluster.heldLibrary("films").Status
+			status := cluster.heldLibrary("movies").Status
 			bound := conditionOf(t, status, conditionBound)
 			if bound.Status != ConditionFalse || bound.Reason != one.reason {
 				t.Errorf("Bound = %+v, want False with %s", bound, one.reason)
@@ -120,7 +120,7 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := cluster.heldLibrary("films").Status
+	status := cluster.heldLibrary("movies").Status
 	bound := conditionOf(t, status, conditionBound)
 	if bound.Status != ConditionTrue || bound.Reason != reasonBound {
 		t.Errorf("Bound = %+v, want True", bound)
@@ -131,7 +131,7 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 	if status.Volume == nil {
 		t.Fatal("the status reports no volume")
 	}
-	want := LibraryVolume{Name: "pv-films", Type: "nfs", Server: "syn.example", Path: "/volume1/films"}
+	want := LibraryVolume{Name: "pv-movies", Type: "nfs", Server: "syn.example", Path: "/volume1/movies"}
 	if *status.Volume != want {
 		t.Errorf("volume = %+v, want %+v", *status.Volume, want)
 	}
@@ -142,15 +142,15 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 func TestReconcileReportsAVolumeItKnowsNothingAbout(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
-	cluster.volumes["pv-films"] = `{"metadata":{"name":"pv-films"},"spec":` +
-		`{"csi":{"driver":"nas.example","volumeHandle":"films"}}}`
+	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
+		`{"csi":{"driver":"nas.example","volumeHandle":"movies"}}}`
 
 	if err := testOperator(t, cluster).reconcile(library); err != nil {
 		t.Fatal(err)
 	}
 
-	want := LibraryVolume{Name: "pv-films", Type: "csi"}
-	if got := *cluster.heldLibrary("films").Status.Volume; got != want {
+	want := LibraryVolume{Name: "pv-movies", Type: "csi"}
+	if got := *cluster.heldLibrary("movies").Status.Volume; got != want {
 		t.Errorf("volume = %+v, want %+v", got, want)
 	}
 }
@@ -165,7 +165,7 @@ func TestReconcileCreatesTheScannerPod(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pod := cluster.heldPod("films-scanner")
+	pod := cluster.heldPod("movies-scanner")
 	if pod == nil {
 		t.Fatal("no scanner pod was created")
 	}
@@ -175,8 +175,8 @@ func TestReconcileCreatesTheScannerPod(t *testing.T) {
 	if pod.Metadata.Annotations[templateHashAnnotation] == "" {
 		t.Error("the pod carries no template hash")
 	}
-	if got := cluster.heldLibrary("films").Status.Pod; got != "films-scanner" {
-		t.Errorf("status.pod = %q, want films-scanner", got)
+	if got := cluster.heldLibrary("movies").Status.Pod; got != "movies-scanner" {
+		t.Errorf("status.pod = %q, want movies-scanner", got)
 	}
 }
 
@@ -187,17 +187,17 @@ func TestReconcileReplacesAStalePod(t *testing.T) {
 	library := boundHouse(cluster)
 	stale := standingPod(t, library, podRunning, true)
 	stale.Metadata.Annotations[templateHashAnnotation] = "an-older-template"
-	cluster.pods["films-scanner"] = stale
+	cluster.pods["movies-scanner"] = stale
 	operator := testOperator(t, cluster)
 
 	if err := operator.reconcile(library); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("films-scanner") != nil {
+	if cluster.heldPod("movies-scanner") != nil {
 		t.Fatal("the stale pod still stands")
 	}
-	if got := conditionOf(t, cluster.heldLibrary("films").Status, conditionReady); got.Reason != reasonPodPending {
+	if got := conditionOf(t, cluster.heldLibrary("movies").Status, conditionReady); got.Reason != reasonPodPending {
 		t.Errorf("Ready = %+v, want PodPending while the pod is replaced", got)
 	}
 
@@ -205,7 +205,7 @@ func TestReconcileReplacesAStalePod(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	replacement := cluster.heldPod("films-scanner")
+	replacement := cluster.heldPod("movies-scanner")
 	if replacement == nil {
 		t.Fatal("no replacement pod was created")
 	}
@@ -222,7 +222,7 @@ func TestReconcileLeavesATerminatingPodAlone(t *testing.T) {
 	leaving := standingPod(t, library, podRunning, true)
 	leaving.Metadata.Annotations[templateHashAnnotation] = "an-older-template"
 	leaving.Metadata.DeletionTimestamp = "2026-08-29T12:00:00Z"
-	cluster.pods["films-scanner"] = leaving
+	cluster.pods["movies-scanner"] = leaving
 
 	if err := testOperator(t, cluster).reconcile(library); err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestReconcileLeavesATerminatingPodAlone(t *testing.T) {
 	if cluster.countRequests(http.MethodDelete, "pods") != 0 {
 		t.Error("the pass deleted a pod that was already going")
 	}
-	if got := cluster.heldLibrary("films").Status.Pod; got != "films-scanner" {
+	if got := cluster.heldLibrary("movies").Status.Pod; got != "movies-scanner" {
 		t.Errorf("status.pod = %q, want the pod that still stands", got)
 	}
 }
@@ -241,7 +241,7 @@ func TestReconcileLeavesATerminatingPodAlone(t *testing.T) {
 func TestReconcileKeepsAMatchingPod(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
-	cluster.pods["films-scanner"] = standingPod(t, library, podRunning, true)
+	cluster.pods["movies-scanner"] = standingPod(t, library, podRunning, true)
 
 	if err := testOperator(t, cluster).reconcile(library); err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestReconcileAcceptsAConflictOnCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := conditionOf(t, cluster.heldLibrary("films").Status, conditionReady); got.Reason != reasonPodPending {
+	if got := conditionOf(t, cluster.heldLibrary("movies").Status, conditionReady); got.Reason != reasonPodPending {
 		t.Errorf("Ready = %+v, want PodPending", got)
 	}
 }
@@ -278,9 +278,9 @@ func TestReconcileFailsWhenTheClusterCannotBeRead(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "the claim", path: "/api/v1/namespaces/house/persistentvolumeclaims/films"},
-		{name: "the volume", path: "/api/v1/persistentvolumes/pv-films"},
-		{name: "the pod", path: "/api/v1/namespaces/house/pods/films-scanner"},
+		{name: "the claim", path: "/api/v1/namespaces/house/persistentvolumeclaims/movies"},
+		{name: "the volume", path: "/api/v1/persistentvolumes/pv-movies"},
+		{name: "the pod", path: "/api/v1/namespaces/house/pods/movies-scanner"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -303,14 +303,14 @@ func TestReconcileFailsWhenTheClusterCannotBeRead(t *testing.T) {
 func TestReconcileWritesASettledStatusOnce(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
-	cluster.pods["films-scanner"] = standingPod(t, library, podRunning, true)
+	cluster.pods["movies-scanner"] = standingPod(t, library, podRunning, true)
 	operator := testOperator(t, cluster)
-	operator.reports.fold("house", "films", libraryReport{Titles: 12, Unidentified: 2})
+	operator.reports.fold("house", "movies", libraryReport{Titles: 12, Unidentified: 2})
 
 	if err := operator.reconcile(library); err != nil {
 		t.Fatal(err)
 	}
-	written := cluster.heldLibrary("films")
+	written := cluster.heldLibrary("movies")
 	if err := operator.reconcile(written); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestReconcileWritesASettledStatusOnce(t *testing.T) {
 	if got := cluster.countRequests(http.MethodPut, "libraries"); got != 1 {
 		t.Errorf("status writes = %d, want one", got)
 	}
-	ready := conditionOf(t, cluster.heldLibrary("films").Status, conditionReady)
+	ready := conditionOf(t, cluster.heldLibrary("movies").Status, conditionReady)
 	if ready.Status != ConditionTrue {
 		t.Errorf("Ready = %+v, want True", ready)
 	}
@@ -328,7 +328,7 @@ func TestReconcileWritesASettledStatusOnce(t *testing.T) {
 // change it, and a second build of the same Library stamps the same
 // value.
 func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
-	library := houseFilms()
+	library := studioMovies()
 	pod := testScannerPod(library)
 
 	before, err := templateHash(pod.Spec)
@@ -355,16 +355,16 @@ func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
 // or the scanner image, each change the pod's hash, which is what
 // rolls the scanner pod.
 func TestTemplateHashFollowsThePodSpec(t *testing.T) {
-	base, err := templateHash(testScannerPod(houseFilms()).Spec)
+	base, err := templateHash(testScannerPod(studioMovies()).Spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	newImage := houseFilms()
-	newRoot := houseFilms()
-	newRoot.Spec.Storage.Root = "/films"
-	ownScanner := houseFilms()
-	ownScanner.Spec.Films.Image = "registry.example/my-scanner:1"
+	newImage := studioMovies()
+	newRoot := studioMovies()
+	newRoot.Spec.Storage.Root = "/kids-movies"
+	ownScanner := studioMovies()
+	ownScanner.Spec.Movies.Image = "registry.example/my-scanner:1"
 	cases := []struct {
 		name string
 		pod  *Pod

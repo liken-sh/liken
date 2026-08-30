@@ -2,7 +2,7 @@
 
 Plan 07. The client's second view: libraries on the screen, and the
 structure each kind gives. At the end of this plan a person in a room
-presses a button, sees the libraries, walks into one, and reaches a film
+presses a button, sees the libraries, walks into one, and reaches a movie
 or an episode. Nothing plays yet.
 
 ## The problem
@@ -29,7 +29,7 @@ shows the library's name, kind, and count.
 **Kinds give structure.** The media browser reads a kind's structure
 from the catalog and draws one of a small set of views.
 
-- A films library is one list of titles, sorted by the scanner's sort
+- A movies library is one list of titles, sorted by the scanner's sort
   key, drawn as a wall of posters with the focused title larger and its
   name beneath it. The head-to-head drew a wall of five thousand at 60
   frames a second with a bounded decode cache, and those numbers are the
@@ -64,7 +64,7 @@ capture flags let an agent see a frame without a screen.
 
 Search, filters, and rows like "recently added" and "continue watching".
 They belong to the open problem on what a screen shows and to the
-watch-state plan. A person can find a film without them.
+watch-state plan. A person can find a movie without them.
 
 A web view. A web page has no place on a ten-foot screen driven by six
 buttons.
@@ -72,7 +72,7 @@ buttons.
 ## Proof
 
 On `liken-1`: from the idle view, a press on the room's remote opens the
-libraries. The films library opens as a wall with the right count, focus
+libraries. The movies library opens as a wall with the right count, focus
 moves with the arrows, and the focused title's name is right. The series
 library opens to series, then seasons, then episodes, checked against
 one series by hand. Back returns through each level to the idle view.

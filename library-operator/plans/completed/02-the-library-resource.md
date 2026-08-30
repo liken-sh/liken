@@ -8,7 +8,7 @@ that does nothing yet.
 ## The problem
 
 Everything else in the design depends on a declaration of "this volume
-holds films". That declaration must say which volume, which root
+holds movies". That declaration must say which volume, which root
 directory, which kind, and what the kind needs to know. It must say it
 in a shape that grows one kind at a time without changes to the kinds
 already there. And it must report back: how many titles, how many
@@ -32,7 +32,7 @@ The spec has three parts.
 - **Kind.** One discriminator field names the kind, and one typed
   settings block per kind holds that kind's settings, the way a `Volume`
   names one source. A CEL rule requires the block that matches the kind
-  and forbids the others. Plan 04 defines the films block and the series
+  and forbids the others. Plan 04 defines the movies block and the series
   block. This plan defines the discriminator, the validation, and the
   rule that a new kind is a new block. A settings block may name the
   scanner image to run, so a person can supply their own scanner for a
@@ -73,8 +73,8 @@ stay many-to-many.
 
 ## Proof
 
-On `liken-1`: a `Library` of kind films, bound to a claim over the lab's
-film volume, is created. Its status reports the volume it resolved, its
+On `liken-1`: a `Library` of kind movies, bound to a claim over the lab's
+movie volume, is created. Its status reports the volume it resolved, its
 scanner pod starts with both containers, and its status folds the
 zero-title report within one reconcile. A second `Library` of the same
 kind in the same namespace does the same beside it. Deleting one removes
@@ -83,8 +83,8 @@ its pod and leaves the other.
 ## What ran
 
 Release 2026.08.29-002, rolled to `liken-1` on 2026-08-29. Two
-`Library` objects of kind films in one namespace, both over one
-`ReadOnlyMany` claim on the lab's NFS film export, one at `/` and one
+`Library` objects of kind movies in one namespace, both over one
+`ReadOnlyMany` claim on the lab's NFS movie export, one at `/` and one
 at `/Sci-Fi`. Each reported `Bound` and then `Ready` 8 s after it was
 created, with the volume's name, `nfs`, the server, and the export path
 in its status, the scanner pod's name, and the zero-title report's

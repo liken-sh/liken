@@ -16,13 +16,13 @@ func TestTopicsCarryTheLibraryLayout(t *testing.T) {
 	}{
 		{
 			name: "status",
-			got:  libraryStatusTopic(base, "house", "films"),
-			want: "liken/library/libraries/house/films/status",
+			got:  libraryStatusTopic(base, "house", "movies"),
+			want: "liken/library/libraries/house/movies/status",
 		},
 		{
 			name: "availability",
-			got:  libraryAvailabilityTopic(base, "house", "films"),
-			want: "liken/library/libraries/house/films/availability",
+			got:  libraryAvailabilityTopic(base, "house", "movies"),
+			want: "liken/library/libraries/house/movies/availability",
 		},
 		{
 			name: "status filter",
@@ -56,9 +56,9 @@ func TestParseLibraryTopicNamesTheLibraryAndTheKind(t *testing.T) {
 	}{
 		{
 			name:      "a status topic",
-			topic:     libraryStatusTopic(base, "house", "films"),
+			topic:     libraryStatusTopic(base, "house", "movies"),
 			namespace: "house",
-			library:   "films",
+			library:   "movies",
 			kind:      libraryStatusKind,
 			ok:        true,
 		},
@@ -70,12 +70,12 @@ func TestParseLibraryTopicNamesTheLibraryAndTheKind(t *testing.T) {
 			kind:      libraryAvailabilityKind,
 			ok:        true,
 		},
-		{name: "a topic under another base", topic: "other/libraries/house/films/status"},
+		{name: "a topic under another base", topic: "other/libraries/house/movies/status"},
 		{name: "the media operator's own tree", topic: "liken/media/plays/house/movie/status"},
-		{name: "a libraries topic with a kind this operator does not read", topic: base + "/libraries/house/films/commands"},
+		{name: "a libraries topic with a kind this operator does not read", topic: base + "/libraries/house/movies/commands"},
 		{name: "a libraries topic missing its name", topic: base + "/libraries/house/status"},
-		{name: "a libraries topic with a level too many", topic: base + "/libraries/house/films/status/extra"},
-		{name: "an empty namespace", topic: base + "/libraries//films/status"},
+		{name: "a libraries topic with a level too many", topic: base + "/libraries/house/movies/status/extra"},
+		{name: "an empty namespace", topic: base + "/libraries//movies/status"},
 		{name: "an empty name", topic: base + "/libraries/house//status"},
 	}
 	for _, each := range cases {

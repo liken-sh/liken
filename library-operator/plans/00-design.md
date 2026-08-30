@@ -46,20 +46,20 @@ and the next reads them.
 ## Libraries and kinds
 
 A `Library` is one root directory on one volume, of one kind. A cluster
-has many: two film libraries on two volumes, a series library, a music
+has many: two movie libraries on two volumes, a series library, a music
 library, a photo library. Every relation between libraries and the
 things that read them is many-to-many. A screen may browse several
 libraries, and a library may appear on every screen.
 
 A kind is a plugin. It defines how to walk a root, how to read the
 sidecars that kind's ecosystem writes, and what structure a media
-browser draws. Films are one flat list. Series are series, then seasons,
+browser draws. Movies are one flat list. Series are series, then seasons,
 then episodes. Each kind runs as its own scanner image, so a photo
 scanner never contains an `.nfo` parser. A new kind is a new image and a
-new typed settings block in the `Library` schema. The kinds are films,
+new typed settings block in the `Library` schema. The kinds are movies,
 series, music, photos, audiobooks, books, and games.
 
-Each kind uses the format its ecosystem uses. Films and series use the
+Each kind uses the format its ecosystem uses. Movies and series use the
 `.nfo`, artwork, and thumbnail sidecars that Jellyfin, Kodi, and the
 `*arr` tools read and write. Music uses the tags in the files. Photos
 use EXIF and XMP. The operator writes no format of its own on the

@@ -301,8 +301,8 @@ func TestListLibrariesReadsEveryNamespace(t *testing.T) {
 	client, recorded := recordingAPI(t, LibraryList{
 		Metadata: ListMeta{ResourceVersion: "1200"},
 		Items: []Library{{
-			Metadata: ObjectMeta{Name: "films", Namespace: "house"},
-			Spec:     LibrarySpec{Kind: libraryKindFilms, Storage: LibraryStorage{Claim: "films", Root: "/"}},
+			Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
+			Spec:     LibrarySpec{Kind: libraryKindMovies, Storage: LibraryStorage{Claim: "movies", Root: "/"}},
 		}},
 	})
 
@@ -315,7 +315,7 @@ func TestListLibrariesReadsEveryNamespace(t *testing.T) {
 	if list.Metadata.ResourceVersion != "1200" {
 		t.Errorf("resourceVersion = %q, want the collection's 1200", list.Metadata.ResourceVersion)
 	}
-	if len(list.Items) != 1 || list.Items[0].Spec.Storage.Claim != "films" {
+	if len(list.Items) != 1 || list.Items[0].Spec.Storage.Claim != "movies" {
 		t.Errorf("items = %+v, want the one library the server answered", list.Items)
 	}
 }
@@ -324,8 +324,8 @@ func TestListLibrariesReadsEveryNamespace(t *testing.T) {
 // never touch the spec a person declared.
 func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	written := &Library{
-		Metadata: ObjectMeta{Name: "films", Namespace: "house", ResourceVersion: "1200"},
-		Status:   LibraryStatus{Titles: 412, Pod: "films-scanner"},
+		Metadata: ObjectMeta{Name: "movies", Namespace: "house", ResourceVersion: "1200"},
+		Status:   LibraryStatus{Titles: 412, Pod: "movies-scanner"},
 	}
 	client, recorded := recordingAPI(t, written)
 
@@ -334,14 +334,14 @@ func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectRequest(t, recorded, http.MethodPut, "/apis/library.liken.sh/v1alpha1/namespaces/house/libraries/films/status")
+	expectRequest(t, recorded, http.MethodPut, "/apis/library.liken.sh/v1alpha1/namespaces/house/libraries/movies/status")
 	if !strings.Contains(recorded.body, `"resourceVersion":"1200"`) {
 		t.Errorf("body = %s, want the resourceVersion that makes the write conditional", recorded.body)
 	}
 	if !strings.Contains(recorded.body, `"titles":412`) {
 		t.Errorf("body = %s, want the counts the operator folded", recorded.body)
 	}
-	if back.Status.Pod != "films-scanner" {
+	if back.Status.Pod != "movies-scanner" {
 		t.Errorf("pod = %q, want the value the server wrote back", back.Status.Pod)
 	}
 }
@@ -352,7 +352,7 @@ func TestPutLibraryStatusWritesAZeroCount(t *testing.T) {
 	client, recorded := recordingAPI(t, &Library{})
 
 	if _, err := PutLibraryStatus(client, &Library{
-		Metadata: ObjectMeta{Name: "films", Namespace: "house"},
+		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 		Status:   LibraryStatus{Titles: 0, Unidentified: 0},
 	}); err != nil {
 		t.Fatal(err)
@@ -368,18 +368,18 @@ func TestPutLibraryStatusWritesAZeroCount(t *testing.T) {
 
 func TestGetPersistentVolumeClaimReadsTheClaimTheLibraryNames(t *testing.T) {
 	client, recorded := recordingAPI(t, PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "films", Namespace: "house"},
-		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-films"},
+		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	})
 
-	claim, err := GetPersistentVolumeClaim(client, "house", "films")
+	claim, err := GetPersistentVolumeClaim(client, "house", "movies")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectRequest(t, recorded, http.MethodGet, "/api/v1/namespaces/house/persistentvolumeclaims/films")
-	if claim.Status.Phase != claimBound || claim.Spec.VolumeName != "pv-films" {
+	expectRequest(t, recorded, http.MethodGet, "/api/v1/namespaces/house/persistentvolumeclaims/movies")
+	if claim.Status.Phase != claimBound || claim.Spec.VolumeName != "pv-movies" {
 		t.Errorf("claim = %+v, want the bound claim and its volume", claim)
 	}
 }
@@ -388,20 +388,20 @@ func TestGetPersistentVolumeClaimReadsTheClaimTheLibraryNames(t *testing.T) {
 // namespace.
 func TestGetPersistentVolumeReadsWhatServesTheStorage(t *testing.T) {
 	client, recorded := recordingAPI(t, map[string]any{
-		"metadata": map[string]any{"name": "pv-films"},
+		"metadata": map[string]any{"name": "pv-movies"},
 		"spec": map[string]any{
 			"capacity": map[string]any{"storage": "8Ti"},
-			"nfs":      map[string]any{"server": "films.example", "path": "/volume1/films"},
+			"nfs":      map[string]any{"server": "movies.example", "path": "/volume1/movies"},
 		},
 	})
 
-	volume, err := GetPersistentVolume(client, "pv-films")
+	volume, err := GetPersistentVolume(client, "pv-movies")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectRequest(t, recorded, http.MethodGet, "/api/v1/persistentvolumes/pv-films")
-	if volume.Spec.Source != "nfs" || volume.Spec.NFS.Server != "films.example" {
+	expectRequest(t, recorded, http.MethodGet, "/api/v1/persistentvolumes/pv-movies")
+	if volume.Spec.Source != "nfs" || volume.Spec.NFS.Server != "movies.example" {
 		t.Errorf("spec = %+v, want the NFS export the server answered", volume.Spec)
 	}
 }
@@ -411,7 +411,7 @@ func TestGetPersistentVolumeReadsWhatServesTheStorage(t *testing.T) {
 func TestListScannerPodsSelectsTheOperatorsOwnPods(t *testing.T) {
 	client, recorded := recordingAPI(t, PodList{
 		Metadata: ListMeta{ResourceVersion: "88"},
-		Items:    []Pod{{Metadata: ObjectMeta{Name: "films-scanner", Namespace: "house"}}},
+		Items:    []Pod{{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}}},
 	})
 
 	list, err := ListScannerPods(client)
@@ -423,39 +423,39 @@ func TestListScannerPodsSelectsTheOperatorsOwnPods(t *testing.T) {
 	if got := recorded.query.Get("labelSelector"); got != "app.kubernetes.io/name=library-scanner" {
 		t.Errorf("labelSelector = %q, want the scanner selector", got)
 	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "films-scanner" {
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "movies-scanner" {
 		t.Errorf("items = %+v, want the one scanner pod the server answered", list.Items)
 	}
 }
 
 func TestGetPodReadsOnePodByName(t *testing.T) {
 	client, recorded := recordingAPI(t, Pod{
-		Metadata: ObjectMeta{Name: "films-scanner", Namespace: "house"},
+		Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"},
 		Status: PodStatus{
 			Phase:             podRunning,
 			ContainerStatuses: []ContainerStatus{{Name: "scanner", Ready: true}},
 		},
 	})
 
-	pod, err := GetPod(client, "house", "films-scanner")
+	pod, err := GetPod(client, "house", "movies-scanner")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectRequest(t, recorded, http.MethodGet, "/api/v1/namespaces/house/pods/films-scanner")
+	expectRequest(t, recorded, http.MethodGet, "/api/v1/namespaces/house/pods/movies-scanner")
 	if pod.Status.Phase != podRunning || !pod.Status.ContainerStatuses[0].Ready {
 		t.Errorf("status = %+v, want the running pod with its ready container", pod.Status)
 	}
 }
 
 func TestCreatePodPostsIntoTheLibrarysNamespace(t *testing.T) {
-	client, recorded := recordingAPI(t, Pod{Metadata: ObjectMeta{Name: "films-scanner", Namespace: "house"}})
+	client, recorded := recordingAPI(t, Pod{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}})
 
 	created, err := CreatePod(client, &Pod{
 		APIVersion: podAPIVersion,
 		Kind:       "Pod",
 		Metadata: ObjectMeta{
-			Name:      "films-scanner",
+			Name:      "movies-scanner",
 			Namespace: "house",
 			Labels:    map[string]string{scannerLabelKey: scannerLabelValue},
 		},
@@ -465,10 +465,10 @@ func TestCreatePodPostsIntoTheLibrarysNamespace(t *testing.T) {
 	}
 
 	expectRequest(t, recorded, http.MethodPost, "/api/v1/namespaces/house/pods")
-	if !strings.Contains(recorded.body, `"name":"films-scanner"`) {
+	if !strings.Contains(recorded.body, `"name":"movies-scanner"`) {
 		t.Errorf("body = %s, want the pod the operator built", recorded.body)
 	}
-	if created.Metadata.Name != "films-scanner" {
+	if created.Metadata.Name != "movies-scanner" {
 		t.Errorf("name = %q, want the pod the server wrote back", created.Metadata.Name)
 	}
 }
@@ -494,12 +494,12 @@ func TestDeletePodTreatsAnAbsentPodAsDone(t *testing.T) {
 				w.WriteHeader(testCase.status)
 			}))
 
-			err := DeletePod(client, "house", "films-scanner")
+			err := DeletePod(client, "house", "movies-scanner")
 
 			if (err != nil) != testCase.wantErr {
 				t.Fatalf("err = %v, want an error: %v", err, testCase.wantErr)
 			}
-			if path != "/api/v1/namespaces/house/pods/films-scanner" {
+			if path != "/api/v1/namespaces/house/pods/movies-scanner" {
 				t.Errorf("path = %q, want the pod's own path", path)
 			}
 		})
@@ -517,14 +517,14 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		{name: "ListLibraries", call: func(c *Client) error { _, err := ListLibraries(c); return err }},
 		{name: "PutLibraryStatus", call: func(c *Client) error { _, err := PutLibraryStatus(c, &Library{}); return err }},
 		{name: "GetPersistentVolumeClaim", call: func(c *Client) error {
-			_, err := GetPersistentVolumeClaim(c, "house", "films")
+			_, err := GetPersistentVolumeClaim(c, "house", "movies")
 			return err
 		}},
-		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(c, "pv-films"); return err }},
+		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(c, "pv-movies"); return err }},
 		{name: "ListScannerPods", call: func(c *Client) error { _, err := ListScannerPods(c); return err }},
-		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(c, "house", "films-scanner"); return err }},
+		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(c, "house", "movies-scanner"); return err }},
 		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(c, &Pod{}); return err }},
-		{name: "DeletePod", call: func(c *Client) error { return DeletePod(c, "house", "films-scanner") }},
+		{name: "DeletePod", call: func(c *Client) error { return DeletePod(c, "house", "movies-scanner") }},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

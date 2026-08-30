@@ -95,14 +95,14 @@ func TestSetConditionKeepsOneEntryPerType(t *testing.T) {
 // The kind selects the block, and a kind with no block of its own
 // selects nothing. The scanner receives what this answers.
 func TestTheSettingsBlockFollowsTheKind(t *testing.T) {
-	films := &LibrarySettings{Image: "ghcr.io/example/films:1"}
+	movies := &LibrarySettings{Image: "ghcr.io/example/movies:1"}
 	series := &LibrarySettings{Image: "ghcr.io/example/series:1"}
 	cases := []struct {
 		name string
 		spec LibrarySpec
 		want *LibrarySettings
 	}{
-		{name: "films", spec: LibrarySpec{Kind: libraryKindFilms, Films: films}, want: films},
+		{name: "movies", spec: LibrarySpec{Kind: libraryKindMovies, Movies: movies}, want: movies},
 		{name: "series", spec: LibrarySpec{Kind: libraryKindSeries, Series: series}, want: series},
 		{name: "a kind this build does not serve", spec: LibrarySpec{Kind: "photos"}, want: nil},
 	}
@@ -128,10 +128,10 @@ func TestAPersistentVolumeNamesWhatServesIt(t *testing.T) {
 	}{
 		{
 			name:       "an NFS export",
-			spec:       `{"capacity":{"storage":"8Ti"},"accessModes":["ReadOnlyMany"],"nfs":{"server":"films.example","path":"/volume1/films"}}`,
+			spec:       `{"capacity":{"storage":"8Ti"},"accessModes":["ReadOnlyMany"],"nfs":{"server":"movies.example","path":"/volume1/movies"}}`,
 			wantSource: "nfs",
-			wantServer: "films.example",
-			wantPath:   "/volume1/films",
+			wantServer: "movies.example",
+			wantPath:   "/volume1/movies",
 		},
 		{
 			name:       "a CSI driver this operator does not know",
@@ -140,12 +140,12 @@ func TestAPersistentVolumeNamesWhatServesIt(t *testing.T) {
 		},
 		{
 			name:       "a disk on one node",
-			spec:       `{"local":{"path":"/mnt/films"},"nodeAffinity":{},"volumeMode":"Filesystem"}`,
+			spec:       `{"local":{"path":"/mnt/movies"},"nodeAffinity":{},"volumeMode":"Filesystem"}`,
 			wantSource: "local",
 		},
 		{
 			name: "settings and nothing that serves them",
-			spec: `{"claimRef":{"name":"films"},"persistentVolumeReclaimPolicy":"Retain"}`,
+			spec: `{"claimRef":{"name":"movies"},"persistentVolumeReclaimPolicy":"Retain"}`,
 		},
 	}
 	for _, testCase := range cases {
@@ -179,7 +179,7 @@ func TestAPersistentVolumeSpecThatIsNotAnObjectFails(t *testing.T) {
 		spec string
 	}{
 		{name: "the spec is a string", spec: `"nfs"`},
-		{name: "the source is not an object", spec: `{"nfs":"films.example:/volume1/films"}`},
+		{name: "the source is not an object", spec: `{"nfs":"movies.example:/volume1/movies"}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -205,8 +205,8 @@ func TestAnEnvVarCarriesADownwardAPIReference(t *testing.T) {
 	}{
 		{
 			name:     "a literal value",
-			variable: EnvVar{Name: "LIBRARY_KIND", Value: libraryKindFilms},
-			want:     `{"name":"LIBRARY_KIND","value":"films"}`,
+			variable: EnvVar{Name: "LIBRARY_KIND", Value: libraryKindMovies},
+			want:     `{"name":"LIBRARY_KIND","value":"movies"}`,
 		},
 		{
 			name: "the pod's own address",

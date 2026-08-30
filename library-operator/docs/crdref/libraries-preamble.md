@@ -13,14 +13,14 @@ is a different `Library`.
     apiVersion: library.liken.sh/v1alpha1
     kind: Library
     metadata:
-      name: films
+      name: movies
       namespace: media
     spec:
       storage:
-        claim: films
+        claim: movies
         root: /
-      kind: films
-      films: {}
+      kind: movies
+      movies: {}
 
 The block named by `kind` must be present and the other kinds' blocks
 must not. Each block holds that kind's own settings, and an empty

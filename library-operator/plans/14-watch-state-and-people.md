@@ -5,7 +5,7 @@ leave out: positions, history, and who was watching.
 
 ## The problem
 
-Every `Play` starts at the beginning, and nothing records that a film
+Every `Play` starts at the beginning, and nothing records that a movie
 was half watched or that a season is on episode four. Jellyfin gives
 each person their own history today, and the children having their own
 is a feature the design keeps. A person is a fact of the whole cluster:
@@ -33,4 +33,4 @@ a `Remote` may belong to one, and lighting or presence may name one.
 The `Person` operator's home and name. Whether a screen that writes
 watch state breaks the rule that a screen never writes the catalog, or
 whether watch state is a second cluster with its own rule. The retention
-of history, and how "continue watching" classifies a film as finished.
+of history, and how "continue watching" classifies a movie as finished.

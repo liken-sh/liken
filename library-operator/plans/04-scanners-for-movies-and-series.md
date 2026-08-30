@@ -1,18 +1,18 @@
-# Scanners for films and series
+# Scanners for movies and series
 
 Plan 04. The scanner contract, and the first two kinds. At the end of
-this plan a `Library` of films and a `Library` of series each run a
+this plan a `Library` of movies and a `Library` of series each run a
 scanner that reads the volume into the catalog, keeps the catalog
 current as files arrive, and reports what it found.
 
 ## The problem
 
-The volume already has what a catalog needs. A film is a folder, `Title
+The volume already has what a catalog needs. A movie is a folder, `Title
 [Year]`, with `movie.nfo`, `folder.jpg`, a backdrop, a logo, and a
 `.trickplay` directory of thumbnail tiles beside the file, written by
 Jellyfin. A series is a folder with `tvshow.nfo`, season folders, and an
 `.nfo` per episode. The scanner reads that into the catalog and detects
-when it changes. On the lab's volume, about a fifth of the film folders
+when it changes. On the lab's volume, about a fifth of the movie folders
 had no sidecar, so the scanner also reports what it could not identify.
 
 ## The scanner contract
@@ -42,9 +42,9 @@ contract is the same for every kind.
 The project ships one image per kind. A settings block may name another
 image, which is how a person supplies a scanner of their own.
 
-## Films
+## Movies
 
-A films library is one folder per title, at the root or under one level
+A movies library is one folder per title, at the root or under one level
 of grouping folders, as the lab's volume groups by genre. The settings
 block holds the naming convention for a folder with no sidecar, in the
 form the `*arr` tools use, so the folder still yields a title and a
@@ -68,17 +68,17 @@ then seasons, then episodes from the catalog alone.
 
 ## The catalog's shape for these kinds
 
-Both kinds use the item header from plan 03. The film body has what
+Both kinds use the item header from plan 03. The movie body has what
 `movie.nfo` has. The series body has what `tvshow.nfo` has, and the
 episode row has what an episode `.nfo` has. The scanner sets the sort
 key, so "The Matrix" sorts under M in every media browser.
 
 ## The local harness
 
-`local/` gains a script that runs a scanner against a directory of films
+`local/` gains a script that runs a scanner against a directory of movies
 on the workstation, into the local three-agent cluster, so a parser
 change shows in a catalog without a cluster. The lab workstation has a
-folder of films with real sidecars for this.
+folder of movies with real sidecars for this.
 
 ## What was set aside
 
@@ -92,12 +92,12 @@ the enrichment plan's job.
 
 ## Proof
 
-On `liken-1`: a `Library` of the lab's films reports a title count equal
+On `liken-1`: a `Library` of the lab's movies reports a title count equal
 to the folder count and an unidentified count equal to the folders with
 no `.nfo`. A series library reports its series, and the catalog has the
 right season and episode structure for one series checked by hand. A
 file added to the volume and announced by a webhook appears in the
 catalog within a few seconds. A file added with no webhook appears after
-the next slow walk. The catalog's `state.db` size for the lab's films
+the next slow walk. The catalog's `state.db` size for the lab's movies
 and series is recorded in the completed plan, because plan 06 budgets
 against it.

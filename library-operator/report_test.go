@@ -55,11 +55,11 @@ func expectNoReportWake(t *testing.T, wake <-chan struct{}) {
 func TestFoldStoresTheReportAndWakesTheLoop(t *testing.T) {
 	desk, wake := reportDesk(t)
 
-	desk.fold("house", "films", walkedReport())
+	desk.fold("house", "movies", walkedReport())
 
-	stored := desk.latestFor("house", "films")
+	stored := desk.latestFor("house", "movies")
 	if stored == nil {
-		t.Fatal("the desk holds no report for house/films")
+		t.Fatal("the desk holds no report for house/movies")
 	}
 	if stored.Titles != 412 || stored.Unidentified != 3 {
 		t.Errorf("stored report = %+v", *stored)
@@ -75,15 +75,15 @@ func TestFoldStoresTheReportAndWakesTheLoop(t *testing.T) {
 func TestTheNewestReportIsTheOneTheDeskHolds(t *testing.T) {
 	desk, wake := reportDesk(t)
 
-	desk.fold("house", "films", walkedReport())
+	desk.fold("house", "movies", walkedReport())
 	later := walkedReport()
 	later.Titles = 413
 	later.Unidentified = 0
-	desk.fold("house", "films", later)
+	desk.fold("house", "movies", later)
 
-	stored := desk.latestFor("house", "films")
+	stored := desk.latestFor("house", "movies")
 	if stored == nil {
-		t.Fatal("the desk holds no report for house/films")
+		t.Fatal("the desk holds no report for house/movies")
 	}
 	if stored.Titles != 413 || stored.Unidentified != 0 {
 		t.Errorf("stored report = %+v, want the second one", *stored)
@@ -100,7 +100,7 @@ func TestTheNewestReportIsTheOneTheDeskHolds(t *testing.T) {
 func TestTheDeskHoldsNoReportForALibraryItHasNotHeardFrom(t *testing.T) {
 	desk, _ := reportDesk(t)
 
-	if stored := desk.latestFor("house", "films"); stored != nil {
+	if stored := desk.latestFor("house", "movies"); stored != nil {
 		t.Errorf("report = %+v, want none", *stored)
 	}
 }
@@ -110,12 +110,12 @@ func TestTheDeskHoldsNoReportForALibraryItHasNotHeardFrom(t *testing.T) {
 // until the next walk replaces it.
 func TestAnOfflineScannerKeepsItsReport(t *testing.T) {
 	desk, wake := reportDesk(t)
-	desk.fold("house", "films", walkedReport())
+	desk.fold("house", "movies", walkedReport())
 	waitForReportWake(t, wake)
 
-	desk.availability("house", "films", false)
+	desk.availability("house", "movies", false)
 
-	stored := desk.latestFor("house", "films")
+	stored := desk.latestFor("house", "movies")
 	if stored == nil {
 		t.Fatal("the offline scanner's report is gone")
 	}
@@ -131,13 +131,13 @@ func TestAnOfflineScannerKeepsItsReport(t *testing.T) {
 func TestAvailabilityWakesOnEveryChangeAndOnNoRepeat(t *testing.T) {
 	desk, wake := reportDesk(t)
 
-	desk.availability("house", "films", true)
+	desk.availability("house", "movies", true)
 	waitForReportWake(t, wake)
 
-	desk.availability("house", "films", true)
+	desk.availability("house", "movies", true)
 	expectNoReportWake(t, wake)
 
-	desk.availability("house", "films", false)
+	desk.availability("house", "movies", false)
 	waitForReportWake(t, wake)
 }
 
@@ -146,14 +146,14 @@ func TestAvailabilityWakesOnEveryChangeAndOnNoRepeat(t *testing.T) {
 // starts with no report and no availability.
 func TestTheDeskForgetsALibraryThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {
 	desk, wake := reportDesk(t)
-	desk.fold("house", "films", walkedReport())
+	desk.fold("house", "movies", walkedReport())
 	desk.fold("attic", "series", walkedReport())
 	desk.availability("attic", "series", true)
 	waitForReportWake(t, wake)
 
-	desk.retain(map[string]bool{libraryKey("house", "films"): true})
+	desk.retain(map[string]bool{libraryKey("house", "movies"): true})
 
-	if desk.latestFor("house", "films") == nil {
+	if desk.latestFor("house", "movies") == nil {
 		t.Error("the live Library's report is gone")
 	}
 	if stored := desk.latestFor("attic", "series"); stored != nil {
@@ -166,7 +166,7 @@ func TestTheDeskForgetsALibraryThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {
 }
 
 func TestALibraryKeyNamesTheNamespaceAndTheName(t *testing.T) {
-	if got := libraryKey("house", "films"); got != "house/films" {
-		t.Errorf("key = %q, want house/films", got)
+	if got := libraryKey("house", "movies"); got != "house/movies" {
+		t.Errorf("key = %q, want house/movies", got)
 	}
 }

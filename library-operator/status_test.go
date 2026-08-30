@@ -18,16 +18,16 @@ var testNow = time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 // Ready condition is read against.
 func boundVolume() binding {
 	return binding{
-		volume:  &LibraryVolume{Name: "pv-films", Type: "nfs"},
+		volume:  &LibraryVolume{Name: "pv-movies", Type: "nfs"},
 		reason:  reasonBound,
-		message: "the claim films is bound to the PersistentVolume pv-films",
+		message: "the claim movies is bound to the PersistentVolume pv-movies",
 	}
 }
 
 // readyPod is a scanner pod as the kubelet reports one that works.
 func readyPod(phase string, ready bool) *Pod {
 	return &Pod{
-		Metadata: ObjectMeta{Name: "films-scanner", Namespace: "house"},
+		Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"},
 		Status: PodStatus{Phase: phase, ContainerStatuses: []ContainerStatus{
 			{Name: scannerContainer, Ready: ready},
 			{Name: catalogContainer, Ready: ready},
@@ -43,7 +43,7 @@ func TestDeriveStatusCarriesTheScannersReport(t *testing.T) {
 	changed := time.Date(2026, 8, 29, 11, 45, 0, 0, time.UTC)
 	report := &libraryReport{Titles: 412, Unidentified: 3, LastWalk: walked, LastChange: changed}
 
-	status := deriveLibraryStatus(houseFilms(), boundVolume(), readyPod(podRunning, true), report, testNow)
+	status := deriveLibraryStatus(studioMovies(), boundVolume(), readyPod(podRunning, true), report, testNow)
 
 	if status.Titles != 412 || status.Unidentified != 3 {
 		t.Errorf("counts = %d and %d, want 412 and 3", status.Titles, status.Unidentified)
@@ -52,8 +52,8 @@ func TestDeriveStatusCarriesTheScannersReport(t *testing.T) {
 		t.Errorf("times = %v and %v, want %v and %v",
 			status.LastWalk, status.LastChange, walked, changed)
 	}
-	if status.Pod != "films-scanner" {
-		t.Errorf("pod = %q, want films-scanner", status.Pod)
+	if status.Pod != "movies-scanner" {
+		t.Errorf("pod = %q, want movies-scanner", status.Pod)
 	}
 	ready := conditionOf(t, status, conditionReady)
 	if ready.Status != ConditionTrue || ready.Reason != reasonReady {
@@ -130,7 +130,7 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			status := deriveLibraryStatus(houseFilms(), one.bound, one.pod, one.report, testNow)
+			status := deriveLibraryStatus(studioMovies(), one.bound, one.pod, one.report, testNow)
 
 			ready := conditionOf(t, status, conditionReady)
 			if ready.Status != ConditionFalse {
@@ -150,7 +150,7 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 // not ready.
 func TestReadyConditionRefusesAPodTheKubeletHasNotSpokenFor(t *testing.T) {
 	silent := &Pod{
-		Metadata: ObjectMeta{Name: "films-scanner"},
+		Metadata: ObjectMeta{Name: "movies-scanner"},
 		Status:   PodStatus{Phase: podRunning},
 	}
 
@@ -193,7 +193,7 @@ func TestPodFailureMessagePrefersTheKubeletsWords(t *testing.T) {
 // A condition's lastTransitionTime moves only when the verdict flips,
 // which is what lets a reader ask how long a library has been Ready.
 func TestDeriveStatusKeepsTheTimeOfTheLastFlip(t *testing.T) {
-	library := houseFilms()
+	library := studioMovies()
 	report := &libraryReport{Titles: 12}
 	library.Status = deriveLibraryStatus(library, boundVolume(), readyPod(podRunning, true), report, testNow)
 
@@ -209,7 +209,7 @@ func TestDeriveStatusKeepsTheTimeOfTheLastFlip(t *testing.T) {
 // the comparison that decides whether to write reads the status the
 // Library still carries.
 func TestDeriveStatusLeavesTheLibraryAlone(t *testing.T) {
-	library := houseFilms()
+	library := studioMovies()
 	library.Status = deriveLibraryStatus(library, boundVolume(), readyPod(podRunning, true),
 		&libraryReport{Titles: 12}, testNow)
 	before := conditionOf(t, library.Status, conditionReady)
@@ -255,7 +255,7 @@ func TestWriteLibraryStatusWritesOnlyAChange(t *testing.T) {
 func TestWriteLibraryStatusAcceptsAConflict(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
-	cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/libraries/films/status"] = http.StatusConflict
+	cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/libraries/movies/status"] = http.StatusConflict
 	client := testOperator(t, cluster).client
 
 	err := writeLibraryStatus(client, library,
@@ -271,7 +271,7 @@ func TestWriteLibraryStatusAcceptsAConflict(t *testing.T) {
 func TestWriteLibraryStatusReportsAFailedWrite(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
-	cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/libraries/films/status"] = http.StatusInternalServerError
+	cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/libraries/movies/status"] = http.StatusInternalServerError
 	client := testOperator(t, cluster).client
 
 	err := writeLibraryStatus(client, library,

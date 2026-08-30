@@ -156,7 +156,7 @@ func TestRunReconcilesOnceAndStops(t *testing.T) {
 	if !strings.Contains(line, "1 libraries") || !strings.Contains(line, testBusAddress) {
 		t.Errorf("report = %q, want the count and the broker", line)
 	}
-	if cluster.heldPod("films-scanner") == nil {
+	if cluster.heldPod("movies-scanner") == nil {
 		t.Error("the pass created no scanner pod")
 	}
 }
@@ -190,12 +190,12 @@ func TestPassReconcilesEveryLibraryAndForgetsTheRest(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	library := testOperator(t, cluster)
-	library.reports.fold("house", "films", libraryReport{Titles: 12})
+	library.reports.fold("house", "movies", libraryReport{Titles: 12})
 	library.reports.fold("house", "gone", libraryReport{Titles: 3})
 
 	library.pass()
 
-	if library.reports.latestFor("house", "films") == nil {
+	if library.reports.latestFor("house", "movies") == nil {
 		t.Error("the desk dropped the report of a Library that exists")
 	}
 	if library.reports.latestFor("house", "gone") != nil {
@@ -221,8 +221,8 @@ func TestPassCarriesOnPastOneBrokenLibrary(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	if cluster.heldPod("films-scanner") == nil {
-		t.Error("the films library was not reconciled")
+	if cluster.heldPod("movies-scanner") == nil {
+		t.Error("the movies library was not reconciled")
 	}
 	if cluster.heldPod("series-scanner") != nil {
 		t.Error("a scanner pod was created for a library whose claim could not be read")
@@ -250,10 +250,10 @@ func TestHandleBusMessageFoldsWhatItCanRead(t *testing.T) {
 	cluster := newFakeCluster()
 	library := testOperator(t, cluster)
 
-	library.handleBusMessage(libraryStatusTopic(defaultTopicBase, "house", "films"),
+	library.handleBusMessage(libraryStatusTopic(defaultTopicBase, "house", "movies"),
 		[]byte(`{"titles":12,"unidentified":2}`))
 
-	report := library.reports.latestFor("house", "films")
+	report := library.reports.latestFor("house", "movies")
 	if report == nil {
 		t.Fatal("the report did not reach the desk")
 	}
@@ -270,8 +270,8 @@ func TestHandleBusMessageIgnoresWhatItCannotRead(t *testing.T) {
 	}{
 		{name: "another operator's topic", topic: "liken/media/plays/house/movie/status", payload: `{"titles":1}`},
 		{name: "a topic with no library", topic: defaultTopicBase + "/libraries/house/status", payload: `{"titles":1}`},
-		{name: "a report that is not JSON", topic: libraryStatusTopic(defaultTopicBase, "house", "films"), payload: "12 titles"},
-		{name: "a cleared report", topic: libraryStatusTopic(defaultTopicBase, "house", "films"), payload: ""},
+		{name: "a report that is not JSON", topic: libraryStatusTopic(defaultTopicBase, "house", "movies"), payload: "12 titles"},
+		{name: "a cleared report", topic: libraryStatusTopic(defaultTopicBase, "house", "movies"), payload: ""},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -279,7 +279,7 @@ func TestHandleBusMessageIgnoresWhatItCannotRead(t *testing.T) {
 
 			library.handleBusMessage(one.topic, []byte(one.payload))
 
-			if library.reports.latestFor("house", "films") != nil {
+			if library.reports.latestFor("house", "movies") != nil {
 				t.Error("a message the operator cannot read reached the desk")
 			}
 		})
@@ -293,7 +293,7 @@ func TestHandleBusMessageMarksAScannerOnline(t *testing.T) {
 	woken := make(chan struct{}, 1)
 	library.reports = newReports(woken)
 
-	library.handleBusMessage(libraryAvailabilityTopic(defaultTopicBase, "house", "films"),
+	library.handleBusMessage(libraryAvailabilityTopic(defaultTopicBase, "house", "movies"),
 		[]byte(availabilityOnline))
 
 	select {
@@ -301,7 +301,7 @@ func TestHandleBusMessageMarksAScannerOnline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("the availability woke no pass")
 	}
-	if library.reports.latestFor("house", "films") != nil {
+	if library.reports.latestFor("house", "movies") != nil {
 		t.Error("an availability message folded a report")
 	}
 }

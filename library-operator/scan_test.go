@@ -52,8 +52,8 @@ func testBroker(t *testing.T) (address string, accepted <-chan *fakeBroker) {
 func scanEnvironment(t *testing.T, address string) {
 	t.Helper()
 	t.Setenv(libraryNamespaceVariable, "house")
-	t.Setenv(libraryNameVariable, "films")
-	t.Setenv(libraryKindVariable, "films")
+	t.Setenv(libraryNameVariable, "movies")
+	t.Setenv(libraryKindVariable, "movies")
 	t.Setenv(libraryRootVariable, "/movies")
 	t.Setenv(busAddressVariable, address)
 	t.Setenv(topicBaseVariable, "")
@@ -122,7 +122,7 @@ func TestTheScannerPublishesARetainedReportOfZeroTitlesOnConnect(t *testing.T) {
 	startScanner(t, newScanner(started, io.Discard))
 
 	broker := waitForBroker(t, accepted)
-	got := waitForTopic(t, broker, "liken/library/libraries/house/films/status")
+	got := waitForTopic(t, broker, "liken/library/libraries/house/movies/status")
 
 	if !got.retained {
 		t.Error("the report was not retained")
@@ -148,7 +148,7 @@ func TestTheScannerPublishesRetainedOnlineOnConnect(t *testing.T) {
 	startScanner(t, newScanner(time.Now().UTC(), io.Discard))
 
 	broker := waitForBroker(t, accepted)
-	got := waitForTopic(t, broker, "liken/library/libraries/house/films/availability")
+	got := waitForTopic(t, broker, "liken/library/libraries/house/movies/availability")
 
 	if string(got.payload) != availabilityOnline {
 		t.Errorf("payload = %q, want %q", got.payload, availabilityOnline)
@@ -168,7 +168,7 @@ func TestTheScannerLogsWhatItWasGiven(t *testing.T) {
 	newScanner(time.Now().UTC(), &logged)
 
 	line := logged.String()
-	if !strings.Contains(line, "house/films") || !strings.Contains(line, "/library/movies") {
+	if !strings.Contains(line, "house/movies") || !strings.Contains(line, "/library/movies") {
 		t.Errorf("log = %q, want the Library and the path inside the mount", line)
 	}
 	if strings.Count(line, "\n") != 1 {
@@ -189,7 +189,7 @@ func TestTheScannerFallsBackToTheMountRootAndTheDefaultBase(t *testing.T) {
 	if !strings.Contains(logged.String(), "at /library\n") {
 		t.Errorf("log = %q, want the mount root", logged.String())
 	}
-	if scan.statusTopic != libraryStatusTopic(defaultTopicBase, "house", "films") {
+	if scan.statusTopic != libraryStatusTopic(defaultTopicBase, "house", "movies") {
 		t.Errorf("status topic = %q, want the default base", scan.statusTopic)
 	}
 }
@@ -211,13 +211,13 @@ func TestRunScanPublishesOfflineOnSIGTERMAndReturns(t *testing.T) {
 	// registers for the signal, so the signal below always reaches its
 	// handler and never the default one, which would end the test
 	// binary.
-	waitForTopic(t, broker, "liken/library/libraries/house/films/availability")
+	waitForTopic(t, broker, "liken/library/libraries/house/movies/availability")
 
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
 
-	got := waitForTopic(t, broker, "liken/library/libraries/house/films/availability")
+	got := waitForTopic(t, broker, "liken/library/libraries/house/movies/availability")
 	if string(got.payload) != availabilityOffline {
 		t.Errorf("payload = %q, want %q", got.payload, availabilityOffline)
 	}

@@ -38,7 +38,7 @@ and every list sorts or filters on. Those are an id, the library it
 belongs to, its kind, its path on the volume, a title, a sort key, a
 year or date, the time it was added, the path of its primary art, and a
 duration where one exists. The kind's own shape is one JSON column. Plan
-04 gives films and series their tables. Indexes cover the sorts and
+04 gives movies and series their tables. Indexes cover the sorts and
 filters the media browser runs per library.
 
 **Writes go through the agent.** A scanner posts statements to its own
@@ -78,7 +78,7 @@ screen's sidecar restarts once after its first full sync, or the pod
 starts with the catalog already on disk. A busy agent took more than 30
 s to exit on `SIGTERM`, so pods that run one set a longer termination
 grace period. Every agent stores every table of the cluster, so a
-films-only screen also stores the series catalog; the first large kind
+movies-only screen also stores the series catalog; the first large kind
 makes that a budget question, in [every node stores every
 table](open-problems/every-node-stores-every-table.md).
 
@@ -108,7 +108,7 @@ query answers. Each has a note in [`rejected/`](rejected/).
 ## Proof
 
 On the workstation: the three-agent cluster loads the schema. A seed of
-the lab's films posted through one agent appears in the other two within
+the lab's movies posted through one agent appears in the other two within
 a second. A row changed on one agent appears in a subscriber's update
 stream on another within a tenth of a second. On `liken-1`: two scanner
 pods' sidecars form a cluster through the headless `Service`, and a

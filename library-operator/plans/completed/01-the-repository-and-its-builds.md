@@ -55,7 +55,7 @@ concern, so a person who reads one can read the other.
   script per thing a person can run on a workstation without a cluster.
   This plan adds the first, which runs the media browser in a window
   with the harness flags. Later plans add a three-agent Corrosion
-  cluster, a scanner against a local directory of films, and a media
+  cluster, a scanner against a local directory of movies, and a media
   browser against that catalog, so the whole read path runs on a laptop.
 
 ## What was set aside

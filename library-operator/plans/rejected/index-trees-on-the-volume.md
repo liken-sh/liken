@@ -8,7 +8,7 @@ build.
 
 The media browser never needs the tree, because a catalog query answers
 any grouping. So an operator-written tree serves only programs that read
-the volume. Today that is Jellyfin, which would list every film twice
+the volume. Today that is Jellyfin, which would list every movie twice
 unless it skipped the tree, and a person with a shell. That is a loop,
 writes to the volume, and a hazard, for a view nobody asked for.
 

@@ -11,7 +11,7 @@ setting writes `movie.nfo`, `tvshow.nfo`, the artwork, and the
 `.trickplay` tiles beside the files, from TMDb, OMDb, and Fanart. The
 `*arr` tools' own metadata writers are off. That works, and it makes the
 catalog depend on a program outside the cluster. About a fifth of the
-lab's films had no sidecar when the design was made, and a scanner can
+lab's movies had no sidecar when the design was made, and a scanner can
 only report that.
 
 ## The shape

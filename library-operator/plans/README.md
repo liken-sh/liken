@@ -31,13 +31,13 @@ set aside, with the measurements that decided it.
 These plans are staged in order. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled. Plans 01 to 09
 deliver one outcome: index a library, browse it on a screen, pick a
-film, and play it on the same `Player`. Plan 10 documents that.
+movie, and play it on the same `Player`. Plan 10 documents that.
 
 * [03, The catalog](03-the-catalog.md). The Corrosion cluster: the
   schema and its rules, the sidecar, the write path, the update stream,
   and the pod settings the proof of concept decided.
-* [04, Scanners for films and
-  series](04-scanners-for-films-and-series.md). The scanner contract and
+* [04, Scanners for movies and
+  series](04-scanners-for-movies-and-series.md). The scanner contract and
   the first two kinds.
 * [05, The idle screen in Iced](05-the-idle-screen-in-iced.md). The idle
   screen redrawn as a native client, and the `Player` field that selects

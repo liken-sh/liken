@@ -115,7 +115,7 @@ func claimState(claim *PersistentVolumeClaim) string {
 }
 
 // libraryVolume reports what serves the storage. The type is the name
-// of the volume's own source key, so a cluster that serves its films
+// of the volume's own source key, so a cluster that serves its movies
 // through a driver this operator knows nothing about still reports
 // which one. The NFS pair is filled for an NFS volume alone, because
 // a media reference over NFS is built from the server and the export.

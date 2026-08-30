@@ -50,7 +50,7 @@ type PersistentVolume struct {
 // where the storage is. Kubernetes gives each kind of storage its own
 // key under the spec, and a volume carries exactly one of them, so
 // this type reports the key's name instead of holding a field per
-// driver. A cluster that serves its films through a driver this
+// driver. A cluster that serves its movies through a driver this
 // operator carries no type for still reports what serves them.
 type PersistentVolumeSpec struct {
 	// Source is the name of the storage key, such as nfs or csi, and
