@@ -149,7 +149,11 @@ Four things the build and the drill found.
   and -003 named one `Service` in `liken-system` for the whole cluster,
   which contradicted the design's namespace rule. Release
   2026.08.30-004 moved to one `Service` per namespace and the short
-  name `catalog`.
+  name `catalog`. On `liken-1`, the operator created the `Service` and
+  the slice in `default` owned by both `Library` objects, both sidecars
+  resolved the short name and logged `Member Up` with no error, and
+  deleting one `Library` removed it from the owners and its pod from
+  the slice within a pass, with both objects left under the other.
 - Corrosion drops its own address from the bootstrap list by
   comparison with the address it bound, not the address it announces.
   Release 2026.08.30-002 bound `0.0.0.0` and every agent announced to
