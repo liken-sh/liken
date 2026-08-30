@@ -16,7 +16,7 @@ because a screen that polls once a second per catalog is traffic every
 second for nothing.
 
 Two other transports were built and measured before this one, and both
-are in [`rejected/`](rejected/): a Litestream replica on a second
+are in [`rejected/`](../rejected/): a Litestream replica on a second
 volume, read through its VFS extension, and dqlite. Litestream worked
 and lost on three counts. Reads polled at a one-second interval. The
 reader wedged or died under level-1 compaction, in a race that six of
@@ -80,7 +80,7 @@ s to exit on `SIGTERM`, so pods that run one set a longer termination
 grace period. Every agent stores every table of the cluster, so a
 movies-only screen also stores the series catalog; the first large kind
 makes that a budget question, in [every node stores every
-table](open-problems/every-node-stores-every-table.md).
+table](../open-problems/every-node-stores-every-table.md).
 
 **The bus has two jobs.** The catalog needs no bus, because the agent
 pushes changes. The scanner's status report goes over the bus to the
@@ -103,7 +103,7 @@ A query service of any kind, REST, Meilisearch, or Postgres: each puts a
 process in the read path, and none gives push. Litestream, for the
 reasons above. dqlite, which has no client outside Go and makes every
 screen a Raft member. Symlink index trees on the volume, which a catalog
-query answers. Each has a note in [`rejected/`](rejected/).
+query answers. Each has a note in [`rejected/`](../rejected/).
 
 ## Proof
 
@@ -113,3 +113,44 @@ a second. A row changed on one agent appears in a subscriber's update
 stream on another within a tenth of a second. On `liken-1`: two scanner
 pods' sidecars form a cluster through the headless `Service`, and a
 write through one is read from the other's file.
+
+## What ran
+
+Releases 2026.08.30-002 and 2026.08.30-003, rolled to `liken-1` on
+2026-08-30.
+
+On the workstation, `local/catalog up` formed three agents in a few
+seconds, and each loaded `movies` from the schema. A seed of the lab's
+movies, 1257 title folders, posted through one agent in three batches
+of up to 500 statements in 0.199 s. The other two agents held all 1257
+rows 0.204 s after the last write returned, on a 100 ms poll. An update
+through one agent reached a subscriber's update stream on another in a
+median of 11.2 ms, 16.5 ms, and 11.2 ms over three runs of twenty. Two
+runs had a maximum under 24 ms; one sample in the sixty took 199 ms.
+
+On `liken-1`, two scanner pods in `default` took their sidecars'
+addresses into the `catalog` `EndpointSlice` in `liken-system`, both
+sidecars logged `Member Up` for the other, and a row inserted through
+one pod's agent was read from the other's 0.35 s later, `kubectl exec`
+included. The catalog is on an `emptyDir`, so a row written before a
+roll of the pod was gone after it, which is the contract.
+
+Four things the build and the drill found.
+
+- Corrosion loads its configuration with the `config` crate 0.13,
+  which cannot parse a list from an environment variable. So the
+  bootstrap name is in the image's configuration file, and the
+  `Service` behind it has no selector. The operator writes the
+  `EndpointSlice`, because a selector sees only its own namespace.
+- Corrosion drops its own address from the bootstrap list by
+  comparison with the address it bound, not the address it announces.
+  Release 2026.08.30-002 bound `0.0.0.0` and every agent announced to
+  itself on each retry, with an error line each time. Release
+  2026.08.30-003 binds the pod's own address through `GOSSIP__ADDR`,
+  and `GOSSIP__EXTERNAL_ADDR` is no longer set.
+- `/v1/updates/{table}` answers `POST`, not `GET`. Each event is one
+  line, `{"notify":["update",["<id>"]]}` or
+  `{"notify":["delete",["<id>"]]}`, and an insert arrives as an update.
+- `/v1/health` answers 503 with "no p99 lag information available"
+  until the agent has replicated something, so `local/catalog` waits
+  on `corrosion cluster members` instead.

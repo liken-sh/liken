@@ -33,9 +33,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [03, The catalog](03-the-catalog.md). The Corrosion cluster: the
-  schema and its rules, the sidecar, the write path, the update stream,
-  and the pod settings the proof of concept decided.
 * [04, Scanners for movies and
   series](04-scanners-for-movies-and-series.md). The scanner contract and
   the first two kinds.
@@ -84,6 +81,11 @@ for a later agent to shape.
   pod with the Corrosion sidecar, the report over the bus, and the
   status with its two conditions. The scanner reports zero titles until
   plan 04.
+* [03, The catalog](completed/03-the-catalog.md). Built, and rolled to
+  `liken-1` on 2026-08-30 in releases 2026.08.30-002 and 2026.08.30-003.
+  The schema with the item header and the `movies` table, the `catalog`
+  `Service` and the `EndpointSlice` the operator writes behind it, the
+  local three-agent cluster, and the numbers from both drills.
 
 ## Open problems
 
