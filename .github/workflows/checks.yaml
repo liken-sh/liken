@@ -40,6 +40,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
 
       # prek runs the hooks. Its version is pinned here, because the
       # workflow is the only place CI reads it from. The action caches

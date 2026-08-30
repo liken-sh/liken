@@ -648,6 +648,54 @@ serve:
 docs:
 	$(MAKE) -C docs
 
+# `make test` runs every check CI runs, in the same commands, so a
+# change that passes here passes there.
+test: test-go test-docs
+
+# The gate measures coverage on its own run, on its own pinned
+# toolchain, and the pin is the point.
+#
+# Go 1.27 splits a basic block into one profile row per run of code,
+# so a comment inside a function ends that row and starts another.
+# Each row repeats the whole block's statement count, and every
+# reader sums the rows, `go tool cover` included. A block written as
+# three runs of code therefore counts three times. The error is not a
+# constant: it grows with the comments inside a function, so it moves
+# a package's number up or down when someone only reflows a comment.
+# On this repo it moves machine-operator down 11.6 points and disks
+# up 5.9.
+#
+# Go 1.26 counts each block once, so the pin below measures what
+# .testcoverage.yml's thresholds were set against. Move it to the
+# newest toolchain that counts each block once.
+#
+# go-test-coverage is a pinned tool dependency (the `tool` directive
+# in go.mod), so the gate needs nothing installed beyond the Go
+# toolchain. Its thresholds live in .testcoverage.yml, which explains
+# how they are chosen. The profile itself is gitignored.
+COVERAGE_TOOLCHAIN := go1.26.7
+
+# The repo's programs are one Go module (see go.mod at the root). So
+# every check is a single invocation of ./.... This covers Go files in
+# any domain directory, present or future, without listing them. The
+# one exception is docs/, a nested module that exists to keep Hugo's
+# dependency graph out of the root go.sum; ./... does not descend into
+# it, and test-docs below runs the same checks against that module.
+#
+# gofmt is not here. It stays its own pre-commit hook, because that
+# hook rewrites the files it finds with the toolchain's own gofmt,
+# and a make target could only report them.
+test-go:
+	go vet ./...
+	go tool staticcheck ./...
+	go test ./...
+	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
+	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+
+test-docs:
+	$(MAKE) -C docs test
+	$(MAKE) -C docs build
+
 # Every domain that vendors something says what it pins and what its
 # upstream has now. The domains are listed in build order, so the
 # table reads in the order a release is assembled, and the last two
@@ -705,4 +753,4 @@ clean:
 	rm -rf $(HW_IMAGE_DIR)
 	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go test-docs clean
