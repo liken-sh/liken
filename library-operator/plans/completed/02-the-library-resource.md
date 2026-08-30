@@ -82,7 +82,7 @@ its pod and leaves the other.
 
 ## What ran
 
-Release 2026.08.29-002, rolled to `liken-1` on 2026-08-29. Two
+Release 2026.08.29-002, rolled to `liken-1` on 2026-08-29, and again as 2026.08.30-001 after the kind was renamed from films to movies. Two
 `Library` objects of kind movies in one namespace, both over one
 `ReadOnlyMany` claim on the lab's NFS movie export, one at `/` and one
 at `/Sci-Fi`. Each reported `Bound` and then `Ready` 8 s after it was

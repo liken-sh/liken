@@ -79,7 +79,7 @@ for a later agent to shape.
   images, the release workflow, the coverage gates, and the local
   harness directory.
 * [02, The Library resource](completed/02-the-library-resource.md).
-  Built, and rolled to `liken-1` on 2026-08-29 in release 2026.08.29-002.
+  Built, and rolled to `liken-1` on 2026-08-30 in release 2026.08.30-001.
   The `Library` CRD with its kind rule, the reconcile loop, the scanner
   pod with the Corrosion sidecar, the report over the bus, and the
   status with its two conditions. The scanner reports zero titles until
