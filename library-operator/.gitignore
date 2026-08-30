@@ -2,7 +2,7 @@
 # the scanners as separate images, and each build lands here.
 /library-operator
 /bin/
-/target/
+/media-browser/target/
 
 # Hugo's build output, once the site exists.
 /docs/dist/

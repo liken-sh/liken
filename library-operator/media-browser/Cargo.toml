@@ -1,0 +1,44 @@
+[package]
+name = "media-browser"
+version = "0.1.0"
+edition = "2024"
+
+# The crate is a library with one binary over it, so the parsers and the
+# measurements have unit tests that open no window.
+[lib]
+name = "media_browser"
+path = "src/lib.rs"
+
+[[bin]]
+name = "media-browser"
+path = "src/main.rs"
+
+# The client drives its own winit loop, so it takes the iced pieces directly
+# instead of the `iced` facade. That is what gives the harness a wgpu surface it
+# can read a frame back from.
+#
+# Every iced crate here turns its default features off where the default would
+# pull X11 or the software renderer in. The target is a Wayland kiosk, so winit
+# builds with Wayland alone.
+#
+# Every version is exact, so a build from this manifest resolves the same
+# crates the lock file names.
+[dependencies]
+iced_winit = { version = "=0.14.0", default-features = false, features = [
+    "wayland",
+] }
+iced_wgpu = { version = "=0.14.0", features = ["geometry", "image"] }
+iced_widget = { version = "=0.14.2", default-features = false, features = [
+    "canvas",
+    "image",
+    "wgpu",
+] }
+# image writes the captured frames. They are PNGs and nothing else.
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+# serde_json writes the measurements file.
+serde_json = "=1.0.151"
+
+# The measurements need optimized code with symbols the profile does not strip.
+[profile.release]
+opt-level = 3
+lto = "thin"

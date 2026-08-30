@@ -1,0 +1,7 @@
+# The build tree is the workstation's own and never enters the context. The
+# image builds the crate again from source.
+target/
+
+# The recipe is not an input to itself.
+Dockerfile
+.dockerignore

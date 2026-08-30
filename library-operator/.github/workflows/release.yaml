@@ -1,0 +1,130 @@
+# A pushed tag cuts a release. A push to main releases nothing:
+# ci.yaml tests it and stops. The tag is the release act, as in the
+# main liken repository, so main takes docs and intermediate work
+# freely and every image in the registry traces to a version somebody
+# chose to name.
+#
+# The version is the tag, in liken's own scheme: 2026.08.29-001. The
+# release cadences of the operators do not couple, and reading one
+# version beside another still tells you when each one was cut.
+#
+# The three images release together, always, under one version. The
+# operator names the other two in the pods it creates, and a pair that
+# could drift apart would put the catalog contract at two versions at
+# once.
+name: release
+
+on:
+  push:
+    tags: ['*']
+
+permissions:
+  contents: read
+  packages: write
+
+# One release at a time. Two runs that pushed :latest at once would
+# leave whichever finished second, which is not always the newer one.
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # The tag names the version, so its shape is an input this
+      # workflow must check before it spends anything on a build. A
+      # tag of any other shape is a mistake. The run says so and
+      # stops, before an image can ship under a name no machine can
+      # order against the others.
+      - name: Check the tag shape
+        run: |
+          echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
+            echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.29-001"
+            exit 1
+          }
+          echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The tests gate the build. ci.yaml already ran them on the
+      # tagged commit when it landed on main. A tag can name any
+      # commit, so the release proves the one it ships. An image that
+      # reaches the registry has passed them. A rollback names an
+      # older tag, and never has to find out which tag was good.
+      - run: go vet ./...
+      - run: go test -race ./...
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The three images build here and push nothing yet. The gates
+      # below have to pass first, and a push that happened first would
+      # leave a broken :latest behind when a gate failed.
+      #
+      # The builds read and write the same :buildcache tags ci.yaml
+      # uses, so a release of a commit CI already built rebuilds
+      # nothing.
+      - name: Build the operator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/library-operator:${{ env.VERSION }}
+            ghcr.io/liken-sh/library-operator:latest
+
+      - name: Build the media browser image
+        uses: docker/build-push-action@v6
+        with:
+          context: media-browser
+          file: media-browser/Dockerfile
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/library-operator-media-browser:${{ env.VERSION }}
+            ghcr.io/liken-sh/library-operator-media-browser:latest
+
+      - name: Build the Corrosion image
+        uses: docker/build-push-action@v6
+        with:
+          context: corrosion
+          file: corrosion/Dockerfile
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/library-operator-corrosion:${{ env.VERSION }}
+            ghcr.io/liken-sh/library-operator-corrosion:latest
+
+      # The gate on the images. The runner has no GPU, no Wayland, and
+      # no peers, so nothing here draws or replicates. What can break
+      # invisibly is the dynamic closure, so each binary proves that it
+      # loads its libraries by answering one flag.
+      - name: Prove the images
+        run: |
+          set -eu
+          docker run --rm "ghcr.io/liken-sh/library-operator-media-browser:$VERSION" --help
+          docker run --rm "ghcr.io/liken-sh/library-operator-corrosion:$VERSION" --version
+
+      - name: Push the images
+        run: |
+          docker push "ghcr.io/liken-sh/library-operator:$VERSION"
+          docker push "ghcr.io/liken-sh/library-operator:latest"
+          docker push "ghcr.io/liken-sh/library-operator-media-browser:$VERSION"
+          docker push "ghcr.io/liken-sh/library-operator-media-browser:latest"
+          docker push "ghcr.io/liken-sh/library-operator-corrosion:$VERSION"
+          docker push "ghcr.io/liken-sh/library-operator-corrosion:latest"

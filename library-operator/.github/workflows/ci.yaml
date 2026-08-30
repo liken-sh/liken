@@ -1,0 +1,169 @@
+# Every push to main and every pull request runs the tests. Nothing
+# here releases: a release is a pushed tag, and release.yaml owns
+# that. Because of the split, docs and intermediate work land on
+# main freely, and every image in the registry traces to a tag
+# somebody chose to push.
+#
+# There is no path filter. The tests are cheap, and a filter would
+# have to decide which files can never break a build. That list is
+# wrong the day someone adds a file it does not name, and the push
+# that adds it would then land untested.
+#
+# The four jobs are independent, so they run at once, and the run
+# takes as long as its slowest job.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  # The image builds write their layer cache to ghcr, which needs
+  # this permission even though no run of this workflow pushes an
+  # image.
+  packages: write
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-go keeps the module downloads and the build cache
+      # between runs, keyed on go.sum, so a run compiles only what
+      # changed.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The same target a workstation runs: gofmt, vet, the race
+      # tests, and the coverage gate on its pinned toolchain. The
+      # Makefile says why the gate pins a toolchain, and
+      # .testcoverage.yml holds the floor.
+      - run: make test-go
+
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: media-browser
+    env:
+      # Incremental artifacts are large, and a fresh runner never
+      # reuses them. Without this they would fill the cache and gain
+      # nothing.
+      CARGO_INCREMENTAL: 0
+      # cage renders with pixman, so the compositor needs no GPU on
+      # the runner.
+      WLR_RENDERER: pixman
+    steps:
+      - uses: actions/checkout@v7
+
+      # The media browser's tests open a real window. cage is the
+      # compositor, wlr-randr sets the headless mode, and
+      # mesa-vulkan-drivers carries lavapipe, the software Vulkan
+      # device a runner with no GPU draws through.
+      - name: install the headless graphics
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
+            libwayland-client0 libxkbcommon0
+
+      # media-browser/rust-toolchain.toml names the version and the
+      # components. rustup installs what the file names, so this
+      # workflow pins no version of its own.
+      - name: install the toolchain
+        run: rustup show
+
+      # The cache holds the cargo registry and target/, keyed on
+      # Cargo.lock. Almost all of the build is dependencies, and they
+      # change only when the lock file changes.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: media-browser
+          cache-on-failure: true
+
+      # cargo-llvm-cov is a binary. The action fetches its release
+      # build instead of compiling one, and it runs after rust-cache,
+      # which prunes binaries it did not see before it saved.
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      # The same target a workstation runs: the format, the lints,
+      # and the tests under the coverage gate. media-browser/Makefile
+      # holds the floor.
+      - run: make test
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      # The theme is the brand repository, a submodule at
+      # docs/themes/brand. A checkout without it builds a site with
+      # no shell, no nav, and no stylesheet.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The docs domain is its own Go module, and Hugo is a tool
+      # directive in it, so the Go toolchain is the only build
+      # dependency and this file pins its version too.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: docs/go.mod
+
+      # The same target a workstation runs: the link check, then
+      # the site build.
+      - run: make test-docs
+
+  # Every image builds on every change, and none is pushed, so a
+  # Dockerfile that stopped building fails here and not at the tag.
+  #
+  # The layer cache lives in ghcr, as a :buildcache tag beside each
+  # image, not in the GitHub Actions cache. A registry cache has no
+  # 10 GB ceiling, it outlives a branch, and CI and release share it,
+  # so a release of a commit CI already built rebuilds nothing. A pull
+  # request from a fork holds a read-only token, so it reads the cache
+  # and writes none.
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build the operator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache,mode=max' || '' }}
+
+      - name: build the media browser image
+        uses: docker/build-push-action@v6
+        with:
+          context: media-browser
+          file: media-browser/Dockerfile
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max' || '' }}
+
+      - name: build the Corrosion image
+        uses: docker/build-push-action@v6
+        with:
+          context: corrosion
+          file: corrosion/Dockerfile
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache,mode=max' || '' }}

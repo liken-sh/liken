@@ -1,0 +1,8 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. It reads no resource yet, so it holds no rules. The plan that
+# adds the Library adds the rules that read it.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: library-operator

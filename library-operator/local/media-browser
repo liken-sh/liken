@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# local/media-browser opens the media browser on this workstation, so the
+# window can be seen without a cluster and without a release.
+#
+# With no arguments the client runs on the desktop compositor. With --headless
+# first, it runs under cage on the wlroots headless backend, where the harness
+# flags stand in for a keyboard and a screenshot tool. Every argument after
+# --headless reaches the binary unchanged.
+#
+# Usage:
+#   local/media-browser
+#   local/media-browser --headless --capture frames --capture-at 1.0 \
+#     --stats stats.json --quit-after 3
+set -euo pipefail
+
+# The crate sits in the repository above this file, so its path resolves from
+# this script's own directory and needs no absolute path.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$here/../media-browser"
+
+if [ "${1:-}" != "--headless" ]; then
+  # cargo runs the client on the compositor this session already has.
+  exec cargo run --release --locked -- "$@"
+fi
+shift
+
+cargo build --release --locked
+binary="$PWD/target/release/media-browser"
+
+# cage starts a compositor on the wlroots headless backend and runs the client
+# as its only client. The headless output starts at 1280x720, so wlr-randr sets
+# the mode. cage takes the next free display name, so this script reads the name
+# from the client's own output instead of guessing wayland-1.
+log="$(mktemp)"
+# The log holds the output until the run ends, and it goes when the run does.
+trap 'rm -f "$log"' EXIT
+
+env -u WAYLAND_DISPLAY \
+  WLR_BACKENDS=headless \
+  WLR_LIBINPUT_NO_DEVICES=1 \
+  cage -- "$binary" "$@" >"$log" 2>&1 &
+cage_pid=$!
+
+# The client prints its display name once the compositor gives it a window. Wait
+# for that line, and give up after ten seconds so a failed start never hangs.
+display=""
+for _ in $(seq 100); do
+  display=$(grep -o 'wayland: wayland-[0-9]*' "$log" 2>/dev/null | head -1 | cut -d' ' -f2 || true)
+  [ -n "$display" ] && break
+  sleep 0.1
+done
+
+if [ -n "$display" ]; then
+  WAYLAND_DISPLAY="$display" wlr-randr --output HEADLESS-1 --custom-mode 1920x1080 || true
+else
+  echo "local/media-browser: the client never reported a display" >&2
+fi
+
+# cage exits on an assertion in its own teardown after the client leaves. The
+# client has written its captures and its numbers by then, so the run's
+# outcome is the client's and not cage's.
+wait "$cage_pid" || true
+cat "$log"

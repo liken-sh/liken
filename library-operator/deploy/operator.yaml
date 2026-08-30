@@ -1,0 +1,40 @@
+# The operator itself: one unprivileged Deployment, in the shape of
+# liken's cluster operator rather than the hardware operators'
+# DaemonSets. Those run a pod per node because they hold that node's
+# hardware; this one holds no hardware at all.
+#
+# There is no volume for state. The operator re-derives everything
+# from the API server on every pass.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: library-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: library-operator
+  # Recreate, so two copies never reconcile at once.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: library-operator
+    spec:
+      serviceAccountName: library-operator
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/library-operator:latest
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
