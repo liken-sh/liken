@@ -32,18 +32,24 @@ const catalogStatePath = "/var/lib/corrosion"
 // The two variables the catalog agent reads. Corrosion takes an
 // environment variable over the matching setting in its configuration
 // file, with two underscores between the table and the key, so
-// GOSSIP__EXTERNAL_ADDR is the gossip table's external address.
+// GOSSIP__ADDR is the gossip table's bind address.
 //
 // The image is built long before any pod exists, so its configuration
-// cannot name the address the agent announces to its peers. The
-// kubelet assigns that address when it starts the pod, the downward
-// API reads it into POD_IP, and the kubelet expands $(POD_IP) in the
-// value beside it. So the agent announces the pod's own address on the
-// gossip port.
+// cannot name the pod's address. The kubelet assigns that address when
+// it starts the pod, the downward API reads it into POD_IP, and the
+// kubelet expands $(POD_IP) in the value beside it. So the agent binds
+// the gossip port on the pod's own address, and it announces the
+// address it bound.
+//
+// The agent binds the pod's address rather than every address on
+// purpose. Corrosion drops its own address from the bootstrap list by
+// comparison with the address it bound. An agent bound on 0.0.0.0
+// finds its own pod in the list, announces to itself on every retry,
+// and logs an error each time.
 const (
 	podIPVariable         = "POD_IP"
 	podIPFieldPath        = "status.podIP"
-	gossipAddressVariable = "GOSSIP__EXTERNAL_ADDR"
+	gossipAddressVariable = "GOSSIP__ADDR"
 	gossipAddress         = "$(" + podIPVariable + "):8787"
 )
 

@@ -37,11 +37,13 @@ addr = "127.0.0.1:8080"
 [gossip]
 # Agents replicate to each other over QUIC on this port. The image is
 # built before any pod exists, so the file cannot name the pod's
-# address, and the agent binds every address instead. The pod sets
-# `GOSSIP__EXTERNAL_ADDR` to `<pod IP>:8787` from the downward API, and
-# that is the address the agent announces to its peers. An agent that
-# starts without that variable serves its API and announces
-# `0.0.0.0:8787`, which no peer can dial.
+# address, and this default binds every address. The pod sets
+# `GOSSIP__ADDR` to `<pod IP>:8787` from the downward API, so the agent
+# binds the pod's own address and announces that address to its peers.
+# An agent that starts without that variable serves its API and
+# announces `0.0.0.0:8787`, which no peer can dial. It also finds its
+# own pod in the bootstrap list, because Corrosion drops its own
+# address from that list by comparison with the address it bound.
 #
 # The bind address is IPv4 because Corrosion keeps only the peers whose
 # address family matches the family it bound. An agent bound on
