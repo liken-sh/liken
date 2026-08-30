@@ -50,6 +50,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
 
       # The tests gate the build. ci.yaml already ran them on the
       # tagged commit when it landed on main. A tag can name any
@@ -58,6 +59,8 @@ jobs:
       # older tag, and never has to find out which tag was good.
       - run: go vet ./...
       - run: go test -race ./...
+
+      - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -68,11 +71,18 @@ jobs:
       # Both images build here and push nothing yet. The player gate
       # below has to pass first, and a push that happened first would
       # leave a broken :latest behind when the gate failed.
+      #
+      # The builds read and write the same :buildcache tags ci.yaml
+      # uses, so a release of a commit CI already built rebuilds
+      # nothing.
       - name: Build the operator image
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile
           load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator:buildcache,mode=max
           tags: |
             ghcr.io/liken-sh/media-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator:latest
@@ -83,6 +93,8 @@ jobs:
           context: .
           file: Dockerfile.player
           load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache,mode=max
           tags: |
             ghcr.io/liken-sh/media-operator-player:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator-player:latest

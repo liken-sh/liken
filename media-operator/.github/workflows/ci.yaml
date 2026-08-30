@@ -8,6 +8,9 @@
 # have to decide which files can never break a build. That list is
 # wrong the day someone adds a file it does not name, and the push
 # that adds it would then land untested.
+#
+# The three jobs are independent, so they run at once, and the run
+# takes as long as its slowest job.
 name: ci
 
 on:
@@ -17,36 +20,89 @@ on:
 
 permissions:
   contents: read
+  # The image builds write their layer cache to ghcr, which needs
+  # this permission even though no run of this workflow pushes an
+  # image.
+  packages: write
 
 jobs:
-  test:
+  go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
+      # setup-go keeps the module downloads and the build cache
+      # between runs, keyed on go.sum, so a run compiles only what
+      # changed.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
 
-      - run: go vet ./...
-      - run: go test -race ./...
+      # The same target a workstation runs: gofmt, vet, the race
+      # tests, and the coverage gate on its pinned toolchain. The
+      # Makefile says why the gate pins a toolchain, and
+      # .testcoverage.yml holds the floors.
+      - run: make test-go
 
-      # The coverage gate measures on its own run, on a pinned
-      # toolchain. Go 1.27 splits a basic block into one profile row
-      # per run of code inside it, and repeats the whole block's
-      # statement count on every row. Every reader sums those rows,
-      # `go tool cover` included, so a block counts once more for
-      # each comment that interrupts it. Go 1.26 counts each block
-      # once, which is what .testcoverage.yml's thresholds were set
-      # against. Move this pin to the newest toolchain that counts
-      # each block once.
-      #
-      # go-test-coverage is a pinned tool dependency (the `tool`
-      # directive in go.mod), so the gate needs nothing installed
-      # beyond the Go toolchain.
-      - run: go test -coverprofile=coverage.out ./...
-        env:
-          GOTOOLCHAIN: go1.26.7
-      - run: go tool go-test-coverage --config=.testcoverage.yml
-        env:
-          GOTOOLCHAIN: go1.26.7
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      # The theme is the brand repository, a submodule at
+      # docs/themes/brand. A checkout without it builds a site with
+      # no shell, no nav, and no stylesheet.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The docs domain is its own Go module, and Hugo is a tool
+      # directive in it, so the Go toolchain is the only build
+      # dependency and this file pins its version too.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: docs/go.mod
+
+      # The same target a workstation runs: the link check, then
+      # the site build.
+      - run: make test-docs
+
+  # Every image builds on every change, and none is pushed, so a
+  # Dockerfile that stopped building fails here and not at the tag.
+  #
+  # The layer cache lives in ghcr, as a :buildcache tag beside each
+  # image, not in the GitHub Actions cache. A registry cache has no
+  # 10 GB ceiling, it outlives a branch, and CI and release share it,
+  # so a release of a commit CI already built rebuilds nothing. A pull
+  # request from a fork holds a read-only token, so it reads the cache
+  # and writes none.
+  images:
+    runs-on: ubuntu-latest
+    # One job per image, so the two build at once and the run is as
+    # long as the slowest of them, not the sum.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: media-operator
+            file: Dockerfile
+          - image: media-operator-player
+            file: Dockerfile.player
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: false
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref=ghcr.io/liken-sh/{0}:buildcache,mode=max', matrix.image) || '' }}
