@@ -23,7 +23,7 @@ name one.
   and later a link to an identity provider. A screen takes the person
   from a picker or from a default per room, and the browser puts the
   person on its `Play` request.
-- Where the state lives is open. The catalog is a multi-writer store
+- Where the state is stored is open. The catalog is a multi-writer store
   with every screen as a member, which is the shape watch state has:
   written from rooms, read everywhere. A table in the same cluster
   would store it with no new infrastructure. dqlite was weighed for
