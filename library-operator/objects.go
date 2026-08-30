@@ -202,30 +202,32 @@ type Container struct {
 	// the pod rather than waiting for it to exit before the next
 	// container starts.
 	RestartPolicy string `json:"restartPolicy,omitempty"`
-	// The three probes on the catalog agent. The startupProbe
-	// gates the scanner's start, and the readiness and liveness probes
-	// cover the agent's running life.
-	StartupProbe   *Probe `json:"startupProbe,omitempty"`
-	ReadinessProbe *Probe `json:"readinessProbe,omitempty"`
-	LivenessProbe  *Probe `json:"livenessProbe,omitempty"`
+	// The two probes on the catalog agent. The startupProbe gates
+	// the scanner's start, and the livenessProbe covers the agent's
+	// running life. There is no readinessProbe: the scanner pod's
+	// readiness gates its place in the catalog gossip EndpointSlice, and a
+	// momentary API hiccup must not drop the agent from the bootstrap
+	// list.
+	StartupProbe  *Probe `json:"startupProbe,omitempty"`
+	LivenessProbe *Probe `json:"livenessProbe,omitempty"`
 }
 
 // A Probe is the check the kubelet runs on a container. This
-// operator probes the catalog agent over a TCP connection to its API
-// port, because the port answers as soon as the agent opens its API,
-// where the /v1/health endpoint returns 503 until the agent replicates.
+// operator probes the catalog agent by running a command inside the
+// container, because the agent's API binds loopback alone, so nothing
+// the kubelet dials over the pod network reaches it.
 type Probe struct {
-	TCPSocket           *TCPSocketAction `json:"tcpSocket,omitempty"`
-	InitialDelaySeconds int              `json:"initialDelaySeconds,omitempty"`
-	PeriodSeconds       int              `json:"periodSeconds,omitempty"`
-	TimeoutSeconds      int              `json:"timeoutSeconds,omitempty"`
-	FailureThreshold    int              `json:"failureThreshold,omitempty"`
+	Exec                *ExecAction `json:"exec,omitempty"`
+	InitialDelaySeconds int         `json:"initialDelaySeconds,omitempty"`
+	PeriodSeconds       int         `json:"periodSeconds,omitempty"`
+	TimeoutSeconds      int         `json:"timeoutSeconds,omitempty"`
+	FailureThreshold    int         `json:"failureThreshold,omitempty"`
 }
 
-// A TCPSocketAction opens a TCP connection to a port. A
-// connection that the kubelet completes is the check passing.
-type TCPSocketAction struct {
-	Port int `json:"port"`
+// An ExecAction runs a command inside the container. An exit of
+// zero is the check passing.
+type ExecAction struct {
+	Command []string `json:"command,omitempty"`
 }
 
 // ResourceRequirements is the room a container asks for and the

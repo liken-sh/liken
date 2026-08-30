@@ -56,10 +56,11 @@ const (
 	gossipAddress         = "$(" + podIPVariable + "):8787"
 )
 
-// catalogAPIPort is the loopback port the catalog agent binds
-// its HTTP API on, from corrosion/config.toml. The scanner posts its
-// writes there, and the kubelet's probes open a TCP connection to it.
-const catalogAPIPort = 8080
+// catalogBinary is the Corrosion binary the image's entrypoint
+// runs, from corrosion/Dockerfile. The kubelet's probes run it with the
+// query subcommand, which reaches the agent's loopback API from inside
+// the container.
+const catalogBinary = "/corrosion"
 
 // scannerGracePeriod is how long the kubelet waits between the SIGTERM
 // and the kill. A busy catalog agent flushes its database on the way
@@ -220,17 +221,16 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 //
 // The agent is a native sidecar: an initContainer with
 // restartPolicy Always. The kubelet starts it and waits for its
-// startupProbe before it starts the scanner, so the scanner's first
-// walk never races a catalog API that is not listening.
+// startupProbe before it starts the scanner, so the scanner's first walk
+// never races a catalog API that is not listening.
 //
-// The three probes open a TCP connection to the API port, not
-// an httpGet on /v1/health. Corrosion answers /v1/health with a 503
-// carrying "no p99 lag information available" until the agent
-// replicates something, and an agent that holds one pod's catalog alone
-// never replicates, so a health probe would keep the agent from ever
-// passing its startupProbe. A TCP connection to the API port passes as
-// soon as the agent opens its API, which is the signal the scanner and
-// the readers need.
+// The probes run a query inside the container, not an httpGet or
+// a TCP dial from the kubelet. The agent's API binds loopback alone (see
+// corrosion/config.toml), so nothing the kubelet reaches over the pod
+// network can dial it. `corrosion query "SELECT 1"` connects to that
+// loopback API from inside the container and exits zero only when the
+// API answers, which is more than a bound port: it is the API and the
+// database behind it both up.
 func catalogSidecar(image string) Container {
 	always := "Always"
 	return Container{
@@ -251,24 +251,24 @@ func catalogSidecar(image string) Container {
 		},
 		SecurityContext: unprivileged(),
 		RestartPolicy:   always,
-		// The startupProbe gives the agent up to a minute to open
-		// its API, checking every second, and gates the scanner's start.
-		StartupProbe: catalogProbe(1, 1, 60),
-		// The readiness and liveness probes cover the agent's
-		// running life once the startupProbe passes.
-		ReadinessProbe: catalogProbe(0, 10, 3),
-		LivenessProbe:  catalogProbe(0, 10, 3),
+		// The startupProbe gives a cold agent up to 90 seconds to
+		// open its API, because an agent that replays its database on
+		// start takes a while, and it gates the scanner's start.
+		StartupProbe: catalogProbe(3, 30),
+		// The livenessProbe runs every 30 seconds and restarts a
+		// wedged agent after three failures, at near-zero cost.
+		LivenessProbe: catalogProbe(30, 3),
 	}
 }
 
-// catalogProbe builds a probe that opens a TCP connection to the
-// catalog agent's API port on the given schedule.
-func catalogProbe(initialDelay, period, failureThreshold int) *Probe {
+// catalogProbe builds a probe that runs the catalog agent's query
+// command inside the container on the given schedule. The query reaches
+// the agent's loopback API and exits zero only when it answers.
+func catalogProbe(period, failureThreshold int) *Probe {
 	return &Probe{
-		TCPSocket:           &TCPSocketAction{Port: catalogAPIPort},
-		InitialDelaySeconds: initialDelay,
-		PeriodSeconds:       period,
-		FailureThreshold:    failureThreshold,
+		Exec:             &ExecAction{Command: []string{catalogBinary, "query", "SELECT 1"}},
+		PeriodSeconds:    period,
+		FailureThreshold: failureThreshold,
 	}
 }
 

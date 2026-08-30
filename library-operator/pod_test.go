@@ -260,12 +260,12 @@ func TestCatalogContainerIsANativeSidecar(t *testing.T) {
 	}
 }
 
-// The three probes open a TCP connection to the catalog agent's API
-// port. The startupProbe gates the scanner's start, and the readiness
-// and liveness probes cover the agent's running life. The probe is a
-// TCP connection and not an httpGet on /v1/health, which answers 503
-// until the agent replicates.
-func TestCatalogContainerProbesItsApiPort(t *testing.T) {
+// The startupProbe and the livenessProbe run a query inside the
+// container, because the catalog agent's API binds loopback alone and
+// nothing the kubelet dials over the pod network reaches it. The
+// startupProbe gates the scanner's start, and the livenessProbe covers
+// the agent's running life.
+func TestCatalogContainerProbesWithAnExecQuery(t *testing.T) {
 	catalog := catalogSidecarOf(t, testScannerPod(studioMovies()))
 
 	cases := []struct {
@@ -274,20 +274,19 @@ func TestCatalogContainerProbesItsApiPort(t *testing.T) {
 		period           int
 		failureThreshold int
 	}{
-		{"startup", catalog.StartupProbe, 1, 60},
-		{"readiness", catalog.ReadinessProbe, 10, 3},
-		{"liveness", catalog.LivenessProbe, 10, 3},
+		{"startup", catalog.StartupProbe, 3, 30},
+		{"liveness", catalog.LivenessProbe, 30, 3},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			if one.probe == nil {
 				t.Fatal("the probe is unset")
 			}
-			if one.probe.TCPSocket == nil {
-				t.Fatalf("probe = %+v, want a TCP connection", one.probe)
+			if one.probe.Exec == nil {
+				t.Fatalf("probe = %+v, want an exec query", one.probe)
 			}
-			if one.probe.TCPSocket.Port != catalogAPIPort {
-				t.Errorf("port = %d, want %d", one.probe.TCPSocket.Port, catalogAPIPort)
+			if strings.Join(one.probe.Exec.Command, " ") != "/corrosion query SELECT 1" {
+				t.Errorf("command = %v, want the catalog query", one.probe.Exec.Command)
 			}
 			if one.probe.PeriodSeconds != one.period {
 				t.Errorf("periodSeconds = %d, want %d", one.probe.PeriodSeconds, one.period)
