@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# local/catalog runs a three-agent Corrosion cluster on this workstation, so a
+# schema change, a scanner, or a media browser can be seen without a cluster.
+#
+# Usage:
+#   local/catalog up      start the three agents and wait until they see
+#                         each other; prints the three API addresses
+#   local/catalog down    stop the three agents
+#   local/catalog status  print which agents are up
+set -euo pipefail
+
+# The repository is the directory above this file, so every path resolves
+# from this script's own directory and none is absolute.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/.." && pwd)"
+
+# The agents run from the image corrosion/Dockerfile builds, not from a cargo
+# build on the workstation's own toolchain, so every agent runs the same bytes
+# here and in the cluster.
+image="library-operator-corrosion:local"
+
+# The container names, and the ports. The ports are fixed and above 20000, so
+# a later harness can name an address and a second run reaches the same
+# cluster. Agent N answers its HTTP API on 2008N and gossips over QUIC on
+# 2087N.
+name_prefix="library-catalog"
+api_ports=(20081 20082 20083)
+gossip_ports=(20871 20872 20873)
+
+# The harness writes under local/state, which .gitignore excludes. Each agent
+# gets a directory of its own for its configuration, its database, its
+# write-ahead log, and its admin socket.
+state="$repo/local/state/catalog"
+
+# The two paths inside the container. The agent's state directory and the
+# repository's schema directory are the only mounts. The schema mount hides the
+# copy the image carries, so an edit to the schema shows on the next start
+# with no image build.
+container_state="/var/lib/corrosion"
+container_schema="/etc/corrosion/schema"
+
+usage() {
+  sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+# An agent is up when a container of its name runs. docker's own filter is the
+# record, so the harness keeps no pid file, and a stale file cannot survive a
+# reboot.
+running() {
+  [ -n "$(docker ps --quiet --filter "name=^${name_prefix}-$1\$")" ]
+}
+
+# The gossip addresses of every agent, as the bootstrap list. Every agent
+# takes the whole list, its own address included, because Corrosion drops its
+# own address from what it dials.
+bootstrap_list() {
+  local out=""
+  local port
+  for port in "${gossip_ports[@]}"; do
+    [ -n "$out" ] && out="$out, "
+    out="$out\"127.0.0.1:$port\""
+  done
+  printf '%s' "$out"
+}
+
+# Each agent's configuration, rendered before its container starts. It sets
+# the same page cache as the image's own configuration, because the memory an
+# agent uses is one of the things this harness measures.
+render_config() {
+  local n="$1" dir="$2"
+  cat >"$dir/config.toml" <<EOF
+[db]
+path = "$container_state/state.db"
+schema_paths = ["$container_schema"]
+cache_size_kib = -65536
+
+[api]
+addr = "127.0.0.1:${api_ports[$((n - 1))]}"
+
+[gossip]
+addr = "127.0.0.1:${gossip_ports[$((n - 1))]}"
+plaintext = true
+bootstrap = [$(bootstrap_list)]
+
+[admin]
+path = "$container_state/admin.sock"
+EOF
+}
+
+start_agent() {
+  local n="$1"
+  local dir="$state/agent-$n"
+  mkdir -p "$dir"
+  render_config "$n" "$dir"
+
+  # --network host puts the agent on loopback, where the ports above are the
+  # addresses a harness on this workstation dials. --user runs it as the
+  # person at the keyboard, because a later plan's media browser opens the
+  # SQLite file from the host, and a database in WAL mode needs a writable
+  # -shm file beside it.
+  docker run --detach --rm \
+    --name "$name_prefix-$n" \
+    --network host \
+    --user "$(id -u):$(id -g)" \
+    --volume "$dir:$container_state" \
+    --volume "$repo/corrosion/schema:$container_schema:ro" \
+    "$image" agent --config "$container_state/config.toml" >/dev/null
+}
+
+# How many other agents this one holds. `corrosion cluster members` answers
+# over the admin socket in the agent's own state directory and prints one JSON
+# object per member, so the count is the number of objects. /v1/health is not
+# the check, because it answers 503 with "no p99 lag information available"
+# until the agent has replicated something, and a fresh cluster has not.
+peers() {
+  docker exec "$name_prefix-$1" \
+    /corrosion --config "$container_state/config.toml" cluster members 2>/dev/null |
+    jq --slurp 'length' 2>/dev/null || echo 0
+}
+
+# Whether the agent's HTTP API answers. A query is the smallest request that
+# proves the API and the database behind it are both up.
+api_answers() {
+  curl --silent --fail --max-time 2 \
+    --header 'content-type: application/json' \
+    --data '"SELECT 1"' \
+    "http://127.0.0.1:$1/v1/queries" >/dev/null 2>&1
+}
+
+up() {
+  local n
+  for n in 1 2 3; do
+    if running "$n"; then
+      echo "local/catalog: $name_prefix-$n is already running; run 'local/catalog down' first" >&2
+      exit 1
+    fi
+  done
+
+  # A missing image is built here rather than reported, and the build is the
+  # same one CI runs.
+  if [ -z "$(docker images --quiet "$image")" ]; then
+    echo "local/catalog: building $image" >&2
+    docker build "$repo/corrosion" --tag "$image" >&2
+  fi
+
+  for n in 1 2 3; do
+    start_agent "$n"
+  done
+
+  # The cluster is up when every agent answers its API and reports the other
+  # two as members. Sixty seconds is the ceiling. Three agents on loopback
+  # converge in a few seconds, so a cluster that has not formed by then has
+  # failed.
+  local deadline=$((SECONDS + 60))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local ready=0
+    for n in 1 2 3; do
+      if api_answers "${api_ports[$((n - 1))]}" && [ "$(peers "$n")" -ge 2 ]; then
+        ready=$((ready + 1))
+      fi
+    done
+    if [ "$ready" -eq 3 ]; then
+      local port
+      for port in "${api_ports[@]}"; do
+        echo "127.0.0.1:$port"
+      done
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "local/catalog: the three agents did not form a cluster in 60 seconds" >&2
+  status
+  exit 1
+}
+
+down() {
+  local n
+  for n in 1 2 3; do
+    running "$n" || continue
+    # A busy agent flushes its database on the way out, so the stop gives it
+    # thirty seconds before docker sends the kill.
+    docker stop --timeout 30 "$name_prefix-$n" >/dev/null
+  done
+}
+
+status() {
+  local n
+  for n in 1 2 3; do
+    if running "$n"; then
+      echo "$name_prefix-$n up on 127.0.0.1:${api_ports[$((n - 1))]}, $(peers "$n") peers"
+    else
+      echo "$name_prefix-$n down"
+    fi
+  done
+}
+
+case "${1:-}" in
+  up) up ;;
+  down) down ;;
+  status) status ;;
+  *) usage ;;
+esac

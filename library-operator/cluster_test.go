@@ -26,6 +26,9 @@ type fakeCluster struct {
 	libraries map[string]*Library
 	claims    map[string]*PersistentVolumeClaim
 	pods      map[string]*Pod
+	// The EndpointSlices the operator writes, by name. Only the catalog
+	// slice reaches here.
+	slices map[string]*EndpointSlice
 
 	// A PersistentVolume is held as the body the API server serves,
 	// because a volume names its storage with a key on the spec and
@@ -39,8 +42,8 @@ type fakeCluster struct {
 	// carries on from.
 	broken map[string]int
 
-	// refuseCreate answers every pod creation with a conflict, the
-	// state a second writer leaves behind.
+	// refuseCreate answers every creation, of a pod or of the catalog
+	// slice, with a conflict: the state a second writer leaves behind.
 	refuseCreate bool
 
 	// parked holds every watch request open, because a watcher has no
@@ -54,6 +57,7 @@ func newFakeCluster() *fakeCluster {
 		claims:    map[string]*PersistentVolumeClaim{},
 		volumes:   map[string]string{},
 		pods:      map[string]*Pod{},
+		slices:    map[string]*EndpointSlice{},
 		broken:    map[string]int{},
 		parked:    make(chan struct{}),
 	}
@@ -110,6 +114,8 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = io.WriteString(w, body)
+	case strings.Contains(r.URL.Path, "/endpointslices"):
+		f.serveEndpointSlice(w, r, name)
 	case r.Method == http.MethodPost:
 		if f.refuseCreate {
 			w.WriteHeader(http.StatusConflict)
@@ -126,6 +132,33 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveEndpointSlice answers the catalog slice the way the API server
+// does: an absent slice is a 404, a create stores what the body
+// carries, and an update replaces it. The stored resourceVersion is
+// what a conditional write is checked against.
+func (f *fakeCluster) serveEndpointSlice(w http.ResponseWriter, r *http.Request, name string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		f.writeEndpointSlice(w, r, "1")
+	case http.MethodPut:
+		f.writeEndpointSlice(w, r, "2")
+	default:
+		answer(w, f.slices[name])
+	}
+}
+
+func (f *fakeCluster) writeEndpointSlice(w http.ResponseWriter, r *http.Request, resourceVersion string) {
+	var written EndpointSlice
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	written.Metadata.ResourceVersion = resourceVersion
+	f.slices[written.Metadata.Name] = &written
+	_ = json.NewEncoder(w).Encode(written)
+}
+
 // held reads one object out of the cluster under the lock, so a test
 // that inspects the cluster while a watch request is in flight reads
 // no torn map.
@@ -139,6 +172,12 @@ func (f *fakeCluster) heldLibrary(name string) *Library {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	return f.libraries[name]
+}
+
+func (f *fakeCluster) heldEndpointSlice(name string) *EndpointSlice {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.slices[name]
 }
 
 // countRequests counts the requests of one method against one kind of
@@ -173,6 +212,10 @@ func sortedNames[T any](objects map[string]*T) []string {
 	return names
 }
 
+// The namespace the operator itself runs in, where it writes the
+// catalog EndpointSlice.
+const testOperatorNamespace = "liken-system"
+
 // testOperator builds the operator around one fake cluster. Its bus is
 // never run by the tests that only take a pass, so a publish finds no
 // write queue and drops, which is what a pass wants with no broker
@@ -184,7 +227,7 @@ func sortedNames[T any](objects map[string]*T) []string {
 func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
-	return newOperator(NewClient(server.URL, server.Client(), ""),
+	return newOperator(NewClient(server.URL, server.Client(), ""), testOperatorNamespace,
 		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 

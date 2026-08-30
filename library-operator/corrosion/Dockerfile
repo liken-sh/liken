@@ -45,8 +45,8 @@ COPY --from=build /usr/src/corrosion/target/release/corrosion /corrosion
 
 # The configuration and the schema arrive in the image because the pod
 # has no shell to render a file and no `ConfigMap` for the sidecar. The
-# schema directory is empty in this plan, and plan 03 puts the
-# catalog's schema file in it.
+# schema directory holds `catalog.sql`, so every agent this image
+# starts loads the same catalog schema.
 COPY config.toml /etc/corrosion/config.toml
 COPY schema/ /etc/corrosion/schema/
 

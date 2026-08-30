@@ -23,23 +23,27 @@ import (
 // Deployment can give it, and it names the one that is missing.
 func TestOperateRequiresItsEnvironment(t *testing.T) {
 	cases := []struct {
-		name    string
-		unset   string
-		scanner string
-		catalog string
-		bus     string
+		name      string
+		unset     string
+		scanner   string
+		catalog   string
+		namespace string
+		bus       string
 	}{
 		{name: "no scanner image", unset: scannerImageVariable,
-			catalog: testCorrosionImage, bus: testBusAddress},
+			catalog: testCorrosionImage, namespace: testOperatorNamespace, bus: testBusAddress},
 		{name: "no catalog image", unset: corrosionImageVariable,
-			scanner: testScannerImage, bus: testBusAddress},
+			scanner: testScannerImage, namespace: testOperatorNamespace, bus: testBusAddress},
+		{name: "no namespace", unset: namespaceVariable,
+			scanner: testScannerImage, catalog: testCorrosionImage, bus: testBusAddress},
 		{name: "no broker", unset: busAddressVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage},
+			scanner: testScannerImage, catalog: testCorrosionImage, namespace: testOperatorNamespace},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Setenv(scannerImageVariable, one.scanner)
 			t.Setenv(corrosionImageVariable, one.catalog)
+			t.Setenv(namespaceVariable, one.namespace)
 			t.Setenv(busAddressVariable, one.bus)
 
 			err := operate()
@@ -54,6 +58,7 @@ func TestOperateRequiresItsEnvironment(t *testing.T) {
 func TestOperateRefusesOutsideACluster(t *testing.T) {
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
+	t.Setenv(namespaceVariable, testOperatorNamespace)
 	t.Setenv(busAddressVariable, testBusAddress)
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
@@ -91,6 +96,7 @@ func testClusterEnvironment(t *testing.T, cluster *fakeCluster) chan struct{} {
 	t.Setenv("KUBERNETES_SERVICE_PORT", port)
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
+	t.Setenv(namespaceVariable, testOperatorNamespace)
 	// Port 1 answers nothing, so the bus reconnects for the length of
 	// the test and no pass waits on it.
 	t.Setenv(busAddressVariable, "127.0.0.1:1")

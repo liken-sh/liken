@@ -4,9 +4,12 @@ package main
 // The pod is the whole of what a Library becomes at run time, so what
 // it carries is worth reading field by field: the mount that makes the
 // volume read-only, the environment the scanner learns its Library
-// from, and the address the catalog agent gossips on.
+// from, and the address the catalog agent gossips on. The four pod
+// requests the client makes are tested here too, beside the pod they
+// carry.
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -284,4 +287,104 @@ func containerEnvironment(container Container) map[string]string {
 		environment[variable.Name] = variable.Value
 	}
 	return environment
+}
+
+// One list answers every namespace, and the label selector is what
+// keeps the answer to this operator's own pods.
+func TestListScannerPodsSelectsTheOperatorsOwnPods(t *testing.T) {
+	client, recorded := recordingAPI(t, PodList{
+		Metadata: ListMeta{ResourceVersion: "88"},
+		Items:    []Pod{{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}}},
+	})
+
+	list, err := ListScannerPods(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectRequest(t, recorded, http.MethodGet, "/api/v1/pods")
+	if got := recorded.query.Get("labelSelector"); got != "app.kubernetes.io/name=library-scanner" {
+		t.Errorf("labelSelector = %q, want the scanner selector", got)
+	}
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "movies-scanner" {
+		t.Errorf("items = %+v, want the one scanner pod the server answered", list.Items)
+	}
+}
+
+func TestGetPodReadsOnePodByName(t *testing.T) {
+	client, recorded := recordingAPI(t, Pod{
+		Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"},
+		Status: PodStatus{
+			Phase:             podRunning,
+			ContainerStatuses: []ContainerStatus{{Name: "scanner", Ready: true}},
+		},
+	})
+
+	pod, err := GetPod(client, "house", "movies-scanner")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectRequest(t, recorded, http.MethodGet, "/api/v1/namespaces/house/pods/movies-scanner")
+	if pod.Status.Phase != podRunning || !pod.Status.ContainerStatuses[0].Ready {
+		t.Errorf("status = %+v, want the running pod with its ready container", pod.Status)
+	}
+}
+
+func TestCreatePodPostsIntoTheLibrarysNamespace(t *testing.T) {
+	client, recorded := recordingAPI(t, Pod{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}})
+
+	created, err := CreatePod(client, &Pod{
+		APIVersion: podAPIVersion,
+		Kind:       "Pod",
+		Metadata: ObjectMeta{
+			Name:      "movies-scanner",
+			Namespace: "house",
+			Labels:    map[string]string{scannerLabelKey: scannerLabelValue},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectRequest(t, recorded, http.MethodPost, "/api/v1/namespaces/house/pods")
+	if !strings.Contains(recorded.body, `"name":"movies-scanner"`) {
+		t.Errorf("body = %s, want the pod the operator built", recorded.body)
+	}
+	if created.Metadata.Name != "movies-scanner" {
+		t.Errorf("name = %q, want the pod the server wrote back", created.Metadata.Name)
+	}
+}
+
+// A pod the operator already removed, or one Kubernetes removed first,
+// leaves nothing to do, so an absent pod is success. Any other failure
+// is reported.
+func TestDeletePodTreatsAnAbsentPodAsDone(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		wantErr bool
+	}{
+		{name: "the pod was there", status: http.StatusOK},
+		{name: "the pod was already gone", status: http.StatusNotFound},
+		{name: "the server refused", status: http.StatusForbidden, wantErr: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var path string
+			client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path = r.URL.Path
+				w.WriteHeader(testCase.status)
+			}))
+
+			err := DeletePod(client, "house", "movies-scanner")
+
+			if (err != nil) != testCase.wantErr {
+				t.Fatalf("err = %v, want an error: %v", err, testCase.wantErr)
+			}
+			if path != "/api/v1/namespaces/house/pods/movies-scanner" {
+				t.Errorf("path = %q, want the pod's own path", path)
+			}
+		})
+	}
 }

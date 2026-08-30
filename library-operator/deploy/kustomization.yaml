@@ -12,6 +12,7 @@ resources:
   - libraries-crd.yaml
   - rbac.yaml
   - operator.yaml
+  - catalog-service.yaml
 
 labels:
   - includeSelectors: false

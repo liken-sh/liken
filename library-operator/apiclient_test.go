@@ -406,106 +406,6 @@ func TestGetPersistentVolumeReadsWhatServesTheStorage(t *testing.T) {
 	}
 }
 
-// One list answers every namespace, and the label selector is what
-// keeps the answer to this operator's own pods.
-func TestListScannerPodsSelectsTheOperatorsOwnPods(t *testing.T) {
-	client, recorded := recordingAPI(t, PodList{
-		Metadata: ListMeta{ResourceVersion: "88"},
-		Items:    []Pod{{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}}},
-	})
-
-	list, err := ListScannerPods(client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/api/v1/pods")
-	if got := recorded.query.Get("labelSelector"); got != "app.kubernetes.io/name=library-scanner" {
-		t.Errorf("labelSelector = %q, want the scanner selector", got)
-	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "movies-scanner" {
-		t.Errorf("items = %+v, want the one scanner pod the server answered", list.Items)
-	}
-}
-
-func TestGetPodReadsOnePodByName(t *testing.T) {
-	client, recorded := recordingAPI(t, Pod{
-		Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"},
-		Status: PodStatus{
-			Phase:             podRunning,
-			ContainerStatuses: []ContainerStatus{{Name: "scanner", Ready: true}},
-		},
-	})
-
-	pod, err := GetPod(client, "house", "movies-scanner")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodGet, "/api/v1/namespaces/house/pods/movies-scanner")
-	if pod.Status.Phase != podRunning || !pod.Status.ContainerStatuses[0].Ready {
-		t.Errorf("status = %+v, want the running pod with its ready container", pod.Status)
-	}
-}
-
-func TestCreatePodPostsIntoTheLibrarysNamespace(t *testing.T) {
-	client, recorded := recordingAPI(t, Pod{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}})
-
-	created, err := CreatePod(client, &Pod{
-		APIVersion: podAPIVersion,
-		Kind:       "Pod",
-		Metadata: ObjectMeta{
-			Name:      "movies-scanner",
-			Namespace: "house",
-			Labels:    map[string]string{scannerLabelKey: scannerLabelValue},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	expectRequest(t, recorded, http.MethodPost, "/api/v1/namespaces/house/pods")
-	if !strings.Contains(recorded.body, `"name":"movies-scanner"`) {
-		t.Errorf("body = %s, want the pod the operator built", recorded.body)
-	}
-	if created.Metadata.Name != "movies-scanner" {
-		t.Errorf("name = %q, want the pod the server wrote back", created.Metadata.Name)
-	}
-}
-
-// A pod the operator already removed, or one Kubernetes removed first,
-// leaves nothing to do, so an absent pod is success. Any other failure
-// is reported.
-func TestDeletePodTreatsAnAbsentPodAsDone(t *testing.T) {
-	cases := []struct {
-		name    string
-		status  int
-		wantErr bool
-	}{
-		{name: "the pod was there", status: http.StatusOK},
-		{name: "the pod was already gone", status: http.StatusNotFound},
-		{name: "the server refused", status: http.StatusForbidden, wantErr: true},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			var path string
-			client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				path = r.URL.Path
-				w.WriteHeader(testCase.status)
-			}))
-
-			err := DeletePod(client, "house", "movies-scanner")
-
-			if (err != nil) != testCase.wantErr {
-				t.Fatalf("err = %v, want an error: %v", err, testCase.wantErr)
-			}
-			if path != "/api/v1/namespaces/house/pods/movies-scanner" {
-				t.Errorf("path = %q, want the pod's own path", path)
-			}
-		})
-	}
-}
-
 // A verb that cannot read reports the server's failure rather than an
 // empty object, so a pass stops instead of writing a status built on
 // nothing.
@@ -525,6 +425,18 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(c, "house", "movies-scanner"); return err }},
 		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(c, &Pod{}); return err }},
 		{name: "DeletePod", call: func(c *Client) error { return DeletePod(c, "house", "movies-scanner") }},
+		{name: "GetEndpointSlice", call: func(c *Client) error {
+			_, err := GetEndpointSlice(c, "liken-system", "catalog")
+			return err
+		}},
+		{name: "CreateEndpointSlice", call: func(c *Client) error {
+			_, err := CreateEndpointSlice(c, &EndpointSlice{})
+			return err
+		}},
+		{name: "UpdateEndpointSlice", call: func(c *Client) error {
+			_, err := UpdateEndpointSlice(c, &EndpointSlice{})
+			return err
+		}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

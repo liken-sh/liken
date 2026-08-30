@@ -49,6 +49,14 @@ spec:
               value: ghcr.io/liken-sh/library-operator:latest
             - name: CORROSION_IMAGE
               value: ghcr.io/liken-sh/library-operator-corrosion:latest
+            # The namespace this Deployment runs in, read from the pod itself.
+            # The operator writes the catalog EndpointSlice there, beside the
+            # headless Service in catalog-service.yaml, and a pod cannot derive
+            # its own namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             capabilities:
               drop: ["ALL"]

@@ -31,6 +31,13 @@ const (
 	corrosionImageVariable = "CORROSION_IMAGE"
 )
 
+// The namespace the operator runs in, from the downward API. The
+// operator writes the catalog EndpointSlice there, beside the headless
+// Service the manifest creates. A pod cannot derive its own namespace,
+// so the Deployment states it, and the operator refuses to start
+// without it.
+const namespaceVariable = "POD_NAMESPACE"
+
 // backstopInterval is how often the loop reconciles with nothing to
 // prompt it. The tick recovers a lost watch event, and it is what
 // notices a pod that changed phase while the watch was down.
@@ -42,7 +49,10 @@ const backstopInterval = 10 * time.Second
 // globals so a test builds an operator around a desk and a cluster it
 // controls.
 type operator struct {
-	client         *Client
+	client *Client
+	// namespace is the operator's own, where it writes the catalog
+	// EndpointSlice.
+	namespace      string
 	scannerImage   string
 	corrosionImage string
 	busAddress     string
@@ -61,10 +71,11 @@ type operator struct {
 // bus subscriptions that fill it. The subscriptions are remembered
 // here and sent on every connection, so they outlive a broker
 // restart.
-func newOperator(client *Client, scannerImage, corrosionImage, busAddress, topicBase string) *operator {
+func newOperator(client *Client, namespace, scannerImage, corrosionImage, busAddress, topicBase string) *operator {
 	wake := make(chan struct{}, 1)
 	library := &operator{
 		client:         client,
+		namespace:      namespace,
 		scannerImage:   scannerImage,
 		corrosionImage: corrosionImage,
 		busAddress:     busAddress,
@@ -85,7 +96,8 @@ func newOperator(client *Client, scannerImage, corrosionImage, busAddress, topic
 // instead of exiting, so main is the only place that ends the process
 // and a test drives the whole setup. A missing setting fails here,
 // before the first pass, because a pod that cannot name the images it
-// creates has nothing to reconcile with.
+// creates, or the namespace it writes the catalog slice in, has
+// nothing to reconcile with.
 func operate() error {
 	scannerImage := os.Getenv(scannerImageVariable)
 	if scannerImage == "" {
@@ -94,6 +106,10 @@ func operate() error {
 	corrosionImage := os.Getenv(corrosionImageVariable)
 	if corrosionImage == "" {
 		return fmt.Errorf("%s is unset; the Deployment must name the catalog image", corrosionImageVariable)
+	}
+	namespace := os.Getenv(namespaceVariable)
+	if namespace == "" {
+		return fmt.Errorf("%s is unset; the Deployment must name the operator's own namespace", namespaceVariable)
 	}
 	busAddress := os.Getenv(busAddressVariable)
 	if busAddress == "" {
@@ -117,7 +133,7 @@ func operate() error {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	return newOperator(client, scannerImage, corrosionImage, busAddress, topicBase).run(stopped, os.Stdout)
+	return newOperator(client, namespace, scannerImage, corrosionImage, busAddress, topicBase).run(stopped, os.Stdout)
 }
 
 // run is the operator without the process around it, so a test drives
@@ -156,9 +172,11 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	}
 }
 
-// pass reconciles every Library in the cluster. A failure on one
-// object is reported and the pass continues, because one library's
-// broken claim must not freeze every other library's status.
+// pass reconciles every Library in the cluster, then stands the
+// catalog cluster's EndpointSlice, which is the whole cluster's work
+// and not one Library's. A failure on one object is reported and the
+// pass continues, because one library's broken claim must not freeze
+// every other library's status.
 func (o *operator) pass() {
 	list, err := ListLibraries(o.client)
 	if err != nil {
@@ -177,6 +195,25 @@ func (o *operator) pass() {
 	// The collection this pass read is the whole set of Libraries, so
 	// anything else the desk holds belongs to a Library that is gone.
 	o.reports.retain(live)
+
+	o.standCatalog()
+}
+
+// standCatalog gives the catalog cluster its peers: one EndpointSlice
+// over every scanner pod in the cluster, read with one list. A failure
+// is reported and the pass ends anyway, because the statuses this pass
+// wrote stand whatever the slice says. The pod watch already wakes the
+// loop when a pod changes, so a new pod's address reaches the slice on
+// the next pass.
+func (o *operator) standCatalog() {
+	pods, err := ListScannerPods(o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing scanner pods: %v\n", err)
+		return
+	}
+	if err := o.standCatalogEndpoints(pods.Items); err != nil {
+		fmt.Fprintf(os.Stderr, "standing the catalog endpoints: %v\n", err)
+	}
 }
 
 // handleBusMessage folds one message from the broker onto the report

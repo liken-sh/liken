@@ -11,4 +11,4 @@
 profile: coverage.out
 
 threshold:
-  total: 90
+  total: 95

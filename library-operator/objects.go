@@ -143,7 +143,11 @@ type PodList struct {
 // grace period long enough for a busy catalog agent to finish its
 // exit.
 type PodSpec struct {
-	RestartPolicy                 string `json:"restartPolicy,omitempty"`
+	RestartPolicy string `json:"restartPolicy,omitempty"`
+	// NodeName is written by the scheduler, never by the builder. The
+	// catalog EndpointSlice carries it, so a reader can tell which peers
+	// are local to a node.
+	NodeName                      string `json:"nodeName,omitempty"`
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 	// AutomountServiceAccountToken is a pointer because the field's
 	// default is true, and only an explicit false keeps the namespace's
@@ -242,12 +246,16 @@ type EmptyDirVolumeSource struct {
 	SizeLimit string `json:"sizeLimit,omitempty"`
 }
 
-// The pod status the Ready condition reads: the phase, the per
-// container readiness, and the words the kubelet gives for a failure.
+// The pod status this operator reads: the phase, the per container
+// readiness, the words the kubelet gives for a failure, and the
+// address the catalog agents gossip on.
 type PodStatus struct {
-	Phase             string            `json:"phase,omitempty"`
-	Reason            string            `json:"reason,omitempty"`
-	Message           string            `json:"message,omitempty"`
+	Phase   string `json:"phase,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+	// PodIP is the address the kubelet assigned. It is the address the
+	// catalog agents gossip on, and a pod without one is not a peer yet.
+	PodIP             string            `json:"podIP,omitempty"`
 	ContainerStatuses []ContainerStatus `json:"containerStatuses,omitempty"`
 }
 

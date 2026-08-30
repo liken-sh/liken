@@ -16,9 +16,8 @@ path = "/var/lib/corrosion/state.db"
 
 # Every agent in the cluster loads the same schema. Corrosion reads
 # each `.sql` file in this directory in name order and applies the
-# difference on every start. Plan 03 puts the catalog's schema file
-# here. The directory is empty until then, and an empty directory
-# means no schema, which the agent accepts.
+# difference on every start. The directory holds one file,
+# `catalog.sql`, which defines the item header and the item tables.
 schema_paths = ["/etc/corrosion/schema"]
 
 # The SQLite page cache, in KiB as a negative number. 64 MiB in place
@@ -55,11 +54,24 @@ addr = "0.0.0.0:8787"
 # TLS needs a certificate per pod that nothing in this project mints.
 plaintext = true
 
-# This plan runs one agent per pod, and an agent with no peers holds
-# only the catalog its own scanner writes. Plan 03 gives each agent the
-# headless `Service` over the pods that run one, and the agents find
-# each other through it.
-bootstrap = []
+# The bootstrap list names the headless `Service` `catalog` in
+# `liken-system`. That `Service` has no selector, because a selector
+# sees only its own namespace, and a `Library` can be in any namespace.
+# The operator writes the `Service`'s `EndpointSlice` with the address
+# of every pod that runs an agent, so an agent resolves this one name
+# and dials the rest of the cluster.
+#
+# The list is in this file and not in the pod, because Corrosion loads
+# its configuration with the `config` crate 0.13, which cannot parse a
+# list from an environment variable: `GOSSIP__BOOTSTRAP` fails with
+# "expected a sequence". Every other setting a pod changes is a scalar
+# and still arrives as a variable.
+#
+# An agent resolves this list again for its whole life, on a backoff
+# from 5 s to 120 s, and ignores its own address in the answer. So a
+# pod that starts before its peers joins them when they arrive, and
+# one name serves every agent.
+bootstrap = ["catalog.liken-system.svc:8787"]
 
 [admin]
 # The admin socket answers `corrosion cluster members` and the other

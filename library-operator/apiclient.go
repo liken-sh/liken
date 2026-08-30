@@ -183,6 +183,10 @@ const (
 	corePrefix    = "/api/v1/namespaces/"
 	volumesPath   = "/api/v1/persistentvolumes"
 	podsAllPath   = "/api/v1/pods"
+
+	// The slice behind the catalog Service, written in the operator's
+	// own namespace and nowhere else.
+	endpointSlicePrefix = "/apis/" + endpointSliceAPIVersion + "/namespaces/"
 )
 
 // scannerPodsQuery narrows a pod list or a pod watch to this
@@ -201,6 +205,10 @@ func claimPath(namespace, name string) string {
 
 func podsPath(namespace string) string {
 	return corePrefix + namespace + "/pods"
+}
+
+func endpointSlicesPath(namespace string) string {
+	return endpointSlicePrefix + namespace + "/endpointslices"
 }
 
 // ListLibraries answers a whole pass with one request, and the list's
@@ -294,4 +302,45 @@ func DeletePod(c *Client, namespace, name string) error {
 		return nil
 	}
 	return err
+}
+
+// GetEndpointSlice reads the live catalog slice, for the endpoints it
+// holds now and for the resourceVersion the write is made conditional
+// on. An absent slice is ErrNotFound, which the pass answers by
+// creating one.
+func GetEndpointSlice(c *Client, namespace, name string) (*EndpointSlice, error) {
+	slice := &EndpointSlice{}
+	if err := c.RequestJSON(http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
+		return nil, err
+	}
+	return slice, nil
+}
+
+func CreateEndpointSlice(c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+	body, err := json.Marshal(slice)
+	if err != nil {
+		return nil, err
+	}
+	created := &EndpointSlice{}
+	path := endpointSlicesPath(slice.Metadata.Namespace)
+	if err := c.RequestJSON(http.MethodPost, path, body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// UpdateEndpointSlice writes the whole slice back. The resourceVersion
+// in the body makes the write conditional, so a slice that changed
+// underneath answers ErrConflict, and the next pass reads it again.
+func UpdateEndpointSlice(c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+	body, err := json.Marshal(slice)
+	if err != nil {
+		return nil, err
+	}
+	written := &EndpointSlice{}
+	path := endpointSlicesPath(slice.Metadata.Namespace) + "/" + slice.Metadata.Name
+	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
 }

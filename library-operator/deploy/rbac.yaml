@@ -5,7 +5,10 @@
 # hash no longer matches what the pass builds. Otherwise the teardown
 # is the garbage collector's, through the ownerReference every scanner
 # pod carries, so deleting the Library is the whole stop. It deletes no
-# object a person created.
+# object a person created. One grant is namespaced: the operator writes
+# the catalog EndpointSlice in its own namespace, through the Role
+# below, and that slice is the only object it writes outside a
+# Library's own namespace.
 #
 # The scanner pods hold no credential of their own. They report over
 # the bus, and the operator writes what they report, so nothing in this
@@ -57,6 +60,35 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
+---
+# The catalog EndpointSlice, written in the operator's own namespace
+# and nowhere else. This is a Role and not a rule on the ClusterRole,
+# because the operator writes exactly one slice in one namespace, and a
+# cluster-wide grant over endpointslices would let it rewrite the
+# endpoints of every Service in the cluster. There is no delete and no
+# list: the slice is read by name, and it exists as long as the
+# operator does.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: library-operator
+rules:
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: library-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: library-operator
+subjects:
+  - kind: ServiceAccount
+    name: library-operator
+    namespace: liken-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
