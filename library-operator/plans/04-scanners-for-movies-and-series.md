@@ -45,6 +45,33 @@ contract is the same for every kind.
 The project ships one image per kind. A settings block may name another
 image, which is how a person supplies a scanner of their own.
 
+## The catalog is durable and pruned
+
+The first drill added two elements to this plan.
+
+The scanner keeps its catalog on a `PersistentVolumeClaim`, not an
+`emptyDir`. The catalog is derived, and a rescan rebuilds it, but a
+catalog held only on `emptyDir` volumes vanishes the moment no pod runs
+one, and rebuilding a large catalog on every restart is work the volume
+already answered. The scanner is the catalog's one writer and its source
+of truth for a library, so its agent's catalog is durable: the scanner
+starts from the catalog it last wrote. A screen's agent stays an
+`emptyDir`, because a screen is a reader that re-syncs from the scanner.
+This does not change the derived, provider-scoped id. The id is still
+read off the volume, and the claim holds the derived catalog, not any
+minted state.
+
+The scanner prunes what the volume no longer holds. Because it starts
+from the catalog it last wrote, it reconciles against what the catalog
+holds, not against an in-memory record of one session's writes, so a
+removal survives a restart and reaches every peer. A walk is two passes.
+The scan pass reads the volume and upserts the items, files, and aliases
+it finds. The prune pass reads the catalog and deletes every item, file,
+and alias the scan pass did not see, and every one whose folder the
+`ignore` list now names. So a title deleted from the volume, and a folder
+that starts matching the `ignore` list, both leave the catalog on the
+next walk.
+
 ## Movies
 
 A movies library is one folder per title, at the root or under one level
@@ -132,6 +159,8 @@ no `.nfo`. A series library reports its series, and the catalog has the
 right season and episode structure for one series checked by hand. A
 file added to the volume and announced by a webhook appears in the
 catalog within a few seconds. A file added with no webhook appears after
-the next slow walk. The catalog's `state.db` size for the lab's movies
+the next slow walk. The scanner's catalog survives a restart of its pod.
+A title deleted from the volume, and a folder added to the `ignore` list,
+both leave the catalog on the next walk. The catalog's `state.db` size for the lab's movies
 and series is recorded in the completed plan, because plan 06 budgets
 against it.
