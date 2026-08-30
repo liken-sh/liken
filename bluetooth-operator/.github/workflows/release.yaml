@@ -48,6 +48,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
 
       # The tests gate the release. An image that reaches ghcr.io is
       # one that passed them, so a rollback target is always a build
@@ -55,39 +56,64 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+      - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the operator
+      # The three images build here and push nothing yet. A build
+      # that fails then leaves no half-released version behind, where
+      # a push per image could leave two of three on :latest.
+      #
+      # The builds read and write the same :buildcache tags ci.yaml
+      # uses, so a release of a commit CI already built rebuilds
+      # nothing.
+      - name: Build the operator
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          file: Dockerfile
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache,mode=max
           tags: |
             ghcr.io/liken-sh/bluetooth-operator:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetooth-operator:latest
 
-      - name: Build and push bluetooth-bondfetch
+      - name: Build bluetooth-bondfetch
         uses: docker/build-push-action@v6
         with:
           context: .
           file: bondfetch/Dockerfile
-          push: true
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache,mode=max
           tags: |
             ghcr.io/liken-sh/bluetooth-bondfetch:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetooth-bondfetch:latest
 
       # This one builds BlueZ and dbus from source, so it takes
       # minutes rather than seconds.
-      - name: Build and push bluetoothd
+      - name: Build bluetoothd
         uses: docker/build-push-action@v6
         with:
           context: .
           file: bluetoothd/Dockerfile
-          push: true
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache,mode=max
           tags: |
             ghcr.io/liken-sh/bluetoothd:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetoothd:latest
+
+      - name: Push the images
+        run: |
+          docker push "ghcr.io/liken-sh/bluetooth-operator:$VERSION"
+          docker push "ghcr.io/liken-sh/bluetooth-operator:latest"
+          docker push "ghcr.io/liken-sh/bluetooth-bondfetch:$VERSION"
+          docker push "ghcr.io/liken-sh/bluetooth-bondfetch:latest"
+          docker push "ghcr.io/liken-sh/bluetoothd:$VERSION"
+          docker push "ghcr.io/liken-sh/bluetoothd:latest"
