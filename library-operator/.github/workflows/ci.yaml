@@ -46,7 +46,11 @@ jobs:
       - run: make test-go
 
   rust:
-    runs-on: ubuntu-latest
+    # The headless tests run under cage, and the cage in Ubuntu 24.04
+    # (0.1.5) dies on an assertion when wlr-randr changes the output
+    # mode. Ubuntu 26.04 carries 0.2.1, which takes the change, and it
+    # is the release the workstations run.
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: media-browser
@@ -130,6 +134,18 @@ jobs:
   # and writes none.
   images:
     runs-on: ubuntu-latest
+    # One job per image, so the three build at once and the run is as
+    # long as the slowest of them, not the sum.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: library-operator
+            context: .
+          - image: library-operator-media-browser
+            context: media-browser
+          - image: library-operator-corrosion
+            context: corrosion
     steps:
       - uses: actions/checkout@v7
 
@@ -141,29 +157,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: build the operator image
+      - name: build ${{ matrix.image }}
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
           push: false
-          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache
-          cache-to: ${{ github.event_name != 'pull_request' && 'type=registry,ref=ghcr.io/liken-sh/library-operator:buildcache,mode=max' || '' }}
-
-      - name: build the media browser image
-        uses: docker/build-push-action@v6
-        with:
-          context: media-browser
-          file: media-browser/Dockerfile
-          push: false
-          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache
-          cache-to: ${{ github.event_name != 'pull_request' && 'type=registry,ref=ghcr.io/liken-sh/library-operator-media-browser:buildcache,mode=max' || '' }}
-
-      - name: build the Corrosion image
-        uses: docker/build-push-action@v6
-        with:
-          context: corrosion
-          file: corrosion/Dockerfile
-          push: false
-          cache-from: type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache
-          cache-to: ${{ github.event_name != 'pull_request' && 'type=registry,ref=ghcr.io/liken-sh/library-operator-corrosion:buildcache,mode=max' || '' }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref=ghcr.io/liken-sh/{0}:buildcache,mode=max', matrix.image) || '' }}
