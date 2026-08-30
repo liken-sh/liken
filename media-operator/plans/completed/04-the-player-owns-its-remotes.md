@@ -52,14 +52,14 @@ The reference is a name, not a selector. A `Player` names its
 `Remote`s the way it will name anything it owns, and a name is exact
 where a selector invites the question of what a second match means.
 
-## The namespace is the room
+## References stay in the namespace
 
 Every reference between a `Player`, a `Play`, and a `Remote` resolves
 in the object's own namespace. Nothing points across a namespace
-boundary. A person who wants to model rooms or floors as namespaces
-gets a clean result: a room's `Player`s, `Remote`s, and the `Play`s
-run against them all live together, and deleting the room's namespace
-deletes the room.
+boundary. A namespace is not a room: one namespace holds every
+`Player`, `Remote`, and `Play` of a household, and a `Player`'s `zone`
+is the word that groups units by where they are. A person who wants a
+second namespace draws an access boundary, not a floor plan.
 
 Same-namespace is the Kubernetes rule for a reason this project keeps.
 An owner reference cannot cross a namespace, and the design tears a
@@ -67,7 +67,7 @@ An owner reference cannot cross a namespace, and the design tears a
 cross-namespace reference would break that teardown. A namespace is
 also the unit of access control, and a reference that crosses it
 reaches past the boundary the namespace exists to draw. The one
-resource that is shared across rooms is the `Keymap`, and plan 05
+resource that is shared across namespaces is the `Keymap`, and plan 05
 lifts it to cluster scope rather than let any reference cross a
 namespace.
 

@@ -321,8 +321,7 @@ func operate() {
 
 // pass runs one reconcile over every Play and every Remote in the
 // cluster. A failure on one object is reported and the pass continues,
-// because one namespace's broken run must not freeze every other room's
-// status.
+// because one broken run must not freeze every other unit's status.
 func (o *operator) pass() {
 	if o.busReconnected.Swap(false) {
 		o.reestablishRetained()
