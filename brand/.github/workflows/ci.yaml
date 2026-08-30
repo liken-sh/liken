@@ -18,13 +18,21 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
+      # setup-go keeps the module downloads and the build cache
+      # between runs, keyed on go.sum, so a run compiles only what
+      # changed.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
 
-      - run: make test
+      # The same target a workstation runs: gofmt, vet, the race
+      # tests, and the coverage gate on its pinned toolchain. The
+      # Makefile says why the gate pins a toolchain, and
+      # .testcoverage.yml holds the floors.
+      - run: make test-go

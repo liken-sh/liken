@@ -9,7 +9,7 @@
 # must already hold everything the theme serves. The default target
 # is for a person who changes the mark or the stylesheet: edit an
 # original, run `make`, and commit the files that change. CI runs
-# only `make test`, the checks for the Go packages below.
+# only `make test-go`, the checks for the Go packages below.
 #
 # rsvg-convert (from librsvg) turns the vector image into pixels, and
 # ImageMagick packs the multi-size .ico file.
@@ -79,11 +79,16 @@ assets/liken.css: liken.css
 # counts each block once, which is what .testcoverage.yml's
 # thresholds were set against. Move this pin to the newest toolchain
 # that counts each block once.
-test:
+COVERAGE_TOOLCHAIN := go1.26.7
+
+test: test-go
+
+test-go:
+	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go vet ./...
 	go tool staticcheck ./...
-	go test ./...
-	GOTOOLCHAIN=go1.26.7 go test -coverprofile=coverage.out ./...
-	GOTOOLCHAIN=go1.26.7 go tool go-test-coverage --config=.testcoverage.yml
+	go test -race ./...
+	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
+	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
 
-.PHONY: all test
+.PHONY: all test test-go
