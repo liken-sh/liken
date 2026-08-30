@@ -85,7 +85,7 @@ func TestReconcileReportsStorageThatIsNotBound(t *testing.T) {
 				cluster.claims["movies"] = one.claim
 			}
 
-			if err := testOperator(t, cluster).reconcile(library); err != nil {
+			if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
 				t.Fatal(err)
 			}
 
@@ -116,7 +116,7 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(library); err != nil {
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,7 +145,7 @@ func TestReconcileReportsAVolumeItKnowsNothingAbout(t *testing.T) {
 	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
 		`{"csi":{"driver":"nas.example","volumeHandle":"movies"}}}`
 
-	if err := testOperator(t, cluster).reconcile(library); err != nil {
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,13 +155,58 @@ func TestReconcileReportsAVolumeItKnowsNothingAbout(t *testing.T) {
 	}
 }
 
+// A bound Library in a namespace with no Catalog waits: it gets no
+// scanner pod, and Ready says the namespace has no Catalog. The storage
+// is still bound, so a person sees the one thing that is missing.
+func TestReconcileWaitsForACatalog(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+
+	if err := testOperator(t, cluster).reconcile(library, singleCatalog(nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.countRequests(http.MethodPost, "pods") != 0 {
+		t.Error("a scanner pod was created for a Library with no Catalog")
+	}
+	status := cluster.heldLibrary("movies").Status
+	if bound := conditionOf(t, status, conditionBound); bound.Status != ConditionTrue {
+		t.Errorf("Bound = %+v, want True", bound)
+	}
+	if ready := conditionOf(t, status, conditionReady); ready.Reason != reasonNoCatalog {
+		t.Errorf("Ready = %+v, want NoCatalog", ready)
+	}
+}
+
+// A bound Library in a namespace with a Catalog provisions its durable
+// catalog claim before it stands the scanner pod.
+func TestReconcileProvisionsTheCatalogClaim(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+		t.Fatal(err)
+	}
+
+	claim := cluster.heldClaim("movies-catalog")
+	if claim == nil {
+		t.Fatal("the reconcile provisioned no catalog claim")
+	}
+	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
+		t.Errorf("accessModes = %v, want ReadWriteOnce", claim.Spec.AccessModes)
+	}
+	if cluster.heldPod("movies-scanner") == nil {
+		t.Error("the reconcile stood no scanner pod")
+	}
+}
+
 // A bound Library gets its scanner pod, stamped with the hash of the
 // template that built it and named in the status.
 func TestReconcileCreatesTheScannerPod(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(library); err != nil {
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +235,7 @@ func TestReconcileReplacesAStalePod(t *testing.T) {
 	cluster.pods["movies-scanner"] = stale
 	operator := testOperator(t, cluster)
 
-	if err := operator.reconcile(library); err != nil {
+	if err := operator.reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -201,7 +246,7 @@ func TestReconcileReplacesAStalePod(t *testing.T) {
 		t.Errorf("Ready = %+v, want PodPending while the pod is replaced", got)
 	}
 
-	if err := operator.reconcile(library); err != nil {
+	if err := operator.reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,7 +269,7 @@ func TestReconcileLeavesATerminatingPodAlone(t *testing.T) {
 	leaving.Metadata.DeletionTimestamp = "2026-08-29T12:00:00Z"
 	cluster.pods["movies-scanner"] = leaving
 
-	if err := testOperator(t, cluster).reconcile(library); err != nil {
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -243,7 +288,7 @@ func TestReconcileKeepsAMatchingPod(t *testing.T) {
 	library := boundHouse(cluster)
 	cluster.pods["movies-scanner"] = standingPod(t, library, podRunning, true)
 
-	if err := testOperator(t, cluster).reconcile(library); err != nil {
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +307,7 @@ func TestReconcileAcceptsAConflictOnCreate(t *testing.T) {
 	library := boundHouse(cluster)
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).reconcile(library); err != nil {
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -288,7 +333,7 @@ func TestReconcileFailsWhenTheClusterCannotBeRead(t *testing.T) {
 			library := boundHouse(cluster)
 			cluster.broken[one.path] = http.StatusInternalServerError
 
-			err := testOperator(t, cluster).reconcile(library)
+			err := testOperator(t, cluster).reconcile(library, withCatalog())
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the pass could not read past")
@@ -307,11 +352,11 @@ func TestReconcileWritesASettledStatusOnce(t *testing.T) {
 	operator := testOperator(t, cluster)
 	operator.reports.fold("house", "movies", libraryReport{Titles: 12, Unidentified: 2})
 
-	if err := operator.reconcile(library); err != nil {
+	if err := operator.reconcile(library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 	written := cluster.heldLibrary("movies")
-	if err := operator.reconcile(written); err != nil {
+	if err := operator.reconcile(written, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 

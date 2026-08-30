@@ -6,42 +6,60 @@ package main
 // and no deeper.
 
 import (
+	"iter"
 	"os"
 	"path/filepath"
 	"strconv"
 )
 
-// walkMovies reads a movies root into a walkResult. A directory under the root
-// that holds a movie.nfo or a video file is a title folder. A directory that
-// holds neither is a grouping folder, and its own children are title folders.
-// The walk descends one level, because the lab groups by genre and no volume
-// nests deeper.
+// walkMovies reads a whole movies root into one walkResult by collecting the
+// folder stream. The tests and a small library use this whole-root read.
 func walkMovies(root, library string, ignore ignoreSet) *walkResult {
-	result := &walkResult{}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return result
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || ignore.skips(entry.Name()) {
-			continue
+	return collectFolders(walkMovieFolders(root, library, ignore))
+}
+
+// walkMovieFolders streams a movies root one title folder at a time. A directory
+// under the root that holds a movie.nfo or a video file is a title folder. A
+// directory that holds neither is a grouping folder, and its own children are
+// title folders. The walk descends one level, because the lab groups by genre
+// and no volume nests deeper. A read error at the root yields one result marked
+// with the error and nothing else, so the caller keeps the catalog.
+func walkMovieFolders(root, library string, ignore ignoreSet) iter.Seq[*walkResult] {
+	return func(yield func(*walkResult) bool) {
+		emit := func(dir string) bool {
+			folder := &walkResult{}
+			scanMovieFolder(root, dir, library, folder)
+			return yield(folder)
 		}
-		dir := filepath.Join(root, entry.Name())
-		if isMovieTitleFolder(dir) {
-			scanMovieFolder(root, dir, library, result)
-			continue
-		}
-		grouped, err := os.ReadDir(dir)
+		entries, err := os.ReadDir(root)
 		if err != nil {
-			continue
+			yield(&walkResult{readError: true})
+			return
 		}
-		for _, child := range grouped {
-			if child.IsDir() && !ignore.skips(child.Name()) {
-				scanMovieFolder(root, filepath.Join(dir, child.Name()), library, result)
+		for _, entry := range entries {
+			if !entry.IsDir() || ignore.skips(entry.Name()) {
+				continue
+			}
+			dir := filepath.Join(root, entry.Name())
+			if isMovieTitleFolder(dir) {
+				if !emit(dir) {
+					return
+				}
+				continue
+			}
+			grouped, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			for _, child := range grouped {
+				if child.IsDir() && !ignore.skips(child.Name()) {
+					if !emit(filepath.Join(dir, child.Name())) {
+						return
+					}
+				}
 			}
 		}
 	}
-	return result
 }
 
 // isMovieTitleFolder reports whether a directory is a title folder: it holds a

@@ -1,9 +1,9 @@
 package main
 
-// These tests run the walk-apply layer against the same
-// capturing HTTP server the catalog tests use, so the upserts, the
-// reconciliation deletes, and the change signal are proved with no
-// Corrosion agent.
+// These tests run the upsert layer against the same capturing HTTP server
+// the catalog tests use, so the item, file, and alias writes and the error
+// path are proved with no Corrosion agent. The mark-and-sweep reconciliation
+// is proved against a stateful fake in prune_test.go.
 
 import (
 	"context"
@@ -23,7 +23,7 @@ func recordingCatalog(t *testing.T) (*Catalog, *catalogRecorder) {
 }
 
 // sqlKinds reads the leading verb-and-table of every posted statement,
-// so a test asserts what the apply layer wrote without matching whole
+// so a test asserts what the write layer wrote without matching whole
 // SQL text.
 func sqlKinds(recorder *catalogRecorder) []string {
 	var kinds []string
@@ -45,8 +45,21 @@ func containsKind(kinds []string, want string) bool {
 	return false
 }
 
+// postedWith reports whether any posted statement bound the value, so a
+// test proves a row was written by the id or path it carries.
+func postedWith(recorder *catalogRecorder, value string) bool {
+	for _, statement := range recorder.all() {
+		for _, param := range statement.params {
+			if s, ok := param.(string); ok && s == value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // oneMovie builds a walk result of a single movie, its file, and its
-// aliases, the smallest whole title the apply layer writes.
+// aliases, the smallest whole title the upsert layer writes.
 func oneMovie(id, path string) *walkResult {
 	return &walkResult{
 		movies:  []movieRow{{Id: id, Library: "house/movies", Kind: libraryKindMovies, Path: path, Title: "T"}},
@@ -56,124 +69,37 @@ func oneMovie(id, path string) *walkResult {
 	}
 }
 
-func TestApplyFullWritesAndReportsChange(t *testing.T) {
+func TestUpsertWalkWritesTheItemFileAndAlias(t *testing.T) {
 	catalog, recorder := recordingCatalog(t)
-	state, changed, err := applyFull(context.Background(), catalog, newCatalogState(), oneMovie("movie:tmdb:1", "One"))
+	wrote, err := upsertWalk(context.Background(), catalog, oneMovie("movie:tmdb:1", "One"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !changed {
-		t.Error("the first walk wrote rows but reported no change")
+	if !wrote {
+		t.Error("upsertWalk wrote rows but reported none")
 	}
 	kinds := sqlKinds(recorder)
 	if !containsKind(kinds, "INSERT MOVIES") || !containsKind(kinds, "INSERT FILES") || !containsKind(kinds, "INSERT ALIASES") {
 		t.Errorf("statements = %v, want the item, file, and alias upserts", kinds)
 	}
-	if !state.movies["movie:tmdb:1"] {
-		t.Error("the new state does not hold the movie id")
-	}
 }
 
-func TestApplyFullDeletesWhatLeftTheVolume(t *testing.T) {
-	catalog, recorder := recordingCatalog(t)
-	previous, _, err := applyFull(context.Background(), catalog, newCatalogState(), oneMovie("movie:tmdb:1", "One"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The second walk holds a different title, so the first title and
-	// its file left the volume and the apply layer removes their rows.
-	state, changed, err := applyFull(context.Background(), catalog, previous, oneMovie("movie:tmdb:2", "Two"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Error("a walk that dropped a title reported no change")
-	}
-	kinds := sqlKinds(recorder)
-	if !containsKind(kinds, "DELETE MOVIES") || !containsKind(kinds, "DELETE FILES") || !containsKind(kinds, "DELETE FILE_ITEMS") || !containsKind(kinds, "DELETE ALIASES") {
-		t.Errorf("statements = %v, want deletes for the departed title", kinds)
-	}
-	if state.movies["movie:tmdb:1"] {
-		t.Error("the departed movie is still in the state")
-	}
-}
-
-func TestApplyFullReportsNoChangeOnAnEmptyWalk(t *testing.T) {
+func TestUpsertWalkReportsNothingWrittenForAnEmptyWalk(t *testing.T) {
 	catalog, _ := recordingCatalog(t)
-	_, changed, err := applyFull(context.Background(), catalog, newCatalogState(), &walkResult{})
+	wrote, err := upsertWalk(context.Background(), catalog, &walkResult{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changed {
-		t.Error("an empty walk of an empty catalog reported a change")
+	if wrote {
+		t.Error("an empty walk reported a write")
 	}
 }
 
-func TestApplyPartialUpsertsWithoutDeleting(t *testing.T) {
-	catalog, recorder := recordingCatalog(t)
-	previous, _, err := applyFull(context.Background(), catalog, newCatalogState(), oneMovie("movie:tmdb:1", "One"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// A rescan reads one other title, writes it, and leaves the first
-	// alone, because it cannot tell what left the rest of the volume.
-	state, changed, err := applyPartial(context.Background(), catalog, previous, oneMovie("movie:tmdb:2", "Two"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Error("a rescan that wrote a title reported no change")
-	}
-	if containsKind(sqlKinds(recorder), "DELETE MOVIES") {
-		t.Error("a rescan deleted a row")
-	}
-	if !state.movies["movie:tmdb:1"] || !state.movies["movie:tmdb:2"] {
-		t.Errorf("state = %v, want both titles after a merge", state.movies)
-	}
-}
-
-func TestApplyFullSurfacesAWriteError(t *testing.T) {
+func TestUpsertWalkSurfacesAWriteError(t *testing.T) {
 	catalog, recorder := recordingCatalog(t)
 	recorder.status = 500
-	_, _, err := applyFull(context.Background(), catalog, newCatalogState(), oneMovie("movie:tmdb:1", "One"))
+	_, err := upsertWalk(context.Background(), catalog, oneMovie("movie:tmdb:1", "One"))
 	if err == nil {
-		t.Error("applyFull hid a catalog write failure")
-	}
-}
-
-// oneSeries builds a walk result of a series, one episode, and its file.
-func oneSeries(seriesID, episodeID, path string) *walkResult {
-	return &walkResult{
-		series:   []seriesRow{{Id: seriesID, Library: "house/series", Kind: libraryKindSeries, Title: "S"}},
-		episodes: []episodeRow{{Id: episodeID, Library: "house/series", Kind: libraryKindSeries, Series: seriesID, Season: 1, Episode: 1}},
-		files:    []fileRow{{Path: path, Library: "house/series", Present: true, Items: []string{episodeID}}},
-		aliases:  []aliasRow{{Alias: seriesID, Item: seriesID, Source: aliasSourceProvider}},
-		titles:   1,
-	}
-}
-
-func TestApplyFullDeletesADepartedSeriesAndEpisodes(t *testing.T) {
-	catalog, recorder := recordingCatalog(t)
-	previous, _, err := applyFull(context.Background(), catalog, newCatalogState(),
-		oneSeries("series:tvdb:1", "episode:tvdb:1:s01e01", "one.mkv"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The second walk holds a different series, so the first series, its
-	// episode, and its file all left the volume.
-	_, changed, err := applyFull(context.Background(), catalog, previous,
-		oneSeries("series:tvdb:2", "episode:tvdb:2:s01e01", "two.mkv"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Error("dropping a series reported no change")
-	}
-	kinds := sqlKinds(recorder)
-	if !containsKind(kinds, "DELETE SERIES") || !containsKind(kinds, "DELETE EPISODES") {
-		t.Errorf("statements = %v, want the series and episode deletes", kinds)
+		t.Error("upsertWalk hid a catalog write failure")
 	}
 }

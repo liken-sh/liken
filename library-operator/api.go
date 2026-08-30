@@ -149,18 +149,23 @@ type LibrarySettings struct {
 // the claim resolved to, the scanner's report, the pod that runs the
 // scanner, and the conditions.
 //
-// The two counts carry no omitempty. A library of zero titles is a
+// The counts carry no omitempty. A library of zero titles is a
 // real answer, and a column that reads 0 says it, where an omitted
 // field reads as nothing at all. The conditions say whether a report
 // arrived.
+//
+// RemovedLastSweep is the count of catalog rows the scanner's last full
+// sweep removed, folded from the bus report. A partial walk that pruned
+// too much shows here, so a mass delete is visible without a shell.
 type LibraryStatus struct {
-	Volume       *LibraryVolume `json:"volume,omitempty"`
-	Titles       int            `json:"titles"`
-	Unidentified int            `json:"unidentified"`
-	LastWalk     time.Time      `json:"lastWalk,omitzero"`
-	LastChange   time.Time      `json:"lastChange,omitzero"`
-	Pod          string         `json:"pod,omitempty"`
-	Conditions   []Condition    `json:"conditions,omitempty"`
+	Volume           *LibraryVolume `json:"volume,omitempty"`
+	Titles           int            `json:"titles"`
+	Unidentified     int            `json:"unidentified"`
+	RemovedLastSweep int            `json:"removedLastSweep"`
+	LastWalk         time.Time      `json:"lastWalk,omitzero"`
+	LastChange       time.Time      `json:"lastChange,omitzero"`
+	Pod              string         `json:"pod,omitempty"`
+	Conditions       []Condition    `json:"conditions,omitempty"`
 }
 
 // LibraryVolume is the PersistentVolume the claim is bound to,
@@ -190,11 +195,13 @@ const (
 	reasonClaimUnbound   = "ClaimUnbound"
 	reasonVolumeNotFound = "VolumeNotFound"
 
-	reasonReady      = "Ready"
-	reasonNotBound   = "NotBound"
-	reasonPodPending = "PodPending"
-	reasonPodFailed  = "PodFailed"
-	reasonNoReport   = "NoReport"
+	reasonReady        = "Ready"
+	reasonNotBound     = "NotBound"
+	reasonNoCatalog    = "NoCatalog"
+	reasonManyCatalogs = "ManyCatalogs"
+	reasonPodPending   = "PodPending"
+	reasonPodFailed    = "PodFailed"
+	reasonNoReport     = "NoReport"
 )
 
 // ConditionStatus is a condition's verdict. It is a string rather than

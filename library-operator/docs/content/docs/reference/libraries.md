@@ -47,6 +47,7 @@ The volume this library covers, the kind of media it holds, and the settings for
 | <span id="spec--movies"></span>`movies` | [object](#specmovies) | no | The settings for a library of movies, one folder per title. Present exactly when kind is movies, and empty is a complete block: every setting has a default. |
 | <span id="spec--series"></span>`series` | [object](#specseries) | no | The settings for a library of series, one folder per series with a folder per season inside it. Present exactly when kind is series, and empty is a complete block. |
 | <span id="spec--sources"></span>`sources` | []string | no | The metadata providers to ask about a title, in the order they are asked: the first that answers supplies the title's metadata. Enrichment reads this list. Nothing acts on it yet, and a library that omits it takes what the files themselves carry. |
+| <span id="spec--ignore"></span>`ignore` | []string | no | Path components to skip. The scanner leaves out any folder whose name matches an entry, and everything under it, so a volume's non-media folders such as a recycle bin or a staging directory stay out of the catalog. |
 
 ### spec.storage
 
@@ -82,6 +83,7 @@ What the volume resolved to and what the scanner reports, written only by the li
 | <span id="status--volume"></span>`volume` | [object](#statusvolume) | no | The PersistentVolume the claim is bound to. It is absent until the claim binds. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume. |
 | <span id="status--titles"></span>`titles` | integer | no | How many titles the scanner's last walk cataloged. |
 | <span id="status--unidentified"></span>`unidentified` | integer | no | How many folders the last walk could not identify: no sidecar file, and no confident parse of the folder name. They are cataloged under their folder names, so they are still browsable. |
+| <span id="status--removedlastsweep"></span>`removedLastSweep` | integer | no | How many catalog rows the scanner's last full sweep removed. A mass delete that a partial walk caused shows here, without a shell. |
 | <span id="status--lastwalk"></span>`lastWalk` | string | no | When the scanner last finished a full walk of the volume. |
 | <span id="status--lastchange"></span>`lastChange` | string | no | When the scanner last wrote a change to the catalog. A walk that finds nothing new moves lastWalk and leaves this alone. |
 | <span id="status--pod"></span>`pod` | string | no | The scanner pod's name, for kubectl describe and logs. The pod is owned by this Library and is deleted with it. |
@@ -125,12 +127,13 @@ the `Library`'s status.
 
 ### `status`
 
-The report, as the operator writes it into the status: the two counts
-and the two times.
+The report, as the operator writes it into the status: the counts, the
+rows the last sweep removed, and the two times.
 
     {
       "titles": 412,
       "unidentified": 9,
+      "removedLastSweep": 3,
       "lastWalk": "2026-08-29T21:04:11Z",
       "lastChange": "2026-08-29T21:04:11Z"
     }

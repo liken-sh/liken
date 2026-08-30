@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net"
 	"net/http"
 	"os"
@@ -127,11 +128,10 @@ type scanner struct {
 	report libraryReport
 
 	// walkMutex serializes the walks. A timer walk and a webhook rescan
-	// can arrive at once, and both write the catalog and the record of
-	// what it holds. One walk runs at a time, so the record stays
-	// consistent.
+	// can arrive at once, and both write the catalog and reconcile it
+	// against the volume. One walk runs at a time, so the reconciliation
+	// reads a settled catalog.
 	walkMutex sync.Mutex
-	state     catalogState
 
 	webhookAddr string
 }
@@ -188,7 +188,6 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 		ignore:            ignore,
 		catalog:           NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
 		report:            libraryReport{LastWalk: started, LastChange: started},
-		state:             newCatalogState(),
 	}
 	// The will is what marks the scanner offline when the pod dies
 	// without a chance to publish, which is every kill the kubelet does
@@ -270,51 +269,125 @@ func (s *scanner) runTimer(ctx context.Context) {
 	}
 }
 
-// walk reads the whole root for this library's kind. An unknown kind
-// reads nothing and reports zero titles rather than failing.
-func (s *scanner) walk() *walkResult {
+// walkFolders streams the title folders for this library's kind, one at
+// a time, so a full walk holds one folder and never the whole library.
+// An unknown kind streams nothing and reports zero titles rather than
+// failing. A cancelled context stops the stream between folders, so a
+// walk of a large volume does not run on past a shutdown.
+func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
+	var folders iter.Seq[*walkResult]
 	switch s.kind {
 	case libraryKindMovies:
-		return walkMovies(s.root, s.library, s.ignore)
+		folders = walkMovieFolders(s.root, s.library, s.ignore)
 	case libraryKindSeries:
-		return walkSeries(s.root, s.library, s.ignore)
+		folders = walkSeriesFolders(s.root, s.library, s.ignore)
+	default:
+		return func(yield func(*walkResult) bool) {}
 	}
-	return &walkResult{}
+	return func(yield func(*walkResult) bool) {
+		for folder := range folders {
+			if ctx.Err() != nil {
+				return
+			}
+			if !yield(folder) {
+				return
+			}
+		}
+	}
 }
 
-// fullWalk reads the whole root, writes it to the catalog, and
-// reconciles the catalog to it. It updates the counts and the last-walk
-// time, and moves the last-change time only when the structure changed.
-// A write that fails leaves the record as it was, so the next walk
-// retries the removals.
+// fullWalk streams the root one title folder at a time, buffers the rows
+// until the buffer reaches scanFlushBatch, and flushes each buffer:
+// it upserts the rows and marks them with the walk's epoch. It then prunes
+// the rows the walk did not mark. It updates the counts and the last-walk
+// time, and moves the last-change time only when the catalog changed. A
+// write that fails leaves the catalog as it was, so the next walk retries.
+// An incomplete walk keeps its prune for the next clean walk, so a partial
+// read never mass-deletes.
 func (s *scanner) fullWalk(ctx context.Context) {
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
 
-	result := s.walk()
-	state, changed, err := applyFull(ctx, s.catalog, s.state, result)
+	if err := s.catalog.ensureSeen(ctx); err != nil {
+		return
+	}
+	epoch := time.Now().UnixNano()
+
+	before, err := s.catalog.countItems(ctx, s.library)
 	if err != nil {
 		return
 	}
-	s.state = state
+
+	buffer := &walkResult{}
+	buffered, items, titles, unidentified := 0, 0, 0, 0
+	readError := false
+	flush := func() bool {
+		if buffered == 0 {
+			return true
+		}
+		if err := flushWalk(ctx, s.catalog, buffer, epoch); err != nil {
+			return false
+		}
+		buffer = &walkResult{}
+		buffered = 0
+		return true
+	}
+
+	for folder := range s.walkFolders(ctx) {
+		if folder.readError {
+			readError = true
+		}
+		appendFolder(buffer, folder)
+		found := len(folder.movies) + len(folder.series) + len(folder.episodes)
+		items += found
+		buffered += found
+		titles += folder.titles
+		unidentified += folder.unidentified
+		if buffered >= scanFlushBatch && !flush() {
+			return
+		}
+	}
+	if !flush() {
+		return
+	}
+
+	removed := -1
+	if !incompleteWalk(readError, items, before) {
+		count, err := pruneLibrary(ctx, s.catalog, s.library, epoch)
+		if err != nil {
+			return
+		}
+		removed = count
+	}
+
+	after, err := s.catalog.countItems(ctx, s.library)
+	if err != nil {
+		return
+	}
 
 	now := time.Now().UTC()
 	s.mutex.Lock()
-	s.report.Titles = result.titles
-	s.report.Unidentified = result.unidentified
+	s.report.Titles = titles
+	s.report.Unidentified = unidentified
 	s.report.LastWalk = now
-	if changed {
+	if removed > 0 || after != before {
 		s.report.LastChange = now
+	}
+	if removed >= 0 {
+		s.report.RemovedLastSweep = removed
 	}
 	s.mutex.Unlock()
 	s.publishReport()
 }
 
-// rescan reads one title or series folder and upserts it, the answer to
-// a webhook that names an imported path. It moves the last-change time
-// when it wrote anything, and leaves the counts and the last-walk time
-// to the next full walk. A path that resolves to no folder falls back
-// to a full walk.
+// rescan reads one title or series folder and reconciles the catalog to
+// it, the answer to a webhook that names an imported path. It upserts what
+// the folder holds and prunes only that folder's rows the re-read did not
+// produce, such as a file an upgrade replaced. A folder that left the
+// volume marks nothing, so all of its rows leave. It moves the last-change
+// time when it wrote or removed a row, and leaves the counts and the
+// last-walk time to the next full walk. A path that resolves to no folder
+// falls back to a full walk.
 func (s *scanner) rescan(ctx context.Context, absolute string) {
 	folder := s.titleFolderOf(absolute)
 	if folder == "" {
@@ -324,22 +397,34 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
+
+	if err := s.catalog.ensureSeen(ctx); err != nil {
+		return
+	}
+	epoch := time.Now().UnixNano()
 	result := &walkResult{}
-	switch s.kind {
-	case libraryKindMovies:
-		scanMovieFolder(s.root, folder, s.library, result)
-	case libraryKindSeries:
-		scanSeriesFolder(s.root, folder, s.library, s.ignore, result)
-	default:
+	if dirExists(folder) {
+		switch s.kind {
+		case libraryKindMovies:
+			scanMovieFolder(s.root, folder, s.library, result)
+		case libraryKindSeries:
+			scanSeriesFolder(s.root, folder, s.library, s.ignore, result)
+		default:
+			return
+		}
+	}
+
+	if err := flushWalk(ctx, s.catalog, result, epoch); err != nil {
 		return
 	}
 
-	state, changed, err := applyPartial(ctx, s.catalog, s.state, result)
+	removed, err := pruneScope(ctx, s.catalog, s.library, relativePath(s.root, folder), epoch)
 	if err != nil {
 		return
 	}
-	s.state = state
-	if !changed {
+
+	wrote := len(result.movies)+len(result.series)+len(result.episodes)+len(result.files) > 0
+	if !wrote && removed == 0 {
 		return
 	}
 	s.mutex.Lock()

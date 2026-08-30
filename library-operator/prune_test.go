@@ -1,0 +1,318 @@
+package main
+
+// These tests prove the mark-and-sweep reconciliation against the stateful
+// fake catalog: a full walk marks what it read and prunes what it did not,
+// a partial walk keeps the catalog, a webhook prunes one folder, and the
+// prune never reaches another library's rows.
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// seedTitle writes one movie, its file, and its alias into the catalog the
+// real way, through the write client, so a prune test starts from a catalog
+// a walk could have written.
+func seedTitle(t *testing.T, catalog *Catalog, library, id, path string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := catalog.UpsertMovies(ctx, []movieRow{{Id: id, Library: library, Path: path, Title: id}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.UpsertFiles(ctx, []fileRow{{Path: path + "/movie.mkv", Library: library, Present: true, Items: []string{id}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.UpsertFileItems(ctx, []fileRow{{Path: path + "/movie.mkv", Items: []string{id}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.UpsertAliases(ctx, []aliasRow{{Alias: id, Item: id, Source: aliasSourceProvider}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPruneLibraryDeletesTheUnmarkedRows(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:2", "Two")
+
+	// A later walk read only the first title, so only it carries the epoch.
+	epoch := int64(1000)
+	if _, err := catalog.markSeen(ctx, []string{"movie:tmdb:1", "One/movie.mkv", "movie:tmdb:1"}, epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := pruneLibrary(ctx, catalog, "house/movies", epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 3 {
+		t.Errorf("removed = %d, want the departed movie, its file, and its alias", removed)
+	}
+	movies := fake.held(fake.movies)
+	if len(movies) != 1 || movies["movie:tmdb:1"].path != "One" {
+		t.Errorf("movies = %v, want only the marked title", movies)
+	}
+	if len(fake.held(fake.files)) != 1 {
+		t.Errorf("files = %v, want only the marked file", fake.held(fake.files))
+	}
+}
+
+func TestPruneLibraryKeepsAnotherLibrarysRows(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+	seedTitle(t, catalog, "studio/films", "movie:tmdb:9", "Nine")
+
+	// No id carries this epoch, so a library-blind prune would delete both.
+	// The prune scopes to its library, so the other library's row stands.
+	removed, err := pruneLibrary(ctx, catalog, "house/movies", int64(2000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 3 {
+		t.Errorf("removed = %d, want only this library's rows", removed)
+	}
+	movies := fake.held(fake.movies)
+	if _, held := movies["movie:tmdb:9"]; !held {
+		t.Errorf("movies = %v, want the other library's row kept", movies)
+	}
+	if _, held := movies["movie:tmdb:1"]; held {
+		t.Errorf("movies = %v, want this library's unmarked row gone", movies)
+	}
+}
+
+func TestPruneScopeDeletesOnlyTheFolder(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "Action/One")
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:2", "Action/Two")
+
+	// The webhook named the first folder, which left the volume, so the
+	// rescan marks nothing and the scoped prune removes only its rows.
+	removed, err := pruneScope(ctx, catalog, "house/movies", "Action/One", int64(3000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 3 {
+		t.Errorf("removed = %d, want only the named folder's rows", removed)
+	}
+	movies := fake.held(fake.movies)
+	if _, held := movies["movie:tmdb:2"]; !held {
+		t.Errorf("movies = %v, want the other folder kept", movies)
+	}
+	if _, held := movies["movie:tmdb:1"]; held {
+		t.Errorf("movies = %v, want the named folder gone", movies)
+	}
+}
+
+func TestIncompleteWalk(t *testing.T) {
+	cases := []struct {
+		name         string
+		readError    bool
+		items        int
+		catalogItems int
+		want         bool
+	}{
+		{name: "a read error at the root is incomplete", readError: true, items: 0, catalogItems: 100, want: true},
+		{name: "far below the catalog is incomplete", items: 10, catalogItems: 100, want: true},
+		{name: "above half is complete", items: 60, catalogItems: 100, want: false},
+		{name: "a small catalog skips the ratio guard", items: 0, catalogItems: 5, want: false},
+		{name: "a first walk of an empty catalog is complete", items: 3, catalogItems: 0, want: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := incompleteWalk(testCase.readError, testCase.items, testCase.catalogItems); got != testCase.want {
+				t.Errorf("incompleteWalk = %v, want %v", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestMarkKeysReadsEveryIdPathAndAlias(t *testing.T) {
+	result := &walkResult{
+		movies:   []movieRow{{Id: "movie:tmdb:1"}},
+		series:   []seriesRow{{Id: "series:tvdb:1"}},
+		episodes: []episodeRow{{Id: "episode:tvdb:1:s01e01"}},
+		files:    []fileRow{{Path: "one.mkv"}},
+		aliases:  []aliasRow{{Alias: "movie:imdb:tt1"}, {Alias: "movie:tmdb:1"}},
+	}
+	keys := markKeys(result)
+	want := map[string]bool{
+		"movie:tmdb:1": true, "series:tvdb:1": true, "episode:tvdb:1:s01e01": true,
+		"one.mkv": true, "movie:imdb:tt1": true,
+	}
+	if len(keys) != len(want) {
+		t.Errorf("keys = %v, want %d deduplicated keys", keys, len(want))
+	}
+	for _, key := range keys {
+		if !want[key] {
+			t.Errorf("keys = %v, holds an unexpected key %q", keys, key)
+		}
+	}
+}
+
+// fakeScanner builds a scanner over a root wired to the stateful fake
+// catalog and a bus that never connects, so a full walk runs the whole
+// mark-and-sweep with no cluster and no broker.
+func fakeScanner(t *testing.T, root, kind string) (*scanner, *fakeCatalog) {
+	t.Helper()
+	catalog, fake := newFakeCatalog(t)
+	scan := &scanner{
+		root:    root,
+		library: "house/movies",
+		kind:    kind,
+		catalog: catalog,
+		report:  libraryReport{LastWalk: time.Now().UTC(), LastChange: time.Now().UTC()},
+		bus:     newBus("", "test", nil, nil, nil),
+	}
+	return scan, fake
+}
+
+// titleTree writes a movie library of title folders under a temp dir, each
+// a folder with one video file, so a walk reads them as titles.
+func titleTree(t *testing.T, folders ...string) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, folder := range folders {
+		dir := filepath.Join(root, folder)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "movie.mkv"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestFullWalkPrunesADepartedTitleAndCountsIt(t *testing.T) {
+	root := titleTree(t, "A (2001)", "B (2002)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if len(fake.held(fake.movies)) != 2 {
+		t.Fatalf("movies = %v, want the two titles the first walk read", fake.held(fake.movies))
+	}
+
+	// The second title left the volume, so the next walk prunes it and the
+	// report carries the count of rows that left.
+	if err := os.RemoveAll(filepath.Join(root, "B (2002)")); err != nil {
+		t.Fatal(err)
+	}
+	scan.fullWalk(ctx)
+
+	movies := fake.held(fake.movies)
+	if len(movies) != 1 {
+		t.Fatalf("movies = %v, want only the surviving title", movies)
+	}
+	if scan.report.RemovedLastSweep != 3 {
+		t.Errorf("removedLastSweep = %d, want the departed movie, file, and alias", scan.report.RemovedLastSweep)
+	}
+}
+
+// The full walk buffers the streamed folders and flushes each buffer when it
+// reaches scanFlushBatch. A low threshold drives several flushes over a small
+// set, and the count of flushes scales with the threshold, so the walk holds one
+// batch and never the whole library. A batch of one flushes every folder alone,
+// whatever the library's size, which is the bound the design promises.
+func TestFullWalkFlushesInBoundedChunks(t *testing.T) {
+	cases := []struct {
+		name        string
+		batch       int
+		wantFlushes int
+	}{
+		{name: "one folder per flush", batch: 1, wantFlushes: 5},
+		{name: "two folders per flush", batch: 2, wantFlushes: 3},
+		{name: "one flush holds the whole small set", batch: 100, wantFlushes: 1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := titleTree(t, "A (2001)", "B (2002)", "C (2003)", "D (2004)", "E (2005)")
+			scan, fake := fakeScanner(t, root, libraryKindMovies)
+
+			batchWas := scanFlushBatch
+			t.Cleanup(func() { scanFlushBatch = batchWas })
+			scanFlushBatch = testCase.batch
+
+			scan.fullWalk(context.Background())
+
+			if got := len(fake.held(fake.movies)); got != 5 {
+				t.Fatalf("movies = %d, want the five titles the walk read", got)
+			}
+			if got := fake.flushes(); got != testCase.wantFlushes {
+				t.Errorf("flushes = %d, want %d for a batch of %d", got, testCase.wantFlushes, testCase.batch)
+			}
+		})
+	}
+}
+
+func TestFullWalkSkipsThePruneOnAnUnreadableRoot(t *testing.T) {
+	root := titleTree(t, "A (2001)", "B (2002)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if len(fake.held(fake.movies)) != 2 {
+		t.Fatalf("movies = %v, want the two titles", fake.held(fake.movies))
+	}
+
+	// The root became unreadable, so the walk read nothing. The prune is
+	// skipped and the catalog stands.
+	scan.root = filepath.Join(root, "gone")
+	scan.fullWalk(ctx)
+
+	if len(fake.held(fake.movies)) != 2 {
+		t.Errorf("movies = %v, want the catalog kept after a partial read", fake.held(fake.movies))
+	}
+	if scan.report.RemovedLastSweep != 0 {
+		t.Errorf("removedLastSweep = %d, want no sweep on a partial read", scan.report.RemovedLastSweep)
+	}
+}
+
+func TestFullWalkLeavesTheReportOnAWriteError(t *testing.T) {
+	root := titleTree(t, "A (2001)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	fake.failStatus = 500
+
+	scan.fullWalk(context.Background())
+
+	if scan.report.Titles != 0 {
+		t.Errorf("titles = %d, want the report untouched after a write error", scan.report.Titles)
+	}
+}
+
+func TestRescanRemovesAVanishedFolder(t *testing.T) {
+	root := titleTree(t, "A (2001)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if len(fake.held(fake.movies)) != 1 {
+		t.Fatalf("movies = %v, want the one title", fake.held(fake.movies))
+	}
+
+	// The folder left the volume and a webhook named it, so the rescan
+	// deletes its rows without waiting for the slow walk.
+	if err := os.RemoveAll(filepath.Join(root, "A (2001)")); err != nil {
+		t.Fatal(err)
+	}
+	scan.rescan(ctx, filepath.Join(root, "A (2001)"))
+
+	if len(fake.held(fake.movies)) != 0 {
+		t.Errorf("movies = %v, want the vanished folder gone", fake.held(fake.movies))
+	}
+}

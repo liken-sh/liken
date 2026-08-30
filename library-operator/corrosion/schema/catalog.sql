@@ -30,6 +30,12 @@
 --   duration  seconds, or 0 where none exists
 --   body      the kind's own shape, as JSON
 --   slug      the legible display name, the-matrix-1999, for a URL or a screen
+--
+-- PROSE: explain that the scanner's mark-and-sweep seen table is not here.
+-- Every table this file names becomes a replicated table that gossips, and
+-- a mark on every row of every walk would flood the readers. The scanner
+-- creates seen through the write API instead, so it stays a local table
+-- the agent never replicates. See prune.go.
 
 CREATE TABLE movies (
     id TEXT NOT NULL PRIMARY KEY,

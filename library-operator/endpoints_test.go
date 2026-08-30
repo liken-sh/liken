@@ -88,21 +88,21 @@ func TestCatalogEndpointsCarryTheServiceMarks(t *testing.T) {
 	}
 }
 
-// The slice is owned by every Library in its namespace, so the
-// garbage collector removes it when the last one goes.
-func TestCatalogEndpointsAreOwnedByTheLibrariesOfTheirNamespace(t *testing.T) {
-	owners := []OwnerReference{catalogOwner("movies", "movies-uid"), catalogOwner("shows", "shows-uid")}
+// The slice is owned by its namespace's one Catalog, so the garbage
+// collector removes it when the Catalog goes.
+func TestCatalogEndpointsAreOwnedByItsCatalog(t *testing.T) {
+	owners := []OwnerReference{catalogOwner("house-catalog", "house-catalog-uid")}
 
 	slice := buildCatalogEndpoints(testLibraryNamespace, owners, nil)
 
-	if len(slice.Metadata.OwnerReferences) != 2 {
-		t.Fatalf("ownerReferences = %+v, want both Libraries", slice.Metadata.OwnerReferences)
+	if len(slice.Metadata.OwnerReferences) != 1 {
+		t.Fatalf("ownerReferences = %+v, want the one Catalog", slice.Metadata.OwnerReferences)
 	}
 	if slice.Metadata.OwnerReferences[0] != owners[0] {
 		t.Errorf("owner = %+v, want %+v", slice.Metadata.OwnerReferences[0], owners[0])
 	}
-	if slice.Metadata.OwnerReferences[0].Controller {
-		t.Error("an owner is marked the controller, and an object with several owners has none")
+	if slice.Metadata.OwnerReferences[0].Kind != "Catalog" || !slice.Metadata.OwnerReferences[0].Controller {
+		t.Errorf("owner = %+v, want the controlling Catalog", slice.Metadata.OwnerReferences[0])
 	}
 }
 

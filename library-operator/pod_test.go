@@ -213,9 +213,11 @@ func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
 	}
 }
 
-// The catalog is derived from a walk, so its database lives in a
-// directory the kubelet creates with the pod and deletes with it.
-func TestCatalogContainerWritesToAnEmptyDirectory(t *testing.T) {
+// The catalog agent writes its database on a durable claim, so a pod
+// that rolls starts from the catalog its claim holds rather than
+// re-syncing the whole namespace over gossip. The claim is mounted
+// writable, and it is the Library's own catalog claim.
+func TestCatalogContainerWritesToItsDurableClaim(t *testing.T) {
 	pod := testScannerPod(studioMovies())
 
 	catalog := pod.Spec.Containers[1]
@@ -226,8 +228,15 @@ func TestCatalogContainerWritesToAnEmptyDirectory(t *testing.T) {
 	if mount.MountPath != catalogStatePath || mount.ReadOnly {
 		t.Errorf("mount = %+v, want %s writable", mount, catalogStatePath)
 	}
-	if podVolume(t, pod, mount.Name).EmptyDir == nil {
-		t.Errorf("volume %s is not an emptyDir", mount.Name)
+	source := podVolume(t, pod, mount.Name).PersistentVolumeClaim
+	if source == nil {
+		t.Fatalf("volume %s is not a claim", mount.Name)
+	}
+	if source.ClaimName != "movies-catalog" {
+		t.Errorf("claimName = %q, want the Library's catalog claim", source.ClaimName)
+	}
+	if source.ReadOnly {
+		t.Error("the catalog claim is mounted read-only, but the agent writes it")
 	}
 }
 

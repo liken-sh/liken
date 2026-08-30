@@ -131,7 +131,13 @@ func buildScannerPod(library *Library, scannerImage, corrosionImage, busAddress,
 						ReadOnly:  true,
 					},
 				},
-				{Name: catalogVolumeName, EmptyDir: &EmptyDirVolumeSource{}},
+				// The catalog agent's state is on a durable claim, not an
+				// emptyDir. The claim survives a pod roll, so the next pod
+				// starts from the catalog it holds rather than re-syncing the
+				// whole namespace over gossip.
+				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
+					ClaimName: scannerCatalogClaimName(library.Metadata.Name),
+				}},
 			},
 		},
 	}

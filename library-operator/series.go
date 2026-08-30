@@ -7,25 +7,38 @@ package main
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"path/filepath"
 )
 
-// walkSeries reads a series root into a walkResult. Every directory under the
-// root is one series, with a tvshow.nfo, season folders, and an episode file
-// with its own .nfo.
+// walkSeries reads a whole series root into one walkResult by collecting the
+// folder stream. The tests and a small library use this whole-root read.
 func walkSeries(root, library string, ignore ignoreSet) *walkResult {
-	result := &walkResult{}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return result
-	}
-	for _, entry := range entries {
-		if entry.IsDir() && !ignore.skips(entry.Name()) {
-			scanSeriesFolder(root, filepath.Join(root, entry.Name()), library, ignore, result)
+	return collectFolders(walkSeriesFolders(root, library, ignore))
+}
+
+// walkSeriesFolders streams a series root one series folder at a time. Every
+// directory under the root is one series, with a tvshow.nfo, season folders, and
+// an episode file with its own .nfo. A read error at the root yields one result
+// marked with the error and nothing else, so the caller keeps the catalog.
+func walkSeriesFolders(root, library string, ignore ignoreSet) iter.Seq[*walkResult] {
+	return func(yield func(*walkResult) bool) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			yield(&walkResult{readError: true})
+			return
+		}
+		for _, entry := range entries {
+			if entry.IsDir() && !ignore.skips(entry.Name()) {
+				folder := &walkResult{}
+				scanSeriesFolder(root, filepath.Join(root, entry.Name()), library, ignore, folder)
+				if !yield(folder) {
+					return
+				}
+			}
 		}
 	}
-	return result
 }
 
 // scanSeriesFolder reads one series folder into the result: the series item,

@@ -304,7 +304,6 @@ func serveScanner(t *testing.T, address, root, kind string) (*scanner, *catalogR
 		kind:              kind,
 		catalog:           catalog,
 		report:            libraryReport{LastWalk: now, LastChange: now},
-		state:             newCatalogState(),
 	}
 	scan.bus = newBus(address, "library-house-movies",
 		&busWill{Topic: scan.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
@@ -359,32 +358,32 @@ func TestServeRepublishesOnTheSlowTimer(t *testing.T) {
 	waitForTopic(t, broker, scan.statusTopic)
 }
 
-// A rescan reads the one folder a path names and merges it, the work a
+// A rescan reads the one folder a path names and upserts it, the work a
 // webhook drives for a series library.
 func TestScannerRescanReadsOneSeriesFolder(t *testing.T) {
-	scan, _ := testScanner(t, "testdata/series", libraryKindSeries)
+	scan, recorder := testScanner(t, "testdata/series", libraryKindSeries)
 	episode := filepath.Join("testdata", "series", "Breaking Bad", "Season 02", "Breaking Bad - S02E05.mkv")
 
 	scan.rescan(context.Background(), episode)
 
-	if !scan.state.series["series:tvdb:81189"] {
-		t.Error("the rescan did not record the series in the state")
+	if !postedWith(recorder, "series:tvdb:81189") {
+		t.Error("the rescan did not upsert the series")
 	}
-	if !scan.state.episodes["episode:tvdb:81189:s02e05"] {
-		t.Error("the rescan did not record the episode in the state")
+	if !postedWith(recorder, "episode:tvdb:81189:s02e05") {
+		t.Error("the rescan did not upsert the episode")
 	}
 }
 
 // A rescan reads a title folder at the root, so the direct
 // title-folder path is taken and not the grouping one.
 func TestScannerRescanReadsARootTitle(t *testing.T) {
-	scan, _ := testScanner(t, "testdata/movies", libraryKindMovies)
+	scan, recorder := testScanner(t, "testdata/movies", libraryKindMovies)
 	title := filepath.Join("testdata", "movies", "The.Thing.1982.1080p.BluRay.x264-GROUP")
 
 	scan.rescan(context.Background(), title)
 
-	if !scan.state.movies["movie:path:the-thing-1982-1080p-bluray-x264-group"] {
-		t.Errorf("state = %v, want The Thing", scan.state.movies)
+	if !postedWith(recorder, "movie:path:the-thing-1982-1080p-bluray-x264-group") {
+		t.Error("the rescan did not upsert The Thing")
 	}
 }
 
@@ -400,11 +399,60 @@ func TestScannerRescanFallsBackToAFullWalk(t *testing.T) {
 	}
 }
 
-// A kind with no walk reads nothing, so an unknown kind reports zero
+// A kind with no walk streams nothing, so an unknown kind reports zero
 // rather than failing.
 func TestWalkOnAnUnknownKindIsEmpty(t *testing.T) {
 	scan, _ := testScanner(t, "testdata/movies", "audiobooks")
-	if result := scan.walk(); result.titles != 0 || len(result.movies) != 0 {
-		t.Errorf("result = %+v, want an empty walk for an unknown kind", result)
+	folders := 0
+	for range scan.walkFolders(context.Background()) {
+		folders++
+	}
+	if folders != 0 {
+		t.Errorf("folders = %d, want an empty walk for an unknown kind", folders)
+	}
+}
+
+// A consumer that stops early ends the folder stream, so a caller that has
+// read enough does not read the rest of the volume.
+func TestWalkFoldersStopsOnAnEarlyBreak(t *testing.T) {
+	cases := []struct {
+		name      string
+		root      string
+		kind      string
+		stopAfter int
+	}{
+		{name: "a grouped movie folder", root: "testdata/movies", kind: libraryKindMovies, stopAfter: 1},
+		{name: "a root movie title", root: "testdata/movies", kind: libraryKindMovies, stopAfter: 2},
+		{name: "a series folder", root: "testdata/series", kind: libraryKindSeries, stopAfter: 1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			scan := &scanner{root: testCase.root, library: "house/library", kind: testCase.kind}
+			read := 0
+			for range scan.walkFolders(context.Background()) {
+				read++
+				if read == testCase.stopAfter {
+					break
+				}
+			}
+			if read != testCase.stopAfter {
+				t.Errorf("read = %d, want the stream to stop after %d", read, testCase.stopAfter)
+			}
+		})
+	}
+}
+
+// A cancelled context stops the stream between folders, so a walk of a large
+// volume does not run on past a shutdown.
+func TestWalkFoldersStopsOnACancelledContext(t *testing.T) {
+	scan := &scanner{root: "testdata/movies", library: "house/movies", kind: libraryKindMovies}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	folders := 0
+	for range scan.walkFolders(ctx) {
+		folders++
+	}
+	if folders != 0 {
+		t.Errorf("folders = %d, want no folder from a cancelled walk", folders)
 	}
 }

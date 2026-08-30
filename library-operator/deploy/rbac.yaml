@@ -1,14 +1,14 @@
 # The operator's identity in the cluster, and deliberately nothing
-# more. It reads libraries, writes their statuses, reads the storage
-# behind each one, creates the scanner pod each one becomes, and
+# more. It reads libraries and catalogs, writes their statuses, reads
+# the storage behind each library, provisions the catalog claim each
+# scanner pod mounts, creates the scanner pod each library becomes, and
 # stands the catalog Service and EndpointSlice of each namespace that
-# holds a Library. It deletes a scanner pod only to replace a stale
+# holds a Catalog. It deletes a scanner pod only to replace a stale
 # one, whose template hash no longer matches what the pass builds.
 # Every other teardown is the garbage collector's, through the
-# ownerReferences the pod and the two catalog objects carry, so
-# deleting the last Library of a namespace is the whole stop. It
-# deletes no object a person created. Every grant is cluster-wide,
-# because a Library can be in any namespace.
+# ownerReferences the pod, the catalog claim, and the two catalog
+# objects carry. It deletes no object a person created. Every grant is
+# cluster-wide, because a Library can be in any namespace.
 #
 # The scanner pods hold no credential of their own. They report over
 # the bus, and the operator writes what they report, so nothing in this
@@ -37,13 +37,25 @@ rules:
   - apiGroups: [library.liken.sh]
     resources: [libraries/status]
     verbs: [update]
-  # The claim each Library names, read by name to learn whether it is
-  # bound and which volume it is bound to. No list and no watch: a
-  # claim is read on the pass that reconciles the Library that names
-  # it.
+  # The Catalogs, across every namespace, on the same terms as the
+  # libraries: the watch is the wake signal, and every pass re-reads
+  # with a list. Read-only, and only the status half is written.
+  - apiGroups: [library.liken.sh]
+    resources: [catalogs]
+    verbs: [get, list, watch]
+  - apiGroups: [library.liken.sh]
+    resources: [catalogs/status]
+    verbs: [update]
+  # The media claim each Library names, read by name to learn whether it
+  # is bound and which volume it is bound to. The catalog claim each
+  # scanner pod mounts, created once per Library and owned by it, so the
+  # garbage collector removes it with the Library. There is no update:
+  # a claim's spec is immutable once it binds, so the operator
+  # provisions the catalog claim and never rewrites it. There is no
+  # delete: the ownerReference is the whole teardown.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
-    verbs: [get]
+    verbs: [get, create]
   # The volume behind that claim, read by name for its source: an NFS
   # server and export, or the name of whatever other key serves it.
   # Playing a title from the library needs that, so the operator reads
@@ -61,12 +73,12 @@ rules:
     resources: [pods]
     verbs: [get, list, watch, create, delete]
   # The headless catalog Service of each namespace that holds a
-  # Library. The grant is cluster-wide because a Library can be in any
+  # Catalog. The grant is cluster-wide because a Catalog can be in any
   # namespace and the operator is one Deployment for the cluster. There
-  # is no delete verb: the Service is owned by the Library objects of its
-  # namespace, and the garbage collector removes it when the last one
-  # goes. There is no list and no watch: the Service is read by name, in
-  # the namespaces the Library list already named.
+  # is no delete verb: the Service is owned by its namespace's Catalog,
+  # and the garbage collector removes it when the Catalog goes. There is
+  # no list and no watch: the Service is read by name, in the namespaces
+  # the Catalog list already named.
   - apiGroups: [""]
     resources: [services]
     verbs: [get, create, update]

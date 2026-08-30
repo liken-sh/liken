@@ -32,45 +32,90 @@ contract is the same for every kind.
   recreating them, so every peer's file changes by the rows that
   changed.
 - It publishes a retained status report on the bus: titles, unidentified
-  folders, the time of the last full walk, and the time of the last
-  change applied. The operator folds that into `Library.status`.
+  folders, the time of the last full walk, the time of the last change
+  applied, and the count of rows the last sweep removed. The operator
+  folds that into `Library.status`.
 - It detects changes two ways. It accepts a webhook on a small HTTP
   endpoint, of the kind Radarr, Sonarr, and Jellyfin send on import, and
   rescans the path the hook names. And it walks the whole root on a slow
   timer. It does not use `inotify`, which fires only for writes made
   through the same kernel and never for another client's writes to a
   network volume.
+- A webhook prunes within the scope of the path it names. If the folder
+  still exists, the rescan upserts it and deletes only that title's rows
+  the rescan did not produce, such as a file an upgrade replaced. If the
+  folder is gone, the item and its files and aliases leave the catalog. A
+  webhook cannot see a title that vanished with no hook, so a removal that
+  arrives with no event waits for the next full walk.
 - It has no API-server credential.
 
 The project ships one image per kind. A settings block may name another
 image, which is how a person supplies a scanner of their own.
 
-## The catalog is durable and pruned
+## Marked and swept
 
-The first drill added two elements to this plan.
+The scanner reconciles against the catalog, not against an in-memory
+record of one session's writes, so a removal survives a restart and
+reaches every peer. The catalog is the namespace's shared store, and
+where it lives and how large each agent's copy is are the `Catalog`
+object's concern, in [the namespace catalog plan](15-the-namespace-catalog.md).
+This does not change the derived, provider-scoped id: the id is read off
+the volume, and the store holds the derived catalog, not any minted
+state, so a full catalog loss re-derives the same rows by a rescan.
 
-The scanner keeps its catalog on a `PersistentVolumeClaim`, not an
-`emptyDir`. The catalog is derived, and a rescan rebuilds it, but a
-catalog held only on `emptyDir` volumes vanishes the moment no pod runs
-one, and rebuilding a large catalog on every restart is work the volume
-already answered. The scanner is the catalog's one writer and its source
-of truth for a library, so its agent's catalog is durable: the scanner
-starts from the catalog it last wrote. A screen's agent stays an
-`emptyDir`, because a screen is a reader that re-syncs from the scanner.
-This does not change the derived, provider-scoped id. The id is still
-read off the volume, and the claim holds the derived catalog, not any
-minted state.
-
-The scanner prunes what the volume no longer holds. Because it starts
-from the catalog it last wrote, it reconciles against what the catalog
-holds, not against an in-memory record of one session's writes, so a
-removal survives a restart and reaches every peer. A walk is two passes.
-The scan pass reads the volume and upserts the items, files, and aliases
-it finds. The prune pass reads the catalog and deletes every item, file,
-and alias the scan pass did not see, and every one whose folder the
+A library can hold millions of items, more than the
+scanner can hold in memory, so neither the scan nor the prune can load
+the whole set at once. Both stream. The scanner marks and sweeps. Each
+full walk takes an epoch. The scan pass streams the volume one title
+folder at a time: it reads a folder, upserts that folder's items, files,
+and aliases, and marks each with the current epoch, then moves on and
+holds no more than one folder. The prune pass then deletes every catalog
+row the walk did not mark this epoch, and every row whose folder the
 `ignore` list now names. So a title deleted from the volume, and a folder
 that starts matching the `ignore` list, both leave the catalog on the
-next walk.
+next walk, and the scanner never holds more than one title folder in
+memory.
+
+The mark lives in a local table the catalog agent does not gossip, a
+`seen` table beside the replicated `items`, `files`, and `aliases`. A
+mark on a replicated row would gossip to every reader on every walk, and
+a new column on a populated cr-sqlite table backfills a clock row for
+every existing row. The scanner creates `seen` at runtime, not in the
+schema file, because Corrosion makes every table a schema file names a
+replicated table. A table created through the write API stays a plain
+local table. So the local table carries the epoch, a walk marks freely,
+and the readers see only real content changes and real deletions.
+The prune streams the ids the current epoch did not mark out of the
+catalog with a bounded query, and deletes them by id in batches. It holds
+no full key set in memory, whatever the library's size. A single
+statement that deletes by joining the local table would save the read
+pass, but Corrosion's write API may not run a delete that reads another
+table, so the scanner does not depend on it.
+
+An upsert writes each row with `INSERT ... ON CONFLICT DO UPDATE`, never
+`INSERT OR REPLACE`. A replace is a delete and an insert under cr-sqlite,
+which writes a tombstone and bumps every column even when the row did not
+change. `ON CONFLICT DO UPDATE` takes cr-sqlite's compare-and-skip path,
+so a row the walk re-reads unchanged gossips nothing. For the same
+reason, and because a changed primary key is a delete and a create, the
+scanner keeps its derived ids and file paths stable across walks.
+
+The prune runs only after a clean, complete walk. A walk reads a network
+volume, and a walk that fails partway marks only the rows it reached, so
+a prune then would delete every row the walk did not reach. A read error
+at the root, or a walk that returns far fewer rows than the catalog
+holds, aborts the prune for that pass and keeps the rows. The next clean
+walk prunes. The report carries the count of rows the last sweep removed,
+so a false mass delete is visible on the bus without a shell.
+
+A `Library` spec change reaches the scanner as a pod roll. The scanner's
+container carries the root, the `ignore` list, and the settings block in
+its environment, so a change to any of them changes the pod template. The
+operator stands the scanner pod itself and replaces it when the template
+hash changes, and the new pod's startup walk is the new scan. The
+replacement is also the queue: a scan already in flight ends with its
+pod. The catalog volume the new pod mounts, and the handoff as one pod's
+agent releases it, are the `Catalog` object's concern.
 
 ## Movies
 
@@ -159,8 +204,13 @@ no `.nfo`. A series library reports its series, and the catalog has the
 right season and episode structure for one series checked by hand. A
 file added to the volume and announced by a webhook appears in the
 catalog within a few seconds. A file added with no webhook appears after
-the next slow walk. The scanner's catalog survives a restart of its pod.
+the next slow walk. A title deleted from the volume while the scanner was
+down leaves the catalog on the first walk after the scanner restarts,
+because the walk reconciles against the catalog and not against memory.
 A title deleted from the volume, and a folder added to the `ignore` list,
-both leave the catalog on the next walk. The catalog's `state.db` size for the lab's movies
-and series is recorded in the completed plan, because plan 06 budgets
-against it.
+both leave the catalog on the next walk, and the report's removed count
+equals the rows that left. A change to the `Library` spec rolls the pod,
+and the new pod's startup walk reflects the change. A walk that fails
+partway, forced by an unreadable root, prunes nothing and keeps the
+catalog. The catalog's `state.db` size for the lab's movies and series is
+recorded in the completed plan, because plan 06 budgets against it.

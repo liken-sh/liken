@@ -5,7 +5,10 @@ package main
 // aliasesFor in rows.go covers the providers in the canonical order; this file
 // adds the rest, so a movie that also lists a tvdb id still resolves by it.
 
-import "sort"
+import (
+	"iter"
+	"sort"
+)
 
 // aliasRowsForItem builds every alias an item carries. It starts with
 // aliasesFor, which reads the providers in the canonical order and the folder
@@ -46,4 +49,35 @@ type walkResult struct {
 	aliases      []aliasRow
 	titles       int
 	unidentified int
+	// A walk that could not read the root read only part of the volume, so
+	// the prune-abort guard skips the prune for this pass and keeps the rows
+	// the walk did not reach.
+	readError bool
+}
+
+// appendFolder folds one folder's rows into a running buffer, so the streaming
+// full walk gathers several folders before it writes them in one batch and never
+// holds the whole library.
+func appendFolder(buffer, folder *walkResult) {
+	buffer.movies = append(buffer.movies, folder.movies...)
+	buffer.series = append(buffer.series, folder.series...)
+	buffer.episodes = append(buffer.episodes, folder.episodes...)
+	buffer.files = append(buffer.files, folder.files...)
+	buffer.aliases = append(buffer.aliases, folder.aliases...)
+}
+
+// collectFolders reads a whole folder stream into one walkResult, with the
+// counts and the read-error signal. The tests and a small library read a root
+// this way, and the streaming full walk holds one folder at a time.
+func collectFolders(folders iter.Seq[*walkResult]) *walkResult {
+	result := &walkResult{}
+	for folder := range folders {
+		appendFolder(result, folder)
+		result.titles += folder.titles
+		result.unidentified += folder.unidentified
+		if folder.readError {
+			result.readError = true
+		}
+	}
+	return result
 }

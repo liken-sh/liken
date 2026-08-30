@@ -33,21 +33,21 @@ func TestCatalogServiceIsHeadlessAndPublishesEveryAddress(t *testing.T) {
 	}
 }
 
-// The Service is owned by every Library in its namespace, so the
-// garbage collector removes it when the last one goes.
-func TestCatalogServiceIsOwnedByTheLibrariesOfItsNamespace(t *testing.T) {
-	owners := []OwnerReference{catalogOwner("movies", "movies-uid"), catalogOwner("shows", "shows-uid")}
+// The Service is owned by its namespace's one Catalog, so the garbage
+// collector removes it when the Catalog goes.
+func TestCatalogServiceIsOwnedByItsCatalog(t *testing.T) {
+	owners := []OwnerReference{catalogOwner("house-catalog", "house-catalog-uid")}
 
 	service := buildCatalogService(testLibraryNamespace, owners)
 
-	if len(service.Metadata.OwnerReferences) != 2 {
-		t.Fatalf("ownerReferences = %+v, want both Libraries", service.Metadata.OwnerReferences)
+	if len(service.Metadata.OwnerReferences) != 1 {
+		t.Fatalf("ownerReferences = %+v, want the one Catalog", service.Metadata.OwnerReferences)
 	}
-	if service.Metadata.OwnerReferences[1] != owners[1] {
-		t.Errorf("owner = %+v, want %+v", service.Metadata.OwnerReferences[1], owners[1])
+	if service.Metadata.OwnerReferences[0] != owners[0] {
+		t.Errorf("owner = %+v, want %+v", service.Metadata.OwnerReferences[0], owners[0])
 	}
-	if service.Metadata.OwnerReferences[1].Controller {
-		t.Error("an owner is marked the controller, and an object with several owners has none")
+	if service.Metadata.OwnerReferences[0].Kind != "Catalog" || !service.Metadata.OwnerReferences[0].Controller {
+		t.Errorf("owner = %+v, want the controlling Catalog", service.Metadata.OwnerReferences[0])
 	}
 }
 

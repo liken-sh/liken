@@ -1,0 +1,137 @@
+# The Catalog API, declared to Kubernetes. A namespace has exactly one
+# Catalog. It sizes the durable volume every catalog agent takes, and it
+# owns the namespace's catalog Service and EndpointSlice. More than one
+# Catalog in a namespace marks every Catalog Blocked and stands no cluster.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: catalogs.library.liken.sh
+spec:
+  group: library.liken.sh
+  names:
+    kind: Catalog
+    listKind: CatalogList
+    plural: catalogs
+    singular: catalog
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Size
+          type: string
+          jsonPath: .status.storageSize
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            The namespace's shared catalog. Declare one Catalog in a
+            namespace, and every Library in it writes into that catalog.
+          properties:
+            spec:
+              type: object
+              required: [storage]
+              description: >-
+                Where the catalog is stored and how large each agent's
+                copy is.
+              properties:
+                storage:
+                  type: object
+                  default: {}
+                  description: >-
+                    The volume every catalog agent in the namespace
+                    takes.
+                  properties:
+                    size:
+                      type: string
+                      default: 1Gi
+                      description: >-
+                        The size of each agent's catalog volume. Small
+                        by default.
+                    storageClassName:
+                      type: string
+                      minLength: 1
+                      description: >-
+                        The StorageClass each agent's catalog volume
+                        binds to. Omitted, the cluster's default binds
+                        it.
+            status:
+              type: object
+              description: >-
+                The cluster the Catalog stands, written only by the
+                library operator.
+              properties:
+                members:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  description: >-
+                    The catalog agent pods that are members of the
+                    namespace's cluster.
+                  items:
+                    type: string
+                storageSize:
+                  type: string
+                  description: >-
+                    The storage size the agents were given.
+                conditions:
+                  type: array
+                  description: >-
+                    The typed observations the operator keeps on this
+                    Catalog, in the standard Kubernetes form. Ready is
+                    True when the Catalog stands the namespace's cluster,
+                    and False with the reason ManyCatalogs when the
+                    namespace holds more than one Catalog.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check this entry reports, in CamelCase. It
+                          is the key of this list.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. True is the good verdict, and
+                          Unknown means the operator cannot tell yet.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition judged.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for why the condition holds
+                          this verdict, meant for a program to match on.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The same answer in a sentence a person reads.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the verdict last changed. It moves only
+                          when the status flips.

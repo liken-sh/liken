@@ -179,6 +179,9 @@ func ServerVersion(client *Client) (Version, error) {
 // and a volume is not.
 const (
 	librariesPath = "/apis/" + libraryAPIVersion + "/libraries"
+	// The Catalogs, listed and watched across every namespace and
+	// written back per namespace, the same shape as the Libraries.
+	catalogsPath  = "/apis/" + libraryAPIVersion + "/catalogs"
 	libraryPrefix = "/apis/" + libraryAPIVersion + "/namespaces/"
 	corePrefix    = "/api/v1/namespaces/"
 	volumesPath   = "/api/v1/persistentvolumes"
@@ -199,8 +202,16 @@ func libraryPath(namespace, name string) string {
 	return libraryPrefix + namespace + "/libraries/" + name
 }
 
+func catalogPath(namespace, name string) string {
+	return libraryPrefix + namespace + "/catalogs/" + name
+}
+
 func claimPath(namespace, name string) string {
 	return corePrefix + namespace + "/persistentvolumeclaims/" + name
+}
+
+func claimsPath(namespace string) string {
+	return corePrefix + namespace + "/persistentvolumeclaims"
 }
 
 func podsPath(namespace string) string {
@@ -243,16 +254,59 @@ func PutLibraryStatus(c *Client, library *Library) (*Library, error) {
 	return written, nil
 }
 
+// ListCatalogs answers a whole pass with one request, and the list's
+// resourceVersion is where the catalogs watch resumes from.
+func ListCatalogs(c *Client) (*CatalogList, error) {
+	list := &CatalogList{}
+	if err := c.RequestJSON(http.MethodGet, catalogsPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// PutCatalogStatus writes through the status subresource, so this
+// request can never touch a spec. The resourceVersion in the body makes
+// the write conditional, the same as PutLibraryStatus.
+func PutCatalogStatus(c *Client, catalog *NamespaceCatalog) (*NamespaceCatalog, error) {
+	body, err := json.Marshal(catalog)
+	if err != nil {
+		return nil, err
+	}
+	written := &NamespaceCatalog{}
+	path := catalogPath(catalog.Metadata.Namespace, catalog.Metadata.Name) + "/status"
+	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
 // GetPersistentVolumeClaim reads the claim a Library names, for two
 // answers: whether it is bound, and which volume it is bound to. An
 // absent claim is ErrNotFound, which the pass reports as the
-// ClaimNotFound reason rather than as a failure.
+// ClaimNotFound reason rather than as a failure. It also reads the
+// catalog claim the operator provisions, to tell an existing one from
+// none.
 func GetPersistentVolumeClaim(c *Client, namespace, name string) (*PersistentVolumeClaim, error) {
 	claim := &PersistentVolumeClaim{}
 	if err := c.RequestJSON(http.MethodGet, claimPath(namespace, name), nil, claim); err != nil {
 		return nil, err
 	}
 	return claim, nil
+}
+
+// CreatePersistentVolumeClaim provisions the catalog claim one scanner
+// pod mounts. The operator creates it once and never updates it,
+// because a claim's spec is immutable once it binds.
+func CreatePersistentVolumeClaim(c *Client, claim *PersistentVolumeClaim) (*PersistentVolumeClaim, error) {
+	body, err := json.Marshal(claim)
+	if err != nil {
+		return nil, err
+	}
+	created := &PersistentVolumeClaim{}
+	if err := c.RequestJSON(http.MethodPost, claimsPath(claim.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
 }
 
 // GetPersistentVolume reads the volume behind a bound claim, for what

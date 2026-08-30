@@ -31,17 +31,25 @@ type binding struct {
 // the whole state every pass rather than acting on what an event
 // carried, so the same facts reach the same status whatever order the
 // events arrived in.
-func (o *operator) reconcile(library *Library) error {
+//
+// The catalog is a precondition beside the storage. A Library stands a
+// scanner pod only when its storage is bound and its namespace holds
+// exactly one Catalog, because the pod's catalog agent joins the cluster
+// the Catalog stands and takes a volume the Catalog sizes.
+func (o *operator) reconcile(library *Library, choice catalogChoice) error {
 	bound, err := resolveStorage(o.client, library)
 	if err != nil {
 		return err
 	}
 
-	// A Library with no volume gets no pod. There would be nothing to
-	// mount, and a pod that could never start would say what the Bound
-	// condition already says.
+	// A Library with no volume, or in a namespace with no single
+	// Catalog, gets no pod. There would be nothing to mount, or no
+	// cluster to join, and the Ready condition says which.
 	var pod *Pod
-	if bound.volume != nil {
+	if bound.volume != nil && choice.catalog != nil {
+		if err := o.standCatalogClaim(library, choice.catalog); err != nil {
+			return err
+		}
 		desired := buildScannerPod(library, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
 		pod, err = o.standScannerPod(desired)
 		if err != nil {
@@ -51,7 +59,7 @@ func (o *operator) reconcile(library *Library) error {
 
 	report := o.reports.latestFor(library.Metadata.Namespace, library.Metadata.Name)
 	return writeLibraryStatus(o.client, library,
-		deriveLibraryStatus(library, bound, pod, report, time.Now().UTC()))
+		deriveLibraryStatus(library, bound, choice, pod, report, time.Now().UTC()))
 }
 
 // resolveStorage reads the claim a Library names and the volume behind
@@ -167,6 +175,11 @@ func (o *operator) standScannerPod(desired *Pod) (*Pod, error) {
 	// operator sent is in progress, and the pass leaves it alone until
 	// it completes, so one divergence causes one delete and not one
 	// delete per pass.
+	//
+	// This wait is also the ReadWriteOnce handoff. The catalog claim admits
+	// one pod at a time, so the pass creates the replacement only after the
+	// old pod releases the claim, which is the create on the not-found branch
+	// above.
 	if live.Metadata.DeletionTimestamp != "" {
 		return live, nil
 	}

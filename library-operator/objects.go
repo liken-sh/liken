@@ -25,8 +25,23 @@ type PersistentVolumeClaim struct {
 
 // VolumeName is written by the binder, not by whoever created the
 // claim, so it is empty until the claim binds.
+//
+// PersistentVolumeClaimSpec is the write half of the claim. The operator
+// reads a media claim through VolumeName and Phase, and it writes a catalog
+// claim through AccessModes, Resources, and StorageClassName. An empty
+// StorageClassName is omitted, so the cluster's default StorageClass binds
+// the claim.
 type PersistentVolumeClaimSpec struct {
-	VolumeName string `json:"volumeName,omitempty"`
+	AccessModes      []string                   `json:"accessModes,omitempty"`
+	Resources        VolumeResourceRequirements `json:"resources,omitzero"`
+	StorageClassName string                     `json:"storageClassName,omitempty"`
+	VolumeName       string                     `json:"volumeName,omitempty"`
+}
+
+// VolumeResourceRequirements is the size a claim asks for. Only storage is
+// stated, as a quantity carried as written rather than parsed.
+type VolumeResourceRequirements struct {
+	Requests map[string]string `json:"requests,omitempty"`
 }
 
 type PersistentVolumeClaimStatus struct {
@@ -36,6 +51,15 @@ type PersistentVolumeClaimStatus struct {
 // A claim is usable only in the Bound phase. Pending means no volume
 // answered it yet, and Lost means the volume behind it is gone.
 const claimBound = "Bound"
+
+// The core group a PersistentVolumeClaim belongs to, and the access
+// mode the catalog claim takes: ReadWriteOnce, because one agent writes
+// one SQLite database and Corrosion agents gossip rather than share a
+// file.
+const (
+	claimAPIVersion         = "v1"
+	accessModeReadWriteOnce = "ReadWriteOnce"
+)
 
 // A PersistentVolume is read for one answer: what serves the storage.
 // The operator never writes one.
@@ -222,7 +246,7 @@ type VolumeMount struct {
 }
 
 // A scanner pod carries two volumes: the library's claim, mounted
-// read-only, and a directory for the catalog agent's database.
+// read-only, and the catalog agent's durable claim.
 type Volume struct {
 	Name                  string                             `json:"name"`
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`

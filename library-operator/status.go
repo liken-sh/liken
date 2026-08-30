@@ -20,7 +20,7 @@ import (
 // scanner, and the report is what the scanner itself says about the
 // volume. A nil pod is a library with no scanner, and a nil report is
 // a scanner that has said nothing yet.
-func deriveLibraryStatus(library *Library, bound binding, pod *Pod, latest *libraryReport, now time.Time) LibraryStatus {
+func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, pod *Pod, latest *libraryReport, now time.Time) LibraryStatus {
 	status := LibraryStatus{Volume: bound.volume}
 	if pod != nil {
 		status.Pod = pod.Metadata.Name
@@ -32,6 +32,7 @@ func deriveLibraryStatus(library *Library, bound binding, pod *Pod, latest *libr
 	if latest != nil {
 		status.Titles = latest.Titles
 		status.Unidentified = latest.Unidentified
+		status.RemovedLastSweep = latest.RemovedLastSweep
 		status.LastWalk = latest.LastWalk
 		status.LastChange = latest.LastChange
 	}
@@ -44,7 +45,7 @@ func deriveLibraryStatus(library *Library, bound binding, pod *Pod, latest *libr
 	conditions := slices.Clone(library.Status.Conditions)
 	generation := library.Metadata.Generation
 	conditions = SetCondition(conditions, boundCondition(bound, generation), now)
-	conditions = SetCondition(conditions, readyCondition(bound, pod, latest, generation), now)
+	conditions = SetCondition(conditions, readyCondition(bound, choice, pod, latest, generation), now)
 	status.Conditions = conditions
 	return status
 }
@@ -71,7 +72,7 @@ func boundCondition(bound binding, generation int64) Condition {
 // every container ready, and a report has arrived over the bus. Each
 // reason names the step that has not happened, so the condition says
 // where to look.
-func readyCondition(bound binding, pod *Pod, latest *libraryReport, generation int64) Condition {
+func readyCondition(bound binding, choice catalogChoice, pod *Pod, latest *libraryReport, generation int64) Condition {
 	condition := Condition{
 		Type:               conditionReady,
 		Status:             ConditionFalse,
@@ -81,6 +82,12 @@ func readyCondition(bound binding, pod *Pod, latest *libraryReport, generation i
 	case bound.volume == nil:
 		condition.Reason = reasonNotBound
 		condition.Message = "the library's storage is not bound"
+	case choice.catalog == nil:
+		// The namespace has no single Catalog, so the Library waits. The
+		// reason and message are the catalog choice's own, which name whether
+		// the namespace has none or several.
+		condition.Reason = choice.reason
+		condition.Message = choice.message
 	case pod == nil:
 		condition.Reason = reasonPodPending
 		condition.Message = "there is no scanner pod yet"

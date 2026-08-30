@@ -24,8 +24,11 @@ import (
 type fakeCluster struct {
 	mutex     sync.Mutex
 	libraries map[string]*Library
-	claims    map[string]*PersistentVolumeClaim
-	pods      map[string]*Pod
+	// The Catalogs the operator reads and writes, by name, one per
+	// namespace in the ordinary case.
+	catalogs map[string]*NamespaceCatalog
+	claims   map[string]*PersistentVolumeClaim
+	pods     map[string]*Pod
 	// The catalog objects the operator writes, by namespace and name,
 	// because the operator stands one of each in every namespace that
 	// holds a Library.
@@ -56,6 +59,7 @@ type fakeCluster struct {
 func newFakeCluster() *fakeCluster {
 	return &fakeCluster{
 		libraries: map[string]*Library{},
+		catalogs:  map[string]*NamespaceCatalog{},
 		claims:    map[string]*PersistentVolumeClaim{},
 		volumes:   map[string]string{},
 		pods:      map[string]*Pod{},
@@ -97,11 +101,31 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			list.Items = append(list.Items, *f.libraries[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == catalogsPath:
+		list := CatalogList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.catalogs) {
+			list.Items = append(list.Items, *f.catalogs[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.Contains(r.URL.Path, "/catalogs/") && strings.HasSuffix(r.URL.Path, "/status"):
+		var written NamespaceCatalog
+		_ = json.NewDecoder(r.Body).Decode(&written)
+		f.catalogs[written.Metadata.Name] = &written
+		_ = json.NewEncoder(w).Encode(written)
 	case strings.HasSuffix(r.URL.Path, "/status"):
 		var written Library
 		_ = json.NewDecoder(r.Body).Decode(&written)
 		f.libraries[written.Metadata.Name] = &written
 		_ = json.NewEncoder(w).Encode(written)
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/persistentvolumeclaims"):
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var created PersistentVolumeClaim
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		f.claims[created.Metadata.Name] = &created
+		_ = json.NewEncoder(w).Encode(created)
 	case r.URL.Path == podsAllPath:
 		list := PodList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.pods) {
@@ -235,6 +259,18 @@ func (f *fakeCluster) heldService(namespace, name string) *Service {
 	return f.services[namespace+"/"+name]
 }
 
+func (f *fakeCluster) heldCatalog(name string) *NamespaceCatalog {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.catalogs[name]
+}
+
+func (f *fakeCluster) heldClaim(name string) *PersistentVolumeClaim {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.claims[name]
+}
+
 // countRequests counts the requests of one method against one kind of
 // object, so a test reads what a pass did rather than only what it
 // left.
@@ -295,19 +331,43 @@ func testRunContext(t *testing.T) context.Context {
 	return ctx
 }
 
-// catalogOwner is one ownerReference as a pass builds it, so a test
-// states the owners it expects in the same shape. Controller is unset,
-// because an object with several owners has no single one.
+// catalogOwner is the ownerReference the catalog Service and
+// EndpointSlice carry, so a test states the owner it expects in the
+// same shape a pass builds. The Catalog owns both, and it is the
+// controller, because a namespace holds one Catalog.
 func catalogOwner(name, uid string) OwnerReference {
-	return OwnerReference{APIVersion: libraryAPIVersion, Kind: "Library", Name: name, UID: uid}
+	return OwnerReference{APIVersion: catalogAPIVersion, Kind: "Catalog", Name: name, UID: uid, Controller: true}
+}
+
+// seedCatalog seeds one Catalog in a namespace, so a Library there
+// proceeds and the operator stands the namespace's catalog cluster.
+func seedCatalog(cluster *fakeCluster, name, namespace string) *NamespaceCatalog {
+	catalog := &NamespaceCatalog{
+		Metadata: ObjectMeta{Name: name, Namespace: namespace, UID: name + "-uid"},
+	}
+	cluster.catalogs[name] = catalog
+	return catalog
+}
+
+// testNamespaceCatalog is one Catalog a reconcile reads, so a test
+// hands reconcile the choice a namespace with one Catalog resolves to.
+func testNamespaceCatalog() *NamespaceCatalog {
+	return &NamespaceCatalog{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house", UID: "house-catalog-uid"}}
+}
+
+// withCatalog is the catalog choice a namespace with one Catalog
+// resolves to, the ordinary state a Library is reconciled against.
+func withCatalog() catalogChoice {
+	return catalogChoice{catalog: testNamespaceCatalog()}
 }
 
 // boundHouse seeds the cluster with a movies Library over a claim bound
-// to an NFS volume, which is the ordinary state every other state is
-// read against.
+// to an NFS volume, and the namespace's one Catalog, which is the
+// ordinary state every other state is read against.
 func boundHouse(cluster *fakeCluster) *Library {
 	library := studioMovies()
 	cluster.libraries["movies"] = library
+	seedCatalog(cluster, "house-catalog", "house")
 	cluster.claims["movies"] = &PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
@@ -320,7 +380,8 @@ func boundHouse(cluster *fakeCluster) *Library {
 }
 
 // boundStudio seeds a second Library in a second namespace, over a
-// claim of its own, so a test sees two catalog clusters stand apart.
+// claim of its own and with its own Catalog, so a test sees two catalog
+// clusters stand apart.
 func boundStudio(cluster *fakeCluster) *Library {
 	library := &Library{
 		Metadata: ObjectMeta{Name: "series", Namespace: "studio", UID: "series-uid"},
@@ -331,6 +392,7 @@ func boundStudio(cluster *fakeCluster) *Library {
 		},
 	}
 	cluster.libraries["series"] = library
+	seedCatalog(cluster, "studio-catalog", "studio")
 	cluster.claims["shows"] = &PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "shows", Namespace: "studio"},
 		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},

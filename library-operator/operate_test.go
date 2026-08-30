@@ -12,7 +12,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -168,6 +167,7 @@ func TestRunFailsWhenTheCollectionsCannotBeRead(t *testing.T) {
 		path string
 	}{
 		{name: "the libraries", path: librariesPath},
+		{name: "the catalogs", path: catalogsPath},
 		{name: "the scanner pods", path: podsAllPath},
 	}
 	for _, one := range cases {
@@ -267,14 +267,14 @@ func TestPassStandsACatalogInEveryNamespaceThatHoldsALibrary(t *testing.T) {
 		namespace string
 		owner     string
 		address   string
-	}{{"house", "movies", "10.42.1.7"}, {"studio", "series", "10.42.3.2"}} {
+	}{{"house", "house-catalog", "10.42.1.7"}, {"studio", "studio-catalog", "10.42.3.2"}} {
 		service := cluster.heldService(one.namespace, catalogServiceName)
 		if service == nil {
 			t.Fatalf("the pass wrote no catalog Service in %s", one.namespace)
 		}
 		if len(service.Metadata.OwnerReferences) != 1 ||
 			service.Metadata.OwnerReferences[0].Name != one.owner {
-			t.Errorf("ownerReferences = %+v, want the Library %s",
+			t.Errorf("ownerReferences = %+v, want the Catalog %s",
 				service.Metadata.OwnerReferences, one.owner)
 		}
 		slice := cluster.heldEndpointSlice(one.namespace, catalogServiceName)
@@ -317,24 +317,17 @@ func TestPassCarriesOnPastABrokenCatalogObject(t *testing.T) {
 	}
 }
 
-// The owners of one namespace's catalog objects are every Library in
-// that namespace, in name order, so two passes build the same object.
-func TestCatalogOwnersGroupByNamespaceAndSortByName(t *testing.T) {
-	owners := catalogOwners([]Library{
-		{Metadata: ObjectMeta{Name: "shows", Namespace: "house", UID: "shows-uid"}},
-		{Metadata: ObjectMeta{Name: "series", Namespace: "studio", UID: "series-uid"}},
-		{Metadata: ObjectMeta{Name: "movies", Namespace: "house", UID: "movies-uid"}},
-	})
+// A pass that cannot read the Catalogs reports it and reconciles
+// nothing, because the Catalog decides whether a Library proceeds.
+func TestPassStopsWhenTheCatalogsCannotBeRead(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	cluster.broken[catalogsPath] = http.StatusInternalServerError
 
-	if len(owners) != 2 {
-		t.Fatalf("namespaces = %v, want the two that hold a Library", owners)
-	}
-	want := []OwnerReference{catalogOwner("movies", "movies-uid"), catalogOwner("shows", "shows-uid")}
-	if !slices.Equal(owners["house"], want) {
-		t.Errorf("owners = %+v, want %+v", owners["house"], want)
-	}
-	if !slices.Equal(owners["studio"], []OwnerReference{catalogOwner("series", "series-uid")}) {
-		t.Errorf("owners = %+v, want the one Library of the namespace", owners["studio"])
+	testOperator(t, cluster).pass()
+
+	if cluster.countRequests(http.MethodPost, "pods") != 0 {
+		t.Error("the pass created a pod without reading the Catalogs")
 	}
 }
 

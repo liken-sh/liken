@@ -22,6 +22,10 @@ type libraryReport struct {
 	Unidentified int       `json:"unidentified"`
 	LastWalk     time.Time `json:"lastWalk"`
 	LastChange   time.Time `json:"lastChange"`
+	// The count of rows the last full sweep removed, so a mass delete that a
+	// partial walk caused is visible on the bus without a shell. The operator
+	// folds it into Library status.
+	RemovedLastSweep int `json:"removedLastSweep"`
 }
 
 // reports holds the newest report per Library and the wake the loop

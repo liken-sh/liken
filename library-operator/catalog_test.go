@@ -34,6 +34,18 @@ type catalogRecorder struct {
 }
 
 func (rec *catalogRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// A query reads from the catalog, which this recorder holds none of,
+	// so it answers an empty stream: the columns marker and the
+	// end-of-query marker, with no rows between them.
+	if strings.HasSuffix(r.URL.Path, queriesPath) {
+		status := rec.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"columns":["c"]}`+"\n"+`{"eoq":{"time":0.0}}`+"\n")
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	statements := parseStatements(body)
 
@@ -330,12 +342,11 @@ func TestDeleteByKeyMethods(t *testing.T) {
 	}
 }
 
-func TestDeleteFileItemsRemovesEveryPair(t *testing.T) {
+func TestDeleteFileItemsByPathRemovesEveryPair(t *testing.T) {
 	rec := &catalogRecorder{}
 	catalog := testCatalog(t, rec)
 
-	rows := []fileRow{{Path: "s01e01e02.mkv", Items: []string{"episode:tvdb:81189:s01e01", "episode:tvdb:81189:s01e02"}}}
-	_, err := catalog.DeleteFileItems(context.Background(), rows)
+	_, err := catalog.DeleteFileItemsByPath(context.Background(), []string{"s01e01e02.mkv", "s02e01.mkv"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,8 +354,11 @@ func TestDeleteFileItemsRemovesEveryPair(t *testing.T) {
 	if len(statements) != 2 {
 		t.Fatalf("statements = %d, want 2", len(statements))
 	}
-	if statements[0].sql != "DELETE FROM file_items WHERE path = ? AND item = ?" {
-		t.Errorf("sql = %q, want a delete on file_items by path and item", statements[0].sql)
+	if statements[0].sql != "DELETE FROM file_items WHERE path = ?" {
+		t.Errorf("sql = %q, want a delete on file_items by path", statements[0].sql)
+	}
+	if statements[0].params[0] != "s01e01e02.mkv" {
+		t.Errorf("params = %v, want the file path", statements[0].params)
 	}
 }
 

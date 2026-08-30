@@ -12,12 +12,13 @@ the `Library`'s status.
 
 ### `status`
 
-The report, as the operator writes it into the status: the two counts
-and the two times.
+The report, as the operator writes it into the status: the counts, the
+rows the last sweep removed, and the two times.
 
     {
       "titles": 412,
       "unidentified": 9,
+      "removedLastSweep": 3,
       "lastWalk": "2026-08-29T21:04:11Z",
       "lastChange": "2026-08-29T21:04:11Z"
     }

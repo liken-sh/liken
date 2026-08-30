@@ -318,6 +318,27 @@ func TestTheWatcherListsAndWakesAfterAStreamThatCarriedNothing(t *testing.T) {
 	}
 }
 
+// A Catalog change wakes the loop, so a Library waiting on its
+// namespace's Catalog proceeds without a backstop tick's delay. The
+// watcher lists the Catalogs to resume and wakes on the list.
+func TestTheCatalogWatchListsAndWakes(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{})
+	api.answersLists(listTurn{version: "150"})
+
+	wake := startWatch(t, api, watchCatalogs, "42")
+
+	nextWatchRequest(t, api)
+	if got := nextListRequest(t, api); got != catalogsPath {
+		t.Errorf("listed %q, want %q", got, catalogsPath)
+	}
+	waitForWatchWake(t, wake)
+	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
+		t.Errorf("the second watch resumed from %q, want the list's 150", got)
+	}
+}
+
 // A list that fails leaves the resume point where it was and the
 // watcher tries again, so an API server that is briefly away costs
 // reconnects and no missed change.

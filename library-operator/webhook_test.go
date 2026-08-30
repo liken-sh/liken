@@ -23,7 +23,6 @@ func testScanner(t *testing.T, root, kind string) (*scanner, *catalogRecorder) {
 		library: "house/library",
 		kind:    kind,
 		catalog: catalog,
-		state:   newCatalogState(),
 		bus:     newBus("", "test", nil, nil, nil),
 	}
 	return scan, recorder
@@ -142,9 +141,10 @@ func TestWebhookRescansTheNamedPath(t *testing.T) {
 	if !containsKind(sqlKinds(recorder), "INSERT MOVIES") {
 		t.Errorf("the webhook wrote no movie row: %v", sqlKinds(recorder))
 	}
-	if !scan.state.movies["movie:tmdb:603"] {
-		t.Error("the rescan did not record The Matrix in the state")
+	if !postedWith(recorder, "movie:tmdb:603") {
+		t.Error("the rescan did not upsert The Matrix")
 	}
+	_ = scan
 }
 
 func TestWebhookFallsBackToAFullWalk(t *testing.T) {

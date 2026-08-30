@@ -16,11 +16,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/signal"
-	"slices"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -136,6 +133,10 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("listing libraries: %w", err)
 	}
+	catalogs, err := ListCatalogs(o.client)
+	if err != nil {
+		return fmt.Errorf("listing catalogs: %w", err)
+	}
 	pods, err := ListScannerPods(o.client)
 	if err != nil {
 		return fmt.Errorf("listing scanner pods: %w", err)
@@ -144,6 +145,7 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 		len(libraries.Items), o.busAddress)
 
 	go watchLibraries(o.client, libraries.Metadata.ResourceVersion, o.wake)
+	go watchCatalogs(o.client, catalogs.Metadata.ResourceVersion, o.wake)
 	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake)
 
 	ticker := time.NewTicker(backstopInterval)
@@ -159,22 +161,32 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	}
 }
 
-// pass reconciles every Library in the cluster, then stands the
-// catalog cluster of each namespace that holds one. That is the
-// namespace's work and not one Library's. A failure on one object is
-// reported and the pass continues, because one library's broken claim
-// must not freeze every other library's status.
+// pass reconciles every Library in the cluster against its namespace's
+// Catalog, then stands the catalog cluster of each namespace that holds
+// a Catalog. That is the namespace's work and not one Library's. A
+// failure on one object is reported and the pass continues, because one
+// library's broken claim must not freeze every other library's status.
 func (o *operator) pass() {
-	list, err := ListLibraries(o.client)
+	libraries, err := ListLibraries(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing libraries: %v\n", err)
 		return
 	}
-	live := make(map[string]bool, len(list.Items))
-	for index := range list.Items {
-		library := &list.Items[index]
+	// The Catalog decides whether a Library proceeds, so the pass reads
+	// the collection before it reconciles a Library, not after.
+	catalogs, err := ListCatalogs(o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing catalogs: %v\n", err)
+		return
+	}
+	byNamespace := catalogsByNamespace(catalogs.Items)
+
+	live := make(map[string]bool, len(libraries.Items))
+	for index := range libraries.Items {
+		library := &libraries.Items[index]
 		live[libraryKey(library.Metadata.Namespace, library.Metadata.Name)] = true
-		if err := o.reconcile(library); err != nil {
+		choice := singleCatalog(byNamespace[library.Metadata.Namespace])
+		if err := o.reconcile(library, choice); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n",
 				library.Metadata.Namespace, library.Metadata.Name, err)
 		}
@@ -183,57 +195,7 @@ func (o *operator) pass() {
 	// anything else the desk holds belongs to a Library that is gone.
 	o.reports.retain(live)
 
-	o.standCatalogs(list.Items)
-}
-
-// standCatalogs gives each namespace's catalog cluster its Service
-// and its peers: one headless Service and one EndpointSlice in every
-// namespace that holds a Library, over that namespace's scanner pods.
-// The pods come from one cluster-wide list, because a Library can be
-// in any namespace. A failure in one namespace is reported and the
-// rest still stand, and the statuses this pass wrote stand whatever
-// the objects say. The pod watch already wakes the loop when a pod
-// changes, so a new pod's address reaches its slice on the next pass.
-func (o *operator) standCatalogs(libraries []Library) {
-	pods, err := ListScannerPods(o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing scanner pods: %v\n", err)
-		return
-	}
-	owners := catalogOwners(libraries)
-	for _, namespace := range slices.Sorted(maps.Keys(owners)) {
-		if err := o.standCatalogService(namespace, owners[namespace]); err != nil {
-			fmt.Fprintf(os.Stderr, "standing the catalog service in %s: %v\n", namespace, err)
-		}
-		if err := o.standCatalogEndpoints(namespace, owners[namespace], pods.Items); err != nil {
-			fmt.Fprintf(os.Stderr, "standing the catalog endpoints in %s: %v\n", namespace, err)
-		}
-	}
-}
-
-// catalogOwners groups every Library by its namespace, as the
-// ownerReferences the catalog objects of that namespace carry. Each
-// namespace's list is sorted by name, so two passes build the same
-// object and the divergence check reads no reorder as a change. None
-// of the references is the controller, because an object with several
-// owners has no single one.
-func catalogOwners(libraries []Library) map[string][]OwnerReference {
-	owners := map[string][]OwnerReference{}
-	for index := range libraries {
-		library := &libraries[index]
-		owners[library.Metadata.Namespace] = append(owners[library.Metadata.Namespace], OwnerReference{
-			APIVersion: libraryAPIVersion,
-			Kind:       "Library",
-			Name:       library.Metadata.Name,
-			UID:        library.Metadata.UID,
-		})
-	}
-	for namespace := range owners {
-		slices.SortFunc(owners[namespace], func(one, other OwnerReference) int {
-			return strings.Compare(one.Name, other.Name)
-		})
-	}
-	return owners
+	o.reconcileCatalogs(byNamespace)
 }
 
 // handleBusMessage folds one message from the broker onto the report

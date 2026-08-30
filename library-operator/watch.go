@@ -56,6 +56,33 @@ func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// watchCatalogs wakes the loop on every Catalog change, so a Library
+// waiting on its namespace's Catalog proceeds on the next pass, and a
+// second Catalog is marked Blocked without a backstop tick's delay. The
+// recovery is watchLibraries's: a dropped stream or a 410 Gone lists the
+// collection, wakes the loop, and resumes from the list's version.
+func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := catalogsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListCatalogs(c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing catalogs to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // watchPods wakes the loop on every change to a scanner pod, and the
 // label selector keeps the stream to this operator's own pods. Every
 // event earns a wake here, because a Library is Ready only while its

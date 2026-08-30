@@ -9,7 +9,7 @@ CRDREF := go tool crdref
 
 REFERENCE := content/docs/reference
 
-GENERATED := $(REFERENCE)/libraries.md
+GENERATED := $(REFERENCE)/libraries.md $(REFERENCE)/catalogs.md
 
 .PHONY: build
 build: $(GENERATED)
@@ -22,3 +22,6 @@ test:
 
 $(REFERENCE)/libraries.md: ../deploy/libraries-crd.yaml crdref/libraries-preamble.md crdref/libraries-postamble.md go.mod
 	$(CRDREF) -title Libraries -weight 10 -postamble crdref/libraries-postamble.md $< $@ crdref/libraries-preamble.md
+
+$(REFERENCE)/catalogs.md: ../deploy/catalogs-crd.yaml crdref/catalogs-preamble.md go.mod
+	$(CRDREF) -title Catalogs -weight 20 $< $@ crdref/catalogs-preamble.md

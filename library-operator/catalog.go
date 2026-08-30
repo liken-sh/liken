@@ -269,17 +269,9 @@ func (c *Catalog) DeleteAliases(ctx context.Context, aliases []string) (int, err
 	return c.apply(ctx, deleteByKey("aliases", "alias", aliases))
 }
 
-// DeleteFileItems removes the link rows for the (file, item) pairs a file no
-// longer holds.
-func (c *Catalog) DeleteFileItems(ctx context.Context, rows []fileRow) (int, error) {
-	var statements []statement
-	for _, row := range rows {
-		for _, item := range row.Items {
-			statements = append(statements, statement{
-				sql:    `DELETE FROM file_items WHERE path = ? AND item = ?`,
-				params: []any{row.Path, item},
-			})
-		}
-	}
-	return c.apply(ctx, statements)
+// DeleteFileItemsByPath removes every link row a departed file held, by
+// its path. The prune deletes a file by path and knows none of the items
+// it linked, so one delete per path clears the whole link.
+func (c *Catalog) DeleteFileItemsByPath(ctx context.Context, paths []string) (int, error) {
+	return c.apply(ctx, deleteByKey("file_items", "path", paths))
 }
