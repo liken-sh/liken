@@ -79,3 +79,23 @@ scanner pod starts with both containers, and its status folds the
 zero-title report within one reconcile. A second `Library` of the same
 kind in the same namespace does the same beside it. Deleting one removes
 its pod and leaves the other.
+
+## What ran
+
+Release 2026.08.29-002, rolled to `liken-1` on 2026-08-29. Two
+`Library` objects of kind films in one namespace, both over one
+`ReadOnlyMany` claim on the lab's NFS film export, one at `/` and one
+at `/Sci-Fi`. Each reported `Bound` and then `Ready` 8 s after it was
+created, with the volume's name, `nfs`, the server, and the export path
+in its status, the scanner pod's name, and the zero-title report's
+counts and times. Each scanner pod ran two containers, mounted the
+claim read-only at `/library`, and mounted no `ServiceAccount` token.
+Deleting one `Library` removed its pod within 10 s and left the other
+`Ready`.
+
+Two things the drill found. The operator's first list after the CRD is
+created in the same apply answers 429 while the API server initializes
+the resource's storage, so the pod exits once and the kubelet restarts
+it; the second start lists cleanly. And a deleted `Library`'s retained
+report and availability stay on the broker, because nothing clears
+them yet; the scanner plan owns that reclaim.

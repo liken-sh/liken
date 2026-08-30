@@ -33,9 +33,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 film, and play it on the same `Player`. Plan 10 documents that.
 
-* [02, The Library resource](02-the-library-resource.md). What a
-  `Library` declares, how a kind is chosen, how a library binds to
-  storage, and what its status reports.
 * [03, The catalog](03-the-catalog.md). The Corrosion cluster: the
   schema and its rules, the sidecar, the write path, the update stream,
   and the pod settings the proof of concept decided.
@@ -81,6 +78,12 @@ for a later agent to shape.
   browser that opens a black window with the harness flags, the three
   images, the release workflow, the coverage gates, and the local
   harness directory.
+* [02, The Library resource](completed/02-the-library-resource.md).
+  Built, and rolled to `liken-1` on 2026-08-29 in release 2026.08.29-002.
+  The `Library` CRD with its kind rule, the reconcile loop, the scanner
+  pod with the Corrosion sidecar, the report over the bus, and the
+  status with its two conditions. The scanner reports zero titles until
+  plan 04.
 
 ## Open problems
 
