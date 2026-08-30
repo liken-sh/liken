@@ -22,7 +22,7 @@ namespace's one cluster, not any single `Library`.
 The catalog also has no durable home yet. Each agent holds the catalog in
 an `emptyDir`, so a restart rebuilds it: an agent with peers up re-syncs
 the whole catalog over gossip, which is the memory peak the
-[`ingest-memory-and-restart`](open-problems/ingest-memory-and-restart.md)
+[`ingest-memory-and-restart`](../open-problems/ingest-memory-and-restart.md)
 problem records, and an agent with no peers up rebuilds from the volume.
 Neither is work the design should repeat on every restart.
 
@@ -107,3 +107,26 @@ already holds, with no full re-sync and no volume rebuild, which the
 agent's memory at startup shows against a cold start. Deleting a
 `Library` garbage-collects its catalog claim. The `Catalog` status lists
 the member pods and the storage size.
+
+## What the build and the drill found
+
+Plan 15 shipped in release 2026.08.30-007 and drilled on `liken-1` through
+-011.
+
+- The `Catalog` is namespaced, in `library.liken.sh/v1alpha1`. Its Go type
+  is `NamespaceCatalog`, because the Corrosion client in `catalog.go`
+  already holds the `Catalog` name; the API kind is still `Catalog`.
+- A namespace has exactly one. On `liken-1`, a `Library` in a namespace with
+  no `Catalog` reported `Ready: False` with the reason `NoCatalog`, and it
+  reached `Ready` within seconds of a `Catalog` being declared.
+- The operator provisions one catalog `PersistentVolumeClaim` per scanner
+  pod, `ReadWriteOnce`, sized from the `Catalog` and owned by the `Library`.
+  On `liken-1` the claim bound on the scanner pod's node and survived a pod
+  roll, so the next pod started from the catalog it held rather than
+  re-syncing over gossip.
+- The `Catalog` owns the catalog `Service` and `EndpointSlice`, which
+  describe the namespace's one Corrosion cluster. `Catalog.status` reports
+  the member agent pods and the storage size.
+- The catalog volume is provisioned once, so a later change to the
+  `Catalog`'s size reaches a new claim, not a bound one. Volume expansion is
+  not built.

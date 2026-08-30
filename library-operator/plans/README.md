@@ -33,9 +33,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [04, Scanners for movies and
-  series](04-scanners-for-movies-and-series.md). The scanner contract and
-  the first two kinds.
 * [05, The idle screen in Iced](05-the-idle-screen-in-iced.md). The idle
   screen redrawn as a native client, and the `Player` field that selects
   it.
@@ -86,6 +83,19 @@ for a later agent to shape.
   The schema with the item header and the `movies` table, the `catalog`
   `Service` and the `EndpointSlice` the operator writes behind it, the
   local three-agent cluster, and the numbers from both drills.
+* [04, Scanners for movies and
+  series](completed/04-scanners-for-movies-and-series.md). Built, and
+  rolled to `liken-1` through release 2026.08.30-011. The streaming walk
+  and the mark-and-sweep prune, the movies and series kinds with recursive
+  descent through grouping folders, the durable catalog on a `Library`-owned
+  claim sized by the namespace `Catalog` (plan 15), the Corrosion native
+  sidecar gated by an exec probe, and the scanner's progress logging.
+* [15, The namespace catalog](completed/15-the-namespace-catalog.md).
+  Built out of sequence during plan 04, and rolled to `liken-1` through
+  release 2026.08.30-011. The `Catalog` CRD, one per namespace, that owns
+  the catalog `Service` and `EndpointSlice`, sizes a `Library`-owned catalog
+  claim per scanner pod, and holds a `Library` `Pending` until exactly one
+  `Catalog` exists.
 
 ## Open problems
 

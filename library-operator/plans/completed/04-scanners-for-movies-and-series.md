@@ -198,7 +198,7 @@ stable for a title with a sidecar, but a sidecar-less folder's id rests
 on its path, and a move breaks it. Writing a minted id back to the
 volume as a durable fact would fix that. The project trusts the public
 databases' ids for now and defers writing its own, recorded in
-[`open-problems/`](open-problems/writing-ids-back-to-the-volume.md).
+[`open-problems/`](../open-problems/writing-ids-back-to-the-volume.md).
 
 ## Proof
 
@@ -218,3 +218,38 @@ and the new pod's startup walk reflects the change. A walk that fails
 partway, forced by an unreadable root, prunes nothing and keeps the
 catalog. The catalog's `state.db` size for the lab's movies and series is
 recorded in the completed plan, because plan 06 budgets against it.
+
+## What the build and the drill found
+
+Plan 04 shipped over releases 2026.08.30-001 through -011 and drilled on
+`liken-1`.
+
+- The scanner reconciles by marking and sweeping against the catalog, and
+  the walk streams one folder at a time, so neither the scan nor the prune
+  holds the whole library in memory. The catalog is durable on a
+  `Library`-owned `ReadWriteOnce` `PersistentVolumeClaim`, sized by the
+  namespace `Catalog` (plan 15).
+- The scanner's first walk raced the Corrosion sidecar. It posted to the
+  agent before the agent bound its API, the walk failed, and the `Library`
+  reported zero titles for a full `scanInterval`, five minutes. Corrosion is
+  now a native sidecar, an `initContainer` with `restartPolicy: Always`, and
+  an exec `startupProbe` that runs `corrosion query "SELECT 1"` holds the
+  scanner until the API answers. A kubelet `tcpSocket` or `httpGet` probe
+  cannot gate it, because the API binds loopback alone. On `liken-1` the
+  scanner started three seconds after Corrosion and its first walk populated
+  the count.
+- A walk no longer discards a good count when a catalog read-back fails. It
+  publishes the count once the write lands, and the prune and the second
+  count are best-effort steps that log and wait for the next walk. An
+  incomplete walk keeps the last report.
+- A movies volume nests a title under more than one grouping folder, genre
+  then studio, such as `Comics/Marvel/Iron Man (2008)`. The one-level walk
+  cataloged the studio folder as an unidentified title and missed the films
+  under it. The walk now recurses into any grouping folder. On `liken-1`,
+  `Comics/Marvel` went from 0 to 78 movies and `Comics/DC` from 0 to 32.
+- On `liken-1`: a movies `Library` reported 1407 titles, a series `Library`
+  reported 156 series and 6222 episodes with the right season and episode
+  structure, checked by hand for "12 Monkeys". A webhook drove a scoped
+  rescan within the request, and adding a folder to the `ignore` list
+  removed its rows from the catalog. The catalog's `state.db` for the movies
+  and series is 38 MB, which plan 06 budgets against.
