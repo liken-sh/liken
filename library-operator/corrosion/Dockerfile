@@ -43,4 +43,17 @@ FROM gcr.io/distroless/cc-debian12@sha256:e5d81ddde149641e2a9ba55be4545bc125c67d
 # pod's network.
 COPY --from=build /usr/src/corrosion/target/release/corrosion /corrosion
 
+# The configuration and the schema arrive in the image because the pod
+# has no shell to render a file and no `ConfigMap` for the sidecar. The
+# schema directory is empty in this plan, and plan 03 puts the
+# catalog's schema file in it.
+COPY config.toml /etc/corrosion/config.toml
+COPY schema/ /etc/corrosion/schema/
+
+# The entrypoint is the bare binary, so `corrosion cluster members` and
+# the other commands still run from this image with their own
+# arguments. The default command is the agent, so a pod that names
+# neither a command nor arguments runs the agent on the configuration
+# above.
 ENTRYPOINT ["/corrosion"]
+CMD ["agent", "--config", "/etc/corrosion/config.toml"]

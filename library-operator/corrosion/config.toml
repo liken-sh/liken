@@ -1,0 +1,69 @@
+# The Corrosion agent's configuration, in the image at
+# `/etc/corrosion/config.toml`. The agent runs as a sidecar in a
+# distroless container with no shell, so nothing in the pod can render
+# a file before the agent starts, and a `ConfigMap` for it would be one
+# more object to keep in step with the image. Corrosion reads an
+# environment variable over any setting here, with `__` between the
+# table and the key, so a pod changes one setting and keeps the rest.
+
+[db]
+# The catalog is derived from a walk of the volume, so it needs no
+# durability beyond a rescan, and the pod gives this directory an
+# `emptyDir`. The agent writes the database, its write-ahead log, its
+# subscription files, and its admin socket under this one directory, so
+# the container needs no other writable path.
+path = "/var/lib/corrosion/state.db"
+
+# Every agent in the cluster loads the same schema. Corrosion reads
+# each `.sql` file in this directory in name order and applies the
+# difference on every start. Plan 03 puts the catalog's schema file
+# here. The directory is empty until then, and an empty directory
+# means no schema, which the agent accepts.
+schema_paths = ["/etc/corrosion/schema"]
+
+# The SQLite page cache, in KiB as a negative number. 64 MiB in place
+# of the 1 GiB default cost nothing measurable in write speed and saved
+# up to 94 MB of resident memory per agent. Every scanner and every
+# screen runs an agent, so that saving repeats once per pod.
+cache_size_kib = -65536
+
+[api]
+# The HTTP API answers on loopback only. A scanner posts its writes to
+# it from another container in the same pod, and a media browser reads
+# its updates stream the same way. Nothing outside the pod writes the
+# catalog, so the API needs no address on the pod's network and no
+# authorization.
+addr = "127.0.0.1:8080"
+
+[gossip]
+# Agents replicate to each other over QUIC on this port. The image is
+# built before any pod exists, so the file cannot name the pod's
+# address, and the agent binds every address instead. The pod sets
+# `GOSSIP__EXTERNAL_ADDR` to `<pod IP>:8787` from the downward API, and
+# that is the address the agent announces to its peers. An agent that
+# starts without that variable serves its API and announces
+# `0.0.0.0:8787`, which no peer can dial.
+#
+# The bind address is IPv4 because Corrosion keeps only the peers whose
+# address family matches the family it bound. An agent bound on
+# `[::]:8787` discards every IPv4 address that plan 03's bootstrap list
+# resolves to.
+addr = "0.0.0.0:8787"
+
+# Gossip carries no TLS. The traffic stays inside the cluster network,
+# it holds the titles and paths the scanner read from the volume, and
+# TLS needs a certificate per pod that nothing in this project mints.
+plaintext = true
+
+# This plan runs one agent per pod, and an agent with no peers holds
+# only the catalog its own scanner writes. Plan 03 gives each agent the
+# headless `Service` over the pods that run one, and the agents find
+# each other through it.
+bootstrap = []
+
+[admin]
+# The admin socket answers `corrosion cluster members` and the other
+# operator commands. It moves off its default under `/var/run` so that
+# the `emptyDir` holds every path the agent writes, and the container
+# can run with a read-only root filesystem.
+path = "/var/lib/corrosion/admin.sock"

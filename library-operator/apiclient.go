@@ -12,6 +12,7 @@ package main
 // certificate and a ServiceAccount token at a known path.
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -31,9 +32,14 @@ const defaultServiceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 // it controls.
 var serviceAccountDir = defaultServiceAccountDir
 
-// An absent object is not a failure. It is the normal state the
-// caller answers by creating it.
-var ErrNotFound = errors.New("not found")
+// These two answers are values, not failures. An absent object is the
+// normal state the caller answers by creating it, and a conflict is
+// the normal state under optimistic concurrency that the caller
+// answers by reading again.
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("conflict: something else wrote this object first")
+)
 
 type Client struct {
 	base        string
@@ -70,7 +76,10 @@ func InClusterClient() (*Client, error) {
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
 			// Each timeout bounds the same failure: a server that
-			// stops answering without sending anything.
+			// stops answering without sending anything. There is no
+			// overall client timeout, because a watch is a request
+			// whose response never ends, and a whole-request deadline
+			// would cut every stream on schedule.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,
@@ -81,10 +90,10 @@ func InClusterClient() (*Client, error) {
 	}, serviceAccountDir), nil
 }
 
-// Get reads one path and decodes the answer into out. It is the only
-// verb this plan uses. The plans that write objects add the rest.
-func (c *Client) Get(path string, out any) error {
-	resp, err := c.send(http.MethodGet, path)
+// RequestJSON sends one request and decodes the answer, turning every
+// non-2xx status into an error that carries the server's own message.
+func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
+	resp, err := c.Do(method, path, body)
 	if err != nil {
 		return err
 	}
@@ -93,9 +102,12 @@ func (c *Client) Get(path string, out any) error {
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrNotFound
 	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("%s %s: %s: %s", http.MethodGet, path, resp.Status, message)
+		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
 	}
 	if out == nil {
 		return nil
@@ -103,8 +115,14 @@ func (c *Client) Get(path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func (c *Client) send(method, path string) (*http.Response, error) {
-	req, err := http.NewRequest(method, c.base+path, nil)
+// Do sends one request and hands back the open response, which is
+// what a watch needs and what RequestJSON is built on.
+func (c *Client) Do(method, path string, body []byte) (*http.Response, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, c.base+path, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +138,9 @@ func (c *Client) send(method, path string) (*http.Response, error) {
 		req.Header.Set("Authorization", "Bearer "+string(token))
 	}
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	return c.http.Do(req)
 }
 
@@ -146,8 +167,131 @@ type Version struct {
 
 func ServerVersion(client *Client) (Version, error) {
 	var version Version
-	if err := client.Get(versionPath, &version); err != nil {
+	if err := client.RequestJSON(http.MethodGet, versionPath, nil, &version); err != nil {
 		return Version{}, err
 	}
 	return version, nil
+}
+
+// The collection paths. Libraries are listed and watched across every
+// namespace and written back per namespace. The storage and the pods
+// are ordinary core-group objects: a claim and a pod are namespaced,
+// and a volume is not.
+const (
+	librariesPath = "/apis/" + libraryAPIVersion + "/libraries"
+	libraryPrefix = "/apis/" + libraryAPIVersion + "/namespaces/"
+	corePrefix    = "/api/v1/namespaces/"
+	volumesPath   = "/api/v1/persistentvolumes"
+	podsAllPath   = "/api/v1/pods"
+)
+
+// scannerPodsQuery narrows a pod list or a pod watch to this
+// operator's own scanner pods, by the name label every scanner pod
+// carries. The equals sign inside the selector is percent-encoded, so
+// the server reads one parameter and not two.
+const scannerPodsQuery = "labelSelector=" + scannerLabelKey + "%3D" + scannerLabelValue
+
+func libraryPath(namespace, name string) string {
+	return libraryPrefix + namespace + "/libraries/" + name
+}
+
+func claimPath(namespace, name string) string {
+	return corePrefix + namespace + "/persistentvolumeclaims/" + name
+}
+
+func podsPath(namespace string) string {
+	return corePrefix + namespace + "/pods"
+}
+
+// ListLibraries answers a whole pass with one request, and the list's
+// resourceVersion is where the libraries watch resumes from.
+func ListLibraries(c *Client) (*LibraryList, error) {
+	list := &LibraryList{}
+	if err := c.RequestJSON(http.MethodGet, librariesPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// PutLibraryStatus writes through the status subresource, which is its
+// own write path: this request can never touch a spec. The
+// resourceVersion in the body is what makes the write conditional, so
+// a status written over a Library that changed underneath answers
+// ErrConflict and the next pass reads it again.
+func PutLibraryStatus(c *Client, library *Library) (*Library, error) {
+	body, err := json.Marshal(library)
+	if err != nil {
+		return nil, err
+	}
+	written := &Library{}
+	path := libraryPath(library.Metadata.Namespace, library.Metadata.Name) + "/status"
+	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
+// GetPersistentVolumeClaim reads the claim a Library names, for two
+// answers: whether it is bound, and which volume it is bound to. An
+// absent claim is ErrNotFound, which the pass reports as the
+// ClaimNotFound reason rather than as a failure.
+func GetPersistentVolumeClaim(c *Client, namespace, name string) (*PersistentVolumeClaim, error) {
+	claim := &PersistentVolumeClaim{}
+	if err := c.RequestJSON(http.MethodGet, claimPath(namespace, name), nil, claim); err != nil {
+		return nil, err
+	}
+	return claim, nil
+}
+
+// GetPersistentVolume reads the volume behind a bound claim, for what
+// serves it. A PersistentVolume is cluster-scoped, so the path carries
+// no namespace.
+func GetPersistentVolume(c *Client, name string) (*PersistentVolume, error) {
+	volume := &PersistentVolume{}
+	if err := c.RequestJSON(http.MethodGet, volumesPath+"/"+name, nil, volume); err != nil {
+		return nil, err
+	}
+	return volume, nil
+}
+
+// ListScannerPods reads this operator's scanner pods across every
+// namespace, because a Library lives in whatever namespace its claim
+// does. The list's resourceVersion is where the pod watch begins.
+func ListScannerPods(c *Client) (*PodList, error) {
+	list := &PodList{}
+	if err := c.RequestJSON(http.MethodGet, podsAllPath+"?"+scannerPodsQuery, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func GetPod(c *Client, namespace, name string) (*Pod, error) {
+	pod := &Pod{}
+	if err := c.RequestJSON(http.MethodGet, podsPath(namespace)+"/"+name, nil, pod); err != nil {
+		return nil, err
+	}
+	return pod, nil
+}
+
+func CreatePod(c *Client, pod *Pod) (*Pod, error) {
+	body, err := json.Marshal(pod)
+	if err != nil {
+		return nil, err
+	}
+	created := &Pod{}
+	if err := c.RequestJSON(http.MethodPost, podsPath(pod.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// DeletePod removes one scanner pod. An already-absent pod is success,
+// because the operator deletes a pod to replace it and a delete that
+// races another pass must not fail.
+func DeletePod(c *Client, namespace, name string) error {
+	err := c.RequestJSON(http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }

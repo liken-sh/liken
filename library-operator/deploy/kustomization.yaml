@@ -9,6 +9,7 @@ kind: Kustomization
 namespace: liken-system
 
 resources:
+  - libraries-crd.yaml
   - rbac.yaml
   - operator.yaml
 

@@ -1,0 +1,352 @@
+# The Library API, declared to Kubernetes.
+#
+# A Library is one declaration of "this volume holds films". It names
+# a PersistentVolumeClaim, a directory inside it, and the kind of
+# media that directory holds. The library operator reconciles it into
+# one scanner pod that walks the volume and writes what it finds into
+# the catalog, and it folds the scanner's report back into the
+# status: how many titles, how many folders the scanner could not
+# identify, and when it last walked.
+#
+# The resource is namespaced, because everything a Library touches is
+# namespaced: the claim it mounts and the scanner pod it becomes both
+# live in one namespace, and RBAC on that namespace covers the set.
+# A namespace may hold many libraries, of any mix of kinds.
+#
+# One field names the kind, and one settings block per kind holds
+# that kind's settings, the way a Volume names one source. A CEL rule
+# requires the block that matches the kind and forbids the others, so
+# a new kind is a new block and one more clause in that rule, and the
+# kinds already there do not change.
+#
+# The scanner pod is owned by the Library, so deleting the Library is
+# the whole teardown: the garbage collector takes the pod with it.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: libraries.library.liken.sh
+spec:
+  group: library.liken.sh
+  names:
+    kind: Library
+    listKind: LibraryList
+    plural: libraries
+    singular: library
+    # `kubectl get media` shows the media layer at once: the players
+    # and plays of the media operator, and the libraries they play
+    # from.
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only the operator writes
+      # status. The API server enforces the split.
+      subresources:
+        status: {}
+      # `kubectl get libraries` answers what the cluster holds and
+      # whether the scanners are healthy, so the columns show the
+      # kind, the volume, the two counts, and the roll-up condition.
+      additionalPrinterColumns:
+        - name: Kind
+          type: string
+          jsonPath: .spec.kind
+        - name: Claim
+          type: string
+          jsonPath: .spec.storage.claim
+        - name: Titles
+          type: integer
+          jsonPath: .status.titles
+        - name: Unidentified
+          type: integer
+          jsonPath: .status.unidentified
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Library is a volume of media of one kind, indexed into
+            the catalog the screens read. Create one for each volume
+            and kind you hold: a Library of films over the film
+            volume, a Library of series over the series volume.
+          properties:
+            spec:
+              type: object
+              required: [storage, kind]
+              description: >-
+                The volume this library covers, the kind of media it
+                holds, and the settings for that kind.
+              # The kind and its settings block are one declaration
+              # in two fields, so the API server keeps them together:
+              # the block named by the kind must be there, and the
+              # blocks of every other kind must not. A third kind
+              # adds one clause here and one block below.
+              #
+              # The kind and the storage are immutable. A different
+              # volume or a different kind is a different library,
+              # and an edit in place would leave a catalog of one
+              # kind under a scanner for another.
+              x-kubernetes-validations:
+                - rule: >-
+                    has(self.films) == (self.kind == 'films') &&
+                    has(self.series) == (self.kind == 'series')
+                  message: >-
+                    the settings block must match the kind: a films
+                    library carries films and no series, and a series
+                    library carries series and no films
+                - rule: self.kind == oldSelf.kind
+                  message: >-
+                    a Library's kind is immutable; create another
+                    Library for the other kind
+                - rule: self.storage == oldSelf.storage
+                  message: >-
+                    a Library's storage is immutable; create another
+                    Library for the other volume or root
+              properties:
+                storage:
+                  type: object
+                  required: [claim]
+                  description: >-
+                    Where the media is: a claim, and a directory
+                    inside it.
+                  properties:
+                    claim:
+                      type: string
+                      minLength: 1
+                      description: >-
+                        The PersistentVolumeClaim in this namespace
+                        that holds the media. Any volume the cluster
+                        can mount will do, an NFS export or a CSI
+                        volume or a disk on one node. The scanner
+                        mounts it read-only and writes nothing to it.
+                        The operator reads the PersistentVolume
+                        behind the claim and reports it in the
+                        status, because playing a title needs to know
+                        how the volume is served.
+                    root:
+                      type: string
+                      minLength: 1
+                      default: /
+                      # A relative path would be read against the
+                      # scanner's working directory, which is not the
+                      # mount. The rule refuses one at apply, where
+                      # the message reaches the person who wrote it.
+                      x-kubernetes-validations:
+                        - rule: self.startsWith('/')
+                          message: root must start with /
+                      description: >-
+                        The directory inside the claim this library
+                        starts at, as an absolute path from the root
+                        of the volume. One volume may hold several
+                        libraries, each with its own root, such as
+                        /films beside /kids-films. Omitted, it is /,
+                        the whole volume.
+                kind:
+                  type: string
+                  enum: [films, series]
+                  description: >-
+                    What this library holds. The kind selects the
+                    scanner that walks the volume and the shape the
+                    catalog stores each title in. The settings block
+                    of the same name must be present, and no other.
+                films:
+                  type: object
+                  description: >-
+                    The settings for a library of films, one folder
+                    per title. Present exactly when kind is films,
+                    and empty is a complete block: every setting has
+                    a default.
+                  properties:
+                    image:
+                      type: string
+                      minLength: 1
+                      description: >-
+                        The scanner image to run in place of the one
+                        this project ships for films. Set it to run a
+                        scanner of your own, which must speak the
+                        scanner contract: mount the volume read-only,
+                        write through the catalog sidecar, and
+                        publish its report to the bus. Omitted, the
+                        operator runs the project's own image.
+                series:
+                  type: object
+                  description: >-
+                    The settings for a library of series, one folder
+                    per series with a folder per season inside it.
+                    Present exactly when kind is series, and empty is
+                    a complete block.
+                  properties:
+                    image:
+                      type: string
+                      minLength: 1
+                      description: >-
+                        The scanner image to run in place of the one
+                        this project ships for series, on the same
+                        terms as the films image.
+                sources:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 10
+                  description: >-
+                    The metadata providers to ask about a title, in
+                    the order they are asked: the first that answers
+                    supplies the title's metadata. Enrichment reads
+                    this list. Nothing acts on it yet, and a library
+                    that omits it takes what the files themselves
+                    carry.
+                  items:
+                    type: string
+                    minLength: 1
+            status:
+              type: object
+              description: >-
+                What the volume resolved to and what the scanner
+                reports, written only by the library operator. The
+                scanner pod holds no API credential. It publishes a
+                retained report on the bus, and the operator folds
+                that report in here.
+              properties:
+                volume:
+                  type: object
+                  description: >-
+                    The PersistentVolume the claim is bound to. It is
+                    absent until the claim binds. Playing a title
+                    from this library needs the volume's kind and
+                    address, so the operator reports them here and no
+                    reader has to follow the claim to its volume.
+                  properties:
+                    name:
+                      type: string
+                      description: The PersistentVolume's name.
+                    type:
+                      type: string
+                      description: >-
+                        How the volume is served, which is the name
+                        of the source key on the PersistentVolume,
+                        such as nfs, csi, local, or hostPath.
+                    server:
+                      type: string
+                      description: >-
+                        The NFS server that exports the volume. Only
+                        an nfs volume has one.
+                    path:
+                      type: string
+                      description: >-
+                        The path the NFS server exports. Only an nfs
+                        volume has one. A title's media reference is
+                        this path and the title's own path under it.
+                titles:
+                  type: integer
+                  minimum: 0
+                  description: >-
+                    How many titles the scanner's last walk cataloged.
+                unidentified:
+                  type: integer
+                  minimum: 0
+                  description: >-
+                    How many folders the last walk could not identify:
+                    no sidecar file, and no confident parse of the
+                    folder name. They are cataloged under their folder
+                    names, so they are still browsable.
+                lastWalk:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the scanner last finished a full walk of the
+                    volume.
+                lastChange:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the scanner last wrote a change to the
+                    catalog. A walk that finds nothing new moves
+                    lastWalk and leaves this alone.
+                pod:
+                  type: string
+                  description: >-
+                    The scanner pod's name, for kubectl describe and
+                    logs. The pod is owned by this Library and is
+                    deleted with it.
+                conditions:
+                  type: array
+                  description: >-
+                    The typed observations the operator keeps on this
+                    library, in the standard Kubernetes form. Bound
+                    reports the storage: True when the claim exists,
+                    is bound, and its PersistentVolume was read, and
+                    False with the reason ClaimNotFound, ClaimUnbound,
+                    or VolumeNotFound. Ready reports the scanner: True
+                    when its pod runs with every container ready and
+                    the operator holds a report for this library, and
+                    False with the reason NotBound, PodPending,
+                    PodFailed, or NoReport.
+                  # A conditions array is a map with one entry per
+                  # type. This declaration (list-type map, keyed by
+                  # type) lets the API server refuse duplicate types.
+                  # The field constraints come from metav1.Condition
+                  # itself, so these conditions validate the way the
+                  # conditions on Pods and Nodes do.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check this entry reports, in CamelCase.
+                          It is the key of this list, so a library
+                          carries one entry for each type. The
+                          description of the conditions field lists
+                          the types this operator publishes.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. Both condition types on a
+                          Library state a healthy fact, so True is the
+                          good verdict for both. Unknown means the
+                          operator cannot tell yet.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition
+                          judged. The generation counts spec edits, so
+                          a reader can tell a verdict on the spec as
+                          it stands from a verdict on an earlier spec.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for why the condition
+                          holds this verdict, meant for a program to
+                          match on.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The same answer in a sentence a person
+                          reads, such as the claim that is not bound
+                          or the container that will not start.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the verdict last changed. It moves only
+                          when the status flips, not on every write,
+                          so it answers how long a library has been
+                          Ready.

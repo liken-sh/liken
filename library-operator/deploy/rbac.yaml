@@ -1,8 +1,72 @@
 # The operator's identity in the cluster, and deliberately nothing
-# more. It reads no resource yet, so it holds no rules. The plan that
-# adds the Library adds the rules that read it.
+# more. It reads libraries, writes their statuses, reads the storage
+# behind each one, and creates the scanner pod each one becomes. It
+# deletes a scanner pod only to replace a stale one, whose template
+# hash no longer matches what the pass builds. Otherwise the teardown
+# is the garbage collector's, through the ownerReference every scanner
+# pod carries, so deleting the Library is the whole stop. It deletes no
+# object a person created.
+#
+# The scanner pods hold no credential of their own. They report over
+# the bus, and the operator writes what they report, so nothing in this
+# file grants a scanner anything.
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: library-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: library-operator
+rules:
+  # The libraries, across every namespace, because a cluster keeps its
+  # media in whatever namespace it likes and the operator is one
+  # Deployment for the cluster. The watch is the wake signal; every
+  # pass re-reads with a list. Read-only: a person declares a Library
+  # and the operator never edits one.
+  - apiGroups: [library.liken.sh]
+    resources: [libraries]
+    verbs: [get, list, watch]
+  # Only the status half. The API server's subresource split is what
+  # keeps this operator from ever rewriting a spec a person declared.
+  - apiGroups: [library.liken.sh]
+    resources: [libraries/status]
+    verbs: [update]
+  # The claim each Library names, read by name to learn whether it is
+  # bound and which volume it is bound to. No list and no watch: a
+  # claim is read on the pass that reconciles the Library that names
+  # it.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get]
+  # The volume behind that claim, read by name for its source: an NFS
+  # server and export, or the name of whatever other key serves it.
+  # Playing a title from the library needs that, so the operator reads
+  # it once per pass and reports it in the status. PersistentVolumes
+  # are cluster-scoped, which is why this rule needs a ClusterRole.
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get]
+  # The scanner pods: created once per Library, read back on every
+  # pass, and deleted only to rebuild one whose template hash no longer
+  # matches. The list and watch are cluster-scoped, because a Library
+  # lives in any namespace, and the watch wakes the loop when a scanner
+  # pod becomes ready or Kubernetes removes one.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: library-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: library-operator
+subjects:
+  - kind: ServiceAccount
+    name: library-operator
+    namespace: liken-system

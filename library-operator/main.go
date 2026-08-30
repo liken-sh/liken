@@ -18,6 +18,9 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		// Each pod role is a case here. It runs its role and returns.
+		case scanMode:
+			runScan()
+			return
 		}
 	}
 
