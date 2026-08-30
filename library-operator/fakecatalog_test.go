@@ -34,6 +34,16 @@ type fakeCatalog struct {
 	seen       map[string]int64
 	statements []capturedStatement
 	failStatus int
+	// seenLagReads models a real Corrosion agent right after CREATE
+	// TABLE seen: a query of seen can still miss the table for a short
+	// window. Each read of seen decrements it and answers "no such table"
+	// until it reaches zero.
+	seenLagReads int
+	// countErrorsAfter fails the item count read once this many have
+	// been served, so a test drives the second count read of a walk failing
+	// while the first succeeds. Zero serves every count read.
+	countErrorsAfter int
+	countReadsServed int
 	// movieBatches counts the transaction POSTs that carried a movie upsert,
 	// so a test reads how many times the streaming full walk flushed.
 	movieBatches int
@@ -145,6 +155,23 @@ func (f *fakeCatalog) cleanSeen(epoch int64) {
 // one row event per result, then the end-of-query marker.
 func (f *fakeCatalog) serveQuery(w http.ResponseWriter, r *http.Request) {
 	sql, params := parseQuery(readBody(r))
+	// while the seen table is not yet visible, a read that names it
+	// answers the error a real agent streams, so a test drives the prune
+	// read that misses the freshly created seen table.
+	if f.seenLagReads > 0 && strings.Contains(sql, "seen") {
+		f.seenLagReads--
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "no such table: seen"})
+		return
+	}
+	// after the configured number of count reads, the next one fails,
+	// so a test drives the walk's second count read failing.
+	if strings.Contains(sql, "count(*)") {
+		f.countReadsServed++
+		if f.countErrorsAfter > 0 && f.countReadsServed > f.countErrorsAfter {
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "database is locked"})
+			return
+		}
+	}
 	rows := f.evaluate(sql, params)
 
 	enc := json.NewEncoder(w)

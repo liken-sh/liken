@@ -126,6 +126,7 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	result.titles++
 	if !identified {
 		result.unidentified++
+		result.unidentifiedNames = append(result.unidentifiedNames, relativeDir)
 	}
 }
 

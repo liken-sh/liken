@@ -79,6 +79,7 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 	result.titles++
 	if !identified {
 		result.unidentified++
+		result.unidentifiedNames = append(result.unidentifiedNames, relativePath(root, dir))
 	}
 
 	for _, episode := range collectEpisodeFiles(dir, ignore) {

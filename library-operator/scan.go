@@ -123,6 +123,10 @@ type scanner struct {
 	ignore            ignoreSet
 	catalog           *Catalog
 	bus               *Bus
+	// log is where the scanner writes a walk that could not finish a catalog
+	// step, so a swallowed error shows in the pod log instead of a gap in
+	// the report. A scanner built without one writes nowhere.
+	log io.Writer
 
 	mutex  sync.Mutex
 	report libraryReport
@@ -187,6 +191,7 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 		kind:              kind,
 		ignore:            ignore,
 		catalog:           NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
+		log:               log,
 		report:            libraryReport{LastWalk: started, LastChange: started},
 	}
 	// The will is what marks the scanner offline when the pod dies
@@ -308,24 +313,31 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
 
+	started := time.Now()
+	s.logf("walking %s", s.root)
+
 	if err := s.catalog.ensureSeen(ctx); err != nil {
+		s.logWalk("ensure the seen table", err)
 		return
 	}
 	epoch := time.Now().UnixNano()
 
 	before, err := s.catalog.countItems(ctx, s.library)
 	if err != nil {
+		s.logWalk("count the catalog before the walk", err)
 		return
 	}
 
 	buffer := &walkResult{}
 	buffered, items, titles, unidentified := 0, 0, 0, 0
 	readError := false
+	var unidentifiedNames []string
 	flush := func() bool {
 		if buffered == 0 {
 			return true
 		}
 		if err := flushWalk(ctx, s.catalog, buffer, epoch); err != nil {
+			s.logWalk("write a walk batch", err)
 			return false
 		}
 		buffer = &walkResult{}
@@ -343,6 +355,7 @@ func (s *scanner) fullWalk(ctx context.Context) {
 		buffered += found
 		titles += folder.titles
 		unidentified += folder.unidentified
+		unidentifiedNames = appendSample(unidentifiedNames, folder.unidentifiedNames, unidentifiedSample)
 		if buffered >= scanFlushBatch && !flush() {
 			return
 		}
@@ -351,18 +364,32 @@ func (s *scanner) fullWalk(ctx context.Context) {
 		return
 	}
 
+	// an incomplete walk read only part of the volume, so its counts
+	// do not describe what the volume holds. It keeps the last good report
+	// in place and publishes nothing, and the next clean walk replaces it,
+	// so a partial read never overwrites a good count with a low one.
+	if incompleteWalk(readError, items, before) {
+		s.logIncompleteWalk(readError, items, before)
+		return
+	}
+
+	// The walk read the volume and wrote what it holds, so the count is
+	// settled here. The prune and the second count read the catalog back
+	// through the query API, which can miss the walk's own writes for a
+	// window after a fresh agent starts. Those steps run after this point,
+	// and a failure in one is logged and left for the next walk, so a read
+	// that lags does not discard the count the walk already knows.
 	removed := -1
-	if !incompleteWalk(readError, items, before) {
-		count, err := pruneLibrary(ctx, s.catalog, s.library, epoch)
-		if err != nil {
-			return
-		}
+	if count, err := pruneLibrary(ctx, s.catalog, s.library, epoch); err != nil {
+		s.logWalk("prune the catalog", err)
+	} else {
 		removed = count
 	}
 
 	after, err := s.catalog.countItems(ctx, s.library)
 	if err != nil {
-		return
+		s.logWalk("count the catalog after the walk", err)
+		after = before
 	}
 
 	now := time.Now().UTC()
@@ -378,6 +405,74 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	}
 	s.mutex.Unlock()
 	s.publishReport()
+
+	s.logWalkComplete(titles, unidentified, removed, unidentifiedNames, time.Since(started))
+}
+
+// unidentifiedSample bounds how many unidentified folder names a walk
+// names in its log, so a library of millions logs a sample and never one
+// line per folder. The count is always reported; the names past this are a
+// tally.
+const unidentifiedSample = 10
+
+// appendSample folds a folder's unidentified names into a running
+// sample, stopping at the limit, so the walk holds a sample and never every
+// name.
+func appendSample(have, more []string, limit int) []string {
+	for _, name := range more {
+		if len(have) >= limit {
+			return have
+		}
+		have = append(have, name)
+	}
+	return have
+}
+
+// logWalk writes one line about a walk that could not finish a step, naming
+// the step and the error. It turns a swallowed catalog error into a visible
+// line in the pod log, in place of a report held at the last count until the
+// next walk. A scanner built without a log writes nowhere.
+func (s *scanner) logWalk(step string, err error) {
+	s.logf("full walk could not %s: %v", step, err)
+}
+
+// logIncompleteWalk names why a walk kept the last report rather than
+// publish its own count: a root it could not read, or a count far below the
+// catalog's.
+func (s *scanner) logIncompleteWalk(readError bool, items, before int) {
+	if readError {
+		s.logf("incomplete walk: could not read the whole volume, keeping the last report")
+		return
+	}
+	s.logf("incomplete walk: read %d of %d cataloged items, keeping the last report", items, before)
+}
+
+// logWalkComplete writes the one summary line a finished walk leaves:
+// the counts, the sweep, and how long the walk took, then a capped sample of
+// the folders it could not identify.
+func (s *scanner) logWalkComplete(titles, unidentified, removed int, names []string, took time.Duration) {
+	if removed >= 0 {
+		s.logf("walk complete: %d titles, %d unidentified, %d removed, in %s", titles, unidentified, removed, took.Round(time.Millisecond))
+	} else {
+		s.logf("walk complete: %d titles, %d unidentified, prune deferred, in %s", titles, unidentified, took.Round(time.Millisecond))
+	}
+	if unidentified == 0 {
+		return
+	}
+	if more := unidentified - len(names); more > 0 {
+		s.logf("unidentified folders: %s, and %d more", strings.Join(names, ", "), more)
+		return
+	}
+	s.logf("unidentified folders: %s", strings.Join(names, ", "))
+}
+
+// logf writes one scanner log line under the shared prefix, or nothing
+// when the scanner was built without a log.
+func (s *scanner) logf(format string, args ...any) {
+	if s.log == nil {
+		return
+	}
+	fmt.Fprintf(s.log, "library.liken.sh: "+format+"\n", args...)
 }
 
 // rescan reads one title or series folder and reconciles the catalog to
@@ -398,7 +493,9 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
 
+	relative := relativePath(s.root, folder)
 	if err := s.catalog.ensureSeen(ctx); err != nil {
+		s.logWalk("ensure the seen table", err)
 		return
 	}
 	epoch := time.Now().UnixNano()
@@ -415,18 +512,22 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 	}
 
 	if err := flushWalk(ctx, s.catalog, result, epoch); err != nil {
+		s.logWalk("write a rescan", err)
 		return
 	}
 
-	removed, err := pruneScope(ctx, s.catalog, s.library, relativePath(s.root, folder), epoch)
+	removed, err := pruneScope(ctx, s.catalog, s.library, relative, epoch)
 	if err != nil {
+		s.logWalk("prune a rescan", err)
 		return
 	}
 
-	wrote := len(result.movies)+len(result.series)+len(result.episodes)+len(result.files) > 0
-	if !wrote && removed == 0 {
+	written := len(result.movies) + len(result.series) + len(result.episodes) + len(result.files)
+	if written == 0 && removed == 0 {
+		s.logf("rescanned %s: no change", relative)
 		return
 	}
+	s.logf("rescanned %s: wrote %d, removed %d", relative, written, removed)
 	s.mutex.Lock()
 	s.report.LastChange = time.Now().UTC()
 	s.mutex.Unlock()

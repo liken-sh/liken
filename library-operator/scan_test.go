@@ -387,6 +387,42 @@ func TestScannerRescanReadsARootTitle(t *testing.T) {
 	}
 }
 
+// a rescan logs the path it read and whether it changed anything, so
+// a webhook import is legible in the pod log: a folder with content writes,
+// and a path that resolves to nothing on the volume and in the catalog is a
+// no-change line.
+func TestRescanLogsWhetherItChanged(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a folder with content writes",
+			path: filepath.Join("testdata", "movies", "The.Thing.1982.1080p.BluRay.x264-GROUP"),
+			want: "wrote",
+		},
+		{
+			name: "a resolved path with nothing to do is a no-change line",
+			path: filepath.Join("testdata", "movies", "Ghost (1990)", "ghost.mkv"),
+			want: "no change",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			scan, _ := testScanner(t, "testdata/movies", libraryKindMovies)
+			var logged bytes.Buffer
+			scan.log = &logged
+
+			scan.rescan(context.Background(), testCase.path)
+
+			if !strings.Contains(logged.String(), "rescanned") || !strings.Contains(logged.String(), testCase.want) {
+				t.Errorf("log = %q, want a rescan line saying %q", logged.String(), testCase.want)
+			}
+		})
+	}
+}
+
 // A path outside the root names no folder, so the rescan falls back to
 // a full walk.
 func TestScannerRescanFallsBackToAFullWalk(t *testing.T) {

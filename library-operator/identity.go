@@ -49,6 +49,10 @@ type walkResult struct {
 	aliases      []aliasRow
 	titles       int
 	unidentified int
+	// the paths of the folders this walk could not identify, so a
+	// full walk names a sample of them in its log without holding every
+	// one. It carries one path per unidentified folder.
+	unidentifiedNames []string
 	// A walk that could not read the root read only part of the volume, so
 	// the prune-abort guard skips the prune for this pass and keeps the rows
 	// the walk did not reach.

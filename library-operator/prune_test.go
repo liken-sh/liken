@@ -6,9 +6,12 @@ package main
 // prune never reaches another library's rows.
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -263,11 +266,16 @@ func TestFullWalkFlushesInBoundedChunks(t *testing.T) {
 func TestFullWalkSkipsThePruneOnAnUnreadableRoot(t *testing.T) {
 	root := titleTree(t, "A (2001)", "B (2002)")
 	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	var logged bytes.Buffer
+	scan.log = &logged
 	ctx := context.Background()
 
 	scan.fullWalk(ctx)
 	if len(fake.held(fake.movies)) != 2 {
 		t.Fatalf("movies = %v, want the two titles", fake.held(fake.movies))
+	}
+	if scan.report.Titles != 2 {
+		t.Fatalf("titles = %d, want the two titles the first walk read", scan.report.Titles)
 	}
 
 	// The root became unreadable, so the walk read nothing. The prune is
@@ -281,6 +289,95 @@ func TestFullWalkSkipsThePruneOnAnUnreadableRoot(t *testing.T) {
 	if scan.report.RemovedLastSweep != 0 {
 		t.Errorf("removedLastSweep = %d, want no sweep on a partial read", scan.report.RemovedLastSweep)
 	}
+	if scan.report.Titles != 2 {
+		t.Errorf("titles = %d, want the last good count kept after an incomplete walk", scan.report.Titles)
+	}
+	if !strings.Contains(logged.String(), "incomplete walk") {
+		t.Errorf("log = %q, want the incomplete walk logged", logged.String())
+	}
+}
+
+// a finished walk logs one summary line with the counts and the
+// duration, and names the folders it could not identify up to the cap, then
+// tallies the rest, so a large library logs a sample and never one line per
+// folder.
+func TestFullWalkLogsASummaryAndACappedUnidentifiedSample(t *testing.T) {
+	cases := []struct {
+		name    string
+		count   int
+		wantAll bool
+	}{
+		{name: "a short list names every folder", count: 3, wantAll: true},
+		{name: "a long list names the cap and tallies the rest", count: 12, wantAll: false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			folders := make([]string, 0, testCase.count)
+			for i := range testCase.count {
+				folders = append(folders, fmt.Sprintf("Mystery %c", 'A'+i))
+			}
+			root := titleTree(t, folders...)
+			scan, _ := fakeScanner(t, root, libraryKindMovies)
+			var logged bytes.Buffer
+			scan.log = &logged
+
+			scan.fullWalk(context.Background())
+
+			out := logged.String()
+			if !strings.Contains(out, fmt.Sprintf("walking %s", root)) {
+				t.Errorf("log = %q, want the walk-start line", out)
+			}
+			summary := fmt.Sprintf("walk complete: %d titles, %d unidentified, 0 removed", testCase.count, testCase.count)
+			if !strings.Contains(out, summary) {
+				t.Errorf("log = %q, want %q", out, summary)
+			}
+			if testCase.wantAll && strings.Contains(out, "more") {
+				t.Errorf("log = %q, want every folder named with no tally", out)
+			}
+			if !testCase.wantAll && !strings.Contains(out, fmt.Sprintf("and %d more", testCase.count-unidentifiedSample)) {
+				t.Errorf("log = %q, want the tally of the folders past the cap", out)
+			}
+		})
+	}
+}
+
+// a walk that reads far fewer items than the catalog holds is
+// incomplete, so it keeps the last good count rather than overwrite it with
+// the low one, and it names the shortfall in the log.
+func TestFullWalkKeepsTheCountWhenTheWalkFallsFarShort(t *testing.T) {
+	folders := make([]string, 0, 20)
+	for i := range 20 {
+		folders = append(folders, fmt.Sprintf("Title %02d (20%02d)", i, i))
+	}
+	root := titleTree(t, folders...)
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	var logged bytes.Buffer
+	scan.log = &logged
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if scan.report.Titles != 20 {
+		t.Fatalf("titles = %d, want the twenty titles the first walk read", scan.report.Titles)
+	}
+
+	// all but two folders vanished at once, far below half the
+	// catalog, so the walk is read as incomplete and the count stands.
+	for _, folder := range folders[2:] {
+		if err := os.RemoveAll(filepath.Join(root, folder)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan.fullWalk(ctx)
+
+	if scan.report.Titles != 20 {
+		t.Errorf("titles = %d, want the last good count kept after a walk that fell far short", scan.report.Titles)
+	}
+	if len(fake.held(fake.movies)) != 20 {
+		t.Errorf("movies = %d, want the catalog kept after an incomplete walk", len(fake.held(fake.movies)))
+	}
+	if !strings.Contains(logged.String(), "of 20 cataloged") {
+		t.Errorf("log = %q, want the shortfall named", logged.String())
+	}
 }
 
 func TestFullWalkLeavesTheReportOnAWriteError(t *testing.T) {
@@ -292,6 +389,51 @@ func TestFullWalkLeavesTheReportOnAWriteError(t *testing.T) {
 
 	if scan.report.Titles != 0 {
 		t.Errorf("titles = %d, want the report untouched after a write error", scan.report.Titles)
+	}
+}
+
+// a prune read that misses the freshly created seen table must not
+// discard the walk's title count. The walk read and wrote the volume, so the
+// report carries the count and the failed prune is logged and left for the
+// next walk, in place of a report stuck at zero for a whole scanInterval.
+func TestFullWalkReportsTitlesWhenThePruneReadMissesSeen(t *testing.T) {
+	root := titleTree(t, "A (2001)", "B (2002)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	var logged bytes.Buffer
+	scan.log = &logged
+	fake.seenLagReads = 1
+
+	scan.fullWalk(context.Background())
+
+	if scan.report.Titles != 2 {
+		t.Errorf("titles = %d, want the two titles the walk read despite the prune read miss", scan.report.Titles)
+	}
+	if len(fake.held(fake.movies)) != 2 {
+		t.Errorf("movies = %v, want the two titles the walk wrote", fake.held(fake.movies))
+	}
+	if !strings.Contains(logged.String(), "seen") {
+		t.Errorf("log = %q, want the failed prune logged", logged.String())
+	}
+}
+
+// the second count read tells a change from no change, and it reads
+// the catalog back through the query API, so it can lag too. A failure there
+// still leaves the walk's title count in the report and is logged, in place
+// of a report stuck at zero.
+func TestFullWalkReportsTitlesWhenTheAfterCountFails(t *testing.T) {
+	root := titleTree(t, "A (2001)", "B (2002)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	var logged bytes.Buffer
+	scan.log = &logged
+	fake.countErrorsAfter = 1
+
+	scan.fullWalk(context.Background())
+
+	if scan.report.Titles != 2 {
+		t.Errorf("titles = %d, want the two titles the walk read despite the after-count failing", scan.report.Titles)
+	}
+	if !strings.Contains(logged.String(), "count") {
+		t.Errorf("log = %q, want the failed count logged", logged.String())
 	}
 }
 
