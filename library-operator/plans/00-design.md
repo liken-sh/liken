@@ -49,7 +49,7 @@ A `Library` is one root directory on one volume, of one kind. A cluster
 has many: two movie libraries on two volumes, a series library, a music
 library, a photo library. Every relation between libraries and the
 things that read them is many-to-many. A screen may browse several
-libraries, and a library may appear on every screen.
+libraries, and a library may appear on every screen in its namespace.
 
 A kind is a plugin. It defines how to walk a root, how to read the
 sidecars that kind's ecosystem writes, and what structure a media
@@ -64,6 +64,21 @@ Each kind uses the format its ecosystem uses. Movies and series use the
 `*arr` tools read and write. Music uses the tags in the files. Photos
 use EXIF and XMP. The operator writes no format of its own on the
 volume, so every file it reads or writes stays useful to other programs.
+
+## Namespaces
+
+A namespace is a boundary. A `Library` is namespaced, and it is visible
+to the screens in its namespace and to nothing outside it. The catalog
+follows the same rule: each namespace that holds a `Library` has a
+catalog cluster of its own, and a screen's sidecar joins the cluster of
+the screen's namespace. Every reference this operator makes stays
+inside one namespace. A `Library` names a claim in its namespace, a
+screen shows libraries in its namespace, and a `Play` is created in the
+`Player`'s namespace. A cluster that wants every library on every
+screen keeps them in one namespace.
+
+This rule is the design's own. It does not follow from what a volume
+or a database can do, and no later plan derives a scope from those.
 
 ## Storage
 
@@ -87,9 +102,10 @@ status for a person to read, and playback does not depend on it.
 The catalog is a SQLite database replicated by
 [Corrosion](https://github.com/superfly/corrosion). A Corrosion agent
 runs as a sidecar in every pod that reads or writes the catalog: beside
-each scanner, and beside the media browser on each screen. Agents find
-each other by SWIM gossip over QUIC, and each change reaches every peer.
-Every agent stores a full copy on its own disk.
+each scanner, and beside the media browser on each screen. The agents
+of one namespace form one cluster. They find each other by SWIM gossip
+over QUIC, and each change reaches every peer in that cluster. Every
+agent stores a full copy of its namespace's catalog on its own disk.
 
 The contract has three rules. Every write goes through the local agent's
 HTTP API, and only scanners write. A screen never writes. Every read is

@@ -67,9 +67,15 @@ idle pod. It has the Corrosion image, a config that binds the API to
 localhost and the gossip port to the pod's address, a schema mount, and
 an `emptyDir` for the database. The agent's page cache is set to 64 MiB,
 below its 1 GiB default. That setting cost nothing measurable in speed
-and saved up to 94 MB of resident memory per agent. Agents find each
-other through a headless `Service` over the pods that run one, given to
-each agent as its bootstrap list.
+and saved up to 94 MB of resident memory per agent. The agents of one
+namespace form one cluster. They find each other through a headless
+`Service` named `catalog` in that namespace, which the operator creates
+in every namespace that holds a `Library`, with an `EndpointSlice` it
+writes over that namespace's scanner pods. The `Service` has no
+selector, because the operator writes the slice itself and adds a
+screen's pod to it in plan 06. Every agent bootstraps to the short
+name `catalog`, which the pod's own search path resolves in the pod's
+namespace, so the image carries no namespace.
 
 **Three findings shape the pod specs.** An agent that ingests a large
 catalog for the first time peaks at 240 to 380 MB resident and keeps
@@ -139,9 +145,11 @@ Four things the build and the drill found.
 
 - Corrosion loads its configuration with the `config` crate 0.13,
   which cannot parse a list from an environment variable. So the
-  bootstrap name is in the image's configuration file, and the
-  `Service` behind it has no selector. The operator writes the
-  `EndpointSlice`, because a selector sees only its own namespace.
+  bootstrap name is in the image's configuration file. Releases -002
+  and -003 named one `Service` in `liken-system` for the whole cluster,
+  which contradicted the design's namespace rule. Release
+  2026.08.30-004 moved to one `Service` per namespace and the short
+  name `catalog`.
 - Corrosion drops its own address from the bootstrap list by
   comparison with the address it bound, not the address it announces.
   Release 2026.08.30-002 bound `0.0.0.0` and every agent announced to

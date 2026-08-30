@@ -1,13 +1,14 @@
 # Which libraries a screen shows
 
-The media browser in plan 07 shows every library in the catalog. A
+The media browser in plan 07 shows every library in its namespace. A
 children's room should show the children's movie library and nothing
 else, and a living room should open on "continue watching" and "recently
 added" rather than a list of libraries. Both are facts of this layer. By
 the one-way rule they cannot be fields of the `Player`.
 
 The shape is a resource in this operator that names a `Player` and the
-libraries it may browse, with both relations many-to-many. It may also
+libraries it may browse, all in its own namespace, with both relations
+many-to-many. It may also
 name the rows the first view shows, in order: continue watching,
 recently added from a library, a hand-made collection, or a grouping
 such as a set or a decade. Rows are queries against the catalog, so a

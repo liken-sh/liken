@@ -25,11 +25,13 @@ generic as the image field: an idle client that needs a helper process
 or a mount gets one.
 
 The sidecar in the pod is plan 03's, unchanged: Corrosion, the schema,
-an `emptyDir` for the database, the API on localhost, and the cluster's
-headless `Service` as its bootstrap list. Gossip crosses namespaces by
-address, so a `Player` in a room's namespace reaches a `Service` in the
-operator's namespace, and the operator publishes the address screens
-use.
+an `emptyDir` for the database, the API on localhost, and the short
+name `catalog` as its bootstrap list. That name resolves to the
+`Service` in the pod's own namespace, so a screen joins the catalog
+cluster of the namespace its `Player` is in, and it sees that
+namespace's libraries and no others. The operator adds the idle pod to
+that namespace's `EndpointSlice`, so a screen is a bootstrap peer for
+the next screen when no scanner is up.
 
 ## The catalog on a screen
 

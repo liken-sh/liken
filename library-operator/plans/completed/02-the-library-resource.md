@@ -60,8 +60,9 @@ path are proved before a parser exists.
 
 ## What was set aside
 
-A cluster-scoped `Library`. Claims and secrets are namespaced, and a
-library belongs with the claim it mounts.
+A cluster-scoped `Library`. A namespace is a boundary, and a library
+is visible inside its namespace and nowhere else. The claim it mounts
+is in the same namespace, as every reference this operator makes is.
 
 A free-form settings map for kinds. It would let a kind ship without a
 schema change, and it would stop the API server from validating anything
