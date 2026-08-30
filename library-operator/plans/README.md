@@ -33,10 +33,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 film, and play it on the same `Player`. Plan 10 documents that.
 
-* [01, The repository and its
-  builds](01-the-repository-and-its-builds.md). The skeleton: an
-  operator that reconciles nothing, a media browser that draws nothing,
-  the images, the release workflow, and the local harness directory.
 * [02, The Library resource](02-the-library-resource.md). What a
   `Library` declares, how a kind is chosen, how a library binds to
   storage, and what its status reports.
@@ -78,7 +74,13 @@ for a later agent to shape.
 
 ## Completed
 
-None yet.
+* [01, The repository and its
+  builds](completed/01-the-repository-and-its-builds.md). Built, and
+  rolled to `liken-1` on 2026-08-29 in release 2026.08.29-001. The
+  skeleton: an operator that connects and reconciles nothing, a media
+  browser that opens a black window with the harness flags, the three
+  images, the release workflow, the coverage gates, and the local
+  harness directory.
 
 ## Open problems
 
