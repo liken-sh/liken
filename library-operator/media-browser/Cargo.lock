@@ -1272,6 +1272,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "liken-iced"
+version = "0.1.0"
+dependencies = [
+ "iced_widget",
+]
+
+[[package]]
 name = "lilt"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1394,6 +1401,7 @@ dependencies = [
  "iced_widget",
  "iced_winit",
  "image",
+ "liken-iced",
  "serde_json",
 ]
 

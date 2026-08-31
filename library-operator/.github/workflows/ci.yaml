@@ -63,7 +63,13 @@ jobs:
       # the runner.
       WLR_RENDERER: pixman
     steps:
+      # The media browser builds against liken-iced, the crate in the
+      # brand repository that carries the mark and the palette. It is
+      # a submodule at media-browser/brand, and a checkout without it
+      # resolves no dependency.
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       # The media browser's tests open a real window. cage is the
       # compositor, wlr-randr sets the headless mode, and
@@ -147,7 +153,13 @@ jobs:
           - image: library-operator-corrosion
             context: corrosion
     steps:
+      # The media browser image builds liken-iced from the submodule at
+      # media-browser/brand, inside the build context. A checkout
+      # without it leaves the directory empty and the build fails on a
+      # dependency it cannot find.
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: docker/setup-buildx-action@v3
 

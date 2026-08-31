@@ -1,108 +1,98 @@
 # The idle screen in Iced
 
-Plan 05. The client's first view, and the first plan that changes
-`media-operator`. At the end of this plan a `Player` can name an image
-for its idle screen. This repository's media browser image draws the
-idle screen that `media-operator` draws today, on the same bus contract,
-and `mpv` and Lua are out of that pod.
+Plan 05. The first plan of this sequence, and the one that builds no
+code in this repository. `media-operator` gains a third image, a native
+client written in Rust and Iced that draws the idle screen it draws
+today in `mpv` and Lua. Every plan after this one draws on a screen that
+client owns.
+
+The work is `media-operator`'s, and [plan
+20](https://github.com/liken-sh/media-operator/blob/main/plans/20-the-idle-screen-is-its-own-image.md)
+in that repository states it. This document states why the library layer
+asked for it and what it needs the result to be.
 
 ## The problem
 
-The idle screen is `media-operator`'s: an `mpv` with no file and a Lua
-overlay under `display/`, driven through `mpv`'s IPC socket by an
-idle-command sidecar that owns the bus. A media browser has to draw on
-the same screen, in the same pod, between plays. Two clients on one
-surface is a handoff. One native client drew the idle screen in the
-toolkit head-to-head at 87 MB resident and 0.63 ms per frame. So the
-media browser is the idle screen, and the idle screen is the media
-browser at rest.
+The idle screen is an `mpv` with no file. It holds a Wayland surface,
+runs a Lua overlay under `display/`, and takes every fact it draws from
+an idle-command sidecar that reads the bus and writes into `mpv`'s IPC
+socket. That works, and it costs three things the library layer cannot
+carry forward.
 
-## The change below: the idle client image
+A video player is holding a window open to draw a clock. It decodes
+nothing while it does, and every fact it draws arrives through a socket
+protocol another project defines.
 
-`media-operator`'s idle pod runs the operator's own image for its idle
-container. This plan adds one field to `Player` under `spec.idle` that
-names an image, defaulting to the operator's own. The idle container
-runs that image with the same claim, the same environment, and the same
-sidecar as today. The idle-command sidecar is unchanged: it keeps the
-clock, the fade and off timers, and the panel power. The field is
-generic. `media-operator` gains no notion of libraries, only that the
-idle client can be another program.
+A surface it cannot show again. Weston's kiosk-shell reveals a lower
+surface only along a code path gated on a seat, and `liken`'s compositor
+has none, so the sidecar makes `mpv` destroy and rebuild its surface to
+bring the clock back after a film. The client cannot ask for that
+itself, because it is `mpv`.
 
-## The contract between the sidecar and a client
+Two toolkits for one television. The media browser this repository
+builds is a native client, chosen in a head-to-head that drew this exact
+screen. A house that runs a Lua overlay for the clock and a Rust client
+for the library has two looks, two layout systems, and two places a
+brand colour has to change.
 
-Today the sidecar drives the idle screen through `mpv`'s IPC socket with
-script messages: the `Player` status, the focus pulse, the shade drawn
-and lifted, the volume level, and a surface recreate. Every input the
-sidecar consumes is already a bus topic. So the contract for a client
-that is not `mpv` is the bus.
+## What the library layer needs
 
-- The client subscribes to the `Player`'s status, commands, focus, and
-  volume topics, which exist today, and draws from them.
-- The sidecar publishes its own outputs, the shade drawn or lifted and
-  the wake, on one new retained topic under the `Player`, instead of a
-  call to `mpv`. The stock Lua screen keeps working through the
-  sidecar's `mpv` adapter, which becomes a reader of that topic.
-- The client publishes one retained mark that names its view, idle or
-  browsing, so the `Player` status can show that a screen is browsing. A
-  client that never browses never publishes it.
+The library layer does not replace the idle screen. A `Player` runs
+`media-operator`'s idle image, and this repository adds a second image
+for the browser: it lists what the libraries hold, takes a choice, and
+starts a `Play` that `media-operator`'s player image plays. The idle
+screen is what the television shows before and after that.
 
-One question must be answered in `media-operator` before the media
-browser can navigate. Are the navigation presses published on the
-commands topic while the `Player` is idle, or does the sidecar consume
-them for its own toggles? If the sidecar consumes them, the media
-browser has no arrow keys, and the fix is part of this plan.
+So this plan asks for three things, and plan 20 delivers them.
 
-## The client
+- The idle screen is its own image, `media-operator-idle`, which the
+  operator ships and a `Player` can override through `spec.idle.image`.
+  The browser needs that field for the plans below, and the override is
+  what makes a screen replaceable at all.
+- The client reads the bus. Every fact the screen draws is a bus fact or
+  a sidecar decision, so a client that draws needs a broker and no
+  socket. The browser reads the same topics when its turn comes.
+- The look comes from `brand`, through a Rust crate both clients take as
+  a dependency. One palette, one mark, one motion, parsed from the
+  brand's own files.
 
-The media browser image, from this repository, draws the idle screen:
-the black ground, the mark at center, the clock at the top right in the
-`Player`'s zone, and the unit's name and parts at the bottom left. It
-draws every motion the Lua draws, taken from `theme.lua` and the display
-modules. The palette, the type scale, the margins, and the font, `Source
-Sans 3`, are the display's values. The head-to-head drew all of it and
-recorded what a builder needs before starting.
+## The look is shared, and one half of it cannot be
 
-- Iced's renderer draws one layer in a fixed order, shapes under text,
-  so a shade drawn as a black rectangle never covers the clock. The
-  screen fades by drawing everything fainter, or it puts the shade in
-  its own layer.
-- The window must request no decorations, or the toolkit draws a title
-  bar and the surface is 35 rows short of 1080.
-- Rust's standard library has no time zones. The clock reads the zone's
-  TZif file or uses a crate.
-- Every animation is a function of the wall clock and the events before
-  it, never a counter advanced per frame. That is what makes a captured
-  frame reproducible and a dropped frame harmless, and the harness flags
-  depend on it.
-- `mpv`'s overlay composites in sRGB and the GPU toolkit in linear
-  light. The fade curves in `theme.lua` do not port as numbers; they
-  need a timing pass by eye on a real screen.
-- The toolkit's high-level entry point exposes no frame. The harness
-  that captures frames and measures runs the window loop by hand, in the
-  shape of the toolkit's own integration example. That is harness cost.
+`brand` carries the crate at `iced/`. It parses `liken.svg` for the
+fourteen hexagons of the mark and `liken.css` for the colour tokens, so
+a value is never copied and cannot drift. The idle client takes it, and
+the media browser in this repository takes it for the same reason.
 
-## The local harness
+The playback overlay stays in Lua, because `mpv` draws it over its own
+frames and nothing else can. Its palette is written out in
+`display/theme.lua` as ASS colours, and Lua reads no Rust crate, so
+those values stay in step with the brand by hand. `theme.lua` says which
+token each of its colours is, and that comment is where a person looks
+when a brand colour changes.
 
-`local/idle` does what `media-operator/local/idle` does: it opens the
-screen in a window on the workstation, takes the unit's name and parts
-as arguments, and binds the same preview keys so each animation can be
-seen. Under `cage` on the headless backend the same binary captures
-frames to files.
+## What the screen shows
 
-## What was set aside
-
-Two clients on one surface, an `mpv` at rest and a media browser for
-browsing: one more claim, one handoff, and one more process.
-
-The sidecar's `mpv` adapter as the only path. A client that had to be
-`mpv` on a socket could never be swapped.
+The port changes nothing a person sees. Plan 20 holds the table of
+numbers: the mark's two sines a hexagon and its ten percent swing, the
+1200 and 2500 ms energy ramps, the 4000 and 400 ms shade, the 120 and
+500 ms beats of the identity block, the 350 and 600 ms volume fade, and
+the four-second hold. Each one is `display/`'s own, and each one is a
+test.
 
 ## Proof
 
-On `liken-1`: a `Player` names the media browser image, the idle pod
-rolls, and the screen shows the idle view with the clock in the right
-zone and the unit's parts. A `Play` starts and ends, and the mark moves
-and rests through the status topic as it does today. A press wakes the
-shade through the sidecar's new topic. A `Player` with the field unset
-runs the stock Lua screen unchanged. The media browser's resident memory
-on the box is recorded beside the head-to-head's 87 MB.
+Plan 20 carries the drill on `liken-1`. This repository's proof is the
+plans that follow: plan 06 puts a Corrosion sidecar beside a client that
+is already native, and plans 07 and 08 draw a browser with the same
+crate, on the same bus, over the same claim.
+
+## What was set aside
+
+The media browser as the idle screen. One image would draw both views,
+and the idle screen would then ship from the repository that knows about
+libraries. A television with no library still shows a clock, so the idle
+screen belongs to the operator that owns the screen.
+
+A Rust crate in this repository holding the palette and the mark, with a
+test against `brand` to catch drift. A dependency that cannot drift is
+better than a test that reports drift.

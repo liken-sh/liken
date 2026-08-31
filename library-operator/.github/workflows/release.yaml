@@ -44,7 +44,13 @@ jobs:
           }
           echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
 
+      # The media browser image builds liken-iced from the submodule at
+      # media-browser/brand, and the documentation builds against the
+      # theme at docs/themes/brand. Both are submodules, so the release
+      # checks out every one of them.
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: actions/setup-go@v6
         with:

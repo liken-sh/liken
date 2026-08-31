@@ -1,7 +1,19 @@
-# The build tree is the workstation's own and never enters the context. The
-# image builds the crate again from source.
+# What never belongs in the image build context.
+#
+# cargo writes target/ on a workstation, and it holds gigabytes that the
+# build inside the image never reads: the image compiles the crate again on
+# its own pinned toolchain. The submodule carries a target/ of its own once
+# somebody runs the crate's checks in place.
 target/
+brand/iced/target/
 
-# The recipe is not an input to itself.
-Dockerfile
-.dockerignore
+# The brand repository is a Hugo theme as well as a crate. The image needs
+# the crate and the two files it parses, and the Dockerfile names them, so
+# the rest of that checkout stays out of the context.
+brand/.git
+brand/assets/
+brand/data/
+brand/layouts/
+brand/static/
+brand/crdref/
+brand/linkcheck/

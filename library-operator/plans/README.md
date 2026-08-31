@@ -35,9 +35,10 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [05, The idle screen in Iced](05-the-idle-screen-in-iced.md). The idle
-  screen redrawn as a native client, and the `Player` field that selects
-  it.
+* [05, The idle screen in Iced](05-the-idle-screen-in-iced.md). Why the
+  library layer needs `media-operator`'s idle screen to be a native
+  client on the bus, and what it needs the result to be. The work is
+  `media-operator`'s, and this plan builds no code here.
 * [06, The catalog on a screen](06-the-catalog-on-a-screen.md). The
   Corrosion sidecar in the idle pod, and the update stream the media
   browser reads.

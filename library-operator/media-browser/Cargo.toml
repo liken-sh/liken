@@ -33,6 +33,14 @@ iced_widget = { version = "=0.14.2", default-features = false, features = [
     "image",
     "wgpu",
 ] }
+# liken-iced carries the mark and the palette. It parses them out of
+# liken.svg and liken.css, so the mark on this screen and the mark on a page
+# are one drawing and cannot drift. The crate lives in the brand repository,
+# which this directory takes as a submodule because the image build context is
+# this directory alone. The repository holds a second checkout of the same
+# repository at docs/themes/brand for the documentation theme, and the two
+# pins move together.
+liken-iced = { path = "brand/iced" }
 # image writes the captured frames. They are PNGs and nothing else.
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 # serde_json writes the measurements file.

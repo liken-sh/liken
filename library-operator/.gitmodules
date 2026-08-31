@@ -1,3 +1,6 @@
 [submodule "docs/themes/brand"]
 	path = docs/themes/brand
 	url = https://github.com/liken-sh/brand
+[submodule "media-browser/brand"]
+	path = media-browser/brand
+	url = https://github.com/liken-sh/brand

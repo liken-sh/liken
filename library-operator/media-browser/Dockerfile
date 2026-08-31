@@ -14,6 +14,13 @@ WORKDIR /src
 # lock file changes.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 
+# liken-iced is a path dependency on the brand repository, a submodule inside
+# this build context. cargo reads its manifest and its sources to resolve the
+# dependency, so the crate arrives before the stub build below and shares that
+# cached layer. It changes only when the submodule pin moves.
+COPY brand/iced/ ./brand/iced/
+COPY brand/liken.svg brand/liken.css ./brand/
+
 # A stub library and a stub binary give cargo something to compile the
 # dependencies against. That build is the layer the image cache keeps.
 RUN mkdir src \
