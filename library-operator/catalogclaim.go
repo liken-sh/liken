@@ -15,14 +15,16 @@ import (
 // scanner pod mounts. It is derived from the Library name, so every pass
 // names the same claim and the operator keeps no record of it.
 //
-// The suffix carries the schema revision. Corrosion refuses to change
-// the primary key of a database it already holds, and an old database
-// started against the new schema starts quietly stale: it logs the
-// refusal, serves the old tables, and fails every write of the new
-// shape, one request at a time. So a fresh database is the migration,
-// and the versioned name is what provisions one.
+// The claim must hold a database whose schema matches this release.
+// Corrosion refuses to change the primary key of a database it already
+// holds, and an old database started against a new schema starts
+// quietly stale: it logs the refusal, serves the old tables, and fails
+// every write of the new shape, one request at a time. The catalog is
+// derived, so the cure is cheap: delete the claims when a release
+// changes a primary key, and the next pass provisions fresh ones that
+// one full walk refills.
 func scannerCatalogClaimName(library string) string {
-	return library + "-catalog-v2"
+	return library + "-catalog"
 }
 
 // buildCatalogClaim writes the catalog claim one Library's scanner takes.

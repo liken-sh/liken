@@ -245,7 +245,7 @@ func TestReconcileProvisionsTheCatalogClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	claim := cluster.heldClaim("movies-catalog-v2")
+	claim := cluster.heldClaim("movies-catalog")
 	if claim == nil {
 		t.Fatal("the reconcile provisioned no catalog claim")
 	}

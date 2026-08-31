@@ -244,7 +244,7 @@ func TestCatalogContainerWritesToItsDurableClaim(t *testing.T) {
 	if source == nil {
 		t.Fatalf("volume %s is not a claim", mount.Name)
 	}
-	if source.ClaimName != "movies-catalog-v2" {
+	if source.ClaimName != "movies-catalog" {
 		t.Errorf("claimName = %q, want the Library's catalog claim", source.ClaimName)
 	}
 	if source.ReadOnly {

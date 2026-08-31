@@ -25,7 +25,7 @@ func testCatalogWithSize(size, class string) *NamespaceCatalog {
 func TestBuildCatalogClaimIsOwnedByItsLibraryAndSizedByTheCatalog(t *testing.T) {
 	claim := buildCatalogClaim(studioMovies(), testCatalogWithSize("2Gi", "fast"))
 
-	if claim.Metadata.Name != "movies-catalog-v2" || claim.Metadata.Namespace != "house" {
+	if claim.Metadata.Name != "movies-catalog" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Library's catalog claim", claim.Metadata)
 	}
 	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
@@ -68,7 +68,7 @@ func TestStandCatalogClaimCreatesTheClaimWhenThereIsNone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	claim := cluster.heldClaim("movies-catalog-v2")
+	claim := cluster.heldClaim("movies-catalog")
 	if claim == nil {
 		t.Fatal("the operator provisioned no catalog claim")
 	}
@@ -81,8 +81,8 @@ func TestStandCatalogClaimCreatesTheClaimWhenThereIsNone(t *testing.T) {
 // the catalog it holds rather than a fresh volume.
 func TestStandCatalogClaimLeavesAnExistingClaim(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.claims["movies-catalog-v2"] = &PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "movies-catalog-v2", Namespace: "house"},
+	cluster.claims["movies-catalog"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "movies-catalog", Namespace: "house"},
 		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-catalog"},
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	}
@@ -112,7 +112,7 @@ func TestStandCatalogClaimAcceptsAConflict(t *testing.T) {
 // because it cannot tell whether the claim exists.
 func TestStandCatalogClaimReportsAFailedRead(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/movies-catalog-v2"] = http.StatusInternalServerError
+	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/movies-catalog"] = http.StatusInternalServerError
 
 	err := testOperator(t, cluster).standCatalogClaim(t.Context(), studioMovies(), testCatalogWithSize("1Gi", ""))
 
@@ -125,7 +125,7 @@ func TestStandCatalogClaimReportsAFailedRead(t *testing.T) {
 // group, and the body carries the ReadWriteOnce access mode.
 func TestCreatePersistentVolumeClaimPostsIntoTheNamespace(t *testing.T) {
 	client, recorded := recordingAPI(t, PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "movies-catalog-v2", Namespace: "house"},
+		Metadata: ObjectMeta{Name: "movies-catalog", Namespace: "house"},
 	})
 
 	created, err := CreatePersistentVolumeClaim(t.Context(), client, buildCatalogClaim(studioMovies(), testCatalogWithSize("1Gi", "")))
@@ -137,7 +137,7 @@ func TestCreatePersistentVolumeClaimPostsIntoTheNamespace(t *testing.T) {
 	if !strings.Contains(recorded.body, `"ReadWriteOnce"`) {
 		t.Errorf("body = %s, want the ReadWriteOnce claim", recorded.body)
 	}
-	if created.Metadata.Name != "movies-catalog-v2" {
+	if created.Metadata.Name != "movies-catalog" {
 		t.Errorf("name = %q, want the claim the server wrote back", created.Metadata.Name)
 	}
 }

@@ -64,12 +64,16 @@ Corrosion refuses to change the primary key of an existing database,
 so the new schema ships against fresh databases only. The catalog is
 derived, so a fresh database costs one full walk.
 
-The claim name carries the schema revision: `<library>-catalog-v2`.
-The claim name sits inside the scanner pod's spec, so the template
-hash changes, and the operator's own stale-template replacement rolls
-every scanner onto a fresh claim. The old claim stays behind: the
-operator deliberately holds no delete on claims, so a person deletes
-it, or the owner reference releases it with the Library.
+The crossing release carried the schema revision in the claim name:
+`<library>-catalog-v2`. The claim name sits inside the scanner pod's
+spec, so the template hash changed, and the operator's own
+stale-template replacement rolled every scanner onto a fresh claim.
+The release after it returned to the plain name, once the old claims
+were deleted: the operator deliberately holds no delete on claims, so
+a person deletes them, or the owner reference releases them with the
+Library. A cluster that crosses the key change in one jump must
+delete its catalog claims first, because the operator adopts a claim
+that already exists, old database and all.
 
 ## Considered and set aside
 
