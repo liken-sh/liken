@@ -37,7 +37,21 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
 
     // The client's own status reaches the test through a file. cage stands
     // between the two, and the status cage returns is the compositor's.
-    let mut line = quoted(BINARY);
+    //
+    // The client waits for a file this test writes once the output is at the
+    // size the run expects. The headless output starts at 1280x720 and
+    // `wlr-randr` cannot run until cage is up, which is after cage has already
+    // started the client, so a client that opened its window at once would
+    // race the mode and sometimes draw and capture at the smaller size.
+    // The shell reports the display, not the client, because the client is
+    // what waits: cage sets WAYLAND_DISPLAY for the command it runs, so the
+    // name is known before anything opens a window.
+    let ready_path = dir.join("ready");
+    let mut line = format!(
+        "echo \"wayland: $WAYLAND_DISPLAY\"; while [ ! -f {} ]; do sleep 0.05; done; ",
+        quoted(&text(&ready_path))
+    );
+    line.push_str(&quoted(BINARY));
     for flag in flags {
         line.push(' ');
         line.push_str(&quoted(flag));
@@ -55,7 +69,7 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
         .spawn()
         .expect("cage runs the client on the headless backend");
 
-    set_the_mode(&log_path, &mut child);
+    set_the_mode(&log_path, &ready_path, &mut child);
     finish(&mut child, &log_path, started);
 
     Run {
@@ -65,9 +79,10 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
     }
 }
 
-// The headless output starts at 1280x720, so the mode is set once the client
-// reports the display cage gave it.
-fn set_the_mode(log_path: &Path, child: &mut Child) {
+// The headless output starts at 1280x720, so the mode is set once the display
+// is known. The client waits on `ready_path`, which this writes after the mode
+// lands, so every frame it draws is at the size the run expects.
+fn set_the_mode(log_path: &Path, ready_path: &Path, child: &mut Child) {
     let deadline = Instant::now() + CAP;
     while Instant::now() < deadline {
         if let Some(display) = read(log_path)
@@ -84,6 +99,7 @@ fn set_the_mode(log_path: &Path, child: &mut Child) {
                 "wlr-randr on {display}: {}",
                 String::from_utf8_lossy(&randr.stderr)
             );
+            std::fs::write(ready_path, "").expect("release the client");
             return;
         }
         std::thread::sleep(Duration::from_millis(50));
