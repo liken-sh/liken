@@ -208,3 +208,36 @@ func TestFolderFilesOnAnUnreadableDirectory(t *testing.T) {
 		t.Errorf("read = %v %v, want nothing from a directory that cannot be read", rows, subdirectories)
 	}
 }
+
+// hi is the hearing-impaired flag where a language tag precedes it, and the
+// Hindi language tag where none does. The lab's volume writes the first form,
+// name.en.hi.srt, where reading hi as the language loses both facts: the track
+// is English, and it is for the hearing impaired.
+func TestHiIsAFlagAfterALanguageAndALanguageAlone(t *testing.T) {
+	cases := []struct {
+		name         string
+		wantRole     string
+		wantLanguage string
+	}{
+		{"Y2K [2024, Bluray-1080p].en.hi.srt", fileRoleSDH, "en"},
+		{"Zeitgeist [2011].eng.hi.srt", fileRoleSDH, "eng"},
+		{"Sholay [1975].hi.srt", fileRoleFull, "hi"},
+		{"Sholay [1975].hi.forced.srt", fileRoleForced, "hi"},
+		{"Y2K [2024].en.srt", fileRoleFull, "en"},
+		{"Y2K [2024].en.sdh.srt", fileRoleSDH, "en"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			class := classifyFile(testCase.name, filePlace{kind: libraryKindMovies})
+			if class.Type != fileTypeSubtitle {
+				t.Fatalf("type = %q, want %q", class.Type, fileTypeSubtitle)
+			}
+			if class.Role != testCase.wantRole {
+				t.Errorf("role = %q, want %q", class.Role, testCase.wantRole)
+			}
+			if class.Language != testCase.wantLanguage {
+				t.Errorf("language = %q, want %q", class.Language, testCase.wantLanguage)
+			}
+		})
+	}
+}

@@ -49,13 +49,13 @@ between folders and drains it, so a walk does not run on past a
 shutdown.
 
 A directory the walk cannot read marks the pass incomplete, wherever it
-sits in the tree, and the prune guard then keeps the rows. Today only a
-failed read of the root does that, and a grouping folder that fails is
-skipped without a word, which loses every title under it and offers them
-to the prune as departed. The one exception is a directory below the
-root that no longer exists. That is a title deleted while the walk ran,
-which is an ordinary event on a live volume, and the next walk reports
-the deletion.
+is in the tree, and the prune guard then keeps the rows. The walk that
+came before this plan marked only a failed read of the root, and skipped
+a failed grouping folder without a word, which loses every title under it
+and offers them to the prune as departed. The one exception is a
+directory below the root that no longer exists. That is a title deleted
+while the walk ran, which is an ordinary event on a live volume, and the
+next walk reports the deletion.
 
 Two things change that a reader should know. The rows reach the catalog
 in a different order, which nothing depends on: every write is an upsert
@@ -96,3 +96,26 @@ The drill runs on `liken-1` against the real volume. Record the duration
 of a full walk of the movies library and of the series library before
 this change and after it, from the scanner's own `walk complete` line,
 and write both numbers here.
+
+## The drill, 2026-08-30
+
+Run on `liken-1`, against the lab's volume over NFS. The before numbers
+are release 2026.08.30-011, which read one folder at a time and recorded
+the video files alone. The after numbers are 2026.08.30-012, which reads
+eight folders at once and records every file a title carries.
+
+| library | titles | before | after |
+| --- | --- | --- | --- |
+| movies | 1411 | 6.9s, 13.4s, 13.3s | 18.7s |
+| series | 156 | 42.0s, 64.3s, 40.5s | 19.2s |
+
+The two columns do not measure the same work. The after walk reads every
+file in every title folder, and its season and extras folders with it,
+which is 10,675 files for movies where the before walk read 1430, and
+24,240 for series where it read 6258. The series library is the clearer
+read: about seven times the files in half the time.
+
+The movies walk grew from about 13 seconds to 18.7 while reading seven
+times the files. Its titles sit one and two levels under the root, so
+the descent is short and the pool has less to overlap than the series
+walk, where each series folder costs a read of its season folders.

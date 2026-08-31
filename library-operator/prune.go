@@ -45,6 +45,18 @@ func (c *Catalog) ensureSeen(ctx context.Context) error {
 	return err
 }
 
+// The key spaces of the seen table. Three kinds of key are marked, and an
+// alias can be the same string as an item's id: a title that gains a
+// provider id keeps its old path-derived id as an alias of the new one. With
+// one key space, that alias marks the stale item row every walk, and the
+// prune never removes it, so the catalog holds the title twice. Each kind of
+// key carries its own prefix, so an alias marks only aliases.
+const (
+	seenItem  = "item:"
+	seenFile  = "file:"
+	seenAlias = "alias:"
+)
+
 // markSeen marks every id with the current epoch. A re-mark of an id
 // already present updates its epoch in place.
 func (c *Catalog) markSeen(ctx context.Context, ids []string, epoch int64) (int, error) {
@@ -89,31 +101,33 @@ func (c *Catalog) countFiles(ctx context.Context, library string) (int, error) {
 }
 
 // markKeys reads every id, file path, and alias a walk produced into one
-// deduplicated list, the set the walk marks with its epoch.
+// deduplicated list, the set the walk marks with its epoch. Each key carries
+// the prefix of its own key space, so an alias that reads the same as an
+// item's id marks the alias and not the item.
 func markKeys(result *walkResult) []string {
 	seen := map[string]bool{}
 	var keys []string
-	add := func(key string) {
-		if key == "" || seen[key] {
+	add := func(space, key string) {
+		if key == "" || seen[space+key] {
 			return
 		}
-		seen[key] = true
-		keys = append(keys, key)
+		seen[space+key] = true
+		keys = append(keys, space+key)
 	}
 	for _, row := range result.movies {
-		add(row.Id)
+		add(seenItem, row.Id)
 	}
 	for _, row := range result.series {
-		add(row.Id)
+		add(seenItem, row.Id)
 	}
 	for _, row := range result.episodes {
-		add(row.Id)
+		add(seenItem, row.Id)
 	}
 	for _, row := range result.files {
-		add(row.Path)
+		add(seenFile, row.Path)
 	}
 	for _, row := range result.aliases {
-		add(row.Alias)
+		add(seenAlias, row.Alias)
 	}
 	return keys
 }
@@ -182,7 +196,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		{"series", catalog.DeleteSeries},
 		{"episodes", catalog.DeleteEpisodes},
 	} {
-		n, err := catalog.sweep(ctx, itemPruneSQL(table.name, "id"), []any{library, epoch, pruneBatch},
+		n, err := catalog.sweep(ctx, itemPruneSQL(table.name, "id", seenItem), []any{library, epoch, pruneBatch},
 			func(ctx context.Context, keys []string) error {
 				_, err := table.delete(ctx, keys)
 				return err
@@ -193,7 +207,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		removed += n
 	}
 
-	n, err = catalog.sweep(ctx, itemPruneSQL("files", "path"), []any{library, epoch, pruneBatch},
+	n, err = catalog.sweep(ctx, itemPruneSQL("files", "path", seenFile), []any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) error {
 			if _, err := catalog.DeleteFiles(ctx, keys); err != nil {
 				return err
@@ -213,11 +227,12 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 }
 
 // itemPruneSQL reads the keys of a table this library holds that the
-// current epoch did not mark, one bounded batch. table and key are
-// constants this package names and never input.
-func itemPruneSQL(table, key string) string {
+// current epoch did not mark, one bounded batch. table, key, and space are
+// constants this package names and never input, so naming them in the SQL
+// text carries no injection.
+func itemPruneSQL(table, key, space string) string {
 	return `SELECT ` + key + ` FROM ` + table +
-		` WHERE library = ? AND ` + key +
+		` WHERE library = ? AND '` + space + `' || ` + key +
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?) LIMIT ?`
 }
 
@@ -226,7 +241,7 @@ func itemPruneSQL(table, key string) string {
 // the set of item ids the three item tables hold for the library.
 func aliasPruneSQL() string {
 	return `SELECT alias FROM aliases` +
-		` WHERE alias NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` WHERE '` + seenAlias + `' || alias NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
 		` AND item IN (` +
 		`SELECT id FROM movies WHERE library = ?` +
 		` UNION SELECT id FROM series WHERE library = ?` +
@@ -279,7 +294,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 		{"series", catalog.DeleteSeries},
 		{"episodes", catalog.DeleteEpisodes},
 	} {
-		n, err := catalog.sweep(ctx, scopedItemPruneSQL(table.name, "id"), scopedItemPruneParams(library, folder, epoch),
+		n, err := catalog.sweep(ctx, scopedItemPruneSQL(table.name, "id", seenItem), scopedItemPruneParams(library, folder, epoch),
 			func(ctx context.Context, keys []string) error {
 				_, err := table.delete(ctx, keys)
 				return err
@@ -290,7 +305,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 		removed += n
 	}
 
-	n, err = catalog.sweep(ctx, scopedItemPruneSQL("files", "path"), scopedItemPruneParams(library, folder, epoch),
+	n, err = catalog.sweep(ctx, scopedItemPruneSQL("files", "path", seenFile), scopedItemPruneParams(library, folder, epoch),
 		func(ctx context.Context, keys []string) error {
 			if _, err := catalog.DeleteFiles(ctx, keys); err != nil {
 				return err
@@ -307,9 +322,9 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 
 // scopedItemPruneSQL reads the keys of one folder's rows in a table that
 // the current epoch did not mark, one bounded batch.
-func scopedItemPruneSQL(table, key string) string {
+func scopedItemPruneSQL(table, key, space string) string {
 	return `SELECT ` + key + ` FROM ` + table +
-		` WHERE library = ? AND ` + pathScopeClause + ` AND ` + key +
+		` WHERE library = ? AND ` + pathScopeClause + ` AND '` + space + `' || ` + key +
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?) LIMIT ?`
 }
 
@@ -326,7 +341,7 @@ func scopedAliasPruneSQL() string {
 		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause
 	}
 	return `SELECT alias FROM aliases` +
-		` WHERE alias NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` WHERE '` + seenAlias + `' || alias NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
 		` AND item IN (` +
 		scope("movies") + ` UNION ` + scope("series") + ` UNION ` + scope("episodes") +
 		`) LIMIT ?`

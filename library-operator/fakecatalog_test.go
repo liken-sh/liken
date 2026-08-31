@@ -229,7 +229,7 @@ func (f *fakeCatalog) unmarkedItems(sql string, p []any) []any {
 		if scoped && !inScope(row.path, folder) {
 			continue
 		}
-		if f.seen[key] == epoch {
+		if f.seen[seenPrefix(sql)+key] == epoch {
 			continue
 		}
 		keys = append(keys, key)
@@ -251,7 +251,7 @@ func (f *fakeCatalog) unmarkedAliases(sql string, p []any) []any {
 	scope := f.scopeItems(library, folder, scoped)
 	var keys []any
 	for alias, item := range f.aliases {
-		if f.seen[alias] == epoch {
+		if f.seen[seenPrefix(sql)+alias] == epoch {
 			continue
 		}
 		if scope[item] {
@@ -362,4 +362,17 @@ func parseQuery(body []byte) (string, []any) {
 	var params []any
 	_ = json.Unmarshal(pair[1], &params)
 	return sql, params
+}
+
+// seenPrefix reads the key space a prune query concatenates onto its column,
+// the first quoted literal in the statement. The fake reads it out of the SQL
+// rather than assuming one, so a query that marks the wrong key space fails
+// here the way it would against a real agent.
+func seenPrefix(sql string) string {
+	_, rest, found := strings.Cut(sql, "'")
+	if !found {
+		return ""
+	}
+	prefix, _, _ := strings.Cut(rest, "'")
+	return prefix
 }

@@ -47,7 +47,8 @@ func TestPruneLibraryDeletesTheUnmarkedRows(t *testing.T) {
 
 	// A later walk read only the first title, so only it carries the epoch.
 	epoch := int64(1000)
-	if _, err := catalog.markSeen(ctx, []string{"movie:tmdb:1", "One/movie.mkv", "movie:tmdb:1"}, epoch); err != nil {
+	marked := []string{seenItem + "movie:tmdb:1", seenFile + "One/movie.mkv", seenAlias + "movie:tmdb:1"}
+	if _, err := catalog.markSeen(ctx, marked, epoch); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,7 +145,10 @@ func TestIncompleteWalk(t *testing.T) {
 	}
 }
 
-func TestMarkKeysReadsEveryIdPathAndAlias(t *testing.T) {
+// Every key carries the prefix of its own key space. The movie's id and the
+// alias of the same name are two keys and not one, which is what keeps an
+// alias from marking a stale item row and holding it in the catalog.
+func TestMarkKeysReadsEveryIdPathAndAliasInItsOwnKeySpace(t *testing.T) {
 	result := &walkResult{
 		movies:   []movieRow{{Id: "movie:tmdb:1"}},
 		series:   []seriesRow{{Id: "series:tvdb:1"}},
@@ -154,11 +158,15 @@ func TestMarkKeysReadsEveryIdPathAndAlias(t *testing.T) {
 	}
 	keys := markKeys(result)
 	want := map[string]bool{
-		"movie:tmdb:1": true, "series:tvdb:1": true, "episode:tvdb:1:s01e01": true,
-		"one.mkv": true, "movie:imdb:tt1": true,
+		seenItem + "movie:tmdb:1":          true,
+		seenItem + "series:tvdb:1":         true,
+		seenItem + "episode:tvdb:1:s01e01": true,
+		seenFile + "one.mkv":               true,
+		seenAlias + "movie:imdb:tt1":       true,
+		seenAlias + "movie:tmdb:1":         true,
 	}
 	if len(keys) != len(want) {
-		t.Errorf("keys = %v, want %d deduplicated keys", keys, len(want))
+		t.Errorf("keys = %v, want %d keys", keys, len(want))
 	}
 	for _, key := range keys {
 		if !want[key] {
@@ -584,5 +592,47 @@ func TestRescanRemovesAVanishedFolder(t *testing.T) {
 
 	if len(fake.held(fake.movies)) != 0 {
 		t.Errorf("movies = %v, want the vanished folder gone", fake.held(fake.movies))
+	}
+}
+
+// A title that gains a provider id changes its canonical id, and its old
+// path-derived id becomes an alias of the new one. The stale item row must
+// still leave the catalog. The two carry the same string, so with one key
+// space the alias marks the stale row every walk and the prune never removes
+// it, and the catalog holds the title twice for as long as the folder stands.
+func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
+	root := artTitleTree(t, "Red Sonja (1985)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	pathID := "movie:path:" + slug("Red Sonja (1985)", 0)
+	if _, held := fake.held(fake.movies)[pathID]; !held {
+		t.Fatalf("movies = %v, want the title under its path-derived id", fake.held(fake.movies))
+	}
+
+	// The sidecar arrives, so the walk reads a provider id and the title's
+	// canonical id becomes the tmdb one.
+	writeFile(t, filepath.Join(root, "Red Sonja (1985)", "movie.nfo"),
+		`<movie><title>Red Sonja</title><year>1985</year><uniqueid type="tmdb">9760</uniqueid></movie>`)
+	scan.fullWalk(ctx)
+
+	movies := fake.held(fake.movies)
+	if _, held := movies[pathID]; held {
+		t.Errorf("movies = %v, want the stale path-derived row pruned", movies)
+	}
+	if _, held := movies["movie:tmdb:9760"]; !held {
+		t.Errorf("movies = %v, want the title under its provider id", movies)
+	}
+	if len(movies) != 1 {
+		t.Errorf("movies = %v, want one row for one folder", movies)
+	}
+	if scan.report.Items != 1 {
+		t.Errorf("items = %d, want the one title the volume holds", scan.report.Items)
+	}
+	// The path-derived id stays an alias, so a reader that holds the old id
+	// still resolves the title.
+	if item := fake.aliases[pathID]; item != "movie:tmdb:9760" {
+		t.Errorf("alias %s resolves to %q, want the provider id", pathID, item)
 	}
 }

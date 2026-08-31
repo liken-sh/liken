@@ -100,9 +100,11 @@ for a later agent to shape.
   `Catalog` exists.
 
 Plans 16 to 19 follow the scanner plans and were built before plan 05.
-Each one finishes something plan 04 left short. All four are built and
-released in 2026.08.30-012, and each still owes the drill its own proof
-section names.
+Each one finishes something plan 04 left short. All four were released in
+2026.08.30-012 and drilled on `liken-1` that day, and each records its
+drill. The drills found two defects, both fixed in 2026.08.30-013: a
+stale title that the prune never removed, and a subtitle language read
+that took a hearing-impaired flag for Hindi.
 
 * [16, The counts and the phase](completed/16-the-counts-and-the-phase.md).
   Built, and released in 2026.08.30-012. `status.items`, `status.files`,

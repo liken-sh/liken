@@ -79,3 +79,38 @@ The drill runs on `liken-1`. Read `status.webhook`, post a Radarr import
 payload to it from a pod in the cluster, and confirm from the scanner's
 log that it rescanned that one title folder and not the whole root.
 Confirm the `Service` goes when the `Library` goes.
+
+## The drill, 2026-08-30
+
+Run on `liken-1` in release 2026.08.30-012.
+
+Both libraries report an address, and the `Service` carries the selector
+the plan states, with the endpoint the API server wrote behind it.
+
+```
+movies   http://movies-scanner.default.svc:8090/
+series   http://series-scanner.default.svc:8090/
+
+NAME             TYPE        PORT(S)    SELECTOR
+movies-scanner   ClusterIP   8090/TCP   app.kubernetes.io/name=library-scanner,library.liken.sh/library=movies
+endpoints: 10.42.0.64 ready=true
+```
+
+A Radarr import payload posted from a pod in the cluster, naming a path
+in the media server's own layout rather than the scanner's:
+
+```
+{"eventType":"Download",
+ "movie":{"folderPath":"/data/movies/Fantasy/Red Sonja [1985]"},
+ "movieFile":{"path":"/data/movies/Fantasy/Red Sonja [1985]/Red Sonja [1985, Bluray-1080p].mkv"}}
+```
+
+The scanner took the longest suffix of that path that exists under its
+own root, mapped it to the title folder, and rescanned that folder
+alone:
+
+```
+library.liken.sh: rescanned Fantasy/Red Sonja [1985]: wrote 11, removed 0
+```
+
+No full walk ran, which is the whole point of the endpoint.

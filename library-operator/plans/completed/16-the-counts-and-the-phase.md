@@ -123,3 +123,38 @@ catalog's own count for a series library, and that the `Files` count
 matches the file rows after [plan 17](17-every-file-a-title-carries.md).
 Delete the scanner pod and confirm the phase reads `Pending`, then
 `Scanning`, then `Idle`.
+
+## The drill, 2026-08-30
+
+Run on `liken-1` in release 2026.08.30-012, over the lab's two libraries.
+The printer reads as the plan drew it, and `-o wide` adds the claim and
+the count of unidentified folders.
+
+```
+NAME     KIND     TITLES  ITEMS  FILES  STATUS  READY  AGE
+movies   movies     1411   1485  10675  Idle    True   13h
+series   series      156   6378  24240  Idle    True   169m
+```
+
+The series library reads 156 titles and 6378 items, which is the 156
+series and their 6222 episodes. That is the number the titles column
+could never give, and it is the reason for the column.
+
+The movies library read 1485 items against 1411 titles, and a movies
+library holds one item per title. The gap was a defect the counts made
+visible for the first time.
+
+**A stale title was never pruned.** `markKeys` marked item ids, file
+paths, and alias names in one `seen` key space. An alias can be the same
+string as an item's id: a title that gains a provider id keeps its old
+path-derived id as an alias of the new one. That alias marked the stale
+item row on every walk, so the prune read it as seen and kept it, and the
+catalog held the title twice, once under `movie:path:...` with the old
+reading and once under `movie:tmdb:...` with the new. 77 rows on the lab's
+volume. `removedLastSweep` read 0 throughout, so nothing named the loss.
+
+The fix gives each kind of key its own space in `seen`, `item:`,
+`file:`, and `alias:`, and each prune query compares against its own
+space. An alias then marks aliases alone. The change is in the mark and
+in the four prune queries, and the next full walk after the upgrade
+removes the rows that accumulated.

@@ -241,7 +241,30 @@ func subtitleRole(base string) string {
 			return fileRoleSDH
 		}
 	}
+	if hearingImpairedFlag(base) {
+		return fileRoleSDH
+	}
 	return fileRoleFull
+}
+
+// hearingImpairedTag is what the tools write for a hearing-impaired track,
+// and it is also the language tag for Hindi. The two are told apart by what
+// comes before: a language tag precedes the flag, so The Matrix.en.hi.srt is
+// English for the hearing impaired, and The Matrix.hi.srt is Hindi.
+const hearingImpairedTag = "hi"
+
+// hearingImpairedFlag reports whether a name carries hi as the flag rather
+// than as the language. It reads the dotted tokens, which is where the tools
+// write both, and it needs a token before the language tag as well, so the
+// title itself is never read as one.
+func hearingImpairedFlag(base string) bool {
+	tokens := strings.Split(strings.ToLower(base), ".")
+	for i := len(tokens) - 1; i >= 2; i-- {
+		if tokens[i] == hearingImpairedTag {
+			return isLanguageTag(tokens[i-1])
+		}
+	}
+	return false
 }
 
 // The words an image's name carries, and the art each one names. This is a
@@ -313,12 +336,18 @@ var subtitleFlags = map[string]bool{
 // write it: The Matrix (1999).en.srt, or The Matrix (1999).en.forced.srt. It is
 // a two-letter or three-letter tag as the name gave it, with no translation
 // between the two. A name with one dotted token carries no tag, so a film named
-// Up keeps its title.
+// Up keeps its title. It steps over the flags that follow the tag, hi among
+// them where hi is the flag and not the Hindi language.
 func fileLanguage(name string) string {
-	tokens := strings.Split(stripAnyExtension(name), ".")
+	base := stripAnyExtension(name)
+	flagged := hearingImpairedFlag(base)
+	tokens := strings.Split(base, ".")
 	for i := len(tokens) - 1; i >= 1; i-- {
 		token := strings.ToLower(strings.TrimSpace(tokens[i]))
 		if subtitleFlags[token] {
+			continue
+		}
+		if token == hearingImpairedTag && flagged {
 			continue
 		}
 		if isLanguageTag(token) {

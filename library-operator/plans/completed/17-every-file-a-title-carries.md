@@ -153,3 +153,36 @@ rescan of one title folder prunes that title's files and no other's.
 The drill runs on `liken-1` against the real volume. Record the file
 count before and after, the walk's duration, and a `SELECT type, count(*)`
 over the catalog, so the plan carries the shape of a real library.
+
+## The drill, 2026-08-30
+
+Run on `liken-1` in release 2026.08.30-012, over the lab's two libraries.
+The walk read 34,915 files it had never recorded before.
+
+| `type` | movies | series |
+| --- | --- | --- |
+| `image` | 6137 | 4218 |
+| `trickplay` | 1756 | 6593 |
+| `video` | 1430 | 6258 |
+| `metadata` | 1027 | 4360 |
+| `subtitle` | 324 | 2799 |
+| `other` | 1 | 12 |
+
+The roles divide as the plan expected: 1002 posters, 987 backdrops, 966
+logos, 948 thumbnails, and 785 banners across the movies library, one
+`metadata/movie` sidecar for 1027 of the 1411 titles, and one
+`trickplay/tiles` row per trickplay directory rather than one per tile.
+13 files in 34,915 fell into `other`.
+
+**The language read was wrong for one form.** 110 of the movies
+library's subtitles read as the language `hi`, from names like
+`Y2K [2024, Bluray-1080p].en.hi.srt`. Those are English tracks for the
+hearing impaired, not Hindi, and the read lost both facts: the language
+`en`, and the `sdh` role.
+
+The fix reads `hi` as the hearing-impaired flag where a language tag
+precedes it, and as the Hindi language tag where none does. So
+`name.en.hi.srt` is English for the hearing impaired, and `name.hi.srt`
+is Hindi. A title's own words are never read as the preceding tag,
+because the rule needs a tag before the flag and the base name is not
+one.
