@@ -209,9 +209,14 @@ pub fn configure(
             format,
             width,
             height,
-            // The kiosk target runs at the screen's own rate, so the client
-            // draws the frames the compositor actually shows.
-            present_mode: wgpu::PresentMode::AutoVsync,
+            // Mailbox rather than FIFO, because of what acquire does on a
+            // hidden Wayland surface: FIFO waits in mesa's poll for a buffer
+            // release the compositor never sends while a film covers the
+            // screen, and the whole loop stops with it, bus and all. Mailbox
+            // keeps spare images, so acquire never waits on the compositor.
+            // The loop's own pace is what caps the rate instead: it never
+            // asks for frames faster than `frame::STEP`.
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,

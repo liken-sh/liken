@@ -190,6 +190,11 @@ pub struct Ready<S: Screen> {
     /// counted from the launch would fire on the first frame, before a
     /// resize arrived and before anything was drawn.
     pub(crate) start: Option<std::time::Instant>,
+    /// The second of the last frame. The pace holds the next one at least
+    /// [`frame::STEP`] after it, because nothing else caps the rate: the
+    /// surface presents without vsync, so an animation that asked for a
+    /// frame on every pass would draw as fast as the loop can spin.
+    pub(crate) drawn: f64,
     /// The frames this run writes to disk, from `--capture`. A run that named
     /// no directory captures nothing.
     #[cfg(feature = "measure")]
@@ -291,6 +296,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             surface_pending: false,
             scheduled: None,
             start: None,
+            drawn: 0.0,
             #[cfg(feature = "measure")]
             captures,
             #[cfg(feature = "measure")]

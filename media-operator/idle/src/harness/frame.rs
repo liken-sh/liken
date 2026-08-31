@@ -18,6 +18,12 @@ use super::stats::millis;
 use super::timeline::{self, Wake};
 use super::{QUIT, Ready, Screen};
 
+/// The least time between two frames, one sixtieth of a second. The surface
+/// presents without vsync, so this floor is the whole of the frame-rate cap:
+/// an animation that answers "now" on every ask draws sixty frames a second
+/// and not as many as the loop can spin.
+pub const STEP: f64 = 1.0 / 60.0;
+
 impl<S: Screen> Ready<S> {
     /// Hand one key to the screen. The answer is true when the key ends the
     /// run. Both the keyboard and the script arrive here, so the key that
@@ -58,6 +64,8 @@ impl<S: Screen> Ready<S> {
                 0.0
             }
         };
+
+        self.drawn = at;
 
         for key in self.timeline.due(at) {
             if self.press(&key) {
@@ -212,10 +220,13 @@ impl<S: Screen> Ready<S> {
         // change, the next script key, the deadline, or the next capture. The
         // harness's own seconds come from forward-only cursors, so they are
         // asked again on every pass, and only the screen's answer is held.
+        // The floor holds every answer at least [`STEP`] after the last
+        // frame, which is the frame-rate cap.
         let next = [screen_next, self.timeline.next_due(), self.next_capture()]
             .into_iter()
             .flatten()
-            .min_by(f64::total_cmp);
+            .min_by(f64::total_cmp)
+            .map(|next| next.max(self.drawn + STEP));
 
         match timeline::wake(self.resized, at, next) {
             Wake::Now => {
