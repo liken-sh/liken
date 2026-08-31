@@ -12,6 +12,7 @@ package main
 
 import (
 	"errors"
+	"maps"
 	"slices"
 )
 
@@ -38,11 +39,16 @@ type Service struct {
 	Spec       ServiceSpec `json:"spec"`
 }
 
+// Selector is omitted where it is empty. The catalog Service must state no
+// selector, because a Service that states one takes its endpoints from the
+// API server in place of the slice this operator writes. The webhook Service
+// in webhookservice.go states one, and takes the API server's.
 type ServiceSpec struct {
-	ClusterIP                string        `json:"clusterIP,omitempty"`
-	ClusterIPs               []string      `json:"clusterIPs,omitempty"`
-	PublishNotReadyAddresses bool          `json:"publishNotReadyAddresses"`
-	Ports                    []ServicePort `json:"ports"`
+	ClusterIP                string            `json:"clusterIP,omitempty"`
+	ClusterIPs               []string          `json:"clusterIPs,omitempty"`
+	PublishNotReadyAddresses bool              `json:"publishNotReadyAddresses"`
+	Selector                 map[string]string `json:"selector,omitempty"`
+	Ports                    []ServicePort     `json:"ports"`
 }
 
 // One port of the Service. The name ties this port to the port of the
@@ -107,15 +113,21 @@ func (o *operator) standCatalogService(namespace string, owners []OwnerReference
 	}
 	live.Metadata.OwnerReferences = desired.Metadata.OwnerReferences
 	live.Spec.PublishNotReadyAddresses = desired.Spec.PublishNotReadyAddresses
+	live.Spec.Selector = desired.Spec.Selector
 	live.Spec.Ports = desired.Spec.Ports
 	_, err = UpdateService(o.client, live)
 	return err
 }
 
-// sameService compares only what the operator states: the owners,
-// that the Service is headless, that it publishes not-ready addresses,
-// and the ports. Everything else on a live Service belongs to the API
-// server, and a comparison of it would rewrite the object every pass.
+// sameService compares only what the operator states: the owners, that the
+// Service is headless, that it publishes not-ready addresses, that it states
+// no selector, and the ports. Everything else on a live Service belongs to
+// the API server, and a comparison of it would rewrite the object every pass.
+//
+// The selector is compared because a selector added by hand would make the
+// API server write the endpoints, in place of the EndpointSlice this operator
+// writes, and the agents would lose their peer list. The update above clears
+// it again.
 func sameService(live, desired *Service) bool {
 	if !slices.Equal(live.Metadata.OwnerReferences, desired.Metadata.OwnerReferences) {
 		return false
@@ -124,6 +136,9 @@ func sameService(live, desired *Service) bool {
 		return false
 	}
 	if live.Spec.PublishNotReadyAddresses != desired.Spec.PublishNotReadyAddresses {
+		return false
+	}
+	if !maps.Equal(live.Spec.Selector, desired.Spec.Selector) {
 		return false
 	}
 	return slices.Equal(live.Spec.Ports, desired.Spec.Ports)

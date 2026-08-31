@@ -437,6 +437,134 @@ func TestFullWalkReportsTitlesWhenTheAfterCountFails(t *testing.T) {
 	}
 }
 
+// artTitleTree writes a movie library whose title folders carry the art and the
+// subtitle beside the video, so a prune test reads a title of more than one
+// file.
+func artTitleTree(t *testing.T, folders ...string) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, folder := range folders {
+		dir := filepath.Join(root, folder)
+		writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+		writeFile(t, filepath.Join(dir, "folder.jpg"), "image")
+		writeFile(t, filepath.Join(dir, "movie.en.srt"), "subtitle")
+	}
+	return root
+}
+
+// The counts the status reports are the catalog's own, read after the
+// prune, and not the number of rows the walk wrote.
+func TestFullWalkReportsTheCatalogsItemAndFileCounts(t *testing.T) {
+	root := artTitleTree(t, "A (2001)", "B (2002)")
+	scan, _ := fakeScanner(t, root, libraryKindMovies)
+
+	scan.fullWalk(context.Background())
+
+	if scan.report.Items != 2 {
+		t.Errorf("items = %d, want the two movie rows the catalog holds", scan.report.Items)
+	}
+	if scan.report.Files != 6 {
+		t.Errorf("files = %d, want the three file rows of each title", scan.report.Files)
+	}
+}
+
+// A count read that fails leaves the count at its last value, the way
+// the walk keeps its last report when a catalog step fails.
+func TestFullWalkKeepsTheLastCountsWhenACountReadFails(t *testing.T) {
+	root := artTitleTree(t, "A (2001)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	var logged bytes.Buffer
+	scan.log = &logged
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if scan.report.Items != 1 || scan.report.Files != 3 {
+		t.Fatalf("counts = %d items and %d files, want the catalog's own counts", scan.report.Items, scan.report.Files)
+	}
+
+	// The next walk's first count read succeeds, and the two reads after
+	// the prune fail.
+	fake.failCountsAfter(fake.counts() + 1)
+	scan.fullWalk(ctx)
+
+	if scan.report.Items != 1 || scan.report.Files != 3 {
+		t.Errorf("counts = %d items and %d files, want the last walk's counts kept", scan.report.Items, scan.report.Files)
+	}
+	if !strings.Contains(logged.String(), "count the catalog after the walk") {
+		t.Errorf("log = %q, want the failed item count logged", logged.String())
+	}
+	if !strings.Contains(logged.String(), "count the catalog's files") {
+		t.Errorf("log = %q, want the failed file count logged", logged.String())
+	}
+}
+
+// The mark-and-sweep treats a poster as it treats a video, so a poster a
+// person deletes leaves the catalog on the next walk, and the prune needed no
+// change to do it.
+func TestFullWalkPrunesADeletedPoster(t *testing.T) {
+	root := artTitleTree(t, "A (2001)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if len(fake.held(fake.files)) != 3 {
+		t.Fatalf("files = %v, want the video, the poster, and the subtitle", fake.held(fake.files))
+	}
+
+	if err := os.Remove(filepath.Join(root, "A (2001)", "folder.jpg")); err != nil {
+		t.Fatal(err)
+	}
+	scan.fullWalk(ctx)
+
+	files := fake.held(fake.files)
+	if _, held := files[filepath.Join("A (2001)", "folder.jpg")]; held {
+		t.Errorf("files = %v, want the deleted poster gone", files)
+	}
+	if len(files) != 2 {
+		t.Errorf("files = %v, want the video and the subtitle kept", files)
+	}
+	if scan.report.RemovedLastSweep != 1 {
+		t.Errorf("removedLastSweep = %d, want the one poster row", scan.report.RemovedLastSweep)
+	}
+}
+
+// A webhook rescan reconciles within the folder it names. One title's files
+// leave the catalog, and another title's stay.
+func TestRescanPrunesOnlyTheNamedTitlesFiles(t *testing.T) {
+	root := artTitleTree(t, "A (2001)", "B (2002)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if len(fake.held(fake.files)) != 6 {
+		t.Fatalf("files = %v, want three files for each of the two titles", fake.held(fake.files))
+	}
+
+	if err := os.Remove(filepath.Join(root, "A (2001)", "folder.jpg")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "A (2001)", "movie.en.srt")); err != nil {
+		t.Fatal(err)
+	}
+	scan.rescan(ctx, filepath.Join(root, "A (2001)"))
+
+	files := fake.held(fake.files)
+	kept := []string{
+		filepath.Join("A (2001)", "movie.mkv"),
+		filepath.Join("B (2002)", "movie.mkv"),
+		filepath.Join("B (2002)", "folder.jpg"),
+		filepath.Join("B (2002)", "movie.en.srt"),
+	}
+	for _, path := range kept {
+		if _, held := files[path]; !held {
+			t.Errorf("files = %v, want %q kept", files, path)
+		}
+	}
+	if len(files) != len(kept) {
+		t.Errorf("files = %v, want only the named title's departed files pruned", files)
+	}
+}
+
 func TestRescanRemovesAVanishedFolder(t *testing.T) {
 	root := titleTree(t, "A (2001)")
 	scan, fake := fakeScanner(t, root, libraryKindMovies)

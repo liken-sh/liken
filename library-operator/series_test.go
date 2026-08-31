@@ -62,6 +62,112 @@ func TestWalkSeriesEpisodeFile(t *testing.T) {
 	}
 }
 
+// A file directly in a series folder links to the series. A file in a season
+// folder links to the episode whose own name it starts with. A season poster
+// matches no episode, so it links to the series.
+func TestWalkSeriesReadsEveryFileTheSeriesCarries(t *testing.T) {
+	result := walkSeries("testdata/series", "house/series", nil)
+	files := filesByPath(result)
+	season := filepath.Join("Breaking Bad", "Season 02")
+
+	cases := []struct {
+		path         string
+		wantType     string
+		wantRole     string
+		wantLanguage string
+		wantItem     string
+	}{
+		{
+			path:     filepath.Join("Breaking Bad", "tvshow.nfo"),
+			wantType: fileTypeMetadata, wantRole: fileRoleTVShow, wantItem: "series:tvdb:81189",
+		},
+		{
+			path:     filepath.Join("Breaking Bad", "folder.jpg"),
+			wantType: fileTypeImage, wantRole: fileRolePoster, wantItem: "series:tvdb:81189",
+		},
+		{
+			path:     filepath.Join(season, "season02-poster.jpg"),
+			wantType: fileTypeImage, wantRole: fileRolePoster, wantItem: "series:tvdb:81189",
+		},
+		{
+			path:     filepath.Join(season, "Breaking Bad - S02E05.mkv"),
+			wantType: fileTypeVideo, wantRole: fileRolePrimary, wantItem: "episode:tvdb:81189:s02e05",
+		},
+		{
+			path:     filepath.Join(season, "Breaking Bad - S02E05.nfo"),
+			wantType: fileTypeMetadata, wantRole: fileRoleEpisode, wantItem: "episode:tvdb:81189:s02e05",
+		},
+		{
+			path:     filepath.Join(season, "Breaking Bad - S02E05-thumb.jpg"),
+			wantType: fileTypeImage, wantRole: fileRoleThumb, wantItem: "episode:tvdb:81189:s02e05",
+		},
+		{
+			path:     filepath.Join(season, "Breaking Bad - S02E05.en.srt"),
+			wantType: fileTypeSubtitle, wantRole: fileRoleFull, wantLanguage: "en", wantItem: "episode:tvdb:81189:s02e05",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.path, func(t *testing.T) {
+			row, held := files[testCase.path]
+			if !held {
+				t.Fatalf("the walk read no row for %s", testCase.path)
+			}
+			if row.Type != testCase.wantType || row.Role != testCase.wantRole || row.Language != testCase.wantLanguage {
+				t.Errorf("class = %s/%s/%s, want %s/%s/%s",
+					row.Type, row.Role, row.Language, testCase.wantType, testCase.wantRole, testCase.wantLanguage)
+			}
+			if row.Items[0] != testCase.wantItem {
+				t.Errorf("items = %v, want %q", row.Items, testCase.wantItem)
+			}
+			if row.Modified == 0 {
+				t.Errorf("modified = %d, want the time the walk's own stat read", row.Modified)
+			}
+		})
+	}
+}
+
+// An extras folder under a series holds the trailers and the featurettes.
+// Each of them links to the series, because none belongs to one episode.
+func TestWalkSeriesReadsAnExtrasFolder(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	writeFile(t, filepath.Join(show, "tvshow.nfo"), `<tvshow><title>Show</title><uniqueid type="tvdb">9</uniqueid></tvshow>`)
+	writeFile(t, filepath.Join(show, "Season 01", "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(show, "Trailers", "Show teaser.mkv"), "video")
+
+	result := walkSeries(root, "house/series", nil)
+	row, held := filesByPath(result)[filepath.Join("Show", "Trailers", "Show teaser.mkv")]
+	if !held {
+		t.Fatalf("the walk read no row for the trailer, it read %v", filesByPath(result))
+	}
+	if row.Type != fileTypeVideo || row.Role != fileRoleTrailer {
+		t.Errorf("class = %s/%s, want a video trailer", row.Type, row.Role)
+	}
+	if row.Items[0] != "series:tvdb:9" {
+		t.Errorf("items = %v, want the series", row.Items)
+	}
+}
+
+// A video in a season folder that the scanner cannot number belongs to no
+// episode. It links to the series, so the catalog holds it rather than
+// losing it.
+func TestWalkSeriesCatalogsAnUnnumberedVideoUnderTheSeries(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show")
+	writeFile(t, filepath.Join(show, "tvshow.nfo"), `<tvshow><title>Show</title><uniqueid type="tvdb">9</uniqueid></tvshow>`)
+	writeFile(t, filepath.Join(show, "Season 01", "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(show, "Season 01", "Bonus Feature.mkv"), "video")
+
+	result := walkSeries(root, "house/series", nil)
+	row, held := filesByPath(result)[filepath.Join("Show", "Season 01", "Bonus Feature.mkv")]
+	if !held {
+		t.Fatal("the walk read no row for the unnumbered video")
+	}
+	if row.Items[0] != "series:tvdb:9" {
+		t.Errorf("items = %v, want the series, because no episode claims it", row.Items)
+	}
+}
+
 func TestWalkSeriesEmitsEpisodeAlias(t *testing.T) {
 	result := walkSeries("testdata/series", "house/series", nil)
 	found := false

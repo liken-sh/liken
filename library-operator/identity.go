@@ -72,7 +72,7 @@ func appendFolder(buffer, folder *walkResult) {
 
 // collectFolders reads a whole folder stream into one walkResult, with the
 // counts and the read-error signal. The tests and a small library read a root
-// this way, and the streaming full walk holds one folder at a time.
+// this way.
 func collectFolders(folders iter.Seq[*walkResult]) *walkResult {
 	result := &walkResult{}
 	for folder := range folders {

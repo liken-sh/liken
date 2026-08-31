@@ -31,6 +31,103 @@ func fileByItem(result *walkResult, item string) (fileRow, bool) {
 	return fileRow{}, false
 }
 
+// filesByPath indexes a walk's file rows by path, so a test reads one
+// file without depending on the order the walk read the folder in.
+func filesByPath(result *walkResult) map[string]fileRow {
+	index := map[string]fileRow{}
+	for _, row := range result.files {
+		index[row.Path] = row
+	}
+	return index
+}
+
+// Every file a title folder holds is one classified row, and the junk a
+// desktop or a storage appliance leaves is no row at all.
+func TestWalkMoviesReadsEveryFileTheTitleCarries(t *testing.T) {
+	result := walkMovies("testdata/movies", "house/movies", nil)
+	files := filesByPath(result)
+	matrix := filepath.Join("Action", "The Matrix (1999)")
+
+	cases := []struct {
+		path         string
+		wantType     string
+		wantRole     string
+		wantLanguage string
+	}{
+		{path: "The Matrix (1999).mkv", wantType: fileTypeVideo, wantRole: fileRolePrimary},
+		{path: "movie.nfo", wantType: fileTypeMetadata, wantRole: fileRoleMovie},
+		{path: "folder.jpg", wantType: fileTypeImage, wantRole: fileRolePoster},
+		{path: "backdrop.jpg", wantType: fileTypeImage, wantRole: fileRoleBackdrop},
+		{path: "logo.png", wantType: fileTypeImage, wantRole: fileRoleLogo},
+		{path: "The Matrix (1999).en.srt", wantType: fileTypeSubtitle, wantRole: fileRoleFull, wantLanguage: "en"},
+		{path: "The Matrix (1999).fr.forced.srt", wantType: fileTypeSubtitle, wantRole: fileRoleForced, wantLanguage: "fr"},
+		{path: "The Matrix (1999).trickplay", wantType: fileTypeTrickplay, wantRole: fileRoleTiles},
+		{path: filepath.Join("Extras", "The Matrix (1999)-trailer.mkv"), wantType: fileTypeVideo, wantRole: fileRoleTrailer},
+		{path: filepath.Join("Extras", "Making Of.mkv"), wantType: fileTypeVideo, wantRole: fileRoleExtra},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.path, func(t *testing.T) {
+			row, held := files[filepath.Join(matrix, testCase.path)]
+			if !held {
+				t.Fatalf("the walk read no row for %s", testCase.path)
+			}
+			if row.Type != testCase.wantType || row.Role != testCase.wantRole || row.Language != testCase.wantLanguage {
+				t.Errorf("class = %s/%s/%s, want %s/%s/%s",
+					row.Type, row.Role, row.Language, testCase.wantType, testCase.wantRole, testCase.wantLanguage)
+			}
+			if row.Items[0] != "movie:tmdb:603" {
+				t.Errorf("items = %v, want the movie the folder holds", row.Items)
+			}
+			if row.Library != "house/movies" || !row.Present {
+				t.Errorf("row = %+v, want it in this library and present", row)
+			}
+			if row.SizeBytes == 0 || row.Modified == 0 {
+				t.Errorf("size = %d, modified = %d, want both from the walk's own stat", row.SizeBytes, row.Modified)
+			}
+		})
+	}
+
+	for _, junk := range []string{"Thumbs.db", ".DS_Store", filepath.Join("The Matrix (1999).trickplay", "1.jpg")} {
+		if _, held := files[filepath.Join(matrix, junk)]; held {
+			t.Errorf("the walk cataloged %s, which is no part of the title", junk)
+		}
+	}
+}
+
+// A title folder whose only extra files are junk yields the title and its
+// video, and no row for the junk.
+func TestWalkMoviesReadsNoRowFromAFolderOfJunk(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Thumbs.db"), "junk")
+	writeFile(t, filepath.Join(dir, "desktop.ini"), "junk")
+	writeFile(t, filepath.Join(dir, ".DS_Store"), "junk")
+
+	result := walkMovies(root, "house/movies", nil)
+	if len(result.files) != 1 {
+		t.Errorf("files = %v, want only the video", filesByPath(result))
+	}
+}
+
+// The walk reads a title folder and the extras folders under it, and goes no
+// deeper, so a folder whose name is outside the extras set yields no rows.
+func TestWalkMoviesDescendsNoFurtherThanAnExtrasFolder(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "Solaris.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Subs", "Solaris.en.srt"), "subtitle")
+	writeFile(t, filepath.Join(dir, "Extras", "Making Of.mkv"), "video")
+
+	files := filesByPath(walkMovies(root, "house/movies", nil))
+	if _, held := files[filepath.Join("Solaris (1972)", "Subs", "Solaris.en.srt")]; held {
+		t.Errorf("files = %v, want nothing from a folder outside the extras set", files)
+	}
+	if _, held := files[filepath.Join("Solaris (1972)", "Extras", "Making Of.mkv")]; !held {
+		t.Errorf("files = %v, want the extras folder read", files)
+	}
+}
+
 func TestWalkMoviesCountsAndIdentifies(t *testing.T) {
 	result := walkMovies("testdata/movies", "house/movies", nil)
 

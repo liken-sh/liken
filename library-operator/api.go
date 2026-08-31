@@ -158,14 +158,27 @@ type LibrarySettings struct {
 // sweep removed, folded from the bus report. A partial walk that pruned
 // too much shows here, so a mass delete is visible without a shell.
 type LibraryStatus struct {
-	Volume           *LibraryVolume `json:"volume,omitempty"`
-	Titles           int            `json:"titles"`
-	Unidentified     int            `json:"unidentified"`
-	RemovedLastSweep int            `json:"removedLastSweep"`
-	LastWalk         time.Time      `json:"lastWalk,omitzero"`
-	LastChange       time.Time      `json:"lastChange,omitzero"`
-	Pod              string         `json:"pod,omitempty"`
-	Conditions       []Condition    `json:"conditions,omitempty"`
+	Volume *LibraryVolume `json:"volume,omitempty"`
+	// Phase says what the scanner is doing, in one word a person reads at
+	// a glance: one of the four values below. Where Ready is the condition a
+	// program matches on, Phase is the sentence a person reads.
+	Phase        string `json:"phase,omitempty"`
+	Titles       int    `json:"titles"`
+	Unidentified int    `json:"unidentified"`
+	// Items is how many item rows the catalog holds for this library,
+	// across the movies, series, and episodes tables, and Files how many
+	// file rows. Both are the catalog's own counts, read after the prune,
+	// so they describe what a screen can read and not what one walk saw.
+	Items            int       `json:"items"`
+	Files            int       `json:"files"`
+	RemovedLastSweep int       `json:"removedLastSweep"`
+	LastWalk         time.Time `json:"lastWalk,omitzero"`
+	LastChange       time.Time `json:"lastChange,omitzero"`
+	Pod              string    `json:"pod,omitempty"`
+	// Webhook is the URL of the scanner's webhook endpoint, the address a
+	// person gives to Radarr, Sonarr, or Jellyfin.
+	Webhook    string      `json:"webhook,omitempty"`
+	Conditions []Condition `json:"conditions,omitempty"`
 }
 
 // LibraryVolume is the PersistentVolume the claim is bound to,
@@ -202,6 +215,16 @@ const (
 	reasonPodPending   = "PodPending"
 	reasonPodFailed    = "PodFailed"
 	reasonNoReport     = "NoReport"
+)
+
+// The four values status.phase takes. libraryPhase in status.go derives
+// one of them from the Ready condition, the scanner's availability on the
+// bus, and the newest report.
+const (
+	phasePending  = "Pending"
+	phaseOffline  = "Offline"
+	phaseScanning = "Scanning"
+	phaseIdle     = "Idle"
 )
 
 // ConditionStatus is a condition's verdict. It is a string rather than

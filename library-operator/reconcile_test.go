@@ -7,6 +7,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -134,6 +135,61 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 	want := LibraryVolume{Name: "pv-movies", Type: "nfs", Server: "syn.example", Path: "/volume1/movies"}
 	if *status.Volume != want {
 		t.Errorf("volume = %+v, want %+v", *status.Volume, want)
+	}
+}
+
+// A bound Library gets the Service over its scanner, and its status reports
+// the address a webhook is posted to.
+func TestReconcileStandsTheWebhookServiceAndReportsItsAddress(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+		t.Fatal(err)
+	}
+
+	service := cluster.heldService("house", "movies-scanner")
+	if service == nil {
+		t.Fatal("the pass stood no webhook Service")
+	}
+	if service.Spec.Selector[libraryLabelKey] != "movies" {
+		t.Errorf("selector = %v, want the Library's own scanner pod", service.Spec.Selector)
+	}
+	if webhook := cluster.heldLibrary("movies").Status.Webhook; webhook != "http://movies-scanner.house.svc:8090/" {
+		t.Errorf("webhook = %q, want the Service's own address", webhook)
+	}
+}
+
+// A Library with no volume gets no Service and no address. This is the same
+// condition its pod is created on.
+func TestReconcileStandsNoWebhookServiceForAnUnboundLibrary(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	delete(cluster.claims, "movies")
+
+	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldService("house", "movies-scanner") != nil {
+		t.Error("a webhook Service was stood for a Library with no volume")
+	}
+	if webhook := cluster.heldLibrary("movies").Status.Webhook; webhook != "" {
+		t.Errorf("webhook = %q, want none", webhook)
+	}
+}
+
+// A failure to write the Service ends the pass. The next pass writes it
+// again, in place of reporting a status the cluster does not hold.
+func TestReconcileReportsAFailedWebhookService(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	cluster.broken[servicesPath("house")+"/movies-scanner"] = http.StatusInternalServerError
+
+	err := testOperator(t, cluster).reconcile(library, withCatalog())
+
+	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
+		t.Fatalf("err = %v, want the server's own message", err)
 	}
 }
 

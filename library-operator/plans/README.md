@@ -15,7 +15,9 @@ layout, and the names to whoever builds it, and expects that person to
 plan the build first. Where a plan needs a change in a lower operator,
 it describes that change here and names the repository.
 
-[`completed/`](completed/) holds the plans that are built and drilled.
+[`completed/`](completed/) holds the plans that are built. A plan there
+records its drill in its own proof section, and an entry below says where
+a drill is still owed.
 [`open-problems/`](open-problems/) holds what the design still owes an
 answer to. [`rejected/`](rejected/) holds what was tried or weighed and
 set aside, with the measurements that decided it.
@@ -29,7 +31,7 @@ set aside, with the measurements that decided it.
 ## Planned
 
 These plans are staged in order. Each keeps its number and moves to
-[`completed/`](completed/) when it is built and drilled. Plans 01 to 09
+[`completed/`](completed/) when it is built. Plans 01 to 09
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
@@ -96,6 +98,31 @@ for a later agent to shape.
   the catalog `Service` and `EndpointSlice`, sizes a `Library`-owned catalog
   claim per scanner pod, and holds a `Library` `Pending` until exactly one
   `Catalog` exists.
+
+Plans 16 to 19 follow the scanner plans and were built before plan 05.
+Each one finishes something plan 04 left short. All four are built and
+released in 2026.08.30-012, and each still owes the drill its own proof
+section names.
+
+* [16, The counts and the phase](completed/16-the-counts-and-the-phase.md).
+  Built, and released in 2026.08.30-012. `status.items`, `status.files`,
+  and `status.phase`, with the printer columns that show them and the
+  two that move behind `-o wide`. The counts are the catalog's own,
+  read after the prune.
+* [17, Every file a title carries](completed/17-every-file-a-title-carries.md).
+  Built, and released in 2026.08.30-012. The `type`, `role`, `language`,
+  and `modified` columns on `files`, the walk that reads the season and
+  extras folders, and the classification that opens no file. The
+  mark-and-sweep prune needed no change.
+* [18, A parallel walk](completed/18-a-parallel-walk.md). Built, and
+  released in 2026.08.30-012. Eight workers over one pool of
+  directories, one collector, and the count of outstanding directories
+  that ends the walk. A directory the walk cannot read now marks the
+  pass incomplete wherever it is in the tree.
+* [19, The webhook, reachable](completed/19-the-webhook-reachable.md).
+  Built, and released in 2026.08.30-012. The `Service` over each
+  scanner pod, with the selector the pod's own labels give it, and the
+  address in `status.webhook`.
 
 ## Open problems
 

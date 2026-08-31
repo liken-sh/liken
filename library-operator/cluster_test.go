@@ -201,11 +201,15 @@ func (f *fakeCluster) writeEndpointSlice(w http.ResponseWriter, r *http.Request,
 	_ = json.NewEncoder(w).Encode(written)
 }
 
-// serveService answers a catalog Service the same way, and it assigns
-// the clusterIP the API server would: a headless Service is created
-// with the None the operator asked for, and the value is the API
-// server's from then on, which is what an update must carry back
+// assignedClusterIP is the address the fake API server gives a Service
+// that asked for none, which is what an update must carry back
 // untouched.
+const assignedClusterIP = "10.43.0.7"
+
+// serveService answers a Service the same way, and it assigns the
+// clusterIP the API server would: a headless Service keeps the None the
+// operator asked for, and any other Service is given an address. The
+// value is the API server's from then on.
 func (f *fakeCluster) serveService(w http.ResponseWriter, r *http.Request, key string) {
 	switch r.Method {
 	case http.MethodPost:
@@ -225,6 +229,9 @@ func (f *fakeCluster) writeService(w http.ResponseWriter, r *http.Request, resou
 	var written Service
 	_ = json.NewDecoder(r.Body).Decode(&written)
 	written.Metadata.ResourceVersion = resourceVersion
+	if written.Spec.ClusterIP == "" {
+		written.Spec.ClusterIP = assignedClusterIP
+	}
 	if written.Spec.ClusterIPs == nil {
 		written.Spec.ClusterIPs = []string{written.Spec.ClusterIP}
 	}
@@ -257,6 +264,15 @@ func (f *fakeCluster) heldService(namespace, name string) *Service {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	return f.services[namespace+"/"+name]
+}
+
+// holdService puts a Service into the cluster as something other than
+// this operator wrote it, so a test drives the divergence a pass finds
+// and repairs.
+func (f *fakeCluster) holdService(service *Service) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.services[service.Metadata.Namespace+"/"+service.Metadata.Name] = service
 }
 
 func (f *fakeCluster) heldCatalog(name string) *NamespaceCatalog {

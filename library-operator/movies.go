@@ -1,12 +1,15 @@
 package main
 
 // movies.go reads one folder per title into item, file, and alias rows. A
-// movies volume holds title folders at its root or under one level of grouping
-// folders, as the lab's volume groups by genre, so the walk descends one level
-// and no deeper.
+// movies volume holds title folders at its root or under grouping folders, as
+// the lab's volume groups by genre, so the walk steps through a grouping
+// folder until it reaches a title folder or the depth cap.
+//
+// It reads every file a title folder holds, and the extras folders beside the
+// feature, and not the video files alone. files.go classifies each one.
 
 import (
-	"iter"
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,7 +18,7 @@ import (
 // walkMovies reads a whole movies root into one walkResult by collecting the
 // folder stream. The tests and a small library use this whole-root read.
 func walkMovies(root, library string, ignore ignoreSet) *walkResult {
-	return collectFolders(walkMovieFolders(root, library, ignore))
+	return collectFolders(walkTree(context.Background(), root, movieFolderRule(root, library, ignore)))
 }
 
 // movieGroupingDepth bounds how deep the walk descends through grouping
@@ -24,52 +27,18 @@ func walkMovies(root, library string, ignore ignoreSet) *walkResult {
 // deep or looping tree from running the walk away.
 const movieGroupingDepth = 8
 
-// walkMovieFolders streams a movies root one title folder at a time. A directory
-// that holds a movie.nfo or a video file is a title folder. A directory that
-// holds neither is a grouping folder, and the walk descends into it and keeps
-// descending, so a title nested under a genre and then a studio is still found.
-// A grouping folder is never a title itself. The descent stops at
-// movieGroupingDepth. A read error at the root yields one result marked with the
-// error and nothing else, so the caller keeps the catalog.
-func walkMovieFolders(root, library string, ignore ignoreSet) iter.Seq[*walkResult] {
-	return func(yield func(*walkResult) bool) {
-		emit := func(dir string) bool {
-			folder := &walkResult{}
-			scanMovieFolder(root, dir, library, folder)
-			return yield(folder)
-		}
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			yield(&walkResult{readError: true})
-			return
-		}
-		var descend func(dir string, entries []os.DirEntry, depth int) bool
-		descend = func(dir string, entries []os.DirEntry, depth int) bool {
-			for _, entry := range entries {
-				if !entry.IsDir() || ignore.skips(entry.Name()) {
-					continue
-				}
-				child := filepath.Join(dir, entry.Name())
-				if isMovieTitleFolder(child) {
-					if !emit(child) {
-						return false
-					}
-					continue
-				}
-				if depth >= movieGroupingDepth {
-					continue
-				}
-				grouped, err := os.ReadDir(child)
-				if err != nil {
-					continue
-				}
-				if !descend(child, grouped, depth+1) {
-					return false
-				}
-			}
-			return true
-		}
-		descend(root, entries, 0)
+// movieFolderRule is what the pool in walk.go needs to walk a movies volume. A
+// directory that holds a movie.nfo or a video file is a title folder. A
+// directory with neither is a grouping folder to descend into, down to the
+// depth cap.
+func movieFolderRule(root, library string, ignore ignoreSet) folderRule {
+	return folderRule{
+		isTitle: isMovieTitleFolder,
+		scan: func(dir string, result *walkResult) {
+			scanMovieFolder(root, dir, library, result)
+		},
+		ignore:   ignore,
+		maxDepth: movieGroupingDepth,
 	}
 }
 
@@ -125,13 +94,17 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	// The sidecar's streamdetails describe the primary file, so only the first
 	// video file reads its attributes from the sidecar; the rest read them from
 	// their own name.
+	videos := map[string]bool{}
 	for i, video := range listVideoFiles(dir) {
 		var stream *streamInfo
 		if i == 0 && meta.Stream.present() {
 			stream = &meta.Stream
 		}
+		videos[video] = true
 		result.files = append(result.files, movieFileRow(root, dir, video, library, id, stream))
 	}
+
+	scanMovieFiles(root, dir, library, id, videos, result)
 
 	result.aliases = append(result.aliases, aliasRowsForItem(scopeMovie, meta.ProviderIDs, key, id)...)
 	result.titles++
@@ -174,6 +147,8 @@ func releasedFromYear(year int) string {
 func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo) fileRow {
 	container, videoCodec, audioCodec, width, height, durationMs := fileAttributes(file, stream)
 	absolute := filepath.Join(dir, file)
+	size, modified := statFile(absolute)
+	class := classifyFile(file, filePlace{kind: libraryKindMovies})
 	return fileRow{
 		Path:       relativePath(root, absolute),
 		Library:    library,
@@ -182,10 +157,43 @@ func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo) f
 		AudioCodec: audioCodec,
 		Width:      width,
 		Height:     height,
-		SizeBytes:  fileSize(absolute),
+		SizeBytes:  size,
 		DurationMs: durationMs,
 		Trickplay:  trickplayFor(root, dir, file),
 		Present:    true,
+		Type:       class.Type,
+		Role:       class.Role,
+		Modified:   modified,
 		Items:      []string{itemID},
+	}
+}
+
+// scanMovieFiles reads the rest of a movie title folder: the sidecar, the art,
+// the subtitles, the trickplay directory, and the extras folders beside the
+// feature. Every one of them links to the movie.
+func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, result *walkResult) {
+	rows, subdirectories := folderFiles{
+		root:    root,
+		dir:     dir,
+		library: library,
+		place:   filePlace{kind: libraryKindMovies},
+		item:    constantItem(itemID),
+		held:    videos,
+	}.read()
+	result.files = append(result.files, rows...)
+
+	for _, name := range subdirectories {
+		extras := extrasFolderName(name)
+		if extras == "" {
+			continue
+		}
+		rows, _ := folderFiles{
+			root:    root,
+			dir:     filepath.Join(dir, name),
+			library: library,
+			place:   filePlace{kind: libraryKindMovies, extras: extras},
+			item:    constantItem(itemID),
+		}.read()
+		result.files = append(result.files, rows...)
 	}
 }

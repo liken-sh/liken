@@ -7,6 +7,7 @@ package main
 // and written with.
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -30,6 +31,20 @@ func TestCatalogServiceIsHeadlessAndPublishesEveryAddress(t *testing.T) {
 	want := ServicePort{Name: catalogPortName, Protocol: catalogPortProtocol, Port: catalogPort}
 	if len(service.Spec.Ports) != 1 || service.Spec.Ports[0] != want {
 		t.Errorf("ports = %+v, want %+v", service.Spec.Ports, want)
+	}
+}
+
+// The catalog Service states no selector. A selector would make the API
+// server write the endpoints, in place of the EndpointSlice this operator
+// writes, so the field must be absent from the body and not merely empty.
+func TestCatalogServiceNamesNoSelector(t *testing.T) {
+	body, err := json.Marshal(buildCatalogService(testLibraryNamespace, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(string(body), "selector") {
+		t.Errorf("body = %s, want no selector at all", body)
 	}
 }
 
@@ -132,6 +147,31 @@ func TestStandCatalogServiceKeepsTheAddressTheAPIServerAssigned(t *testing.T) {
 
 // A 409 on the create means another writer got there first, which is
 // success. The next pass reads the Service and compares against it.
+// A selector on the catalog Service would make the API server write the
+// endpoints, in place of the EndpointSlice this operator writes, and the
+// agents would lose their peer list. A pass clears one that reaches the
+// object by another hand.
+func TestStandCatalogServiceClearsASelectorItDidNotWrite(t *testing.T) {
+	cluster := newFakeCluster()
+	operator := testOperator(t, cluster)
+	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
+	if err := operator.standCatalogService(testLibraryNamespace, owners); err != nil {
+		t.Fatal(err)
+	}
+
+	live := cluster.heldService(testLibraryNamespace, catalogServiceName)
+	live.Spec.Selector = map[string]string{"app": "catalog"}
+	cluster.holdService(live)
+
+	if err := operator.standCatalogService(testLibraryNamespace, owners); err != nil {
+		t.Fatal(err)
+	}
+
+	if selector := cluster.heldService(testLibraryNamespace, catalogServiceName).Spec.Selector; len(selector) != 0 {
+		t.Errorf("selector = %v, want it cleared", selector)
+	}
+}
+
 func TestStandCatalogServiceTreatsAConflictAsAnotherWriter(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.refuseCreate = true

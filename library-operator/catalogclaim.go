@@ -26,12 +26,9 @@ func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentV
 		APIVersion: claimAPIVersion,
 		Kind:       "PersistentVolumeClaim",
 		Metadata: ObjectMeta{
-			Name:      scannerCatalogClaimName(library.Metadata.Name),
-			Namespace: library.Metadata.Namespace,
-			Labels: map[string]string{
-				scannerLabelKey: scannerLabelValue,
-				libraryLabelKey: library.Metadata.Name,
-			},
+			Name:            scannerCatalogClaimName(library.Metadata.Name),
+			Namespace:       library.Metadata.Namespace,
+			Labels:          scannerLabels(library.Metadata.Name),
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
 		Spec: PersistentVolumeClaimSpec{

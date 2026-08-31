@@ -31,7 +31,7 @@
 --   body      the kind's own shape, as JSON
 --   slug      the legible display name, the-matrix-1999, for a URL or a screen
 --
--- PROSE: explain that the scanner's mark-and-sweep seen table is not here.
+-- The seen table the scanner marks and sweeps against is not in this file.
 -- Every table this file names becomes a replicated table that gossips, and
 -- a mark on every row of every walk would flood the readers. The scanner
 -- creates seen through the write API instead, so it stays a local table
@@ -110,7 +110,17 @@ CREATE INDEX episodes_library_series_season_episode ON episodes (library, series
 -- A file is one physical file on the volume: its path, the library it belongs
 -- to, its technical attributes, and its own trickplay path. present marks a
 -- file the last walk still found, so a file that left the volume reads as
--- absent until a walk removes it.
+-- absent until a walk removes it. Every file a title folder holds is a row
+-- here, and not the video files alone, so a media browser draws a title's
+-- art, subtitles, and extras from the catalog and never from the volume.
+--
+-- Four columns say what a file is. The scanner reads all four off the file's
+-- name, the directory that holds it, and one stat, and it opens no file.
+--
+--   type      the category, one word from the closed set in files.go
+--   role      which one of its kind the file is, in Jellyfin's and Kodi's words
+--   language  the two-letter or three-letter tag the file name carries
+--   modified  the time the file was last written, in Unix seconds
 CREATE TABLE files (
     path TEXT NOT NULL PRIMARY KEY DEFAULT '',
     library TEXT NOT NULL DEFAULT '',
@@ -122,7 +132,11 @@ CREATE TABLE files (
     size_bytes INTEGER NOT NULL DEFAULT 0,
     duration_ms INTEGER NOT NULL DEFAULT 0,
     trickplay TEXT NOT NULL DEFAULT '',
-    present INTEGER NOT NULL DEFAULT 1
+    present INTEGER NOT NULL DEFAULT 1,
+    type TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT '',
+    modified INTEGER NOT NULL DEFAULT 0
 );
 
 -- The many-to-many link between a file and the items it holds. A multi-episode

@@ -141,6 +141,26 @@ func TestAvailabilityWakesOnEveryChangeAndOnNoRepeat(t *testing.T) {
 	waitForReportWake(t, wake)
 }
 
+// The desk reports the last availability the bus carried for a scanner,
+// the fact the phase reads to tell Offline from Idle.
+func TestTheDeskAnswersWhetherAScannerIsOnline(t *testing.T) {
+	desk, _ := reportDesk(t)
+
+	if desk.onlineFor("house", "movies") {
+		t.Error("a Library the desk holds no availability for reads online")
+	}
+
+	desk.availability("house", "movies", true)
+	if !desk.onlineFor("house", "movies") {
+		t.Error("the desk reads an online scanner as offline")
+	}
+
+	desk.availability("house", "movies", false)
+	if desk.onlineFor("house", "movies") {
+		t.Error("the desk reads a scanner that left as online")
+	}
+}
+
 // The pass hands over the Libraries that still exist, and the desk
 // shrinks to match, so a Library created later under the same name
 // starts with no report and no availability.

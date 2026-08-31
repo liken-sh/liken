@@ -81,12 +81,16 @@ What the volume resolved to and what the scanner reports, written only by the li
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--volume"></span>`volume` | [object](#statusvolume) | no | The PersistentVolume the claim is bound to. It is absent until the claim binds. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume. |
+| <span id="status--phase"></span>`phase` | string | no | What the scanner is doing. Scanning while it walks the volume, Idle between walks, Pending while the storage or the catalog is not ready, and Offline when no scanner is running. |
 | <span id="status--titles"></span>`titles` | integer | no | How many titles the scanner's last walk cataloged. |
+| <span id="status--items"></span>`items` | integer | no | How many entries this library holds: its movies, or its series and their episodes counted together. |
+| <span id="status--files"></span>`files` | integer | no | How many files this library holds: the video files and everything beside them, the sidecars, the artwork, the subtitles, and the trickplay directories. |
 | <span id="status--unidentified"></span>`unidentified` | integer | no | How many folders the last walk could not identify: no sidecar file, and no confident parse of the folder name. They are cataloged under their folder names, so they are still browsable. |
 | <span id="status--removedlastsweep"></span>`removedLastSweep` | integer | no | How many catalog rows the scanner's last full sweep removed. A mass delete that a partial walk caused shows here, without a shell. |
 | <span id="status--lastwalk"></span>`lastWalk` | string | no | When the scanner last finished a full walk of the volume. |
 | <span id="status--lastchange"></span>`lastChange` | string | no | When the scanner last wrote a change to the catalog. A walk that finds nothing new moves lastWalk and leaves this alone. |
 | <span id="status--pod"></span>`pod` | string | no | The scanner pod's name, for kubectl describe and logs. The pod is owned by this Library and is deleted with it. |
+| <span id="status--webhook"></span>`webhook` | string | no | The address of the scanner's webhook, which you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one title at once. It names the Service over the scanner pod, so it holds when the pod is replaced. It is reported once the storage is bound and the namespace holds one Catalog. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. Ready reports the scanner: True when its pod runs with every container ready and the operator holds a report for this library, and False with the reason NotBound, PodPending, PodFailed, or NoReport. |
 
 ### status.volume

@@ -128,6 +128,21 @@ func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	}
 }
 
+// The scanner container declares the webhook port, so a person who reads the
+// pod finds the port the Service sends to.
+func TestScannerContainerDeclaresTheWebhookPort(t *testing.T) {
+	pod := testScannerPod(studioMovies())
+
+	scanner := pod.Spec.Containers[0]
+	want := ContainerPort{Name: webhookPortName, ContainerPort: webhookPort, Protocol: webhookPortProtocol}
+	if len(scanner.Ports) != 1 || scanner.Ports[0] != want {
+		t.Errorf("ports = %+v, want %+v", scanner.Ports, want)
+	}
+	if catalog := pod.Spec.InitContainers[0]; len(catalog.Ports) != 0 {
+		t.Errorf("the catalog agent declares %+v, want no port", catalog.Ports)
+	}
+}
+
 func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 	pod := testScannerPod(studioMovies())
 

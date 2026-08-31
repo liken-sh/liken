@@ -10,6 +10,9 @@
 # objects carry. It deletes no object a person created. Every grant is
 # cluster-wide, because a Library can be in any namespace.
 #
+# It also stands one Service per Library, over that Library's scanner
+# pod, which is the address the scanner's webhook answers on.
+#
 # The scanner pods hold no credential of their own. They report over
 # the bus, and the operator writes what they report, so nothing in this
 # file grants a scanner anything.
@@ -72,13 +75,14 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
-  # The headless catalog Service of each namespace that holds a
-  # Catalog. The grant is cluster-wide because a Catalog can be in any
-  # namespace and the operator is one Deployment for the cluster. There
-  # is no delete verb: the Service is owned by its namespace's Catalog,
-  # and the garbage collector removes it when the Catalog goes. There is
-  # no list and no watch: the Service is read by name, in the namespaces
-  # the Catalog list already named.
+  # Two Services, each read by name. The headless catalog Service of
+  # each namespace that holds a Catalog, and the webhook Service over
+  # each Library's scanner pod. The grant is cluster-wide because either
+  # can be in any namespace, and the operator is one Deployment for the
+  # cluster. There is no list and no watch: both are read by name, in
+  # the namespaces the Catalog and Library lists already named. There is
+  # no delete verb: each Service is owned by the object it belongs to,
+  # and the garbage collector removes it with that object.
   - apiGroups: [""]
     resources: [services]
     verbs: [get, create, update]

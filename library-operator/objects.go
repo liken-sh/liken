@@ -194,6 +194,7 @@ type Container struct {
 	Command         []string             `json:"command,omitempty"`
 	Args            []string             `json:"args,omitempty"`
 	Env             []EnvVar             `json:"env,omitempty"`
+	Ports           []ContainerPort      `json:"ports,omitempty"`
 	Resources       ResourceRequirements `json:"resources,omitzero"`
 	VolumeMounts    []VolumeMount        `json:"volumeMounts,omitempty"`
 	SecurityContext *SecurityContext     `json:"securityContext,omitempty"`
@@ -210,6 +211,15 @@ type Container struct {
 	// list.
 	StartupProbe  *Probe `json:"startupProbe,omitempty"`
 	LivenessProbe *Probe `json:"livenessProbe,omitempty"`
+}
+
+// A ContainerPort is one port a container listens on. Declaring it changes
+// nothing at run time. It is how a person who reads the pod finds the port
+// without reading this operator's source.
+type ContainerPort struct {
+	Name          string `json:"name"`
+	ContainerPort int32  `json:"containerPort"`
+	Protocol      string `json:"protocol,omitempty"`
 }
 
 // A Probe is the check the kubelet runs on a container. This

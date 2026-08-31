@@ -110,12 +110,9 @@ func buildScannerPod(library *Library, scannerImage, corrosionImage, busAddress,
 		APIVersion: podAPIVersion,
 		Kind:       "Pod",
 		Metadata: ObjectMeta{
-			Name:      scannerPodName(library.Metadata.Name),
-			Namespace: library.Metadata.Namespace,
-			Labels: map[string]string{
-				scannerLabelKey: scannerLabelValue,
-				libraryLabelKey: library.Metadata.Name,
-			},
+			Name:            scannerPodName(library.Metadata.Name),
+			Namespace:       library.Metadata.Namespace,
+			Labels:          scannerLabels(library.Metadata.Name),
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
 		Spec: PodSpec{
@@ -156,6 +153,17 @@ func buildScannerPod(library *Library, scannerImage, corrosionImage, busAddress,
 				}},
 			},
 		},
+	}
+}
+
+// scannerLabels is the label pair that names one Library's scanner pod. The
+// pod carries them, the webhook Service selects on them, and the catalog
+// claim is marked with them, so all three read one function and no two of
+// them can drift apart.
+func scannerLabels(library string) map[string]string {
+	return map[string]string{
+		scannerLabelKey: scannerLabelValue,
+		libraryLabelKey: library,
 	}
 }
 
@@ -202,6 +210,12 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: libraryIgnoreVariable, Value: string(ignore)},
+		},
+		// The port the scanner's webhook listens on, declared so a
+		// person who reads the pod finds it. The Service in
+		// webhookservice.go states the same number and the same name.
+		Ports: []ContainerPort{
+			{Name: webhookPortName, ContainerPort: webhookPort, Protocol: webhookPortProtocol},
 		},
 		VolumeMounts: []VolumeMount{
 			{Name: libraryVolumeName, MountPath: libraryMountPath, ReadOnly: true},

@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -89,10 +90,12 @@ const defaultCatalogAPI = "http://127.0.0.1:8080"
 // and the mount point is this operator's choice.
 const libraryMountPath = "/library"
 
-// The address the webhook listens on. The drill reaches this port on
-// the pod directly, so the plan adds no Service. A var so a test binds
-// an ephemeral port.
-var webhookAddress = ":8090"
+// The address the scanner's webhook listens on. The port is the one the
+// Service in webhookservice.go states, and both read the same constant, so
+// the two cannot drift apart.
+//
+// A var so a test binds an ephemeral port.
+var webhookAddress = ":" + strconv.Itoa(webhookPort)
 
 // The wait between full walks. The walk is how a file that arrived with
 // no webhook reaches the catalog. A var so a test drives several walks
@@ -274,34 +277,23 @@ func (s *scanner) runTimer(ctx context.Context) {
 	}
 }
 
-// walkFolders streams the title folders for this library's kind, one at
-// a time, so a full walk holds one folder and never the whole library.
-// An unknown kind streams nothing and reports zero titles rather than
-// failing. A cancelled context stops the stream between folders, so a
+// walkFolders streams this library's title folders, read by the pool in
+// walk.go and handed one at a time to the caller, which is the walk's one
+// collector. An unknown kind streams nothing and reports zero titles rather
+// than failing. A cancelled context stops the stream between folders, so a
 // walk of a large volume does not run on past a shutdown.
 func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
-	var folders iter.Seq[*walkResult]
 	switch s.kind {
 	case libraryKindMovies:
-		folders = walkMovieFolders(s.root, s.library, s.ignore)
+		return walkTree(ctx, s.root, movieFolderRule(s.root, s.library, s.ignore))
 	case libraryKindSeries:
-		folders = walkSeriesFolders(s.root, s.library, s.ignore)
-	default:
-		return func(yield func(*walkResult) bool) {}
+		return walkTree(ctx, s.root, seriesFolderRule(s.root, s.library, s.ignore))
 	}
-	return func(yield func(*walkResult) bool) {
-		for folder := range folders {
-			if ctx.Err() != nil {
-				return
-			}
-			if !yield(folder) {
-				return
-			}
-		}
-	}
+	return func(yield func(*walkResult) bool) {}
 }
 
-// fullWalk streams the root one title folder at a time, buffers the rows
+// fullWalk is the walk's one collector. A pool of workers reads the root, and
+// this goroutine takes their folders one at a time. It buffers the rows
 // until the buffer reaches scanFlushBatch, and flushes each buffer:
 // it upserts the rows and marks them with the walk's epoch. It then prunes
 // the rows the walk did not mark. It updates the counts and the last-walk
@@ -312,6 +304,13 @@ func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
 func (s *scanner) fullWalk(ctx context.Context) {
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
+
+	// A walk publishes its report twice: once here with the walking mark
+	// set, and once from the deferred clear below, whichever way the walk
+	// returns. So the bus carries Scanning for the length of the walk and
+	// Idle after it, down every one of the walk's exit paths.
+	s.markWalking(true)
+	defer s.markWalking(false)
 
 	started := time.Now()
 	s.logf("walking %s", s.root)
@@ -364,10 +363,11 @@ func (s *scanner) fullWalk(ctx context.Context) {
 		return
 	}
 
-	// an incomplete walk read only part of the volume, so its counts
-	// do not describe what the volume holds. It keeps the last good report
-	// in place and publishes nothing, and the next clean walk replaces it,
-	// so a partial read never overwrites a good count with a low one.
+	// An incomplete walk read only part of the volume, so its counts do
+	// not describe what the volume holds. It returns here without touching
+	// the report's counts, and the deferred mark still moves the phase to
+	// Idle, so a partial read never overwrites a good count with a low one.
+	// The next clean walk replaces the counts.
 	if incompleteWalk(readError, items, before) {
 		s.logIncompleteWalk(readError, items, before)
 		return
@@ -387,9 +387,19 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	}
 
 	after, err := s.catalog.countItems(ctx, s.library)
+	countedItems := err == nil
 	if err != nil {
 		s.logWalk("count the catalog after the walk", err)
 		after = before
+	}
+
+	// The catalog's own file count, read here beside the item count. A read
+	// that fails leaves the report's file count at its last value, the way
+	// the item count holds on a failed read.
+	files, err := s.catalog.countFiles(ctx, s.library)
+	countedFiles := err == nil
+	if err != nil {
+		s.logWalk("count the catalog's files", err)
 	}
 
 	now := time.Now().UTC()
@@ -403,8 +413,13 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	if removed >= 0 {
 		s.report.RemovedLastSweep = removed
 	}
+	if countedItems {
+		s.report.Items = after
+	}
+	if countedFiles {
+		s.report.Files = files
+	}
 	s.mutex.Unlock()
-	s.publishReport()
 
 	s.logWalkComplete(titles, unidentified, removed, unidentifiedNames, time.Since(started))
 }
@@ -570,6 +585,16 @@ func splitPath(relative string) []string {
 		}
 	}
 	return parts
+}
+
+// markWalking sets or clears the walking mark and publishes the report,
+// so the operator sees a walk start and end and moves the phase between
+// Scanning and Idle.
+func (s *scanner) markWalking(walking bool) {
+	s.mutex.Lock()
+	s.report.Walking = walking
+	s.mutex.Unlock()
+	s.publishReport()
 }
 
 // publishReport writes the current report to the bus, retained. A

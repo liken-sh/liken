@@ -146,6 +146,10 @@ type episodeRow struct {
 // the many-to-many file_items link: one file names more than one item where
 // a file holds two episodes, and one item holds more than one file where a
 // title has a second encoding.
+//
+// Type, Role, and Language are the classification in files.go, read off the
+// file's name and the directory that holds it. Modified is the time the one
+// stat that read the size also read.
 type fileRow struct {
 	Path       string
 	Library    string
@@ -158,6 +162,10 @@ type fileRow struct {
 	DurationMs int64
 	Trickplay  string
 	Present    bool
+	Type       string
+	Role       string
+	Language   string
+	Modified   int64
 	Items      []string
 }
 

@@ -279,7 +279,7 @@ func listVideoFiles(dir string) []string {
 // exist.
 func trickplayFor(root, dir, file string) string {
 	base := strings.TrimSuffix(file, filepath.Ext(file))
-	candidate := filepath.Join(dir, base+".trickplay")
+	candidate := filepath.Join(dir, base+trickplayExtension)
 	if dirExists(candidate) {
 		return relativePath(root, candidate)
 	}

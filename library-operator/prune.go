@@ -81,6 +81,13 @@ func (c *Catalog) countItems(ctx context.Context, library string) (int, error) {
 		[]any{library, library, library})
 }
 
+// countFiles reads how many file rows the catalog holds for this
+// library. The report carries it beside the item count, so a Library's
+// status shows both.
+func (c *Catalog) countFiles(ctx context.Context, library string) (int, error) {
+	return c.queryInt(ctx, `SELECT count(*) FROM files WHERE library = ?`, []any{library})
+}
+
 // markKeys reads every id, file path, and alias a walk produced into one
 // deduplicated list, the set the walk marks with its epoch.
 func markKeys(result *walkResult) []string {

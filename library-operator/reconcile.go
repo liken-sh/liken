@@ -45,9 +45,15 @@ func (o *operator) reconcile(library *Library, choice catalogChoice) error {
 	// A Library with no volume, or in a namespace with no single
 	// Catalog, gets no pod. There would be nothing to mount, or no
 	// cluster to join, and the Ready condition says which.
+	//
+	// It gets no webhook Service either. The Service selects the scanner
+	// pod, and an address with no pod behind it answers nothing.
 	var pod *Pod
-	if bound.volume != nil && choice.catalog != nil {
+	if scannerStands(bound, choice) {
 		if err := o.standCatalogClaim(library, choice.catalog); err != nil {
+			return err
+		}
+		if err := o.standWebhookService(library); err != nil {
 			return err
 		}
 		desired := buildScannerPod(library, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
@@ -57,9 +63,19 @@ func (o *operator) reconcile(library *Library, choice catalogChoice) error {
 		}
 	}
 
-	report := o.reports.latestFor(library.Metadata.Namespace, library.Metadata.Name)
+	namespace, name := library.Metadata.Namespace, library.Metadata.Name
+	report := o.reports.latestFor(namespace, name)
+	online := o.reports.onlineFor(namespace, name)
 	return writeLibraryStatus(o.client, library,
-		deriveLibraryStatus(library, bound, choice, pod, report, time.Now().UTC()))
+		deriveLibraryStatus(library, bound, choice, pod, report, online, time.Now().UTC()))
+}
+
+// scannerStands reports the one condition a Library's scanner needs: its
+// storage is bound, and its namespace holds exactly one Catalog. The pass
+// reads it to create the objects, and the status derivation reads it to
+// report the webhook address, so the two cannot answer differently.
+func scannerStands(bound binding, choice catalogChoice) bool {
+	return bound.volume != nil && choice.catalog != nil
 }
 
 // resolveStorage reads the claim a Library names and the volume behind

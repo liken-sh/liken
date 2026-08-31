@@ -358,6 +358,49 @@ func TestServeRepublishesOnTheSlowTimer(t *testing.T) {
 	waitForTopic(t, broker, scan.statusTopic)
 }
 
+// reportOn decodes the report one status publish carried.
+func reportOn(t *testing.T, published brokerPublish) libraryReport {
+	t.Helper()
+	var report libraryReport
+	if err := json.Unmarshal(published.payload, &report); err != nil {
+		t.Fatal(err)
+	}
+	return report
+}
+
+// A walk publishes its report twice, so the bus carries the walk in
+// flight and then the walk done.
+func TestAWalkPublishesTheReportAtItsStartAndAtItsEnd(t *testing.T) {
+	webhookWas := webhookAddress
+	t.Cleanup(func() { webhookAddress = webhookWas })
+	webhookAddress = "127.0.0.1:0"
+	flushWas := scanFlushGrace
+	t.Cleanup(func() { scanFlushGrace = flushWas })
+	scanFlushGrace = 5 * time.Millisecond
+
+	address, accepted := testBroker(t)
+	scan, _ := serveScanner(t, address, "testdata/movies", libraryKindMovies)
+	startScanner(t, scan)
+
+	broker := waitForBroker(t, accepted)
+	// onConnect publishes the report on connect, so waiting for it here
+	// means the bus is connected and the walk's own publishes below reach
+	// the broker.
+	waitForTopic(t, broker, scan.statusTopic)
+
+	scan.fullWalk(context.Background())
+
+	started := reportOn(t, waitForTopic(t, broker, scan.statusTopic))
+	ended := reportOn(t, waitForTopic(t, broker, scan.statusTopic))
+
+	if !started.Walking {
+		t.Error("the report at the start of a walk does not say a walk is in flight")
+	}
+	if ended.Walking {
+		t.Error("the report at the end of a walk still says a walk is in flight")
+	}
+}
+
 // A rescan reads the one folder a path names and upserts it, the work a
 // webhook drives for a series library.
 func TestScannerRescanReadsOneSeriesFolder(t *testing.T) {

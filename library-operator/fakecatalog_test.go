@@ -185,6 +185,8 @@ func (f *fakeCatalog) serveQuery(w http.ResponseWriter, r *http.Request) {
 // evaluate runs the one read the SQL asks for and returns its cells.
 func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	switch {
+	case strings.Contains(sql, "count(*) FROM files"):
+		return []any{float64(f.countIn(f.files, str(p[0])))}
 	case strings.Contains(sql, "count(*)"):
 		lib := str(p[0])
 		count := f.countIn(f.movies, lib) + f.countIn(f.series, lib) + f.countIn(f.episodes, lib)
@@ -300,6 +302,21 @@ func (f *fakeCatalog) held(table map[string]fakeRow) map[string]fakeRow {
 		out[k] = v
 	}
 	return out
+}
+
+// counts reports how many count queries the fake has served.
+func (f *fakeCatalog) counts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.countReadsServed
+}
+
+// failCountsAfter fails every count query after the one numbered here,
+// so a test drives a walk whose counts succeed and whose later reads fail.
+func (f *fakeCatalog) failCountsAfter(served int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.countErrorsAfter = served
 }
 
 // flushes reads how many transaction POSTs carried a movie upsert under the

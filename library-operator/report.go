@@ -22,6 +22,15 @@ type libraryReport struct {
 	Unidentified int       `json:"unidentified"`
 	LastWalk     time.Time `json:"lastWalk"`
 	LastChange   time.Time `json:"lastChange"`
+	// Items and Files are the catalog's own counts after the last walk
+	// pruned: the item rows and the file rows it holds for this library.
+	// The operator folds them into Library status.
+	Items int `json:"items"`
+	Files int `json:"files"`
+	// Walking is true while a walk runs. The scanner publishes the report
+	// with it set as the walk starts and clear as the walk ends, so the
+	// operator's phase follows the walk.
+	Walking bool `json:"walking"`
 	// The count of rows the last full sweep removed, so a mass delete that a
 	// partial walk caused is visible on the bus without a shell. The operator
 	// folds it into Library status.
@@ -102,6 +111,15 @@ func (r *reports) latestFor(namespace, name string) *libraryReport {
 		return nil
 	}
 	return &report
+}
+
+// onlineFor reports the last availability the bus carried for a Library.
+// A Library the desk holds no availability for reads offline, which is
+// the state before its scanner first connects.
+func (r *reports) onlineFor(namespace, name string) bool {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return r.online[libraryKey(namespace, name)]
 }
 
 // retain drops everything the desk holds for a deleted Library. The

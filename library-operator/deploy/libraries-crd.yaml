@@ -46,9 +46,9 @@ spec:
       # status. The API server enforces the split.
       subresources:
         status: {}
-      # `kubectl get libraries` answers what the cluster holds and
-      # whether the scanners are healthy, so the columns show the
-      # kind, the volume, the two counts, and the roll-up condition.
+      # The columns `kubectl get` shows for a Library. The claim and the
+      # count of unidentified folders carry priority 1, so they appear
+      # under `kubectl get -o wide` and stay out of the default view.
       additionalPrinterColumns:
         - name: Kind
           type: string
@@ -56,12 +56,23 @@ spec:
         - name: Claim
           type: string
           jsonPath: .spec.storage.claim
+          priority: 1
         - name: Titles
           type: integer
           jsonPath: .status.titles
+        - name: Items
+          type: integer
+          jsonPath: .status.items
+        - name: Files
+          type: integer
+          jsonPath: .status.files
         - name: Unidentified
           type: integer
           jsonPath: .status.unidentified
+          priority: 1
+        - name: Status
+          type: string
+          jsonPath: .status.phase
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -255,11 +266,31 @@ spec:
                         The path the NFS server exports. Only an nfs
                         volume has one. A title's media reference is
                         this path and the title's own path under it.
+                phase:
+                  type: string
+                  description: >-
+                    What the scanner is doing. Scanning while it walks the
+                    volume, Idle between walks, Pending while the storage
+                    or the catalog is not ready, and Offline when no
+                    scanner is running.
                 titles:
                   type: integer
                   minimum: 0
                   description: >-
                     How many titles the scanner's last walk cataloged.
+                items:
+                  type: integer
+                  minimum: 0
+                  description: >-
+                    How many entries this library holds: its movies, or
+                    its series and their episodes counted together.
+                files:
+                  type: integer
+                  minimum: 0
+                  description: >-
+                    How many files this library holds: the video files and
+                    everything beside them, the sidecars, the artwork, the
+                    subtitles, and the trickplay directories.
                 unidentified:
                   type: integer
                   minimum: 0
@@ -294,6 +325,15 @@ spec:
                     The scanner pod's name, for kubectl describe and
                     logs. The pod is owned by this Library and is
                     deleted with it.
+                webhook:
+                  type: string
+                  description: >-
+                    The address of the scanner's webhook, which you give
+                    to Radarr, Sonarr, or Jellyfin so that an import
+                    rescans that one title at once. It names the Service
+                    over the scanner pod, so it holds when the pod is
+                    replaced. It is reported once the storage is bound
+                    and the namespace holds one Catalog.
                 conditions:
                   type: array
                   description: >-

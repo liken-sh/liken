@@ -42,12 +42,15 @@ func TestDeriveStatusCarriesTheScannersReport(t *testing.T) {
 	walked := time.Date(2026, 8, 29, 11, 30, 0, 0, time.UTC)
 	changed := time.Date(2026, 8, 29, 11, 45, 0, 0, time.UTC)
 	report := &libraryReport{Titles: 412, Unidentified: 3, RemovedLastSweep: 5,
-		LastWalk: walked, LastChange: changed}
+		Items: 1204, Files: 6621, LastWalk: walked, LastChange: changed}
 
-	status := deriveLibraryStatus(studioMovies(), boundVolume(), withCatalog(), readyPod(podRunning, true), report, testNow)
+	status := deriveLibraryStatus(studioMovies(), boundVolume(), withCatalog(), readyPod(podRunning, true), report, true, testNow)
 
 	if status.Titles != 412 || status.Unidentified != 3 {
 		t.Errorf("counts = %d and %d, want 412 and 3", status.Titles, status.Unidentified)
+	}
+	if status.Items != 1204 || status.Files != 6621 {
+		t.Errorf("catalog counts = %d items and %d files, want 1204 and 6621", status.Items, status.Files)
 	}
 	if status.RemovedLastSweep != 5 {
 		t.Errorf("removedLastSweep = %d, want the count the sweep removed", status.RemovedLastSweep)
@@ -70,6 +73,35 @@ func TestDeriveStatusCarriesTheScannersReport(t *testing.T) {
 
 // Each reason names the step that has not happened, so a person reads
 // the condition and knows where to look.
+// The address is reported on the same condition the operator writes the
+// Service on: the storage is bound, and the namespace holds one Catalog. It
+// does not wait on the pod, so a replacement of the pod leaves it in place.
+func TestDeriveStatusReportsTheWebhookAddress(t *testing.T) {
+	cases := []struct {
+		name    string
+		bound   binding
+		choice  catalogChoice
+		pod     *Pod
+		webhook string
+	}{
+		{name: "a scanner that stands", bound: boundVolume(), choice: withCatalog(),
+			pod: readyPod(podRunning, true), webhook: "http://movies-scanner.house.svc:8090/"},
+		{name: "a pod this pass replaced", bound: boundVolume(), choice: withCatalog(),
+			webhook: "http://movies-scanner.house.svc:8090/"},
+		{name: "storage that is not bound", choice: withCatalog()},
+		{name: "a namespace with no Catalog", bound: boundVolume(), choice: singleCatalog(nil)},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			status := deriveLibraryStatus(studioMovies(), one.bound, one.choice, one.pod, nil, true, testNow)
+
+			if status.Webhook != one.webhook {
+				t.Errorf("webhook = %q, want %q", status.Webhook, one.webhook)
+			}
+		})
+	}
+}
+
 func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 	failed := readyPod(podFailed, false)
 	failed.Status.Reason = "Evicted"
@@ -157,7 +189,7 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			status := deriveLibraryStatus(studioMovies(), one.bound, one.choice, one.pod, one.report, testNow)
+			status := deriveLibraryStatus(studioMovies(), one.bound, one.choice, one.pod, one.report, true, testNow)
 
 			ready := conditionOf(t, status, conditionReady)
 			if ready.Status != ConditionFalse {
@@ -168,6 +200,36 @@ func TestReadyConditionNamesTheStepThatIsMissing(t *testing.T) {
 			}
 			if ready.Message != one.message {
 				t.Errorf("message = %q, want %q", ready.Message, one.message)
+			}
+		})
+	}
+}
+
+// The phase takes the first of the four values that holds, read from the
+// Ready condition the same derivation built.
+func TestThePhaseSaysWhatTheScannerIsDoing(t *testing.T) {
+	walking := &libraryReport{Titles: 412, Walking: true}
+	between := &libraryReport{Titles: 412}
+
+	cases := []struct {
+		name   string
+		pod    *Pod
+		report *libraryReport
+		online bool
+		phase  string
+	}{
+		{name: "a pod that has not started", pod: readyPod(podPending, false), report: between, online: true, phase: phasePending},
+		{name: "a scanner that has not reported", pod: readyPod(podRunning, true), online: true, phase: phasePending},
+		{name: "a scanner that left the bus", pod: readyPod(podRunning, true), report: between, phase: phaseOffline},
+		{name: "a walk in flight", pod: readyPod(podRunning, true), report: walking, online: true, phase: phaseScanning},
+		{name: "between walks", pod: readyPod(podRunning, true), report: between, online: true, phase: phaseIdle},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			status := deriveLibraryStatus(studioMovies(), boundVolume(), withCatalog(), one.pod, one.report, one.online, testNow)
+
+			if status.Phase != one.phase {
+				t.Errorf("phase = %q, want %q", status.Phase, one.phase)
 			}
 		})
 	}
@@ -222,9 +284,9 @@ func TestPodFailureMessagePrefersTheKubeletsWords(t *testing.T) {
 func TestDeriveStatusKeepsTheTimeOfTheLastFlip(t *testing.T) {
 	library := studioMovies()
 	report := &libraryReport{Titles: 12}
-	library.Status = deriveLibraryStatus(library, boundVolume(), withCatalog(), readyPod(podRunning, true), report, testNow)
+	library.Status = deriveLibraryStatus(library, boundVolume(), withCatalog(), readyPod(podRunning, true), report, true, testNow)
 
-	later := deriveLibraryStatus(library, boundVolume(), withCatalog(), readyPod(podRunning, true), report,
+	later := deriveLibraryStatus(library, boundVolume(), withCatalog(), readyPod(podRunning, true), report, true,
 		testNow.Add(time.Hour))
 
 	if got := conditionOf(t, later, conditionReady).LastTransitionTime; !got.Equal(testNow) {
@@ -238,10 +300,10 @@ func TestDeriveStatusKeepsTheTimeOfTheLastFlip(t *testing.T) {
 func TestDeriveStatusLeavesTheLibraryAlone(t *testing.T) {
 	library := studioMovies()
 	library.Status = deriveLibraryStatus(library, boundVolume(), withCatalog(), readyPod(podRunning, true),
-		&libraryReport{Titles: 12}, testNow)
+		&libraryReport{Titles: 12}, true, testNow)
 	before := conditionOf(t, library.Status, conditionReady)
 
-	deriveLibraryStatus(library, binding{reason: reasonClaimNotFound}, withCatalog(), nil, nil, testNow)
+	deriveLibraryStatus(library, binding{reason: reasonClaimNotFound}, withCatalog(), nil, nil, true, testNow)
 
 	if got := conditionOf(t, library.Status, conditionReady); got != before {
 		t.Errorf("the Library's own condition changed to %+v", got)
@@ -255,7 +317,7 @@ func TestWriteLibraryStatusWritesOnlyAChange(t *testing.T) {
 	library := boundHouse(cluster)
 	client := testOperator(t, cluster).client
 	settled := deriveLibraryStatus(library, boundVolume(), withCatalog(), readyPod(podRunning, true),
-		&libraryReport{Titles: 12}, testNow)
+		&libraryReport{Titles: 12}, true, testNow)
 
 	if err := writeLibraryStatus(client, library, settled); err != nil {
 		t.Fatal(err)
@@ -286,7 +348,7 @@ func TestWriteLibraryStatusAcceptsAConflict(t *testing.T) {
 	client := testOperator(t, cluster).client
 
 	err := writeLibraryStatus(client, library,
-		deriveLibraryStatus(library, boundVolume(), withCatalog(), nil, nil, testNow))
+		deriveLibraryStatus(library, boundVolume(), withCatalog(), nil, nil, true, testNow))
 
 	if err != nil {
 		t.Fatalf("err = %v, want a conflict to read as success", err)
@@ -302,7 +364,7 @@ func TestWriteLibraryStatusReportsAFailedWrite(t *testing.T) {
 	client := testOperator(t, cluster).client
 
 	err := writeLibraryStatus(client, library,
-		deriveLibraryStatus(library, boundVolume(), withCatalog(), nil, nil, testNow))
+		deriveLibraryStatus(library, boundVolume(), withCatalog(), nil, nil, true, testNow))
 
 	if err == nil {
 		t.Fatal("err = nil, want the server's refusal")

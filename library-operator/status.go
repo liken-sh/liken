@@ -20,10 +20,17 @@ import (
 // scanner, and the report is what the scanner itself says about the
 // volume. A nil pod is a library with no scanner, and a nil report is
 // a scanner that has said nothing yet.
-func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, pod *Pod, latest *libraryReport, now time.Time) LibraryStatus {
+func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, pod *Pod, latest *libraryReport, online bool, now time.Time) LibraryStatus {
 	status := LibraryStatus{Volume: bound.volume}
 	if pod != nil {
 		status.Pod = pod.Metadata.Name
+	}
+
+	// The operator writes the Service whenever it writes the scanner, so
+	// the address is reported on that same condition and not on the pod.
+	// A pod the operator replaces then leaves the address in place.
+	if scannerStands(bound, choice) {
+		status.Webhook = webhookURL(library)
 	}
 
 	// The counts and the times are the scanner's, carried through as
@@ -32,6 +39,8 @@ func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, 
 	if latest != nil {
 		status.Titles = latest.Titles
 		status.Unidentified = latest.Unidentified
+		status.Items = latest.Items
+		status.Files = latest.Files
 		status.RemovedLastSweep = latest.RemovedLastSweep
 		status.LastWalk = latest.LastWalk
 		status.LastChange = latest.LastChange
@@ -44,10 +53,30 @@ func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, 
 	// every status look unchanged.
 	conditions := slices.Clone(library.Status.Conditions)
 	generation := library.Metadata.Generation
+	ready := readyCondition(bound, choice, pod, latest, generation)
 	conditions = SetCondition(conditions, boundCondition(bound, generation), now)
-	conditions = SetCondition(conditions, readyCondition(bound, choice, pod, latest, generation), now)
+	conditions = SetCondition(conditions, ready, now)
 	status.Conditions = conditions
+	status.Phase = libraryPhase(ready, online, latest)
 	return status
+}
+
+// libraryPhase says what the scanner is doing, in the word a person
+// reads in the status column. It reads the Ready condition this same
+// derivation built, so the column and the condition never disagree. The
+// phase is Pending until Ready is True, then Offline when the scanner has
+// left the bus, Scanning while a walk runs, and Idle otherwise.
+func libraryPhase(ready Condition, online bool, latest *libraryReport) string {
+	switch {
+	case ready.Status != ConditionTrue:
+		return phasePending
+	case !online:
+		return phaseOffline
+	case latest != nil && latest.Walking:
+		return phaseScanning
+	default:
+		return phaseIdle
+	}
 }
 
 // boundCondition reports the storage. The volume is the whole verdict:

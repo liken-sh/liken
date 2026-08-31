@@ -248,13 +248,45 @@ func TestUpsertFilesCarriesPresentAsAnInteger(t *testing.T) {
 			if !strings.Contains(got.sql, "INSERT INTO files") {
 				t.Errorf("sql = %q, want an upsert on files", got.sql)
 			}
-			if len(got.params) != 11 {
-				t.Fatalf("params = %d, want 11", len(got.params))
+			if len(got.params) != 15 {
+				t.Fatalf("params = %d, want 15", len(got.params))
 			}
 			if got.params[10].(float64) != testCase.want {
 				t.Errorf("present param = %v, want %v", got.params[10], testCase.want)
 			}
 		})
+	}
+}
+
+// The type, the role, the language, and the modification time go through the
+// same parameterized upsert as the rest of a file row, so a re-walk that
+// reads an unchanged file writes an unchanged row.
+func TestUpsertFilesCarriesTheClassification(t *testing.T) {
+	rec := &catalogRecorder{}
+	catalog := testCatalog(t, rec)
+
+	row := fileRow{
+		Path:     "One/One.en.forced.srt",
+		Type:     fileTypeSubtitle,
+		Role:     fileRoleForced,
+		Language: "en",
+		Modified: 1700000000,
+	}
+	if _, err := catalog.UpsertFiles(context.Background(), []fileRow{row}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := rec.all()[0]
+	for _, column := range []string{"type", "role", "language", "modified"} {
+		if !strings.Contains(got.sql, column+" = excluded."+column) {
+			t.Errorf("sql = %q, want it to update %s in place", got.sql, column)
+		}
+	}
+	if got.params[11] != fileTypeSubtitle || got.params[12] != fileRoleForced || got.params[13] != "en" {
+		t.Errorf("params = %v, want the type, role, and language bound", got.params[11:14])
+	}
+	if got.params[14].(float64) != 1700000000 {
+		t.Errorf("modified param = %v, want the Unix seconds", got.params[14])
 	}
 }
 

@@ -4,10 +4,14 @@ package main
 // episode, and a file per episode. A season is a grouping the media browser
 // draws from the episodes' season numbers, so the walk records a season on each
 // episode and mints no season item.
+//
+// It reads every file the series folder, its season folders, and its extras
+// folders hold. Each one links to the episode whose own name it starts with,
+// and to the series where it matches no episode.
 
 import (
+	"context"
 	"fmt"
-	"iter"
 	"os"
 	"path/filepath"
 )
@@ -15,29 +19,20 @@ import (
 // walkSeries reads a whole series root into one walkResult by collecting the
 // folder stream. The tests and a small library use this whole-root read.
 func walkSeries(root, library string, ignore ignoreSet) *walkResult {
-	return collectFolders(walkSeriesFolders(root, library, ignore))
+	return collectFolders(walkTree(context.Background(), root, seriesFolderRule(root, library, ignore)))
 }
 
-// walkSeriesFolders streams a series root one series folder at a time. Every
-// directory under the root is one series, with a tvshow.nfo, season folders, and
-// an episode file with its own .nfo. A read error at the root yields one result
-// marked with the error and nothing else, so the caller keeps the catalog.
-func walkSeriesFolders(root, library string, ignore ignoreSet) iter.Seq[*walkResult] {
-	return func(yield func(*walkResult) bool) {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			yield(&walkResult{readError: true})
-			return
-		}
-		for _, entry := range entries {
-			if entry.IsDir() && !ignore.skips(entry.Name()) {
-				folder := &walkResult{}
-				scanSeriesFolder(root, filepath.Join(root, entry.Name()), library, ignore, folder)
-				if !yield(folder) {
-					return
-				}
-			}
-		}
+// seriesFolderRule is what the pool in walk.go needs to walk a series volume.
+// Every directory under the root is one series, so the rule answers yes to all
+// of them and the walk descends no further. A series folder's own season
+// folders are read by the folder scan, not by the pool.
+func seriesFolderRule(root, library string, ignore ignoreSet) folderRule {
+	return folderRule{
+		isTitle: func(string) bool { return true },
+		scan: func(dir string, result *walkResult) {
+			scanSeriesFolder(root, dir, library, ignore, result)
+		},
+		ignore: ignore,
 	}
 }
 
@@ -82,8 +77,64 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 		result.unidentifiedNames = append(result.unidentifiedNames, relativePath(root, dir))
 	}
 
+	// The episodes are read first, so the file pass has the two things it
+	// needs from them: the videos that already have a row, and the episode
+	// each of a season folder's files belongs to.
+	episodesByDirectory := map[string]map[string]string{}
+	videosByDirectory := map[string]map[string]bool{}
 	for _, episode := range collectEpisodeFiles(dir, ignore) {
-		scanEpisode(root, library, seriesID, episode, result)
+		episodeItemID := scanEpisode(root, library, seriesID, episode, result)
+		if episodeItemID == "" {
+			continue
+		}
+		if videosByDirectory[episode.dir] == nil {
+			videosByDirectory[episode.dir] = map[string]bool{}
+			episodesByDirectory[episode.dir] = map[string]string{}
+		}
+		videosByDirectory[episode.dir][episode.file] = true
+		episodesByDirectory[episode.dir][stripAnyExtension(episode.file)] = episodeItemID
+	}
+
+	scanSeriesFiles(root, dir, library, seriesID, ignore, episodesByDirectory, videosByDirectory, result)
+}
+
+// scanSeriesFiles reads the rest of a series folder: the tvshow.nfo and the art
+// beside it, then one level down for a season folder's own art, sidecars, and
+// subtitles, and for an extras folder's trailers and featurettes. A file
+// directly in the series folder links to the series. A file in a season folder
+// links to the episode whose own name it starts with, and to the series where
+// it matches no episode, which is where a season poster lands.
+func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, episodes map[string]map[string]string, videos map[string]map[string]bool, result *walkResult) {
+	rows, subdirectories := folderFiles{
+		root:    root,
+		dir:     dir,
+		library: library,
+		place:   filePlace{kind: libraryKindSeries},
+		item:    constantItem(seriesID),
+		held:    videos[dir],
+	}.read()
+	result.files = append(result.files, rows...)
+
+	for _, name := range subdirectories {
+		if ignore.skips(name) {
+			continue
+		}
+		child := filepath.Join(dir, name)
+		place := filePlace{kind: libraryKindSeries}
+		if extras := extrasFolderName(name); extras != "" {
+			place.extras = extras
+		} else {
+			place.season = true
+		}
+		rows, _ := folderFiles{
+			root:    root,
+			dir:     child,
+			library: library,
+			place:   place,
+			item:    episodeItem(episodes[child], seriesID),
+			held:    videos[child],
+		}.read()
+		result.files = append(result.files, rows...)
 	}
 }
 
@@ -135,14 +186,15 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) []episodeFile {
 	return files
 }
 
-// scanEpisode reads one episode file into an episode item and a file. The season
-// and episode numbers come from the episode .nfo where one sits beside the file,
-// and from the season folder and the file name where none does. An episode the
-// scanner cannot number is left out, because it has no place under the series.
-func scanEpisode(root, library, seriesID string, episode episodeFile, result *walkResult) {
+// scanEpisode reads one episode file into an episode item and a file, and
+// reports the episode's item id. The season and episode numbers come from the
+// episode .nfo beside the file where there is one, and from the season folder and
+// the file name where none does. An episode the scanner cannot number is left
+// out and reports no id, because it has no place under the series.
+func scanEpisode(root, library, seriesID string, episode episodeFile, result *walkResult) string {
 	meta := episodeIdentity(episode)
 	if meta.Episode <= 0 {
-		return
+		return ""
 	}
 
 	episodeItemID := episodeID(seriesID, meta.Season, meta.Episode)
@@ -181,6 +233,8 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 		stream = &meta.Stream
 	}
 	container, videoCodec, audioCodec, width, height, durationMs := fileAttributes(episode.file, stream)
+	size, modified := statFile(absolute)
+	class := classifyFile(episode.file, filePlace{kind: libraryKindSeries, season: true})
 	result.files = append(result.files, fileRow{
 		Path:       relativePath(root, absolute),
 		Library:    library,
@@ -189,13 +243,17 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 		AudioCodec: audioCodec,
 		Width:      width,
 		Height:     height,
-		SizeBytes:  fileSize(absolute),
+		SizeBytes:  size,
 		DurationMs: durationMs,
 		Trickplay:  trickplayFor(root, episode.dir, episode.file),
 		Present:    true,
+		Type:       class.Type,
+		Role:       class.Role,
+		Modified:   modified,
 		Items:      []string{episodeItemID},
 	})
 	result.aliases = append(result.aliases, aliasRowsForItem(scopeEpisode, meta.ProviderIDs, "", episodeItemID)...)
+	return episodeItemID
 }
 
 // episodeIdentity reads one episode's numbers and body. The .nfo beside the file
