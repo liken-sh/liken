@@ -208,13 +208,72 @@ fn the_stroke_follows_the_canvas_and_not_the_pulse() {
     }
 }
 
+/// The mark in motion, against the `mpv` overlay that drew it before.
+///
+/// `media-operator`'s `display/logo.lua` places the same fourteen hexagons on
+/// the same canvas from the same two inputs, so the two implementations can be
+/// compared exactly rather than by eye. These vertices came out of that module
+/// at three moments: the mark at rest, the mark at full swing, and the mark
+/// part way down a ramp. A moving hexagon that lands somewhere else is a
+/// difference a person watching the screen would see as a change of rhythm.
+///
+/// The canvas is 1920 by 1080, where the mark takes a third of the width and
+/// centers on the middle of the screen.
 #[test]
-fn a_moment_places_the_same_vertices_twice() {
-    for (index, hexagon) in mark::hexagons().iter().enumerate() {
-        assert_eq!(
-            hexagon.place(CENTER, SPAN, 0.62, 41.75),
-            hexagon.place(CENTER, SPAN, 0.62, 41.75),
-            "hexagon {index}"
-        );
+fn the_mark_lands_where_the_overlay_lands_it() {
+    const CENTER: Point = Point::new(960.0, 540.0);
+    const SPAN: f32 = 640.0;
+
+    // Each row is a hexagon, a moment, and that hexagon's first three
+    // vertices, in the order `liken.svg` writes them.
+    let expected = [
+        (
+            0,
+            0.0,
+            0.0,
+            [(956.45, 453.94), (1027.42, 494.92), (1027.42, 576.88)],
+        ),
+        (
+            0,
+            1.0,
+            3.7,
+            [(956.45, 459.78), (1022.36, 497.84), (1022.36, 573.96)],
+        ),
+        (
+            0,
+            0.4,
+            12.25,
+            [(956.45, 453.91), (1027.45, 494.90), (1027.45, 576.90)],
+        ),
+        (
+            7,
+            0.0,
+            0.0,
+            [(1216.13, 316.30), (1276.50, 351.09), (1276.50, 420.76)],
+        ),
+        (
+            7,
+            1.0,
+            3.7,
+            [(1216.13, 310.61), (1281.44, 348.24), (1281.44, 423.60)],
+        ),
+        (
+            7,
+            0.4,
+            12.25,
+            [(1216.13, 318.91), (1274.24, 352.39), (1274.24, 419.45)],
+        ),
+    ];
+
+    for (index, energy, phase, vertices) in expected {
+        let placed = mark::hexagons()[index].place(CENTER, SPAN, energy, phase);
+
+        for (drawn, (x, y)) in placed.points.iter().zip(vertices) {
+            assert!(
+                (drawn.x - x).abs() < 0.01 && (drawn.y - y).abs() < 0.01,
+                "hexagon {index} at energy {energy} phase {phase} \
+                 draws {drawn:?} where the overlay draws ({x}, {y})"
+            );
+        }
     }
 }

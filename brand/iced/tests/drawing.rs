@@ -1,4 +1,4 @@
-//! `mark::draw` fills and strokes fourteen paths on a canvas frame. A frame
+//! `mark::draw` fills fourteen paths on a canvas frame. A frame
 //! needs a renderer, and the renderers `iced` ships draw through a GPU or a
 //! window. The recorder below is a renderer that keeps every call instead, so
 //! the test reads the calls the mark made on the frame and opens nothing.
@@ -143,64 +143,26 @@ fn calls(energy: f64, phase: f64, alpha: f32) -> Vec<Call> {
     recorder.log.take()
 }
 
+/// Every hexagon is one filled path, and its corners are in the path rather
+/// than in a stroke over it. `mark::outline` says why: a stroke is centered on
+/// its path, so half of it would land on the fill, and two translucent layers
+/// composite brighter than one.
 #[test]
-fn the_mark_fills_and_strokes_every_hexagon() {
+fn the_mark_fills_every_hexagon_once() {
     let calls = calls(0.0, 0.0, 1.0);
 
-    assert_eq!(calls.len(), mark::hexagons().len() * 2);
+    assert_eq!(calls.len(), mark::hexagons().len());
 
-    for (hexagon, pair) in mark::hexagons().iter().zip(calls.chunks(2)) {
-        let color = Style::Solid(hexagon.fill);
-        let width = hexagon.place(CENTER, SPAN, 0.0, 0.0).stroke_width;
-
-        assert_eq!(
-            pair,
-            [
-                // A hexagon is seven path events: the start at the first
-                // vertex, a line to each of the other five, and the end that
-                // closes the sixth back to the first.
-                Call::Fill {
-                    style: color,
-                    segments: 7,
-                },
-                Call::Stroke {
-                    style: color,
-                    width,
-                    // The SVG rounds each corner with a round join, and the
-                    // stroke is what rounds it.
-                    join: "Round".to_string(),
-                },
-            ]
-        );
-    }
-}
-
-#[test]
-fn the_alpha_reaches_the_fill_and_the_stroke() {
-    for call in calls(0.5, 41.75, 0.25) {
-        let style = match call {
-            Call::Fill { style, .. } | Call::Stroke { style, .. } => style,
-        };
-        let Style::Solid(color) = style else {
-            panic!("the mark draws a gradient");
+    for (hexagon, call) in mark::hexagons().iter().zip(&calls) {
+        let Call::Fill { style, segments } = call else {
+            panic!("the mark strokes where it should fill: {call:?}");
         };
 
-        assert_eq!(color.a, 0.25);
+        assert_eq!(*style, Style::Solid(hexagon.fill));
+        // Six offset edges, an arc of six segments at each of the six
+        // vertices, the start, and the close.
+        assert_eq!(*segments, 6 + 6 * 6 + 2);
     }
-}
-
-#[test]
-fn a_mark_in_motion_draws_the_same_shapes() {
-    // The energy moves the vertices. It adds no shape and drops none, so the
-    // call list is the same length and the same colors in the same order.
-    let still = calls(0.0, 0.0, 1.0);
-    let moving = calls(1.0, 41.75, 1.0);
-
-    assert_eq!(still.len(), moving.len());
-    assert_eq!(
-        still.iter().map(style_of).collect::<Vec<Style>>(),
-        moving.iter().map(style_of).collect::<Vec<Style>>()
-    );
 }
 
 fn style_of(call: &Call) -> Style {
@@ -209,32 +171,22 @@ fn style_of(call: &Call) -> Style {
     }
 }
 
+/// A mark in motion, drawn under an alpha. The energy moves the vertices, and
+/// it adds no shape and drops none, so the call list holds one fill for each
+/// hexagon. Each call carries the hexagon's own fill at the alpha the caller
+/// asked for, so a fade changes the alpha and no other channel.
 #[test]
-fn a_fading_mark_keeps_its_colors() {
-    let opaque = calls(0.0, 0.0, 1.0);
-    let faded = calls(0.0, 0.0, 0.4);
+fn the_alpha_reaches_every_fill() {
+    let calls = calls(0.5, 41.75, 0.25);
 
-    for (opaque, faded) in opaque.iter().zip(&faded) {
-        let (Style::Solid(opaque), Style::Solid(faded)) = (style_of(opaque), style_of(faded))
-        else {
-            panic!("the mark draws a gradient");
-        };
+    assert_eq!(calls.len(), mark::hexagons().len());
 
-        assert_eq!((opaque.r, opaque.g, opaque.b), (faded.r, faded.g, faded.b));
-    }
-}
+    for (index, (hexagon, call)) in mark::hexagons().iter().zip(&calls).enumerate() {
+        let faded = Style::Solid(Color {
+            a: 0.25,
+            ..hexagon.fill
+        });
 
-/// A hexagon that draws in a color the palette does not hold would mean the
-/// parser read a fill from the wrong element.
-#[test]
-fn every_color_the_mark_draws_is_a_hexagon_fill() {
-    let fills: Vec<Color> = mark::hexagons().iter().map(|it| it.fill).collect();
-
-    for call in calls(0.0, 0.0, 1.0) {
-        let Style::Solid(color) = style_of(&call) else {
-            panic!("the mark draws a gradient");
-        };
-
-        assert!(fills.contains(&color), "{color:?} is no hexagon fill");
+        assert_eq!(style_of(call), faded, "hexagon {index} fills");
     }
 }

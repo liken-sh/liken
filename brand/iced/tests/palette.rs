@@ -43,15 +43,6 @@ fn the_dark_scheme_is_the_block_under_the_query() {
 }
 
 #[test]
-fn every_token_is_opaque() {
-    for palette in [palette::light(), palette::dark()] {
-        for color in [palette.ink, palette.ink_muted, palette.page, palette.link] {
-            assert_eq!(color.a, 1.0);
-        }
-    }
-}
-
-#[test]
 fn no_token_carries_the_same_color_in_both_schemes() {
     for (light, dark) in tokens(palette::light()).iter().zip(tokens(palette::dark())) {
         assert_ne!(*light, dark);

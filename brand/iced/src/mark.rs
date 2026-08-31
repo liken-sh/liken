@@ -7,7 +7,7 @@
 
 use std::sync::LazyLock;
 
-use iced_widget::canvas::{Frame, LineJoin, Path, Stroke};
+use iced_widget::canvas::{Frame, Path};
 use iced_widget::core::{Color, Point, Rectangle};
 use iced_widget::graphics::geometry;
 
@@ -126,6 +126,11 @@ impl Hexagon {
 /// runs from 0 clear to 1 opaque, and it applies to every hexagon, so the mark
 /// fades as one shape.
 ///
+/// The mark is one filled path per hexagon, so a frame that carries a
+/// transform of its own needs no further argument here: the geometry goes
+/// through that transform the way every other path does. [`outline`] says why
+/// the corners are geometry rather than a stroke.
+///
 /// The caller sets how much of its canvas the mark takes. `liken`'s idle screen
 /// gives it a third of the smaller of the canvas width and the canvas height at
 /// 16:9, so a screen wider than 16:9 draws the same mark with more room beside
@@ -142,35 +147,106 @@ pub fn draw<Renderer>(
 {
     for hexagon in hexagons() {
         let placed = hexagon.place(center, span, energy, phase);
-        let color = Color {
-            a: alpha,
-            ..placed.fill
-        };
-        let path = Path::new(|builder| {
-            builder.move_to(placed.points[0]);
-            for point in &placed.points[1..] {
-                builder.line_to(*point);
-            }
-            builder.close();
-        });
 
-        frame.fill(&path, color);
-
-        // The SVG rounds each corner by stroking the polygon in its fill color
-        // with a round join, and the stroke is the same path the fill took.
-        //
-        // The width is the SVG's, scaled onto the canvas. `logo.lua` halves it
-        // because an ASS border grows outward from the shape, while an SVG
-        // stroke and an `iced` stroke are centered on the path. The three
-        // drawings then reach the same outer edge.
-        frame.stroke(
-            &path,
-            Stroke::default()
-                .with_color(color)
-                .with_width(placed.stroke_width)
-                .with_line_join(LineJoin::Round),
+        frame.fill(
+            &outline(&placed),
+            Color {
+                a: alpha,
+                ..placed.fill
+            },
         );
     }
+}
+
+/// How many straight segments draw one rounded corner. Six leaves the arc
+/// within a fortieth of a pixel of true on a mark that fills a third of a 1080
+/// row screen, which is finer than the rasterizer resolves.
+const ARC_STEPS: usize = 6;
+
+/// The path one placed hexagon draws, corners and all.
+///
+/// `liken.svg` rounds each corner by stroking the polygon in its own fill
+/// color with a round join, so the drawn shape is the hexagon grown outward by
+/// half the stroke width, with an arc of that radius at each vertex. This
+/// builds that shape, and the caller fills it once.
+///
+/// One filled shape rather than a fill under a stroke, for two reasons. A
+/// stroke is centered on the path it follows, so half of it lands on the fill,
+/// and two translucent layers composite brighter than one: a mark drawn at
+/// half opacity showed its own outline as a rim half again as bright as its
+/// interior. And the toolkit tessellates a stroke at the width it is given
+/// after it has transformed the path, so a stroke width has to carry the
+/// frame's own scale while the geometry does not, and a mark drawn from a
+/// canvas of another size closed up its gaps.
+fn outline(placed: &Placed) -> Path {
+    let round = placed.stroke_width / 2.0;
+    let points = placed.points;
+
+    let mut cx = 0.0;
+    let mut cy = 0.0;
+    for point in points {
+        cx += point.x / points.len() as f32;
+        cy += point.y / points.len() as f32;
+    }
+
+    // The outward normal of one edge. Two point away from an edge, and the one
+    // that leads away from the centroid is the outward one, whichever way the
+    // file wound its vertices.
+    let normal = |a: Point, b: Point| {
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let length = dx.hypot(dy);
+        let (nx, ny) = (dy / length, -dx / length);
+        let (mx, my) = ((a.x + b.x) / 2.0 - cx, (a.y + b.y) / 2.0 - cy);
+        if nx * mx + ny * my >= 0.0 {
+            (nx, ny)
+        } else {
+            (-nx, -ny)
+        }
+    };
+
+    let edge = |i: usize| {
+        let (a, b) = (points[i], points[(i + 1) % points.len()]);
+        let (nx, ny) = normal(a, b);
+        (
+            Point::new(a.x + nx * round, a.y + ny * round),
+            Point::new(b.x + nx * round, b.y + ny * round),
+        )
+    };
+
+    Path::new(|builder| {
+        builder.move_to(edge(0).0);
+
+        for i in 0..points.len() {
+            builder.line_to(edge(i).1);
+
+            // The arc around the vertex the next edge starts at, from where
+            // this edge's offset ends to where the next one begins. Both lie
+            // at `round` from that vertex, so the arc is the round join.
+            let vertex = points[(i + 1) % points.len()];
+            let from = edge(i).1;
+            let to = edge((i + 1) % points.len()).0;
+
+            let start = (from.y - vertex.y).atan2(from.x - vertex.x);
+            let mut sweep = (to.y - vertex.y).atan2(to.x - vertex.x) - start;
+            let turn = std::f32::consts::TAU;
+            while sweep > std::f32::consts::PI {
+                sweep -= turn;
+            }
+            while sweep < -std::f32::consts::PI {
+                sweep += turn;
+            }
+
+            for step in 1..=ARC_STEPS {
+                let angle = start + sweep * step as f32 / ARC_STEPS as f32;
+                builder.line_to(Point::new(
+                    vertex.x + round * angle.cos(),
+                    vertex.y + round * angle.sin(),
+                ));
+            }
+        }
+
+        builder.close();
+    })
 }
 
 /// The hexagons of an SVG document, and the box that holds them.
