@@ -121,6 +121,14 @@ impl Screen for Client {
         self.at = at;
     }
 
+    /// Hand the loop's waker to the reader, so a press on a controller shows
+    /// on the next frame rather than at the clock's next second.
+    fn wake_by(&mut self, wake: bus::Waker) {
+        if let Some(bus) = &self.bus {
+            bus.wake_on_delivery(wake);
+        }
+    }
+
     /// Drain the reader and fold in what arrived. The harness calls this on
     /// every wake of the loop rather than on a frame, because a covered
     /// client draws no frame, and `present` arrives exactly while the client
@@ -153,10 +161,10 @@ impl Screen for Client {
     }
 
     /// The second the screen next changes. The elements answer it, and the
-    /// bus does not: the reader drains in `pump`, which the harness calls on
-    /// every wake of the loop. The clock's next second is what bounds each
-    /// wait, so the broker is read at least once a second whatever else the
-    /// screen does.
+    /// bus does not: a delivery wakes the loop itself through the waker, and
+    /// the reader drains in `pump` on every wake. The clock's next second is
+    /// the backstop bound on each wait, so the broker is still read at least
+    /// once a second if the wake ever fails.
     fn next_frame(&self, at: f64) -> Option<f64> {
         self.screen().next_frame(at)
     }

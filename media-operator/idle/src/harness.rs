@@ -76,6 +76,13 @@ pub trait Screen {
         false
     }
 
+    /// Take a handle that wakes the loop from any thread. A screen with a
+    /// source of its own hands it to that source, so a delivery wakes the
+    /// loop the moment it lands and [`Screen::pump`] folds it in
+    /// milliseconds. Without the wake, a message waits for the next
+    /// scheduled second, and a person's press shows up to a second late.
+    fn wake_by(&mut self, _wake: crate::bus::Waker) {}
+
     /// Move the screen's clock to `at` seconds since the first frame. Every
     /// animation reads that clock, so a frame is a pure function of it.
     fn tick(&mut self, at: f64);
@@ -115,7 +122,7 @@ pub trait Screen {
 }
 
 /// Run a screen until the run ends, and write what it measured.
-pub fn run<S: Screen + 'static>(screen: S, options: Options) -> Result<(), String> {
+pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), String> {
     // Two spans start here. The watchdog's grace runs from this moment, and so
     // does the time to the first frame, which covers the whole life of the
     // process: the wgpu setup, the first window, and the first draw.
@@ -130,6 +137,14 @@ pub fn run<S: Screen + 'static>(screen: S, options: Options) -> Result<(), Strin
             return Err(error.to_string());
         }
     };
+
+    // The screen's own sources wake the loop through this proxy, so a bus
+    // delivery folds the moment it lands. The event it sends carries
+    // nothing: the wake is the message, and `about_to_wait` pumps on it.
+    let proxy = event_loop.create_proxy();
+    screen.wake_by(std::sync::Arc::new(move || {
+        let _ = proxy.send_event(());
+    }));
 
     let mut app = App {
         watchdog,

@@ -112,11 +112,25 @@ impl Session {
     }
 }
 
+/// A handle that wakes the screen's event loop from any thread.
+pub type Waker = std::sync::Arc<dyn Fn() + Send + Sync>;
+
+/// The slot the reader thread reads its waker from. The loop does not exist
+/// yet when the reader connects, so the waker arrives after the thread starts,
+/// and the thread reads the slot on every delivery.
+type WakerSlot = std::sync::Arc<std::sync::Mutex<Option<Waker>>>;
+
 /// The subscription, held by the screen. Dropping it closes the channel, and
 /// the reader thread ends on its next delivery.
-#[derive(Debug)]
 pub struct Reader {
     messages: mpsc::Receiver<Message>,
+    waker: WakerSlot,
+}
+
+impl std::fmt::Debug for Reader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reader").finish_non_exhaustive()
+    }
 }
 
 impl Reader {
@@ -139,15 +153,25 @@ impl Reader {
         let (client, connection) = Broker::new(options, QUEUE_DEPTH);
 
         let (sender, messages) = mpsc::channel();
+        let waker: WakerSlot = std::sync::Arc::default();
+        let woken = std::sync::Arc::clone(&waker);
         std::thread::Builder::new()
             .name("media-bus".into())
-            .spawn(move || read(session, client, connection, &sender))
+            .spawn(move || read(session, client, connection, &sender, &woken))
             // A client that spawns no reader draws the seeds and hears
             // nothing for the life of the pod, so the line says why.
             .inspect_err(|error| eprintln!("idle-screen: bus: {error}"))
             .ok()?;
 
-        Some(Self { messages })
+        Some(Self { messages, waker })
+    }
+
+    /// Wake the loop with `wake` on every delivery, from the reader's own
+    /// thread. Without it a message waits in the channel for the next
+    /// scheduled wake, which at rest is the clock's next second, and a press
+    /// then shows up to a second late.
+    pub fn wake_on_delivery(&self, wake: Waker) {
+        *self.waker.lock().expect("no reader panics with the lock") = Some(wake);
     }
 
     /// Every message that arrived since the last call. The call never blocks,
@@ -160,7 +184,10 @@ impl Reader {
     /// proves the screen's side of the seam without a broker.
     #[cfg(test)]
     pub(crate) fn from_channel(messages: mpsc::Receiver<Message>) -> Self {
-        Self { messages }
+        Self {
+            messages,
+            waker: std::sync::Arc::default(),
+        }
     }
 }
 
@@ -172,6 +199,7 @@ fn read(
     client: Broker,
     mut connection: rumqttc::Connection,
     sender: &mpsc::Sender<Message>,
+    waker: &WakerSlot,
 ) {
     for event in connection.iter() {
         match event {
@@ -186,12 +214,16 @@ fn read(
                 let _ = client.try_subscribe_many(filters);
             }
             Ok(Event::Incoming(Packet::Publish(publish))) => {
-                if let Some(message) =
-                    session.deliver(&publish.topic, &publish.payload, publish.retain)
-                    && sender.send(message).is_err()
-                {
-                    // The screen dropped its reader, so nothing reads what this
-                    // thread decodes.
+                if !forward(
+                    &mut session,
+                    &publish.topic,
+                    &publish.payload,
+                    publish.retain,
+                    sender,
+                    waker,
+                ) {
+                    // The screen dropped its reader, so nothing reads what
+                    // this thread decodes.
                     return;
                 }
             }
@@ -202,6 +234,37 @@ fn read(
             Ok(_) => {}
         }
     }
+}
+
+/// Decode one publish, hand it to the screen, and wake the loop. The answer
+/// is false only when the screen dropped its receiver, which ends the thread.
+///
+/// The wake follows the send, so the loop reads the message the moment it
+/// lands rather than at the clock's next second, and a press shows on the
+/// next frame. A payload that decodes to nothing sends nothing and wakes
+/// nothing.
+fn forward(
+    session: &mut Session,
+    topic: &str,
+    payload: &[u8],
+    retained: bool,
+    sender: &mpsc::Sender<Message>,
+    waker: &WakerSlot,
+) -> bool {
+    let Some(message) = session.deliver(topic, payload, retained) else {
+        return true;
+    };
+    if sender.send(message).is_err() {
+        return false;
+    }
+    if let Some(wake) = waker
+        .lock()
+        .expect("no screen panics with the lock")
+        .as_ref()
+    {
+        wake();
+    }
+    true
 }
 
 /// One line for a failed session. The client reconnects on its own, so the line
@@ -348,6 +411,69 @@ mod tests {
     #[test]
     fn a_level_that_does_not_parse_is_nothing() {
         assert_eq!(session().deliver(VOLUME, b"loud", false), None);
+    }
+
+    #[test]
+    fn a_delivery_sends_the_message_and_wakes_the_loop() {
+        let (sender, messages) = mpsc::channel();
+        let woken = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&woken);
+        let wake: Waker = std::sync::Arc::new(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let waker: WakerSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(wake)));
+
+        let mut session = session();
+        assert!(forward(
+            &mut session,
+            VOLUME,
+            br#"{"level":40,"muted":false}"#,
+            false,
+            &sender,
+            &waker
+        ));
+
+        assert_eq!(messages.try_iter().count(), 1);
+        assert_eq!(woken.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_payload_that_decodes_to_nothing_sends_nothing_and_wakes_nothing() {
+        let (sender, messages) = mpsc::channel();
+        let woken = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&woken);
+        let wake: Waker = std::sync::Arc::new(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let waker: WakerSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(wake)));
+
+        assert!(forward(
+            &mut session(),
+            VOLUME,
+            b"loud",
+            false,
+            &sender,
+            &waker
+        ));
+
+        assert_eq!(messages.try_iter().count(), 0);
+        assert_eq!(woken.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_dropped_receiver_ends_the_thread() {
+        let (sender, messages) = mpsc::channel();
+        drop(messages);
+        let waker: WakerSlot = std::sync::Arc::default();
+
+        assert!(!forward(
+            &mut session(),
+            VOLUME,
+            br#"{"level":40,"muted":false}"#,
+            false,
+            &sender,
+            &waker
+        ));
     }
 
     #[test]

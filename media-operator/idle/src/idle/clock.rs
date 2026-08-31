@@ -32,11 +32,9 @@ pub fn draw(frame: &mut Frame, layout: &Layout, _unit: &Unit, _at: f64, light: f
 /// The reading turns at a minute, and the answer is the next whole second.
 /// The harness counts its clock from the first frame, and the wall clock's
 /// minute lands anywhere inside that second, so a screen that woke once a
-/// minute would draw the new minute up to a second late. The client also
-/// drains the broker in `tick`, and `tick` runs on a frame, so a screen that
-/// slept longer than this would stop reading the bus. The screen takes the
-/// earliest second its elements name, so this one holds the loop's sleep to a
-/// second whatever else the screen is drawing.
+/// minute would draw the new minute up to a second late. The second is also
+/// the backstop on every wait: a bus delivery wakes the loop itself, and
+/// this bound is what still reads the broker if that wake ever fails.
 pub fn next_frame(at: f64) -> f64 {
     at.floor() + 1.0
 }
