@@ -406,7 +406,9 @@ type folderFiles struct {
 	// item names the item a file in this directory links to. A season folder
 	// answers with the episode whose own name the file starts with; every
 	// other place answers with one id.
-	item func(name string) string
+	// The answer is a list, because a file beside a double-episode video
+	// belongs to both of its episodes.
+	item func(name string) []string
 	// held is the names the item walk already wrote a row for, so this pass
 	// adds no second row for a video that carries its sidecar's attributes.
 	held map[string]bool
@@ -465,32 +467,34 @@ func (f folderFiles) row(name string, class fileClass) fileRow {
 		row.Width, row.Height = resolutionFromName(name)
 		row.Trickplay = trickplayFor(f.root, f.dir, name)
 	}
-	if item := f.item(name); item != "" {
-		row.Items = []string{item}
+	if items := f.item(name); len(items) > 0 {
+		row.Items = items
 	}
 	return row
 }
 
 // constantItem answers with one item id for every file in a directory, the
 // resolver a movie title folder and a series folder both use.
-func constantItem(item string) func(string) string {
-	return func(string) string { return item }
+func constantItem(item string) func(string) []string {
+	return func(string) []string { return []string{item} }
 }
 
 // episodeItem answers with the episode whose own file name a file's name starts
 // with, and with the series where it matches none, which is where a season
 // poster lands. The longest match wins, so an episode does not take a file that
 // belongs to another episode whose name it is a prefix of.
-func episodeItem(episodes map[string]string, series string) func(string) string {
-	return func(name string) string {
+// A video of two episodes carries both ids, so its sidecar, its subtitle, and
+// its still link to the same episodes the video does.
+func episodeItem(episodes map[string][]string, series string) func(string) []string {
+	return func(name string) []string {
 		base := stripAnyExtension(name)
-		longest, item := "", series
-		for episodeBase, id := range episodes {
+		longest, items := "", []string{series}
+		for episodeBase, ids := range episodes {
 			if len(episodeBase) > len(longest) && strings.HasPrefix(base, episodeBase) {
-				longest, item = episodeBase, id
+				longest, items = episodeBase, ids
 			}
 		}
-		return item
+		return items
 	}
 }
 

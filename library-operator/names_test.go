@@ -6,6 +6,7 @@ package main
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -65,22 +66,31 @@ func TestParseSeasonFolder(t *testing.T) {
 
 func TestParseEpisodeMarker(t *testing.T) {
 	cases := []struct {
-		input   string
-		season  int
-		episode int
-		ok      bool
+		input    string
+		season   int
+		episodes []int
+		ok       bool
 	}{
-		{input: "Breaking Bad - S02E05.mkv", season: 2, episode: 5, ok: true},
-		{input: "show.s01e10.1080p.mkv", season: 1, episode: 10, ok: true},
-		{input: "Show 2x05.mkv", season: 2, episode: 5, ok: true},
-		{input: "S02 E05.mkv", season: 2, episode: 5, ok: true},
-		{input: "No Marker Here.mkv", season: 0, episode: 0, ok: false},
+		{input: "Coastline - S02E05.mkv", season: 2, episodes: []int{5}, ok: true},
+		{input: "show.s01e10.1080p.mkv", season: 1, episodes: []int{10}, ok: true},
+		{input: "Show 2x05.mkv", season: 2, episodes: []int{5}, ok: true},
+		{input: "S02 E05.mkv", season: 2, episodes: []int{5}, ok: true},
+		{input: "No Marker Here.mkv", season: 0, episodes: nil, ok: false},
+		{input: "Coastline - S04E10-E11 - The Long Way.mkv", season: 4, episodes: []int{10, 11}, ok: true},
+		{input: "Coastline - S04E10-11 - The Long Way.mkv", season: 4, episodes: []int{10, 11}, ok: true},
+		{input: "Coastline - S04E10E11 - The Long Way.mkv", season: 4, episodes: []int{10, 11}, ok: true},
+		{input: "coastline.s04e10e12.720p.mkv", season: 4, episodes: []int{10, 11, 12}, ok: true},
+		{input: "Coastline - S01E01-E40.mkv", season: 1, episodes: []int{1}, ok: true},
+		{input: "Coastline - S01E05-E02.mkv", season: 1, episodes: []int{5}, ok: true},
+		{input: "Coastline - S01E05-E05.mkv", season: 1, episodes: []int{5}, ok: true},
+		{input: "coastline.s01e05-1080p.mkv", season: 1, episodes: []int{5}, ok: true},
+		{input: "coastline.s01e05-11th.hour.mkv", season: 1, episodes: []int{5}, ok: true},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.input, func(t *testing.T) {
-			season, episode, ok := parseEpisodeMarker(testCase.input)
-			if season != testCase.season || episode != testCase.episode || ok != testCase.ok {
-				t.Errorf("parseEpisodeMarker(%q) = %d %d %v, want %d %d %v", testCase.input, season, episode, ok, testCase.season, testCase.episode, testCase.ok)
+			season, episodes, ok := parseEpisodeMarker(testCase.input)
+			if season != testCase.season || !reflect.DeepEqual(episodes, testCase.episodes) || ok != testCase.ok {
+				t.Errorf("parseEpisodeMarker(%q) = %d %v %v, want %d %v %v", testCase.input, season, episodes, ok, testCase.season, testCase.episodes, testCase.ok)
 			}
 		})
 	}

@@ -6,7 +6,10 @@ package main
 // file's resolution and codec come off the sidecar and never off a media probe.
 
 import (
+	"bytes"
 	"encoding/xml"
+	"errors"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -222,7 +225,7 @@ func parseSeriesNFO(data []byte) (seriesMeta, error) {
 	}, nil
 }
 
-// episodeMeta is what parseEpisodeNFO reads from an episode .nfo.
+// episodeMeta is what parseEpisodeNFOs reads from an episode .nfo.
 type episodeMeta struct {
 	Title       string
 	Season      int
@@ -234,12 +237,35 @@ type episodeMeta struct {
 	Stream      streamInfo
 }
 
-// parseEpisodeNFO reads an episodedetails .nfo into an episodeMeta.
-func parseEpisodeNFO(data []byte) (episodeMeta, error) {
-	var raw episodeNFO
-	if err := xml.Unmarshal(data, &raw); err != nil {
-		return episodeMeta{}, err
+// parseEpisodeNFOs reads every episodedetails block an episode .nfo holds, in
+// the order the sidecar wrote them. A file that holds two episodes carries one
+// block for each, which is how Kodi and Jellyfin write it.
+//
+// It streams the decoder over the file rather than unmarshaling once, because
+// those blocks are consecutive root elements and encoding/xml reads only the
+// first of those. A block that fails after one has been read keeps what was
+// read, so a truncated second block does not lose the first.
+func parseEpisodeNFOs(data []byte) ([]episodeMeta, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	var metas []episodeMeta
+	for {
+		var raw episodeNFO
+		err := decoder.Decode(&raw)
+		if errors.Is(err, io.EOF) {
+			return metas, nil
+		}
+		if err != nil {
+			if len(metas) > 0 {
+				return metas, nil
+			}
+			return nil, err
+		}
+		metas = append(metas, episodeMetaFrom(raw))
 	}
+}
+
+// episodeMetaFrom turns one episodedetails block into an episodeMeta.
+func episodeMetaFrom(raw episodeNFO) episodeMeta {
 	providers := collectProviders(raw.UniqueIDs, "", "", "", "")
 	aired := strings.TrimSpace(raw.Aired)
 	if aired == "" {
@@ -261,7 +287,7 @@ func parseEpisodeNFO(data []byte) (episodeMeta, error) {
 		},
 		Duration: itemDuration(stream, raw.Runtime),
 		Stream:   stream,
-	}, nil
+	}
 }
 
 // collectProviders reads every uniqueid and the convenience id tags into one

@@ -1,7 +1,11 @@
 package main
 
-// series.go reads one folder per series into a series item, an episode item per
-// episode, and a file per episode. A season is a grouping the media browser
+// series.go reads one folder per series into a series item.
+// series.go reads one folder per series into a series item, an episode item
+// per episode, and one file row per video file. A file named for two episodes
+// is one file that both episode items link to.
+//
+// A season is a grouping the media browser
 // draws from the episodes' season numbers, so the walk records a season on each
 // episode and mints no season item.
 //
@@ -80,19 +84,19 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 	// The episodes are read first, so the file pass has the two things it
 	// needs from them: the videos that already have a row, and the episode
 	// each of a season folder's files belongs to.
-	episodesByDirectory := map[string]map[string]string{}
+	episodesByDirectory := map[string]map[string][]string{}
 	videosByDirectory := map[string]map[string]bool{}
 	for _, episode := range collectEpisodeFiles(dir, ignore) {
-		episodeItemID := scanEpisode(root, library, seriesID, episode, result)
-		if episodeItemID == "" {
+		episodeItemIDs := scanEpisode(root, library, seriesID, episode, result)
+		if len(episodeItemIDs) == 0 {
 			continue
 		}
 		if videosByDirectory[episode.dir] == nil {
 			videosByDirectory[episode.dir] = map[string]bool{}
-			episodesByDirectory[episode.dir] = map[string]string{}
+			episodesByDirectory[episode.dir] = map[string][]string{}
 		}
 		videosByDirectory[episode.dir][episode.file] = true
-		episodesByDirectory[episode.dir][stripAnyExtension(episode.file)] = episodeItemID
+		episodesByDirectory[episode.dir][stripAnyExtension(episode.file)] = episodeItemIDs
 	}
 
 	scanSeriesFiles(root, dir, library, seriesID, ignore, episodesByDirectory, videosByDirectory, result)
@@ -104,7 +108,7 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 // directly in the series folder links to the series. A file in a season folder
 // links to the episode whose own name it starts with, and to the series where
 // it matches no episode, which is where a season poster lands.
-func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, episodes map[string]map[string]string, videos map[string]map[string]bool, result *walkResult) {
+func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, episodes map[string]map[string][]string, videos map[string]map[string]bool, result *walkResult) {
 	rows, subdirectories := folderFiles{
 		root:    root,
 		dir:     dir,
@@ -186,51 +190,64 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) []episodeFile {
 	return files
 }
 
-// scanEpisode reads one episode file into an episode item and a file, and
-// reports the episode's item id. The season and episode numbers come from the
+// scanEpisode reads one episode file into an item per episode it holds and one
+// file row for the file itself, and reports the item ids. The file is one file,
+// and its path is the primary key of the files table, so a double episode is
+// two items and one row. Both items play the file from the start, because
+// nothing on the volume says where the second episode begins.
+//
+// The season and episode numbers come from the
 // episode .nfo beside the file where there is one, and from the season folder and
 // the file name where none does. An episode the scanner cannot number is left
 // out and reports no id, because it has no place under the series.
-func scanEpisode(root, library, seriesID string, episode episodeFile, result *walkResult) string {
-	meta := episodeIdentity(episode)
-	if meta.Episode <= 0 {
-		return ""
-	}
-
-	episodeItemID := episodeID(seriesID, meta.Season, meta.Episode)
-	title := meta.Title
-	if title == "" {
-		title = fmt.Sprintf("S%02dE%02d", meta.Season, meta.Episode)
-	}
+func scanEpisode(root, library, seriesID string, episode episodeFile, result *walkResult) []string {
+	metas := episodeIdentity(episode)
 	absolute := filepath.Join(episode.dir, episode.file)
 	thumb := episodeThumb(root, episode.dir, episode.file)
 
-	body := meta.Body
-	if thumb != "" {
-		body.Art = []string{thumb}
+	var episodeItemIDs []string
+	for _, meta := range metas {
+		if meta.Episode <= 0 {
+			continue
+		}
+		episodeItemID := episodeID(seriesID, meta.Season, meta.Episode)
+		title := meta.Title
+		if title == "" {
+			title = fmt.Sprintf("S%02dE%02d", meta.Season, meta.Episode)
+		}
+
+		body := meta.Body
+		if thumb != "" {
+			body.Art = []string{thumb}
+		}
+
+		result.episodes = append(result.episodes, episodeRow{
+			Id:       episodeItemID,
+			Library:  library,
+			Kind:     libraryKindSeries,
+			Path:     relativePath(root, absolute),
+			Title:    title,
+			SortKey:  sortKey(title),
+			Slug:     slug(title, 0),
+			Released: meta.Released,
+			Added:    addedTime(absolute),
+			Art:      thumb,
+			Duration: meta.Duration,
+			Body:     body,
+			Series:   seriesID,
+			Season:   meta.Season,
+			Episode:  meta.Episode,
+		})
+		result.aliases = append(result.aliases, aliasRowsForItem(scopeEpisode, meta.ProviderIDs, "", episodeItemID)...)
+		episodeItemIDs = append(episodeItemIDs, episodeItemID)
+	}
+	if len(episodeItemIDs) == 0 {
+		return nil
 	}
 
-	result.episodes = append(result.episodes, episodeRow{
-		Id:       episodeItemID,
-		Library:  library,
-		Kind:     libraryKindSeries,
-		Path:     relativePath(root, absolute),
-		Title:    title,
-		SortKey:  sortKey(title),
-		Slug:     slug(title, 0),
-		Released: meta.Released,
-		Added:    addedTime(absolute),
-		Art:      thumb,
-		Duration: meta.Duration,
-		Body:     body,
-		Series:   seriesID,
-		Season:   meta.Season,
-		Episode:  meta.Episode,
-	})
-
 	var stream *streamInfo
-	if meta.Stream.present() {
-		stream = &meta.Stream
+	if metas[0].Stream.present() {
+		stream = &metas[0].Stream
 	}
 	container, videoCodec, audioCodec, width, height, durationMs := fileAttributes(episode.file, stream)
 	size, modified := statFile(absolute)
@@ -250,34 +267,57 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 		Type:       class.Type,
 		Role:       class.Role,
 		Modified:   modified,
-		Items:      []string{episodeItemID},
+		Items:      episodeItemIDs,
 	})
-	result.aliases = append(result.aliases, aliasRowsForItem(scopeEpisode, meta.ProviderIDs, "", episodeItemID)...)
-	return episodeItemID
+	return episodeItemIDs
 }
 
-// episodeIdentity reads one episode's numbers and body. The .nfo beside the file
+// episodeIdentity reads the numbers and the body of every episode one file
+// holds. A range marker in the name numbers each of them, within one season.
+//
+// A sidecar of several episodedetails blocks gives each episode its own title
+// and body, in the sidecar's own order. An episode past the last block takes
+// the file's technical attributes and no title of its own, so scanEpisode
+// names it S04E11 and no episode ever carries another episode's title.
+//
+// The .nfo beside the file
 // is the source where one exists; the season folder and the file name fill a
 // number the sidecar left at zero, so a sidecar that names only the episode
 // still takes its season from the folder.
-func episodeIdentity(episode episodeFile) episodeMeta {
-	var meta episodeMeta
+func episodeIdentity(episode episodeFile) []episodeMeta {
+	var blocks []episodeMeta
 	nfoPath := filepath.Join(episode.dir, stripExtension(episode.file)+".nfo")
 	if data, err := os.ReadFile(nfoPath); err == nil {
-		if parsed, err := parseEpisodeNFO(data); err == nil {
-			meta = parsed
+		if parsed, err := parseEpisodeNFOs(data); err == nil {
+			blocks = parsed
 		}
 	}
-	season, episodeNumber, marked := parseEpisodeMarker(episode.file)
-	if meta.Season == 0 {
+
+	var first episodeMeta
+	if len(blocks) > 0 {
+		first = blocks[0]
+	}
+	season, episodeNumbers, marked := parseEpisodeMarker(episode.file)
+	if first.Season == 0 {
 		if folderSeason, ok := parseSeasonFolder(filepath.Base(episode.dir)); ok {
-			meta.Season = folderSeason
+			first.Season = folderSeason
 		} else if marked {
-			meta.Season = season
+			first.Season = season
 		}
 	}
-	if meta.Episode == 0 && marked {
-		meta.Episode = episodeNumber
+	if first.Episode == 0 && marked {
+		first.Episode = episodeNumbers[0]
 	}
-	return meta
+
+	metas := []episodeMeta{first}
+	for index := 1; index < len(episodeNumbers); index++ {
+		next := episodeMeta{Stream: first.Stream, Duration: itemDuration(first.Stream, 0)}
+		if index < len(blocks) {
+			next = blocks[index]
+		}
+		next.Season = first.Season
+		next.Episode = episodeNumbers[index]
+		metas = append(metas, next)
+	}
+	return metas
 }

@@ -5,8 +5,10 @@ package main
 // episode's own aliases are proved against real files.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -234,6 +236,161 @@ func TestWalkSeriesSkipsIgnoredFolders(t *testing.T) {
 	}
 	if result.episodes[0].Episode != 1 {
 		t.Errorf("episode = %d, want the numbered one, not the staged file", result.episodes[0].Episode)
+	}
+}
+
+// doubleEpisodeVolume writes a series folder holding one file of two episodes,
+// with the sidecar the test gives it, and reports the season folder.
+func doubleEpisodeVolume(t *testing.T, root, video, sidecar string) string {
+	t.Helper()
+	show := filepath.Join(root, "Coastline")
+	season := filepath.Join(show, "Season 04")
+	writeFile(t, filepath.Join(show, "tvshow.nfo"), `<tvshow><title>Coastline</title><uniqueid type="tvdb">7</uniqueid></tvshow>`)
+	writeFile(t, filepath.Join(season, video), "video")
+	if sidecar != "" {
+		writeFile(t, filepath.Join(season, stripExtension(video)+".nfo"), sidecar)
+	}
+	return season
+}
+
+// episodesByID indexes a walk's episode rows by item id.
+func episodesByID(result *walkResult) map[string]episodeRow {
+	index := map[string]episodeRow{}
+	for _, episode := range result.episodes {
+		index[episode.Id] = episode
+	}
+	return index
+}
+
+// A file named for two episodes is two episode items and one file row, and the
+// row names both items. The three range forms name the same pair.
+func TestWalkSeriesReadsADoubleEpisodeFile(t *testing.T) {
+	cases := []struct {
+		name  string
+		video string
+	}{
+		{name: "a dash and a second marker", video: "Coastline - S04E10-E11 - The Long Way.mkv"},
+		{name: "a dash and a bare number", video: "Coastline - S04E10-11 - The Long Way.mkv"},
+		{name: "a second marker with no dash", video: "Coastline - S04E10E11 - The Long Way.mkv"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := t.TempDir()
+			doubleEpisodeVolume(t, root, testCase.video, "")
+
+			result := walkSeries(root, "house/series", nil)
+			if len(result.episodes) != 2 {
+				t.Fatalf("episodes = %d, want both the file names", len(result.episodes))
+			}
+			for index, number := range []int{10, 11} {
+				episode := result.episodes[index]
+				wantID := fmt.Sprintf("episode:tvdb:7:s04e%02d", number)
+				if episode.Id != wantID || episode.Season != 4 || episode.Episode != number {
+					t.Errorf("episode = %q s%02de%02d, want %q", episode.Id, episode.Season, episode.Episode, wantID)
+				}
+			}
+
+			path := filepath.Join("Coastline", "Season 04", testCase.video)
+			rows := 0
+			for _, row := range result.files {
+				if row.Path == path {
+					rows++
+				}
+			}
+			if rows != 1 {
+				t.Fatalf("file rows = %d, want the one file the two episodes play", rows)
+			}
+			want := []string{"episode:tvdb:7:s04e10", "episode:tvdb:7:s04e11"}
+			if items := filesByPath(result)[path].Items; !reflect.DeepEqual(items, want) {
+				t.Errorf("items = %v, want %v", items, want)
+			}
+		})
+	}
+}
+
+// A sidecar of two episodedetails blocks gives each episode its own title and
+// plot, in the order the sidecar wrote them.
+func TestWalkSeriesReadsAMultiEpisodeSidecar(t *testing.T) {
+	root := t.TempDir()
+	doubleEpisodeVolume(t, root, "Coastline - S04E10-E11.mkv",
+		`<episodedetails><title>The Long Way Down</title><season>4</season><episode>10</episode><plot>The crew descends.</plot></episodedetails>
+<episodedetails><title>The Long Way Back</title><season>4</season><episode>11</episode><plot>The crew climbs.</plot></episodedetails>`)
+
+	episodes := episodesByID(walkSeries(root, "house/series", nil))
+	first, held := episodes["episode:tvdb:7:s04e10"]
+	if !held {
+		t.Fatalf("the walk read no first episode, it read %v", episodes)
+	}
+	second, held := episodes["episode:tvdb:7:s04e11"]
+	if !held {
+		t.Fatalf("the walk read no second episode, it read %v", episodes)
+	}
+	if first.Title != "The Long Way Down" || first.Body.Plot != "The crew descends." {
+		t.Errorf("first episode = %q %q, want the first block", first.Title, first.Body.Plot)
+	}
+	if second.Title != "The Long Way Back" || second.Body.Plot != "The crew climbs." {
+		t.Errorf("second episode = %q %q, want the second block", second.Title, second.Body.Plot)
+	}
+	if first.Path != second.Path || first.Added != second.Added {
+		t.Errorf("file facts = %q %d and %q %d, want the one file's own", first.Path, first.Added, second.Path, second.Added)
+	}
+}
+
+// A sidecar of one block titles the first episode of the range. The second
+// takes the numbered title, because the block describes the first episode and
+// no episode carries another episode's title.
+func TestWalkSeriesNumbersTheSecondEpisodeOfASingleBlockSidecar(t *testing.T) {
+	root := t.TempDir()
+	doubleEpisodeVolume(t, root, "Coastline - S04E10-E11.mkv",
+		`<episodedetails><title>The Long Way Down</title><season>4</season><episode>10</episode><plot>The crew descends.</plot></episodedetails>`)
+
+	episodes := episodesByID(walkSeries(root, "house/series", nil))
+	first := episodes["episode:tvdb:7:s04e10"]
+	second, held := episodes["episode:tvdb:7:s04e11"]
+	if !held {
+		t.Fatalf("the walk read no second episode, it read %v", episodes)
+	}
+	if first.Title != "The Long Way Down" {
+		t.Errorf("first title = %q, want the block's own", first.Title)
+	}
+	if second.Title != "S04E11" {
+		t.Errorf("second title = %q, want the numbered title", second.Title)
+	}
+	if second.Body.Plot != "" {
+		t.Errorf("second plot = %q, want none, because the block describes the first episode", second.Body.Plot)
+	}
+}
+
+// A range wider than maxRangeEpisodes is a name the scanner does not read as a
+// range, so a strange name mints one item and not a run of them.
+func TestWalkSeriesRefusesAWideEpisodeRange(t *testing.T) {
+	root := t.TempDir()
+	doubleEpisodeVolume(t, root, "Coastline - S04E10-E40.mkv", "")
+
+	result := walkSeries(root, "house/series", nil)
+	if len(result.episodes) != 1 {
+		t.Fatalf("episodes = %d, want the first alone", len(result.episodes))
+	}
+	if result.episodes[0].Id != "episode:tvdb:7:s04e10" {
+		t.Errorf("episode = %q, want the first of the range", result.episodes[0].Id)
+	}
+}
+
+// The files beside a double-episode video link to the same two episodes the
+// video links to.
+func TestWalkSeriesLinksASubtitleToBothEpisodes(t *testing.T) {
+	root := t.TempDir()
+	season := doubleEpisodeVolume(t, root, "Coastline - S04E10-E11.mkv", "")
+	writeFile(t, filepath.Join(season, "Coastline - S04E10-E11.en.srt"), "subtitle")
+
+	path := filepath.Join("Coastline", "Season 04", "Coastline - S04E10-E11.en.srt")
+	row, held := filesByPath(walkSeries(root, "house/series", nil))[path]
+	if !held {
+		t.Fatal("the walk read no row for the subtitle")
+	}
+	want := []string{"episode:tvdb:7:s04e10", "episode:tvdb:7:s04e11"}
+	if !reflect.DeepEqual(row.Items, want) {
+		t.Errorf("items = %v, want %v", row.Items, want)
 	}
 }
 

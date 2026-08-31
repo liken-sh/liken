@@ -57,7 +57,10 @@ var (
 	seasonFolder = regexp.MustCompile(`(?i)^season\s*0*(\d+)$`)
 	// episodeMarker reads the season and episode off an s02e05 or 2x05 name,
 	// wherever it sits.
-	episodeMarker = regexp.MustCompile(`(?i)s(\d{1,3})[ ._-]?e(\d{1,3})|(\d{1,2})x(\d{1,3})`)
+	// The third group closes a range, so s04e10-e11, s04e10-11, and s04e10e11
+	// all read as episodes 10 and 11. It is optional, so an ordinary single
+	// marker reads as it always did.
+	episodeMarker = regexp.MustCompile(`(?i)s(\d{1,3})[ ._-]?e(\d{1,3})(?:(?:[ ._-]?e|-)(\d{1,3}))?|(\d{1,2})x(\d{1,3})`)
 )
 
 // parseReleaseName reads a title and a year off a folder or file name in
@@ -160,19 +163,62 @@ func parseSeasonFolder(name string) (int, bool) {
 
 // parseEpisodeMarker reads a season and an episode off a name in the s02e05 or
 // 2x05 form, wherever the marker sits.
-func parseEpisodeMarker(name string) (season, episode int, ok bool) {
-	match := episodeMarker.FindStringSubmatch(name)
+// A range marker names every episode from its first number to its last, so a
+// file of two episodes reports both.
+func parseEpisodeMarker(name string) (season int, episodes []int, ok bool) {
+	match := episodeMarker.FindStringSubmatchIndex(name)
 	if match == nil {
-		return 0, 0, false
+		return 0, nil, false
 	}
-	if match[1] != "" {
-		season, _ = strconv.Atoi(match[1])
-		episode, _ = strconv.Atoi(match[2])
-		return season, episode, true
+	if match[2] >= 0 {
+		season, _ = strconv.Atoi(name[match[2]:match[3]])
+		first, _ := strconv.Atoi(name[match[4]:match[5]])
+		return season, episodeRange(name, first, match[6], match[7]), true
 	}
-	season, _ = strconv.Atoi(match[3])
-	episode, _ = strconv.Atoi(match[4])
-	return season, episode, true
+	season, _ = strconv.Atoi(name[match[8]:match[9]])
+	episode, _ := strconv.Atoi(name[match[10]:match[11]])
+	return season, []int{episode}, true
+}
+
+// maxRangeEpisodes is the most episodes one file is read as holding. A
+// broadcast block that ships as one file is two parts, sometimes three. Past
+// that, a number after a marker is far more likely to be a resolution or a
+// season pack than a real range, and the cap keeps such a name from minting a
+// run of items that no volume holds.
+const maxRangeEpisodes = 4
+
+// episodeRange expands a range marker into every episode between its two
+// numbers. A range holds only where it passes three tests: its closing number
+// ends the marker, it ascends, and it counts maxRangeEpisodes or fewer. A name
+// that fails any of them names its first episode alone, which is what the
+// scanner did before ranges were read at all.
+//
+// The first test is what keeps s01e05-1080p from reading as episodes 5 through
+// 108. The digits there are followed by another digit, so the range is refused.
+// RE2 has no lookahead, so the test reads the byte after the match.
+func episodeRange(name string, first, start, end int) []int {
+	if start < 0 || (end < len(name) && isAlphanumeric(name[end])) {
+		return []int{first}
+	}
+	last, _ := strconv.Atoi(name[start:end])
+	if last <= first || last-first+1 > maxRangeEpisodes {
+		return []int{first}
+	}
+	episodes := make([]int, 0, last-first+1)
+	for episode := first; episode <= last; episode++ {
+		episodes = append(episodes, episode)
+	}
+	return episodes
+}
+
+// isAlphanumeric reports whether a byte is an ASCII letter or digit, which is
+// how episodeRange tells the end of a marker from the start of another word.
+func isAlphanumeric(c byte) bool {
+	switch {
+	case c >= '0' && c <= '9', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		return true
+	}
+	return false
 }
 
 // resolutionFromName reads a file's resolution off a token in its name, the

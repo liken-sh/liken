@@ -107,10 +107,14 @@ func TestParseSeriesNFO(t *testing.T) {
 }
 
 func TestParseEpisodeNFO(t *testing.T) {
-	meta, err := parseEpisodeNFO([]byte(`<episodedetails><title>Breakage</title><season>2</season><episode>5</episode><aired>2009-04-05</aired><credits>Moira Walley-Beckett</credits><uniqueid type="tvdb">340124</uniqueid><fileinfo><streamdetails><video><codec>h264</codec><width>1280</width><height>720</height></video></streamdetails></fileinfo></episodedetails>`))
+	metas, err := parseEpisodeNFOs([]byte(`<episodedetails><title>Breakage</title><season>2</season><episode>5</episode><aired>2009-04-05</aired><credits>Moira Walley-Beckett</credits><uniqueid type="tvdb">340124</uniqueid><fileinfo><streamdetails><video><codec>h264</codec><width>1280</width><height>720</height></video></streamdetails></fileinfo></episodedetails>`))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(metas) != 1 {
+		t.Fatalf("blocks = %d, want the one the sidecar holds", len(metas))
+	}
+	meta := metas[0]
 	if meta.Season != 2 || meta.Episode != 5 || meta.Title != "Breakage" {
 		t.Errorf("placement = s%02de%02d %q", meta.Season, meta.Episode, meta.Title)
 	}
@@ -129,12 +133,47 @@ func TestParseEpisodeNFO(t *testing.T) {
 }
 
 func TestParseEpisodeNFOFallsBackToPremiered(t *testing.T) {
-	meta, err := parseEpisodeNFO([]byte(`<episodedetails><title>Pilot</title><season>1</season><episode>1</episode><premiered>2008-01-20</premiered></episodedetails>`))
+	metas, err := parseEpisodeNFOs([]byte(`<episodedetails><title>Pilot</title><season>1</season><episode>1</episode><premiered>2008-01-20</premiered></episodedetails>`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Released != "2008-01-20" {
-		t.Errorf("released = %q, want premiered when aired is absent", meta.Released)
+	if metas[0].Released != "2008-01-20" {
+		t.Errorf("released = %q, want premiered when aired is absent", metas[0].Released)
+	}
+}
+
+// A sidecar beside a file of two episodes holds one episodedetails block per
+// episode, and each block carries its own title and plot.
+func TestParseEpisodeNFOsReadsEveryBlock(t *testing.T) {
+	metas, err := parseEpisodeNFOs([]byte(`<?xml version="1.0" encoding="utf-8"?>
+<episodedetails><title>The Long Way Down</title><season>4</season><episode>10</episode><plot>The crew descends.</plot></episodedetails>
+<episodedetails><title>The Long Way Back</title><season>4</season><episode>11</episode><plot>The crew climbs.</plot></episodedetails>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 2 {
+		t.Fatalf("blocks = %d, want both episodes the sidecar names", len(metas))
+	}
+	if metas[0].Title != "The Long Way Down" || metas[0].Episode != 10 {
+		t.Errorf("first block = %q e%02d", metas[0].Title, metas[0].Episode)
+	}
+	if metas[1].Title != "The Long Way Back" || metas[1].Episode != 11 {
+		t.Errorf("second block = %q e%02d", metas[1].Title, metas[1].Episode)
+	}
+	if metas[1].Body.Plot != "The crew climbs." {
+		t.Errorf("second plot = %q, want the second block's own plot", metas[1].Body.Plot)
+	}
+}
+
+// A sidecar whose second block is unreadable keeps the blocks that read, so one
+// broken block does not lose the episode before it.
+func TestParseEpisodeNFOsKeepsTheBlocksItRead(t *testing.T) {
+	metas, err := parseEpisodeNFOs([]byte(`<episodedetails><title>First</title><season>1</season><episode>1</episode></episodedetails><episodedetails`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 || metas[0].Title != "First" {
+		t.Errorf("blocks = %+v, want the one that read", metas)
 	}
 }
 
@@ -145,8 +184,8 @@ func TestParseNFORejectsBadXML(t *testing.T) {
 	if _, err := parseSeriesNFO([]byte(`<tvshow`)); err == nil {
 		t.Error("parseSeriesNFO accepted truncated XML")
 	}
-	if _, err := parseEpisodeNFO([]byte(`<episodedetails`)); err == nil {
-		t.Error("parseEpisodeNFO accepted truncated XML")
+	if _, err := parseEpisodeNFOs([]byte(`<episodedetails`)); err == nil {
+		t.Error("parseEpisodeNFOs accepted truncated XML")
 	}
 }
 

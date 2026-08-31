@@ -5,7 +5,10 @@ package main
 // language tag. A change to any of the three changes what the media browser
 // draws, so each word is a case here.
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestClassifyFile(t *testing.T) {
 	movies := filePlace{kind: libraryKindMovies}
@@ -163,26 +166,32 @@ func TestExtrasFolderName(t *testing.T) {
 }
 
 // The longest episode name wins. Without that rule an episode takes a file
-// that belongs to another episode whose name starts with its own.
+// that belongs to another episode whose name starts with its own. A file
+// beside a video of two episodes answers with both of them.
 func TestEpisodeItem(t *testing.T) {
-	episodes := map[string]string{
-		"Show - S01E01":       "episode:tvdb:1:s01e01",
-		"Show - S01E01 Extra": "episode:tvdb:1:s01e02",
+	episodes := map[string][]string{
+		"Show - S01E01":       {"episode:tvdb:1:s01e01"},
+		"Show - S01E01 Extra": {"episode:tvdb:1:s01e02"},
+		"Show - S01E04-E05":   {"episode:tvdb:1:s01e04", "episode:tvdb:1:s01e05"},
 	}
 	resolve := episodeItem(episodes, "series:tvdb:1")
 
 	cases := []struct {
 		name string
-		want string
+		want []string
 	}{
-		{name: "Show - S01E01.en.srt", want: "episode:tvdb:1:s01e01"},
-		{name: "Show - S01E01 Extra.nfo", want: "episode:tvdb:1:s01e02"},
-		{name: "season01-poster.jpg", want: "series:tvdb:1"},
+		{name: "Show - S01E01.en.srt", want: []string{"episode:tvdb:1:s01e01"}},
+		{name: "Show - S01E01 Extra.nfo", want: []string{"episode:tvdb:1:s01e02"}},
+		{name: "season01-poster.jpg", want: []string{"series:tvdb:1"}},
+		{
+			name: "Show - S01E04-E05.en.srt",
+			want: []string{"episode:tvdb:1:s01e04", "episode:tvdb:1:s01e05"},
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := resolve(testCase.name); got != testCase.want {
-				t.Errorf("episodeItem(%q) = %q, want %q", testCase.name, got, testCase.want)
+			if got := resolve(testCase.name); !reflect.DeepEqual(got, testCase.want) {
+				t.Errorf("episodeItem(%q) = %v, want %v", testCase.name, got, testCase.want)
 			}
 		})
 	}
