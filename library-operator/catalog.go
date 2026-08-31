@@ -128,12 +128,16 @@ func (c *Catalog) post(ctx context.Context, statements []statement) (int, error)
 // header and the slug, which movies and series do. table is a constant this
 // package names and never input, so naming it in the SQL text carries no
 // injection.
+//
+// The conflict target is the whole primary key, (library, id), and the
+// update names no primary-key column, because cr-sqlite reads a change
+// to a key column as a delete and a create.
 func plainItemUpsert(table string, params []any) statement {
 	return statement{
-		sql: `INSERT INTO ` + table + ` (id, library, kind, path, title, sort_key, released, added, art, duration, body, slug) ` +
+		sql: `INSERT INTO ` + table + ` (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug) ` +
 			`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
-			`ON CONFLICT(id) DO UPDATE SET ` +
-			`library = excluded.library, kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
+			`ON CONFLICT (library, id) DO UPDATE SET ` +
+			`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
 			`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
 			`duration = excluded.duration, body = excluded.body, slug = excluded.slug`,
 		params: params,
@@ -141,9 +145,12 @@ func plainItemUpsert(table string, params []any) statement {
 }
 
 // itemParams marshals a body and lays the header out in column order.
-func itemParams(id, library, kind, path, title, sortKey, released string, added int64, art string, duration int64, body any, slug string) []any {
+//
+// The library is the first parameter of every statement this file
+// writes, because it leads every key.
+func itemParams(library, id, kind, path, title, sortKey, released string, added int64, art string, duration int64, body any, slug string) []any {
 	payload, _ := json.Marshal(body)
-	return []any{id, library, kind, path, title, sortKey, released, added, art, duration, string(payload), slug}
+	return []any{library, id, kind, path, title, sortKey, released, added, art, duration, string(payload), slug}
 }
 
 // UpsertMovies writes movie rows in place, so a re-walk updates a title rather
@@ -151,7 +158,7 @@ func itemParams(id, library, kind, path, title, sortKey, released string, added 
 func (c *Catalog) UpsertMovies(ctx context.Context, rows []movieRow) (int, error) {
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
-		params := itemParams(row.Id, row.Library, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
+		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
 		statements[i] = plainItemUpsert("movies", params)
 	}
 	return c.apply(ctx, statements)
@@ -161,7 +168,7 @@ func (c *Catalog) UpsertMovies(ctx context.Context, rows []movieRow) (int, error
 func (c *Catalog) UpsertSeries(ctx context.Context, rows []seriesRow) (int, error) {
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
-		params := itemParams(row.Id, row.Library, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
+		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
 		statements[i] = plainItemUpsert("series", params)
 	}
 	return c.apply(ctx, statements)
@@ -174,14 +181,14 @@ func (c *Catalog) UpsertEpisodes(ctx context.Context, rows []episodeRow) (int, e
 	for i, row := range rows {
 		payload, _ := json.Marshal(row.Body)
 		statements[i] = statement{
-			sql: `INSERT INTO episodes (id, library, kind, path, title, sort_key, released, added, art, duration, body, slug, series, season, episode) ` +
+			sql: `INSERT INTO episodes (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, series, season, episode) ` +
 				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
-				`ON CONFLICT(id) DO UPDATE SET ` +
-				`library = excluded.library, kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
+				`ON CONFLICT (library, id) DO UPDATE SET ` +
+				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
 				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
 				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
 				`series = excluded.series, season = excluded.season, episode = excluded.episode`,
-			params: []any{row.Id, row.Library, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, string(payload), row.Slug, row.Series, row.Season, row.Episode},
+			params: []any{row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, string(payload), row.Slug, row.Series, row.Season, row.Episode},
 		}
 	}
 	return c.apply(ctx, statements)
@@ -197,14 +204,14 @@ func (c *Catalog) UpsertFiles(ctx context.Context, rows []fileRow) (int, error) 
 			present = 1
 		}
 		statements[i] = statement{
-			sql: `INSERT INTO files (path, library, container, video_codec, audio_codec, width, height, size_bytes, duration_ms, trickplay, present, type, role, language, modified) ` +
+			sql: `INSERT INTO files (library, path, container, video_codec, audio_codec, width, height, size_bytes, duration_ms, trickplay, present, type, role, language, modified) ` +
 				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
-				`ON CONFLICT(path) DO UPDATE SET ` +
-				`library = excluded.library, container = excluded.container, video_codec = excluded.video_codec, ` +
+				`ON CONFLICT (library, path) DO UPDATE SET ` +
+				`container = excluded.container, video_codec = excluded.video_codec, ` +
 				`audio_codec = excluded.audio_codec, width = excluded.width, height = excluded.height, ` +
 				`size_bytes = excluded.size_bytes, duration_ms = excluded.duration_ms, trickplay = excluded.trickplay, present = excluded.present, ` +
 				`type = excluded.type, role = excluded.role, language = excluded.language, modified = excluded.modified`,
-			params: []any{row.Path, row.Library, row.Container, row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.SizeBytes, row.DurationMs, row.Trickplay, present, row.Type, row.Role, row.Language, row.Modified},
+			params: []any{row.Library, row.Path, row.Container, row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.SizeBytes, row.DurationMs, row.Trickplay, present, row.Type, row.Role, row.Language, row.Modified},
 		}
 	}
 	return c.apply(ctx, statements)
@@ -212,13 +219,17 @@ func (c *Catalog) UpsertFiles(ctx context.Context, rows []fileRow) (int, error) 
 
 // UpsertFileItems writes the many-to-many link, one row per (file, item) pair a
 // file carries.
+//
+// Every column of file_items is a primary-key column, so the row
+// carries nothing to update and the upsert does nothing on a conflict.
+// A repeat write changes no row and broadcasts nothing.
 func (c *Catalog) UpsertFileItems(ctx context.Context, rows []fileRow) (int, error) {
 	var statements []statement
 	for _, row := range rows {
 		for _, item := range row.Items {
 			statements = append(statements, statement{
-				sql:    `INSERT INTO file_items (path, item) VALUES (?, ?) ON CONFLICT(path, item) DO UPDATE SET path = excluded.path`,
-				params: []any{row.Path, item},
+				sql:    `INSERT INTO file_items (library, path, item) VALUES (?, ?, ?) ON CONFLICT (library, path, item) DO NOTHING`,
+				params: []any{row.Library, row.Path, item},
 			})
 		}
 	}
@@ -231,60 +242,62 @@ func (c *Catalog) UpsertAliases(ctx context.Context, rows []aliasRow) (int, erro
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
 		statements[i] = statement{
-			sql:    `INSERT INTO aliases (alias, item, source) VALUES (?, ?, ?) ON CONFLICT(alias) DO UPDATE SET item = excluded.item, source = excluded.source`,
-			params: []any{row.Alias, row.Item, row.Source},
+			sql:    `INSERT INTO aliases (library, alias, item, source) VALUES (?, ?, ?, ?) ON CONFLICT (library, alias) DO UPDATE SET item = excluded.item, source = excluded.source`,
+			params: []any{row.Library, row.Alias, row.Item, row.Source},
 		}
 	}
 	return c.apply(ctx, statements)
 }
 
-// deleteByKey builds one delete per key against a single-column primary key.
+// deleteByKey builds one delete per key against a two-column primary
+// key, the library and the table's own key, so a delete reaches one
+// library's row and never another library's row of the same name.
 // table and column are constants this package names and never input.
-func deleteByKey(table, column string, keys []string) []statement {
+func deleteByKey(table, column, library string, keys []string) []statement {
 	statements := make([]statement, len(keys))
 	for i, key := range keys {
 		statements[i] = statement{
-			sql:    `DELETE FROM ` + table + ` WHERE ` + column + ` = ?`,
-			params: []any{key},
+			sql:    `DELETE FROM ` + table + ` WHERE library = ? AND ` + column + ` = ?`,
+			params: []any{library, key},
 		}
 	}
 	return statements
 }
 
 // DeleteMovies removes movie rows whose titles left the volume.
-func (c *Catalog) DeleteMovies(ctx context.Context, ids []string) (int, error) {
-	return c.apply(ctx, deleteByKey("movies", "id", ids))
+func (c *Catalog) DeleteMovies(ctx context.Context, library string, ids []string) (int, error) {
+	return c.apply(ctx, deleteByKey("movies", "id", library, ids))
 }
 
 // DeleteSeries removes series rows whose titles left the volume.
-func (c *Catalog) DeleteSeries(ctx context.Context, ids []string) (int, error) {
-	return c.apply(ctx, deleteByKey("series", "id", ids))
+func (c *Catalog) DeleteSeries(ctx context.Context, library string, ids []string) (int, error) {
+	return c.apply(ctx, deleteByKey("series", "id", library, ids))
 }
 
 // DeleteEpisodes removes episode rows whose files left the volume.
-func (c *Catalog) DeleteEpisodes(ctx context.Context, ids []string) (int, error) {
-	return c.apply(ctx, deleteByKey("episodes", "id", ids))
+func (c *Catalog) DeleteEpisodes(ctx context.Context, library string, ids []string) (int, error) {
+	return c.apply(ctx, deleteByKey("episodes", "id", library, ids))
 }
 
 // DeleteFiles removes file rows whose files left the volume.
-func (c *Catalog) DeleteFiles(ctx context.Context, paths []string) (int, error) {
-	return c.apply(ctx, deleteByKey("files", "path", paths))
+func (c *Catalog) DeleteFiles(ctx context.Context, library string, paths []string) (int, error) {
+	return c.apply(ctx, deleteByKey("files", "path", library, paths))
 }
 
 // DeleteAliases removes alias rows a re-walk no longer produces.
-func (c *Catalog) DeleteAliases(ctx context.Context, aliases []string) (int, error) {
-	return c.apply(ctx, deleteByKey("aliases", "alias", aliases))
+func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []string) (int, error) {
+	return c.apply(ctx, deleteByKey("aliases", "alias", library, aliases))
 }
 
-// DeleteFileItems removes link rows by both of their columns, because the pair
-// is the primary key of the table. A delete by one column alone would take
-// every other link the file or the item holds with it.
-func (c *Catalog) DeleteFileItems(ctx context.Context, links []fileItemKey) (int, error) {
+// DeleteFileItems names all three columns of the link row, because all
+// three are the primary key. A delete by fewer would take every other
+// link the library, the file, or the item holds with it.
+func (c *Catalog) DeleteFileItems(ctx context.Context, library string, links []fileItemKey) (int, error) {
 	statements := make([]statement, len(links))
 	for i, link := range links {
 		statements[i] = statement{
-			sql:    `DELETE FROM file_items WHERE path = ? AND item = ?`,
-			params: []any{link.Path, link.Item},
+			sql:    `DELETE FROM file_items WHERE library = ? AND path = ? AND item = ?`,
+			params: []any{library, link.Path, link.Item},
 		}
 	}
 	return c.apply(ctx, statements)

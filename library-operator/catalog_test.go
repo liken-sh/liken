@@ -127,8 +127,15 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 		t.Fatalf("statements = %d, want 1", len(statements))
 	}
 	got := statements[0]
-	if !strings.Contains(got.sql, "INSERT INTO movies") || !strings.Contains(got.sql, "ON CONFLICT(id) DO UPDATE SET") {
-		t.Errorf("sql = %q, want an upsert on movies", got.sql)
+	if !strings.Contains(got.sql, "INSERT INTO movies") || !strings.Contains(got.sql, "ON CONFLICT (library, id) DO UPDATE SET") {
+		t.Errorf("sql = %q, want an upsert on movies keyed by the library and the id", got.sql)
+	}
+	// A change to a primary-key column is a delete and a create in
+	// cr-sqlite, so the update names no key column.
+	for _, column := range []string{"library = excluded.library", "id = excluded.id"} {
+		if strings.Contains(got.sql, column) {
+			t.Errorf("sql = %q, want no update of a primary-key column", got.sql)
+		}
 	}
 	// Every value is a parameter, so the id and the title never appear
 	// in the SQL text.
@@ -138,8 +145,11 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	if len(got.params) != 12 {
 		t.Fatalf("params = %d, want 12", len(got.params))
 	}
-	if got.params[0] != "movie:tmdb:603" {
-		t.Errorf("params[0] = %v, want the id", got.params[0])
+	if got.params[0] != "house/movies" {
+		t.Errorf("params[0] = %v, want the library", got.params[0])
+	}
+	if got.params[1] != "movie:tmdb:603" {
+		t.Errorf("params[1] = %v, want the id", got.params[1])
 	}
 	body, ok := got.params[10].(string)
 	if !ok || !strings.Contains(body, "A hacker learns the truth.") {
@@ -306,10 +316,13 @@ func TestUpsertFileItemsExpandsEveryPair(t *testing.T) {
 	if len(statements) != 2 {
 		t.Fatalf("statements = %d, want 2", len(statements))
 	}
-	if !strings.Contains(statements[0].sql, "INSERT INTO file_items") {
-		t.Errorf("sql = %q, want an upsert on file_items", statements[0].sql)
+	// Every column of file_items is a key column, so the write has
+	// nothing to update and a repeat changes no row.
+	if !strings.Contains(statements[0].sql, "INSERT INTO file_items") ||
+		!strings.Contains(statements[0].sql, "ON CONFLICT (library, path, item) DO NOTHING") {
+		t.Errorf("sql = %q, want an insert on file_items that does nothing on a conflict", statements[0].sql)
 	}
-	if statements[0].params[0] != "s01e01e02.mkv" || statements[1].params[1] != "episode:tvdb:81189:s01e02" {
+	if statements[0].params[1] != "s01e01e02.mkv" || statements[1].params[2] != "episode:tvdb:81189:s01e02" {
 		t.Errorf("params = %v / %v, want the path and each item", statements[0].params, statements[1].params)
 	}
 }
@@ -318,16 +331,19 @@ func TestUpsertAliasesWritesEachName(t *testing.T) {
 	rec := &catalogRecorder{}
 	catalog := testCatalog(t, rec)
 
-	_, err := catalog.UpsertAliases(context.Background(), []aliasRow{{Alias: "movie:imdb:tt0133093", Item: "movie:tmdb:603", Source: aliasSourceProvider}})
+	_, err := catalog.UpsertAliases(context.Background(), []aliasRow{{
+		Alias: "movie:imdb:tt0133093", Library: "house/movies", Item: "movie:tmdb:603", Source: aliasSourceProvider,
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := rec.all()[0]
-	if !strings.Contains(got.sql, "INSERT INTO aliases") || !strings.Contains(got.sql, "ON CONFLICT(alias)") {
-		t.Errorf("sql = %q, want an upsert on aliases", got.sql)
+	if !strings.Contains(got.sql, "INSERT INTO aliases") || !strings.Contains(got.sql, "ON CONFLICT (library, alias)") {
+		t.Errorf("sql = %q, want an upsert on aliases keyed by the library and the alias", got.sql)
 	}
-	if got.params[0] != "movie:imdb:tt0133093" || got.params[1] != "movie:tmdb:603" || got.params[2] != aliasSourceProvider {
-		t.Errorf("params = %v, want the alias, item, and source", got.params)
+	if got.params[0] != "house/movies" || got.params[1] != "movie:imdb:tt0133093" ||
+		got.params[2] != "movie:tmdb:603" || got.params[3] != aliasSourceProvider {
+		t.Errorf("params = %v, want the library, alias, item, and source", got.params)
 	}
 }
 
@@ -338,18 +354,20 @@ func TestDeleteByKeyMethods(t *testing.T) {
 		want   string
 	}{
 		{name: "movies", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteMovies(ctx, []string{"movie:tmdb:603"})
-		}, want: "DELETE FROM movies WHERE id = ?"},
+			return c.DeleteMovies(ctx, "house/movies", []string{"movie:tmdb:603"})
+		}, want: "DELETE FROM movies WHERE library = ? AND id = ?"},
 		{name: "series", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteSeries(ctx, []string{"series:tvdb:81189"})
-		}, want: "DELETE FROM series WHERE id = ?"},
+			return c.DeleteSeries(ctx, "house/movies", []string{"series:tvdb:81189"})
+		}, want: "DELETE FROM series WHERE library = ? AND id = ?"},
 		{name: "episodes", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteEpisodes(ctx, []string{"episode:tvdb:81189:s01e01"})
-		}, want: "DELETE FROM episodes WHERE id = ?"},
-		{name: "files", delete: func(c *Catalog, ctx context.Context) (int, error) { return c.DeleteFiles(ctx, []string{"a.mkv"}) }, want: "DELETE FROM files WHERE path = ?"},
+			return c.DeleteEpisodes(ctx, "house/movies", []string{"episode:tvdb:81189:s01e01"})
+		}, want: "DELETE FROM episodes WHERE library = ? AND id = ?"},
+		{name: "files", delete: func(c *Catalog, ctx context.Context) (int, error) {
+			return c.DeleteFiles(ctx, "house/movies", []string{"a.mkv"})
+		}, want: "DELETE FROM files WHERE library = ? AND path = ?"},
 		{name: "aliases", delete: func(c *Catalog, ctx context.Context) (int, error) {
-			return c.DeleteAliases(ctx, []string{"movie:imdb:tt0133093"})
-		}, want: "DELETE FROM aliases WHERE alias = ?"},
+			return c.DeleteAliases(ctx, "house/movies", []string{"movie:imdb:tt0133093"})
+		}, want: "DELETE FROM aliases WHERE library = ? AND alias = ?"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -367,14 +385,16 @@ func TestDeleteByKeyMethods(t *testing.T) {
 			if got.sql != testCase.want {
 				t.Errorf("sql = %q, want %q", got.sql, testCase.want)
 			}
-			if len(got.params) != 1 {
-				t.Errorf("params = %v, want one key", got.params)
+			// The library is the first parameter and the row's own key
+			// follows it, the convention every statement holds to.
+			if len(got.params) != 2 || got.params[0] != "house/movies" {
+				t.Errorf("params = %v, want the library and one key", got.params)
 			}
 		})
 	}
 }
 
-func TestDeleteFileItemsNamesBothColumns(t *testing.T) {
+func TestDeleteFileItemsNamesEveryKeyColumn(t *testing.T) {
 	rec := &catalogRecorder{}
 	catalog := testCatalog(t, rec)
 
@@ -382,7 +402,7 @@ func TestDeleteFileItemsNamesBothColumns(t *testing.T) {
 		{Path: "s01e01e02.mkv", Item: "episode:tvdb:81189:s01e01"},
 		{Path: "s01e01e02.mkv", Item: "episode:tvdb:81189:s01e02"},
 	}
-	_, err := catalog.DeleteFileItems(context.Background(), links)
+	_, err := catalog.DeleteFileItems(context.Background(), "house/series", links)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,11 +410,12 @@ func TestDeleteFileItemsNamesBothColumns(t *testing.T) {
 	if len(statements) != 2 {
 		t.Fatalf("statements = %d, want 2", len(statements))
 	}
-	if statements[0].sql != "DELETE FROM file_items WHERE path = ? AND item = ?" {
-		t.Errorf("sql = %q, want a delete on file_items by the pair", statements[0].sql)
+	if statements[0].sql != "DELETE FROM file_items WHERE library = ? AND path = ? AND item = ?" {
+		t.Errorf("sql = %q, want a delete on file_items by all three key columns", statements[0].sql)
 	}
-	if statements[0].params[0] != "s01e01e02.mkv" || statements[1].params[1] != "episode:tvdb:81189:s01e02" {
-		t.Errorf("params = %v / %v, want the path and each item", statements[0].params, statements[1].params)
+	if statements[0].params[0] != "house/series" || statements[0].params[1] != "s01e01e02.mkv" ||
+		statements[1].params[2] != "episode:tvdb:81189:s01e02" {
+		t.Errorf("params = %v / %v, want the library, the path, and each item", statements[0].params, statements[1].params)
 	}
 }
 

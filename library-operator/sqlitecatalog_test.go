@@ -127,14 +127,29 @@ func (a *sqliteAgent) rowCount(t *testing.T, table string) int {
 	return count
 }
 
-// holdsItem reports whether one item id is still in a table.
-func (a *sqliteAgent) holdsItem(t *testing.T, table, id string) bool {
+// holdsItem reports whether one library still holds one item id. It
+// names both, because an id identifies a row only inside its own
+// library.
+func (a *sqliteAgent) holdsItem(t *testing.T, table, library, id string) bool {
 	t.Helper()
 	count := 0
-	if err := a.db.QueryRow(`SELECT count(*) FROM `+table+` WHERE id = ?`, id).Scan(&count); err != nil {
+	if err := a.db.QueryRow(`SELECT count(*) FROM `+table+` WHERE library = ? AND id = ?`,
+		library, id).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	return count > 0
+}
+
+// rowsFor reads how many rows of one table one library holds, the
+// count a cross-library test reads to prove that one library's prune
+// left the other library whole.
+func (a *sqliteAgent) rowsFor(t *testing.T, table, library string) int {
+	t.Helper()
+	count := 0
+	if err := a.db.QueryRow(`SELECT count(*) FROM `+table+` WHERE library = ?`, library).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 // walkOfOneTitle is the rows one movie title folder produces: the item,
@@ -151,8 +166,8 @@ func walkOfOneTitle(library, id, path, folderKey string) *walkResult {
 			Role: fileRolePrimary, Items: []string{id},
 		}},
 		aliases: []aliasRow{
-			{Alias: id, Item: id, Source: aliasSourceProvider},
-			{Alias: folderKey, Item: id, Source: aliasSourceFolder},
+			{Alias: id, Library: library, Item: id, Source: aliasSourceProvider},
+			{Alias: folderKey, Library: library, Item: id, Source: aliasSourceFolder},
 		},
 		titles: 1,
 	}
@@ -198,13 +213,13 @@ func TestPruneLibraryAgainstTheRealSchema(t *testing.T) {
 	if removed != 5 {
 		t.Errorf("removed = %d, want the departed title's five rows", removed)
 	}
-	if !agent.holdsItem(t, "movies", "movie:tmdb:1") {
+	if !agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
 		t.Error("the marked title was swept")
 	}
-	if agent.holdsItem(t, "movies", "movie:tmdb:2") {
+	if agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:2") {
 		t.Error("the unmarked title stands")
 	}
-	if !agent.holdsItem(t, "movies", "movie:tmdb:9") {
+	if !agent.holdsItem(t, "movies", "studio/films", "movie:tmdb:9") {
 		t.Error("the other library's title was swept")
 	}
 	if got := agent.rowCount(t, "files"); got != 2 {
@@ -269,10 +284,10 @@ func TestPruneScopeAgainstTheRealSchema(t *testing.T) {
 	if removed != 5 {
 		t.Errorf("removed = %d, want the folder's five rows", removed)
 	}
-	if agent.holdsItem(t, "movies", "movie:tmdb:1") {
+	if agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
 		t.Error("the departed folder's title stands")
 	}
-	if !agent.holdsItem(t, "movies", "movie:tmdb:2") {
+	if !agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:2") {
 		t.Error("a title outside the folder was swept")
 	}
 	if got := agent.rowCount(t, "files"); got != 1 {
@@ -309,13 +324,154 @@ func TestTheKeySpacesSeparateAnAliasFromAnItemAgainstTheRealSchema(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if agent.holdsItem(t, "movies", "movie:path:one-2001") {
+	if agent.holdsItem(t, "movies", "house/movies", "movie:path:one-2001") {
 		t.Error("the stale path-derived item stands, so the catalog holds the title twice")
 	}
-	if !agent.holdsItem(t, "movies", "movie:tmdb:1") {
+	if !agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
 		t.Error("the provider-derived item was swept")
 	}
 	if got := agent.rowCount(t, "aliases"); got != 2 {
 		t.Errorf("aliases = %d, want the provider id and the folder key", got)
+	}
+}
+
+// The namespace's tables hold every library, so two libraries can carry a
+// title under the same provider id at the same relative path. The library
+// leads every key, so the two are two rows in every table and neither
+// walk overwrites the other.
+func TestTwoLibrariesHoldTheSameIdAndPathAgainstTheRealSchema(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	ctx := t.Context()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, library := range []string{"house/movies", "studio/films"} {
+		walk := walkOfOneTitle(library, "movie:tmdb:1", "One (2001)", "movie:path:one-2001")
+		if err := flushWalk(ctx, catalog, walk, int64(1000)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, table := range []struct {
+		name string
+		want int
+	}{
+		{"movies", 1}, {"files", 1}, {"file_items", 1}, {"aliases", 2},
+	} {
+		for _, library := range []string{"house/movies", "studio/films"} {
+			if got := agent.rowsFor(t, table.name, library); got != table.want {
+				t.Errorf("%s of %s = %d, want %d", table.name, library, got, table.want)
+			}
+		}
+		if got := agent.rowCount(t, table.name); got != 2*table.want {
+			t.Errorf("%s = %d, want the rows of both libraries", table.name, got)
+		}
+	}
+}
+
+// seedTwoLibraries writes the same two titles into two libraries, at the
+// same relative paths and under the same provider ids, and marks them all
+// with one epoch.
+func seedTwoLibraries(t *testing.T, catalog *Catalog, epoch int64) {
+	t.Helper()
+	for _, library := range []string{"house/movies", "studio/films"} {
+		for _, title := range []struct{ id, path, key string }{
+			{"movie:tmdb:1", "One (2001)", "movie:path:one-2001"},
+			{"movie:tmdb:2", "Two (2002)", "movie:path:two-2002"},
+		} {
+			walk := walkOfOneTitle(library, title.id, title.path, title.key)
+			if err := flushWalk(t.Context(), catalog, walk, epoch); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// libraryRows is the row count of each table one seeded library holds, the
+// shape a cross-library test reads back after the other library's prune.
+func libraryRows(t *testing.T, agent *sqliteAgent, library string) map[string]int {
+	t.Helper()
+	rows := map[string]int{}
+	for _, table := range []string{"movies", "files", "file_items", "aliases"} {
+		rows[table] = agent.rowsFor(t, table, library)
+	}
+	return rows
+}
+
+// A full walk and its prune reach one library alone. The other library
+// holds the same ids at the same paths, and every one of its rows stands.
+func TestPruneLibraryLeavesTheOtherLibrarysIdenticalRows(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	ctx := t.Context()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTwoLibraries(t, catalog, int64(1000))
+	before := libraryRows(t, agent, "studio/films")
+
+	// The next walk of this library read the first title alone, so the
+	// second title's rows carry the old epoch and leave.
+	second := int64(2000)
+	walk := walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001")
+	if err := flushWalk(ctx, catalog, walk, second); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := pruneLibrary(ctx, catalog, "house/movies", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 5 {
+		t.Errorf("removed = %d, want the departed title's five rows", removed)
+	}
+	if !agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
+		t.Error("the marked title was swept")
+	}
+	if agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:2") {
+		t.Error("the unmarked title stands")
+	}
+	after := libraryRows(t, agent, "studio/films")
+	for table, want := range before {
+		if after[table] != want {
+			t.Errorf("%s of the other library = %d, want the %d it held before the prune", table, after[table], want)
+		}
+	}
+}
+
+// A rescan of one folder reaches one library alone. The other library
+// holds a folder of the same name, and every row under it stands.
+func TestPruneScopeLeavesTheOtherLibrarysFolder(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	ctx := t.Context()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTwoLibraries(t, catalog, int64(1000))
+	before := libraryRows(t, agent, "studio/films")
+
+	// The folder left this library's volume, so the rescan marks nothing
+	// and every row under it is unmarked.
+	removed, err := pruneScope(ctx, catalog, "house/movies", "One (2001)", int64(2000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 5 {
+		t.Errorf("removed = %d, want the folder's five rows", removed)
+	}
+	if agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
+		t.Error("the departed folder's title stands")
+	}
+	if !agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:2") {
+		t.Error("a title outside the folder was swept")
+	}
+	if !agent.holdsItem(t, "movies", "studio/films", "movie:tmdb:1") {
+		t.Error("the other library's folder of the same name was swept")
+	}
+	after := libraryRows(t, agent, "studio/films")
+	for table, want := range before {
+		if after[table] != want {
+			t.Errorf("%s of the other library = %d, want the %d it held before the prune", table, after[table], want)
+		}
 	}
 }

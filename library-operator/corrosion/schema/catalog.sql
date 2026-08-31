@@ -7,7 +7,9 @@
 -- beyond the primary key, and a primary key on every table.
 --
 -- Every item table starts with the item header: these twelve columns,
--- in this order. They are the columns every kind shares and every list
+-- in this order, with the library first because the library scopes
+-- every row, and (library, id) as the primary key. They are the
+-- columns every kind shares and every list
 -- sorts or filters on. The kind's own shape is the body column, one
 -- JSON document. So a new kind is a new item table, and never a new
 -- nullable column on a table that other kinds share.
@@ -18,8 +20,12 @@
 -- re-walk of an unchanged sidecar reads the same id. A folder with no
 -- provider id falls back to movie:path:<key>.
 --
---   id        the item's provider-scoped id, derived from the sidecar
+-- An id is unique inside one library and never across the namespace,
+-- so the library and the id together name a row. Two libraries hold
+-- the same id, or the same relative path, without touching each other.
+--
 --   library   the Library that holds the item, as namespace/name
+--   id        the item's provider-scoped id, derived from the sidecar
 --   kind      the kind that wrote the row
 --   path      the item's path on the volume, relative to the library root
 --   title     the name a person reads
@@ -38,8 +44,8 @@
 -- the agent never replicates. See prune.go.
 
 CREATE TABLE movies (
-    id TEXT NOT NULL PRIMARY KEY,
     library TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
@@ -49,7 +55,8 @@ CREATE TABLE movies (
     art TEXT NOT NULL DEFAULT '',
     duration INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL DEFAULT '{}',
-    slug TEXT NOT NULL DEFAULT ''
+    slug TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, id)
 );
 
 -- The three sorts a media browser offers over one library: by title,
@@ -62,8 +69,8 @@ CREATE INDEX movies_library_added ON movies (library, added);
 
 -- The series item table: the same item header as movies, with the series body.
 CREATE TABLE series (
-    id TEXT NOT NULL PRIMARY KEY,
     library TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
@@ -73,7 +80,8 @@ CREATE TABLE series (
     art TEXT NOT NULL DEFAULT '',
     duration INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL DEFAULT '{}',
-    slug TEXT NOT NULL DEFAULT ''
+    slug TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, id)
 );
 
 -- The three sorts a media browser offers over one series library, each led by
@@ -85,9 +93,12 @@ CREATE INDEX series_library_added ON series (library, added);
 -- The episode item table: the item header, then the three columns that place
 -- the episode under its series. series is the parent series id, and season and
 -- episode are its aired numbers.
+--
+-- A join from the series column to a series id must match the library
+-- as well, because an id names one row only inside its own library.
 CREATE TABLE episodes (
-    id TEXT NOT NULL PRIMARY KEY,
     library TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
@@ -100,16 +111,19 @@ CREATE TABLE episodes (
     slug TEXT NOT NULL DEFAULT '',
     series TEXT NOT NULL DEFAULT '',
     season INTEGER NOT NULL DEFAULT 0,
-    episode INTEGER NOT NULL DEFAULT 0
+    episode INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (library, id)
 );
 
 -- The one order a media browser draws episodes in: a series, then its seasons,
 -- then their episodes, within one library.
 CREATE INDEX episodes_library_series_season_episode ON episodes (library, series, season, episode);
 
--- A file is one physical file on the volume: its path, the library it belongs
--- to, its technical attributes, and its own trickplay path. Every file a
--- title folder holds is a row here, and not the video files alone, so a media
+-- A file is one physical file on the volume, named by the library that
+-- holds it and its path relative to the library root, which together
+-- are the primary key. The row carries the file's technical attributes
+-- and its own trickplay path. Every file a title folder holds is a row
+-- here, and not the video files alone, so a media
 -- browser draws a title's art, subtitles, and extras from the catalog and
 -- never from the volume.
 --
@@ -125,8 +139,8 @@ CREATE INDEX episodes_library_series_season_episode ON episodes (library, series
 --   language  the two-letter or three-letter tag the file name carries
 --   modified  the time the file was last written, in Unix seconds
 CREATE TABLE files (
-    path TEXT NOT NULL PRIMARY KEY DEFAULT '',
     library TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
     container TEXT NOT NULL DEFAULT '',
     video_codec TEXT NOT NULL DEFAULT '',
     audio_codec TEXT NOT NULL DEFAULT '',
@@ -139,30 +153,46 @@ CREATE TABLE files (
     type TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT '',
     language TEXT NOT NULL DEFAULT '',
-    modified INTEGER NOT NULL DEFAULT 0
+    modified INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (library, path)
 );
 
--- The many-to-many link between a file and the items it holds. A multi-episode
--- file names more than one item, and an item with a second encoding holds more
--- than one file.
+-- The many-to-many link between a file and the items it holds, within
+-- one library: a multi-episode file names more than one item, and an
+-- item with a second encoding holds more than one file. All three
+-- columns are the primary key, so the row carries nothing to update
+-- and a repeat write is a no-op.
+--
+-- A join from the item column to an item id must match the library as
+-- well, because an id names one row only inside its own library.
 CREATE TABLE file_items (
+    library TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (path, item)
+    PRIMARY KEY (library, path, item)
 );
 
--- The reverse lookup, from an item to its files.
-CREATE INDEX file_items_item ON file_items (item);
+-- The reverse lookup, from one library's item to its files. It leads
+-- with the library, as every index in this schema does.
+CREATE INDEX file_items_library_item ON file_items (library, item);
 
--- An alias maps one of an item's names to the item: every provider id the
--- sidecar carries, and the folder-name key. So several names resolve to one
--- work, and a lost sidecar still resolves the folder. source records how the
--- name was learned.
+-- An alias maps one of an item's names to the item, inside one
+-- library: every provider id the sidecar carries, and the folder-name
+-- key. So several names resolve to one work, and a lost sidecar still
+-- resolves the folder. The library and the alias together are the
+-- primary key, and source records how the name was learned.
+--
+-- A join from the item column to an item id must match the library as
+-- well, because an id names one row only inside its own library.
 CREATE TABLE aliases (
-    alias TEXT NOT NULL PRIMARY KEY DEFAULT '',
+    library TEXT NOT NULL DEFAULT '',
+    alias TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
-    source TEXT NOT NULL DEFAULT ''
+    source TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, alias)
 );
 
--- The reverse lookup, from an item to the names that resolve to it.
-CREATE INDEX aliases_item ON aliases (item);
+-- The reverse lookup, from one library's item to the names that
+-- resolve to it. It leads with the library, as every index in this
+-- schema does.
+CREATE INDEX aliases_library_item ON aliases (library, item);

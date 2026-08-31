@@ -16,11 +16,19 @@ import (
 	"testing"
 )
 
-// fakeRow is one catalog row the fake keys on, holding the two columns the
-// prune reads: the library the row belongs to, and its path.
+// fakeRow is one catalog row, holding the two columns the prune reads:
+// the library the row belongs to, and its path. Every table the fake
+// holds is keyed the way the schema keys it, by the library and the
+// row's own key joined with a NUL, so the same id under two libraries
+// is two rows here, as it is in the database.
 type fakeRow struct {
 	library string
 	path    string
+}
+
+// fakeKey renders that composite map key from its parts.
+func fakeKey(parts ...string) string {
+	return strings.Join(parts, "\x00")
 }
 
 type fakeCatalog struct {
@@ -112,31 +120,31 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 	p := s.params
 	switch {
 	case strings.HasPrefix(s.sql, "INSERT INTO movies"):
-		f.movies[str(p[0])] = fakeRow{str(p[1]), str(p[3])}
+		f.movies[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[3])}
 	case strings.HasPrefix(s.sql, "INSERT INTO series"):
-		f.series[str(p[0])] = fakeRow{str(p[1]), str(p[3])}
+		f.series[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[3])}
 	case strings.HasPrefix(s.sql, "INSERT INTO episodes"):
-		f.episodes[str(p[0])] = fakeRow{str(p[1]), str(p[3])}
+		f.episodes[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[3])}
 	case strings.HasPrefix(s.sql, "INSERT INTO files"):
-		f.files[str(p[0])] = fakeRow{str(p[1]), str(p[0])}
+		f.files[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[1])}
 	case strings.HasPrefix(s.sql, "INSERT INTO file_items"):
-		f.fileItems[str(p[0])+"\x00"+str(p[1])] = true
+		f.fileItems[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = true
 	case strings.HasPrefix(s.sql, "INSERT INTO aliases"):
-		f.aliases[str(p[0])] = str(p[1])
+		f.aliases[fakeKey(str(p[0]), str(p[1]))] = str(p[2])
 	case strings.HasPrefix(s.sql, "INSERT INTO seen"):
 		f.seen[str(p[0])] = num(p[1])
 	case strings.HasPrefix(s.sql, "DELETE FROM movies"):
-		delete(f.movies, str(p[0]))
+		delete(f.movies, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "DELETE FROM series"):
-		delete(f.series, str(p[0]))
+		delete(f.series, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "DELETE FROM episodes"):
-		delete(f.episodes, str(p[0]))
+		delete(f.episodes, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "DELETE FROM files"):
-		delete(f.files, str(p[0]))
+		delete(f.files, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "DELETE FROM aliases"):
-		delete(f.aliases, str(p[0]))
+		delete(f.aliases, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "DELETE FROM file_items"):
-		delete(f.fileItems, str(p[0])+"\x00"+str(p[1]))
+		delete(f.fileItems, fakeKey(str(p[0]), str(p[1]), str(p[2])))
 	case strings.HasPrefix(s.sql, "DELETE FROM seen"):
 		f.cleanSeen(num(p[0]))
 	}
@@ -202,8 +210,10 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	}
 }
 
-// unmarkedLinks reads the links this library's files hold that the current
-// epoch did not mark, honoring the folder scope where the query names one.
+// unmarkedLinks reads the links this library holds that the current
+// epoch did not mark, honoring the folder scope where the query names
+// one. A link row carries its own library, so the read reaches no
+// other table.
 func (f *fakeCatalog) unmarkedLinks(sql string, p []any) []any {
 	scoped := strings.Contains(sql, "path >=")
 	var library, folder string
@@ -215,8 +225,9 @@ func (f *fakeCatalog) unmarkedLinks(sql string, p []any) []any {
 	}
 	var keys []any
 	for key := range f.fileItems {
-		path, item, _ := strings.Cut(key, "\x00")
-		if f.files[path].library != library {
+		rowLibrary, rest, _ := strings.Cut(key, "\x00")
+		path, item, _ := strings.Cut(rest, "\x00")
+		if rowLibrary != library {
 			continue
 		}
 		if scoped && !inScope(path, folder) {
@@ -266,7 +277,8 @@ func (f *fakeCatalog) unmarkedItems(sql string, p []any) []any {
 		library, epoch = str(p[0]), num(p[1])
 	}
 	var keys []any
-	for key, row := range table {
+	for composite, row := range table {
+		_, key, _ := strings.Cut(composite, "\x00")
 		if row.library != library {
 			continue
 		}
@@ -281,24 +293,28 @@ func (f *fakeCatalog) unmarkedItems(sql string, p []any) []any {
 	return keys
 }
 
-// unmarkedAliases reads the aliases the current epoch did not mark whose
-// item the library, and the folder where the query names one, hold.
+// unmarkedAliases reads this library's aliases that the current epoch
+// did not mark. The alias row carries the library, so the library
+// scopes it the way it scopes an item table, and the item is read only
+// to narrow a scoped prune to one folder.
 func (f *fakeCatalog) unmarkedAliases(sql string, p []any) []any {
 	scoped := strings.Contains(sql, "path >=")
-	epoch := num(p[0])
-	var library, folder string
+	library, epoch := str(p[0]), num(p[1])
+	folder := ""
 	if scoped {
-		library, folder = str(p[1]), str(p[2])
-	} else {
-		library = str(p[1])
+		folder = str(p[3])
 	}
 	scope := f.scopeItems(library, folder, scoped)
 	var keys []any
-	for alias, item := range f.aliases {
+	for composite, item := range f.aliases {
+		rowLibrary, alias, _ := strings.Cut(composite, "\x00")
+		if rowLibrary != library {
+			continue
+		}
 		if f.seen[seenPrefix(sql)+alias] == epoch {
 			continue
 		}
-		if scope[item] {
+		if !scoped || scope[item] {
 			keys = append(keys, alias)
 		}
 	}
@@ -310,7 +326,8 @@ func (f *fakeCatalog) unmarkedAliases(sql string, p []any) []any {
 func (f *fakeCatalog) scopeItems(library, folder string, scoped bool) map[string]bool {
 	scope := map[string]bool{}
 	for _, table := range []map[string]fakeRow{f.movies, f.series, f.episodes} {
-		for id, row := range table {
+		for composite, row := range table {
+			_, id, _ := strings.Cut(composite, "\x00")
 			if row.library != library {
 				continue
 			}
@@ -338,8 +355,9 @@ func (f *fakeCatalog) tableOf(sql string) map[string]fakeRow {
 
 // held reads a whole table under the lock, so a test reads no torn map
 // while a request is in flight.
-// heldLinks copies the file-to-item links, whose keys are the path and the
-// item joined by a NUL, so a test reads them without the lock.
+// heldLinks copies the file-to-item links, whose keys are the library,
+// the path, and the item joined by NULs, so a test reads them without
+// the lock.
 func (f *fakeCatalog) heldLinks() map[string]bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
