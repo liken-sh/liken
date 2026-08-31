@@ -14,8 +14,15 @@ import (
 // scannerCatalogClaimName is the durable catalog volume one Library's
 // scanner pod mounts. It is derived from the Library name, so every pass
 // names the same claim and the operator keeps no record of it.
+//
+// The suffix carries the schema revision. Corrosion refuses to change
+// the primary key of a database it already holds, and an old database
+// started against the new schema starts quietly stale: it logs the
+// refusal, serves the old tables, and fails every write of the new
+// shape, one request at a time. So a fresh database is the migration,
+// and the versioned name is what provisions one.
 func scannerCatalogClaimName(library string) string {
-	return library + "-catalog"
+	return library + "-catalog-v2"
 }
 
 // buildCatalogClaim writes the catalog claim one Library's scanner takes.
