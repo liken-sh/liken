@@ -180,7 +180,13 @@ then reads as belonging to two items, the live one and a dead one, and
 the rows never leave.
 
 Release 2026.08.30-014 deletes an item's links with the item, the way it
-already deletes a departed file's links with the file.
+already deletes a departed file's links with the file. That covers the
+moment an item leaves, and it cannot reach a link whose item left before
+the release, because there is no delete left to attach it to. So the walk
+also reconciles the link table against the items and removes a link that
+names an item no table holds. The invariant is that a link names an item,
+and a walk proves it rather than trusting every path into the catalog to
+have remembered.
 
 It names the cost of the derived id in a way the design did not.
 [Writing ids back to the volume](../open-problems/writing-ids-back-to-the-volume.md)

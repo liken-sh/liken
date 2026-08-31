@@ -644,3 +644,43 @@ func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
 		}
 	}
 }
+
+// A link row can outlive its item without the item ever passing through a
+// prune: a release that deleted the item and not its links leaves the row
+// stranded, and no later delete by item reaches it. The walk reconciles the
+// link table against the items, so the stranded row leaves on the next
+// clean walk.
+func TestPruneLibraryDeletesALinkWhoseItemIsAlreadyGone(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+
+	// The file also links to an item no table holds, the shape an earlier
+	// release left behind.
+	stranded := fileRow{Path: "One/movie.mkv", Items: []string{"movie:path:one"}}
+	if _, err := catalog.UpsertFileItems(ctx, []fileRow{stranded}); err != nil {
+		t.Fatal(err)
+	}
+
+	epoch := int64(1000)
+	marked := []string{seenItem + "movie:tmdb:1", seenFile + "One/movie.mkv", seenAlias + "movie:tmdb:1"}
+	if _, err := catalog.markSeen(ctx, marked, epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pruneLibrary(ctx, catalog, "house/movies", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	for key := range fake.heldLinks() {
+		if strings.HasSuffix(key, "\x00movie:path:one") {
+			t.Errorf("file_items holds %q, want the stranded link reconciled away", key)
+		}
+	}
+	if len(fake.heldLinks()) != 1 {
+		t.Errorf("links = %v, want only the live one", fake.heldLinks())
+	}
+}

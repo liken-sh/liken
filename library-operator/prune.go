@@ -223,10 +223,44 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
+	n, err = pruneOrphanLinks(ctx, catalog, library)
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
 	if _, err := catalog.cleanSeen(ctx, epoch); err != nil {
 		return removed, err
 	}
 	return removed, nil
+}
+
+// pruneOrphanLinks deletes the link rows whose item the catalog no longer
+// holds. Deleting an item's links with the item covers the moment an item
+// leaves, and this covers every other way a link outlives its item: a
+// release that left them behind, a write that failed partway, a rescan the
+// prune could not finish. The invariant is that a link names an item, so
+// the walk reconciles it rather than trusting that every path into the
+// catalog remembered to.
+func pruneOrphanLinks(ctx context.Context, catalog *Catalog, library string) (int, error) {
+	return catalog.sweep(ctx, orphanLinkSQL(), []any{library, pruneBatch},
+		func(ctx context.Context, items []string) error {
+			_, err := catalog.DeleteFileItemsByItem(ctx, items)
+			return err
+		})
+}
+
+// orphanLinkSQL reads the items this library's files link to that no item
+// table holds, one bounded batch. The link row carries no library of its
+// own, so the scope is the library its file belongs to.
+func orphanLinkSQL() string {
+	return `SELECT DISTINCT fi.item FROM file_items fi` +
+		` JOIN files f ON f.path = fi.path` +
+		` WHERE f.library = ?` +
+		` AND fi.item NOT IN (SELECT id FROM movies)` +
+		` AND fi.item NOT IN (SELECT id FROM series)` +
+		` AND fi.item NOT IN (SELECT id FROM episodes)` +
+		` LIMIT ?`
 }
 
 // itemPruneSQL reads the keys of a table this library holds that the

@@ -203,11 +203,35 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 		lib := str(p[0])
 		count := f.countIn(f.movies, lib) + f.countIn(f.series, lib) + f.countIn(f.episodes, lib)
 		return []any{float64(count)}
+	case strings.Contains(sql, "FROM file_items"):
+		return f.orphanLinks(str(p[0]))
 	case strings.Contains(sql, "FROM aliases"):
 		return f.unmarkedAliases(sql, p)
 	default:
 		return f.unmarkedItems(sql, p)
 	}
+}
+
+// orphanLinks reads the items this library's files link to that no item
+// table holds, the read the link reconciliation drives.
+func (f *fakeCatalog) orphanLinks(library string) []any {
+	seen := map[string]bool{}
+	var items []any
+	for key := range f.fileItems {
+		path, item, _ := strings.Cut(key, "\x00")
+		if f.files[path].library != library || seen[item] {
+			continue
+		}
+		_, isMovie := f.movies[item]
+		_, isSeries := f.series[item]
+		_, isEpisode := f.episodes[item]
+		if isMovie || isSeries || isEpisode {
+			continue
+		}
+		seen[item] = true
+		items = append(items, item)
+	}
+	return items
 }
 
 func (f *fakeCatalog) countIn(table map[string]fakeRow, library string) int {
