@@ -37,6 +37,11 @@ These plans are designed. Each keeps its number and moves to
   decisions on a screen topic and loses its socket, the seven Lua
   modules that drew the screen are deleted, and the playback overlay
   stays. The library layer depends on it.
+* [21, A remote that teaches its
+  keymap](21-a-remote-that-teaches-its-keymap.md). A stub. A discovery
+  mode of the remote pod logs every key code as it arrives, named the
+  way a `Keymap` names it, so a person maps unknown hardware by
+  pressing its buttons. The details wait for a design pass.
 
 ## Completed
 
