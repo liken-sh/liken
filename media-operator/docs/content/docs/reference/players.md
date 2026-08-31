@@ -129,6 +129,7 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus: the status topic, the volume topic where the unit has sinks, and the screen topic that carries the sleep, wake, focus, and present moments. Omit it to inherit the default MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
 | <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
 | <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; state it only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
@@ -154,6 +155,7 @@ rules every topic follows.
 | `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
 | `players/{namespace}/{name}/volume` | the operator and the pods | yes | the listening level |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
+| `players/{namespace}/{name}/screen` | the idle pod | no | what the idle screen shows next |
 | `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
 
 ### `status`
@@ -212,10 +214,38 @@ and applies or lifts `spec.override` on the screen's `Display`. What
 the panel actually shows comes back the other way, from the
 `Display`'s observed state into `status.panel`.
 
+### `screen`
+
+What the idle sidecar decided for the unit's screen, one moment per
+message:
+
+    {"event": "focus", "remote": 1}
+
+The sidecar holds the quiet window, the keymaps, and the focus gate,
+and these four moments are what it decides. The idle client reads
+them and draws them, whichever client
+[`spec.idle.image`](#specidle--image) named.
+
+| `event` | What it says |
+|---|---|
+| `sleep` | The quiet window ran out, so the shade comes down. |
+| `wake` | A press or a starting `Play` came, so the shade goes up. |
+| `focus` | A live mark named this `Player`. `remote` is the controller's index in `spec.remotes` order. |
+| `present` | A `Play` ended, and the screen is the idle client's again. |
+
+Only `focus` carries `remote`. Nothing on this topic is retained: a
+retained moment would replay a press to a client that restarted.
+
+The unit's own state stays on the retained topics above. A client
+reads `status` for the name, the activity, and the parts, and
+`volume` for the level. The first `volume` message of a session is
+the broker's retained catch-up, which sets the level and shows no
+indicator, and every message after it is a press.
+
 ### `commands`
 
 The operator's channel to the `Player`'s idle pod. It carries
 `{"action": "re-present"}` when a `Play` ends, and the idle sidecar
-recreates the idle surface. A controller never sends it, and it
-carries none of the media actions a
+states the `present` moment on [`screen`](#screen). A controller
+never sends it, and it carries none of the media actions a
 [Play's commands topic](/docs/reference/plays/#commands) accepts.

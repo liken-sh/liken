@@ -552,7 +552,7 @@ func TestResolveIdleFadeAfterTierWins(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			mustMatch(t, resolveIdle(one.player, one.defaults).FadeAfterSeconds, one.want)
+			mustMatch(t, resolveIdle(one.player, one.defaults, testIdleImage).FadeAfterSeconds, one.want)
 		})
 	}
 }
@@ -582,7 +582,7 @@ func TestResolveIdleOffAfterTierWins(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			mustMatch(t, resolveIdle(one.player, one.defaults).OffAfterSeconds, one.want)
+			mustMatch(t, resolveIdle(one.player, one.defaults, testIdleImage).OffAfterSeconds, one.want)
 		})
 	}
 }
@@ -618,22 +618,64 @@ func TestResolveIdleOffModeTierWins(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			mustMatch(t, resolveIdle(one.player, one.defaults).OffMode, one.want)
+			mustMatch(t, resolveIdle(one.player, one.defaults, testIdleImage).OffMode, one.want)
+		})
+	}
+}
+
+// The idle client resolves the same way the two windows do, the Player
+// first and the household default second. The operator's own IDLE_IMAGE
+// is the tier under both, so the resolved policy always names a client
+// and the pod carries no fallback of its own.
+func TestResolveIdleImageTierWins(t *testing.T) {
+	cases := []struct {
+		name     string
+		player   *IdlePolicy
+		defaults *IdlePolicy
+		want     string
+	}{
+		{
+			name:     "the Player over the default",
+			player:   &IdlePolicy{Image: "ghcr.io/liken-sh/media-browser:2026.09.01-001"},
+			defaults: &IdlePolicy{Image: "ghcr.io/liken-sh/kiosk:2026.09.01-001"},
+			want:     "ghcr.io/liken-sh/media-browser:2026.09.01-001",
+		},
+		{
+			name:     "the default where the Player states none",
+			defaults: &IdlePolicy{Image: "ghcr.io/liken-sh/media-browser:2026.09.01-001"},
+			want:     "ghcr.io/liken-sh/media-browser:2026.09.01-001",
+		},
+		{name: "the IDLE_IMAGE client where neither states one", want: testIdleImage},
+		{
+			name:     "an empty image on the Player",
+			player:   &IdlePolicy{Image: ""},
+			defaults: &IdlePolicy{Image: "ghcr.io/liken-sh/media-browser:2026.09.01-001"},
+			want:     "ghcr.io/liken-sh/media-browser:2026.09.01-001",
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, resolveIdle(one.player, one.defaults, testIdleImage).Image, one.want)
 		})
 	}
 }
 
 // Each field resolves on its own, so a Player that states one still
-// inherits the other two from the household.
+// inherits the rest from the household.
 func TestResolveIdleSettlesEachFieldOnItsOwn(t *testing.T) {
 	player := &IdlePolicy{OffMode: offModePower}
-	defaults := &IdlePolicy{FadeAfterSeconds: ptr(int64(900)), OffAfterSeconds: ptr(int64(1800))}
+	defaults := &IdlePolicy{
+		FadeAfterSeconds: ptr(int64(900)),
+		OffAfterSeconds:  ptr(int64(1800)),
+		Image:            "ghcr.io/liken-sh/media-browser:2026.09.01-001",
+	}
 
-	got := resolveIdle(player, defaults)
+	got := resolveIdle(player, defaults, testIdleImage)
 
 	mustMatch(t, got.FadeAfterSeconds, int64(900))
 	mustMatch(t, got.OffAfterSeconds, int64(1800))
 	mustMatch(t, got.OffMode, offModePower)
+	mustMatch(t, got.Image, "ghcr.io/liken-sh/media-browser:2026.09.01-001")
 }
 
 // ptr is one value's address, for a tier that states a number.

@@ -263,6 +263,10 @@ const defaultOffMode = offModeBacklight
 // are set on the idle pod as plain values, and the off mode stays
 // with the operator, which writes the override.
 type resolvedIdle struct {
+	// The image the idle client runs, always set, because the operator's
+	// own IDLE_IMAGE is the floor under both tiers.
+	Image string
+
 	FadeAfterSeconds int64
 
 	// The settled off window, and the override the operator
@@ -273,21 +277,26 @@ type resolvedIdle struct {
 
 // resolveIdle settles each idle field on its own: the Player's block,
 // then the household default, then the built-in. Field by field, so a
-// Player that states one field still inherits the rest.
-func resolveIdle(player, defaults *IdlePolicy) resolvedIdle {
+// Player that states one field still inherits the rest. image is the
+// client the operator reads from IDLE_IMAGE, the last tier under the
+// two the cluster states.
+func resolveIdle(player, defaults *IdlePolicy, image string) resolvedIdle {
 	var fade, off []*int64
-	var mode []string
+	var mode, images []string
 	if player != nil {
 		fade = append(fade, player.FadeAfterSeconds)
 		off = append(off, player.OffAfterSeconds)
 		mode = append(mode, player.OffMode)
+		images = append(images, player.Image)
 	}
 	if defaults != nil {
 		fade = append(fade, defaults.FadeAfterSeconds)
 		off = append(off, defaults.OffAfterSeconds)
 		mode = append(mode, defaults.OffMode)
+		images = append(images, defaults.Image)
 	}
 	return resolvedIdle{
+		Image:            firstStatedString(append(images, image)),
 		FadeAfterSeconds: firstStatedSeconds(fade, defaultFadeAfterSeconds),
 		OffAfterSeconds:  firstStatedSeconds(off, defaultOffAfterSeconds),
 		OffMode:          firstStatedIdleMode(mode),

@@ -16,9 +16,8 @@ end
 -- a level above it fills no further.
 local FULL = 100
 
--- The row is the third line of the top-right column, under the clock and
--- the activity line, because the low center of the screen holds the
--- scrubber on a Play and the mark on the idle screen.
+-- The row draws in the top-right column, two line pitches under the clock,
+-- because the scrubber draws across the low center of the screen.
 local function right()
   return theme.canvas.w - theme.margin.x
 end

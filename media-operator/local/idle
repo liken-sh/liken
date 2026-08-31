@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 # local/idle opens the liken idle screen on this workstation, so the clock, the
-# centered logo, and the identity block can be seen without a cluster and
-# without a release. It runs mpv with no file, the way the standing idle pod
-# does, and loads the same display script the player runs, so an edit to a
-# display/*.lua file shows on the next run.
+# centered mark, and the identity block can be seen without a cluster and
+# without a release. It builds the idle screen from the source in this
+# checkout, so an edit to an element shows on the next run.
 #
 # The idle screen reads three environment values, the same ones the operator
 # sets on the idle pod: the unit's friendly name, its parts one per line, and
 # the zone the clock reads. This script sets them from its arguments.
 #
 # On a cluster the bus drives the screen. This script sets IDLE_PREVIEW=1
-# instead, and under that variable the display binds five keys that build the
-# same messages the idle pod's sidecar sends:
+# instead, and under that variable the client binds keys that build the same
+# messages the idle pod's sidecar publishes:
 #
 #   p   a Play starts. The mark ramps into motion and the activity line
 #       appears.
 #   o   the Play runs. The mark stops, the way it does behind a film.
 #   i   the Play ends. The idle surface returns in motion and eases to still.
-#   d   the last part connects or disconnects. Its line dims, then pulses
+#   d   the last part connects or disconnects. Its line dims, then flashes
 #       back.
 #   f   focus lands on the last part, the remote. Its hexagon draws in the
 #       left margin and beats white. A press while it is focused beats it
@@ -29,6 +28,7 @@
 #       fades on its own clock, the way a press from a remote shows it.
 #   m   a mute press. The glyph carries the muted state on the same
 #       indicator.
+#   q   quit.
 #
 # Usage:
 #   local/idle                          a sample unit, so a first run draws a
@@ -36,40 +36,47 @@
 #   local/idle "Studio Desk" "LG Ultrawide Screen" "Built-in Speakers"
 #                                        the first argument is the name, the
 #                                        rest are the components in order
+#   local/idle -- --script 1.0:p --quit-after 5
+#                                        every argument after -- reaches the
+#                                        binary, so a run can take the
+#                                        harness's own flags
 set -euo pipefail
 
-# The display script sits in the repository above this file, so its path
-# resolves from this script's own directory and needs no absolute path.
+# The crate is in the repository above this file, so its path resolves from
+# this script's own directory and needs no absolute path.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-display_dir="$here/../display"
+cd "$here/../idle"
 
-# The name is the first argument, the components are the rest. With no
-# arguments, show a sample unit.
-if [ "$#" -ge 1 ]; then
-  name="$1"
+# The unit is every argument before --, and the harness takes every argument
+# after it. The two lists need a separator, because a name and a part are both
+# free text and neither one announces where the unit ends.
+unit=()
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+  unit+=("$1")
   shift
-  components="$(printf '%s\n' "$@")"
+done
+[ "${1:-}" = "--" ] && shift
+
+# The name is the first of those arguments, the components are the rest. With
+# no arguments, show a sample unit.
+if [ "${#unit[@]}" -ge 1 ]; then
+  name="${unit[0]}"
+  components="$(printf '%s\n' "${unit[@]:1}")"
 else
   name="Studio Lab"
   components=$'Portable Screen\nBuilt-in Speakers\nStudio Dualsense'
 fi
 
-# --idle and --force-window hold a window with no file, the way the idle pod
-# runs. --load-scripts=no skips the workstation's own mpv scripts, so a
-# personal on-screen controller does not draw over the display. --osc=no turns
-# off mpv's built-in controller, because the display draws its own. The window
-# opens at 1280x720, and the overlay scales to it. Quit with q.
+# The window opens at 1280x720, so it fits beside an editor on a workstation.
+# The screen draws in its own space, 1080 rows tall, and takes its width from
+# the surface's ratio, so a small window shows the layout a television shows. A
+# --size after -- comes later on the command line and wins, because the parser
+# takes the last value of a flag.
 exec env \
   TZ="${TZ:-America/New_York}" \
   IDLE_PLAYER_NAME="$name" \
   IDLE_PLAYER_COMPONENTS="$components" \
   IDLE_PREVIEW=1 \
-  mpv \
-    --idle=yes \
-    --force-window=yes \
-    --no-audio \
-    --load-scripts=no \
-    --osc=no \
-    --script="$display_dir" \
-    --geometry=1280x720 \
-    --title="liken idle preview"
+  cargo run --release --locked -- \
+    --size 1280x720 \
+    "$@"

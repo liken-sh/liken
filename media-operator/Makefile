@@ -2,14 +2,16 @@
 # each one to the domain that owns it. `make test` runs every check CI
 # runs, in the same commands, so a change that passes here passes
 # there. The Go operator is the module at the root, so its checks are
-# here; the docs are their own domain with their own Makefile.
+# here; the idle screen and the docs are their own domains with
+# their own Makefiles.
 #
 # The coverage floors are the one number each gate enforces: the Go
-# floor is in .testcoverage.yml. CI reads the same file, so a floor
-# moves in one place.
+# floor is in .testcoverage.yml, and the Rust floor is in
+# idle/Makefile. CI reads the same files, so a floor moves in one
+# place.
 
 .PHONY: test
-test: test-go test-docs
+test: test-go test-idle test-docs
 
 # The coverage gate measures on its own run, on a pinned toolchain.
 # Go 1.27 splits a basic block into one profile row per run of code
@@ -32,6 +34,10 @@ test-go:
 	go test -race ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+
+.PHONY: test-idle
+test-idle:
+	$(MAKE) -C idle test
 
 .PHONY: test-docs
 test-docs:

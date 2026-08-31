@@ -42,6 +42,11 @@ end
 -- the dark-scheme lichen green --link, the text is --ink, and the muted grey
 -- is --ink-muted. The bar track is the light-scheme --link, a deep green dark
 -- enough that the bright elapsed fill reads over it.
+--
+-- These values are written out here, and the idle client parses the same
+-- tokens out of liken.css through the brand's Rust crate. Lua reads no crate,
+-- so this is the second place a brand color lives and the one place it has to
+-- be changed by hand. The token names above say which value to read.
 theme.color = {
   text = "&HE8E8E8&",
   fill = "&H9AC4B4&",
@@ -114,14 +119,12 @@ theme.type = {
 }
 
 -- The layout margins and the shared rows. x is the side margin every
--- flush-left and flush-right element keeps. y is the top margin, and by
--- symmetry the bottom one: the clock, the header, and the activity line
--- hang from it, and the identity block and the preview legend stand the
--- same distance off the bottom edge. bar_y is the scrubber bar's center
--- line, where the image counter also sits. panel_bottom is the baseline a
--- chooser or an adjuster panel grows upward from. They live here because
--- two modules that share a row must read one number, not keep two copies
--- that happen to agree.
+-- flush-left and flush-right element keeps. y is the top margin, which the
+-- header, the clock, and the volume row all measure down from. bar_y is the
+-- scrubber bar's center line, which the image counter shares. panel_bottom
+-- is the baseline a chooser or an adjuster panel grows upward from. The
+-- numbers are defined here because two modules that share a row must read
+-- one number, and not keep two copies that happen to agree.
 theme.margin = {
   x = 140,
   y = 90,
@@ -129,15 +132,17 @@ theme.margin = {
 theme.bar_y = 904
 theme.panel_bottom = 876
 -- line_pitch is the drop from one line of the top-right column to the next.
--- The clock hangs at the top margin, the activity line one pitch under it,
--- and the volume row one pitch under that, so the three read as a column and
--- no two of them touch.
+-- The clock draws at the top margin and the volume row two pitches under it,
+-- so a clear line separates the two and the row never crowds the clock.
 theme.line_pitch = theme.type.small + 12
 
--- The whole display draws in one family. libass resolves it through fontconfig,
--- and the player image installs the font, so the text renders the same on every
--- machine. With no installed match, libass falls back and the look drifts.
-theme.font = "Source Sans 3"
+-- The whole display draws in one family. libass resolves it through
+-- fontconfig, and the player image installs the family, so the text renders
+-- the same on every machine. Noto Sans is that family because it is also what
+-- fontconfig falls back to: a face the image failed to install would draw as
+-- itself rather than as a look that quietly drifted. The idle screen draws in
+-- the same family for the same reason.
+theme.font = "Noto Sans"
 
 -- Place a shape at its top-left with an7 and pos, so the path points are the
 -- shape's own local box. p1 is the ASS vector drawing mode.

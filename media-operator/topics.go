@@ -55,6 +55,11 @@ const playerPanelKind = "panel"
 // tree.
 const playerVolumeKind = "volume"
 
+// The last segment of the players topic that carries what the idle
+// sidecar decided for the screen, beside the panel, commands, status,
+// and volume kinds of the same tree.
+const playerScreenKind = "screen"
+
 // remoteEventsTopic carries one Remote's raw button and axis events.
 // The standing remote pod publishes to it, not retained, because a
 // press is an event and not a state. The keymap stays off this topic,
@@ -209,8 +214,8 @@ func playCommandsTopic(base, namespace, name string) string {
 }
 
 // playerCommandsTopic carries the display commands the operator sends
-// one Player's idle pod, the re-present that recreates the idle surface
-// when a Play ends. It is not retained, because a re-present is an event
+// one Player's idle pod, the re-present that returns the screen to the
+// idle client when a Play ends. It is not retained, because a re-present is an event
 // and not a state, the same as the play-commands and remote-events
 // topics. It stays off the plays tree because it drives the standing
 // idle pod, not a Play, and it carries no media vocabulary a controller
@@ -276,6 +281,21 @@ func parsePlayerTopic(base, topic, kind string) (namespace, name string, ok bool
 // the authority and no observer ever writes back what it saw.
 func playerVolumeTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerVolumeKind
+}
+
+// playerScreenTopic carries the four moments the idle sidecar decides
+// for one unit's screen: the shade down, the shade up, a focus mark
+// that named this unit, and the surface the idle client presents again
+// when a Play ends. The sidecar is the only writer, and whichever
+// client the idle pod runs reads them here.
+//
+// Nothing on this topic is retained. The shade up, the focus, and the
+// surface are moments and not state, and a retained moment replays a
+// press to a client that restarted. The shade down is the one lasting
+// state here, and it is not retained either, so one rule covers the
+// topic.
+func playerScreenTopic(base, namespace, name string) string {
+	return base + "/players/" + namespace + "/" + name + "/" + playerScreenKind
 }
 
 // playerVolumeFilter is the operator's one subscription across

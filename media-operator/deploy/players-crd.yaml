@@ -299,6 +299,19 @@ spec:
                     This unit's idle screen policy. Each field overrides
                     the default MediaPreferences on its own.
                   properties:
+                    image:
+                      type: string
+                      description: >-
+                        The container image that draws this unit's idle
+                        screen. The image starts with its own
+                        entrypoint and reads the unit's state from the
+                        bus: the status topic, the volume topic where
+                        the unit has sinks, and the screen topic that
+                        carries the sleep, wake, focus, and present
+                        moments. Omit it to inherit the default
+                        MediaPreferences. Where no tier names an image,
+                        the screen runs the idle client the media
+                        operator ships.
                     fadeAfterSeconds:
                       type: integer
                       format: int64

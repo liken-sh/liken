@@ -110,62 +110,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 	}
 }
 
-func TestIdleArgvBuildsMPVsIdleCommand(t *testing.T) {
-	mpv := useMPV(t)
-	useSocket(t, "/tmp/test-mpv.sock")
-	useScriptDir(t, "/test-display")
-
-	cases := []struct {
-		name          string
-		applicationID string
-		want          []string
-	}{
-		{
-			// No file, no audio, and no trailing media path: the idle client
-			// only draws the clock. It serves the IPC socket so the idle
-			// command sidecar can recreate the surface when a Play ends.
-			name: "no display claim",
-			want: []string{
-				"--vo=gpu", "--gpu-context=wayland", "--fullscreen",
-				"--idle=yes", "--force-window=yes", "--no-audio",
-				"--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display", "--osc=no",
-			},
-		},
-		{
-			name:          "the display claim names the surface",
-			applicationID: "display-0",
-			want: []string{
-				"--vo=gpu", "--gpu-context=wayland", "--fullscreen",
-				"--idle=yes", "--force-window=yes", "--no-audio",
-				"--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display", "--osc=no",
-				"--wayland-app-id=display-0",
-			},
-		},
-	}
-
-	for _, each := range cases {
-		t.Run(each.name, func(t *testing.T) {
-			t.Setenv(displayAppIDVariable, each.applicationID)
-			argv, err := idleArgv()
-			mustSucceed(t, err)
-			// argv[0] is the resolved binary, so the want list is the mpv
-			// path followed by the arguments the shim built.
-			mustMatchAll(t, argv, append([]string{mpv}, each.want...))
-		})
-	}
-}
-
-func TestIdleArgvFailsWhenTheImageCarriesNoMPV(t *testing.T) {
-	was := mpvBinary
-	t.Cleanup(func() { mpvBinary = was })
-	mpvBinary = "definitely-not-a-real-mpv-binary"
-
-	_, err := idleArgv()
-	mustFail(t, err)
-}
-
 func TestPlayerArgvFailsWhenTheImageCarriesNoMPV(t *testing.T) {
 	was := mpvBinary
 	t.Cleanup(func() { mpvBinary = was })

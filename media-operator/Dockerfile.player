@@ -41,10 +41,10 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 # client context without /usr/share/pipewire/client.conf, that file
 # ships in pipewire-bin, and --ao=pipewire fails without it.
 #
-# The display draws its text in Source Sans 3, so fonts-adobe-sourcesans3
-# installs that family. fonts-noto-core covers the glyphs Source Sans 3 does
-# not carry, such as a foreign title or a subtitle track name, so no glyph
-# drops to a blank box.
+# The display draws its text in Noto Sans, which fonts-noto-core carries. That
+# family is also fontconfig's own fallback, so one package draws the display
+# and covers the glyphs a foreign title or a subtitle track name needs, and no
+# glyph drops to a blank box.
 #
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
 # Korean, so a CJK title or subtitle track name renders instead of a blank box.
@@ -70,7 +70,6 @@ RUN apt-get update \
         intel-media-va-driver=26.1.2+dfsg1-1 \
         libgl1-mesa-dri=26.0.8-1ubuntu0.3 \
         pipewire-bin=1.6.2-1ubuntu1.1 \
-        fonts-adobe-sourcesans3=3.052+dfsg-2 \
         fonts-noto-core=20201225-2build1 \
         fonts-droid-fallback=1:8.1.0r7-1~1.gbp36536bbuild1 \
         tzdata=2026c-0ubuntu0.26.04.1 \

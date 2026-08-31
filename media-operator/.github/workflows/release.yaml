@@ -1,18 +1,20 @@
 # A pushed tag cuts a release. This workflow runs the tests, builds
-# the operator image and the player image, proves the player image
-# can run mpv, and pushes both to ghcr.io under the tag's name and
-# :latest. A push to main releases nothing: ci.yaml tests it and
-# stops. The tag is the release act, as in the main liken repository,
-# so main takes docs and intermediate work freely and every image in
-# the registry traces to a version somebody chose to name.
+# the operator image, the player image, and the idle image, proves the
+# player image can run mpv and the idle image can start, and pushes all
+# three to ghcr.io under the tag's name and :latest. A push to main
+# releases nothing: ci.yaml tests it and stops. The tag is the release
+# act, as in the main liken repository, so main takes docs and
+# intermediate work freely and every image in the registry traces to a
+# version somebody chose to name.
 #
 # The version is the tag, in liken's own scheme: 2026.08.20-001. The
 # release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The two images release together, always. The operator stamps the
-# player image into every playback pod, and a pair that could drift
-# apart would put the report contract at two versions at once.
+# The three images release together, always. The operator stamps the
+# player image into every playback pod and the idle image into every
+# idle pod, and images that could drift apart would put the report
+# contract and the screen topic at two versions at once.
 name: release
 
 on:
@@ -45,7 +47,12 @@ jobs:
           }
           echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
 
+      # The idle image compiles liken-iced out of the brand submodule
+      # at docs/themes/brand, and the documentation builds against the
+      # theme in the same checkout.
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -99,6 +106,28 @@ jobs:
             ghcr.io/liken-sh/media-operator-player:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator-player:latest
 
+      - name: Build the idle image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.idle
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/media-operator-idle:${{ env.VERSION }}
+            ghcr.io/liken-sh/media-operator-idle:latest
+
+      # The gate on the idle image, the same shape the player's gate
+      # takes. The runner has no GPU and no compositor, so the client
+      # cannot draw; what can break invisibly is the closure. The
+      # binary prints its flags without opening a window, which proves
+      # it loaded every library it links.
+      - name: Prove the idle image
+        run: |
+          set -eu
+          docker run --rm "ghcr.io/liken-sh/media-operator-idle:$VERSION" --help > /dev/null
+
       # The gate on the player image. The runner has no GPU, no
       # Wayland, and no PipeWire, so nothing here plays; what can
       # break invisibly is the closure. mpv proves it can load its
@@ -120,3 +149,5 @@ jobs:
           docker push "ghcr.io/liken-sh/media-operator:latest"
           docker push "ghcr.io/liken-sh/media-operator-player:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-player:latest"
+          docker push "ghcr.io/liken-sh/media-operator-idle:$VERSION"
+          docker push "ghcr.io/liken-sh/media-operator-idle:latest"

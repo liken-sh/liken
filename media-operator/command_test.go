@@ -17,6 +17,19 @@ import (
 	"time"
 )
 
+// readLines reads n newline-delimited lines from the connection, under a
+// deadline, so a writer that sends too few does not hang the test.
+func readLines(t *testing.T, conn net.Conn, n int) []string {
+	t.Helper()
+	mustSucceed(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+	scanner := bufio.NewScanner(conn)
+	var lines []string
+	for len(lines) < n && scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	return lines
+}
+
 // A named command on the commands topic becomes mpv's own command words.
 // mpv is a pipe here, so the test reads the line the command sidecar
 // writes.

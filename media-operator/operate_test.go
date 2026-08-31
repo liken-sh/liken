@@ -209,6 +209,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 	return &operator{
 		client:     testAPIClient(t, cluster.handler(t)),
 		image:      "registry.example/player:test",
+		idleImage:  testIdleImage,
 		busAddress: "bus.media.svc:1883",
 		topicBase:  defaultTopicBase,
 		// The bus is never Run, so a publish finds a nil write queue and

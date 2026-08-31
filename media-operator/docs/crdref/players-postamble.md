@@ -9,6 +9,7 @@ rules every topic follows.
 | `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
 | `players/{namespace}/{name}/volume` | the operator and the pods | yes | the listening level |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
+| `players/{namespace}/{name}/screen` | the idle pod | no | what the idle screen shows next |
 | `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
 
 ### `status`
@@ -67,10 +68,38 @@ and applies or lifts `spec.override` on the screen's `Display`. What
 the panel actually shows comes back the other way, from the
 `Display`'s observed state into `status.panel`.
 
+### `screen`
+
+What the idle sidecar decided for the unit's screen, one moment per
+message:
+
+    {"event": "focus", "remote": 1}
+
+The sidecar holds the quiet window, the keymaps, and the focus gate,
+and these four moments are what it decides. The idle client reads
+them and draws them, whichever client
+[`spec.idle.image`](#specidle--image) named.
+
+| `event` | What it says |
+|---|---|
+| `sleep` | The quiet window ran out, so the shade comes down. |
+| `wake` | A press or a starting `Play` came, so the shade goes up. |
+| `focus` | A live mark named this `Player`. `remote` is the controller's index in `spec.remotes` order. |
+| `present` | A `Play` ended, and the screen is the idle client's again. |
+
+Only `focus` carries `remote`. Nothing on this topic is retained: a
+retained moment would replay a press to a client that restarted.
+
+The unit's own state stays on the retained topics above. A client
+reads `status` for the name, the activity, and the parts, and
+`volume` for the level. The first `volume` message of a session is
+the broker's retained catch-up, which sets the level and shows no
+indicator, and every message after it is a press.
+
 ### `commands`
 
 The operator's channel to the `Player`'s idle pod. It carries
 `{"action": "re-present"}` when a `Play` ends, and the idle sidecar
-recreates the idle surface. A controller never sends it, and it
-carries none of the media actions a
+states the `present` moment on [`screen`](#screen). A controller
+never sends it, and it carries none of the media actions a
 [Play's commands topic](/docs/reference/plays/#commands) accepts.

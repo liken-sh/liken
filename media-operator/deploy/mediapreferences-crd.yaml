@@ -100,6 +100,18 @@ spec:
                     while nothing plays, read for each field a
                     Player's own block leaves unset.
                   properties:
+                    image:
+                      type: string
+                      description: >-
+                        The container image that draws every idle
+                        screen. The image starts with its own
+                        entrypoint and reads each unit's state from the
+                        bus: the status topic, the volume topic where
+                        the unit has sinks, and the screen topic that
+                        carries the sleep, wake, focus, and present
+                        moments. Unset, every screen the household does
+                        not override runs the idle client the media
+                        operator ships.
                     fadeAfterSeconds:
                       type: integer
                       format: int64

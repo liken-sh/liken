@@ -40,10 +40,17 @@ spec:
             # The image the playback pods run: mpv under this same
             # binary as the argument shim. The operator stamps it into
             # every pod it creates. It is an environment variable
-            # rather than a constant so a cluster pins the pair of
+            # rather than a constant so a cluster pins the three
             # images together with one patch.
             - name: PLAYER_IMAGE
               value: ghcr.io/liken-sh/media-operator-player:latest
+            # The image every idle screen runs: the client that reads a
+            # unit's state off the bus and draws the clock while
+            # nothing plays. The operator stamps it into every idle pod
+            # whose Player names no image of its own, and it is set
+            # here for the reason the player image is.
+            - name: IDLE_IMAGE
+              value: ghcr.io/liken-sh/media-operator-idle:latest
             # The broker the operator and every pod reach: the bus
             # Service in this namespace. The operator cannot derive the
             # Service name, so the manifest states it, and the operator

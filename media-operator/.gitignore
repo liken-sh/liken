@@ -11,3 +11,7 @@
 # The coverage profile the gate measures. CI writes it on every
 # run and reads it once; it never belongs to the tree.
 /coverage.out
+
+# The Rust build tree. cargo writes it under idle/ and rebuilds anything
+# it needs, so it never belongs to the tree.
+/idle/target/

@@ -1,0 +1,16 @@
+# What never belongs in an image build context. All three images take the
+# repository root as their context, so one file covers them.
+#
+# cargo writes idle/target on a workstation, and it holds gigabytes that no
+# build inside an image reads: the image compiles the crate again on its own
+# pinned toolchain.
+idle/target/
+
+# The documentation site and its theme. The idle image reads the crate and the
+# two brand files its Dockerfile names, and nothing in any image serves a page.
+docs/public/
+docs/resources/
+docs/themes/brand/.git
+
+# The Go coverage profile the gate writes on every run.
+coverage.out

@@ -75,9 +75,73 @@ jobs:
   # so a release of a commit CI already built rebuilds nothing. A pull
   # request from a fork holds a read-only token, so it reads the cache
   # and writes none.
+  idle:
+    # The headless tests run under cage, and the cage in Ubuntu 24.04
+    # (0.1.5) dies on an assertion when wlr-randr changes the output
+    # mode. Ubuntu 26.04 carries 0.2.1, which takes the change, and it
+    # is the release the workstations run.
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: idle
+    env:
+      # Incremental artifacts are large, and a fresh runner never
+      # reuses them. Without this they would fill the cache and gain
+      # nothing.
+      CARGO_INCREMENTAL: 0
+      # cage renders with pixman, so the compositor needs no GPU on
+      # the runner.
+      WLR_RENDERER: pixman
+    steps:
+      # The idle screen builds against liken-iced, the crate in the
+      # brand repository that carries the mark and the palette. It
+      # arrives with the documentation theme's submodule at
+      # docs/themes/brand, and a checkout without it resolves no
+      # dependency.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The idle screen's tests open a real window. cage is the
+      # compositor, wlr-randr sets the headless mode, and
+      # mesa-vulkan-drivers carries lavapipe, the software Vulkan
+      # device a runner with no GPU draws through.
+      - name: install the headless graphics
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
+            libwayland-client0 libxkbcommon0
+
+      # idle/rust-toolchain.toml names the version and the
+      # components. rustup installs what the file names, so this
+      # workflow pins no version of its own.
+      - name: install the toolchain
+        run: rustup show
+
+      # The cache holds the cargo registry and target/, keyed on
+      # Cargo.lock. Almost all of the build is dependencies, and they
+      # change only when the lock file changes.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: idle
+          cache-on-failure: true
+
+      # cargo-llvm-cov is a binary. The action fetches its release
+      # build instead of compiling one, and it runs after rust-cache,
+      # which prunes binaries it did not see before it saved.
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      # The same target a workstation runs: the format, the lints,
+      # and the tests under the coverage gate. idle/Makefile
+      # holds the floor.
+      - run: make test
+
   images:
     runs-on: ubuntu-latest
-    # One job per image, so the two build at once and the run is as
+    # One job per image, so the three build at once and the run is as
     # long as the slowest of them, not the sum.
     strategy:
       fail-fast: false
@@ -87,8 +151,14 @@ jobs:
             file: Dockerfile
           - image: media-operator-player
             file: Dockerfile.player
+          - image: media-operator-idle
+            file: Dockerfile.idle
     steps:
+      # The idle image compiles liken-iced out of the brand submodule
+      # at docs/themes/brand, so the context needs it checked out.
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: docker/setup-buildx-action@v3
 

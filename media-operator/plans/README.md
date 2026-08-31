@@ -30,6 +30,13 @@ These plans are designed. Each keeps its number and moves to
   the `Play`'s namespace and a path inside it, so a `Play` plays from
   any volume the cluster can mount and names no server. The library
   layer depends on it.
+* [20, The idle screen is its own
+  image](20-the-idle-screen-is-its-own-image.md). The idle screen
+  leaves `mpv` and becomes `media-operator-idle`, a Rust client on the
+  Iced toolkit that reads the bus. The sidecar publishes its four
+  decisions on a screen topic and loses its socket, the seven Lua
+  modules that drew the screen are deleted, and the playback overlay
+  stays. The library layer depends on it.
 
 ## Completed
 

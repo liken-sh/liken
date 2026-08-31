@@ -68,22 +68,22 @@ const (
 	playerOptionsVariable = "MEDIA_PLAYER_OPTIONS"
 
 	// TZ is the standard name libc and Lua os.date read, not a MEDIA_ variable.
-	// The player pod sets it, and the display clock reads it against the image's
-	// tz database to show the household's wall-clock zone.
+	// The playback pod and the idle pod both set it, and each clock reads it
+	// against its own image's tz database to show the household's wall-clock
+	// zone.
 	timeZoneVariable = "TZ"
 
-	// The seconds the display script waits for mpv's window
-	// before it exits non-zero. It arms the watchdog, so a pod that
-	// expects no window sets it nowhere and the script never exits for
-	// a missing one. The operator sets it on the idle container alone,
-	// because the idle client holds a window for its whole life and a
-	// playback pod may be audio-only.
+	// The seconds a client waits for its window before it exits
+	// non-zero. It arms the watchdog, so a pod that expects no window
+	// sets it nowhere and nothing exits for a missing one. The operator
+	// sets it on the idle container alone, because the idle client holds
+	// a window for its whole life and a playback pod may be audio-only.
 	idleWindowGraceVariable = "IDLE_WINDOW_GRACE_SECONDS"
 
 	// The Player's friendly name and its parts, which the idle screen draws
 	// in the bottom-left. The operator sets the name always, resolved from
 	// spec.displayName or the object name, and sets the parts only when the
-	// Player lists any. The parts join with newlines, and the display Lua
+	// Player lists any. The parts join with newlines, and the idle client
 	// splits them, the same shape the player options travel in.
 	idlePlayerNameVariable       = "IDLE_PLAYER_NAME"
 	idlePlayerComponentsVariable = "IDLE_PLAYER_COMPONENTS"
@@ -111,6 +111,12 @@ const (
 	// operator builds it whole, the way it builds the commands and
 	// status topics, so the sidecar parses no topic.
 	idlePanelTopicVariable = "IDLE_PANEL_TOPIC"
+
+	// The topic the sidecar publishes the screen's moments on, and the
+	// idle client reads them off. The operator sets it on both
+	// containers of every idle pod, because the sidecar decides those
+	// moments whichever client draws them.
+	playerScreenTopicVariable = "MEDIA_PLAYER_SCREEN_TOPIC"
 
 	// The command sidecar carries every item's presentation block, baked
 	// into the pod when the operator creates it. The sidecar swaps to the
@@ -152,15 +158,15 @@ const (
 	playerCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
 
 	// The player-status topic the same sidecar reads the unit's presentable
-	// state from. The operator builds it the same way and the topic is
-	// retained, so a freshly started idle pod reads the current state on
-	// subscribe and asks for nothing.
+	// state from, and the idle client draws it from. The operator builds it
+	// the same way and the topic is retained, so a freshly started idle pod
+	// reads the current state on subscribe and asks for nothing.
 	playerStatusTopicVariable = "MEDIA_PLAYER_STATUS_TOPIC"
 
-	// The unit's volume topic, on both the play pod's command sidecar
-	// and the idle pod's. It is the speaker gate as well as the
-	// address: the operator sets it only for a Player that states
-	// sinks, so a sidecar that reads nothing here subscribes to no
-	// level, applies none, and publishes none.
+	// The unit's volume topic, on the playback pod's command sidecar, on
+	// the idle pod's sidecar, and on the idle client. It is the speaker
+	// gate as well as the address: the operator sets it only for a Player
+	// that states sinks, so a container that reads nothing here
+	// subscribes to no level, draws none, and publishes none.
 	playerVolumeTopicVariable = "MEDIA_PLAYER_VOLUME_TOPIC"
 )

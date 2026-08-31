@@ -1,7 +1,7 @@
 package main
 
 // These tests cover the idle sidecar's focus gate: the presses it answers
-// only for a controller whose mark names this Player, the pulse and the wake
+// only for a controller whose mark names this Player, the focus and the wake
 // a live mark brings, the retained catch-up that brings neither, and the
 // cycle request a focused press publishes.
 
@@ -21,19 +21,6 @@ func sofaFocus() string {
 func armchairTopics() (events, focus string) {
 	return remoteEventsTopic(defaultTopicBase, "house", "armchair"),
 		remoteFocusTopic(defaultTopicBase, "house", "armchair")
-}
-
-// publishingCommander builds one idle sidecar with no fade window and a
-// stand-in for the bus publish half, so a test reads every message the
-// sidecar sent.
-func publishingCommander(t *testing.T, remotes map[string]string) (*idleCommander, chan brokerPublish) {
-	t.Helper()
-	ic := fadingCommander(t, 0, remotes)
-	published := make(chan brokerPublish, 16)
-	ic.publish = func(topic string, payload []byte, retained bool) {
-		published <- brokerPublish{topic: topic, payload: append([]byte(nil), payload...), retained: retained}
-	}
-	return ic, published
 }
 
 // sendMark publishes one retained mark on a controller's focus topic, the
@@ -62,25 +49,32 @@ func bindCycle(t *testing.T, ic *idleCommander, keymap string) {
 	}}))
 }
 
-// pulseCommand is the script message the sidecar sends for the remote at
-// one index.
-func pulseCommand(index string) string {
-	return `{"command":["script-message","focus-pulse","` + index + `"]}`
+// nextPulse reads the next moment and returns the controller it named.
+// Any other moment fails the test, because a focus is the only one that
+// names a controller.
+func nextPulse(t *testing.T, watch *idleWatch) int {
+	t.Helper()
+	moment := nextMoment(t, watch)
+	mustMatch(t, moment.Event, screenFocusEvent)
+	if moment.Remote == nil {
+		t.Fatalf("the focus moment named no controller: %+v", moment)
+		return 0
+	}
+	return *moment.Remote
 }
 
 // A controller whose mark names another unit touches nothing here, so a
 // pad pointed at a film in another room does not wake this screen.
 func TestIdleFocusIgnoresAPressFromAnUnfocusedRemote(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendMark(ic, sofaFocus(), "cinema")
 	sendPress(t, ic, events)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // The same gate holds the level: an unfocused controller's volume press
@@ -88,16 +82,15 @@ func TestIdleFocusIgnoresAPressFromAnUnfocusedRemote(t *testing.T) {
 // own unit.
 func TestIdleFocusIgnoresAVolumePressFromAnUnfocusedRemote(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic, published := publishingCommander(t, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, 0, map[string]string{events: keymap})
 	ic.volumeTopic = playerVolumeTopic(defaultTopicBase, "house", idleTestPlayer)
 	bindVolume(t, ic, keymap)
 	sendMark(ic, sofaFocus(), "cinema")
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	pressButton(t, ic, events, "BTN_NORTH")
 
-	noPublish(t, published, 100*time.Millisecond)
+	noPublish(t, watch, 100*time.Millisecond)
 }
 
 // A volume button held as focus cycles to another room stops stepping this
@@ -105,34 +98,32 @@ func TestIdleFocusIgnoresAVolumePressFromAnUnfocusedRemote(t *testing.T) {
 // pointing at until the release, or until the repeat's own cap.
 func TestIdleFocusMovingTheMarkAwayStopsAHeldRepeat(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic, published := volumeCommander(t, map[string]string{events: keymap})
+	ic, watch := volumeCommander(t, map[string]string{events: keymap})
 	bindRepeatingVolume(t, ic, keymap)
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 
 	pressButton(t, ic, events, "BTN_NORTH")
-	nextPublish(t, published)
+	nextPublish(t, watch)
 	sendMark(ic, sofaFocus(), "cinema")
 
-	drainPublishes(published, 50*time.Millisecond)
-	noPublish(t, published, 100*time.Millisecond)
+	drainPublishes(watch, 50*time.Millisecond)
+	noPublish(t, watch, 100*time.Millisecond)
 	releaseButton(t, ic, events, "BTN_NORTH")
 }
 
 // A mark that arrives during a session and names this Player is a person
-// pointing the controller here, so the shade lifts and the display reads
-// which controller it was.
+// pointing the controller here, so the sidecar states wake and then the
+// focus that names which controller it was.
 func TestIdleFocusALiveMarkWakesTheScreenAndPulses(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
-	mustMatch(t, fake.next(t), wakeCommand)
-	mustMatch(t, fake.next(t), pulseCommand("0"))
+	mustMatch(t, nextMoment(t, watch).Event, screenWakeEvent)
+	mustMatch(t, nextPulse(t, watch), 0)
 }
 
 // The first mark of a bus session is the broker's retained catch-up, a
@@ -140,60 +131,56 @@ func TestIdleFocusALiveMarkWakesTheScreenAndPulses(t *testing.T) {
 // it asleep and draws nothing.
 func TestIdleFocusTheRetainedCatchUpNeitherWakesNorPulses(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
 	awaitCatchUp(ic)
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // The catch-up still sets the gate, so the press that follows it acts.
 func TestIdleFocusTheRetainedCatchUpOpensTheGate(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, time.Hour, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
 	awaitCatchUp(ic)
 	bindBack(t, ic, keymap)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
 
-	mustMatch(t, fake.next(t), sleepCommand)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 }
 
 // A cycle that wraps back onto the unit it started on republishes the same
-// mark. The pulse goes out again, because that repeat is the answer to the
+// mark. The focus goes out again, because that repeat is the answer to the
 // press: this screen is the one the controller already holds.
 func TestIdleFocusPulsesAgainOnTheSameMark(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 0, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 0, map[string]string{events: ""})
 
 	sendMark(ic, sofaFocus(), idleTestPlayer)
-	mustMatch(t, fake.next(t), pulseCommand("0"))
+	mustMatch(t, nextPulse(t, watch), 0)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
-	mustMatch(t, fake.next(t), pulseCommand("0"))
+	mustMatch(t, nextPulse(t, watch), 0)
 }
 
-// The pulse names the controller by its position in the Player's list, so
-// the display draws the one the mark landed on.
+// The focus names the controller by its position in spec.remotes, so the
+// client draws the one the mark landed on.
 func TestIdleFocusThePulseCarriesTheRemoteIndex(t *testing.T) {
 	sofa, _ := fadeTopics()
 	armchair, armchairFocus := armchairTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 0, map[string]string{sofa: "", armchair: ""})
+	ic, watch := fadingCommander(t, 0, map[string]string{sofa: "", armchair: ""})
 
 	sendMark(ic, armchairFocus, idleTestPlayer)
-	mustMatch(t, fake.next(t), pulseCommand("0"))
+	mustMatch(t, nextPulse(t, watch), 0)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
-	mustMatch(t, fake.next(t), pulseCommand("1"))
+	mustMatch(t, nextPulse(t, watch), 1)
 }
 
 // A mark that names another unit draws nothing here, and neither does the
@@ -210,12 +197,11 @@ func TestIdleFocusPulsesNothingForAMarkThatNamesAnotherPlayer(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			events, _ := fadeTopics()
-			fake := startFakeMPV(t)
-			ic := fadingCommander(t, 0, map[string]string{events: ""})
+			ic, watch := fadingCommander(t, 0, map[string]string{events: ""})
 
 			sendMark(ic, sofaFocus(), one.mark)
 
-			fake.quiet(t, 100*time.Millisecond)
+			noMoment(t, watch, 100*time.Millisecond)
 		})
 	}
 }
@@ -224,15 +210,14 @@ func TestIdleFocusPulsesNothingForAMarkThatNamesAnotherPlayer(t *testing.T) {
 // each topic is a catch-up again and a broker restart pulses nothing.
 func TestIdleFocusABusSessionMakesTheNextMarkACatchUpAgain(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 0, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 0, map[string]string{events: ""})
 
 	sendMark(ic, sofaFocus(), idleTestPlayer)
-	mustMatch(t, fake.next(t), pulseCommand("0"))
+	mustMatch(t, nextPulse(t, watch), 0)
 	awaitCatchUp(ic)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // A press named cycle-focus, from a controller that holds this unit, asks
@@ -240,33 +225,31 @@ func TestIdleFocusABusSessionMakesTheNextMarkACatchUpAgain(t *testing.T) {
 // publishes from a Play, so focus moves from an idle screen too.
 func TestIdleCycleFocusPublishesTheCycleRequest(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic, published := publishingCommander(t, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, 0, map[string]string{events: keymap})
 	bindCycle(t, ic, keymap)
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
 
-	publish := nextPublish(t, published)
+	publish := nextPublish(t, watch)
 	mustMatch(t, publish.topic, sofaFocus()+"/cycle")
 	mustMatch(t, len(publish.payload), 0)
 	mustMatch(t, publish.retained, false)
-	noPublish(t, published, 100*time.Millisecond)
+	noPublish(t, watch, 100*time.Millisecond)
 }
 
 // A cycle press from a controller that holds another unit publishes
 // nothing, because the translator that holds the mark answers it there.
 func TestIdleCycleFocusPublishesNothingFromAnUnfocusedRemote(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic, published := publishingCommander(t, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, 0, map[string]string{events: keymap})
 	bindCycle(t, ic, keymap)
 	sendMark(ic, sofaFocus(), "cinema")
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
 
-	noPublish(t, published, 100*time.Millisecond)
+	noPublish(t, watch, 100*time.Millisecond)
 }
 
 // The cycle press is the request and nothing else, so it leaves a sleeping
@@ -274,27 +257,25 @@ func TestIdleCycleFocusPublishesNothingFromAnUnfocusedRemote(t *testing.T) {
 // comes around to this unit.
 func TestIdleCycleFocusDoesNotWakeTheScreen(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: keymap})
 	bindCycle(t, ic, keymap)
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendPress(t, ic, events)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // A Play owns the presses on the unit it runs on, and its own translator
 // publishes the cycle, so the idle sidecar publishes none while one runs.
 func TestIdleCycleFocusPublishesNothingWhileAPlayRuns(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic, published := publishingCommander(t, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, 0, map[string]string{events: keymap})
 	bindCycle(t, ic, keymap)
 
-	sendActivity(t, ic, fake, playerPlaying)
+	sendActivity(t, ic, playerPlaying)
 	sendPress(t, ic, events)
 
-	noPublish(t, published, 100*time.Millisecond)
+	noPublish(t, watch, 100*time.Millisecond)
 }

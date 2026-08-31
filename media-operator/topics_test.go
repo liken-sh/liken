@@ -31,6 +31,7 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "player panel filter", got: playerPanelFilter(base), want: "liken/media/players/+/+/panel"},
 		{name: "player volume", got: playerVolumeTopic(base, "house", "theater"), want: "liken/media/players/house/theater/volume"},
 		{name: "player volume filter", got: playerVolumeFilter(base), want: "liken/media/players/+/+/volume"},
+		{name: "player screen", got: playerScreenTopic(base, "house", "theater"), want: "liken/media/players/house/theater/screen"},
 		{name: "keymap", got: keymapTopic(base, "gamepad"), want: "liken/media/keymaps/gamepad"},
 		{name: "status filter", got: playStatusFilter(base), want: "liken/media/plays/+/+/status"},
 		{name: "availability filter", got: playAvailabilityFilter(base), want: "liken/media/plays/+/+/availability"},

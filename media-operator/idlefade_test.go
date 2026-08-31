@@ -6,91 +6,95 @@ package main
 // person sleeps the screen with by hand.
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"maps"
-	"net"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 )
 
-// fakeMPV is a stand-in for the idle mpv. It answers every dial the
-// sidecar makes, replies success to each command, and hands the
-// command lines to the test in the order they arrived. The replies
-// matter, because the sidecar's dialog waits for each one before its
-// next write.
-type fakeMPV struct {
-	commands chan string
+// idleWatch is everything one sidecar states, split by topic: the
+// moments a client reads off the unit's screen topic, and every other
+// message the sidecar publishes. Two channels, because a test about the
+// shade and a test about the level read different halves, and neither
+// should wait out the other's traffic.
+type idleWatch struct {
+	moments   chan brokerPublish
+	published chan brokerPublish
 }
 
-// startFakeMPV starts the stand-in on a socket of this test's own and
-// points the sidecar at it.
-func startFakeMPV(t *testing.T) *fakeMPV {
+// nextMoment returns the next moment the sidecar stated, on a bounded
+// wait, and fails the test for a retained one, which playerScreenTopic
+// rules out.
+func nextMoment(t *testing.T, watch *idleWatch) screenMessage {
 	t.Helper()
-	useDialDelay(t, time.Millisecond)
-	path := filepath.Join(t.TempDir(), "mpv.sock")
-	useSocket(t, path)
-	listener, err := net.Listen("unix", path)
-	mustSucceed(t, err)
-	t.Cleanup(func() { listener.Close() })
-	fake := &fakeMPV{commands: make(chan string, 32)}
-	go fake.serve(listener)
-	return fake
+	return momentWithin(t, watch, 2*time.Second)
 }
 
-func (f *fakeMPV) serve(listener net.Listener) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		go f.talk(conn)
-	}
-}
-
-func (f *fakeMPV) talk(conn net.Conn) {
-	defer conn.Close()
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		f.commands <- scanner.Text()
-		fmt.Fprintln(conn, `{"error":"success"}`)
-	}
-}
-
-// next returns the next command the sidecar wrote. The wait is
-// bounded, so a sidecar that writes nothing fails the test instead of
-// hanging it.
-func (f *fakeMPV) next(t *testing.T) string {
-	t.Helper()
-	return f.nextWithin(t, 2*time.Second)
-}
-
-// nextWithin returns the next command, and fails when none arrives
+// momentWithin returns the next moment, and fails when none arrives
 // inside the window. A test that proves a quiet window was not
 // restarted reads with an allowance shorter than a restart would need.
-func (f *fakeMPV) nextWithin(t *testing.T, window time.Duration) string {
+func momentWithin(t *testing.T, watch *idleWatch, window time.Duration) screenMessage {
 	t.Helper()
 	select {
-	case line := <-f.commands:
-		return line
+	case publish := <-watch.moments:
+		if publish.retained {
+			t.Errorf("the sidecar retained %s, and nothing on the screen topic is retained", publish.payload)
+		}
+		var message screenMessage
+		mustSucceed(t, json.Unmarshal(publish.payload, &message))
+		return message
 	case <-time.After(window):
-		t.Fatalf("the sidecar wrote no command inside %s", window)
-		return ""
+		t.Fatalf("the sidecar stated no screen moment inside %s", window)
+		return screenMessage{}
 	}
 }
 
-// quiet fails when the sidecar writes anything at all inside this
-// window.
-func (f *fakeMPV) quiet(t *testing.T, window time.Duration) {
+// noMoment fails when the sidecar states any moment inside this window.
+func noMoment(t *testing.T, watch *idleWatch, window time.Duration) {
 	t.Helper()
 	select {
-	case line := <-f.commands:
-		t.Fatalf("the sidecar wrote %s, and should have written nothing", line)
+	case publish := <-watch.moments:
+		t.Fatalf("the sidecar stated %s, and should have stated nothing", publish.payload)
 	case <-time.After(window):
+	}
+}
+
+// nextPublish returns the next message the sidecar published anywhere but
+// the screen topic, on a bounded wait.
+func nextPublish(t *testing.T, watch *idleWatch) brokerPublish {
+	t.Helper()
+	select {
+	case publish := <-watch.published:
+		return publish
+	case <-time.After(2 * time.Second):
+		t.Fatal("the sidecar published nothing inside 2s")
+		return brokerPublish{}
+	}
+}
+
+// noPublish fails when the sidecar publishes anything inside this window.
+func noPublish(t *testing.T, watch *idleWatch, window time.Duration) {
+	t.Helper()
+	select {
+	case publish := <-watch.published:
+		t.Fatalf("the sidecar published %+v, and should have published nothing", publish)
+	case <-time.After(window):
+	}
+}
+
+// drainPublishes empties the channel for the window a canceled repeat's
+// last ticks could still land in, so the quiet check that follows reads
+// only what came after.
+func drainPublishes(watch *idleWatch, window time.Duration) {
+	deadline := time.After(window)
+	for {
+		select {
+		case <-watch.published:
+		case <-deadline:
+			return
+		}
 	}
 }
 
@@ -131,16 +135,19 @@ func focusedRemotes(t *testing.T, remotes map[string]string) (map[string]idleRem
 
 // fadingCommander builds one idle sidecar for a Player, with its quiet
 // window in milliseconds so the fade lands inside a test rather than
-// ten minutes after it. A sidecar runs as long as its pod, so nothing
+// ten minutes after it. The watch it returns holds both halves of what
+// the sidecar sends: every moment on the screen topic, and every other
+// message it publishes. A sidecar runs as long as its pod, so nothing
 // stops its timer in production and the test stops it here: a window
-// still armed when the test ends would otherwise fire into the next
-// test's stand-in mpv.
-func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string) *idleCommander {
+// still armed when the test ends would otherwise state a moment into
+// the next test's watch.
+func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string) (*idleCommander, *idleWatch) {
 	t.Helper()
 	records, marks := focusedRemotes(t, remotes)
 	ic := &idleCommander{
 		commandsTopic: playerCommandsTopic(defaultTopicBase, "house", idleTestPlayer),
 		statusTopic:   playerStatusTopic(defaultTopicBase, "house", idleTestPlayer),
+		screenTopic:   playerScreenTopic(defaultTopicBase, "house", idleTestPlayer),
 		runCtx:        context.Background(),
 		playerName:    idleTestPlayer,
 		remotes:       records,
@@ -152,9 +159,21 @@ func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string
 		desire:  panelDesireOn,
 		repeats: map[uint16]context.CancelFunc{},
 	}
+	watch := &idleWatch{
+		moments:   make(chan brokerPublish, 32),
+		published: make(chan brokerPublish, 32),
+	}
+	ic.publish = func(topic string, payload []byte, retained bool) {
+		message := brokerPublish{topic: topic, payload: append([]byte(nil), payload...), retained: retained}
+		if topic == ic.screenTopic {
+			watch.moments <- message
+			return
+		}
+		watch.published <- message
+	}
 	t.Cleanup(func() {
 		// A repeat still held when the test ends would tick into the
-		// next test's stand-in broker, so every cancel runs here.
+		// next test's watch, so every cancel runs here.
 		ic.repeatMu.Lock()
 		for code, cancel := range ic.repeats {
 			cancel()
@@ -166,17 +185,14 @@ func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string
 		ic.idle = false
 		ic.rearmLocked()
 	})
-	return ic
+	return ic, watch
 }
 
-// sendActivity hands the sidecar one status and reads past the copy it
-// forwards to the display, so a test reads only what the fade itself
-// wrote.
-func sendActivity(t *testing.T, ic *idleCommander, fake *fakeMPV, activity string) {
+// sendActivity hands the sidecar one status off the unit's retained
+// status topic, the way the operator publishes it.
+func sendActivity(t *testing.T, ic *idleCommander, activity string) {
 	t.Helper()
 	ic.handle(ic.statusTopic, []byte(`{"activity":"`+activity+`"}`))
-	mustMatch(t, fake.next(t),
-		`{"command":["script-message","player-status","{\"activity\":\"`+activity+`\"}"]}`)
 }
 
 // sendEvent publishes one controller event on the events topic, the
@@ -217,39 +233,33 @@ func bindBack(t *testing.T, ic *idleCommander, keymap string) {
 	ic.handle(keymap, payload)
 }
 
-const sleepCommand = `{"command":["script-message","player-sleep"]}`
-const wakeCommand = `{"command":["script-message","player-wake"]}`
-
 // A unit that plays nothing arms the quiet window, and the window running
-// out draws the shade.
+// out states the sleep moment the client draws the shade on.
 func TestIdleFadeSleepsAfterTheQuietWindow(t *testing.T) {
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, nil)
+	ic, watch := fadingCommander(t, 20*time.Millisecond, nil)
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 
-	mustMatch(t, fake.next(t), sleepCommand)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 }
 
 // A Play never sleeps the screen, so the window stays off while one runs.
 func TestIdleFadeNeverArmsWhileAPlayRuns(t *testing.T) {
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, nil)
+	ic, watch := fadingCommander(t, 20*time.Millisecond, nil)
 
-	sendActivity(t, ic, fake, playerPlaying)
+	sendActivity(t, ic, playerPlaying)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // A quiet window of zero is the cluster stating that this screen never dims
 // on its own, so the window never arms whatever the unit does.
 func TestIdleFadeNeverArmsAtZero(t *testing.T) {
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 0, nil)
+	ic, watch := fadingCommander(t, 0, nil)
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // A press restarts the window from the moment of the press, so a screen a
@@ -257,103 +267,96 @@ func TestIdleFadeNeverArmsAtZero(t *testing.T) {
 // the last one.
 func TestIdleFadeAPressResetsTheWindow(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 100*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 100*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	time.Sleep(60 * time.Millisecond)
 	sendPress(t, ic, events)
 
 	// The first window ran out at 100ms. Nothing arrives through 130ms, so the
 	// press moved it.
-	fake.quiet(t, 70*time.Millisecond)
-	mustMatch(t, fake.next(t), sleepCommand)
+	noMoment(t, watch, 70*time.Millisecond)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 }
 
-// A press on a sleeping screen lifts the shade, whether or not the
+// A press on a sleeping screen states wake, whether or not the
 // controller has a keymap. The press is the person, so it is the wake
 // signal.
 func TestIdleFadeAPressWakesASleepingScreen(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendPress(t, ic, events)
 
-	mustMatch(t, fake.next(t), wakeCommand)
+	mustMatch(t, nextMoment(t, watch).Event, screenWakeEvent)
 }
 
-// A status that leaves Idle lifts the shade, so a Play started from another
+// A status that leaves Idle states wake, so a Play started from another
 // room shows the film and not a black screen.
 func TestIdleFadeAStatusThatLeavesIdleWakes(t *testing.T) {
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, nil)
+	ic, watch := fadingCommander(t, 20*time.Millisecond, nil)
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
-	sendActivity(t, ic, fake, playerStarting)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
+	sendActivity(t, ic, playerStarting)
 
-	mustMatch(t, fake.next(t), wakeCommand)
-	fake.quiet(t, 100*time.Millisecond)
+	mustMatch(t, nextMoment(t, watch).Event, screenWakeEvent)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// A press named back, on a unit that plays nothing, draws the shade at once
+// A press named back, on a unit that plays nothing, states sleep at once
 // rather than waiting out the window.
 func TestIdleBackSleepsTheScreenAtOnce(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, time.Hour, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
 	bindBack(t, ic, keymap)
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
 
-	mustMatch(t, fake.next(t), sleepCommand)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 }
 
-// The same back press lifts the shade again, because any press wakes a
+// The same back press states wake again, because any press wakes a
 // sleeping screen. So one button works the screen from either side.
 func TestIdleBackWakesTheScreenItSlept(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, time.Hour, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
 	bindBack(t, ic, keymap)
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
-	mustMatch(t, fake.next(t), sleepCommand)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendPress(t, ic, events)
 
-	mustMatch(t, fake.next(t), wakeCommand)
+	mustMatch(t, nextMoment(t, watch).Event, screenWakeEvent)
 }
 
 // Back sleeps nothing while a Play runs. The film owns the screen, and back
 // means what the display makes of it there.
 func TestIdleBackSleepsNothingWhileAPlayRuns(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: keymap})
 	bindBack(t, ic, keymap)
 
-	sendActivity(t, ic, fake, playerPlaying)
+	sendActivity(t, ic, playerPlaying)
 	sendPress(t, ic, events)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // A controller with no keymap names no action, so its presses reset the
 // window and never sleep the screen by hand.
 func TestIdleBackNeedsAKeymapToNameThePress(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, time.Hour, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // The three remote lists travel one per line and stay aligned by position, so
@@ -404,64 +407,60 @@ func TestIdleFadeAfterReadsTheSeconds(t *testing.T) {
 
 // A button press and the release that follows it are one act by one person.
 // The standing remote pod publishes both edges, so the release must leave
-// the shade the press drew exactly where it is. Otherwise back sleeps the
+// the shade the press stated exactly where it is. Otherwise back sleeps the
 // screen and its own release wakes it a tenth of a second later.
 func TestIdleBackHoldsTheScreenAsleepThroughTheRelease(t *testing.T) {
 	events, keymap := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, time.Hour, map[string]string{events: keymap})
+	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
 	bindBack(t, ic, keymap)
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
-	mustMatch(t, fake.next(t), sleepCommand)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendRelease(t, ic, events)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // A release on a sleeping screen is a control coming back up, not a person
 // reaching for one, so the screen stays dark.
 func TestIdleFadeAReleaseDoesNotWakeASleepingScreen(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendRelease(t, ic, events)
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// A release restarts nothing, so the shade falls on the schedule the last
+// A release restarts nothing, so the sleep lands on the schedule the last
 // press set. The window here runs 200ms and the release lands at 120ms: the
 // read allows 140ms, which the remaining 80ms fits and a restarted 200ms
 // window does not.
 func TestIdleFadeAReleaseDoesNotRestartTheWindow(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 200*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 200*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
+	sendActivity(t, ic, playerIdle)
 	time.Sleep(120 * time.Millisecond)
 	sendRelease(t, ic, events)
 
-	mustMatch(t, fake.nextWithin(t, 140*time.Millisecond), sleepCommand)
+	mustMatch(t, momentWithin(t, watch, 140*time.Millisecond).Event, screenSleepEvent)
 }
 
 // A d-pad returning to center reads as value 0 on the hat axis, the same
 // shape as a button release, so it is not a press either.
 func TestIdleFadeAHatReturningToCenterDoesNotWake(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	sendEvent(t, ic, events, remoteEvent{Type: evAbs, Code: axisCodes["ABS_HAT0X"], Value: 0})
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // The down edge is the person. A button reports it as value 1, and a hat as
@@ -492,12 +491,11 @@ func TestIsPressEdgeReadsTheDownEdgeAlone(t *testing.T) {
 // screen nor restarts the quiet window.
 func TestIdleFadeIgnoresAnEventThatDoesNotDecode(t *testing.T) {
 	events, _ := fadeTopics()
-	fake := startFakeMPV(t)
-	ic := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
 
-	sendActivity(t, ic, fake, playerIdle)
-	mustMatch(t, fake.next(t), sleepCommand)
+	sendActivity(t, ic, playerIdle)
+	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 	ic.handle(events, []byte("not json"))
 
-	fake.quiet(t, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }

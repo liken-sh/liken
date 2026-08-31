@@ -21,15 +21,22 @@ import (
 	"time"
 )
 
-// The operator's own environment: the player image it stamps into
-// every playback pod, the broker every pod connects to, and the base
-// every topic extends. The Deployment sets PLAYER_IMAGE and
-// MEDIA_BUS_ADDRESS, because neither is discoverable from inside a pod:
-// the image is a release decision, and a pod cannot read the address of
-// the broker in front of it. MEDIA_TOPIC_BASE has a default, because a
-// cluster that runs one bus needs no policy for the base.
+// The operator's own environment: the two images it stamps into the
+// pods it creates, the broker every pod connects to, and the base
+// every topic extends. The Deployment sets PLAYER_IMAGE, IDLE_IMAGE,
+// and MEDIA_BUS_ADDRESS, because none of the three is discoverable
+// from inside a pod: an image is a release decision, and a pod cannot
+// read the address of the broker in front of it. MEDIA_TOPIC_BASE has
+// a default, because a cluster that runs one bus needs no policy for
+// the base.
 const (
 	playerImageVariable = "PLAYER_IMAGE"
+
+	// IDLE_IMAGE names the client that draws the idle screen. It is
+	// what an idle container runs where no tier states
+	// spec.idle.image, so a household that states nothing gets the
+	// client this release ships.
+	idleImageVariable = "IDLE_IMAGE"
 
 	// IDLE_DISPLAY_CLASS names the cluster's display-draw DeviceClass, the
 	// shareable draw companion a Player's idle pod claims. The class is
@@ -94,8 +101,12 @@ const defaultTTLSecondsAfterFinished = 300
 // are fields rather than globals so a test builds an operator around a
 // desk it can inspect.
 type operator struct {
-	client     *Client
-	image      string
+	client *Client
+	image  string
+	// idleImage is the client an idle container runs where no tier
+	// states spec.idle.image. It is a release decision, so it arrives
+	// in the environment beside the player image.
+	idleImage  string
 	busAddress string
 	topicBase  string
 	// idleDisplayClass is the display-draw DeviceClass a Player's idle pod
@@ -196,6 +207,11 @@ func operate() {
 		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the player image\n", playerImageVariable)
 		os.Exit(1)
 	}
+	idleImage := os.Getenv(idleImageVariable)
+	if idleImage == "" {
+		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the idle image\n", idleImageVariable)
+		os.Exit(1)
+	}
 	busAddress := os.Getenv(busAddressVariable)
 	if busAddress == "" {
 		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the broker\n", busAddressVariable)
@@ -227,6 +243,7 @@ func operate() {
 	media := &operator{
 		client:                client,
 		image:                 image,
+		idleImage:             idleImage,
 		busAddress:            busAddress,
 		topicBase:             topicBase,
 		idleDisplayClass:      idleDisplayClass,
@@ -680,28 +697,31 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		// observed, so the status reports the hardware and not what
 		// the media layer asked for.
 		desired.Panel = o.reconcilePanel(player, key, lookup,
-			resolveIdle(player.Spec.Idle, defaultIdle).OffMode)
+			resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage).OffMode)
 		o.seedVolume(player, key)
 		// The status goes out before the re-present, and the order is what
-		// the returning idle screen draws from. The display animates the
-		// return only when it reads the Idle status before the reveal that
-		// follows the re-present, because the status is what says the film is
-		// over. Both messages leave on the operator's one bus connection and
-		// reach the sidecar on its one connection, so the order the operator
-		// writes is the order the sidecar reads.
+		// the returning idle screen draws from. The client animates the
+		// return only when it reads the Idle status before the present
+		// moment, because the status is what says the film is over. The
+		// client subscribes to the retained status topic itself, and the
+		// present reaches it a hop later, after the sidecar reads the
+		// re-present and states the moment. So the order the operator writes
+		// is the order the client reads.
 		published[o.publishPlayerStatus(player, desired, plays)] = true
-		// A Play that ends leaves the idle pod's surface destroyed and
-		// hidden. Weston's kiosk-shell reveals a lower surface only along a
-		// code path gated on a seat, and liken's compositor has none, so the
-		// idle clock does not return on its own. On the edge from any active
-		// state to idle, the operator publishes a re-present, and the idle
-		// command sidecar recreates the idle surface, which kiosk reveals.
-		// The edge reads the stored status against the derived one, so the
-		// poke fires once as the Player settles to idle and not on every
-		// backstop pass while it stays idle. A status write that fails leaves
-		// the stored status unchanged, so the next pass reads the edge again
-		// and pokes once more, which recreates a surface that is already up
-		// and shows the same clock.
+		// A Play that ends destroys the film's surface, and the idle
+		// client's surface under it stays hidden. Weston's kiosk-shell
+		// reveals a lower surface only along a code path gated on a seat,
+		// and liken's compositor has none, so the idle clock does not return
+		// on its own. On the edge from any active state to idle, the
+		// operator publishes a re-present. The idle command sidecar states
+		// the present moment, the client maps a fresh surface, and kiosk
+		// reveals that one. The edge reads the stored status against the
+		// derived one, so the re-present goes out once as the Player settles
+		// to idle and not on every backstop pass while it stays idle. A
+		// status write that fails leaves the stored status unchanged, so the
+		// next pass reads the edge again and publishes a second re-present.
+		// The client maps a fresh surface over one that is already up, and
+		// the screen shows the same clock.
 		if player.Status.Activity != playerIdle && desired.Activity == playerIdle {
 			o.publishRePresent(player.Metadata.Namespace, player.Metadata.Name)
 		}
@@ -818,8 +838,9 @@ func (o *operator) volumeFor(play *Play) (volumeState, bool) {
 
 // publishRePresent publishes the re-present to a Player's commands topic,
 // not retained, because a re-present is an event and not a state. The
-// idle command sidecar subscribes to that topic and recreates the idle
-// surface, so the clock shows again after a Play ends.
+// idle command sidecar subscribes to that topic and states the present
+// moment on the screen topic, and the client maps a fresh surface, so the
+// clock shows again after a Play ends.
 func (o *operator) publishRePresent(namespace, name string) {
 	payload, err := json.Marshal(mediaCommand{Action: actionRePresent})
 	if err != nil {

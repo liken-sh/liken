@@ -1,0 +1,94 @@
+[package]
+name = "idle-screen"
+version = "0.1.0"
+edition = "2024"
+
+# The crate is a library with one binary over it, so the parsers and the
+# measurements have unit tests that open no window.
+[lib]
+name = "idle_screen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "idle-screen"
+path = "src/main.rs"
+
+# The `measure` feature is the frame capture and the measurements: the
+# `--capture`, `--capture-at`, and `--stats` flags, the PNG encoder behind the
+# first two, and the frame times and resident-set samples the third writes. It
+# is on by default, so a workstation and every gate in the Makefile build the
+# whole harness.
+#
+# The image builds with the feature off, because no pod reaches any of it. The
+# operator sets no command on the idle container and the image's entrypoint
+# takes no flag, so a pod passes none of the three.
+[features]
+default = ["measure"]
+measure = ["dep:image"]
+
+# The client drives its own winit loop, so it takes the iced pieces directly
+# instead of the `iced` facade. That is what gives the harness a wgpu surface it
+# can read a frame back from.
+#
+# Every iced crate here turns its default features off where the default would
+# pull X11 or the software renderer in. The target is a Wayland kiosk, so winit
+# builds with Wayland alone.
+#
+# Every version is exact, so a build from this manifest resolves the same
+# crates the lock file names.
+[dependencies]
+iced_winit = { version = "=0.14.0", default-features = false, features = [
+    "wayland",
+] }
+# `web-colors` is what makes this client blend the way libass blends. Without
+# it `iced_wgpu` converts every colour to linear light before the shader sees
+# it, and the blend runs in linear light. libass composites on the encoded sRGB
+# values, so a name at the display's dim alpha over black reads 79 of 255 in
+# libass and 143 of 255 in linear light. With the feature on, the colours reach
+# the shader as they were written, and `graphics::open` takes a surface format
+# that stores them unconverted.
+iced_wgpu = { version = "=0.14.0", features = [
+    "geometry",
+    "image",
+    "web-colors",
+] }
+iced_widget = { version = "=0.14.2", default-features = false, features = [
+    "canvas",
+    "image",
+    "wgpu",
+] }
+# liken-iced carries the mark and the palette. It parses them out of
+# liken.svg and liken.css, so the mark on this screen and the mark on a page
+# are one drawing and cannot drift. The crate is in the brand repository, which
+# this one already takes as a submodule for the documentation theme, and the
+# image build context is the repository root, so one checkout serves both.
+liken-iced = { path = "../docs/themes/brand/iced" }
+# image writes the captured frames. They are PNGs and nothing else, and only a
+# build with the `measure` feature writes any, so the dependency is optional.
+# iced_graphics takes the same crate for its own image pipeline, with no format
+# behind it. The line below is what turns image's `png` feature on and brings
+# the `png` crate in, so a build without `measure` carries no PNG codec.
+image = { version = "=0.25.10", default-features = false, features = [
+    "png",
+], optional = true }
+# serde derives the readers for the three bus payloads, and serde_json writes
+# the measurements file and decodes those payloads.
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+# rumqttc is the client's connection to the broker. The bus speaks plain TCP,
+# so the default features are off and no TLS stack enters the build.
+rumqttc = { version = "=0.25.1", default-features = false }
+# jiff reads the wall clock in the zone TZ names. Its tzdb-zoneinfo feature
+# reads the image's own /usr/share/zoneinfo, and the bundled databases stay
+# out of the binary, so the clock and the rest of the image name the same
+# zone rules.
+jiff = { version = "=0.2.35", default-features = false, features = [
+    "std",
+    "tz-system",
+    "tzdb-zoneinfo",
+] }
+
+# The measurements need optimized code with symbols the profile does not strip.
+[profile.release]
+opt-level = 3
+lto = "thin"

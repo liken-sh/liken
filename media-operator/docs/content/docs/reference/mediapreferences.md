@@ -53,9 +53,10 @@ The cluster's default for what a display does while nothing plays, read for each
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="specidle--image"></span>`image` | string | no | The container image that draws every idle screen. The image starts with its own entrypoint and reads each unit's state from the bus: the status topic, the volume topic where the unit has sinks, and the screen topic that carries the sleep, wake, focus, and present moments. Unset, every screen the household does not override runs the idle client the media operator ships. |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before an idle screen fades to black. Zero disables the automatic fade; unset, every screen fades after 600. |
 | <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before an idle panel goes dark, at least fadeAfterSeconds. Zero or unset means panels never go dark on their own. A panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
-| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display: backlight, the default, or power, which is deeper. State power only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
+| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; state it only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
 
 ## How a Play resolves it
 
