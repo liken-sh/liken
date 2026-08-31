@@ -35,15 +35,21 @@ func nextMoment(t *testing.T, watch *idleWatch) screenMessage {
 // momentWithin returns the next moment, and fails when none arrives
 // inside the window. A test that proves a quiet window was not
 // restarted reads with an allowance shorter than a restart would need.
+//
+// Every read checks the retain flag against the rule for the
+// moment it carries, so no test can state a shade the broker drops or a
+// moment the broker replays.
 func momentWithin(t *testing.T, watch *idleWatch, window time.Duration) screenMessage {
 	t.Helper()
 	select {
 	case publish := <-watch.moments:
-		if publish.retained {
-			t.Errorf("the sidecar retained %s, and nothing on the screen topic is retained", publish.payload)
-		}
 		var message screenMessage
 		mustSucceed(t, json.Unmarshal(publish.payload, &message))
+		shade := message.Event == screenSleepEvent || message.Event == screenWakeEvent
+		if publish.retained != shade {
+			t.Errorf("the sidecar published %s with retained %v, and only the shade is retained",
+				publish.payload, publish.retained)
+		}
 		return message
 	case <-time.After(window):
 		t.Fatalf("the sidecar stated no screen moment inside %s", window)
@@ -277,6 +283,93 @@ func TestIdleFadeAPressResetsTheWindow(t *testing.T) {
 	// press moved it.
 	noMoment(t, watch, 70*time.Millisecond)
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
+}
+
+// A status the operator republishes with the same activity
+// leaves the window where it stands, so bus churn never holds the screen
+// awake. The window runs 200ms and the republish lands at 120ms: the read
+// allows 140ms, which the remaining 80ms fits and a restarted window does
+// not.
+func TestIdleFadeARepublishedStatusDoesNotRestartTheWindow(t *testing.T) {
+	ic, watch := fadingCommander(t, 200*time.Millisecond, nil)
+
+	sendActivity(t, ic, playerIdle)
+	time.Sleep(120 * time.Millisecond)
+	sendActivity(t, ic, playerIdle)
+
+	mustMatch(t, momentWithin(t, watch, 140*time.Millisecond).Event, screenSleepEvent)
+}
+
+// ScreenPublish is one moment with the retain flag it went out
+// under, which momentWithin reads but does not return.
+type screenPublish struct {
+	event    string
+	retained bool
+}
+
+// NextScreenPublish returns the next moment and the flag it
+// carried, on a bounded wait.
+func nextScreenPublish(t *testing.T, watch *idleWatch) screenPublish {
+	t.Helper()
+	select {
+	case publish := <-watch.moments:
+		var message screenMessage
+		mustSucceed(t, json.Unmarshal(publish.payload, &message))
+		return screenPublish{event: message.Event, retained: publish.retained}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the sidecar stated no screen moment inside 2s")
+		return screenPublish{}
+	}
+}
+
+// The shade is a state, so it goes out retained and a client that
+// restarts reads the shade it left rather than waking lit. The focus and
+// the present are moments, so they do not, and a restart replays neither.
+func TestIdleScreenRetainsTheShadeAndNothingElse(t *testing.T) {
+	events, keymap := fadeTopics()
+	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
+	bindBack(t, ic, keymap)
+	sendActivity(t, ic, playerIdle)
+
+	sendPress(t, ic, events)
+	mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: screenSleepEvent, retained: true})
+
+	sendPress(t, ic, events)
+	mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: screenWakeEvent, retained: true})
+
+	sendMark(ic, sofaFocus(), idleTestPlayer)
+	mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: screenFocusEvent})
+
+	ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionRePresent}))
+	mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: screenPresentEvent})
+}
+
+// Every bus session restamps the shade the sidecar holds, the way
+// it restamps the panel desire. A pod that rolled while the screen was
+// dark starts awake and overwrites the sleep the process before it left,
+// so the screen comes back lit instead of holding a shade nothing will
+// lift.
+func TestIdleScreenRestampsTheShadeOnEveryBusSession(t *testing.T) {
+	cases := []struct {
+		name   string
+		asleep bool
+		want   string
+	}{
+		{name: "a pod that starts awake", want: screenWakeEvent},
+		{name: "a session that returns to a dark screen", asleep: true, want: screenSleepEvent},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			ic, watch := fadingCommander(t, time.Hour, nil)
+			ic.mu.Lock()
+			ic.asleep = one.asleep
+			ic.mu.Unlock()
+
+			ic.onBusConnect(nil)
+
+			mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: one.want, retained: true})
+		})
+	}
 }
 
 // A press on a sleeping screen states wake, whether or not the

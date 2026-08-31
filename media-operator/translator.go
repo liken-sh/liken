@@ -36,6 +36,33 @@ import (
 // so the cap ends a repeat a lost release left running.
 var maxRepeatWindow = 30 * time.Second
 
+// The ceiling on the milliseconds a table off the bus can name
+// for a repeat. It is a minute, past any rate a person holds a control
+// at and past the window above, and it is what keeps a value that
+// overflows a Duration from panicking the ticker.
+const maxRepeatMillis = 60000
+
+// ClampRepeats holds every repeat in one decoded table under the
+// ceiling. The operator compiles the tables it publishes, so this is the
+// guard on a table the bus carried from anywhere else.
+func clampRepeats(table []compiledBinding) []compiledBinding {
+	for index := range table {
+		table[index].RepeatDelay = clampMillis(table[index].RepeatDelay)
+		table[index].RepeatInterval = clampMillis(table[index].RepeatInterval)
+	}
+	return table
+}
+
+// ClampMillis holds one value under the ceiling. A value at or
+// below zero passes through: the interval below zero is a binding that
+// does not repeat, and a delay that low starts the repeat at once.
+func clampMillis(millis int) int {
+	if millis > maxRepeatMillis {
+		return maxRepeatMillis
+	}
+	return millis
+}
+
 // translator holds the current compiled table and the repeat state. The
 // keymap topic is retained, so the current table arrives the instant the
 // client connects, and a later message on it replaces the held table.
@@ -143,13 +170,16 @@ func (tr *translator) handle(topic string, payload []byte) {
 // keymap topic carries. A payload that does not decode leaves the
 // last-good table in place, so a cleared or malformed keymap does not
 // empty a running translation.
+//
+// The repeat milliseconds are clamped here for the same reason
+// the idle sidecar clamps its own tables.
 func (tr *translator) setTable(payload []byte) {
 	var table []compiledBinding
 	if err := json.Unmarshal(payload, &table); err != nil {
 		return
 	}
 	tr.tableMu.Lock()
-	tr.table = table
+	tr.table = clampRepeats(table)
 	tr.tableMu.Unlock()
 }
 

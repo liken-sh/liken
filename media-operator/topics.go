@@ -289,11 +289,12 @@ func playerVolumeTopic(base, namespace, name string) string {
 // when a Play ends. The sidecar is the only writer, and whichever
 // client the idle pod runs reads them here.
 //
-// Nothing on this topic is retained. The shade up, the focus, and the
-// surface are moments and not state, and a retained moment replays a
-// press to a client that restarted. The shade down is the one lasting
-// state here, and it is not retained either, so one rule covers the
-// topic.
+// The shade is the lasting state of the two, so the shade down
+// and the shade up are retained and a client that restarts reads the
+// shade it left rather than waking lit. The focus and the present are
+// moments, so they are not retained, and a restart replays no press. The
+// broker holds one retained message per topic, which is the last shade
+// either way.
 func playerScreenTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerScreenKind
 }

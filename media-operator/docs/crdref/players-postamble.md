@@ -87,7 +87,9 @@ them and draws them, whichever client
 | `focus` | A live mark named this `Player`. `remote` is the controller's index in `spec.remotes` order. |
 | `present` | A `Play` ended, and the screen is the idle client's again. |
 
-Only `focus` carries `remote`. Nothing on this topic is retained: a
+Only `focus` carries `remote`. The shade events are state and travel
+retained, so a client that restarts reads the cover it should draw.
+The `focus` and `present` events are moments and do not, because a
 retained moment would replay a press to a client that restarted.
 
 The unit's own state stays on the retained topics above. A client

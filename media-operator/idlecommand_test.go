@@ -20,6 +20,7 @@ func TestIdleCommandClientIDDerivesFromTheTopic(t *testing.T) {
 // is rather than crashing the sidecar.
 func TestIdleCommandHandleActsOnlyOnRePresent(t *testing.T) {
 	ic, watch := fadingCommander(t, 0, nil)
+	sendActivity(t, ic, playerIdle)
 
 	ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionPause}))
 	ic.handle(ic.commandsTopic, []byte("not json"))
@@ -32,6 +33,7 @@ func TestIdleCommandHandleActsOnlyOnRePresent(t *testing.T) {
 // it as the request to map a fresh surface.
 func TestIdleCommandARePresentStatesThePresentMoment(t *testing.T) {
 	ic, watch := fadingCommander(t, 0, nil)
+	sendActivity(t, ic, playerIdle)
 
 	ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionRePresent}))
 
@@ -40,5 +42,17 @@ func TestIdleCommandARePresentStatesThePresentMoment(t *testing.T) {
 	if moment.Remote != nil {
 		t.Errorf("the present named controller %d, and only a focus names one", *moment.Remote)
 	}
+	noMoment(t, watch, 100*time.Millisecond)
+}
+
+// A re-present that reaches the sidecar while a Play runs states
+// nothing, so a stray one never maps the idle clock over a running film.
+// It is the same gate back, volume, and cycle read.
+func TestIdleCommandARePresentStatesNothingWhileAPlayRuns(t *testing.T) {
+	ic, watch := fadingCommander(t, 0, nil)
+	sendActivity(t, ic, playerPlaying)
+
+	ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionRePresent}))
+
 	noMoment(t, watch, 100*time.Millisecond)
 }

@@ -108,8 +108,8 @@ spec:
                         entrypoint and reads each unit's state from the
                         bus: the status topic, the volume topic where
                         the unit has sinks, and the screen topic that
-                        carries the sleep, wake, focus, and present
-                        moments. Unset, every screen the household does
+                        carries the shade (sleep and wake), the focus
+                        marks, and the present moments. Unset, every screen the household does
                         not override runs the idle client the media
                         operator ships.
                     fadeAfterSeconds:

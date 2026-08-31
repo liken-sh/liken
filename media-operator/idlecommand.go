@@ -40,6 +40,9 @@ const focusCycleSuffix = "/cycle"
 // shade comes down when the quiet window runs out and goes up on a press
 // or a starting Play.
 //
+// The two shade moments travel retained, because the shade is a
+// state a client that restarts has to read; the other two do not.
+//
 // A focus names the controller a live mark landed on, by its position in
 // spec.remotes. The parts list the client draws holds the display and
 // the sinks before the controllers, so the client reads this index among
@@ -80,6 +83,9 @@ type idleCommander struct {
 
 	// The topic the panel state stands on, and the publish half of the
 	// sidecar's own bus connection.
+	//
+	// RunIdleCommand sets publish before the bus runs and nothing
+	// clears it, so no publisher here guards against a nil one.
 	panelTopic string
 	publish    func(topic string, payload []byte, retained bool)
 
@@ -340,6 +346,9 @@ func idleCommandClientID(commandsTopic string) string {
 // status before it publishes the re-present, and the sidecar states the
 // present only after it has read that status, so the client reads the Idle
 // status first and starts the arrival motion from it.
+//
+// The re-present acts only while the unit plays nothing, so a
+// stray one during a film never maps the clock over it.
 func (ic *idleCommander) handle(topic string, payload []byte) {
 	if topic == ic.statusTopic {
 		ic.onStatus(payload)
@@ -376,7 +385,14 @@ func (ic *idleCommander) handle(topic string, payload []byte) {
 	if command.Action != actionRePresent {
 		return
 	}
-	ic.publishScreen(screenMessage{Event: screenPresentEvent})
+	// The present states the screen back to the idle client, so it
+	// acts only while the unit plays nothing, the same gate back, volume,
+	// and cycle read.
+	ic.mu.Lock()
+	if ic.idle {
+		ic.publishScreen(screenMessage{Event: screenPresentEvent})
+	}
+	ic.mu.Unlock()
 }
 
 // idleStatus is the one field of the status the sidecar reads for
@@ -390,21 +406,30 @@ type idleStatus struct {
 // the timer arms in, so a status that leaves Idle disarms it. The same
 // status lifts the shade if the screen sleeps, so a Play started from
 // another room shows its film and not a black screen.
+//
+// The operator republishes the status on any change to the
+// payload, a controller's Connected flap included, so only a status that
+// moved the unit into or out of Idle restarts the quiet window; a
+// republish of the same activity leaves the window where it stands.
 func (ic *idleCommander) onStatus(payload []byte) {
 	var status idleStatus
 	if err := json.Unmarshal(payload, &status); err != nil {
 		return
 	}
+	idle := status.Activity == playerIdle
 	ic.mu.Lock()
-	ic.idle = status.Activity == playerIdle
+	defer ic.mu.Unlock()
+	if idle == ic.idle {
+		return
+	}
+	ic.idle = idle
 	moment := ""
 	if !ic.idle && ic.asleep {
 		ic.asleep = false
 		moment = screenWakeEvent
 	}
 	ic.rearmLocked()
-	ic.mu.Unlock()
-	ic.applyShade(moment)
+	ic.applyShadeLocked(moment)
 }
 
 // isPressEdge reports whether this event is a control pressed down. The
@@ -485,12 +510,12 @@ func (ic *idleCommander) onRemoteEvent(topic string, remote idleRemote, payload 
 		repeat = binding.RepeatInterval > 0
 	}
 	ic.rearmLocked()
+	ic.applyShadeLocked(moment)
 	ic.mu.Unlock()
 	if cycle {
 		ic.publishCycle(remote)
 		return
 	}
-	ic.applyShade(moment)
 	ic.pressVolume(press)
 	if repeat {
 		ic.startRepeat(event.Code, press, binding.RepeatDelay, binding.RepeatInterval)
@@ -502,7 +527,7 @@ func (ic *idleCommander) onRemoteEvent(topic string, remote idleRemote, payload 
 // not a state. It is the same message the translator publishes from a
 // Play.
 func (ic *idleCommander) publishCycle(remote idleRemote) {
-	if ic.publish == nil || remote.focus == "" {
+	if remote.focus == "" {
 		return
 	}
 	ic.publish(remote.focus+focusCycleSuffix, nil, false)
@@ -541,9 +566,9 @@ func (ic *idleCommander) onFocus(events string, remote idleRemote, payload []byt
 		moment = screenWakeEvent
 	}
 	ic.rearmLocked()
-	ic.mu.Unlock()
-	ic.applyShade(moment)
+	ic.applyShadeLocked(moment)
 	ic.publishScreen(screenMessage{Event: screenFocusEvent, Remote: &remote.index})
+	ic.mu.Unlock()
 }
 
 // holdsFocus reports whether this remote's mark names this Player right
@@ -576,27 +601,41 @@ func (ic *idleCommander) remoteForFocus(topic string) (string, idleRemote, bool)
 	return "", idleRemote{}, false
 }
 
-// applyShade states one fold's moment on the screen topic. A wake also
-// states the on desire, which is what lifts the override. An empty moment
-// is the ordinary case of a fold that changed no state, and it states
-// nothing.
-func (ic *idleCommander) applyShade(moment string) {
+// applyShadeLocked states one fold's moment on the screen topic. A wake
+// also states the on desire, which is what lifts the override. An empty
+// moment is the ordinary case of a fold that changed no state, and it
+// states nothing.
+//
+// The caller holds ic.mu across both the state change and this
+// publish, so the order two goroutines moved the shade in is the order
+// the client reads; the publish never waits, because a bus publish
+// enqueues or drops.
+func (ic *idleCommander) applyShadeLocked(moment string) {
 	if moment == "" {
 		return
 	}
 	ic.publishScreen(screenMessage{Event: moment})
 	if moment == screenWakeEvent {
-		ic.setDesire(panelDesireOn)
+		ic.setDesireLocked(panelDesireOn)
 	}
 }
 
-// publishScreen states one moment on the Player's screen topic, not
-// retained. playerScreenTopic states why nothing there is retained.
+// publishScreen states one moment on the Player's screen topic.
+// The shade is a state, so sleep and wake are retained and a client that
+// restarts reads the shade it left; the focus and the present are moments,
+// so they are not, and a restart replays no press. The caller holds ic.mu.
 func (ic *idleCommander) publishScreen(message screenMessage) {
 	// A word and an index always marshal, so the error is the
 	// interface's and not a state this code reaches.
 	payload, _ := json.Marshal(message)
-	ic.publish(ic.screenTopic, payload, false)
+	ic.publish(ic.screenTopic, payload, screenRetains(message.Event))
+}
+
+// The shade moments are the two the broker holds; MQTT keeps one
+// retained message per topic, so the last shade stands and a moment
+// published after it does not clear it.
+func screenRetains(event string) bool {
+	return event == screenSleepEvent || event == screenWakeEvent
 }
 
 // bindingForLocked reports what this press names on the remote that
@@ -632,6 +671,12 @@ func (ic *idleCommander) holdVolume(payload []byte) {
 // redelivers every retained mark, so each one is a catch-up again and
 // pulses nothing. The mark itself stands across the reconnect, so the
 // gate does not open or close on a broker restart alone.
+//
+// The shade is the sidecar's own retained state the way the
+// desire is, so it goes out again on every session. A pod that rolled
+// while the screen was dark starts awake and overwrites the sleep the
+// process before it left, so the screen comes back lit and the quiet
+// window runs down from here.
 func (ic *idleCommander) onBusConnect(*Bus) {
 	ic.focusMu.Lock()
 	for events, mark := range ic.marks {
@@ -639,11 +684,23 @@ func (ic *idleCommander) onBusConnect(*Bus) {
 		ic.marks[events] = mark
 	}
 	ic.focusMu.Unlock()
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	ic.publishScreen(screenMessage{Event: ic.shadeLocked()})
 	// The panel desire is the sidecar's own retained state, so
 	// it goes out again on every session. A pod that returns while the
 	// panel is dark states the on desire here, and the operator lifts
 	// the override.
-	ic.publishDesire()
+	ic.publishDesireLocked()
+}
+
+// shadeLocked is the shade the sidecar holds now, as the moment
+// that states it. The caller holds ic.mu.
+func (ic *idleCommander) shadeLocked() string {
+	if ic.asleep {
+		return screenSleepEvent
+	}
+	return screenWakeEvent
 }
 
 // pressVolume publishes what a press means, retained. An empty action is
@@ -658,9 +715,6 @@ func (ic *idleCommander) pressVolume(command mediaCommand) {
 	payload, err := marshalVolumeState(nextVolume(ic.heldVolume(), command))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "idle-command: volume: %v\n", err)
-		return
-	}
-	if ic.publish == nil {
 		return
 	}
 	ic.publish(ic.volumeTopic, payload, true)
@@ -751,13 +805,17 @@ func (ic *idleCommander) holdsKeymapTopic(topic string) bool {
 // setTable replaces one keymap's held table. A payload that does not
 // decode leaves the last good table in place, the same way the
 // playback translator holds its own.
+//
+// The repeat milliseconds are clamped here, because a table off
+// the bus is not the operator's compile and a value that overflows a
+// Duration would panic the ticker a held control starts.
 func (ic *idleCommander) setTable(topic string, payload []byte) {
 	var table []compiledBinding
 	if err := json.Unmarshal(payload, &table); err != nil {
 		return
 	}
 	ic.mu.Lock()
-	ic.tables[topic] = table
+	ic.tables[topic] = clampRepeats(table)
 	ic.mu.Unlock()
 }
 
@@ -810,36 +868,38 @@ func (ic *idleCommander) fade(generation uint64) {
 	ic.timer = nil
 	// The shade coming down starts the second window.
 	ic.rearmLocked()
+	ic.applyShadeLocked(screenSleepEvent)
 	ic.mu.Unlock()
-	ic.applyShade(screenSleepEvent)
 }
 
 // darken is the off window running out. It states the off
 // desire and writes no hardware. The operator reads the desire and
 // overrides the screen's Display.
+//
+// The check and the publish run under one hold of ic.mu, so a
+// press that wakes the screen between them cannot leave the panel dark
+// behind a lit one.
 func (ic *idleCommander) darken(generation uint64) {
 	ic.mu.Lock()
+	defer ic.mu.Unlock()
 	if generation != ic.generation || !ic.asleep {
-		ic.mu.Unlock()
 		return
 	}
 	ic.offTimer = nil
-	ic.mu.Unlock()
-	ic.setDesire(panelDesireOff)
+	ic.setDesireLocked(panelDesireOff)
 }
 
-// setDesire holds the new desire and publishes it retained, so
+// setDesireLocked holds the new desire and publishes it retained, so
 // the operator reads the current one the moment it subscribes. An
 // unchanged desire publishes nothing.
-func (ic *idleCommander) setDesire(desire string) {
-	ic.mu.Lock()
+//
+// The caller holds ic.mu.
+func (ic *idleCommander) setDesireLocked(desire string) {
 	if ic.desire == desire {
-		ic.mu.Unlock()
 		return
 	}
 	ic.desire = desire
-	ic.mu.Unlock()
-	ic.publishDesire()
+	ic.publishDesireLocked()
 }
 
 // publishDesire states the desire the sidecar holds now. It
@@ -848,15 +908,19 @@ func (ic *idleCommander) setDesire(desire string) {
 // off desire of the process before it.
 func (ic *idleCommander) publishDesire() {
 	ic.mu.Lock()
-	desire := ic.desire
-	ic.mu.Unlock()
-	topic, publish := ic.panelTopic, ic.publish
-	if publish == nil || topic == "" {
+	defer ic.mu.Unlock()
+	ic.publishDesireLocked()
+}
+
+// PublishDesireLocked is the publish itself, for a caller that
+// already holds ic.mu. A Player with no panel topic states no desire.
+func (ic *idleCommander) publishDesireLocked() {
+	if ic.panelTopic == "" {
 		return
 	}
-	payload, err := json.Marshal(panelDesire{Desire: desire})
+	payload, err := json.Marshal(panelDesire{Desire: ic.desire})
 	if err != nil {
 		return
 	}
-	publish(topic, payload, true)
+	ic.publish(ic.panelTopic, payload, true)
 }

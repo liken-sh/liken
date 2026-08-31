@@ -129,7 +129,7 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus: the status topic, the volume topic where the unit has sinks, and the screen topic that carries the sleep, wake, focus, and present moments. Omit it to inherit the default MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
+| <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus: the status topic, the volume topic where the unit has sinks, and the screen topic that carries the shade (sleep and wake), the focus marks, and the present moments. Omit it to inherit the default MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
 | <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
 | <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; state it only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
@@ -233,7 +233,9 @@ them and draws them, whichever client
 | `focus` | A live mark named this `Player`. `remote` is the controller's index in `spec.remotes` order. |
 | `present` | A `Play` ended, and the screen is the idle client's again. |
 
-Only `focus` carries `remote`. Nothing on this topic is retained: a
+Only `focus` carries `remote`. The shade events are state and travel
+retained, so a client that restarts reads the cover it should draw.
+The `focus` and `present` events are moments and do not, because a
 retained moment would replay a press to a client that restarted.
 
 The unit's own state stays on the retained topics above. A client

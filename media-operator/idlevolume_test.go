@@ -6,6 +6,7 @@ package main
 // the whole path off.
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -217,4 +218,27 @@ func TestAPlayStartedMidHoldSilencesTheRepeat(t *testing.T) {
 	drainPublishes(watch, 50*time.Millisecond)
 	noPublish(t, watch, 100*time.Millisecond)
 	releaseButton(t, ic, events, "BTN_NORTH")
+}
+
+// The idle sidecar clamps a repeat the same way the translator
+// does, and the press proves it: a table off the bus that names an
+// interval no Duration holds would panic the ticker this press starts,
+// on a goroutine that takes the sidecar down with it.
+func TestAnIdleRepeatItCouldNotTickIsClamped(t *testing.T) {
+	events, keymap := fadeTopics()
+	ic, watch := volumeCommander(t, map[string]string{events: keymap})
+	ic.handle(keymap, mustEncode(t, []compiledBinding{{
+		EventType: evKey, Code: buttonCodes["BTN_NORTH"], Value: 1,
+		Action: actionVolume, Amount: 5,
+		RepeatDelay: math.MaxInt, RepeatInterval: math.MaxInt,
+	}}))
+	sendActivity(t, ic, playerIdle)
+
+	pressButton(t, ic, events, "BTN_NORTH")
+
+	nextPublish(t, watch)
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	mustMatch(t, ic.tables[keymap][0].RepeatDelay, maxRepeatMillis)
+	mustMatch(t, ic.tables[keymap][0].RepeatInterval, maxRepeatMillis)
 }

@@ -32,8 +32,13 @@ func sendMark(ic *idleCommander, focus, player string) {
 // awaitCatchUp puts every mark back to the state a fresh bus session
 // starts in, where the first message on each focus topic is the broker's
 // retained catch-up.
-func awaitCatchUp(ic *idleCommander) {
+//
+// The session also restamps the shade, so the moment it states is
+// read here and the test reads what follows it.
+func awaitCatchUp(t *testing.T, ic *idleCommander, watch *idleWatch) {
+	t.Helper()
 	ic.onBusConnect(nil)
+	mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: screenWakeEvent, retained: true})
 }
 
 // bindCycle hands the sidecar the compiled table that binds the east
@@ -132,7 +137,7 @@ func TestIdleFocusALiveMarkWakesTheScreenAndPulses(t *testing.T) {
 func TestIdleFocusTheRetainedCatchUpNeitherWakesNorPulses(t *testing.T) {
 	events, _ := fadeTopics()
 	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
-	awaitCatchUp(ic)
+	awaitCatchUp(t, ic, watch)
 
 	sendActivity(t, ic, playerIdle)
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
@@ -145,7 +150,7 @@ func TestIdleFocusTheRetainedCatchUpNeitherWakesNorPulses(t *testing.T) {
 func TestIdleFocusTheRetainedCatchUpOpensTheGate(t *testing.T) {
 	events, keymap := fadeTopics()
 	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
-	awaitCatchUp(ic)
+	awaitCatchUp(t, ic, watch)
 	bindBack(t, ic, keymap)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
@@ -214,7 +219,7 @@ func TestIdleFocusABusSessionMakesTheNextMarkACatchUpAgain(t *testing.T) {
 
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 	mustMatch(t, nextPulse(t, watch), 0)
-	awaitCatchUp(ic)
+	awaitCatchUp(t, ic, watch)
 	sendMark(ic, sofaFocus(), idleTestPlayer)
 
 	noMoment(t, watch, 100*time.Millisecond)

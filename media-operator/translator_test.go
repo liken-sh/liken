@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -243,5 +244,29 @@ func TestAFocusChangeAwayStopsAnInFlightRepeat(t *testing.T) {
 	close(done)
 	if after != held {
 		t.Errorf("the repeat kept publishing after focus left: %d then %d", held, after)
+	}
+}
+
+// A repeat interval that overflows a Duration is clamped at the
+// decode. The ticker a held control starts panics on an interval that is
+// not positive, and that panic runs on a bare goroutine, so it would take
+// the whole sidecar with it.
+func TestATranslatorClampsARepeatItCouldNotTick(t *testing.T) {
+	tr, _ := testTranslator(t)
+
+	tr.handle(tr.keymapTopicID, mustJSON(t, []compiledBinding{{
+		EventType:   evKey,
+		Code:        0x130,
+		Value:       1,
+		Action:      actionPause,
+		RepeatDelay: math.MaxInt, RepeatInterval: math.MaxInt,
+	}}))
+
+	tr.tableMu.Lock()
+	defer tr.tableMu.Unlock()
+	mustMatch(t, tr.table[0].RepeatDelay, maxRepeatMillis)
+	mustMatch(t, tr.table[0].RepeatInterval, maxRepeatMillis)
+	if interval := time.Duration(tr.table[0].RepeatInterval) * time.Millisecond; interval <= 0 {
+		t.Errorf("the clamped interval is %v, and a ticker panics on anything that is not positive", interval)
 	}
 }
