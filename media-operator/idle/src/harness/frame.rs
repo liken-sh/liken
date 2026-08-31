@@ -32,9 +32,10 @@ impl<S: Screen> Ready<S> {
         if name == QUIT {
             return true;
         }
-        // A key can change what the screen draws next, so the second it named
-        // before the press no longer holds.
+        // A key changes what the screen draws, so the frame on the glass is
+        // stale and the second named before the press no longer holds.
         self.scheduled = None;
+        self.stale = true;
         self.screen.key(name);
         false
     }
@@ -50,8 +51,10 @@ impl<S: Screen> Ready<S> {
     /// Build, draw, capture, and present one frame.
     pub(crate) fn frame(&mut self, event_loop: &ActiveEventLoop) {
         // This frame is the one the schedule asked for, so the schedule is
-        // spent and the next pass asks the screen again.
+        // spent and the next pass asks the screen again. It draws every fold
+        // so far, so the glass is current again.
         self.scheduled = None;
+        self.stale = false;
         let loop_start = std::time::Instant::now();
         let at = match self.start {
             Some(start) => start.elapsed().as_secs_f64(),
@@ -216,17 +219,25 @@ impl<S: Screen> Ready<S> {
         };
         self.scheduled = None;
 
-        // The wake is the earliest second anything is due: the screen's own
-        // change, the next script key, the deadline, or the next capture. The
-        // harness's own seconds come from forward-only cursors, so they are
-        // asked again on every pass, and only the screen's answer is held.
-        // The floor holds every answer at least [`STEP`] after the last
-        // frame, which is the frame-rate cap.
-        let next = [screen_next, self.timeline.next_due(), self.next_capture()]
-            .into_iter()
-            .flatten()
-            .min_by(f64::total_cmp)
-            .map(|next| next.max(self.drawn + STEP));
+        // The wake is the earliest second anything is due: a stale frame is
+        // due now, and after it the screen's own change, the next script key,
+        // the deadline, or the next capture. The harness's own seconds come
+        // from forward-only cursors, so they are asked again on every pass,
+        // and only the screen's answer is held. The floor holds every answer
+        // at least [`STEP`] after the last frame, which is the frame-rate
+        // cap: a burst of folds coalesces to sixty frames a second and no
+        // press waits past the next one.
+        let stale_now = self.stale.then_some(at);
+        let next = [
+            stale_now,
+            screen_next,
+            self.timeline.next_due(),
+            self.next_capture(),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by(f64::total_cmp)
+        .map(|next| next.max(self.drawn + STEP));
 
         match timeline::wake(self.resized, at, next) {
             Wake::Now => {

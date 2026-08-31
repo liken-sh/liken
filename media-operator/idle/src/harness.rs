@@ -210,6 +210,12 @@ pub struct Ready<S: Screen> {
     /// surface presents without vsync, so an animation that asked for a
     /// frame on every pass would draw as fast as the loop can spin.
     pub(crate) drawn: f64,
+    /// Whether the frame on the glass shows old state. A fold and a key both
+    /// set it, because the elements schedule their own motion and not the
+    /// content: a level that changes while its row stands still would
+    /// otherwise wait for the next scheduled second, and a press must show
+    /// on the next frame.
+    pub(crate) stale: bool,
     /// The frames this run writes to disk, from `--capture`. A run that named
     /// no directory captures nothing.
     #[cfg(feature = "measure")]
@@ -312,6 +318,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             scheduled: None,
             start: None,
             drawn: 0.0,
+            stale: false,
             #[cfg(feature = "measure")]
             captures,
             #[cfg(feature = "measure")]
@@ -409,9 +416,11 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         if let Some(start) = ready.start {
             let at = start.elapsed().as_secs_f64();
             if ready.screen.pump(at) {
-                // What arrived can change the view, so the second scheduled
-                // before it no longer holds.
+                // What arrived changed the unit, so the frame on the glass is
+                // stale whatever the animations schedule, and the second
+                // scheduled before it no longer holds.
                 ready.scheduled = None;
+                ready.stale = true;
             }
             if ready.screen.surface_due() {
                 ready.surface_pending = true;
