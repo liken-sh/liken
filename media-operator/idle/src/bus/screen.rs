@@ -1,13 +1,15 @@
-// The four moments on the `Player`'s screen topic. They are the idle sidecar's
-// own decisions, which `display/main.lua` reads as `mpv` script messages and
-// this client reads off the bus.
+// The four events on the `Player`'s screen topic: the idle sidecar's own
+// decisions, which this client reads off the bus.
 //
-// Nothing on this topic is retained. Three of the four are moments, and a
-// retained moment replays a press to a client that restarted.
+// The shade events are state, so the sidecar publishes them retained and
+// a client that restarts reads the cover it should draw. The focus and
+// present events are moments and travel unretained, because a replayed
+// moment is a press that already happened, or a surface nothing asked
+// for.
 
 use serde::Deserialize;
 
-/// One moment as the sidecar states it.
+/// One event as the sidecar states it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     /// The quiet window ran out. The shade eases down over 4000 ms.
@@ -19,7 +21,7 @@ pub enum Event {
     /// order, so the screen beats that part's marker.
     Focus { remote: usize },
     /// A `Play` ended and the screen is this client's again. The client
-    /// destroys its Wayland surface and maps a new one.
+    /// maps a fresh Wayland surface, and then drops the covered one.
     Present,
 }
 

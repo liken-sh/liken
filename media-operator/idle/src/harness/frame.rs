@@ -72,12 +72,6 @@ impl<S: Screen> Ready<S> {
             stats.sample_rss(at);
         }
 
-        // The new surface goes up before this frame is drawn, so the frame the
-        // screen is told about is the first one a person sees on it.
-        if self.screen.surface_due() && self.represent(event_loop) {
-            self.screen.surfaced(at);
-        }
-
         if self.resized {
             let size = self.graphics.window.inner_size();
             let (width, height) = (size.width.max(1), size.height.max(1));
@@ -193,10 +187,11 @@ impl<S: Screen> Ready<S> {
 
     /// Set the pace of the loop, and ask for the frame that pace calls for.
     ///
-    /// The loop sleeps until the second the screen says it changes, so a
-    /// screen at rest builds one frame a change rather than one a display
-    /// refresh. A second the screen has already named holds until the clock
-    /// reaches it.
+    /// The loop sleeps until the earliest second anything is due, so a screen
+    /// at rest builds one frame a change rather than one a display refresh. A
+    /// second the screen has already named holds until the clock reaches it,
+    /// because a fresh answer after the clock arrived would name the change
+    /// after it, and the frame would never be drawn.
     pub(crate) fn pace(&mut self, event_loop: &ActiveEventLoop) {
         // Before the first frame there is no clock to schedule against, and
         // the first frame is what starts it.
@@ -207,31 +202,34 @@ impl<S: Screen> Ready<S> {
         };
 
         let at = start.elapsed().as_secs_f64();
-        let next = match self.scheduled {
+        let screen_next = match self.scheduled {
             Some(scheduled) => Some(scheduled),
             None => self.screen.next_frame(at),
         };
         self.scheduled = None;
 
-        match timeline::wake(self.armed(), at, next) {
+        // The wake is the earliest second anything is due: the screen's own
+        // change, the next script key, the deadline, or the next capture. The
+        // harness's own seconds come from forward-only cursors, so they are
+        // asked again on every pass, and only the screen's answer is held.
+        let next = [screen_next, self.timeline.next_due(), self.next_capture()]
+            .into_iter()
+            .flatten()
+            .min_by(f64::total_cmp);
+
+        match timeline::wake(self.resized, at, next) {
             Wake::Now => {
                 event_loop.set_control_flow(ControlFlow::Poll);
                 self.graphics.window.request_redraw();
             }
             Wake::At(next) => {
-                self.scheduled = Some(next);
+                self.scheduled = screen_next;
                 event_loop.set_control_flow(ControlFlow::WaitUntil(
                     start + std::time::Duration::from_secs_f64(next),
                 ));
             }
             Wake::Never => event_loop.set_control_flow(ControlFlow::Wait),
         }
-    }
-
-    /// Whether the harness itself needs the next frame: a script key or a
-    /// deadline to catch, a capture to take, or a surface that changed size.
-    fn armed(&self) -> bool {
-        self.timeline.armed() || self.capturing() || self.resized
     }
 
     /// Write this frame to a file, if a capture is due at this second. The
@@ -264,15 +262,15 @@ impl<S: Screen> Ready<S> {
         false
     }
 
-    /// Whether a capture is still to come.
+    /// The second of the next capture, folded into the wake time.
     #[cfg(feature = "measure")]
-    fn capturing(&self) -> bool {
-        self.captures.as_ref().is_some_and(Captures::pending)
+    fn next_capture(&self) -> Option<f64> {
+        self.captures.as_ref().and_then(Captures::next_due)
     }
 
     #[cfg(not(feature = "measure"))]
-    fn capturing(&self) -> bool {
-        false
+    fn next_capture(&self) -> Option<f64> {
+        None
     }
 
     /// Whether the run has taken every capture it asked for, which ends it.
@@ -300,7 +298,7 @@ impl<S: Screen> Ready<S> {
     /// surface holds the window it was created from.
     ///
     /// A compositor that gives no second window leaves the first one drawing.
-    fn represent(&mut self, event_loop: &ActiveEventLoop) -> bool {
+    pub(crate) fn represent(&mut self, event_loop: &ActiveEventLoop) -> bool {
         let size = self.viewport.physical_size();
         let Some(window) = graphics::window(event_loop, (size.width, size.height), &self.app_id)
         else {

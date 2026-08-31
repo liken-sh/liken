@@ -10,9 +10,9 @@ use serde::Deserialize;
 pub const MIN_LEVEL: i64 = 0;
 pub const UNITY_LEVEL: i64 = 100;
 
-/// The whole payload on the volume topic. Both fields are always written, so a
-/// message that omits one reads as the zero value the writer would have read,
-/// and no reader needs a default of its own.
+/// The whole payload on the volume topic. The operator writes both fields on
+/// every message, and each one still defaults here, so a partial payload from
+/// another writer reads as the zero value instead of failing to decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct Volume {
     #[serde(default)]

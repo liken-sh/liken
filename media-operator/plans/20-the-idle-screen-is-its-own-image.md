@@ -51,13 +51,12 @@ client subscribes and the socket goes away. Three topics reach it.
 * The `Player`'s status topic, retained, which exists today. It carries
   `displayName`, `activity`, `components`, and the current `play`, and
   it drives the identity block, the energy, and the activity line.
-* The `Player`'s volume topic, retained, which exists today. The first
-  message of a session is the broker's catch-up, which sets the level
-  and shows no indicator, and every message after it is a press. The
-  sidecar holds that rule today in `volumeCaughtUp`, and it moves to the
-  client.
+* The `Player`'s volume topic, retained, which exists today. The
+  broker's catch-up sets the level and shows no indicator, and every
+  live message is a press. The broker marks a catch-up delivery with the
+  retain flag, so the client tells the two apart and holds no state.
 * `<base>/players/<namespace>/<name>/screen`, new, which the sidecar
-  publishes and nothing retains. It carries what the sidecar decides.
+  publishes. It carries what the sidecar decides.
 
 | `event` | What it says | What the client does |
 |---|---|---|
@@ -66,8 +65,14 @@ client subscribes and the socket goes away. Three topics reach it.
 | `focus` | A live mark named this `Player`. `remote` holds the controller's index in `spec.remotes` order. | Beat that part's marker white once. |
 | `present` | A `Play` ended and the screen is the client's again. | Build a new Wayland surface, and start the arrival motion on the frame it is up. |
 
-Nothing on this topic is retained. Three of the four are moments, and a
-retained moment replays a press to a client that restarted.
+The shade events are state, so the sidecar publishes them retained, and
+a client that restarts reads the cover it should draw. The sidecar also
+restamps the shade it holds on every bus session, so a pod that rolls
+while the screen is dark comes back lit. The focus and present events
+are moments and travel unretained, because a replayed moment is a press
+that already happened, or a surface nothing asked for. The retained
+status is the fallback for a lost `present`: the client also maps a
+fresh surface on the status's own move to `Idle`.
 
 `present` is one event where the socket had three steps. The reveal
 problem is the compositor's and it does not go away: Weston's
@@ -147,15 +152,15 @@ the surface is 35 rows short of 1080. It takes its app-id from
 surface to the right screen. It reads the zone from `TZ` against the
 image's own `tzdata`.
 
-`IDLE_WINDOW_GRACE_SECONDS` arms the watchdog `display/window.lua`
-implements, and a client with no window after the grace exits 7, so the
+`IDLE_WINDOW_GRACE_SECONDS` arms the watchdog, and a client with no
+window after the grace exits 7, so the
 kubelet restarts the container until the compositor answers again. The
 code stays 7, so a person reading a container's last state reads the
 same number for the same reason.
 
 `IDLE_PLAYER_NAME` and `IDLE_PLAYER_COMPONENTS` seed the identity block
 before the broker answers, and the first status replaces it.
-`IDLE_PREVIEW=1` binds the keys `display/preview.lua` binds, and each
+`IDLE_PREVIEW=1` binds the preview keys, and each
 one builds the message the bus carries and folds it through the same
 code the bus path uses. `local/idle` runs the client from source with
 those keys, takes the unit's name and its parts as arguments, and passes
@@ -185,7 +190,8 @@ sidecar would need no change at all, and the scripting surface would be
 identical. It ties every future client to a protocol another project
 defines and versions.
 
-A retained screen topic. Three of its four events are moments.
+A fully retained screen topic. The moments must not replay, so only
+the shade, which is state, travels retained.
 
 The idle screen shipped from `library-operator`, drawn by the media
 browser at rest. A television with no library still shows a clock.

@@ -17,7 +17,7 @@ use crate::bus::Message;
 use crate::bus::screen;
 use crate::bus::status::{Activity, Component, Status};
 use crate::bus::volume::Volume;
-use crate::idle::{energy, shade, volume};
+use crate::idle::{energy, identity, shade, volume};
 
 /// One part of the unit: a screen, a set of speakers, or a controller.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -45,6 +45,16 @@ pub struct Part {
     /// here. The status says whether the marker draws at all, and the moment
     /// carries the timing, so a beat that lands before the status still shows.
     pub marked: Option<f64>,
+    /// The name's brightness at `returned` or `left`, so a part that
+    /// flips presence mid-ease turns around from the level it stood at
+    /// rather than jumping to one end.
+    pub brightness_from: f32,
+    /// The name's white flash at `returned`, so a second return inside
+    /// one flash climbs from the level it holds.
+    pub flash_from: f32,
+    /// The marker's beat at `marked`, so a second focus moment inside
+    /// one beat climbs from the level it holds.
+    pub focus_from: f32,
 }
 
 /// The shade over the whole screen: which way it moves, and the second it
@@ -214,6 +224,8 @@ impl Unit {
             .filter(|part| part.kind == Component::REMOTE)
             .nth(remote)
         {
+            let from = identity::focus(part, at);
+            part.focus_from = from;
             part.marked = Some(at);
         }
     }
@@ -240,10 +252,25 @@ fn lit(connected: Option<bool>) -> bool {
 /// A part this unit has not listed before takes neither second, so a
 /// controller that is already away when the first status lands draws dim
 /// without easing there.
+///
+/// A part that turns also records the level the identity block drew it
+/// at, read through that block's own curve, so the ease that follows
+/// leaves from there. A part that did not turn keeps the levels it
+/// already held.
 fn part(component: Component, was: Option<&Part>, at: f64) -> Part {
     let went_away = was.is_some_and(|was| lit(was.connected)) && !lit(component.connected);
     let came_back =
         was.is_some_and(|was| was.connected == Some(false)) && component.connected == Some(true);
+    let brightness_from = match was {
+        Some(was) if went_away || came_back => identity::brightness(was, at),
+        Some(was) => was.brightness_from,
+        None => 0.0,
+    };
+    let flash_from = match was {
+        Some(was) if came_back => identity::flash(was, at),
+        Some(was) => was.flash_from,
+        None => 0.0,
+    };
 
     Part {
         name: component.name,
@@ -257,6 +284,9 @@ fn part(component: Component, was: Option<&Part>, at: f64) -> Part {
             .then_some(at)
             .or_else(|| was.and_then(|was| was.left)),
         marked: was.and_then(|was| was.marked),
+        brightness_from,
+        flash_from,
+        focus_from: was.map_or(0.0, |was| was.focus_from),
     }
 }
 
@@ -402,6 +432,65 @@ mod tests {
             2.0,
         );
         assert_eq!(unit.parts[0].left, Some(2.0));
+    }
+
+    #[test]
+    fn a_part_that_came_back_mid_fade_records_the_level_it_stood_at() {
+        let mut unit = seeded();
+        unit.fold(
+            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            1.0,
+        );
+        unit.fold(
+            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            4.0,
+        );
+        assert_eq!(unit.parts[0].brightness_from, 1.0);
+
+        // The return lands 200 ms into the 400 ms fade, so the name
+        // stands at half and the ease up leaves from there.
+        unit.fold(
+            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            4.2,
+        );
+        assert_eq!(unit.parts[0].returned, Some(4.2));
+        assert_eq!(unit.parts[0].brightness_from, 0.5);
+    }
+
+    #[test]
+    fn a_part_that_did_not_turn_keeps_the_level_it_already_recorded() {
+        let mut unit = seeded();
+        unit.fold(
+            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            1.0,
+        );
+        unit.fold(
+            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            4.0,
+        );
+        unit.fold(
+            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            9.0,
+        );
+        assert_eq!(unit.parts[0].brightness_from, 1.0);
+    }
+
+    #[test]
+    fn a_focus_moment_inside_a_beat_records_the_level_the_marker_held() {
+        let mut unit = seeded();
+        unit.fold(
+            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            1.0,
+        );
+
+        unit.fold(Message::Screen(screen::Event::Focus { remote: 0 }), 3.0);
+        assert_eq!(unit.parts[0].focus_from, 0.0);
+
+        // The second moment lands 250 ms into the beat's 500 ms fall, so
+        // the marker holds half and the next beat climbs from there.
+        unit.fold(Message::Screen(screen::Event::Focus { remote: 0 }), 3.37);
+        assert_eq!(unit.parts[0].marked, Some(3.37));
+        assert_eq!(unit.parts[0].focus_from, 0.5);
     }
 
     #[test]

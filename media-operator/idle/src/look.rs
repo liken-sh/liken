@@ -55,9 +55,10 @@ pub const fn faded(color: Color, alpha: f32) -> Color {
 // inside where it belongs.
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
-/// The canvas width for one surface size, rounded the way the display rounds
-/// it. Every element measures against the screen that is there now, so a width
-/// read once at startup is the width of another screen.
+/// The canvas width for one surface size, rounded the way `display/theme.lua`
+/// rounds it. The surface can change size while the client runs, so every
+/// element measures against the screen that is there now rather than a width
+/// read once at startup.
 pub fn canvas_width(surface: (u32, u32)) -> f32 {
     if surface.0 == 0 || surface.1 == 0 {
         return CANVAS_HEIGHT * 16.0 / 9.0;

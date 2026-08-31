@@ -14,8 +14,8 @@
 //! before the first status.
 //!
 //! Every brightness here is a function of the clock and of the seconds in
-//! `Part`. `media-operator`'s `display/identity.lua` holds the same numbers and
-//! steps them on a timer of its own, sixty times a second.
+//! `Part`, so a captured frame is reproducible and a dropped frame is
+//! harmless.
 
 use iced_widget::canvas::Path;
 use iced_winit::core::{Color, Point};
@@ -149,8 +149,8 @@ struct Marker {
 /// marks the part focused, and the beat shows either way.
 fn line(part: &Part, y: f32, at: f64) -> Line {
     let level = brightness(part, at);
-    let flash = beat(part.returned, at);
-    let focus = beat(part.marked, at);
+    let flash = flash(part, at);
+    let focus = focus(part, at);
 
     Line {
         color: look::faded(lit(flash), name_opacity(level)),
@@ -235,18 +235,39 @@ fn vertices(center: Point, r: f32) -> [Point; 6] {
 /// The brightness one part draws at, from 0 at `look::DIM` to 1 at full.
 ///
 /// A part that reports no presence draws at full brightness always. A part that
-/// reports presence eases over `DIM_SECONDS` in both directions: down from the
-/// second it went away, and up from the second it came back. A part that has
-/// been away since the first status rests at dim, because the client saw no
+/// has been away since the first status rests at dim, because the client saw no
 /// moment to ease from.
-fn brightness(part: &Part, at: f64) -> f32 {
+///
+/// A part that reports presence eases over `DIM_SECONDS` in both
+/// directions, from the level `Part::brightness_from` recorded at the
+/// moment it turned toward the end its presence names. `Unit` reads the
+/// level through this function, so the curve is stated once.
+pub fn brightness(part: &Part, at: f64) -> f32 {
     match (part.connected, part.returned, part.left) {
         (None, _, _) => 1.0,
         (Some(true), None, _) => 1.0,
-        (Some(true), Some(returned), _) => progress(at - returned, DIM_SECONDS),
+        (Some(true), Some(returned), _) => between(
+            part.brightness_from,
+            1.0,
+            progress(at - returned, DIM_SECONDS),
+        ),
         (Some(false), _, None) => 0.0,
-        (Some(false), _, Some(left)) => 1.0 - progress(at - left, DIM_SECONDS),
+        (Some(false), _, Some(left)) => {
+            between(part.brightness_from, 0.0, progress(at - left, DIM_SECONDS))
+        }
     }
+}
+
+/// The white flash on the name of a controller that returned: the beat
+/// `returned` and `flash_from` state.
+pub fn flash(part: &Part, at: f64) -> f32 {
+    beat(part.returned, part.flash_from, at)
+}
+
+/// The beat on the marker of a controller that took focus: the beat
+/// `marked` and `focus_from` state.
+pub fn focus(part: &Part, at: f64) -> f32 {
+    beat(part.marked, part.focus_from, at)
 }
 
 /// One white beat, 0 at rest and 1 at its peak. It rises from `moment` over
@@ -254,14 +275,18 @@ fn brightness(part: &Part, at: f64) -> f32 {
 /// part, the flash on the name of a controller that returned and the beat on
 /// the marker of a controller that took focus, and both read their moment from
 /// `Part`.
-fn beat(moment: Option<f64>, at: f64) -> f32 {
+///
+/// `from` is the level the beat stood at when the moment landed, so a
+/// beat that lands inside another climbs from there instead of dropping
+/// to rest first.
+fn beat(moment: Option<f64>, from: f32, at: f64) -> f32 {
     let Some(moment) = moment else {
         return 0.0;
     };
 
     let elapsed = at - moment;
     if elapsed < BEAT_RISE_SECONDS {
-        progress(elapsed, BEAT_RISE_SECONDS)
+        between(from, 1.0, progress(elapsed, BEAT_RISE_SECONDS))
     } else {
         1.0 - progress(elapsed - BEAT_RISE_SECONDS, BEAT_FALL_SECONDS)
     }
@@ -412,6 +437,7 @@ mod tests {
     fn a_part_that_went_away_eases_down_over_400_ms() {
         let part = Part {
             left: Some(10.0),
+            brightness_from: 1.0,
             ..part(Some(false))
         };
 
@@ -440,21 +466,79 @@ mod tests {
     }
 
     #[test]
+    fn a_part_that_came_back_mid_fade_eases_up_from_the_level_it_stood_at() {
+        // The part left at 10.0 and came back at 10.2, halfway down the
+        // 400 ms fade, so the ease up leaves from half brightness.
+        let part = Part {
+            returned: Some(10.2),
+            left: Some(10.0),
+            brightness_from: 0.5,
+            ..part(Some(true))
+        };
+
+        assert_eq!(brightness(&part, 10.2), 0.5);
+        assert_eq!(brightness(&part, 10.4), 0.75);
+        assert_eq!(brightness(&part, 10.6), 1.0);
+    }
+
+    #[test]
+    fn a_part_that_went_away_mid_ease_fades_down_from_the_level_it_stood_at() {
+        let part = Part {
+            returned: Some(10.0),
+            left: Some(10.2),
+            brightness_from: 0.5,
+            ..part(Some(false))
+        };
+
+        assert_eq!(brightness(&part, 10.2), 0.5);
+        assert_eq!(brightness(&part, 10.4), 0.25);
+        assert_eq!(brightness(&part, 10.6), 0.0);
+    }
+
+    #[test]
     fn a_beat_peaks_at_120_ms_and_falls_over_500_ms() {
         let moment = Some(10.0);
 
-        assert_eq!(beat(moment, 10.0), 0.0);
-        assert_eq!(beat(moment, 10.06), 0.5);
-        assert_eq!(beat(moment, 10.12), 1.0);
-        assert_eq!(beat(moment, 10.37), 0.5);
-        assert_eq!(beat(moment, 10.62), 0.0);
-        assert_eq!(beat(moment, 30.0), 0.0);
+        assert_eq!(beat(moment, 0.0, 10.0), 0.0);
+        assert_eq!(beat(moment, 0.0, 10.06), 0.5);
+        assert_eq!(beat(moment, 0.0, 10.12), 1.0);
+        assert_eq!(beat(moment, 0.0, 10.37), 0.5);
+        assert_eq!(beat(moment, 0.0, 10.62), 0.0);
+        assert_eq!(beat(moment, 0.0, 30.0), 0.0);
     }
 
     #[test]
     fn a_beat_that_has_not_landed_is_at_rest() {
-        assert_eq!(beat(None, 10.0), 0.0);
-        assert_eq!(beat(Some(12.0), 10.0), 0.0);
+        assert_eq!(beat(None, 0.0, 10.0), 0.0);
+        assert_eq!(beat(Some(12.0), 0.0, 10.0), 0.0);
+    }
+
+    #[test]
+    fn a_second_focus_beat_inside_the_first_climbs_from_the_level_it_held() {
+        // The first beat stood at half on its way down when the second
+        // focus moment landed at 10.37, so the marker climbs from 0.5 to
+        // 1 over the 120 ms rise rather than dropping to rest first.
+        let part = Part {
+            marked: Some(10.37),
+            focus_from: 0.5,
+            ..part(Some(true))
+        };
+
+        assert_eq!(focus(&part, 10.37), 0.5);
+        assert_eq!(focus(&part, 10.43), 0.75);
+        assert_eq!(focus(&part, 10.49), 1.0);
+    }
+
+    #[test]
+    fn a_second_flash_inside_the_first_climbs_from_the_level_it_held() {
+        let part = Part {
+            returned: Some(10.37),
+            flash_from: 0.5,
+            ..part(Some(true))
+        };
+
+        assert_eq!(flash(&part, 10.37), 0.5);
+        assert_eq!(flash(&part, 10.49), 1.0);
     }
 
     #[test]
@@ -477,10 +561,10 @@ mod tests {
     fn a_focus_beat_lifts_the_marker_to_opaque_and_back() {
         let moment = Some(10.0);
 
-        assert_eq!(marker_opacity(1.0, beat(moment, 10.12)), 1.0);
-        assert_eq!(marker_opacity(0.0, beat(moment, 10.12)), 1.0);
-        assert!(marker_opacity(1.0, beat(moment, 10.37)) > look::DIM);
-        assert_eq!(marker_opacity(1.0, beat(moment, 10.62)), look::DIM);
+        assert_eq!(marker_opacity(1.0, beat(moment, 0.0, 10.12)), 1.0);
+        assert_eq!(marker_opacity(0.0, beat(moment, 0.0, 10.12)), 1.0);
+        assert!(marker_opacity(1.0, beat(moment, 0.0, 10.37)) > look::DIM);
+        assert_eq!(marker_opacity(1.0, beat(moment, 0.0, 10.62)), look::DIM);
     }
 
     #[test]

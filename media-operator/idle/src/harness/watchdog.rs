@@ -10,9 +10,9 @@
 
 use std::time::{Duration, Instant};
 
-/// The exit code a client with no window leaves. It is the code
-/// `display/window.lua` exits with, so a person reading a container's last
-/// state reads the same number for the same reason on either client.
+/// The exit code a client with no window leaves. The code is a contract with
+/// whoever reads a container's last state: 7 means the compositor gave no
+/// window, whichever client the image runs.
 pub const NO_WINDOW: i32 = 7;
 
 /// The grace, and the moment the window went away.

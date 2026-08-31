@@ -23,7 +23,7 @@ pub const STATUS_TOPIC: &str = "MEDIA_PLAYER_STATUS_TOPIC";
 pub const VOLUME_TOPIC: &str = "MEDIA_PLAYER_VOLUME_TOPIC";
 
 /// The `Player`'s screen topic, which carries the sidecar's own decisions.
-/// Nothing on it is retained.
+/// The shade travels retained, and the moments do not.
 pub const SCREEN_TOPIC: &str = "MEDIA_PLAYER_SCREEN_TOPIC";
 
 /// The unit's friendly name, and its parts joined with newlines. They seed the
@@ -113,8 +113,7 @@ pub fn split_lines(text: &str) -> Vec<String> {
 }
 
 /// The window grace, in seconds. Anything but a positive number leaves the
-/// watchdog off, which is the rule `display/window.lua` applies to the same
-/// variable.
+/// watchdog off.
 fn grace(text: &str) -> Option<Duration> {
     let seconds: f64 = text.trim().parse().ok()?;
     if seconds <= 0.0 || !seconds.is_finite() {

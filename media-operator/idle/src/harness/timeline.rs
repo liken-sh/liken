@@ -44,12 +44,16 @@ impl Timeline {
         self.quit_after.is_some_and(|limit| at >= limit)
     }
 
-    /// Whether the run still has a step of its own to catch: a script key that
-    /// has not fired, or a deadline that has not passed. The harness reads
-    /// both between frames, so a run with either one draws at the pace of the
-    /// loop rather than at the pace of the screen.
-    pub fn armed(&self) -> bool {
-        self.next_step < self.script.len() || self.quit_after.is_some()
+    /// The next second the run itself must catch: the next script key, or the
+    /// deadline. The loop folds it into the wake time, so a scripted or
+    /// deadlined run sleeps between its seconds instead of drawing every
+    /// pass, and a measurement under `--quit-after` reads a paced run.
+    pub fn next_due(&self) -> Option<f64> {
+        let step = self.script.get(self.next_step).map(|(when, _)| *when);
+        [step, self.quit_after]
+            .into_iter()
+            .flatten()
+            .min_by(f64::total_cmp)
     }
 }
 
@@ -65,15 +69,17 @@ pub enum Wake {
 }
 
 /// When the loop draws its next frame. `at` is the second of the frame that
-/// was drawn last, and `next` is the second the screen says it changes.
+/// was drawn last, and `next` is the earliest second anything is due: the
+/// screen's own change, the next script key, the next capture, or the
+/// deadline, whichever comes first.
 ///
 /// A screen at rest changes on its own schedule, once a minute for a clock
 /// that draws no seconds, and a loop that drew at the rate of the display
-/// would build sixty identical frames a second for it. An `armed` run is the
-/// exception: a script key, a capture, or a deadline is a second the harness
-/// itself must catch, and it catches one by taking every pass it can.
-pub fn wake(armed: bool, at: f64, next: Option<f64>) -> Wake {
-    if armed {
+/// would build sixty identical frames a second for it. `immediate` is the
+/// exception: a surface that changed size holds a stale frame, and the loop
+/// draws now whatever the schedule says.
+pub fn wake(immediate: bool, at: f64, next: Option<f64>) -> Wake {
+    if immediate {
         return Wake::Now;
     }
     match next {
@@ -127,28 +133,29 @@ mod tests {
     }
 
     #[test]
-    fn a_run_with_no_script_and_no_deadline_is_unarmed() {
-        assert!(!Timeline::default().armed());
+    fn a_run_with_no_script_and_no_deadline_has_nothing_due() {
+        assert_eq!(Timeline::default().next_due(), None);
         assert!(!Timeline::default().past_deadline(86_400.0));
     }
 
     #[test]
-    fn a_script_arms_the_run_until_its_last_step_has_fired() {
-        let mut timeline = scripted(&[(1.0, "p")]);
-        assert!(timeline.armed());
+    fn the_next_step_is_due_until_it_fires_and_then_the_one_after_it() {
+        let mut timeline = scripted(&[(1.0, "p"), (2.5, "q")]);
+        assert_eq!(timeline.next_due(), Some(1.0));
 
         timeline.due(1.0);
 
-        assert!(!timeline.armed());
+        assert_eq!(timeline.next_due(), Some(2.5));
     }
 
     #[test]
-    fn a_deadline_arms_the_run() {
-        assert!(Timeline::new(Vec::new(), Some(3.0)).armed());
+    fn the_deadline_is_due_when_it_comes_before_the_next_step() {
+        let timeline = Timeline::new(vec![(5.0, "p".into())], Some(3.0));
+        assert_eq!(timeline.next_due(), Some(3.0));
     }
 
     #[test]
-    fn an_armed_run_draws_every_pass() {
+    fn a_resized_surface_draws_now_whatever_the_schedule_says() {
         assert_eq!(wake(true, 4.0, Some(60.0)), Wake::Now);
         assert_eq!(wake(true, 4.0, None), Wake::Now);
     }

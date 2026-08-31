@@ -8,9 +8,6 @@
 //! `Client::receive`, the call the bus reader's own messages take, so a person
 //! plays every ramp, every dim, and every beat against the real handlers and
 //! not against a second set written for a workstation.
-//!
-//! `media-operator`'s `display/preview.lua` binds the same keys, and the two
-//! files name the same key for the same moment.
 
 use iced_winit::core::Point;
 
@@ -36,9 +33,9 @@ const PLAY_TITLE: &str = "Sailing";
 /// index is always the first.
 const REMOTE: usize = 0;
 
-/// How far one volume key moves the level, out of the 100 that is unity. It is
-/// the step `mpv`'s own `9` and `0` keys take, and what `display/preview.lua`
-/// presses for.
+/// How far one volume key moves the level, out of the 100 that is unity: a
+/// step big enough to read on the bar at a glance, and small enough that the
+/// range takes twenty of them.
 const VOLUME_STEP: i64 = 5;
 
 /// The state behind the keys: what the fake status says about the unit now.
@@ -212,13 +209,11 @@ const LEGEND: [(&str, &str); 10] = [
     ("s", "sleep"),
     ("9/0", "volume"),
     ("m", "mute"),
-    (HARNESS_KEY, "quit"),
+    // The one key of the legend this module does not bind. The harness reads
+    // the quit key itself, and the legend names it beside the rest because a
+    // person reading the line needs the way out.
+    (crate::harness::QUIT, "quit"),
 ];
-
-/// The one key of the legend that this module does not bind. `q` ends the run,
-/// which the harness reads, and the legend names it beside the rest because a
-/// person reading the line needs the way out.
-const HARNESS_KEY: &str = "q";
 
 /// The gap between one pair and the next, wide enough that a reader takes the
 /// key and its words as one.
@@ -479,7 +474,7 @@ mod tests {
             .filter(|key| keys.press(key).is_empty())
             .collect();
 
-        assert_eq!(bound_to_nothing, [HARNESS_KEY]);
+        assert_eq!(bound_to_nothing, [crate::harness::QUIT]);
     }
 
     #[test]

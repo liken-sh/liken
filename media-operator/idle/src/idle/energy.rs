@@ -4,8 +4,7 @@
 //! It runs from 0, the mark at rest, to 1, the mark at full swing. The
 //! `brand` repository's `motion.md` states the rule: the mark moves only while
 //! the system works on something a person waits for, and every change of
-//! energy eases rather than steps. `media-operator`'s `display/energy.lua`
-//! holds the numbers.
+//! energy eases rather than steps. The numbers below state how.
 //!
 //! The activity in the `Player`'s retained status decides the target. Starting
 //! ramps the energy up, because the seconds a playback pod pulls and starts are
@@ -49,9 +48,8 @@ fn area(t: f64) -> f64 {
 /// The ramp in flight at one moment: its two ends, how long it takes, the
 /// second it started, and the animation clock it carried into that second.
 ///
-/// A ramp with both ends at 0 moves nothing. `display/energy.lua` refuses to
-/// start its frame timer for one, so the clock stands still through it, and a
-/// settled idle screen animates nothing at all.
+/// A ramp with both ends at 0 moves nothing, the clock stands still through
+/// it, and a settled idle screen animates nothing at all.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Flight {
     from: f64,
@@ -427,12 +425,11 @@ mod tests {
         assert!(drift.abs() < INTEGRAL_TOLERANCE, "{drift}");
     }
 
-    // `display/energy.lua` advances its clock one frame at a time, at its own
-    // thirty frames a second: `phase = phase + TICK * (SPEED_FLOOR + (1 -
-    // SPEED_FLOOR) * level)`, with the level read after the ramp steps. This is
-    // that loop, run to `until` seconds, and the one test below is the port
-    // check: the two screens run side by side on one cluster, so a drift
-    // between them is a drift a person sees.
+    // The phase is defined as this stepped loop: `phase = phase + TICK *
+    // (SPEED_FLOOR + (1 - SPEED_FLOOR) * level)`, thirty steps a second, with
+    // the level read after the ramp steps. The closed form above must land
+    // where the loop lands, so the test below runs the loop to `until`
+    // seconds and holds the two together.
     const TICK: f64 = 1.0 / 30.0;
 
     fn accumulated(from: f64, to: f64, seconds: f64, until: f64) -> f64 {

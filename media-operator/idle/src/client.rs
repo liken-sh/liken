@@ -10,6 +10,7 @@ use iced_wgpu::Renderer;
 use iced_widget::Canvas;
 use iced_winit::core::{Color, Element, Length, Theme};
 
+use crate::bus::status::Activity;
 use crate::bus::{self, Message, Reader};
 use crate::harness::Screen;
 use crate::idle::Idle;
@@ -24,8 +25,8 @@ pub struct Client {
     /// The subscription, or nothing when the operator named no broker. A run on
     /// a workstation draws the seeds alone.
     bus: Option<Reader>,
-    /// Whether a `present` asked for a fresh Wayland surface. The harness reads
-    /// it once a frame.
+    /// Whether a `present` asked for a fresh Wayland surface. The harness
+    /// reads it on every wake of the loop.
     surface_due: bool,
     /// The preview keys, on a run that binds them. They stand in for the bus
     /// on a workstation, and the legend draws where they are bound.
@@ -73,11 +74,21 @@ impl Client {
     /// Fold one message in, at `at` seconds on the screen's clock. A `present`
     /// asks the harness for a new surface, and every other message reaches the
     /// unit.
+    ///
+    /// The retained status also asks, on its move to `Idle`. `present` rides a
+    /// topic nothing retains, so a broker session that drops while a film ends
+    /// loses the moment for good, and the catch-up status still says the
+    /// screen is the client's again. The two usually drain in one wake, and
+    /// the flag folds them into one map.
     pub fn receive(&mut self, message: Message, at: f64) {
         if message == Message::Screen(bus::screen::Event::Present) {
             self.surface_due = true;
         }
+        let was = self.unit.activity;
         self.unit.fold(message, at);
+        if self.unit.activity == Activity::Idle && was != Activity::Idle {
+            self.surface_due = true;
+        }
     }
 }
 
@@ -108,12 +119,22 @@ impl Screen for Client {
 
     fn tick(&mut self, at: f64) {
         self.at = at;
+    }
+
+    /// Drain the reader and fold in what arrived. The harness calls this on
+    /// every wake of the loop rather than on a frame, because a covered
+    /// client draws no frame, and `present` arrives exactly while the client
+    /// is covered.
+    fn pump(&mut self, at: f64) -> bool {
         let Some(bus) = &self.bus else {
-            return;
+            return false;
         };
-        for message in bus.drain() {
+        let messages = bus.drain();
+        let folded = !messages.is_empty();
+        for message in messages {
             self.receive(message, at);
         }
+        folded
     }
 
     fn surface_due(&mut self) -> bool {
@@ -132,9 +153,10 @@ impl Screen for Client {
     }
 
     /// The second the screen next changes. The elements answer it, and the
-    /// bus does not: a message the reader holds is read in `tick`, which runs
-    /// on a frame. The clock's next second is what bounds the wait, so the
-    /// broker is drained once a second whatever else the screen is doing.
+    /// bus does not: the reader drains in `pump`, which the harness calls on
+    /// every wake of the loop. The clock's next second is what bounds each
+    /// wait, so the broker is read at least once a second whatever else the
+    /// screen does.
     fn next_frame(&self, at: f64) -> Option<f64> {
         self.screen().next_frame(at)
     }
@@ -177,9 +199,32 @@ mod tests {
         let mut client = seeded();
         client.tick(7.25);
 
-        // `tick` is where the reader drains, and it runs on a frame alone, so
-        // a client that named no second would stop reading the broker.
+        // The clock's next second bounds every wait, so a client that named
+        // no second would leave the loop with no timer to pump the bus on.
         assert_eq!(client.next_frame(7.25), Some(8.0));
+    }
+
+    #[test]
+    fn the_pump_folds_what_the_bus_delivered_and_says_so() {
+        let (sender, messages) = std::sync::mpsc::channel();
+        let mut client = seeded();
+        client.bus = Some(Reader::from_channel(messages));
+
+        assert!(!client.pump(1.0));
+
+        sender
+            .send(Message::Screen(screen::Event::Present))
+            .expect("the channel is open");
+
+        assert!(client.pump(2.0));
+        assert!(client.surface_due());
+    }
+
+    #[test]
+    fn the_clock_moves_without_the_bus() {
+        let mut client = seeded();
+        client.tick(3.5);
+        assert_eq!(client.next_frame(3.5), Some(4.0));
     }
 
     #[test]
@@ -193,6 +238,28 @@ mod tests {
             2.0,
         );
         assert_eq!(client.unit().activity, Activity::Playing);
+    }
+
+    #[test]
+    fn the_retained_status_heals_a_present_the_client_never_received() {
+        let mut client = seeded();
+        client.receive(
+            Message::Status(Status {
+                activity: Activity::Playing,
+                ..Status::default()
+            }),
+            2.0,
+        );
+        assert!(!client.surface_due());
+
+        client.receive(
+            Message::Status(Status {
+                activity: Activity::Idle,
+                ..Status::default()
+            }),
+            9.0,
+        );
+        assert!(client.surface_due());
     }
 
     #[test]

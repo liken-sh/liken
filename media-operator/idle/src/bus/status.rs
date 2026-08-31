@@ -2,8 +2,8 @@
 // the operator says about a unit. The operator folds the Kubernetes objects
 // into it, so this client resolves nothing and reads one payload.
 //
-// `media-operator` writes it in `playerstatus.go`, and `display/identity.lua`
-// and `display/activity.lua` read the same payload.
+// `media-operator` writes it in `playerstatus.go`, and the idle sidecar
+// follows the same topic.
 
 use serde::Deserialize;
 
@@ -38,9 +38,8 @@ pub enum Activity {
 
 impl Activity {
     /// The activity one word names. A word this client does not name reads as
-    /// `Idle`, which draws the mark at rest and no activity line. That is what
-    /// `display/activity.lua` and `display/energy.lua` draw for it, because
-    /// their comparisons are against `Starting` and `Playing` alone.
+    /// `Idle`, which draws the mark at rest and no activity line, because
+    /// every comparison downstream is against `Starting` and `Playing` alone.
     pub fn from_word(word: &str) -> Self {
         match word {
             "Starting" => Self::Starting,
@@ -69,6 +68,10 @@ pub struct Play {
 /// One part of the unit: a screen, a set of speakers, or a controller.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct Component {
+    /// A part that carries no name defaults to an empty one, and the
+    /// identity block drops it, because one unnamed part must not cost
+    /// the whole retained status and leave the screen on stale state.
+    #[serde(default)]
     pub name: String,
     /// `display`, `sink`, or `remote`. It is the screen's whole vocabulary for
     /// a part, and it says what to draw rather than which `DeviceClass` the
@@ -150,6 +153,18 @@ mod tests {
         assert_eq!(parse(b"{"), None);
         assert_eq!(parse(b"[]"), None);
         assert_eq!(parse(br#"["The Den","Idle",null,[]]"#), None);
-        assert_eq!(parse(br#"{"components":[{"kind":"remote"}]}"#), None);
+    }
+
+    #[test]
+    fn a_part_with_no_name_leaves_the_rest_of_the_status_readable() {
+        let status = parse(
+            br#"{"displayName":"The Den","components":[
+                   {"kind":"remote"},{"name":"A remote","kind":"remote"}]}"#,
+        )
+        .expect("the status decodes");
+
+        assert_eq!(status.display_name, "The Den");
+        assert_eq!(status.components[0].name, "");
+        assert_eq!(status.components[1].name, "A remote");
     }
 }

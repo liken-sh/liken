@@ -39,8 +39,14 @@ impl Captures {
         Some(self.dir.join(format!("{when:06.2}.png")))
     }
 
-    /// Whether a capture is still to come. The harness draws every frame it
-    /// can while one is, so the run reaches the second it was asked for.
+    /// The second of the next capture still to come. The loop folds it into
+    /// the wake time, so a capturing run sleeps to the second it needs rather
+    /// than drawing every pass toward it.
+    pub fn next_due(&self) -> Option<f64> {
+        self.at.get(self.next).copied()
+    }
+
+    /// Whether a capture is still to come.
     pub fn pending(&self) -> bool {
         self.next < self.at.len()
     }
@@ -105,6 +111,18 @@ mod tests {
             captures.due(200.0),
             Some(PathBuf::from("/frames/100.00.png"))
         );
+    }
+
+    #[test]
+    fn the_next_capture_is_due_until_it_is_taken() {
+        let mut captures = capturing("/frames", vec![0.5, 1.5]);
+        assert_eq!(captures.next_due(), Some(0.5));
+
+        captures.due(0.5);
+        assert_eq!(captures.next_due(), Some(1.5));
+
+        captures.due(1.5);
+        assert_eq!(captures.next_due(), None);
     }
 
     #[test]

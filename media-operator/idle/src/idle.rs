@@ -36,10 +36,8 @@ pub type Frame = canvas::Frame<Renderer>;
 
 /// The canvas the elements measure against.
 ///
-/// The height is always 1080. The width follows the surface's own ratio, so a
-/// canvas pixel is square and a 16:9 surface gives 1920. A fixed 1920 on a
-/// 21:9 screen stretches every drawing by a third and pulls every margin
-/// inside where it belongs.
+/// The height is always 1080, and the width follows the surface's own ratio.
+/// `look::canvas_width` states the rule and the reason.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layout {
     pub width: f32,
@@ -144,10 +142,9 @@ impl Idle<'_> {
 impl<Message> canvas::Program<Message, Theme, Renderer> for Idle<'_> {
     type State = ();
 
-    /// The elements in the order `display/main.lua` draws them for an idle
-    /// client. The mark draws first, so the corner text draws over it if the
-    /// two ever meet. The shade is read first and drawn by none of them: each
-    /// element scales its own colours by it.
+    /// The elements. The mark draws first, so the corner text draws over it
+    /// if the two ever meet. The shade is read first and drawn by none of
+    /// them: each element scales its own colours by it.
     fn draw(
         &self,
         _state: &Self::State,

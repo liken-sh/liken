@@ -64,6 +64,18 @@ pub trait Screen {
     /// digit, or `up`, `down`, `left`, `right`.
     fn key(&mut self, name: &str);
 
+    /// Fold in what the screen's own sources delivered since the last call,
+    /// at `at` seconds on the clock. The answer is whether anything folded,
+    /// so the harness drops a stale schedule and asks the screen again.
+    ///
+    /// The harness calls this on every wake of the loop, not only on a frame.
+    /// A covered Wayland surface receives no frame callbacks, so a screen
+    /// that read its sources only when it drew would go deaf for exactly as
+    /// long as something covers it.
+    fn pump(&mut self, _at: f64) -> bool {
+        false
+    }
+
     /// Move the screen's clock to `at` seconds since the first frame. Every
     /// animation reads that clock, so a frame is a pure function of it.
     fn tick(&mut self, at: f64);
@@ -91,8 +103,8 @@ pub trait Screen {
     fn update(&mut self, _message: Self::Message) {}
 
     /// Whether the screen asked for a fresh Wayland surface. The harness reads
-    /// this once a frame, and the read clears the request, so one ask maps one
-    /// new surface.
+    /// this on every wake of the loop, and the read clears the request, so one
+    /// ask maps one new surface.
     fn surface_due(&mut self) -> bool {
         false
     }
@@ -164,6 +176,10 @@ pub struct Ready<S: Screen> {
     pub(crate) modifiers: ModifiersState,
     pub(crate) events: Vec<Event>,
     pub(crate) resized: bool,
+    /// Whether a fresh Wayland surface is owed. The screen's ask moves here
+    /// and stays until a map succeeds, so a compositor that gives no window
+    /// on one wake is asked again on the next.
+    pub(crate) surface_pending: bool,
     /// The second the screen named for its next change, while the loop sleeps
     /// toward it. The harness holds that second rather than asking again on
     /// every pass, because a fresh answer names the change after it and the
@@ -272,6 +288,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             modifiers: ModifiersState::default(),
             events: Vec::new(),
             resized: false,
+            surface_pending: false,
             scheduled: None,
             start: None,
             #[cfg(feature = "measure")]
@@ -361,6 +378,31 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         {
             ready.stop(event_loop);
             return;
+        }
+
+        // The sources are pumped here, on every wake of the loop, because a
+        // covered client draws no frame: the compositor sends a hidden
+        // surface no frame callbacks. `present` is the one message that lets
+        // a covered client map the surface that reveals it, so the bus must
+        // be read on a path the compositor cannot starve.
+        if let Some(start) = ready.start {
+            let at = start.elapsed().as_secs_f64();
+            if ready.screen.pump(at) {
+                // What arrived can change the view, so the second scheduled
+                // before it no longer holds.
+                ready.scheduled = None;
+            }
+            if ready.screen.surface_due() {
+                ready.surface_pending = true;
+            }
+            if ready.surface_pending && ready.represent(event_loop) {
+                ready.surface_pending = false;
+                ready.screen.surfaced(at);
+                // A Wayland surface is not on screen until its first buffer
+                // arrives, so the new window gets a draw whatever the
+                // schedule says.
+                ready.graphics.window.request_redraw();
+            }
         }
 
         ready.pace(event_loop);

@@ -60,6 +60,11 @@ pub fn window(
 }
 
 /// Open the window, pick an adapter, and build the renderer that draws into it.
+///
+/// Every failure here answers `None` the way a compositor that gave no
+/// window does, so the run leaves the watchdog counting and the kubelet
+/// reads the exit code the watchdog states, whichever part of the
+/// graphics stack refused.
 pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Option<Graphics> {
     let window = window(event_loop, size, app_id)?;
 
@@ -68,17 +73,28 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Opt
         backends: wgpu::Backends::from_env().unwrap_or_default(),
         ..Default::default()
     });
-    let surface = instance
-        .create_surface(window.clone())
-        .expect("create surface");
+    let surface = match instance.create_surface(window.clone()) {
+        Ok(surface) => surface,
+        Err(error) => {
+            eprintln!("idle-screen: no drawing surface on this window: {error}");
+            return None;
+        }
+    };
 
     let (format, adapter, device, queue) = block_on(async {
-        let adapter = wgpu::util::initialize_adapter_from_env_or_default(&instance, Some(&surface))
-            .await
-            .expect("no wgpu adapter for this surface");
+        let adapter =
+            match wgpu::util::initialize_adapter_from_env_or_default(&instance, Some(&surface))
+                .await
+            {
+                Ok(adapter) => adapter,
+                Err(error) => {
+                    eprintln!("idle-screen: no wgpu adapter for this surface: {error}");
+                    return None;
+                }
+            };
 
         let capabilities = surface.get_capabilities(&adapter);
-        let (device, queue) = adapter
+        let (device, queue) = match adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
                 required_features: adapter.features() & wgpu::Features::default(),
@@ -88,7 +104,13 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Opt
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
             })
             .await
-            .expect("request device");
+        {
+            Ok(pair) => pair,
+            Err(error) => {
+                eprintln!("idle-screen: the adapter gave no device: {error}");
+                return None;
+            }
+        };
 
         // The client draws what libass draws, and libass composites on the
         // encoded sRGB values rather than in linear light. A format the
@@ -119,11 +141,14 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Opt
         let format = formats()
             .find(encoded)
             .or_else(|| formats().find(wgpu::TextureFormat::is_srgb))
-            .or_else(|| formats().next())
-            .expect("no surface format");
+            .or_else(|| formats().next());
+        let Some(format) = format else {
+            eprintln!("idle-screen: the surface offers no format");
+            return None;
+        };
 
-        (format, adapter, device, queue)
-    });
+        Some((format, adapter, device, queue))
+    })?;
 
     // cage takes the next free `wayland-N`, which is not `wayland-1` when
     // another compositor already holds that name, so the local script reads the

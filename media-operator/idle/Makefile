@@ -16,4 +16,8 @@ COVERAGE_FLOOR := 90
 test:
 	cargo fmt --check
 	cargo clippy --all-targets -- -D warnings
+# The image builds with `measure` off, so the lints run over that build
+# too. The pass is the library and the binary alone, because the test
+# targets reach the flags and the measurements the feature carries.
+	cargo clippy --no-default-features --lib --bins -- -D warnings
 	cargo llvm-cov --all-targets --fail-under-lines $(COVERAGE_FLOOR)
