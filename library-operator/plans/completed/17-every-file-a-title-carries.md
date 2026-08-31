@@ -156,29 +156,28 @@ over the catalog, so the plan carries the shape of a real library.
 
 ## The drill, 2026-08-30
 
-Run on `liken-1` in release 2026.08.30-012, over the lab's two libraries.
-The walk read 34,915 files it had never recorded before.
+Run on `liken-1` in release 2026.08.30-012, over a movies library and a
+series library. The walk recorded every file it had never held before,
+which is many times the number of video files a library holds.
 
-| `type` | movies | series |
-| --- | --- | --- |
-| `image` | 6137 | 4218 |
-| `trickplay` | 1756 | 6593 |
-| `video` | 1430 | 6258 |
-| `metadata` | 1027 | 4360 |
-| `subtitle` | 324 | 2799 |
-| `other` | 1 | 12 |
+The categories come out in the order the plan expected. Images are the
+largest group in a movies library, because a title folder carries a
+poster, a backdrop, a logo, a thumbnail, and a banner. Trickplay
+directories are the largest in a series library, one per episode file.
+Video files are a small share of what a library holds, which is the whole
+point of the plan. Metadata and subtitles follow. Fewer than one file in
+a thousand fell into `other`.
 
-The roles divide as the plan expected: 1002 posters, 987 backdrops, 966
-logos, 948 thumbnails, and 785 banners across the movies library, one
-`metadata/movie` sidecar for 1027 of the 1411 titles, and one
-`trickplay/tiles` row per trickplay directory rather than one per tile.
-13 files in 34,915 fell into `other`.
+The roles divide as the plan expected. Posters, backdrops, logos,
+thumbnails, and banners each land under their own word, one
+`metadata/movie` sidecar sits with most titles, and a trickplay directory
+is one `trickplay/tiles` row and never one row per tile.
 
-**The language read was wrong for one form.** 110 of the movies
-library's subtitles read as the language `hi`, from names like
-`Y2K [2024, Bluray-1080p].en.hi.srt`. Those are English tracks for the
-hearing impaired, not Hindi, and the read lost both facts: the language
-`en`, and the `sdh` role.
+**The language read was wrong for one form.** A subtitle named
+`<title>.en.hi.srt` read as the language `hi`. That is an English track
+for the hearing impaired, not Hindi, and the read lost both facts: the
+language `en`, and the `sdh` role. It affected a sixth of the subtitles
+in the movies library.
 
 The fix reads `hi` as the hearing-impaired flag where a language tag
 precedes it, and as the Hindi language tag where none does. So

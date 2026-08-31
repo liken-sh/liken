@@ -122,9 +122,8 @@ agent releases it, are the `Catalog` object's concern.
 A movies library is one folder per title, at the root or under grouping
 folders. A grouping folder holds no `movie.nfo` and no video, so the walk
 descends into it and keeps descending until it reaches title folders. This
-finds a title a volume nests under a genre and then a studio, such as
-`Comics/Marvel/Iron Man (2008)`, and a grouping folder is never a title
-itself. For a folder with
+finds a title a volume nests under a genre and then a studio, and a
+grouping folder is never a title itself. For a folder with
 no sidecar, the scanner reads the title and year from the folder name,
 in the `Title (Year)` and `Title [Year]` forms the `*arr` tools and
 Jellyfin write. A folder with `movie.nfo` takes its identity, plot, cast, set,
@@ -242,14 +241,14 @@ Plan 04 shipped over releases 2026.08.30-001 through -011 and drilled on
   publishes the count once the write lands, and the prune and the second
   count are best-effort steps that log and wait for the next walk. An
   incomplete walk keeps the last report.
-- A movies volume nests a title under more than one grouping folder, genre
-  then studio, such as `Comics/Marvel/Iron Man (2008)`. The one-level walk
-  cataloged the studio folder as an unidentified title and missed the films
-  under it. The walk now recurses into any grouping folder. On `liken-1`,
-  `Comics/Marvel` went from 0 to 78 movies and `Comics/DC` from 0 to 32.
-- On `liken-1`: a movies `Library` reported 1407 titles, a series `Library`
-  reported 156 series and 6222 episodes with the right season and episode
-  structure, checked by hand for "12 Monkeys". A webhook drove a scoped
-  rescan within the request, and adding a folder to the `ignore` list
-  removed its rows from the catalog. The catalog's `state.db` for the movies
-  and series is 38 MB, which plan 06 budgets against.
+- A movies volume nests a title under more than one grouping folder, a
+  genre and then a studio. The one-level walk cataloged the studio folder
+  as an unidentified title and missed every film under it. The walk now
+  recurses into any grouping folder, and the nested folders went from no
+  titles to all of them.
+- On `liken-1`: a movies `Library` and a series `Library` each reported
+  their titles, and the series reported its episodes under the right
+  season and episode numbers, checked by hand against one series. A
+  webhook drove a scoped rescan within the request, and adding a folder to
+  the `ignore` list removed its rows from the catalog. The catalog's
+  `state.db` for both libraries is 38 MB, which plan 06 budgets against.

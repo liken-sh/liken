@@ -99,29 +99,27 @@ and write both numbers here.
 
 ## The drill, 2026-08-30
 
-Run on `liken-1`, against the lab's volume over NFS. The before numbers
-are release 2026.08.30-011, which read one folder at a time and recorded
-the video files alone. The after numbers are 2026.08.30-012, which reads
-eight folders at once and records every file a title carries.
+Run on `liken-1`, against a real volume over NFS. The before numbers are
+release 2026.08.30-011, which read one folder at a time and recorded the
+video files alone. The after numbers are 2026.08.30-012, which reads
+eight folders at once and records every file a title carries, roughly
+seven times as many files for the movies library and four times for the
+series library.
 
-| library | titles | before | after |
-| --- | --- | --- | --- |
-| movies | 1411 | 6.9s, 13.4s, 13.3s | 18.7s |
-| series | 156 | 42.0s, 64.3s, 40.5s | 19.2s |
+| library | before | after |
+| --- | --- | --- |
+| movies | 6.9s, 13.4s, 13.3s | 3.6s, 7.1s, 13.1s |
+| series | 42.0s, 64.3s, 40.5s | 19.2s |
 
-The two columns do not measure the same work. The after walk reads every
-file in every title folder, and its season and extras folders with it,
-which is 10,675 files for movies where the before walk read 1430, and
-24,240 for series where it read 6258. The series library is the clearer
-read: about seven times the files in half the time.
+The movies library reads seven times the files in about the same time.
+The series library reads four times the files in half the time. Neither
+column measures the same work, because the after walk reads every file in
+every title folder and its season and extras folders with it.
 
-The 18.7 seconds is the movies library's first walk after the upgrade,
-which wrote 9245 file rows it had never held. Its later walks, which
-write only what changed, took 3.6, 7.1, and 13.1 seconds, against 6.9,
-13.4, and 13.3 before. So the movies walk reads seven times the files in
-about the same time, and the series walk reads about four times the
-files in half the time.
+The series library gains more because its folders are deeper. Each series
+folder costs a read of its season folders, which the pool overlaps, where
+a movies title folder is one read at a shallow depth.
 
-The series library gains more because its folders are deeper. Each
-series folder costs a read of its season folders, which the pool
-overlaps, where a movies title folder is one read at a shallow depth.
+The first walk after an upgrade is slower than the numbers above, because
+it writes every file row the catalog has never held. The movies library's
+first walk took 18.7 seconds and its later walks took a third of that.

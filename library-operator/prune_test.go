@@ -601,27 +601,27 @@ func TestRescanRemovesAVanishedFolder(t *testing.T) {
 // space the alias marks the stale row every walk and the prune never removes
 // it, and the catalog holds the title twice for as long as the folder stands.
 func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
-	root := artTitleTree(t, "Red Sonja (1985)")
+	root := artTitleTree(t, "The Signal (2024)")
 	scan, fake := fakeScanner(t, root, libraryKindMovies)
 	ctx := context.Background()
 
 	scan.fullWalk(ctx)
-	pathID := "movie:path:" + slug("Red Sonja (1985)", 0)
+	pathID := "movie:path:" + slug("The Signal (2024)", 0)
 	if _, held := fake.held(fake.movies)[pathID]; !held {
 		t.Fatalf("movies = %v, want the title under its path-derived id", fake.held(fake.movies))
 	}
 
 	// The sidecar arrives, so the walk reads a provider id and the title's
 	// canonical id becomes the tmdb one.
-	writeFile(t, filepath.Join(root, "Red Sonja (1985)", "movie.nfo"),
-		`<movie><title>Red Sonja</title><year>1985</year><uniqueid type="tmdb">9760</uniqueid></movie>`)
+	writeFile(t, filepath.Join(root, "The Signal (2024)", "movie.nfo"),
+		`<movie><title>The Signal</title><year>2024</year><uniqueid type="tmdb">424242</uniqueid></movie>`)
 	scan.fullWalk(ctx)
 
 	movies := fake.held(fake.movies)
 	if _, held := movies[pathID]; held {
 		t.Errorf("movies = %v, want the stale path-derived row pruned", movies)
 	}
-	if _, held := movies["movie:tmdb:9760"]; !held {
+	if _, held := movies["movie:tmdb:424242"]; !held {
 		t.Errorf("movies = %v, want the title under its provider id", movies)
 	}
 	if len(movies) != 1 {
@@ -632,7 +632,7 @@ func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
 	}
 	// The path-derived id stays an alias, so a reader that holds the old id
 	// still resolves the title.
-	if item := fake.aliases[pathID]; item != "movie:tmdb:9760" {
+	if item := fake.aliases[pathID]; item != "movie:tmdb:424242" {
 		t.Errorf("alias %s resolves to %q, want the provider id", pathID, item)
 	}
 }

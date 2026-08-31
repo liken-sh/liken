@@ -210,7 +210,7 @@ func TestFolderFilesOnAnUnreadableDirectory(t *testing.T) {
 }
 
 // hi is the hearing-impaired flag where a language tag precedes it, and the
-// Hindi language tag where none does. The lab's volume writes the first form,
+// Hindi language tag where none does. The tools write the first form,
 // name.en.hi.srt, where reading hi as the language loses both facts: the track
 // is English, and it is for the hearing impaired.
 func TestHiIsAFlagAfterALanguageAndALanguageAlone(t *testing.T) {
@@ -219,12 +219,12 @@ func TestHiIsAFlagAfterALanguageAndALanguageAlone(t *testing.T) {
 		wantRole     string
 		wantLanguage string
 	}{
-		{"Y2K [2024, Bluray-1080p].en.hi.srt", fileRoleSDH, "en"},
-		{"Zeitgeist [2011].eng.hi.srt", fileRoleSDH, "eng"},
-		{"Sholay [1975].hi.srt", fileRoleFull, "hi"},
-		{"Sholay [1975].hi.forced.srt", fileRoleForced, "hi"},
-		{"Y2K [2024].en.srt", fileRoleFull, "en"},
-		{"Y2K [2024].en.sdh.srt", fileRoleSDH, "en"},
+		{"The Signal [2024, Bluray-1080p].en.hi.srt", fileRoleSDH, "en"},
+		{"The Signal [2024].eng.hi.srt", fileRoleSDH, "eng"},
+		{"The Signal [2024].hi.srt", fileRoleFull, "hi"},
+		{"The Signal [2024].hi.forced.srt", fileRoleForced, "hi"},
+		{"The Signal [2024].en.srt", fileRoleFull, "en"},
+		{"The Signal [2024].en.sdh.srt", fileRoleSDH, "en"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

@@ -126,23 +126,19 @@ Delete the scanner pod and confirm the phase reads `Pending`, then
 
 ## The drill, 2026-08-30
 
-Run on `liken-1` in release 2026.08.30-012, over the lab's two libraries.
-The printer reads as the plan drew it, and `-o wide` adds the claim and
-the count of unidentified folders.
+Run on `liken-1` in release 2026.08.30-012, over a movies library and a
+series library. The printer reads as the plan drew it, and `-o wide` adds
+the claim and the count of unidentified folders.
 
-```
-NAME     KIND     TITLES  ITEMS  FILES  STATUS  READY  AGE
-movies   movies     1411   1485  10675  Idle    True   13h
-series   series      156   6378  24240  Idle    True   169m
-```
+The series library is what the `Items` column is for. Its titles column
+counts series, and its items column counts the series and their episodes
+together, which is a far larger number and the one a person means by
+asking how much is in there. A movies library reads alike in both
+columns, and that is what made the next thing visible.
 
-The series library reads 156 titles and 6378 items, which is the 156
-series and their 6222 episodes. That is the number the titles column
-could never give, and it is the reason for the column.
-
-The movies library read 1485 items against 1411 titles, and a movies
-library holds one item per title. The gap was a defect the counts made
-visible for the first time.
+The movies library's items column read higher than its titles column, and
+a movies library holds one item per title. The gap was a defect the
+counts exposed for the first time.
 
 **A stale title was never pruned.** `markKeys` marked item ids, file
 paths, and alias names in one `seen` key space. An alias can be the same
@@ -150,45 +146,33 @@ string as an item's id: a title that gains a provider id keeps its old
 path-derived id as an alias of the new one. That alias marked the stale
 item row on every walk, so the prune read it as seen and kept it, and the
 catalog held the title twice, once under `movie:path:...` with the old
-reading and once under `movie:tmdb:...` with the new. 77 rows on the lab's
-volume. `removedLastSweep` read 0 throughout, so nothing named the loss.
+reading and once under `movie:tmdb:...` with the new. `removedLastSweep`
+read 0 throughout, so nothing named the loss.
 
-The fix gives each kind of key its own space in `seen`, `item:`,
-`file:`, and `alias:`, and each prune query compares against its own
-space. An alias then marks aliases alone. The change is in the mark and
-in the four prune queries.
+The fix gives each kind of key its own space in `seen`, `item:`, `file:`,
+and `alias:`, and each prune query compares against its own space. An
+alias then marks aliases alone. The change is in the mark and in the four
+prune queries.
 
 Release 2026.08.30-013 carries the fix. The first walk after the upgrade
-reported `1411 titles, 15 unidentified, 77 removed`, and the movies
-library reads 1408 items where it read 1485.
+swept every stale row, and the items column fell below the titles column,
+which is the second finding.
 
-1408 is three below the count of title folders, and the three are a
-finding of their own. Each is a pair of different films whose `movie.nfo`
-carries the same provider id, so both folders derive the same id and the
-catalog holds one item for two works.
-
-```
-Drama/Nymphomaniac - Vol. I [2013]        both tmdb 249397
-Drama/Nymphomaniac - Vol. II [2013]
-Scary/A Nightmare on Elm Street [1984]    both tmdb 377
-Scary/A Nightmare on Elm Street [2010]
-Scary/Halloween [1978]                    both tmdb 948
-Scary/Halloween [2018]
-```
-
-In each pair a sequel or a remake carries the original's id. One of the
-two films is then unreachable: it has no row, its title reads as the
-other's, and its video and artwork link to the wrong work.
+**Two folders can derive one id.** A few pairs of folders resolved to a
+single item. Each pair is a film and its remake or its later sequel,
+where both sidecars carry the original's provider id. Both folders then
+derive the same id, and one of the two films is unreachable: it has no
+row, its title reads as the other's, and its video and artwork link to
+the wrong work.
 
 This is the scanner following plan 04's rule that identity is read off
-the volume and never minted. A wrong id in the sidecar is a wrong item
-in the catalog, and no rule here can tell a bad id from a good one. The
-repair is on the volume, in the three sidecars.
+the volume and never minted. A wrong id in a sidecar is a wrong item in
+the catalog, and no rule here can tell a bad id from a good one. The
+repair is on the volume, in the sidecar that carries the wrong id.
 
-It also names the cost of the derived id in a way the design did not.
+It names the cost of the derived id in a way the design did not.
 [Writing ids back to the volume](../open-problems/writing-ids-back-to-the-volume.md)
 covers the sidecar-less case. This is the opposite case, a sidecar that
 is present and wrong, and the catalog has no defence against it. A later
 plan could report a collision rather than absorb it: two folders that
 derive one id is a fact the scanner knows and does not say.
-
