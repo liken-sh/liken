@@ -130,6 +130,10 @@ that took a hearing-impaired flag for Hindi.
   replicated table's primary key leads with the library, so Libraries
   that share a namespace never touch each other's rows. Ships against
   fresh databases through a versioned claim name, with a rescan.
+* [21, A Library takes its rows with it](21-a-library-takes-its-rows-with-it.md).
+  A stub. A finalizer stops a deleted Library's scanner and launches a
+  cleanup pod that scours the library's rows out of the catalog, so a
+  Library's rows never outlive it. The details wait for a design pass.
 
 ## Open problems
 
