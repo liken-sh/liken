@@ -162,14 +162,33 @@ Release 2026.08.30-013 carries the fix. The first walk after the upgrade
 reported `1411 titles, 15 unidentified, 77 removed`, and the movies
 library reads 1408 items where it read 1485.
 
-1408 is three below the count of title folders, and that is the derived
-identity working as plan 04 designed it. Three films are in two folders
-each, so both folders resolve to one item and both folders' files link
-to it. A second copy of a film is another file, and not another title.
+1408 is three below the count of title folders, and the three are a
+finding of their own. Each is a pair of different films whose `movie.nfo`
+carries the same provider id, so both folders derive the same id and the
+catalog holds one item for two works.
 
 ```
-movie:tmdb:249397   2 folders
-movie:tmdb:377      2 folders
-movie:tmdb:948      2 folders
+Drama/Nymphomaniac - Vol. I [2013]        both tmdb 249397
+Drama/Nymphomaniac - Vol. II [2013]
+Scary/A Nightmare on Elm Street [1984]    both tmdb 377
+Scary/A Nightmare on Elm Street [2010]
+Scary/Halloween [1978]                    both tmdb 948
+Scary/Halloween [2018]
 ```
+
+In each pair a sequel or a remake carries the original's id. One of the
+two films is then unreachable: it has no row, its title reads as the
+other's, and its video and artwork link to the wrong work.
+
+This is the scanner following plan 04's rule that identity is read off
+the volume and never minted. A wrong id in the sidecar is a wrong item
+in the catalog, and no rule here can tell a bad id from a good one. The
+repair is on the volume, in the three sidecars.
+
+It also names the cost of the derived id in a way the design did not.
+[Writing ids back to the volume](../open-problems/writing-ids-back-to-the-volume.md)
+covers the sidecar-less case. This is the opposite case, a sidecar that
+is present and wrong, and the catalog has no defence against it. A later
+plan could report a collision rather than absorb it: two folders that
+derive one id is a fact the scanner knows and does not say.
 
