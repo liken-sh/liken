@@ -15,8 +15,8 @@ import (
 // key, then adds an alias for every other provider id the sidecar named. The
 // extra providers are added in sorted order, so a re-walk of the same sidecar
 // writes the same rows.
-func aliasRowsForItem(kind string, providerIDs map[string]string, folderKey, canonicalID string) []aliasRow {
-	rows := aliasesFor(kind, providerIDs, folderKey, canonicalID)
+func aliasRowsForItem(library, kind string, providerIDs map[string]string, folderKey, canonicalID string) []aliasRow {
+	rows := aliasesFor(library, kind, providerIDs, folderKey, canonicalID)
 	seen := map[string]bool{}
 	for _, row := range rows {
 		seen[row.Alias] = true
@@ -33,7 +33,7 @@ func aliasRowsForItem(kind string, providerIDs map[string]string, folderKey, can
 	}
 	sort.Strings(extras)
 	for _, alias := range extras {
-		rows = append(rows, aliasRow{Alias: alias, Item: canonicalID, Source: aliasSourceProvider})
+		rows = append(rows, aliasRow{Alias: alias, Library: library, Item: canonicalID, Source: aliasSourceProvider})
 	}
 	return rows
 }

@@ -125,7 +125,7 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 
 	scanMovieFiles(root, dir, library, id, videos, result)
 
-	result.aliases = append(result.aliases, aliasRowsForItem(scopeMovie, meta.ProviderIDs, key, id)...)
+	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeMovie, meta.ProviderIDs, key, id)...)
 	result.titles++
 	if !identified {
 		result.unidentified++

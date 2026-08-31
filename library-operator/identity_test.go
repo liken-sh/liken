@@ -11,12 +11,12 @@ import (
 
 func TestAliasRowsForItemAddsEveryProvider(t *testing.T) {
 	providers := map[string]string{"tmdb": "603", "imdb": "tt0133093", "tvdb": "12345"}
-	got := aliasRowsForItem(scopeMovie, providers, "the-matrix", "movie:tmdb:603")
+	got := aliasRowsForItem("movies", scopeMovie, providers, "the-matrix", "movie:tmdb:603")
 	want := []aliasRow{
-		{Alias: "movie:tmdb:603", Item: "movie:tmdb:603", Source: aliasSourceProvider},
-		{Alias: "movie:imdb:tt0133093", Item: "movie:tmdb:603", Source: aliasSourceProvider},
-		{Alias: "movie:path:the-matrix", Item: "movie:tmdb:603", Source: aliasSourceFolder},
-		{Alias: "movie:tvdb:12345", Item: "movie:tmdb:603", Source: aliasSourceProvider},
+		{Library: "movies", Alias: "movie:tmdb:603", Item: "movie:tmdb:603", Source: aliasSourceProvider},
+		{Library: "movies", Alias: "movie:imdb:tt0133093", Item: "movie:tmdb:603", Source: aliasSourceProvider},
+		{Library: "movies", Alias: "movie:path:the-matrix", Item: "movie:tmdb:603", Source: aliasSourceFolder},
+		{Library: "movies", Alias: "movie:tvdb:12345", Item: "movie:tmdb:603", Source: aliasSourceProvider},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("aliasRowsForItem = %+v, want %+v", got, want)
@@ -27,8 +27,8 @@ func TestAliasRowsForItemAddsEveryProvider(t *testing.T) {
 // same sidecar writes the same rows.
 func TestAliasRowsForItemIsDeterministic(t *testing.T) {
 	providers := map[string]string{"tmdb": "1", "zdb": "z", "adb": "a"}
-	first := aliasRowsForItem(scopeMovie, providers, "", "movie:tmdb:1")
-	second := aliasRowsForItem(scopeMovie, providers, "", "movie:tmdb:1")
+	first := aliasRowsForItem("movies", scopeMovie, providers, "", "movie:tmdb:1")
+	second := aliasRowsForItem("movies", scopeMovie, providers, "", "movie:tmdb:1")
 	if !reflect.DeepEqual(first, second) {
 		t.Errorf("two passes differ:\n%+v\n%+v", first, second)
 	}
@@ -40,7 +40,7 @@ func TestAliasRowsForItemIsDeterministic(t *testing.T) {
 // A provider with an empty value is not made into an alias.
 func TestAliasRowsForItemDropsEmptyProviderValues(t *testing.T) {
 	providers := map[string]string{"tmdb": "1", "blank": ""}
-	got := aliasRowsForItem(scopeMovie, providers, "", "movie:tmdb:1")
+	got := aliasRowsForItem("movies", scopeMovie, providers, "", "movie:tmdb:1")
 	for _, row := range got {
 		if row.Alias == "movie:blank:" {
 			t.Errorf("an empty provider value became an alias: %+v", got)

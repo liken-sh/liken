@@ -60,6 +60,7 @@ func TestEpisodeID(t *testing.T) {
 func TestAliasesFor(t *testing.T) {
 	cases := []struct {
 		name        string
+		library     string
 		kind        string
 		providers   map[string]string
 		folderKey   string
@@ -68,40 +69,43 @@ func TestAliasesFor(t *testing.T) {
 	}{
 		{
 			name:        "provider ids and folder key roll onto the canonical",
+			library:     "movies",
 			kind:        scopeMovie,
 			providers:   map[string]string{"tmdb": "603", "imdb": "tt0133093"},
 			folderKey:   "the-matrix",
 			canonicalID: "movie:tmdb:603",
 			want: []aliasRow{
-				{Alias: "movie:tmdb:603", Item: "movie:tmdb:603", Source: aliasSourceProvider},
-				{Alias: "movie:imdb:tt0133093", Item: "movie:tmdb:603", Source: aliasSourceProvider},
-				{Alias: "movie:path:the-matrix", Item: "movie:tmdb:603", Source: aliasSourceFolder},
+				{Library: "movies", Alias: "movie:tmdb:603", Item: "movie:tmdb:603", Source: aliasSourceProvider},
+				{Library: "movies", Alias: "movie:imdb:tt0133093", Item: "movie:tmdb:603", Source: aliasSourceProvider},
+				{Library: "movies", Alias: "movie:path:the-matrix", Item: "movie:tmdb:603", Source: aliasSourceFolder},
 			},
 		},
 		{
 			name:        "the folder is the only name when no provider is present",
+			library:     "movies",
 			kind:        scopeMovie,
 			providers:   nil,
 			folderKey:   "unknown-2001",
 			canonicalID: "movie:path:unknown-2001",
 			want: []aliasRow{
-				{Alias: "movie:path:unknown-2001", Item: "movie:path:unknown-2001", Source: aliasSourceFolder},
+				{Library: "movies", Alias: "movie:path:unknown-2001", Item: "movie:path:unknown-2001", Source: aliasSourceFolder},
 			},
 		},
 		{
 			name:        "the canonical is added when neither provider nor folder names it",
+			library:     "films",
 			kind:        scopeMovie,
 			providers:   nil,
 			folderKey:   "",
 			canonicalID: "movie:path:orphan",
 			want: []aliasRow{
-				{Alias: "movie:path:orphan", Item: "movie:path:orphan", Source: aliasSourceProvider},
+				{Library: "films", Alias: "movie:path:orphan", Item: "movie:path:orphan", Source: aliasSourceProvider},
 			},
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got := aliasesFor(testCase.kind, testCase.providers, testCase.folderKey, testCase.canonicalID)
+			got := aliasesFor(testCase.library, testCase.kind, testCase.providers, testCase.folderKey, testCase.canonicalID)
 			if !reflect.DeepEqual(got, testCase.want) {
 				t.Errorf("aliasesFor = %+v, want %+v", got, testCase.want)
 			}

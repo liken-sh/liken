@@ -178,10 +178,15 @@ type fileItemKey struct {
 
 // aliasRow maps one of an item's names to the item, with the source of the
 // name.
+//
+// The alias table keys on the library and the alias together, so two
+// libraries that read the same name each keep their own row, and neither
+// overwrites the other.
 type aliasRow struct {
-	Alias  string
-	Item   string
-	Source string
+	Alias   string
+	Library string
+	Item    string
+	Source  string
 }
 
 // itemID derives the provider-scoped canonical id. It takes the first provider
@@ -213,7 +218,7 @@ func episodeID(seriesID string, season, episode int) string {
 // per provider id, one for the folder key, and the canonical id itself. The
 // canonical is its own alias, so alias resolution is one lookup and needs no
 // special case for the id a caller already holds.
-func aliasesFor(kind string, providerIDs map[string]string, folderKey, canonicalID string) []aliasRow {
+func aliasesFor(library, kind string, providerIDs map[string]string, folderKey, canonicalID string) []aliasRow {
 	var rows []aliasRow
 	seen := map[string]bool{}
 	add := func(alias, source string) {
@@ -221,7 +226,7 @@ func aliasesFor(kind string, providerIDs map[string]string, folderKey, canonical
 			return
 		}
 		seen[alias] = true
-		rows = append(rows, aliasRow{Alias: alias, Item: canonicalID, Source: source})
+		rows = append(rows, aliasRow{Alias: alias, Library: library, Item: canonicalID, Source: source})
 	}
 	for _, provider := range providerOrder[kind] {
 		if value := providerIDs[provider]; value != "" {

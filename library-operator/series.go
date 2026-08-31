@@ -82,7 +82,7 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 		Art:      primaryArt,
 		Body:     body,
 	})
-	result.aliases = append(result.aliases, aliasRowsForItem(scopeSeries, meta.ProviderIDs, key, seriesID)...)
+	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeSeries, meta.ProviderIDs, key, seriesID)...)
 	result.titles++
 	if !identified {
 		result.unidentified++
@@ -274,7 +274,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 			Season:   meta.Season,
 			Episode:  meta.Episode,
 		})
-		result.aliases = append(result.aliases, aliasRowsForItem(scopeEpisode, meta.ProviderIDs, "", episodeItemID)...)
+		result.aliases = append(result.aliases, aliasRowsForItem(library, scopeEpisode, meta.ProviderIDs, "", episodeItemID)...)
 		episodeItemIDs = append(episodeItemIDs, episodeItemID)
 	}
 	if len(episodeItemIDs) == 0 {
