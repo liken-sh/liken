@@ -115,7 +115,13 @@ which is 10,675 files for movies where the before walk read 1430, and
 24,240 for series where it read 6258. The series library is the clearer
 read: about seven times the files in half the time.
 
-The movies walk grew from about 13 seconds to 18.7 while reading seven
-times the files. Its titles sit one and two levels under the root, so
-the descent is short and the pool has less to overlap than the series
-walk, where each series folder costs a read of its season folders.
+The 18.7 seconds is the movies library's first walk after the upgrade,
+which wrote 9245 file rows it had never held. Its later walks, which
+write only what changed, took 3.6, 7.1, and 13.1 seconds, against 6.9,
+13.4, and 13.3 before. So the movies walk reads seven times the files in
+about the same time, and the series walk reads about four times the
+files in half the time.
+
+The series library gains more because its folders are deeper. Each
+series folder costs a read of its season folders, which the pool
+overlaps, where a movies title folder is one read at a shallow depth.

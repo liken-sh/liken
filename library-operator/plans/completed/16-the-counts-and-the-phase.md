@@ -156,5 +156,20 @@ volume. `removedLastSweep` read 0 throughout, so nothing named the loss.
 The fix gives each kind of key its own space in `seen`, `item:`,
 `file:`, and `alias:`, and each prune query compares against its own
 space. An alias then marks aliases alone. The change is in the mark and
-in the four prune queries, and the next full walk after the upgrade
-removes the rows that accumulated.
+in the four prune queries.
+
+Release 2026.08.30-013 carries the fix. The first walk after the upgrade
+reported `1411 titles, 15 unidentified, 77 removed`, and the movies
+library reads 1408 items where it read 1485.
+
+1408 is three below the count of title folders, and that is the derived
+identity working as plan 04 designed it. Three films are in two folders
+each, so both folders resolve to one item and both folders' files link
+to it. A second copy of a film is another file, and not another title.
+
+```
+movie:tmdb:249397   2 folders
+movie:tmdb:377      2 folders
+movie:tmdb:948      2 folders
+```
+
