@@ -1,9 +1,10 @@
-# A pushed tag cuts a release. This workflow runs the tests, builds
-# the operator image, the player image, and the idle image, proves the
-# player image can run mpv and the idle image can start, and pushes all
-# three to ghcr.io under the tag's name and :latest. A push to main
-# releases nothing: ci.yaml tests it and stops. The tag is the release
-# act, as in the main liken repository, so main takes docs and
+# A pushed tag cuts a release. This workflow runs the tests, builds the
+# operator image, the player image, the idle image, and the sidecar
+# image, proves the player image can run mpv and the idle image can
+# start, and pushes all four to ghcr.io under the tag's name and
+# :latest. A push
+# to main releases nothing: ci.yaml tests it and stops. The tag is the
+# release act, as in the main liken repository, so main takes docs and
 # intermediate work freely and every image in the registry traces to a
 # version somebody chose to name.
 #
@@ -11,10 +12,11 @@
 # release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The three images release together, always. The operator stamps the
-# player image into every playback pod and the idle image into every
-# idle pod, and images that could drift apart would put the report
-# contract and the screen topic at two versions at once.
+# The four images release together, always. The operator stamps the
+# player image into every playback pod, the idle image into every idle
+# pod, and the sidecar image into every sidecar container, and images
+# that could drift apart would put the report contract and the screen
+# topic at two versions at once.
 name: release
 
 on:
@@ -75,7 +77,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Both images build here and push nothing yet. The player gate
+      # Every image builds here and pushes nothing yet. The player gate
       # below has to pass first, and a push that happened first would
       # leave a broken :latest behind when the gate failed.
       #
@@ -118,6 +120,18 @@ jobs:
             ghcr.io/liken-sh/media-operator-idle:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator-idle:latest
 
+      - name: Build the sidecar image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.sidecar
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-sidecar:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-sidecar:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/media-operator-sidecar:${{ env.VERSION }}
+            ghcr.io/liken-sh/media-operator-sidecar:latest
+
       # The gate on the idle image, the same shape the player's gate
       # takes. The runner has no GPU and no compositor, so the client
       # cannot draw; what can break invisibly is the closure. The
@@ -151,3 +165,5 @@ jobs:
           docker push "ghcr.io/liken-sh/media-operator-player:latest"
           docker push "ghcr.io/liken-sh/media-operator-idle:$VERSION"
           docker push "ghcr.io/liken-sh/media-operator-idle:latest"
+          docker push "ghcr.io/liken-sh/media-operator-sidecar:$VERSION"
+          docker push "ghcr.io/liken-sh/media-operator-sidecar:latest"

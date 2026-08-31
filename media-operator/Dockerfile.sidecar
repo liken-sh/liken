@@ -1,0 +1,30 @@
+# The sidecar image: the same static Go binary the operator image
+# carries, and nothing else. Every sidecar container runs this binary in
+# one of its modes (idle-command, remote, command, translate), and no
+# mode decodes a frame, so none of them needs the player image's mpv,
+# Mesa, or fonts. On a machine that pulls over wifi, that is the
+# difference between an 11 MB image and a 266 MB one.
+#
+# The bytes match the operator image. The two names carry two jobs: the
+# operator image runs this cluster's controller, and the sidecar image
+# runs beside another pod's containers, so a repository that needs only
+# the sidecar pins a name that promises nothing about the controller.
+
+FROM golang:1.27.0-bookworm AS build
+WORKDIR /src
+# The module files come first, so a source edit reuses the cached
+# download layer.
+COPY go.mod go.sum ./
+RUN go mod download
+COPY *.go ./
+# The EDL package builds into the binary, so the source tree it needs is the
+# root files and this one directory.
+COPY edl/ ./edl/
+# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
+# static binary with no paths from the build machine in it. It runs
+# from scratch, where there is no loader to need.
+RUN CGO_ENABLED=0 go build -trimpath -o /media-operator .
+
+FROM scratch
+COPY --from=build /media-operator /media-operator
+ENTRYPOINT ["/media-operator"]

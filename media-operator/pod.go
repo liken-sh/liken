@@ -60,7 +60,10 @@ func podName(play string) string {
 // end: a finished film is not a failure to restart. The player image's
 // entrypoint shim execs mpv, so the arguments are nothing but the
 // resolved playlist in spec order.
-func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busAddress, topicBase string, remotes []boundRemote, prefs resolvedPreferences) *Pod {
+func buildPod(
+	play *Play, claim *ResourceClaim, resolved resolution, image, sidecarImage, busAddress, topicBase string,
+	remotes []boundRemote, prefs resolvedPreferences,
+) *Pod {
 	grace := int64(playbackGracePeriod)
 	// The IPC volume is unconditional, so mpv serves its socket at one
 	// path whether or not this pod binds a remote. The mount list is
@@ -127,9 +130,10 @@ func buildPod(play *Play, claim *ResourceClaim, resolved resolution, image, busA
 	// order, and the operator reads the translator set back off it to tell
 	// whether a Player reshaped this pod.
 	initContainers := make([]Container, 0, len(remotes)+1)
-	initContainers = append(initContainers, commandSidecar(play, claim, blocks, resolved.Mounts, image, busAddress, topicBase))
+	initContainers = append(initContainers,
+		commandSidecar(play, claim, blocks, resolved.Mounts, sidecarImage, busAddress, topicBase))
 	for _, remote := range remotes {
-		initContainers = append(initContainers, translatorSidecar(play, image, busAddress, topicBase, remote))
+		initContainers = append(initContainers, translatorSidecar(play, sidecarImage, busAddress, topicBase, remote))
 	}
 
 	return &Pod{
@@ -198,12 +202,16 @@ func mpvVolumeOptions(volume *PlayVolume) []string {
 	return options
 }
 
-// commandSidecar is the playback pod's owner of the mpv IPC socket: the
-// player image in its command mode, holding no device claim. It
-// subscribes to the Play's commands topic, drives mpv through the shared
-// socket, and publishes the Play's status. It mounts the IPC volume,
-// because it is the one container besides mpv that reaches the socket.
-func commandSidecar(play *Play, claim *ResourceClaim, blocks string, mediaMounts []VolumeMount, image, busAddress, topicBase string) Container {
+// commandSidecar is the playback pod's owner of the mpv IPC socket:
+// the sidecar image in its command mode, holding no device claim. It
+// subscribes to the Play's commands topic, drives mpv through the
+// shared socket, and publishes the Play's status. It mounts the IPC
+// volume, because it is the one container besides mpv that reaches the
+// socket.
+func commandSidecar(
+	play *Play, claim *ResourceClaim, blocks string, mediaMounts []VolumeMount,
+	sidecarImage, busAddress, topicBase string,
+) Container {
 	interval := play.Spec.TrickplayInterval
 	if interval == "" {
 		interval = defaultTrickplayInterval
@@ -228,7 +236,7 @@ func commandSidecar(play *Play, claim *ResourceClaim, blocks string, mediaMounts
 	}
 	return Container{
 		Name:    commandContainer,
-		Image:   image,
+		Image:   sidecarImage,
 		Command: []string{"/media-operator", commandMode},
 		Env:     env,
 		// The command sidecar reads mpv's socket on the IPC volume and writes
@@ -280,17 +288,17 @@ func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) stri
 	return string(array)
 }
 
-// translatorSidecar is one controller's translator: the player image in
-// its translate mode, holding no device claim and no IPC mount. Its
+// translatorSidecar is one controller's translator: the sidecar image
+// in its translate mode, holding no device claim and no IPC mount. Its
 // environment carries the play identity, the Player the play runs on,
-// which is what the gate compares the mark against, and the three topics
-// it works between: the events topic it reads, the keymap topic it reads
-// the table from, and the focus topic it gates on. It builds the cycle
-// topic it publishes to from the same identity.
-func translatorSidecar(play *Play, image, busAddress, topicBase string, remote boundRemote) Container {
+// which is what the gate compares the mark against, and the three
+// topics it works between: the events topic it reads, the keymap topic
+// it reads the table from, and the focus topic it gates on. It builds
+// the cycle topic it publishes to from the same identity.
+func translatorSidecar(play *Play, sidecarImage, busAddress, topicBase string, remote boundRemote) Container {
 	return Container{
 		Name:    translatorContainer(remote.Name),
-		Image:   image,
+		Image:   sidecarImage,
 		Command: []string{"/media-operator", translateMode},
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: play.Metadata.Namespace},

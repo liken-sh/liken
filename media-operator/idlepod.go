@@ -209,9 +209,10 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // buildIdlePod writes the standing idle pod: the idle client holding
 // the draw and render requests and drawing the clock, beside the idle
 // command sidecar that states each moment the client draws.
-// operatorImage is this operator's own image, which the sidecar runs in
-// its idle-command mode. The client's own image is idle.Image, which
-// resolveIdle settles.
+//
+// sidecarImage carries this operator's binary alone, which the sidecar
+// runs in its idle-command mode. The client's own image is idle.Image,
+// which resolveIdle settles.
 //
 // restartPolicy is Always because the pod is a service and not a job: a
 // crash restarts it, and the pod ends only when the Player is deleted.
@@ -225,7 +226,7 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // retained status replaces them, so an edit to the Player shows with no
 // pod restart.
 func buildIdlePod(
-	player *Player, claim *ResourceClaim, operatorImage, busAddress, topicBase, timeZone string,
+	player *Player, claim *ResourceClaim, sidecarImage, busAddress, topicBase, timeZone string,
 	idle resolvedIdle, remotes []idleRemoteTopics,
 ) *Pod {
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
@@ -304,7 +305,7 @@ func buildIdlePod(
 	// the topic base and the sidecar parses no topic of its own.
 	sidecar := Container{
 		Name:    idleCommandContainer,
-		Image:   operatorImage,
+		Image:   sidecarImage,
 		Command: []string{"/media-operator", idleCommandMode},
 		Env: []EnvVar{
 			{Name: busAddressVariable, Value: busAddress},
@@ -401,6 +402,6 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 	claim := buildIdleClaim(player, o.idleDisplayClass)
 	idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
 	remotes := gatherIdleRemotes(o.client, player, o.topicBase)
-	pod := buildIdlePod(player, claim, o.image, o.busAddress, o.topicBase, timeZone, idle, remotes)
+	pod := buildIdlePod(player, claim, o.sidecarImage, o.busAddress, o.topicBase, timeZone, idle, remotes)
 	return o.reconcileStanding(claim, pod)
 }

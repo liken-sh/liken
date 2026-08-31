@@ -207,11 +207,12 @@ func sortedNames[T any](objects map[string]*T) []string {
 func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *operator {
 	t.Helper()
 	return &operator{
-		client:     testAPIClient(t, cluster.handler(t)),
-		image:      "registry.example/player:test",
-		idleImage:  testIdleImage,
-		busAddress: "bus.media.svc:1883",
-		topicBase:  defaultTopicBase,
+		client:       testAPIClient(t, cluster.handler(t)),
+		image:        "registry.example/player:test",
+		idleImage:    testIdleImage,
+		sidecarImage: "registry.example/sidecar:test",
+		busAddress:   "bus.media.svc:1883",
+		topicBase:    defaultTopicBase,
 		// The bus is never Run, so a publish finds a nil write queue and
 		// drops, which is what a pass wants with no broker under the test.
 		bus:                   newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
@@ -260,7 +261,7 @@ func housePlaybackPod() *Pod {
 	play := housePlay("https://nas/film.mkv")
 	pod := buildPod(play, buildClaim(play, housePlayer()),
 		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{})
+		"registry.example/player:test", "registry.example/sidecar:test", "bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{})
 	pod.Status.Phase = podRunning
 	return pod
 }
@@ -848,7 +849,7 @@ func runningCluster(player *Player) *fakeCluster {
 	cluster.players["theater"] = player
 	pod := buildPod(play, buildClaim(play, player),
 		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{})
+		"registry.example/player:test", "registry.example/sidecar:test", "bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{})
 	pod.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = pod
 	cluster.claims["movie-devices"] = buildClaim(play, player)
@@ -1009,7 +1010,7 @@ func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 	}}
 	pod := buildPod(play, buildClaim(play, player),
 		resolution{Items: []string{"https://nas/film.mkv"}},
-		"registry.example/player:test", "bus.media.svc:1883", defaultTopicBase, sofa, resolvedPreferences{})
+		"registry.example/player:test", "registry.example/sidecar:test", "bus.media.svc:1883", defaultTopicBase, sofa, resolvedPreferences{})
 	pod.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = pod
 	cluster.claims["movie-devices"] = buildClaim(play, player)

@@ -67,10 +67,9 @@ const (
 	// shim splits them and appends each to mpv's argv.
 	playerOptionsVariable = "MEDIA_PLAYER_OPTIONS"
 
-	// TZ is the standard name libc and Lua os.date read, not a MEDIA_ variable.
-	// The playback pod and the idle pod both set it, and each clock reads it
-	// against its own image's tz database to show the household's wall-clock
-	// zone.
+	// TZ is the standard name, not a MEDIA_ variable. The playback pod
+	// and the idle pod both set it, and each clock reads it against its
+	// own image's tz database to show the household's wall-clock zone.
 	timeZoneVariable = "TZ"
 
 	// The seconds a client waits for its window before it exits

@@ -51,6 +51,13 @@ spec:
             # here for the reason the player image is.
             - name: IDLE_IMAGE
               value: ghcr.io/liken-sh/media-operator-idle:latest
+            # The image every sidecar container runs: the same binary
+            # alone, with none of the player image's mpv, drivers, or
+            # fonts. The operator stamps it into every sidecar it
+            # creates, and it is set here for the reason the player
+            # image is.
+            - name: SIDECAR_IMAGE
+              value: ghcr.io/liken-sh/media-operator-sidecar:latest
             # The broker the operator and every pod reach: the bus
             # Service in this namespace. The operator cannot derive the
             # Service name, so the manifest states it, and the operator

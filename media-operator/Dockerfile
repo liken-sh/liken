@@ -1,9 +1,11 @@
 # The operator's image: one static Go binary and nothing else. The
 # operator holds the cluster credentials and writes every status, so
 # its image carries no shell, no libc, and no tools, which is the
-# least there is to attack. The player image, mpv under this same
-# binary as supervisor, builds from Dockerfile.player beside this
-# file, and the release ships the two together.
+# least there is to attack.
+#
+# The player image (mpv under this same binary as its supervisor), the
+# idle image, and the sidecar image build from the three Dockerfiles
+# beside this one, and a release ships all four together.
 
 FROM golang:1.27.0-bookworm AS build
 WORKDIR /src

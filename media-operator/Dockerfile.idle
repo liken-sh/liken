@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
-# The idle image: the Rust client that draws the idle screen, and the Wayland
-# and Vulkan libraries it opens by name on a real machine. It is a third image
-# beside the operator and the player, because this client shares no code with
-# the Go binary and needs a graphics stack the operator's scratch image has
+# The idle image: the Rust client that draws the idle screen, and the
+# Wayland and Vulkan libraries it opens by name on a real machine. It is
+# an image of its own, because this client shares no code with the Go
+# binary and needs a graphics stack the operator's scratch image has
 # none of.
 #
-# The build context is the repository root, the way the other two images take
+# The build context is the repository root, the way every other image takes
 # it, so the build reaches both the crate and the brand submodule the crate
 # reads its mark and its palette from.
 
@@ -71,14 +71,17 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 # path to the Intel graphics these machines have.
 #
 # fonts-noto-core carries the face the screen draws its text in, the same face
-# the player image installs for the playback overlay. tzdata carries
-# the zoneinfo database, because Rust's standard library has no time zones and
-# the clock reads the zone TZ names.
+# the player image installs for the playback overlay. fonts-droid-fallback is
+# one small file that draws Chinese, Japanese, and Korean, for the reason the
+# player image installs it: the unit's name and its parts are text a household
+# writes, and a face with no CJK draws a blank box for each character. tzdata
+# carries the zoneinfo database, because Rust's standard library has no time
+# zones and the clock reads the zone TZ names.
 #
 # The Snapshot line pins apt to the archive as it stood at one instant, so the
 # versions below stay fetchable after Ubuntu publishes newer ones. To move the
-# image forward, set a later serial and refresh the six versions from a build at
-# that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries no
+# image forward, set a later serial and refresh the seven versions from a build
+# at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries no
 # certificate store, so the build installs ca-certificates from the default
 # archive first, then purges it after the pinned install so it leaves no trace
 # in the runtime.
@@ -92,6 +95,7 @@ RUN apt-get update \
         libvulkan1=1.4.341.0-1 \
         mesa-vulkan-drivers=26.0.8-1ubuntu0.3 \
         fonts-noto-core=20201225-2build1 \
+        fonts-droid-fallback=1:8.1.0r7-1~1.gbp36536bbuild1 \
         tzdata=2026c-0ubuntu0.26.04.1 \
     && apt-get purge -y ca-certificates \
     && apt-get autoremove -y --purge \
@@ -99,10 +103,11 @@ RUN apt-get update \
 
 COPY --from=build /src/idle/target/release/idle-screen /idle-screen
 
-# The binary runs here, in the image that ships it and against the libraries
-# this stage installed. --help opens no window and reaches no compositor, so
-# what it proves is the whole of the loading: the dynamic closure resolves and
-# the process starts and exits 0.
+# The binary runs here, in the image that ships it. --help opens no window
+# and reaches no compositor, and the toolkit opens its Wayland and Vulkan
+# libraries by name at run time, so what this proves is that the linked
+# closure resolves and the process starts and exits 0, not that the
+# graphics stack loads.
 RUN /idle-screen --help > /dev/null
 
 # The binary is the container's own process, so the kubelet sends it the

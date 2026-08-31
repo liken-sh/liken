@@ -11,8 +11,8 @@
 // pods, publishes the compiled keymaps, and writes every status. As
 // `player` it is the playback pod's entrypoint shim: it appends the
 // display's app-id flag and execs mpv. As `idle-command` it is the idle
-// pod's command sidecar: it subscribes to the Player's commands and
-// status topics and states each moment the idle client draws on the
+// pod's command sidecar: it follows the Player's topics and the unit's
+// controllers, and it states each moment the idle client draws on the
 // Player's screen topic, so a seatless kiosk shell shows the clock again
 // when a Play ends. As `remote` it is the standing
 // remote pod: it reads a controller's input nodes and publishes each

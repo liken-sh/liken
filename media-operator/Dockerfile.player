@@ -1,13 +1,12 @@
-# The player image: mpv, the libraries that decode on a real
-# machine, and the same binary the operator image carries. In this
-# image the binary runs as the player shim, and the operator also
-# overrides the entrypoint to run it in the bridge and remote modes.
-# The operator's image cannot serve this role, because it is one
-# static binary on scratch and mpv needs a video and audio stack
+# The player image: mpv, the libraries that decode on a real machine,
+# and the same binary the operator image carries. In this image the
+# binary runs as the player shim alone; every sidecar mode runs on the
+# sidecar image. The operator's own image cannot serve here, because it
+# is one static binary on scratch and mpv needs a video and audio stack
 # under it.
 
-# The build stage repeats the operator image's, so both images carry
-# the same binary from the same source at the same commit.
+# The build stage repeats the operator image's, so every image that
+# carries the binary carries the same one, built from the same source.
 FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
 # The module files come first, so a source edit reuses the cached

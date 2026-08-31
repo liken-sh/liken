@@ -53,26 +53,26 @@ func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
 	mustMatch(t, again.Metadata.Annotations[templateHashAnnotation], before)
 }
 
-// A release that changes the player image, and a household that changes
-// the zone the idle clock reads, each change the pod hash, which is what
-// rolls the standing pod.
+// A release that changes either image the idle pod runs, and a
+// household that changes the zone the idle clock reads, each change the
+// pod hash, which is what rolls the standing pod.
 func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	base, err := templateHash(plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York").Spec)
+	base, err := templateHash(plainIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase, "America/New_York").Spec)
 	mustSucceed(t, err)
 
 	cases := []struct {
 		name string
 		pod  *Pod
 	}{
-		{"the operator image", plainIdlePod(player, claim, testImage+"-next", testBusAddress, testTopicBase, "America/New_York")},
-		{"the idle image", buildIdlePod(player, claim, testImage, testBusAddress,
+		{"the sidecar image", plainIdlePod(player, claim, testSidecarImage+"-next", testBusAddress, testTopicBase, "America/New_York")},
+		{"the idle image", buildIdlePod(player, claim, testSidecarImage, testBusAddress,
 			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage+"-next"), nil)},
-		{"the timezone", plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "Europe/Berlin")},
-		{"the fade policy", buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase,
+		{"the timezone", plainIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase, "Europe/Berlin")},
+		{"the fade policy", buildIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase,
 			"America/New_York", resolveIdle(fadeAfter(60), nil, testIdleImage), nil)},
-		{"a remote", buildIdlePod(player, claim, testImage, testBusAddress, testTopicBase,
+		{"a remote", buildIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase,
 			"America/New_York", resolveIdle(nil, nil, testIdleImage),
 			[]idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}})},
 	}
@@ -110,7 +110,8 @@ func TestReconcileStandingKeepsAMatchingPair(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	remote := standingRemote()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim, buildRemotePod(remote, claim, media.image, media.busAddress, media.topicBase))
+	seedStanding(t, cluster, claim,
+		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase))
 
 	mustSucceed(t, media.reconcileRemote(remote))
 
@@ -128,7 +129,8 @@ func TestReconcileStandingReplacesThePodAlone(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	remote := standingRemote()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim, buildRemotePod(remote, claim, "registry.example/player:old", media.busAddress, media.topicBase))
+	seedStanding(t, cluster, claim,
+		buildRemotePod(remote, claim, "registry.example/sidecar:old", media.busAddress, media.topicBase))
 	stamped := claim.Metadata.Annotations[templateHashAnnotation]
 
 	mustSucceed(t, media.reconcileRemote(remote))
@@ -149,7 +151,7 @@ func TestReconcileStandingReplacesThePodAlone(t *testing.T) {
 	if !stands {
 		t.Fatalf("no replacement pod was created: %v", cluster.requests)
 	}
-	mustMatch(t, replacement.Spec.Containers[0].Image, media.image)
+	mustMatch(t, replacement.Spec.Containers[0].Image, media.sidecarImage)
 }
 
 // A claim the Remote reshaped is stale, and so is the pod that holds its
@@ -160,7 +162,8 @@ func TestReconcileStandingReplacesBothWhenTheClaimDiverges(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	remote := standingRemote()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim, buildRemotePod(remote, claim, media.image, media.busAddress, media.topicBase))
+	seedStanding(t, cluster, claim,
+		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase))
 
 	remote.Spec.Device.Selector = `device.attributes["bluetooth.liken.sh"].address == "7C:66"`
 	mustSucceed(t, media.reconcileRemote(remote))
@@ -200,7 +203,7 @@ func TestReconcileStandingRollsAnUnstampedObject(t *testing.T) {
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 			remote := standingRemote()
 			claim := buildRemoteClaim(remote)
-			pod := buildRemotePod(remote, claim, media.image, media.busAddress, media.topicBase)
+			pod := buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase)
 			seedStanding(t, cluster, claim, pod)
 			one.strip(claim, pod)
 
@@ -232,7 +235,7 @@ func TestReconcileStandingLeavesATerminatingPairAlone(t *testing.T) {
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 			remote := standingRemote()
 			claim := buildRemoteClaim(remote)
-			stale := buildRemotePod(remote, claim, "registry.example/player:old", media.busAddress, media.topicBase)
+			stale := buildRemotePod(remote, claim, "registry.example/sidecar:old", media.busAddress, media.topicBase)
 			seedStanding(t, cluster, claim, stale)
 			one.mark(claim, stale)
 
@@ -255,7 +258,7 @@ func TestReconcileIdleRollsThePodOnAPlayerEdit(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, media.idleDisplayClass)
 	seedStanding(t, cluster, claim,
-		plainIdlePod(player, claim, media.image, media.busAddress, media.topicBase, "America/New_York"))
+		plainIdlePod(player, claim, media.sidecarImage, media.busAddress, media.topicBase, "America/New_York"))
 
 	player.Spec.DisplayName = "Studio Lab"
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))

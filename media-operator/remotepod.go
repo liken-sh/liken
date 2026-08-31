@@ -4,9 +4,11 @@ package main
 // through an owner reference, so deleting the Remote tears the pod
 // down. The pod holds the controller's device claim, which pins it to
 // the machine that owns the radio and runs it whether or not anything
-// plays. The container is the player image in its reader mode, which
-// reads the claim's event nodes and publishes each event to the
-// Remote's events topic.
+// plays.
+//
+// The container is the sidecar image in its reader mode, which reads
+// the claim's event nodes and publishes each event to the Remote's
+// events topic.
 
 // The one container in the standing pod. The pod runs a single reader,
 // so its name is the job it does.
@@ -66,15 +68,17 @@ func buildRemoteClaim(remote *Remote) *ResourceClaim {
 	return claim
 }
 
-// buildRemotePod writes the standing pod: the player image in its
-// reader mode, holding the controller's claim, publishing to the bus.
+// buildRemotePod writes the standing pod: the sidecar image in its
+// reader mode, holding the controller's claim and publishing to the
+// bus.
+//
 // restartPolicy is Always because the pod is a service and not a job: a
 // crash restarts it, and the pod ends only when the Remote is deleted.
 // It carries no IPC volume, because the reader drives no mpv socket.
-func buildRemotePod(remote *Remote, claim *ResourceClaim, image, busAddress, topicBase string) *Pod {
+func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddress, topicBase string) *Pod {
 	container := Container{
 		Name:    remoteReaderContainer,
-		Image:   image,
+		Image:   sidecarImage,
 		Command: []string{"/media-operator", remoteMode},
 		Env: []EnvVar{
 			{Name: remoteNamespaceVariable, Value: remote.Metadata.Namespace},
@@ -113,15 +117,16 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, image, busAddress, top
 // pod, both owned by the Remote.
 //
 // The pair follows the template: an edit to the Remote's device
-// selector, or a release that changes the player image, deletes the
-// stale object and the next pass creates the replacement. The reader
-// pod drops controller input for the few seconds the replacement takes,
-// and it holds no other state a rebuild would have to recover. A guard
-// that held the roll while a person watched a film would trade those
-// seconds for a pod of unpredictable age, so the pass rolls the pod
-// whenever the template changes.
+// selector, or a release that changes the sidecar image, deletes the
+// stale object and the next pass creates the replacement.
+//
+// The reader pod drops controller input for the few seconds the
+// replacement takes, and it holds no other state a rebuild would have to
+// recover. A guard that held the roll while a person watched a film would
+// trade those seconds for a pod of unpredictable age, so the pass rolls
+// the pod whenever the template changes.
 func (o *operator) reconcileRemote(remote *Remote) error {
 	claim := buildRemoteClaim(remote)
-	pod := buildRemotePod(remote, claim, o.image, o.busAddress, o.topicBase)
+	pod := buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase)
 	return o.reconcileStanding(claim, pod)
 }

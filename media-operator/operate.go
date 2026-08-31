@@ -21,14 +21,10 @@ import (
 	"time"
 )
 
-// The operator's own environment: the two images it stamps into the
-// pods it creates, the broker every pod connects to, and the base
-// every topic extends. The Deployment sets PLAYER_IMAGE, IDLE_IMAGE,
-// and MEDIA_BUS_ADDRESS, because none of the three is discoverable
-// from inside a pod: an image is a release decision, and a pod cannot
-// read the address of the broker in front of it. MEDIA_TOPIC_BASE has
-// a default, because a cluster that runs one bus needs no policy for
-// the base.
+// The operator's own environment: the three images it stamps into
+// pods, the broker, and the topic base. The Deployment sets each image,
+// because an image is a release decision a pod cannot discover, and
+// only MEDIA_TOPIC_BASE has a default.
 const (
 	playerImageVariable = "PLAYER_IMAGE"
 
@@ -37,6 +33,12 @@ const (
 	// spec.idle.image, so a household that states nothing gets the
 	// client this release ships.
 	idleImageVariable = "IDLE_IMAGE"
+
+	// SIDECAR_IMAGE names the image that carries this binary alone,
+	// which every sidecar container runs. It holds none of the player
+	// image's mpv, drivers, or fonts, because a sidecar decodes
+	// nothing.
+	sidecarImageVariable = "SIDECAR_IMAGE"
 
 	// IDLE_DISPLAY_CLASS names the cluster's display-draw DeviceClass, the
 	// shareable draw companion a Player's idle pod claims. The class is
@@ -106,9 +108,13 @@ type operator struct {
 	// idleImage is the client an idle container runs where no tier
 	// states spec.idle.image. It is a release decision, so it arrives
 	// in the environment beside the player image.
-	idleImage  string
-	busAddress string
-	topicBase  string
+	idleImage string
+	// sidecarImage is the image every sidecar container runs, the
+	// binary alone. It is a release decision, so it arrives in the
+	// environment beside the player image.
+	sidecarImage string
+	busAddress   string
+	topicBase    string
 	// idleDisplayClass is the display-draw DeviceClass a Player's idle pod
 	// claims. An empty value turns the idle screen off, so reconcileIdle
 	// builds nothing.
@@ -212,6 +218,11 @@ func operate() {
 		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the idle image\n", idleImageVariable)
 		os.Exit(1)
 	}
+	sidecarImage := os.Getenv(sidecarImageVariable)
+	if sidecarImage == "" {
+		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the sidecar image\n", sidecarImageVariable)
+		os.Exit(1)
+	}
 	busAddress := os.Getenv(busAddressVariable)
 	if busAddress == "" {
 		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the broker\n", busAddressVariable)
@@ -244,6 +255,7 @@ func operate() {
 		client:                client,
 		image:                 image,
 		idleImage:             idleImage,
+		sidecarImage:          sidecarImage,
 		busAddress:            busAddress,
 		topicBase:             topicBase,
 		idleDisplayClass:      idleDisplayClass,
@@ -1076,7 +1088,7 @@ func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved res
 	if err != nil {
 		return nil, false, err
 	}
-	desired := buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes, prefs)
+	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs)
 	if !claimChanged && sameRemoteSet(running, desired) {
 		return running, false, nil
 	}
@@ -1141,7 +1153,7 @@ func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved r
 // pod first.
 func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.busAddress, o.topicBase, remotes, prefs))
+	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}

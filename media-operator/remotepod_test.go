@@ -83,7 +83,7 @@ func TestBuildRemoteClaimHoldsTheControllerForever(t *testing.T) {
 func TestBuildRemotePodRunsTheReaderInTheRemoteMode(t *testing.T) {
 	remote := standingRemote()
 	claim := buildRemoteClaim(remote)
-	pod := buildRemotePod(remote, claim, testImage, testBusAddress, testTopicBase)
+	pod := buildRemotePod(remote, claim, testSidecarImage, testBusAddress, testTopicBase)
 
 	if pod.Metadata.Name != "sofa-remote" {
 		t.Errorf("name = %q, want sofa-remote", pod.Metadata.Name)

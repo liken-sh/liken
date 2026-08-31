@@ -44,9 +44,13 @@ func mountsIPC(container Container) bool {
 }
 
 const (
-	testImage      = "ghcr.io/liken-sh/media-operator:test"
-	testBusAddress = "bus.media.svc:1883"
-	testTopicBase  = "liken/media"
+	testPlayerImage = "ghcr.io/liken-sh/media-operator-player:test"
+	// The image every sidecar container runs. It is a different name
+	// from the player image, so a pod that confuses the two fails a
+	// test.
+	testSidecarImage = "ghcr.io/liken-sh/media-operator-sidecar:test"
+	testBusAddress   = "bus.media.svc:1883"
+	testTopicBase    = "liken/media"
 )
 
 // One playlist that costs a volume, so the pod under test carries a
@@ -67,7 +71,7 @@ func testPod(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
-	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 }
 
 // The same pod, with two controllers bound to the player.
@@ -75,7 +79,7 @@ func testPodWithRemotes(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
-	return buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, testBoundRemotes(), resolvedPreferences{})
+	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, testBoundRemotes(), resolvedPreferences{})
 }
 
 // restartPolicy is Never, because a finished film is not a failure to
@@ -126,8 +130,8 @@ func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	if container.Name != "player" {
 		t.Errorf("name = %q, want player", container.Name)
 	}
-	if container.Image != testImage {
-		t.Errorf("image = %q, want %q", container.Image, testImage)
+	if container.Image != testPlayerImage {
+		t.Errorf("image = %q, want %q", container.Image, testPlayerImage)
 	}
 	args := []string{"https://films.example/trailer.mkv", "/media/1/film.mkv"}
 	if !reflect.DeepEqual(container.Args, args) {
@@ -147,7 +151,7 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	play := testPlay()
 	play.Spec.Start = "0:10:00"
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	env := pod.Spec.Containers[0].Env
 	want := []EnvVar{
@@ -199,7 +203,7 @@ func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	resolved := testResolution(t)
 	play := testPlay()
-	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	volumes := append(append([]Volume{}, resolved.Volumes...),
 		Volume{Name: "art", EmptyDir: &EmptyDirVolumeSource{SizeLimit: artSizeLimit}},
@@ -243,17 +247,17 @@ func TestBuildPodWithNoRemotesCarriesOnlyTheCommandSidecar(t *testing.T) {
 	}
 }
 
-// The command sidecar is the player image in its command mode, holding
-// no device claim, mounting the IPC socket, the art volume, and the same
-// media mounts the player holds so it can open the source art, and
-// carrying the play's identity, the bus, and the base.
+// The command sidecar is the sidecar image in its command mode. It
+// holds no device claim, and it mounts the IPC socket, the art volume,
+// and the same media mounts the player holds, so it can open the source
+// art. It carries the play's identity, the bus, and the base.
 func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	pod := testPodWithRemotes(t)
 
 	command := initContainer(t, pod, commandContainer)
 	want := Container{
 		Name:    commandContainer,
-		Image:   testImage,
+		Image:   testSidecarImage,
 		Command: []string{"/media-operator", "command"},
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: "house"},
@@ -297,7 +301,7 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 		},
 	}
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	command := initContainer(t, pod, commandContainer)
 	got := envValue(command, presentationsVariable)
@@ -307,9 +311,9 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 	}
 }
 
-// One translator sidecar runs per bound remote. Each is the player image
-// in its translate mode, holding no device claim, mounting no IPC socket,
-// and carrying the remote's name and its three topics.
+// One translator sidecar runs per bound remote. Each is the sidecar
+// image in its translate mode, holding no device claim, mounting no IPC
+// socket, and carrying the remote's name and its three topics.
 func TestBuildPodRunsOneTranslatorPerRemote(t *testing.T) {
 	pod := testPodWithRemotes(t)
 
@@ -325,7 +329,7 @@ func TestBuildPodRunsOneTranslatorPerRemote(t *testing.T) {
 	sofa := initContainer(t, pod, "translate-sofa")
 	want := Container{
 		Name:    "translate-sofa",
-		Image:   testImage,
+		Image:   testSidecarImage,
 		Command: []string{"/media-operator", "translate"},
 		Env: []EnvVar{
 			{Name: playNamespaceVariable, Value: "house"},
@@ -425,7 +429,7 @@ func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
 	prefs := resolvedPreferences{AudioLanguages: []string{"en", "ja"}, Subtitles: subtitlesAuto}
-	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, prefs)
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, prefs)
 
 	got := envValue(pod.Spec.Containers[0], playerOptionsVariable)
 	want := "--alang=en,ja\n--subs-with-matching-audio=no\n--subs-match-os-language=no"
@@ -450,7 +454,7 @@ func TestBuildPodStartsMpvAtTheUnitsLevel(t *testing.T) {
 	play := testPlay()
 	play.Spec.Volume = &PlayVolume{Level: level(35), Muted: muted(true)}
 	pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
-		testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+		testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	mustMatch(t, envValue(pod.Spec.Containers[0], playerOptionsVariable), "--volume=35\n--mute=yes")
 }
@@ -472,7 +476,7 @@ func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
 	}
 	play := testPlay()
 	pod := buildPod(play, buildClaim(play, speakerless), testResolution(t),
-		testImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+		testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
 
 	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeTopicVariable), "")
 	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeTopicVariable),
@@ -485,7 +489,7 @@ func TestBuildPodCarriesTheResolvedTimeZone(t *testing.T) {
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
 	prefs := resolvedPreferences{TimeZone: "America/New_York"}
-	pod := buildPod(play, claim, testResolution(t), testImage, testBusAddress, testTopicBase, nil, prefs)
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, prefs)
 
 	got := envValue(pod.Spec.Containers[0], timeZoneVariable)
 	if got != "America/New_York" {

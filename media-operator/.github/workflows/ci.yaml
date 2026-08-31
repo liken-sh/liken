@@ -9,7 +9,7 @@
 # wrong the day someone adds a file it does not name, and the push
 # that adds it would then land untested.
 #
-# The three jobs are independent, so they run at once, and the run
+# The four jobs are independent, so they run at once, and the run
 # takes as long as its slowest job.
 name: ci
 
@@ -141,8 +141,8 @@ jobs:
 
   images:
     runs-on: ubuntu-latest
-    # One job per image, so the three build at once and the run is as
-    # long as the slowest of them, not the sum.
+    # One job per image, so the four build at once and the run is as
+    # long as the slowest of them, not their sum.
     strategy:
       fail-fast: false
       matrix:
@@ -153,6 +153,8 @@ jobs:
             file: Dockerfile.player
           - image: media-operator-idle
             file: Dockerfile.idle
+          - image: media-operator-sidecar
+            file: Dockerfile.sidecar
     steps:
       # The idle image compiles liken-iced out of the brand submodule
       # at docs/themes/brand, so the context needs it checked out.

@@ -44,8 +44,8 @@ const testIdleImage = "ghcr.io/liken-sh/media-operator-idle:2026.09.01-001"
 
 // plainIdlePod builds the idle pod of a Player that states no idle
 // policy and owns no remotes, for the tests that are about neither.
-func plainIdlePod(player *Player, claim *ResourceClaim, image, busAddress, topicBase, timeZone string) *Pod {
-	return buildIdlePod(player, claim, image, busAddress, topicBase, timeZone,
+func plainIdlePod(player *Player, claim *ResourceClaim, sidecarImage, busAddress, topicBase, timeZone string) *Pod {
+	return buildIdlePod(player, claim, sidecarImage, busAddress, topicBase, timeZone,
 		resolveIdle(nil, nil, testIdleImage), nil)
 }
 
@@ -130,7 +130,7 @@ func TestBuildIdleClaimOmitsTheRenderRequestWithoutARenderNode(t *testing.T) {
 func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	pod := plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
+	pod := plainIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase, "America/New_York")
 
 	if pod.Metadata.Name != "theater-idle" {
 		t.Errorf("name = %q, want theater-idle", pod.Metadata.Name)
@@ -182,13 +182,13 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 }
 
 // The pod carries one native sidecar in the idle-command mode. It runs
-// this operator's own image, reads the bus address and the Player's
-// topics, and restarts alone on a crash. It holds no device claim and no
-// volume, because it reads the bus and writes the bus.
+// the sidecar image, reads the bus address and the Player's topics, and
+// restarts alone on a crash. It holds no device claim and no volume,
+// because it reads the bus and writes the bus.
 func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	pod := plainIdlePod(player, claim, testImage, testBusAddress, testTopicBase, "America/New_York")
+	pod := plainIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase, "America/New_York")
 
 	if pod.Spec.Volumes != nil {
 		t.Errorf("volumes = %+v, want none", pod.Spec.Volumes)
@@ -201,7 +201,7 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 	if sidecar.Name != idleCommandContainer {
 		t.Errorf("sidecar name = %q, want %q", sidecar.Name, idleCommandContainer)
 	}
-	mustMatch(t, sidecar.Image, testImage)
+	mustMatch(t, sidecar.Image, testSidecarImage)
 	command := []string{"/media-operator", idleCommandMode}
 	if !reflect.DeepEqual(sidecar.Command, command) {
 		t.Errorf("sidecar command = %v, want %v", sidecar.Command, command)
@@ -237,7 +237,7 @@ func TestBuildIdlePodCarriesTheCommandSidecar(t *testing.T) {
 func TestBuildIdlePodArmsTheWindowWatchdog(t *testing.T) {
 	player := standingIdlePlayer()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 
 	mustMatch(t, envValue(pod.Spec.Containers[0], idleWindowGraceVariable),
 		strconv.Itoa(idleWindowGraceSeconds))
@@ -248,7 +248,7 @@ func TestBuildIdlePodArmsTheWindowWatchdog(t *testing.T) {
 // depend on the zone.
 func TestBuildIdlePodOmitsTheTimeZoneWhenUnset(t *testing.T) {
 	player := standingIdlePlayer()
-	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"), testSidecarImage, testBusAddress, testTopicBase, "")
 
 	env := containerEnv(pod.Spec.Containers[0])
 	if _, held := env[timeZoneVariable]; held {
@@ -271,7 +271,7 @@ func TestBuildIdlePodCarriesTheIdentity(t *testing.T) {
 			Remotes:     []PlayerRemote{{Name: "pad", DisplayName: "Studio Dualsense Controller"}},
 		},
 	}
-	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"), testImage, testBusAddress, testTopicBase, "")
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"), testSidecarImage, testBusAddress, testTopicBase, "")
 
 	env := containerEnv(pod.Spec.Containers[0])
 	if env[idlePlayerNameVariable] != "Studio Lab" {
@@ -336,7 +336,7 @@ func TestBuildIdlePodOmitsTheComponentsWhenThereAreNone(t *testing.T) {
 		t.Fatalf("idleComponents = %+v, want none", got)
 	}
 	pod := plainIdlePod(player, buildIdleClaim(&Player{Spec: PlayerSpec{Display: &PlayerDevice{Class: "display-output"}}}, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 
 	env := map[string]string{}
 	for _, entry := range pod.Spec.Containers[0].Env {
@@ -438,7 +438,7 @@ func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 		},
 	}
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "",
+		testSidecarImage, testBusAddress, testTopicBase, "",
 		resolveIdle(fadeAfter(60), nil, testIdleImage), remotes)
 
 	env := containerEnv(pod.Spec.InitContainers[0])
@@ -458,7 +458,7 @@ func TestBuildIdlePodCarriesThePlayerName(t *testing.T) {
 	player := standingIdlePlayer()
 	player.Spec.DisplayName = "The Theater"
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 
 	mustMatch(t, envValue(pod.Spec.InitContainers[0], playerNameVariable), "theater")
 	mustMatch(t, envValue(pod.Spec.Containers[0], idlePlayerNameVariable), "The Theater")
@@ -470,13 +470,13 @@ func TestBuildIdlePodCarriesThePlayerName(t *testing.T) {
 func TestBuildIdlePodCarriesTheVolumeTopicOnlyWithSinks(t *testing.T) {
 	speakerless := standingIdlePlayer()
 	pod := plainIdlePod(speakerless, buildIdleClaim(speakerless, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 	mustMatch(t, envValue(pod.Spec.InitContainers[0], playerVolumeTopicVariable), "")
 
 	speakered := standingIdlePlayer()
 	speakered.Spec.Sinks = []PlayerDevice{{Class: "audio-sink"}}
 	pod = plainIdlePod(speakered, buildIdleClaim(speakered, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 	mustMatch(t, envValue(pod.Spec.InitContainers[0], playerVolumeTopicVariable),
 		playerVolumeTopic(testTopicBase, "house", "theater"))
 }
@@ -486,7 +486,7 @@ func TestBuildIdlePodCarriesTheVolumeTopicOnlyWithSinks(t *testing.T) {
 func TestBuildIdlePodOmitsTheRemoteListsWithoutRemotes(t *testing.T) {
 	player := standingIdlePlayer()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 
 	env := map[string]string{}
 	for _, entry := range pod.Spec.InitContainers[0].Env {
@@ -564,7 +564,7 @@ func TestBuildIdlePodCarriesTheOffWindow(t *testing.T) {
 	}, nil, testIdleImage)
 
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "", idle, nil)
+		testSidecarImage, testBusAddress, testTopicBase, "", idle, nil)
 
 	env := containerEnv(pod.Spec.InitContainers[0])
 	mustMatch(t, env[idleOffAfterSecondsVariable], "1800")
@@ -581,7 +581,7 @@ const namedIdleImage = "ghcr.io/liken-sh/media-browser:2026.09.01-001"
 // an image, with no household default under it.
 func namedIdlePod(player *Player, image string) *Pod {
 	return buildIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "America/New_York",
+		testSidecarImage, testBusAddress, testTopicBase, "America/New_York",
 		resolveIdle(&IdlePolicy{Image: image}, nil, testIdleImage), nil)
 }
 
@@ -594,7 +594,7 @@ func TestBuildIdlePodRunsTheNamedImageAndChangesNothingElse(t *testing.T) {
 	player := standingIdlePlayer()
 	player.Spec.Sinks = []PlayerDevice{{Class: "audio-sink"}}
 	fallback := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "America/New_York")
+		testSidecarImage, testBusAddress, testTopicBase, "America/New_York")
 	named := namedIdlePod(player, namedIdleImage)
 
 	container := named.Spec.Containers[0]
@@ -619,13 +619,13 @@ func TestBuildIdlePodRunsTheNamedImageAndChangesNothingElse(t *testing.T) {
 func TestBuildIdlePodCarriesTheVolumeTopicToTheClientOnlyWithSinks(t *testing.T) {
 	speakerless := standingIdlePlayer()
 	pod := plainIdlePod(speakerless, buildIdleClaim(speakerless, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 	mustMatch(t, envValue(pod.Spec.Containers[0], playerVolumeTopicVariable), "")
 
 	speakered := standingIdlePlayer()
 	speakered.Spec.Sinks = []PlayerDevice{{Class: "audio-sink"}}
 	pod = plainIdlePod(speakered, buildIdleClaim(speakered, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 	mustMatch(t, envValue(pod.Spec.Containers[0], playerVolumeTopicVariable),
 		playerVolumeTopic(testTopicBase, "house", "theater"))
 }
@@ -638,7 +638,7 @@ func TestBuildIdlePodCarriesTheScreenTopicToBothContainers(t *testing.T) {
 	want := playerScreenTopic(testTopicBase, "house", "theater")
 
 	fallback := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
-		testImage, testBusAddress, testTopicBase, "")
+		testSidecarImage, testBusAddress, testTopicBase, "")
 	mustMatch(t, envValue(fallback.Spec.InitContainers[0], playerScreenTopicVariable), want)
 	mustMatch(t, envValue(fallback.Spec.Containers[0], playerScreenTopicVariable), want)
 
