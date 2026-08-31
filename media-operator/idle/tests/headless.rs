@@ -276,8 +276,12 @@ fn a_capture_run_writes_its_frames_and_ends_after_the_last_one() {
     );
 
     assert_eq!(run.exit, "0", "{}", run.log);
+    // A run its captures ended finishes at the compositor's startup plus a
+    // few seconds; a run the deadline ended takes the startup plus the full
+    // 25. The bound sits just under the deadline, because a cold CI runner
+    // has taken over ten seconds to bring the compositor up.
     assert!(
-        run.seconds < 20.0,
+        run.seconds < 24.0,
         "the last capture ended the run, not the deadline at 25 s: {} s\n{}",
         run.seconds,
         run.log
