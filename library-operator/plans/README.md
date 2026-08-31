@@ -126,6 +126,10 @@ that took a hearing-impaired flag for Hindi.
   Built, and released in 2026.08.30-012. The `Service` over each
   scanner pod, with the selector the pod's own labels give it, and the
   address in `status.webhook`.
+* [20, Library-scoped catalog keys](20-library-scoped-keys.md). Every
+  replicated table's primary key leads with the library, so Libraries
+  that share a namespace never touch each other's rows. Ships against
+  fresh databases through a versioned claim name, with a rescan.
 
 ## Open problems
 
