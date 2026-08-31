@@ -9,7 +9,7 @@ voice rules. The main manual at
 shell, the same nav, and the same stylesheet, so the family reads as
 one place.
 
-Two kinds of consumer read this repository:
+Three kinds of consumer read this repository:
 
 * **Hugo sites** take it as a git submodule at `themes/brand` and set
   `theme: brand`. The theme is the page shell (`layouts/`), the
@@ -19,6 +19,10 @@ Two kinds of consumer read this repository:
   module `github.com/liken-sh/brand`. The package embeds the
   stylesheet and the mark, so a page builder such as `liken`'s
   release channel inlines them with no file to copy.
+* **Rust programs** that draw with the `iced` toolkit take it as a
+  git submodule and name `iced/` as a path dependency. The crate
+  parses the mark and the palette out of the two originals, so a
+  screen and a page draw the same shape in the same colors.
 
 `voice.md` states the voice and tone rules for every word the
 project publishes, on the sites and in the source files' comments.
@@ -184,6 +188,42 @@ committed copy in `assets/`. The release channel's pages read the
 original through the `brand` Go package, because a Go program can
 only embed files from its own module. The file at the root of this
 repository is the only original.
+
+## The `liken-iced` crate
+
+`iced/` is a Rust crate, `liken-iced`, for a program that draws the
+brand with the [`iced`](https://iced.rs/) toolkit, such as an idle
+screen on a television. The crate carries three things:
+
+* **The mark.** It embeds `liken.svg` and parses the fourteen
+  polygons out of it. A caller reads the six vertices, the fill, and
+  the stroke width of each hexagon, in the SVG's own coordinate space
+  with its bounding box, and one call draws the whole mark into a
+  canvas frame at any center and any width.
+* **The palette.** It embeds `liken.css` and parses `--ink`,
+  `--ink-muted`, `--page`, and `--link` out of both schemes.
+* **The pulse.** `motion.md` states the loop, and the crate holds its
+  numbers: two sines for each hexagon, first rates between 0.22 and
+  0.40 cycles a second spread by the golden ratio, and a ten percent
+  swing at full energy. At energy 0 the mark is still.
+
+No value in the crate is a copy of a value in `liken.svg` or
+`liken.css`. An edit to either original reaches a screen with no
+second edit, so the mark on a screen and the mark on a page cannot
+drift.
+
+The crate carries no type scale, no margins, and no layout. Those
+belong to the display that draws the mark, and a ten-foot screen and
+a web page do not share them.
+
+`iced/Cargo.toml` names the exact `iced` version the crate builds
+against, and a consumer names the same one. Two versions of `iced` in
+one binary do not compile, so a bump moves both manifests in one
+change.
+
+`make test-rust` runs the crate's checks: the format, the lints, and
+the tests under a line coverage floor. It needs the compiler
+`iced/rust-toolchain.toml` names, and `cargo-llvm-cov`.
 
 ## The files
 

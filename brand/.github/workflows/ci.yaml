@@ -36,3 +36,45 @@ jobs:
       # Makefile says why the gate pins a toolchain, and
       # .testcoverage.yml holds the floors.
       - run: make test-go
+
+  # liken-iced parses liken.svg and liken.css, so this job fails on a
+  # change to either original that the crate cannot read. It opens no
+  # window and needs no GPU, so the runner installs no graphics.
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: iced
+    env:
+      # Incremental artifacts are large, and a fresh runner never
+      # reuses them. Without this they would fill the cache and gain
+      # nothing.
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7
+
+      # iced/rust-toolchain.toml names the version and the components.
+      # rustup installs what the file names, so this workflow pins no
+      # version of its own.
+      - name: install the toolchain
+        run: rustup show
+
+      # The cache holds the cargo registry and target/, keyed on
+      # Cargo.lock. Almost all of the build is dependencies, and they
+      # change only when the lock file changes.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: iced
+          cache-on-failure: true
+
+      # cargo-llvm-cov is a binary. The action fetches its release
+      # build instead of compiling one, and it runs after rust-cache,
+      # which prunes binaries it did not see before it saved.
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      # The same target a workstation runs: the format, the lints, and
+      # the tests under the coverage gate. iced/Makefile holds the
+      # floor.
+      - run: make test

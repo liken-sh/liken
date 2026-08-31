@@ -8,8 +8,9 @@
 # a git submodule and runs nothing inside it, so the checkout itself
 # must already hold everything the theme serves. The default target
 # is for a person who changes the mark or the stylesheet: edit an
-# original, run `make`, and commit the files that change. CI runs
-# only `make test-go`, the checks for the Go packages below.
+# original, run `make`, and commit the files that change. CI runs the
+# check targets below, `test-go` and `test-rust`, and none of the
+# rules above them.
 #
 # rsvg-convert (from librsvg) turns the vector image into pixels, and
 # ImageMagick packs the multi-size .ico file.
@@ -81,7 +82,7 @@ assets/liken.css: liken.css
 # that counts each block once.
 COVERAGE_TOOLCHAIN := go1.26.7
 
-test: test-go
+test: test-go test-rust
 
 test-go:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
@@ -91,4 +92,11 @@ test-go:
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
 
-.PHONY: all test test-go
+# The checks for liken-iced, the Rust crate under iced/. It parses the
+# mark and the stylesheet, so a change to liken.svg or liken.css that
+# the crate cannot read fails here. iced/Makefile holds the coverage
+# floor, and iced/rust-toolchain.toml pins the compiler.
+test-rust:
+	$(MAKE) -C iced test
+
+.PHONY: all test test-go test-rust

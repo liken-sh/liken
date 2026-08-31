@@ -36,3 +36,11 @@ repos:
         language: system
         files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$|^Makefile$
         pass_filenames: false
+      - id: test-rust
+        name: rust checks and coverage gate
+        # liken-iced parses liken.svg and liken.css, so a change to
+        # either original runs this gate too.
+        entry: make test-rust
+        language: system
+        files: ^iced/|^liken\.(svg|css)$|^Makefile$
+        pass_filenames: false
