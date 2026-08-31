@@ -276,3 +276,11 @@ func (c *Catalog) DeleteAliases(ctx context.Context, aliases []string) (int, err
 func (c *Catalog) DeleteFileItemsByPath(ctx context.Context, paths []string) (int, error) {
 	return c.apply(ctx, deleteByKey("file_items", "path", paths))
 }
+
+// DeleteFileItemsByItem removes every link row a departed item held, by
+// its id. A title that changes its canonical id leaves its files on the
+// volume, so the prune never reaches those links by path, and without this
+// they point at an item the catalog no longer holds.
+func (c *Catalog) DeleteFileItemsByItem(ctx context.Context, items []string) (int, error) {
+	return c.apply(ctx, deleteByKey("file_items", "item", items))
+}

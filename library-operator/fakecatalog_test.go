@@ -128,6 +128,8 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		delete(f.files, str(p[0]))
 	case strings.HasPrefix(s.sql, "DELETE FROM aliases"):
 		delete(f.aliases, str(p[0]))
+	case strings.HasPrefix(s.sql, "DELETE FROM file_items WHERE item"):
+		f.deleteFileItemsByItem(str(p[0]))
 	case strings.HasPrefix(s.sql, "DELETE FROM file_items"):
 		f.deleteFileItems(str(p[0]))
 	case strings.HasPrefix(s.sql, "DELETE FROM seen"):
@@ -138,6 +140,16 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 func (f *fakeCatalog) deleteFileItems(path string) {
 	for key := range f.fileItems {
 		if strings.HasPrefix(key, path+"\x00") {
+			delete(f.fileItems, key)
+		}
+	}
+}
+
+// deleteFileItemsByItem clears the links to one item, whatever file holds
+// them, the delete a pruned item drives.
+func (f *fakeCatalog) deleteFileItemsByItem(item string) {
+	for key := range f.fileItems {
+		if strings.HasSuffix(key, "\x00"+item) {
 			delete(f.fileItems, key)
 		}
 	}
@@ -294,6 +306,18 @@ func (f *fakeCatalog) tableOf(sql string) map[string]fakeRow {
 
 // held reads a whole table under the lock, so a test reads no torn map
 // while a request is in flight.
+// heldLinks copies the file-to-item links, whose keys are the path and the
+// item joined by a NUL, so a test reads them without the lock.
+func (f *fakeCatalog) heldLinks() map[string]bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]bool{}
+	for k := range f.fileItems {
+		out[k] = true
+	}
+	return out
+}
+
 func (f *fakeCatalog) held(table map[string]fakeRow) map[string]fakeRow {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -171,6 +171,17 @@ the volume and never minted. A wrong id in a sidecar is a wrong item in
 the catalog, and no rule here can tell a bad id from a good one. The
 repair is on the volume, in the sidecar that carries the wrong id.
 
+**A pruned item left its file links behind.** The prune deletes a link
+row in `file_items` only when a file leaves the volume, by its path. An
+item that leaves for another reason, because its canonical id changed,
+keeps its files on the volume, so the prune never reaches those links and
+they point at an item the catalog no longer holds. Every affected file
+then reads as belonging to two items, the live one and a dead one, and
+the rows never leave.
+
+Release 2026.08.30-014 deletes an item's links with the item, the way it
+already deletes a departed file's links with the file.
+
 It names the cost of the derived id in a way the design did not.
 [Writing ids back to the volume](../open-problems/writing-ids-back-to-the-volume.md)
 covers the sidecar-less case. This is the opposite case, a sidecar that

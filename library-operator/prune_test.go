@@ -635,4 +635,12 @@ func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
 	if item := fake.aliases[pathID]; item != "movie:tmdb:424242" {
 		t.Errorf("alias %s resolves to %q, want the provider id", pathID, item)
 	}
+	// The files stayed on the volume, so the prune never reaches their links
+	// by path. Without the delete by item they would point at an item the
+	// catalog no longer holds, and every reader would see the file twice.
+	for key := range fake.heldLinks() {
+		if strings.HasSuffix(key, "\x00"+pathID) {
+			t.Errorf("file_items holds %q, want no link to the departed item", key)
+		}
+	}
 }

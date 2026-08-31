@@ -198,7 +198,10 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	} {
 		n, err := catalog.sweep(ctx, itemPruneSQL(table.name, "id", seenItem), []any{library, epoch, pruneBatch},
 			func(ctx context.Context, keys []string) error {
-				_, err := table.delete(ctx, keys)
+				if _, err := table.delete(ctx, keys); err != nil {
+					return err
+				}
+				_, err := catalog.DeleteFileItemsByItem(ctx, keys)
 				return err
 			})
 		if err != nil {
@@ -296,7 +299,10 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	} {
 		n, err := catalog.sweep(ctx, scopedItemPruneSQL(table.name, "id", seenItem), scopedItemPruneParams(library, folder, epoch),
 			func(ctx context.Context, keys []string) error {
-				_, err := table.delete(ctx, keys)
+				if _, err := table.delete(ctx, keys); err != nil {
+					return err
+				}
+				_, err := catalog.DeleteFileItemsByItem(ctx, keys)
 				return err
 			})
 		if err != nil {
