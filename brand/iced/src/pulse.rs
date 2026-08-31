@@ -4,10 +4,15 @@
 //! energy. The rate and the phase come from the hexagon's index, so the same
 //! moment draws the same frame on every run and on every surface.
 //!
-//! Every number here is `display/logo.lua`'s, the `mpv` overlay that draws the
-//! same mark. A difference in any of them is a difference a person sees.
+//! The brand's `motion.md` states the ten percent swing and the
+//! index-derived phases, and this module states the rest: the rates, the
+//! golden-ratio second sine, and the mean of the two. This module is the
+//! definition every surface that animates the mark must match, and a
+//! change to any number here is a change a person watching a screen
+//! sees.
 
-/// The golden ratio, to the ten decimal places `logo.lua` writes.
+/// The golden ratio, to the ten decimal places this module chooses to
+/// carry.
 ///
 /// A hexagon's spread is its index times this number, taken modulo one. That
 /// places the fourteen spreads across the range with no two close together, so
@@ -46,10 +51,9 @@ impl Pulse {
     /// The motion of the hexagon at `index`, counting from zero in the order
     /// `liken.svg` writes the polygons.
     ///
-    /// `logo.lua` counts its hexagons from one, because Lua indexes from one,
-    /// and the spread is the index times [`PHI`]. A zero-based index therefore
-    /// adds one before the spread, so the fourteen keep the rates and the
-    /// offsets the `mpv` screen gives them.
+    /// The spread is the one-based ordinal times [`PHI`] modulo one, so a
+    /// zero-based index adds one first. The ordinal is this module's own
+    /// definition: hexagon one is the first polygon in the file.
     pub fn for_index(index: usize) -> Self {
         let ordinal = (index + 1) as f64;
         let spread = (ordinal * PHI) % 1.0;

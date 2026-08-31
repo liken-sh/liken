@@ -73,9 +73,13 @@ pub fn bounds() -> Rectangle {
 impl Hexagon {
     /// This hexagon on a canvas at one moment.
     ///
-    /// `center` is where the center of [`bounds`] lands, and `span` is the
-    /// width the whole mark fills, both in canvas units. The height follows the
-    /// width, so the mark keeps its ratio. `energy` runs from 0 at rest to 1 at
+    /// `center` is where the middle of [`bounds`] lands and `span` is that
+    /// box's width, both in canvas units. The box is the vertex box, and
+    /// not the drawn mark: `outline` reaches half a stroke width past the
+    /// extreme vertices, so a mark at span 640 draws 651.9 px wide and
+    /// 733.2 px tall over a 640 by 722.7 box, and a caller that clips to
+    /// the span cuts the outer rims off. The height follows the width, so
+    /// the mark keeps its ratio. `energy` runs from 0 at rest to 1 at
     /// full swing, and `phase` is the animation clock in seconds.
     ///
     /// The SVG y axis and the canvas y axis both run down, so the shape needs
@@ -158,9 +162,13 @@ pub fn draw<Renderer>(
     }
 }
 
-/// How many straight segments draw one rounded corner. Six leaves the arc
-/// within a fortieth of a pixel of true on a mark that fills a third of a 1080
-/// row screen, which is finer than the rasterizer resolves.
+/// How many straight segments draw one rounded corner.
+///
+/// Six segments cut a 60 degree corner into 10 degree chords, which sag
+/// r * (1 - cos 5 degrees) below the arc. On a mark that fills a third
+/// of a 1080-row screen the widest corner radius is 6.997 px, so the sag
+/// is 0.0266 px, one 37.6th of a pixel, finer than the rasterizer
+/// resolves.
 const ARC_STEPS: usize = 6;
 
 /// The path one placed hexagon draws, corners and all.
@@ -204,27 +212,30 @@ fn outline(placed: &Placed) -> Path {
         }
     };
 
-    let edge = |i: usize| {
+    // Each edge displaced outward by `round`, as its two endpoints. The
+    // path below reads each one three times and the offset costs a square
+    // root, so the six are built once here.
+    let edges: [(Point, Point); 6] = std::array::from_fn(|i| {
         let (a, b) = (points[i], points[(i + 1) % points.len()]);
         let (nx, ny) = normal(a, b);
         (
             Point::new(a.x + nx * round, a.y + ny * round),
             Point::new(b.x + nx * round, b.y + ny * round),
         )
-    };
+    });
 
     Path::new(|builder| {
-        builder.move_to(edge(0).0);
+        builder.move_to(edges[0].0);
 
         for i in 0..points.len() {
-            builder.line_to(edge(i).1);
+            builder.line_to(edges[i].1);
 
             // The arc around the vertex the next edge starts at, from where
             // this edge's offset ends to where the next one begins. Both lie
             // at `round` from that vertex, so the arc is the round join.
             let vertex = points[(i + 1) % points.len()];
-            let from = edge(i).1;
-            let to = edge((i + 1) % points.len()).0;
+            let from = edges[i].1;
+            let to = edges[(i + 1) % points.len()].0;
 
             let start = (from.y - vertex.y).atan2(from.x - vertex.x);
             let mut sweep = (to.y - vertex.y).atan2(to.x - vertex.x) - start;
@@ -269,6 +280,16 @@ fn read(svg: &str) -> Mark {
             read_hexagon(index, element)
         })
         .collect();
+
+    assert!(
+        !hexagons.is_empty(),
+        "the document has no <polygon> element"
+    );
+    assert_eq!(
+        hexagons.len(),
+        14,
+        "the document is not the mark's fourteen <polygon> elements"
+    );
 
     let mut left = f32::MAX;
     let mut top = f32::MAX;

@@ -208,19 +208,15 @@ fn the_stroke_follows_the_canvas_and_not_the_pulse() {
     }
 }
 
-/// The mark in motion, against the `mpv` overlay that drew it before.
-///
-/// `media-operator`'s `display/logo.lua` places the same fourteen hexagons on
-/// the same canvas from the same two inputs, so the two implementations can be
-/// compared exactly rather than by eye. These vertices came out of that module
-/// at three moments: the mark at rest, the mark at full swing, and the mark
-/// part way down a ramp. A moving hexagon that lands somewhere else is a
-/// difference a person watching the screen would see as a change of rhythm.
-///
+// The mark in motion, pinned at three moments: at rest, at full swing,
+// and part way down a ramp. The vertices are this crate's own contract:
+// they are what every screen that draws the mark draws, and a moving
+// hexagon that lands anywhere else is a change of rhythm a person
+// watching would see.
 /// The canvas is 1920 by 1080, where the mark takes a third of the width and
 /// centers on the middle of the screen.
 #[test]
-fn the_mark_lands_where_the_overlay_lands_it() {
+fn the_mark_holds_its_vertices_at_three_moments() {
     const CENTER: Point = Point::new(960.0, 540.0);
     const SPAN: f32 = 640.0;
 
@@ -272,7 +268,7 @@ fn the_mark_lands_where_the_overlay_lands_it() {
             assert!(
                 (drawn.x - x).abs() < 0.01 && (drawn.y - y).abs() < 0.01,
                 "hexagon {index} at energy {energy} phase {phase} \
-                 draws {drawn:?} where the overlay draws ({x}, {y})"
+                 draws {drawn:?} off its pinned vertex ({x}, {y})"
             );
         }
     }

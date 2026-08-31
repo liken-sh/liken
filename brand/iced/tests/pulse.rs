@@ -1,7 +1,6 @@
-//! The motion is a port of `display/logo.lua`, the `mpv` overlay that draws the
-//! same mark on the same screens. The two run side by side on one cluster, so
-//! the numbers below are the Lua's own, and a difference in any of them is a
-//! difference a person sees.
+// This crate defines the motion, so the numbers below are arithmetic
+// this file works out from PHI, RATE_MIN, and RATE_SPAN, and not
+// readings taken off another implementation.
 
 use liken_iced::mark;
 use liken_iced::pulse::{PHI, Pulse, RATE_MIN, RATE_SPAN, SWING};
@@ -12,10 +11,10 @@ use liken_iced::pulse::{PHI, Pulse, RATE_MIN, RATE_SPAN, SWING};
 /// an `f32` vertex or a screen can hold.
 const TOLERANCE: f64 = 1e-12;
 
-/// The rates and the offsets `logo.lua` gives the first hexagon, the seventh,
-/// and the last, in cycles a second and in radians. Nothing in the motion is
-/// random, so these are arithmetic, and the properties below hold for the
-/// eleven this table leaves out.
+// The rates and the offsets of the first hexagon, the seventh, and the
+// last, in cycles a second and in radians. Nothing in the motion is
+// random, so each value is arithmetic, and the properties below hold for
+// the eleven hexagons this table leaves out.
 const NUMBERS: [(usize, f64, f64, f64, f64); 3] = [
     (
         0,
@@ -58,7 +57,7 @@ fn every_hexagon_runs_the_rates_and_offsets_the_mpv_screen_runs() {
         {
             assert!(
                 (measured - expected).abs() < TOLERANCE,
-                "hexagon {index} runs at {measured}, and the mpv screen runs it at {expected}"
+                "hexagon {index} runs at {measured}, and the numbers state {expected}"
             );
         }
     }
@@ -92,8 +91,9 @@ fn the_second_rate_is_the_first_times_the_golden_ratio() {
     }
 }
 
-/// The scale of hexagons 0, 6, and 13 at four moments, as phase, energy, and
-/// the three scales. The values come from `logo.lua`'s own expressions.
+// The scale of hexagons 0, 6, and 13 at four moments, as phase, energy,
+// and the three scales. Each value is the two-sine arithmetic worked by
+// hand, and it holds `Pulse::scale_at` to twelve decimal places.
 const MOMENTS: [(f64, f64, [f64; 3]); 4] = [
     (
         0.0,
@@ -126,7 +126,7 @@ fn a_moment_renders_the_scales_the_mpv_screen_renders() {
             assert!(
                 (scale - expected).abs() < TOLERANCE,
                 "hexagon {index} at phase {phase} and energy {energy} \
-                 scales to {scale}, and the mpv screen scales it to {expected}"
+                 scales to {scale}, and the arithmetic states {expected}"
             );
         }
     }

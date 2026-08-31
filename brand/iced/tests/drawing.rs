@@ -10,6 +10,7 @@ use iced_widget::canvas::Frame;
 use iced_widget::core::{
     Background, Color, Point, Radians, Rectangle, Size, Transformation, Vector, image, renderer,
 };
+use iced_widget::graphics::geometry::path::lyon_path;
 use iced_widget::graphics::geometry::{self, Fill, Image, Path, Stroke, Style, Svg, Text, frame};
 use liken_iced::mark;
 
@@ -19,6 +20,7 @@ enum Call {
     Fill {
         style: Style,
         segments: usize,
+        points: Vec<Point>,
     },
     Stroke {
         style: Style,
@@ -61,6 +63,19 @@ impl frame::Backend for Recording {
         self.log.borrow_mut().push(Call::Fill {
             style: fill.into().style,
             segments: path.raw().iter().count(),
+            // The corner of the path each segment lands on, in the order
+            // the path draws them. `move_to` opens the path and every
+            // `line_to` adds one, so the close carries no corner of its
+            // own and this list is one shorter than `segments`.
+            points: path
+                .raw()
+                .iter()
+                .filter_map(|event| match event {
+                    lyon_path::Event::Begin { at } => Some(Point::new(at.x, at.y)),
+                    lyon_path::Event::Line { to, .. } => Some(Point::new(to.x, to.y)),
+                    _ => None,
+                })
+                .collect(),
         });
     }
 
@@ -154,7 +169,10 @@ fn the_mark_fills_every_hexagon_once() {
     assert_eq!(calls.len(), mark::hexagons().len());
 
     for (hexagon, call) in mark::hexagons().iter().zip(&calls) {
-        let Call::Fill { style, segments } = call else {
+        let Call::Fill {
+            style, segments, ..
+        } = call
+        else {
             panic!("the mark strokes where it should fill: {call:?}");
         };
 
@@ -188,5 +206,83 @@ fn the_alpha_reaches_every_fill() {
         });
 
         assert_eq!(style_of(call), faded, "hexagon {index} fills");
+    }
+}
+
+fn points_of(call: &Call) -> &[Point] {
+    match call {
+        Call::Fill { points, .. } => points,
+        Call::Stroke { .. } => panic!("the mark strokes where it should fill: {call:?}"),
+    }
+}
+
+// The tolerance is a hundredth of a pixel. The derived numbers hold to
+// under 0.0005 px: liken.svg rounds its vertices to two decimals, so the
+// hexagon is 0.005 degrees off regular and an arc midpoint lands about
+// 0.0003 px from the whole-degree position. The errors this test exists
+// for move a corner by whole pixels: an inverted normal by 14, a doubled
+// offset by 7, a dropped sweep normalization by 14.
+const TOLERANCE: f64 = 0.01;
+
+// The numbers below are derived by hand from the first polygon of
+// liken.svg. Its six vertices are (-4.33,-9.27), (2.77,-5.17),
+// (2.77,3.03), (-4.33,7.13), (-11.43,3.03), and (-11.43,-5.17), and its
+// stroke-width is 1.40. mark::bounds is 64.03 wide, so SPAN 640 scales
+// by 9.995315, and the placed vertices are v0 (956.45166,453.94034),
+// v1 (1027.41850,494.92114), v2 (1027.41850,576.88270),
+// v3 (956.45166,617.86350), v4 (885.48490,576.88270), and
+// v5 (885.48490,494.92114), with round = 1.40 * 9.995315 / 2 = 6.996720.
+//
+// The hexagon is pointy-top and regular, so each edge normal stands 60
+// degrees from the last. Edge 0 (v0 to v1) runs (7.1,4.1) over a length
+// of 8.198780, which gives the outward normal (0.500074,-0.865982) and
+// the displacement (3.498881,-6.059036). Edge 1 (v1 to v2) is the
+// vertical right side, normal (1,0), displacement (6.996720,0). Edge 2
+// (v2 to v3) mirrors edge 0 across the horizontal, displacement
+// (3.498881,6.059036). Edge 4 (v4 to v5) is the vertical left side,
+// normal (-1,0), displacement (-6.996720,0), and its sign is what an
+// unoriented normal would get wrong.
+//
+// Each arc turns 60 degrees on a circle of radius `round` about its
+// vertex, so its midpoint sits 30 degrees along. At v1 the arc runs from
+// -60 to 0 degrees, and its midpoint is v1 + 6.996720 * (cos -30,
+// sin -30) = (1033.47784,491.42278). At v5 the arc runs from 180 to 240
+// degrees, which atan2 reports as +180 and -120, so the raw sweep is
+// -300 degrees and only the normalization turns it back into +60. Its
+// midpoint is v5 + 6.996720 * (cos 210, sin 210) =
+// (879.42556,491.42278), the one number here that a dropped
+// normalization moves.
+//
+// `outline` opens at edge 0's start, then writes each edge's end and six
+// arc corners, so edge i's end is corner 1+7i and the arc midpoint after
+// it is corner 4+7i.
+#[test]
+fn the_outline_offsets_each_edge_outward_and_rounds_each_vertex() {
+    let calls = calls(0.0, 0.0, 1.0);
+    let points = points_of(&calls[0]);
+
+    // Each row is a corner of the path, counting from the one `move_to`
+    // opens with, and where the offset outline puts it.
+    let expected = [
+        (0, 959.95054, 447.88130),
+        (1, 1030.91738, 488.86210),
+        (4, 1033.47784, 491.42278),
+        (7, 1034.41522, 494.92114),
+        (8, 1034.41522, 576.88270),
+        (14, 1030.91738, 582.94174),
+        (15, 959.95054, 623.92254),
+        (28, 878.48818, 576.88270),
+        (29, 878.48818, 494.92114),
+        (32, 879.42556, 491.42278),
+    ];
+
+    for (at, x, y) in expected {
+        let drawn = points[at];
+
+        assert!(
+            (f64::from(drawn.x) - x).abs() < TOLERANCE
+                && (f64::from(drawn.y) - y).abs() < TOLERANCE,
+            "corner {at} draws {drawn:?} where the outline puts ({x}, {y})"
+        );
     }
 }
