@@ -54,14 +54,14 @@ func moviesTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	titles := []string{
-		"The Matrix (1999)",
-		filepath.Join("Action", "Heat (1995)"),
-		filepath.Join("Action", "Ronin (1998)"),
-		filepath.Join("Comics", "Marvel", "Iron Man (2008)"),
-		filepath.Join("Comics", "DC", "Batman (1989)"),
-		filepath.Join("Comics", "DC", "Superman (1978)"),
+		"The Signal (2024)",
+		filepath.Join("Genre", "The Beacon (2019)"),
+		filepath.Join("Genre", "The Crossing (2021)"),
+		filepath.Join("Genre", "Studio A", "The Lantern (2016)"),
+		filepath.Join("Genre", "Studio B", "The Orchard (2012)"),
+		filepath.Join("Genre", "Studio B", "The Quarry (2018)"),
 		"Mystery Folder",
-		filepath.Join("Action", "Another Mystery"),
+		filepath.Join("Genre", "Another Mystery"),
 	}
 	for i, title := range titles {
 		dir := filepath.Join(root, title)
@@ -273,7 +273,7 @@ func TestTheWalkEndsWhenTheCollectorStops(t *testing.T) {
 // read marks the pass incomplete.
 func TestAFolderRuleReadsOneDirectory(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "Action", "Heat (1995)", "movie.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Genre", "The Beacon (2019)", "movie.mkv"), "video")
 	writeFile(t, filepath.Join(root, "readme.txt"), "not a folder")
 	writeFile(t, filepath.Join(root, "#recycle", "old.mkv"), "video")
 	rule := movieFolderRule(root, "house/movies", ignoreSet{"#recycle": true})
@@ -288,16 +288,16 @@ func TestAFolderRuleReadsOneDirectory(t *testing.T) {
 		{
 			name:         "the root hands back its folders, and not its files or its ignored names",
 			dir:          walkDirectory{path: root},
-			wantChildren: []string{"Action"},
+			wantChildren: []string{"Genre"},
 		},
 		{
 			name:         "a grouping folder hands back its titles",
-			dir:          walkDirectory{path: filepath.Join(root, "Action"), depth: 1},
-			wantChildren: []string{"Heat (1995)"},
+			dir:          walkDirectory{path: filepath.Join(root, "Genre"), depth: 1},
+			wantChildren: []string{"The Beacon (2019)"},
 		},
 		{
 			name:       "a title folder is scanned into its rows",
-			dir:        walkDirectory{path: filepath.Join(root, "Action", "Heat (1995)"), depth: 2},
+			dir:        walkDirectory{path: filepath.Join(root, "Genre", "The Beacon (2019)"), depth: 2},
 			wantTitles: 1,
 		},
 		{

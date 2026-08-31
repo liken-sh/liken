@@ -11,9 +11,10 @@ A `Library` reports its titles and whether it is `Ready`. Neither
 answers the questions a person asks first.
 
 A title count and an item count are different numbers. A movies library
-of 812 titles holds 812 movies, so the two agree. A series library of 47
-titles holds 1204 episodes, and the titles column says 47. The catalog
-holds both numbers and the status reports one.
+holds one movie per title, so its two counts agree. A series library
+holds one item per series and one per episode, so its item count runs
+many times its title count, and the titles column reports the smaller
+one. The catalog holds both numbers and the status reports one.
 
 A library's file count is nowhere. The volume holds the video files, and
 after [plan 17](17-every-file-a-title-carries.md) it holds the `.nfo`
