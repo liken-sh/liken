@@ -46,10 +46,15 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
     // The shell reports the display, not the client, because the client is
     // what waits: cage sets WAYLAND_DISPLAY for the command it runs, so the
     // name is known before anything opens a window.
+    // The wait is counted rather than open, so a ready file that never
+    // arrives ends the shell instead of spinning it for the life of the
+    // machine. The count is `CAP` at one wake every 50 ms.
     let ready_path = dir.join("ready");
     let mut line = format!(
-        "echo \"wayland: $WAYLAND_DISPLAY\"; while [ ! -f {} ]; do sleep 0.05; done; ",
-        quoted(&text(&ready_path))
+        "echo \"wayland: $WAYLAND_DISPLAY\"; waits=0; while [ ! -f {} ]; do \
+         waits=$((waits+1)); if [ $waits -gt {} ]; then exit 1; fi; sleep 0.05; done; ",
+        quoted(&text(&ready_path)),
+        CAP.as_secs() * 20
     );
     line.push_str(&quoted(BINARY));
     for flag in flags {
@@ -59,7 +64,7 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
     line.push_str(&format!("; echo $? > {}", quoted(&text(&exit_path))));
 
     let started = Instant::now();
-    let mut child = Command::new("cage")
+    let child = Command::new("cage")
         .args(["--", "sh", "-c", &line])
         .env_remove("WAYLAND_DISPLAY")
         .env("WLR_BACKENDS", "headless")
@@ -69,8 +74,13 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
         .spawn()
         .expect("cage runs the client on the headless backend");
 
-    set_the_mode(&log_path, &ready_path, &mut child);
-    finish(&mut child, &log_path, started);
+    let mut run = Cage {
+        child,
+        ready_path: &ready_path,
+    };
+    set_the_mode(&log_path, &ready_path, &mut run.child);
+    finish(&mut run.child, &log_path, started);
+    drop(run);
 
     Run {
         exit: read(&exit_path).trim().to_string(),
@@ -79,9 +89,31 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
     }
 }
 
+// Cage and the shell under it, held together so that every way out of
+// this run releases the shell from its wait and reaps the compositor. A
+// test that panics on an assertion drops this, and a shell left waiting
+// on a file nothing writes would wake twenty times a second for as long
+// as the machine stands.
+struct Cage<'a> {
+    child: Child,
+    ready_path: &'a Path,
+}
+
+impl Drop for Cage<'_> {
+    fn drop(&mut self) {
+        let _ = std::fs::write(self.ready_path, "");
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 // The headless output starts at 1280x720, so the mode is set once the display
 // is known. The client waits on `ready_path`, which this writes after the mode
 // lands, so every frame it draws is at the size the run expects.
+//
+// A cage that ends before it names a display is reported as that, and
+// not as the whole cap spent waiting for a line that can no longer
+// arrive.
 fn set_the_mode(log_path: &Path, ready_path: &Path, child: &mut Child) {
     let deadline = Instant::now() + CAP;
     while Instant::now() < deadline {
@@ -102,10 +134,15 @@ fn set_the_mode(log_path: &Path, ready_path: &Path, child: &mut Child) {
             std::fs::write(ready_path, "").expect("release the client");
             return;
         }
+        if let Some(status) = child.try_wait().expect("wait for cage") {
+            panic!(
+                "cage ended as {status} before it named a display\n{}",
+                read(log_path)
+            );
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    let _ = child.kill();
     panic!("the client never reported a display\n{}", read(log_path));
 }
 
@@ -118,12 +155,40 @@ fn finish(child: &mut Child, log_path: &Path, started: Instant) {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    let _ = child.kill();
-    let _ = child.wait();
     panic!(
         "the run did not end within {} s\n{}",
         CAP.as_secs(),
         read(log_path)
+    );
+}
+
+// One captured frame carries a drawing. The elements are light on a
+// black ground, so a frame of one colour, and a frame no brighter than
+// that ground, are both a client that opened a window and drew nothing
+// into it. The size alone proves neither.
+fn drawn(frame: &Path, run: &Run) {
+    let pixels = image::open(frame)
+        .unwrap_or_else(|error| panic!("{}: {error}\n{}", frame.display(), run.log))
+        .to_rgb8();
+
+    let ground = *pixels.get_pixel(0, 0);
+    assert!(
+        pixels.pixels().any(|pixel| *pixel != ground),
+        "{} is one colour, {ground:?}\n{}",
+        frame.display(),
+        run.log
+    );
+
+    let brightest = pixels
+        .pixels()
+        .flat_map(|pixel| pixel.0)
+        .max()
+        .expect("the frame has pixels");
+    assert!(
+        brightest > 64,
+        "{} reaches {brightest} of 255, no brighter than its ground\n{}",
+        frame.display(),
+        run.log
     );
 }
 
@@ -217,6 +282,7 @@ fn a_capture_run_writes_its_frames_and_ends_after_the_last_one() {
             frame.display(),
             run.log
         );
+        drawn(&frame, &run);
     }
 
     let measured = measurements(&stats, &run);

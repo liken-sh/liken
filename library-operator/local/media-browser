@@ -35,7 +35,14 @@ log="$(mktemp)"
 # The log holds the output until the run ends, and it goes when the run does.
 trap 'rm -f "$log"' EXIT
 
-env -u WAYLAND_DISPLAY \
+# The cap on one run, in seconds. A --quit-after past the cap needs a larger
+# one through MEDIA_BROWSER_RUN_SECONDS.
+run_seconds="${MEDIA_BROWSER_RUN_SECONDS:-300}"
+
+# The timeout ends cage once the run passes the cap, so a compositor that
+# never ends leaves no shell waiting on this machine.
+timeout --signal=TERM "$run_seconds" \
+  env -u WAYLAND_DISPLAY \
   WLR_BACKENDS=headless \
   WLR_LIBINPUT_NO_DEVICES=1 \
   cage -- "$binary" "$@" >"$log" 2>&1 &

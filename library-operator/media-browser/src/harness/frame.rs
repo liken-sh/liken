@@ -1,23 +1,37 @@
 // One pass of the frame loop: the script's keys, the draw, the capture, and
-// the numbers.
+// the numbers. The pass ends by setting the pace of the next one.
 
 use iced_wgpu::graphics::Viewport;
 use iced_wgpu::wgpu;
 use iced_winit::core::time::Instant;
-use iced_winit::core::{Event, Size, Theme, mouse, renderer, window};
+use iced_winit::core::{Color, Event, Size, Theme, mouse, renderer, window};
 use iced_winit::runtime::user_interface::UserInterface;
-use iced_winit::winit::event_loop::ActiveEventLoop;
+use iced_winit::winit::event_loop::{ActiveEventLoop, ControlFlow};
 
-use super::graphics::{configure, write_png};
+use super::capture::{self, Captures};
+use super::graphics::configure;
 use super::stats::millis;
+use super::timeline::{self, Wake};
 use super::{QUIT, Ready, Screen};
 
+/// The least time between two frames, one sixtieth of a second. The surface
+/// presents without vsync, so this floor is the whole of the frame-rate cap:
+/// an animation that answers "now" on every ask draws sixty frames a second
+/// and not as many as the loop can spin.
+pub const STEP: f64 = 1.0 / 60.0;
+
 impl<S: Screen> Ready<S> {
-    /// Hand one key to the screen. The answer is true when the key ends the run.
+    /// Hand one key to the screen. The answer is true when the key ends the
+    /// run. Both the keyboard and the script arrive here, so the key that
+    /// ends a run is decided once for the two of them.
     pub(crate) fn press(&mut self, name: &str) -> bool {
         if name == QUIT {
             return true;
         }
+        // A key changes what the screen draws, so the frame on the glass is
+        // stale and the second named before the press no longer holds.
+        self.scheduled = None;
+        self.stale = true;
         self.screen.key(name);
         false
     }
@@ -30,6 +44,11 @@ impl<S: Screen> Ready<S> {
 
     /// Build, draw, capture, and present one frame.
     pub(crate) fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        // This frame is the one the schedule asked for, so the schedule is
+        // spent and the next pass asks the screen again. It draws every fold
+        // so far, so the glass is current again.
+        self.scheduled = None;
+        self.stale = false;
         let loop_start = std::time::Instant::now();
         let at = match self.start {
             Some(start) => start.elapsed().as_secs_f64(),
@@ -41,13 +60,13 @@ impl<S: Screen> Ready<S> {
             }
         };
 
-        let due = self.timeline.due(at);
-        for key in &due.keys {
-            self.screen.key(key);
-        }
-        if due.quit {
-            self.stop(event_loop);
-            return;
+        self.drawn = at;
+
+        for key in self.timeline.due(at) {
+            if self.press(&key) {
+                self.stop(event_loop);
+                return;
+            }
         }
 
         self.screen.tick(at);
@@ -122,24 +141,10 @@ impl<S: Screen> Ready<S> {
         // so the clock stops here and starts again for the submit.
         let drawn_ms = millis(build_start.elapsed());
 
-        let capture = self.timeline.due_capture(at);
-        let submit_start;
-        if let Some(path) = &capture {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            // Renderer::screenshot renders the frame that was just drawn into
-            // an offscreen texture and reads it back as RGBA. It is iced's own
-            // path off the GPU, and it draws the same layers the surface would
-            // get. The surface itself is left alone on a capture frame, because
-            // one drawn frame must not be submitted twice.
-            let pixels = self.renderer.screenshot(&self.viewport, background);
-            let size = self.viewport.physical_size();
-            write_png(path, size.width, size.height, &pixels);
-            eprintln!("captured {} at {at:.3}s", path.display());
-            submit_start = std::time::Instant::now();
-        } else {
-            submit_start = std::time::Instant::now();
+        let captured = self.capture(at, background);
+
+        let submit_start = std::time::Instant::now();
+        if !captured {
             let _ = self
                 .renderer
                 .present(Some(background), self.format, &view, &self.viewport);
@@ -151,14 +156,103 @@ impl<S: Screen> Ready<S> {
         let build_ms = drawn_ms + millis(submit_start.elapsed());
 
         frame.present();
-        let loop_ms = millis(loop_start.elapsed());
+
         // A captured frame draws twice and blocks on a readback, so it says
         // nothing about the cost of a frame and stays out of the numbers.
-        self.stats.frame(build_ms, loop_ms, capture.is_none());
+        self.stats
+            .frame(build_ms, millis(loop_start.elapsed()), !captured);
 
-        if self.timeline.ended(at) {
+        if self.timeline.past_deadline(at) || self.captured_everything() {
             self.stop(event_loop);
         }
+    }
+
+    /// Set the pace of the loop, and ask for the frame that pace calls for.
+    ///
+    /// The loop sleeps until the earliest second anything is due, so a screen
+    /// at rest builds one frame a change rather than one a display refresh. A
+    /// second the screen has already named holds until the clock reaches it,
+    /// because a fresh answer after the clock arrived would name the change
+    /// after it, and the frame would never be drawn.
+    pub(crate) fn pace(&mut self, event_loop: &ActiveEventLoop) {
+        // Before the first frame there is no clock to schedule against, and
+        // the first frame is what starts it.
+        let Some(start) = self.start else {
+            event_loop.set_control_flow(ControlFlow::Poll);
+            self.window.request_redraw();
+            return;
+        };
+
+        let at = start.elapsed().as_secs_f64();
+        let screen_next = match self.scheduled {
+            Some(scheduled) => Some(scheduled),
+            None => self.screen.next_frame(at),
+        };
+        self.scheduled = None;
+
+        // The wake is the earliest second anything is due: a stale frame is
+        // due now, and after it the screen's own change, the next script key,
+        // the deadline, or the next capture. The harness's own seconds come
+        // from forward-only cursors, so they are asked again on every pass,
+        // and only the screen's answer is held. The floor holds every answer
+        // at least [`STEP`] after the last frame, which is the frame-rate
+        // cap: a burst of folds coalesces to sixty frames a second and no
+        // press waits past the next one.
+        let stale_now = self.stale.then_some(at);
+        let next = [
+            stale_now,
+            screen_next,
+            self.timeline.next_due(),
+            self.next_capture(),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by(f64::total_cmp)
+        .map(|next| next.max(self.drawn + STEP));
+
+        match timeline::wake(self.resized, at, next) {
+            Wake::Now => {
+                event_loop.set_control_flow(ControlFlow::Poll);
+                self.window.request_redraw();
+            }
+            Wake::At(next) => {
+                self.scheduled = screen_next;
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    start + std::time::Duration::from_secs_f64(next),
+                ));
+            }
+            Wake::Never => event_loop.set_control_flow(ControlFlow::Wait),
+        }
+    }
+
+    /// Write this frame to a file, if a capture is due at this second. The
+    /// answer is whether one was written.
+    ///
+    /// `Renderer::screenshot` renders the frame that was just drawn into an
+    /// offscreen texture and reads it back as RGBA. It is iced's own path off
+    /// the GPU, and it draws the same layers the surface would get. The
+    /// surface itself is left alone on a capture frame, because one drawn
+    /// frame must not be submitted twice.
+    fn capture(&mut self, at: f64, background: Color) -> bool {
+        let Some(path) = self.captures.as_mut().and_then(|captures| captures.due(at)) else {
+            return false;
+        };
+
+        let pixels = self.renderer.screenshot(&self.viewport, background);
+        let size = self.viewport.physical_size();
+        capture::write_png(&path, size.width, size.height, &pixels);
+        eprintln!("captured {} at {at:.3}s", path.display());
+        true
+    }
+
+    /// The second of the next capture, folded into the wake time.
+    fn next_capture(&self) -> Option<f64> {
+        self.captures.as_ref().and_then(Captures::next_due)
+    }
+
+    /// Whether the run has taken every capture it asked for, which ends it.
+    fn captured_everything(&self) -> bool {
+        self.captures.as_ref().is_some_and(Captures::taken)
     }
 
     /// Write the statistics file once, whichever way the run ends.

@@ -1,80 +1,42 @@
 // The timed decisions of a run, kept out of the code that needs a window:
-// which script keys are due, whether a capture is due, and whether the run
-// is over. Every decision is a function of the clock, so a test drives it
-// with numbers and never opens a window.
+// which script keys are due, whether the run has reached its deadline, and
+// when the loop draws its next frame. Every decision is a function of the
+// clock, so a test drives it with numbers and never opens a window.
 
-use std::path::PathBuf;
-
-use super::QUIT;
-
-/// The script steps whose time has come, and whether one of them ended the run.
-#[derive(Debug, Default, PartialEq)]
-pub struct Due {
-    pub keys: Vec<String>,
-    pub quit: bool,
-}
-
-/// The script, the capture times, the deadline, and a cursor into each of the
-/// two lists. The cursors only move forward, so a step or a capture fires once.
+/// The script and the deadline, with a cursor into the script. The cursor only
+/// moves forward, so a step fires once.
 #[derive(Debug, Default)]
 pub struct Timeline {
     script: Vec<(f64, String)>,
-    capture_dir: Option<PathBuf>,
-    capture_at: Vec<f64>,
     quit_after: Option<f64>,
-    next_script: usize,
-    next_capture: usize,
+    next_step: usize,
 }
 
 impl Timeline {
     /// The schedule the flags asked for, at second zero.
-    pub fn new(
-        script: Vec<(f64, String)>,
-        capture_dir: Option<PathBuf>,
-        capture_at: Vec<f64>,
-        quit_after: Option<f64>,
-    ) -> Self {
+    pub fn new(script: Vec<(f64, String)>, quit_after: Option<f64>) -> Self {
         Self {
             script,
-            capture_dir,
-            capture_at,
             quit_after,
-            next_script: 0,
-            next_capture: 0,
+            next_step: 0,
         }
     }
 
-    /// The steps at or before `at`, in order. The batch stops at the quit key,
-    /// and the cursor moves past every step it returned, so a later call never
-    /// looks back.
-    pub fn due(&mut self, at: f64) -> Due {
-        let mut due = Due::default();
+    /// The keys at or before `at`, in the order the script names them. The
+    /// cursor moves past every key this call returned, so a later call never
+    /// looks back. The harness hands each one to the same call a keyboard
+    /// press takes, and that call holds the rule for the key that ends a run.
+    pub fn due(&mut self, at: f64) -> Vec<String> {
+        let mut keys = Vec::new();
 
-        while let Some((when, key)) = self.script.get(self.next_script)
+        while let Some((when, key)) = self.script.get(self.next_step)
             && *when <= at
         {
-            let key = key.clone();
-            self.next_script += 1;
-            if key == QUIT {
-                due.quit = true;
-                break;
-            }
-            due.keys.push(key);
+            keys.push(key.clone());
+            self.next_step += 1;
         }
 
-        due
-    }
-
-    /// The path this frame should be written to, if the frame is the first one
-    /// at or after the next capture time.
-    pub fn due_capture(&mut self, at: f64) -> Option<PathBuf> {
-        let dir = self.capture_dir.as_ref()?;
-        let when = *self.capture_at.get(self.next_capture)?;
-        if at < when {
-            return None;
-        }
-        self.next_capture += 1;
-        Some(dir.join(format!("{when:06.2}.png")))
+        keys
     }
 
     /// True once the clock reaches the `--quit-after` second.
@@ -82,15 +44,51 @@ impl Timeline {
         self.quit_after.is_some_and(|limit| at >= limit)
     }
 
-    /// True once the run has taken its last capture or reached its deadline.
-    pub fn ended(&self, at: f64) -> bool {
-        self.past_captures() || self.past_deadline(at)
+    /// The next second the run itself must catch: the next script key, or the
+    /// deadline. The loop folds it into the wake time, so a scripted or
+    /// deadlined run sleeps between its seconds instead of drawing every
+    /// pass, and a measurement under `--quit-after` reads a paced run.
+    pub fn next_due(&self) -> Option<f64> {
+        let step = self.script.get(self.next_step).map(|(when, _)| *when);
+        [step, self.quit_after]
+            .into_iter()
+            .flatten()
+            .min_by(f64::total_cmp)
     }
+}
 
-    fn past_captures(&self) -> bool {
-        self.capture_dir.is_some()
-            && !self.capture_at.is_empty()
-            && self.next_capture >= self.capture_at.len()
+/// What the loop does until it draws again.
+#[derive(Debug, PartialEq)]
+pub enum Wake {
+    /// Draw now, and take the next pass of the loop as soon as it comes.
+    Now,
+    /// Draw at this second on the screen's clock, and sleep until then.
+    At(f64),
+    /// Draw when an event arrives, and on nothing else.
+    Never,
+}
+
+/// When the loop draws its next frame. `at` is the second of the frame that
+/// was drawn last, and `next` is the earliest second anything is due: the
+/// screen's own change, the next script key, the next capture, or the
+/// deadline, whichever comes first.
+///
+/// A screen at rest changes on its own schedule, once a minute for a clock
+/// that draws no seconds, and a loop that drew at the rate of the display
+/// would build sixty identical frames a second for it. `immediate` is the
+/// exception: a surface that changed size holds a stale frame, and the loop
+/// draws now whatever the schedule says.
+pub fn wake(immediate: bool, at: f64, next: Option<f64>) -> Wake {
+    if immediate {
+        return Wake::Now;
+    }
+    match next {
+        // A second the clock never reaches is a screen with nothing scheduled,
+        // and it is also the one value a wake time cannot hold.
+        Some(next) if next.is_infinite() => Wake::Never,
+        Some(next) if next > at => Wake::At(next),
+        Some(_) => Wake::Now,
+        None => Wake::Never,
     }
 }
 
@@ -99,34 +97,23 @@ mod tests {
     use super::*;
 
     fn scripted(steps: &[(f64, &str)]) -> Timeline {
-        Timeline {
-            script: steps
+        Timeline::new(
+            steps
                 .iter()
                 .map(|(at, key)| (*at, key.to_string()))
                 .collect(),
-            ..Default::default()
-        }
+            None,
+        )
     }
 
-    fn capturing(dir: &str, capture_at: Vec<f64>) -> Timeline {
-        Timeline {
-            capture_dir: Some(PathBuf::from(dir)),
-            capture_at,
-            ..Default::default()
-        }
-    }
-
-    fn keys(names: &[&str]) -> Due {
-        Due {
-            keys: names.iter().map(|name| name.to_string()).collect(),
-            quit: false,
-        }
+    fn keys(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
     }
 
     #[test]
     fn a_step_is_due_at_its_second_and_not_before() {
         let mut timeline = scripted(&[(1.0, "p")]);
-        assert_eq!(timeline.due(0.999), Due::default());
+        assert_eq!(timeline.due(0.999), keys(&[]));
         assert_eq!(timeline.due(1.0), keys(&["p"]));
     }
 
@@ -134,73 +121,59 @@ mod tests {
     fn every_step_the_clock_has_passed_comes_out_in_order_and_once() {
         let mut timeline = scripted(&[(0.1, "up"), (0.2, "down"), (0.3, "p")]);
         assert_eq!(timeline.due(0.25), keys(&["up", "down"]));
-        assert_eq!(timeline.due(0.25), Due::default());
+        assert_eq!(timeline.due(0.25), keys(&[]));
         assert_eq!(timeline.due(9.0), keys(&["p"]));
     }
 
     #[test]
-    fn the_quit_key_ends_the_batch_and_the_run() {
-        let mut timeline = scripted(&[(0.1, "up"), (0.2, "q"), (0.3, "p")]);
-        assert_eq!(
-            timeline.due(9.0),
-            Due {
-                keys: vec!["up".to_string()],
-                quit: true,
-            }
-        );
-    }
-
-    #[test]
-    fn a_capture_is_due_on_the_first_frame_at_or_after_its_second() {
-        let mut timeline = capturing("/frames", vec![0.5]);
-        assert_eq!(timeline.due_capture(0.49), None);
-        assert_eq!(
-            timeline.due_capture(0.52),
-            Some(PathBuf::from("/frames/000.50.png"))
-        );
-        assert_eq!(timeline.due_capture(0.53), None);
-    }
-
-    #[test]
-    fn a_capture_is_named_for_the_second_it_was_asked_for() {
-        let mut timeline = capturing("/frames", vec![12.25, 100.0]);
-        assert_eq!(
-            timeline.due_capture(20.0),
-            Some(PathBuf::from("/frames/012.25.png"))
-        );
-        assert_eq!(
-            timeline.due_capture(200.0),
-            Some(PathBuf::from("/frames/100.00.png"))
-        );
-    }
-
-    #[test]
-    fn capture_seconds_without_a_directory_capture_nothing() {
-        let mut timeline = Timeline::new(Vec::new(), None, vec![0.5], None);
-        assert_eq!(timeline.due_capture(1.0), None);
-        assert!(!timeline.ended(1.0));
-    }
-
-    #[test]
-    fn a_run_with_no_captures_and_no_deadline_never_ends() {
-        assert!(!Timeline::default().ended(86_400.0));
-    }
-
-    #[test]
-    fn a_run_ends_after_its_last_capture() {
-        let mut timeline = capturing("/frames", vec![0.5, 1.5]);
-        assert!(!timeline.ended(0.0));
-        timeline.due_capture(0.5);
-        assert!(!timeline.ended(0.5));
-        timeline.due_capture(1.5);
-        assert!(timeline.ended(1.5));
-    }
-
-    #[test]
     fn a_run_ends_at_its_deadline() {
-        let timeline = Timeline::new(Vec::new(), None, Vec::new(), Some(3.0));
+        let timeline = Timeline::new(Vec::new(), Some(3.0));
         assert!(!timeline.past_deadline(2.999));
         assert!(timeline.past_deadline(3.0));
-        assert!(timeline.ended(3.0));
+    }
+
+    #[test]
+    fn a_run_with_no_script_and_no_deadline_has_nothing_due() {
+        assert_eq!(Timeline::default().next_due(), None);
+        assert!(!Timeline::default().past_deadline(86_400.0));
+    }
+
+    #[test]
+    fn the_next_step_is_due_until_it_fires_and_then_the_one_after_it() {
+        let mut timeline = scripted(&[(1.0, "p"), (2.5, "q")]);
+        assert_eq!(timeline.next_due(), Some(1.0));
+
+        timeline.due(1.0);
+
+        assert_eq!(timeline.next_due(), Some(2.5));
+    }
+
+    #[test]
+    fn the_deadline_is_due_when_it_comes_before_the_next_step() {
+        let timeline = Timeline::new(vec![(5.0, "p".into())], Some(3.0));
+        assert_eq!(timeline.next_due(), Some(3.0));
+    }
+
+    #[test]
+    fn a_resized_surface_draws_now_whatever_the_schedule_says() {
+        assert_eq!(wake(true, 4.0, Some(60.0)), Wake::Now);
+        assert_eq!(wake(true, 4.0, None), Wake::Now);
+    }
+
+    #[test]
+    fn a_screen_that_changes_later_sleeps_until_then() {
+        assert_eq!(wake(false, 4.0, Some(60.0)), Wake::At(60.0));
+    }
+
+    #[test]
+    fn a_screen_that_has_changed_draws_now() {
+        assert_eq!(wake(false, 4.0, Some(4.0)), Wake::Now);
+        assert_eq!(wake(false, 4.0, Some(3.5)), Wake::Now);
+    }
+
+    #[test]
+    fn a_screen_with_nothing_scheduled_waits_for_an_event() {
+        assert_eq!(wake(false, 4.0, None), Wake::Never);
+        assert_eq!(wake(false, 4.0, Some(f64::INFINITY)), Wake::Never);
     }
 }

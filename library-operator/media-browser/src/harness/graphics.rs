@@ -134,29 +134,19 @@ pub fn configure(
             format,
             width,
             height,
-            // The kiosk target runs at the screen's own rate, so the client
-            // draws the frames the compositor actually shows.
-            present_mode: wgpu::PresentMode::AutoVsync,
+            // Mailbox rather than FIFO, because of what acquire does on a
+            // hidden Wayland surface: FIFO waits in mesa's poll for a buffer
+            // release the compositor never sends while a film covers the
+            // screen, and the whole loop stops with it, bus and all. Mailbox
+            // keeps spare images, so acquire never waits on the compositor.
+            // The loop's own pace is what caps the rate instead: it never
+            // asks for frames faster than `frame::STEP`.
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         },
     );
-}
-
-/// Write one captured frame. `rgba` is what the renderer read back.
-pub fn write_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) {
-    let Some(buffer) = image::RgbaImage::from_raw(width, height, rgba.to_vec()) else {
-        eprintln!(
-            "capture {}: {} bytes is not {width}x{height}",
-            path.display(),
-            rgba.len()
-        );
-        return;
-    };
-    if let Err(error) = buffer.save(path) {
-        eprintln!("capture {}: {error}", path.display());
-    }
 }
 
 /// Wait for one future on this thread. Only wgpu's setup is asynchronous here,

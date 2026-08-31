@@ -9,6 +9,7 @@
 //! because it must reach the renderer directly. A frame capture and a frame
 //! clock are not part of the high-level entry point.
 
+pub mod capture;
 pub mod frame;
 pub mod graphics;
 pub mod options;
@@ -26,15 +27,19 @@ use iced_winit::winit;
 use iced_winit::{Clipboard, conversion};
 
 use winit::event::WindowEvent;
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::EventLoop;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+use capture::Captures;
 pub use options::{Invocation, Options};
 use stats::Stats;
 use timeline::Timeline;
 
 /// The key that ends a run, from the keyboard or from a script.
 pub const QUIT: &str = "q";
+
+/// A handle that wakes the screen's event loop from any thread.
+pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// What the harness needs from a screen. The harness advances the clock, hands
 /// over each key the script or the keyboard produced, and asks for a view.
@@ -52,6 +57,25 @@ pub trait Screen {
     /// `up`, `down`, `left`, `right`.
     fn key(&mut self, name: &str);
 
+    /// Fold in what the screen's own sources delivered since the last call,
+    /// at `at` seconds on the clock. The answer is whether anything folded,
+    /// so the harness drops a stale schedule and asks the screen again.
+    ///
+    /// The harness calls this on every wake of the loop, not only on a frame.
+    /// A covered Wayland surface receives no frame callbacks, so a screen
+    /// that read its sources only when it drew would go deaf for exactly as
+    /// long as something covers it.
+    fn pump(&mut self, _at: f64) -> bool {
+        false
+    }
+
+    /// Take a handle that wakes the loop from any thread. A screen with a
+    /// source of its own hands it to that source, so a delivery wakes the
+    /// loop the moment it lands and [`Screen::pump`] folds it in
+    /// milliseconds. Without the wake, a message waits for the next
+    /// scheduled second, and a person's press shows up to a second late.
+    fn wake_by(&mut self, _wake: Waker) {}
+
     /// Move the screen's clock to `at` seconds since the first frame. Every
     /// animation reads that clock, so a frame is a pure function of it.
     fn tick(&mut self, at: f64);
@@ -59,18 +83,45 @@ pub trait Screen {
     /// The view for the clock's current position.
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer>;
 
+    /// The second at which the screen next changes, on the same clock
+    /// [`Screen::tick`] reads. `at` is what that clock reads now, at or after
+    /// the second of the last frame. The harness sleeps until the second this
+    /// answer names, so a screen whose clock draws no seconds redraws once a
+    /// minute rather than sixty times a second.
+    ///
+    /// `None` says nothing on this screen is scheduled, and the loop then
+    /// draws on an event alone. A screen that folds in a source of its own,
+    /// such as a bus, must not answer `None`.
+    ///
+    /// The default answers `at`, which is a change on the frame already drawn,
+    /// so a screen that states nothing draws every pass the loop takes.
+    fn next_frame(&self, at: f64) -> Option<f64> {
+        Some(at)
+    }
+
     /// Handle a message from a widget.
     fn update(&mut self, _message: Self::Message) {}
 }
 
 /// Run a screen to the end of its script and write what it measured.
-pub fn run<S: Screen + 'static>(screen: S, options: Options) -> Result<(), String> {
+pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), String> {
     // The launch is measured from here, so the time to the first frame
     // counts the whole life of the process: the wgpu setup, the first
     // window, and the first draw.
     let launched = std::time::Instant::now();
 
     let event_loop = EventLoop::new().map_err(|error| error.to_string())?;
+
+    // The screen's own sources wake the loop through this proxy, so a
+    // delivery folds the moment it lands. The event it sends carries
+    // nothing: the wake is the message, and `about_to_wait` pumps on it.
+    // The browser has no source of its own yet; the bus that will feed it
+    // takes this handle.
+    let proxy = event_loop.create_proxy();
+    screen.wake_by(Arc::new(move || {
+        let _ = proxy.send_event(());
+    }));
+
     let mut app = App::Loading {
         screen: Some(screen),
         options,
@@ -101,11 +152,30 @@ pub struct Ready<S: Screen> {
     pub(crate) resized: bool,
     /// When the process began, for the time to the first frame.
     pub(crate) launched: std::time::Instant,
+    /// The second the screen named for its next change, while the loop sleeps
+    /// toward it. The harness holds that second rather than asking again on
+    /// every pass, because a fresh answer names the change after it and the
+    /// frame would never be drawn.
+    pub(crate) scheduled: Option<f64>,
     /// The timeline's zero: the first frame, not the launch. A compositor
     /// can take seconds to give a window, and a script or a capture that
     /// counted from the launch would fire on the first frame, before a
     /// resize arrived and before anything was drawn.
     pub(crate) start: Option<std::time::Instant>,
+    /// The second of the last frame. The pace holds the next one at least
+    /// [`frame::STEP`] after it, because nothing else caps the rate: the
+    /// surface presents without vsync, so an animation that asked for a
+    /// frame on every pass would draw as fast as the loop can spin.
+    pub(crate) drawn: f64,
+    /// Whether the frame on the glass shows old state. A fold and a key both
+    /// set it, because the elements schedule their own motion and not the
+    /// content: a level that changes while its row stands still would
+    /// otherwise wait for the next scheduled second, and a press must show
+    /// on the next frame.
+    pub(crate) stale: bool,
+    /// The frames this run writes to disk, from `--capture`. A run that named
+    /// no directory captures nothing.
+    pub(crate) captures: Option<Captures>,
     pub(crate) stats: Stats,
     pub(crate) finished: bool,
 }
@@ -153,13 +223,9 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             graphics.size,
         );
 
-        // Poll rather than Wait, because the screen animates on its own clock
-        // and no input arrives under the headless backend.
-        event_loop.set_control_flow(ControlFlow::Poll);
-
         *self = Self::Ready(Box::new(Ready {
             screen,
-            timeline: Timeline::new(script, capture_dir, capture_at, quit_after),
+            timeline: Timeline::new(script, quit_after),
             stats_path,
             window: graphics.window,
             device: graphics.device,
@@ -173,7 +239,11 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             events: Vec::new(),
             resized: false,
             launched,
+            scheduled: None,
             start: None,
+            drawn: 0.0,
+            stale: false,
+            captures: Captures::requested(capture_dir, capture_at),
             stats,
             finished: false,
         }));
@@ -234,7 +304,20 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             return;
         }
 
-        ready.window.request_redraw();
+        // The sources are pumped here, on every wake of the loop, because a
+        // covered client draws no frame: the compositor sends a hidden
+        // surface no frame callbacks.
+        if let Some(start) = ready.start
+            && ready.screen.pump(start.elapsed().as_secs_f64())
+        {
+            // What arrived changed the screen, so the frame on the glass is
+            // stale whatever the animations schedule, and the second
+            // scheduled before it no longer holds.
+            ready.scheduled = None;
+            ready.stale = true;
+        }
+
+        ready.pace(event_loop);
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
