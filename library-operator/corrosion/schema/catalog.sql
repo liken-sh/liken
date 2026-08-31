@@ -108,11 +108,14 @@ CREATE TABLE episodes (
 CREATE INDEX episodes_library_series_season_episode ON episodes (library, series, season, episode);
 
 -- A file is one physical file on the volume: its path, the library it belongs
--- to, its technical attributes, and its own trickplay path. present marks a
--- file the last walk still found, so a file that left the volume reads as
--- absent until a walk removes it. Every file a title folder holds is a row
--- here, and not the video files alone, so a media browser draws a title's
--- art, subtitles, and extras from the catalog and never from the volume.
+-- to, its technical attributes, and its own trickplay path. Every file a
+-- title folder holds is a row here, and not the video files alone, so a media
+-- browser draws a title's art, subtitles, and extras from the catalog and
+-- never from the volume.
+--
+-- present is 1 on every row the scanner writes. The mark-and-sweep pass
+-- in prune.go deletes a file that left the volume rather than marking it
+-- absent, so nothing ever writes 0.
 --
 -- Four columns say what a file is. The scanner reads all four off the file's
 -- name, the directory that holds it, and one stat, and it opens no file.

@@ -17,7 +17,7 @@ var scanFlushBatch = 512
 // with the walk's epoch. Both the streaming full walk and a webhook rescan write
 // a folder through it.
 func flushWalk(ctx context.Context, catalog *Catalog, result *walkResult, epoch int64) error {
-	if _, err := upsertWalk(ctx, catalog, result); err != nil {
+	if err := upsertWalk(ctx, catalog, result); err != nil {
 		return err
 	}
 	_, err := catalog.markSeen(ctx, markKeys(result), epoch)
@@ -25,9 +25,8 @@ func flushWalk(ctx context.Context, catalog *Catalog, result *walkResult, epoch 
 }
 
 // upsertWalk writes every row a walk produced: the items, the files and their
-// item links, and the aliases. It reports whether it wrote anything.
-func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) (bool, error) {
-	wrote := false
+// item links, and the aliases.
+func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) error {
 	steps := []func() (int, error){
 		func() (int, error) { return catalog.UpsertMovies(ctx, result.movies) },
 		func() (int, error) { return catalog.UpsertSeries(ctx, result.series) },
@@ -37,13 +36,9 @@ func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) (bool
 		func() (int, error) { return catalog.UpsertAliases(ctx, result.aliases) },
 	}
 	for _, step := range steps {
-		applied, err := step()
-		if err != nil {
-			return wrote, err
-		}
-		if applied > 0 {
-			wrote = true
+		if _, err := step(); err != nil {
+			return err
 		}
 	}
-	return wrote, nil
+	return nil
 }

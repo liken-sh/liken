@@ -36,6 +36,13 @@ const (
 // notices a pod that changed phase while the watch was down.
 const backstopInterval = 10 * time.Second
 
+// passTimeout bounds every request one pass makes. The pass owns the
+// context rather than taking the stop signal, so a shutdown lets the pass
+// in flight finish its writes, and the loop returns on the next turn. A
+// pass whose API server stops answering ends here, and the next pass
+// starts clean. It is a variable so a test drives a short timeout.
+var passTimeout = 30 * time.Second
+
 // operator holds what every pass needs: the client it reads and writes
 // through, the settings it stamps into each scanner pod, the bus, and
 // the desk the bus folds each report onto. They are fields rather than
@@ -129,15 +136,18 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	// The first lists do two jobs: they prove the operator can read
 	// the collections it reconciles, and their resourceVersions are
 	// where the watches start.
-	libraries, err := ListLibraries(o.client)
+	startup, endStartup := context.WithTimeout(context.Background(), passTimeout)
+	defer endStartup()
+
+	libraries, err := ListLibraries(startup, o.client)
 	if err != nil {
 		return fmt.Errorf("listing libraries: %w", err)
 	}
-	catalogs, err := ListCatalogs(o.client)
+	catalogs, err := ListCatalogs(startup, o.client)
 	if err != nil {
 		return fmt.Errorf("listing catalogs: %w", err)
 	}
-	pods, err := ListScannerPods(o.client)
+	pods, err := ListScannerPods(startup, o.client)
 	if err != nil {
 		return fmt.Errorf("listing scanner pods: %w", err)
 	}
@@ -167,14 +177,17 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 // failure on one object is reported and the pass continues, because one
 // library's broken claim must not freeze every other library's status.
 func (o *operator) pass() {
-	libraries, err := ListLibraries(o.client)
+	ctx, done := context.WithTimeout(context.Background(), passTimeout)
+	defer done()
+
+	libraries, err := ListLibraries(ctx, o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing libraries: %v\n", err)
 		return
 	}
 	// The Catalog decides whether a Library proceeds, so the pass reads
 	// the collection before it reconciles a Library, not after.
-	catalogs, err := ListCatalogs(o.client)
+	catalogs, err := ListCatalogs(ctx, o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing catalogs: %v\n", err)
 		return
@@ -186,7 +199,7 @@ func (o *operator) pass() {
 		library := &libraries.Items[index]
 		live[libraryKey(library.Metadata.Namespace, library.Metadata.Name)] = true
 		choice := singleCatalog(byNamespace[library.Metadata.Namespace])
-		if err := o.reconcile(library, choice); err != nil {
+		if err := o.reconcile(ctx, library, choice); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n",
 				library.Metadata.Namespace, library.Metadata.Name, err)
 		}
@@ -195,7 +208,7 @@ func (o *operator) pass() {
 	// anything else the desk holds belongs to a Library that is gone.
 	o.reports.retain(live)
 
-	o.reconcileCatalogs(byNamespace)
+	o.reconcileCatalogs(ctx, byNamespace)
 }
 
 // handleBusMessage folds one message from the broker onto the report

@@ -67,9 +67,10 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumes]
     verbs: [get]
-  # The scanner pods: created once per Library, read back on every
-  # pass, and deleted only to rebuild one whose template hash no longer
-  # matches. The list and watch are cluster-scoped, because a Library
+  # The scanner pods: created once per Library and read back on every
+  # pass. The delete verb covers two deletes: the rebuild of a pod whose
+  # template hash no longer matches, and the stop of a Library that no
+  # longer stands a scanner. The list and watch are cluster-scoped, because a Library
   # lives in any namespace, and the watch wakes the loop when a scanner
   # pod becomes ready or Kubernetes removes one.
   - apiGroups: [""]
@@ -86,9 +87,11 @@ rules:
   - apiGroups: [""]
     resources: [services]
     verbs: [get, create, update]
-  # The EndpointSlice behind each of those Services, on the same terms
-  # and for the same reasons. The operator writes the slice itself
-  # because the Service names no selector.
+  # The EndpointSlice behind the catalog Service, on the same terms
+  # and for the same reasons. There is one per namespace that holds a
+  # Catalog, and the operator writes it because that Service names no
+  # selector. The webhook Service names one, so the API server writes
+  # its endpoints, and this rule is not for it.
   - apiGroups: [discovery.k8s.io]
     resources: [endpointslices]
     verbs: [get, create, update]

@@ -159,6 +159,10 @@ func fileTypeOf(name string) string {
 
 // fileRoleOf reads which one of its kind a file is. A file in no category has
 // no role.
+//
+// A trickplay directory never reaches here: its category comes from the
+// directory's name rather than from fileTypeOf, and the walk builds its
+// row with the tiles role already set.
 func fileRoleOf(category, name string, place filePlace) string {
 	base := strings.ToLower(stripAnyExtension(name))
 	switch category {
@@ -172,8 +176,6 @@ func fileRoleOf(category, name string, place filePlace) string {
 		return imageRole(base, place)
 	case fileTypeMetadata:
 		return metadataRole(base, place)
-	case fileTypeTrickplay:
-		return fileRoleTiles
 	}
 	return ""
 }
@@ -191,15 +193,15 @@ var extraMarks = map[string]bool{
 // videoRole reads which video a file is. A mark in the name wins over the
 // folder, so a trailer under Extras still reads as a trailer, and a video in an
 // extras folder with no mark takes the folder's own word.
+//
+// Every mark, sample among them, is read off the last token alone, so a
+// title that opens with one of the words is not a sample.
 func videoRole(base string, place filePlace) string {
 	tokens := nameTokens(base)
-	for _, token := range tokens {
-		if token == fileRoleSample {
-			return fileRoleSample
-		}
-	}
 	last := lastToken(tokens)
 	switch {
+	case last == fileRoleSample:
+		return fileRoleSample
 	case last == fileRoleTrailer:
 		return fileRoleTrailer
 	case last == fileRoleTheme:
@@ -294,9 +296,16 @@ var imageMarks = []struct {
 // imageRole reads which art an image is. An image in a season folder that
 // carries none of the words is the still beside an episode, which is the one
 // image a season folder holds under a video's own name.
+//
+// The word is read off the end of the name's last token, where the tools
+// write it, the way videoRole reads its own marks. Trailing digits are
+// stripped before the match, so extrafanart1.jpg is a backdrop. A title
+// that holds one of the words anywhere else, the way Discovery holds
+// disc, is not art.
 func imageRole(base string, place filePlace) string {
+	last := strings.TrimRight(lastToken(nameTokens(base)), "0123456789")
 	for _, entry := range imageMarks {
-		if strings.Contains(base, entry.mark) {
+		if strings.HasSuffix(last, entry.mark) {
 			return entry.role
 		}
 	}
@@ -419,10 +428,10 @@ type folderFiles struct {
 // folders from the one read. A .trickplay directory is one row and its tiles
 // are none, because a large library holds millions of tiles and the directory
 // is the unit a player asks for.
-func (f folderFiles) read() ([]fileRow, []string) {
+func (f folderFiles) read() ([]fileRow, []string, error) {
 	entries, err := os.ReadDir(f.dir)
 	if err != nil {
-		return nil, nil
+		return nil, nil, err
 	}
 	var rows []fileRow
 	var subdirectories []string
@@ -433,7 +442,11 @@ func (f folderFiles) read() ([]fileRow, []string) {
 		}
 		if entry.IsDir() {
 			if strings.EqualFold(filepath.Ext(name), trickplayExtension) {
-				rows = append(rows, f.row(name, fileClass{Type: fileTypeTrickplay, Role: fileRoleTiles}))
+				row, err := f.row(name, fileClass{Type: fileTypeTrickplay, Role: fileRoleTiles})
+				if err != nil {
+					return rows, subdirectories, err
+				}
+				rows = append(rows, row)
 				continue
 			}
 			subdirectories = append(subdirectories, name)
@@ -442,16 +455,23 @@ func (f folderFiles) read() ([]fileRow, []string) {
 		if f.held[name] {
 			continue
 		}
-		rows = append(rows, f.row(name, classifyFile(name, f.place)))
+		row, err := f.row(name, classifyFile(name, f.place))
+		if err != nil {
+			return rows, subdirectories, err
+		}
+		rows = append(rows, row)
 	}
-	return rows, subdirectories
+	return rows, subdirectories, nil
 }
 
 // row builds one classified file row. The size and the modification time come
 // from one stat, and no image is opened to measure it.
-func (f folderFiles) row(name string, class fileClass) fileRow {
+func (f folderFiles) row(name string, class fileClass) (fileRow, error) {
 	absolute := filepath.Join(f.dir, name)
-	size, modified := statFile(absolute)
+	size, modified, err := statFile(absolute)
+	if err != nil {
+		return fileRow{}, err
+	}
 	row := fileRow{
 		Path:      relativePath(f.root, absolute),
 		Library:   f.library,
@@ -470,7 +490,7 @@ func (f folderFiles) row(name string, class fileClass) fileRow {
 	if items := f.item(name); len(items) > 0 {
 		row.Items = items
 	}
-	return row
+	return row, nil
 }
 
 // constantItem answers with one item id for every file in a directory, the
@@ -499,11 +519,13 @@ func episodeItem(episodes map[string][]string, series string) func(string) []str
 }
 
 // statFile reads a path's size in bytes and the time it was last written, in
-// Unix seconds, from one stat. A path it cannot read reads as zero.
-func statFile(path string) (int64, int64) {
+// Unix seconds, from one stat. A stat that fails is an error the caller
+// folds into the walk's incomplete mark, because a size and a time of
+// zero would otherwise land in the catalog as facts.
+func statFile(path string) (int64, int64, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return 0, 0
+		return 0, 0, err
 	}
-	return info.Size(), info.ModTime().Unix()
+	return info.Size(), info.ModTime().Unix(), nil
 }

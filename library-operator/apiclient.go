@@ -13,6 +13,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -92,8 +93,8 @@ func InClusterClient() (*Client, error) {
 
 // RequestJSON sends one request and decodes the answer, turning every
 // non-2xx status into an error that carries the server's own message.
-func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
-	resp, err := c.Do(method, path, body)
+func (c *Client) RequestJSON(ctx context.Context, method, path string, body []byte, out any) error {
+	resp, err := c.Do(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
@@ -117,12 +118,15 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 
 // Do sends one request and hands back the open response, which is
 // what a watch needs and what RequestJSON is built on.
-func (c *Client) Do(method, path string, body []byte) (*http.Response, error) {
+//
+// The context is the caller's, so a pass that ends takes its requests
+// with it, and a watch runs for as long as its own context does.
+func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, c.base+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -165,9 +169,9 @@ type Version struct {
 	GitVersion string `json:"gitVersion"`
 }
 
-func ServerVersion(client *Client) (Version, error) {
+func ServerVersion(ctx context.Context, client *Client) (Version, error) {
 	var version Version
-	if err := client.RequestJSON(http.MethodGet, versionPath, nil, &version); err != nil {
+	if err := client.RequestJSON(ctx, http.MethodGet, versionPath, nil, &version); err != nil {
 		return Version{}, err
 	}
 	return version, nil
@@ -228,9 +232,9 @@ func servicesPath(namespace string) string {
 
 // ListLibraries answers a whole pass with one request, and the list's
 // resourceVersion is where the libraries watch resumes from.
-func ListLibraries(c *Client) (*LibraryList, error) {
+func ListLibraries(ctx context.Context, c *Client) (*LibraryList, error) {
 	list := &LibraryList{}
-	if err := c.RequestJSON(http.MethodGet, librariesPath, nil, list); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, librariesPath, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil
@@ -241,14 +245,14 @@ func ListLibraries(c *Client) (*LibraryList, error) {
 // resourceVersion in the body is what makes the write conditional, so
 // a status written over a Library that changed underneath answers
 // ErrConflict and the next pass reads it again.
-func PutLibraryStatus(c *Client, library *Library) (*Library, error) {
+func PutLibraryStatus(ctx context.Context, c *Client, library *Library) (*Library, error) {
 	body, err := json.Marshal(library)
 	if err != nil {
 		return nil, err
 	}
 	written := &Library{}
 	path := libraryPath(library.Metadata.Namespace, library.Metadata.Name) + "/status"
-	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil
@@ -256,9 +260,9 @@ func PutLibraryStatus(c *Client, library *Library) (*Library, error) {
 
 // ListCatalogs answers a whole pass with one request, and the list's
 // resourceVersion is where the catalogs watch resumes from.
-func ListCatalogs(c *Client) (*CatalogList, error) {
+func ListCatalogs(ctx context.Context, c *Client) (*CatalogList, error) {
 	list := &CatalogList{}
-	if err := c.RequestJSON(http.MethodGet, catalogsPath, nil, list); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, catalogsPath, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil
@@ -267,14 +271,14 @@ func ListCatalogs(c *Client) (*CatalogList, error) {
 // PutCatalogStatus writes through the status subresource, so this
 // request can never touch a spec. The resourceVersion in the body makes
 // the write conditional, the same as PutLibraryStatus.
-func PutCatalogStatus(c *Client, catalog *NamespaceCatalog) (*NamespaceCatalog, error) {
+func PutCatalogStatus(ctx context.Context, c *Client, catalog *NamespaceCatalog) (*NamespaceCatalog, error) {
 	body, err := json.Marshal(catalog)
 	if err != nil {
 		return nil, err
 	}
 	written := &NamespaceCatalog{}
 	path := catalogPath(catalog.Metadata.Namespace, catalog.Metadata.Name) + "/status"
-	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil
@@ -286,9 +290,9 @@ func PutCatalogStatus(c *Client, catalog *NamespaceCatalog) (*NamespaceCatalog, 
 // ClaimNotFound reason rather than as a failure. It also reads the
 // catalog claim the operator provisions, to tell an existing one from
 // none.
-func GetPersistentVolumeClaim(c *Client, namespace, name string) (*PersistentVolumeClaim, error) {
+func GetPersistentVolumeClaim(ctx context.Context, c *Client, namespace, name string) (*PersistentVolumeClaim, error) {
 	claim := &PersistentVolumeClaim{}
-	if err := c.RequestJSON(http.MethodGet, claimPath(namespace, name), nil, claim); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, claimPath(namespace, name), nil, claim); err != nil {
 		return nil, err
 	}
 	return claim, nil
@@ -297,13 +301,13 @@ func GetPersistentVolumeClaim(c *Client, namespace, name string) (*PersistentVol
 // CreatePersistentVolumeClaim provisions the catalog claim one scanner
 // pod mounts. The operator creates it once and never updates it,
 // because a claim's spec is immutable once it binds.
-func CreatePersistentVolumeClaim(c *Client, claim *PersistentVolumeClaim) (*PersistentVolumeClaim, error) {
+func CreatePersistentVolumeClaim(ctx context.Context, c *Client, claim *PersistentVolumeClaim) (*PersistentVolumeClaim, error) {
 	body, err := json.Marshal(claim)
 	if err != nil {
 		return nil, err
 	}
 	created := &PersistentVolumeClaim{}
-	if err := c.RequestJSON(http.MethodPost, claimsPath(claim.Metadata.Namespace), body, created); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPost, claimsPath(claim.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -312,9 +316,9 @@ func CreatePersistentVolumeClaim(c *Client, claim *PersistentVolumeClaim) (*Pers
 // GetPersistentVolume reads the volume behind a bound claim, for what
 // serves it. A PersistentVolume is cluster-scoped, so the path carries
 // no namespace.
-func GetPersistentVolume(c *Client, name string) (*PersistentVolume, error) {
+func GetPersistentVolume(ctx context.Context, c *Client, name string) (*PersistentVolume, error) {
 	volume := &PersistentVolume{}
-	if err := c.RequestJSON(http.MethodGet, volumesPath+"/"+name, nil, volume); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, volumesPath+"/"+name, nil, volume); err != nil {
 		return nil, err
 	}
 	return volume, nil
@@ -323,29 +327,29 @@ func GetPersistentVolume(c *Client, name string) (*PersistentVolume, error) {
 // ListScannerPods reads this operator's scanner pods across every
 // namespace, because a Library lives in whatever namespace its claim
 // does. The list's resourceVersion is where the pod watch begins.
-func ListScannerPods(c *Client) (*PodList, error) {
+func ListScannerPods(ctx context.Context, c *Client) (*PodList, error) {
 	list := &PodList{}
-	if err := c.RequestJSON(http.MethodGet, podsAllPath+"?"+scannerPodsQuery, nil, list); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+scannerPodsQuery, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil
 }
 
-func GetPod(c *Client, namespace, name string) (*Pod, error) {
+func GetPod(ctx context.Context, c *Client, namespace, name string) (*Pod, error) {
 	pod := &Pod{}
-	if err := c.RequestJSON(http.MethodGet, podsPath(namespace)+"/"+name, nil, pod); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, podsPath(namespace)+"/"+name, nil, pod); err != nil {
 		return nil, err
 	}
 	return pod, nil
 }
 
-func CreatePod(c *Client, pod *Pod) (*Pod, error) {
+func CreatePod(ctx context.Context, c *Client, pod *Pod) (*Pod, error) {
 	body, err := json.Marshal(pod)
 	if err != nil {
 		return nil, err
 	}
 	created := &Pod{}
-	if err := c.RequestJSON(http.MethodPost, podsPath(pod.Metadata.Namespace), body, created); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPost, podsPath(pod.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -354,8 +358,8 @@ func CreatePod(c *Client, pod *Pod) (*Pod, error) {
 // DeletePod removes one scanner pod. An already-absent pod is success,
 // because the operator deletes a pod to replace it and a delete that
 // races another pass must not fail.
-func DeletePod(c *Client, namespace, name string) error {
-	err := c.RequestJSON(http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
+func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
 	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
@@ -366,22 +370,22 @@ func DeletePod(c *Client, namespace, name string) error {
 // the owners and endpoints it holds now and for the resourceVersion
 // the write is made conditional on. An absent slice is ErrNotFound,
 // which the pass answers by creating one.
-func GetEndpointSlice(c *Client, namespace, name string) (*EndpointSlice, error) {
+func GetEndpointSlice(ctx context.Context, c *Client, namespace, name string) (*EndpointSlice, error) {
 	slice := &EndpointSlice{}
-	if err := c.RequestJSON(http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
 		return nil, err
 	}
 	return slice, nil
 }
 
-func CreateEndpointSlice(c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+func CreateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
 	body, err := json.Marshal(slice)
 	if err != nil {
 		return nil, err
 	}
 	created := &EndpointSlice{}
 	path := endpointSlicesPath(slice.Metadata.Namespace)
-	if err := c.RequestJSON(http.MethodPost, path, body, created); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -390,14 +394,14 @@ func CreateEndpointSlice(c *Client, slice *EndpointSlice) (*EndpointSlice, error
 // UpdateEndpointSlice writes the whole slice back. The resourceVersion
 // in the body makes the write conditional, so a slice that changed
 // underneath answers ErrConflict, and the next pass reads it again.
-func UpdateEndpointSlice(c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+func UpdateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
 	body, err := json.Marshal(slice)
 	if err != nil {
 		return nil, err
 	}
 	written := &EndpointSlice{}
 	path := endpointSlicesPath(slice.Metadata.Namespace) + "/" + slice.Metadata.Name
-	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil
@@ -407,22 +411,22 @@ func UpdateEndpointSlice(c *Client, slice *EndpointSlice) (*EndpointSlice, error
 // read answers the fields the operator compares, and it answers the
 // resourceVersion and the addresses the API server assigned, which
 // the update carries back unchanged.
-func GetService(c *Client, namespace, name string) (*Service, error) {
+func GetService(ctx context.Context, c *Client, namespace, name string) (*Service, error) {
 	service := &Service{}
-	if err := c.RequestJSON(http.MethodGet, servicesPath(namespace)+"/"+name, nil, service); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, servicesPath(namespace)+"/"+name, nil, service); err != nil {
 		return nil, err
 	}
 	return service, nil
 }
 
-func CreateService(c *Client, service *Service) (*Service, error) {
+func CreateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
 	body, err := json.Marshal(service)
 	if err != nil {
 		return nil, err
 	}
 	created := &Service{}
 	path := servicesPath(service.Metadata.Namespace)
-	if err := c.RequestJSON(http.MethodPost, path, body, created); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
 		return nil, err
 	}
 	return created, nil
@@ -431,14 +435,14 @@ func CreateService(c *Client, service *Service) (*Service, error) {
 // UpdateService writes the whole Service back. The resourceVersion in
 // the body makes the write conditional, so a Service that changed
 // underneath answers ErrConflict, and the next pass reads it again.
-func UpdateService(c *Client, service *Service) (*Service, error) {
+func UpdateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
 	body, err := json.Marshal(service)
 	if err != nil {
 		return nil, err
 	}
 	written := &Service{}
 	path := servicesPath(service.Metadata.Namespace) + "/" + service.Metadata.Name
-	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
 		return nil, err
 	}
 	return written, nil

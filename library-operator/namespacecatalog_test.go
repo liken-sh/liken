@@ -104,7 +104,7 @@ func TestListCatalogsReadsEveryNamespace(t *testing.T) {
 		Items:    []NamespaceCatalog{{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}},
 	})
 
-	list, err := ListCatalogs(client)
+	list, err := ListCatalogs(t.Context(), client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestPutCatalogStatusWritesTheStatusSubresource(t *testing.T) {
 		Status:   CatalogStatus{StorageSize: "1Gi"},
 	}
 
-	written, err := PutCatalogStatus(client, catalog)
+	written, err := PutCatalogStatus(t.Context(), client, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}

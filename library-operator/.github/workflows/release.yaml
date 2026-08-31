@@ -12,6 +12,9 @@
 # operator names the other two in the pods it creates, and a pair that
 # could drift apart would put the catalog contract at two versions at
 # once.
+#
+# The run is ci.yaml's three test jobs, then one job that builds,
+# proves, and pushes, which it reaches only after all three pass.
 name: release
 
 on:
@@ -28,42 +31,150 @@ concurrency:
   group: release
 
 jobs:
-  release:
+  # The tag names the version, so its shape is an input this
+  # workflow must check before it spends anything on a build. A
+  # tag of any other shape is a mistake. The run says so and
+  # stops, before an image can ship under a name no machine can
+  # order against the others.
+  #
+  # Every other job waits on this one, so a malformed tag costs one
+  # runner and neither a test nor a build.
+  version:
     runs-on: ubuntu-latest
     steps:
-      # The tag names the version, so its shape is an input this
-      # workflow must check before it spends anything on a build. A
-      # tag of any other shape is a mistake. The run says so and
-      # stops, before an image can ship under a name no machine can
-      # order against the others.
       - name: Check the tag shape
         run: |
           echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
             echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.29-001"
             exit 1
           }
-          echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
 
-      # The media browser image builds liken-iced from the submodule at
-      # media-browser/brand, and the documentation builds against the
-      # theme at docs/themes/brand. Both are submodules, so the release
-      # checks out every one of them.
+  # The tests gate the build. ci.yaml already ran them on the tagged
+  # commit when it landed on main. A tag can name any commit, so the
+  # release proves the one it ships. An image that reaches the registry
+  # has passed them. A rollback names an older tag, and never has to
+  # find out which tag was good.
+  #
+  # The three jobs below are ci.yaml's go, rust, and docs jobs, step
+  # for step and target for target, so the release gate is never weaker
+  # than the one main passes.
+  go:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
+      # setup-go keeps the module downloads and the build cache
+      # between runs, keyed on go.sum, so a run compiles only what
+      # changed.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
-      # The tests gate the build. ci.yaml already ran them on the
-      # tagged commit when it landed on main. A tag can name any
-      # commit, so the release proves the one it ships. An image that
-      # reaches the registry has passed them. A rollback names an
-      # older tag, and never has to find out which tag was good.
-      - run: go vet ./...
-      - run: go test -race ./...
+      # The same target a workstation runs: gofmt, vet, the race
+      # tests, and the coverage gate on its pinned toolchain. The
+      # Makefile says why the gate pins a toolchain, and
+      # .testcoverage.yml holds the floor.
+      - run: make test-go
+
+  rust:
+    needs: version
+    # The headless tests run under cage, and the cage in Ubuntu 24.04
+    # (0.1.5) dies on an assertion when wlr-randr changes the output
+    # mode. Ubuntu 26.04 carries 0.2.1, which takes the change, and it
+    # is the release the workstations run.
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: media-browser
+    env:
+      # Incremental artifacts are large, and a fresh runner never
+      # reuses them. Without this they would fill the cache and gain
+      # nothing.
+      CARGO_INCREMENTAL: 0
+      # cage renders with pixman, so the compositor needs no GPU on
+      # the runner.
+      WLR_RENDERER: pixman
+    steps:
+      # The media browser builds against liken-iced, the crate in the
+      # brand repository that carries the mark and the palette. It is
+      # a submodule at media-browser/brand, and a checkout without it
+      # resolves no dependency.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The media browser's tests open a real window. cage is the
+      # compositor, wlr-randr sets the headless mode, and
+      # mesa-vulkan-drivers carries lavapipe, the software Vulkan
+      # device a runner with no GPU draws through.
+      - name: install the headless graphics
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
+            libwayland-client0 libxkbcommon0
+
+      # media-browser/rust-toolchain.toml names the version and the
+      # components. rustup installs what the file names, so this
+      # workflow pins no version of its own.
+      - name: install the toolchain
+        run: rustup show
+
+      # The cache holds the cargo registry and target/, keyed on
+      # Cargo.lock. Almost all of the build is dependencies, and they
+      # change only when the lock file changes.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: media-browser
+          cache-on-failure: true
+
+      # cargo-llvm-cov is a binary. The action fetches its release
+      # build instead of compiling one, and it runs after rust-cache,
+      # which prunes binaries it did not see before it saved.
+      - uses: taiki-e/install-action@v2.87.1
+        with:
+          tool: cargo-llvm-cov
+
+      # The same target a workstation runs: the format, the lints,
+      # and the tests under the coverage gate. media-browser/Makefile
+      # holds the floor.
+      - run: make test
+
+  docs:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      # The theme is the brand repository, a submodule at
+      # docs/themes/brand. A checkout without it builds a site with
+      # no shell, no nav, and no stylesheet.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The docs domain is its own Go module, and Hugo is a tool
+      # directive in it, so the Go toolchain is the only build
+      # dependency and this file pins its version too.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: docs/go.mod
+
+      # The same target a workstation runs: the link check, then
+      # the site build.
+      - run: make test-docs
+
+  release:
+    needs: [go, rust, docs]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      # The media browser image builds liken-iced from the submodule
+      # at media-browser/brand, so the checkout brings every submodule.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: docker/setup-buildx-action@v3
 

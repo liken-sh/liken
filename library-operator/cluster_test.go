@@ -391,7 +391,7 @@ func boundHouse(cluster *fakeCluster) *Library {
 	}
 	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
 		`{"capacity":{"storage":"4Ti"},"accessModes":["ReadOnlyMany"],` +
-		`"nfs":{"server":"syn.example","path":"/volume1/movies"}}}`
+		`"nfs":{"server":"syn.example","path":"/srv/media/movies"}}}`
 	return library
 }
 

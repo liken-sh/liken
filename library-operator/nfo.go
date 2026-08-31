@@ -395,13 +395,15 @@ func releaseFields(year int, premiered string) (int, string) {
 	return year, released
 }
 
-// leadingYear reads a four-digit year off the front of a date, or 0.
+// leadingYear reads a four-digit year off the front of a date, or 0. The
+// range is the release range in names.go, the same one a folder name is
+// read against.
 func leadingYear(date string) int {
 	if len(date) < 4 {
 		return 0
 	}
 	year, err := strconv.Atoi(date[:4])
-	if err != nil || year < 1000 || year > 9999 {
+	if err != nil || !plausibleYear(year) {
 		return 0
 	}
 	return year

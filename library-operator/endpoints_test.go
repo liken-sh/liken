@@ -22,8 +22,31 @@ func scannerPodAt(name, namespace, address, node string) Pod {
 			UID:       name + "-uid",
 			Labels:    map[string]string{scannerLabelKey: scannerLabelValue},
 		},
-		Spec:   PodSpec{NodeName: node},
-		Status: PodStatus{Phase: podRunning, PodIP: address},
+		Spec: PodSpec{NodeName: node},
+		Status: PodStatus{
+			Phase:                 podRunning,
+			PodIP:                 address,
+			InitContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: true}},
+			ContainerStatuses:     []ContainerStatus{{Name: scannerContainer, Ready: true}},
+		},
+	}
+}
+
+// A pod the kubelet has not marked ready is still an address in the
+// slice, because the Service publishes not-ready addresses and a forming
+// cluster has no ready agents. The condition carries the kubelet's own
+// verdict.
+func TestCatalogEndpointsReportAStartingAgentAsNotReady(t *testing.T) {
+	starting := scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")
+	starting.Status.InitContainerStatuses = []ContainerStatus{{Name: catalogContainer, Ready: false}}
+
+	slice := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{starting})
+
+	if len(slice.Endpoints) != 1 {
+		t.Fatalf("endpoints = %+v, want the starting pod's address", slice.Endpoints)
+	}
+	if slice.Endpoints[0].Conditions.Ready {
+		t.Error("the endpoint reports ready, but the kubelet has not marked the agent ready")
 	}
 }
 
@@ -153,7 +176,7 @@ func TestStandCatalogEndpointsCreatesTheSliceWhenThereIsNone(t *testing.T) {
 	cluster := newFakeCluster()
 	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")}
 
-	if err := testOperator(t, cluster).standCatalogEndpoints(testLibraryNamespace, nil, pods); err != nil {
+	if err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, pods); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,11 +197,11 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 	operator := testOperator(t, cluster)
 	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
 	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")}
-	if err := operator.standCatalogEndpoints(testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := operator.standCatalogEndpoints(testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
 		t.Fatal(err)
 	}
 
@@ -187,7 +210,7 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 	}
 
 	pods = append(pods, scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.2.4", "nuc-2"))
-	if err := operator.standCatalogEndpoints(testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +223,7 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 	}
 
 	owners = append(owners, catalogOwner("shows", "shows-uid"))
-	if err := operator.standCatalogEndpoints(testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,7 +241,7 @@ func TestStandCatalogEndpointsTreatsAConflictAsAnotherWriter(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).standCatalogEndpoints(testLibraryNamespace, nil, nil); err != nil {
+	if err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -228,7 +251,7 @@ func TestStandCatalogEndpointsReportsAFailedRead(t *testing.T) {
 	path := endpointSlicesPath(testLibraryNamespace) + "/" + catalogServiceName
 	cluster.broken[path] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).standCatalogEndpoints(testLibraryNamespace, nil, nil)
+	err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, nil)
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -244,7 +267,7 @@ func TestGetEndpointSliceReadsTheCatalogSlice(t *testing.T) {
 		Endpoints:   []Endpoint{{Addresses: []string{"10.42.1.7"}}},
 	})
 
-	slice, err := GetEndpointSlice(client, "house", "catalog")
+	slice, err := GetEndpointSlice(t.Context(), client, "house", "catalog")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +284,7 @@ func TestCreateEndpointSlicePostsIntoTheLibrarysNamespace(t *testing.T) {
 		Metadata: ObjectMeta{Name: "catalog", Namespace: "house"},
 	})
 
-	created, err := CreateEndpointSlice(client, buildCatalogEndpoints("house", nil, nil))
+	created, err := CreateEndpointSlice(t.Context(), client, buildCatalogEndpoints("house", nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +308,7 @@ func TestUpdateEndpointSliceWritesTheVersionItRead(t *testing.T) {
 	slice := buildCatalogEndpoints("house", nil, nil)
 	slice.Metadata.ResourceVersion = "44"
 
-	written, err := UpdateEndpointSlice(client, slice)
+	written, err := UpdateEndpointSlice(t.Context(), client, slice)
 	if err != nil {
 		t.Fatal(err)
 	}

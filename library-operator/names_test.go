@@ -146,7 +146,10 @@ func TestDiscoverArtAndTrickplay(t *testing.T) {
 	root := "testdata/movies"
 	dir := filepath.Join(root, "Action", "The Matrix (1999)")
 
-	primary, all := discoverArt(root, dir)
+	primary, all, err := discoverArt(root, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wantPrimary := filepath.Join("Action", "The Matrix (1999)", "folder.jpg")
 	if primary != wantPrimary {
 		t.Errorf("primary art = %q, want %q", primary, wantPrimary)
@@ -167,7 +170,10 @@ func TestDiscoverArtAndTrickplay(t *testing.T) {
 
 func TestListVideoFilesSkipsSidecars(t *testing.T) {
 	dir := filepath.Join("testdata", "movies", "Action", "The Matrix (1999)")
-	files := listVideoFiles(dir)
+	files, err := listVideoFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(files) != 1 || files[0] != "The Matrix (1999).mkv" {
 		t.Errorf("video files = %v, want only the mkv", files)
 	}
@@ -183,11 +189,13 @@ func TestResolutionFromNameLowerTiers(t *testing.T) {
 }
 
 func TestFileHelpersOnMissingPaths(t *testing.T) {
-	if files := listVideoFiles("testdata/nowhere"); files != nil {
-		t.Errorf("listVideoFiles = %v, want nil for a missing directory", files)
+	files, err := listVideoFiles("testdata/nowhere")
+	if files != nil || err == nil {
+		t.Errorf("listVideoFiles = %v %v, want nothing and an error for a missing directory", files, err)
 	}
-	if size := fileSize("testdata/nowhere/x.mkv"); size != 0 {
-		t.Errorf("fileSize = %d, want 0 for a missing file", size)
+	exists, err := fileExists("testdata/nowhere/x.mkv")
+	if exists || err != nil {
+		t.Errorf("fileExists = %v %v, want false and no error for a missing file", exists, err)
 	}
 	if added := addedTime("testdata/nowhere/x.mkv"); added != 0 {
 		t.Errorf("addedTime = %d, want 0 for a missing file", added)

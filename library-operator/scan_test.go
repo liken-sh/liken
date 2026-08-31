@@ -535,3 +535,70 @@ func TestWalkFoldersStopsOnACancelledContext(t *testing.T) {
 		t.Errorf("folders = %d, want no folder from a cancelled walk", folders)
 	}
 }
+
+// The webhook resolver reads a path the way the walk reads the volume:
+// it steps down through the grouping folders and stops at the first title
+// folder. A movies volume that groups by genre and then by studio nests a
+// title two levels down, and a resolver that stopped at two levels would
+// name the studio and sweep every title under it.
+func TestTitleFolderOfFollowsTheWalksOwnRule(t *testing.T) {
+	root := titleTree(t,
+		filepath.Join("Genre", "Studio", "Nested (2024)"),
+		"Root (2020)")
+	scan, _ := testScanner(t, root, libraryKindMovies)
+
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a file under a title two grouping folders down",
+			path: filepath.Join(root, "Genre", "Studio", "Nested (2024)", "movie.mkv"),
+			want: filepath.Join(root, "Genre", "Studio", "Nested (2024)"),
+		},
+		{
+			name: "the nested title folder itself",
+			path: filepath.Join(root, "Genre", "Studio", "Nested (2024)"),
+			want: filepath.Join(root, "Genre", "Studio", "Nested (2024)"),
+		},
+		{
+			name: "a file under a title at the root",
+			path: filepath.Join(root, "Root (2020)", "movie.mkv"),
+			want: filepath.Join(root, "Root (2020)"),
+		},
+		{
+			name: "a title folder that left the volume",
+			path: filepath.Join(root, "Genre", "Studio", "Departed (1999)", "movie.mkv"),
+			want: filepath.Join(root, "Genre", "Studio", "Departed (1999)"),
+		},
+		{
+			name: "a grouping folder names no title",
+			path: filepath.Join(root, "Genre", "Studio"),
+			want: "",
+		},
+		{
+			name: "a path outside the root",
+			path: filepath.Join("elsewhere", "Other (2011)", "movie.mkv"),
+			want: "",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := scan.titleFolderOf(testCase.path); got != testCase.want {
+				t.Errorf("titleFolderOf(%q) = %q, want %q", testCase.path, got, testCase.want)
+			}
+		})
+	}
+}
+
+// A series folder is always a child of the root, whatever the path names
+// under it.
+func TestTitleFolderOfASeriesIsTheChildOfTheRoot(t *testing.T) {
+	scan, _ := testScanner(t, "testdata/series", libraryKindSeries)
+	episode := filepath.Join("testdata", "series", "Breaking Bad", "Season 02", "Breaking Bad - S02E05.mkv")
+
+	if got := scan.titleFolderOf(episode); got != filepath.Join("testdata", "series", "Breaking Bad") {
+		t.Errorf("titleFolderOf = %q, want the series folder", got)
+	}
+}

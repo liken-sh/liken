@@ -8,8 +8,9 @@ harness has a home.
 
 ## The problem
 
-The design names four kinds of artifact: a Go operator, Go scanner
-images, a Rust media browser image, and a Corrosion sidecar image. It
+The design names three kinds of artifact: one Go image that serves the
+operator and every scanner, a Rust media browser image, and a Corrosion
+sidecar image. It
 also names a release channel, a documentation site, and a local harness.
 Each has a first-time cost that has nothing to do with libraries:
 toolchains, caches, image bases, workflows. Paying that cost inside the

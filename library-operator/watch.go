@@ -8,12 +8,21 @@ package main
 // change here is only a wake, and the loop decides what to read.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"time"
 )
+
+// A watch is a request whose response never ends, so it carries a context
+// with no deadline and no cancel; the bounded contexts belong to the
+// passes in operate.go. A watcher runs for the life of the process, and
+// the process ending is what ends it.
+func watchContext() context.Context {
+	return context.Background()
+}
 
 // watchRetryPause is how long a watcher waits before it re-lists after
 // a dropped stream, and a variable so a test drives a reconnect in
@@ -34,7 +43,7 @@ var watchRetryPause = 2 * time.Second
 func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
 	for {
 		path := librariesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resourceVersion = readWatchStream(resp, resourceVersion, wake)
 		}
@@ -46,7 +55,7 @@ func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
 		// running while this loop is down, and a relist is the whole
 		// recovery.
 		time.Sleep(watchRetryPause)
-		list, err := ListLibraries(c)
+		list, err := ListLibraries(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing libraries to resume the watch: %v\n", err)
 			continue
@@ -64,7 +73,7 @@ func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
 func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}) {
 	for {
 		path := catalogsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resourceVersion = readWatchStream(resp, resourceVersion, wake)
 		}
@@ -73,7 +82,7 @@ func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}) {
 		}
 
 		time.Sleep(watchRetryPause)
-		list, err := ListCatalogs(c)
+		list, err := ListCatalogs(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing catalogs to resume the watch: %v\n", err)
 			continue
@@ -96,7 +105,7 @@ func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
 	for {
 		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + scannerPodsQuery +
 			"&resourceVersion=" + resourceVersion
-		resp, err := c.Do(http.MethodGet, path, nil)
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resourceVersion = readWatchStream(resp, resourceVersion, wake)
 		}
@@ -105,7 +114,7 @@ func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
 		}
 
 		time.Sleep(watchRetryPause)
-		list, err := ListScannerPods(c)
+		list, err := ListScannerPods(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing scanner pods to resume the watch: %v\n", err)
 			continue

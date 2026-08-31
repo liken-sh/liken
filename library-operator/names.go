@@ -7,6 +7,8 @@ package main
 // none, and discovers the art and the trickplay directory a folder holds.
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -119,14 +121,29 @@ func isReleaseToken(token string) bool {
 	return false
 }
 
-// releaseYear reads a plausible release year, 1900 through 2099, off a token, so
-// a four-digit part of a title is not mistaken for one.
+// The years a release can carry. The scanner reads a year off a folder
+// name and off a sidecar's date, and both read the same range, so one
+// title cannot be identified by its sidecar and unidentified by its
+// folder.
+const (
+	firstReleaseYear = 1900
+	lastReleaseYear  = 2099
+)
+
+// plausibleYear is the one test of a four-digit number, so a number in a
+// title is not mistaken for a year.
+func plausibleYear(year int) bool {
+	return year >= firstReleaseYear && year <= lastReleaseYear
+}
+
+// releaseYear reads a plausible release year off a token, so a four-digit
+// part of a title is not mistaken for one.
 func releaseYear(token string) (int, bool) {
 	if len(token) != 4 {
 		return 0, false
 	}
 	year, err := strconv.Atoi(token)
-	if err != nil || year < 1900 || year > 2099 {
+	if err != nil || !plausibleYear(year) {
 		return 0, false
 	}
 	return year, true
@@ -281,12 +298,16 @@ var (
 // the item row carries; the full list is the poster, the backdrop, and the logo,
 // in that order, for the body. Every path is relative to the library root, so
 // the display draws the art from the volume and the scanner copies nothing.
-func discoverArt(root, dir string) (string, []string) {
+func discoverArt(root, dir string) (string, []string, error) {
 	var primary string
 	var all []string
 	for group, names := range [][]string{posterNames, backdropNames, logoNames} {
 		for _, name := range names {
-			if !fileExists(filepath.Join(dir, name)) {
+			exists, err := fileExists(filepath.Join(dir, name))
+			if err != nil {
+				return primary, all, err
+			}
+			if !exists {
 				continue
 			}
 			relative := relativePath(root, filepath.Join(dir, name))
@@ -297,26 +318,26 @@ func discoverArt(root, dir string) (string, []string) {
 			break
 		}
 	}
-	return primary, all
+	return primary, all, nil
 }
 
 // listVideoFiles reads a directory's video files in name order, so a re-walk
 // reads a folder's files the same way and the first file is a fixed choice.
-func listVideoFiles(dir string) []string {
+func listVideoFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var names []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || skipName(entry.Name()) {
 			continue
 		}
 		if videoExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
 			names = append(names, entry.Name())
 		}
 	}
-	return names
+	return names, nil
 }
 
 // trickplayFor reads the path of a file's .trickplay directory, the thumbnail
@@ -334,15 +355,19 @@ func trickplayFor(root, dir, file string) string {
 
 // episodeThumb reads the path of an episode's thumbnail, which Jellyfin writes
 // beside the file as a -thumb.jpg.
-func episodeThumb(root, dir, file string) string {
+func episodeThumb(root, dir, file string) (string, error) {
 	base := strings.TrimSuffix(file, filepath.Ext(file))
 	for _, suffix := range []string{"-thumb.jpg", "-thumb.png", ".jpg", ".png"} {
 		candidate := filepath.Join(dir, base+suffix)
-		if fileExists(candidate) {
-			return relativePath(root, candidate)
+		exists, err := fileExists(candidate)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			return relativePath(root, candidate), nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // folderKey is the slug of a folder's own name, the key a title with no provider
@@ -362,10 +387,18 @@ func relativePath(root, path string) string {
 	return path
 }
 
-// fileExists reports whether a path is a file that exists.
-func fileExists(path string) bool {
+// fileExists reports whether a path is a file that exists. An absent
+// path is an answer; a stat that fails any other way is an error, because
+// the walk must not read an unreadable path as a file that is not there.
+func fileExists(path string) (bool, error) {
 	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !info.IsDir(), nil
 }
 
 // dirExists reports whether a path is a directory that exists.
@@ -379,15 +412,6 @@ func dirExists(path string) bool {
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// fileSize reads a file's size in bytes, or 0 where the file cannot be read.
-func fileSize(path string) int64 {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return info.Size()
 }
 
 // addedTime reads the time a path was last written, in Unix seconds, the value

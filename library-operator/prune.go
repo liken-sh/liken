@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -41,10 +42,14 @@ var pruneRatioFloor = 8
 // becomes a replicated table that gossips. This one is created through the
 // write API instead, so it stays a plain local table the agent never
 // replicates.
+//
+// The index on epoch is what every prune query reads, because each one
+// asks for the ids this epoch marked.
 func (c *Catalog) ensureSeen(ctx context.Context) error {
-	_, err := c.apply(ctx, []statement{{
-		sql: `CREATE TABLE IF NOT EXISTS seen (id TEXT NOT NULL PRIMARY KEY, epoch INTEGER NOT NULL DEFAULT 0)`,
-	}})
+	_, err := c.apply(ctx, []statement{
+		{sql: `CREATE TABLE IF NOT EXISTS seen (id TEXT NOT NULL PRIMARY KEY, epoch INTEGER NOT NULL DEFAULT 0)`},
+		{sql: `CREATE INDEX IF NOT EXISTS seen_epoch ON seen (epoch)`},
+	})
 	return err
 }
 
@@ -103,6 +108,13 @@ func (c *Catalog) countItems(ctx context.Context, library string) (int, error) {
 		[]any{library, library, library})
 }
 
+// countSeen reads how many ids this epoch marked. The prune guard reads
+// it, because an epoch that marked nothing would sweep every row the
+// library holds.
+func (c *Catalog) countSeen(ctx context.Context, epoch int64) (int, error) {
+	return c.queryInt(ctx, `SELECT count(*) FROM seen WHERE epoch = ?`, []any{epoch})
+}
+
 // countFiles reads how many file rows the catalog holds for this
 // library. The report carries it beside the item count, so a Library's
 // status shows both.
@@ -146,9 +158,10 @@ func markKeys(result *walkResult) []string {
 }
 
 // incompleteWalk reports whether a walk read only part of the volume, so
-// the caller skips the prune and keeps the rows. A read error at the root
-// is one signal. A walk that found far fewer items than the catalog holds
-// is the other, once the catalog holds more than the ratio floor.
+// the caller skips the prune and keeps the rows. A read error anywhere
+// in the walk, at any depth, in a directory, a sidecar, or a file, is one
+// signal. A walk that found far fewer items than the catalog holds is the
+// other, once the catalog holds more than the ratio floor.
 func incompleteWalk(readError bool, items, catalogItems int) bool {
 	if readError {
 		return true
@@ -162,7 +175,11 @@ func incompleteWalk(readError bool, items, catalogItems int) bool {
 // sweep reads the unmarked ids one bounded batch at a time and deletes
 // each batch, until a query returns fewer than a full batch. It holds one
 // batch and never the whole set. It returns the count of rows deleted.
-func (c *Catalog) sweep(ctx context.Context, sql string, params []any, del func(ctx context.Context, keys []string) error) (int, error) {
+//
+// A batch that deletes nothing while the query still answers with keys is
+// a sweep that cannot end, so it stops with an error rather than spinning
+// under the walk lock.
+func (c *Catalog) sweep(ctx context.Context, sql string, params []any, del func(ctx context.Context, keys []string) (int, error)) (int, error) {
 	removed := 0
 	for {
 		keys, err := c.queryStrings(ctx, sql, params)
@@ -172,8 +189,12 @@ func (c *Catalog) sweep(ctx context.Context, sql string, params []any, del func(
 		if len(keys) == 0 {
 			return removed, nil
 		}
-		if err := del(ctx, keys); err != nil {
+		deleted, err := del(ctx, keys)
+		if err != nil {
 			return removed, err
+		}
+		if deleted == 0 {
+			return removed, fmt.Errorf("the sweep deleted none of the %d keys it read", len(keys))
 		}
 		removed += len(keys)
 		if len(keys) < pruneBatch {
@@ -191,11 +212,20 @@ func (c *Catalog) sweep(ctx context.Context, sql string, params []any, del func(
 func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch int64) (int, error) {
 	removed := 0
 
+	// Every sweep below deletes what this epoch did not mark, so an
+	// epoch with no marks at all would delete the whole library. The walk
+	// wrote its marks before this prune; an epoch with none is a mark
+	// write that did not land, and the rows stand for the next walk.
+	marks, err := catalog.countSeen(ctx, epoch)
+	if err != nil {
+		return removed, err
+	}
+	if marks == 0 {
+		return removed, fmt.Errorf("the walk marked no keys with epoch %d", epoch)
+	}
+
 	n, err := catalog.sweep(ctx, aliasPruneSQL(), aliasPruneParams(library, epoch),
-		func(ctx context.Context, keys []string) error {
-			_, err := catalog.DeleteAliases(ctx, keys)
-			return err
-		})
+		catalog.DeleteAliases)
 	if err != nil {
 		return removed, err
 	}
@@ -210,10 +240,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		{"episodes", catalog.DeleteEpisodes},
 	} {
 		n, err := catalog.sweep(ctx, itemPruneSQL(table.name, "id", seenItem), []any{library, epoch, pruneBatch},
-			func(ctx context.Context, keys []string) error {
-				_, err := table.delete(ctx, keys)
-				return err
-			})
+			table.delete)
 		if err != nil {
 			return removed, err
 		}
@@ -224,9 +251,8 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	// scopes itself by joining files, so once a file row is deleted its own
 	// links join to nothing, and no query reaches them again.
 	n, err = catalog.sweep(ctx, linkPruneSQL(), []any{library, epoch, pruneBatch},
-		func(ctx context.Context, keys []string) error {
-			_, err := catalog.DeleteFileItems(ctx, fileItemKeys(keys))
-			return err
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFileItems(ctx, fileItemKeys(keys))
 		})
 	if err != nil {
 		return removed, err
@@ -234,10 +260,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	removed += n
 
 	n, err = catalog.sweep(ctx, itemPruneSQL("files", "path", seenFile), []any{library, epoch, pruneBatch},
-		func(ctx context.Context, keys []string) error {
-			_, err := catalog.DeleteFiles(ctx, keys)
-			return err
-		})
+		catalog.DeleteFiles)
 	if err != nil {
 		return removed, err
 	}
@@ -327,10 +350,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	removed := 0
 
 	n, err := catalog.sweep(ctx, scopedAliasPruneSQL(), scopedAliasPruneParams(library, folder, epoch),
-		func(ctx context.Context, keys []string) error {
-			_, err := catalog.DeleteAliases(ctx, keys)
-			return err
-		})
+		catalog.DeleteAliases)
 	if err != nil {
 		return removed, err
 	}
@@ -345,10 +365,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 		{"episodes", catalog.DeleteEpisodes},
 	} {
 		n, err := catalog.sweep(ctx, scopedItemPruneSQL(table.name, "id", seenItem), scopedItemPruneParams(library, folder, epoch),
-			func(ctx context.Context, keys []string) error {
-				_, err := table.delete(ctx, keys)
-				return err
-			})
+			table.delete)
 		if err != nil {
 			return removed, err
 		}
@@ -359,9 +376,8 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	// does in pruneLibrary: it scopes itself by joining files, and a deleted
 	// file row puts its own links out of every query's reach.
 	n, err = catalog.sweep(ctx, scopedLinkPruneSQL(), scopedItemPruneParams(library, folder, epoch),
-		func(ctx context.Context, keys []string) error {
-			_, err := catalog.DeleteFileItems(ctx, fileItemKeys(keys))
-			return err
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFileItems(ctx, fileItemKeys(keys))
 		})
 	if err != nil {
 		return removed, err
@@ -369,10 +385,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	removed += n
 
 	n, err = catalog.sweep(ctx, scopedItemPruneSQL("files", "path", seenFile), scopedItemPruneParams(library, folder, epoch),
-		func(ctx context.Context, keys []string) error {
-			_, err := catalog.DeleteFiles(ctx, keys)
-			return err
-		})
+		catalog.DeleteFiles)
 	if err != nil {
 		return removed, err
 	}

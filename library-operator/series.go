@@ -1,6 +1,5 @@
 package main
 
-// series.go reads one folder per series into a series item.
 // series.go reads one folder per series into a series item, an episode item
 // per episode, and one file row per video file. A file named for two episodes
 // is one file that both episode items link to.
@@ -15,7 +14,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -46,7 +47,13 @@ func seriesFolderRule(root, library string, ignore ignoreSet) folderRule {
 // does not.
 func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkResult) {
 	name := filepath.Base(dir)
-	meta, identified := seriesIdentity(dir, name)
+	meta, identified, err := seriesIdentity(dir, name)
+	// The same rule the movies walk follows: a folder whose sidecar could
+	// not be read has no identity this pass, so it writes no row.
+	if err != nil {
+		result.noteReadError(err)
+		return
+	}
 
 	title := meta.Title
 	if !identified {
@@ -55,7 +62,8 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 
 	key := folderKey(name)
 	seriesID := itemID(scopeSeries, meta.ProviderIDs, key)
-	primaryArt, allArt := discoverArt(root, dir)
+	primaryArt, allArt, err := discoverArt(root, dir)
+	result.noteReadError(err)
 
 	body := meta.Body
 	body.ProviderIDs = meta.ProviderIDs
@@ -86,7 +94,9 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 	// each of a season folder's files belongs to.
 	episodesByDirectory := map[string]map[string][]string{}
 	videosByDirectory := map[string]map[string]bool{}
-	for _, episode := range collectEpisodeFiles(dir, ignore) {
+	episodeFiles, err := collectEpisodeFiles(dir, ignore)
+	result.noteReadError(err)
+	for _, episode := range episodeFiles {
 		episodeItemIDs := scanEpisode(root, library, seriesID, episode, result)
 		if len(episodeItemIDs) == 0 {
 			continue
@@ -109,7 +119,7 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 // links to the episode whose own name it starts with, and to the series where
 // it matches no episode, which is where a season poster lands.
 func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, episodes map[string]map[string][]string, videos map[string]map[string]bool, result *walkResult) {
-	rows, subdirectories := folderFiles{
+	rows, subdirectories, err := folderFiles{
 		root:    root,
 		dir:     dir,
 		library: library,
@@ -117,6 +127,7 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, epis
 		item:    constantItem(seriesID),
 		held:    videos[dir],
 	}.read()
+	result.noteReadError(err)
 	result.files = append(result.files, rows...)
 
 	for _, name := range subdirectories {
@@ -130,7 +141,7 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, epis
 		} else {
 			place.season = true
 		}
-		rows, _ := folderFiles{
+		rows, _, err := folderFiles{
 			root:    root,
 			dir:     child,
 			library: library,
@@ -138,6 +149,7 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, epis
 			item:    episodeItem(episodes[child], seriesID),
 			held:    videos[child],
 		}.read()
+		result.noteReadError(err)
 		result.files = append(result.files, rows...)
 	}
 }
@@ -145,17 +157,25 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, epis
 // seriesIdentity reads a series folder's identity, the same ladder the movies
 // walk uses: a readable tvshow.nfo with a title, or the folder name, identified
 // when the name yields a year.
-func seriesIdentity(dir, name string) (seriesMeta, bool) {
-	if data, err := os.ReadFile(filepath.Join(dir, "tvshow.nfo")); err == nil {
+//
+// The sidecar read answers the way movieIdentity's does: an absent
+// sidecar falls through to the name, and a sidecar the scanner cannot
+// read is an error.
+func seriesIdentity(dir, name string) (seriesMeta, bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "tvshow.nfo"))
+	switch {
+	case err == nil:
 		if meta, err := parseSeriesNFO(data); err == nil && meta.Title != "" {
-			return meta, true
+			return meta, true, nil
 		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return seriesMeta{}, false, err
 	}
 	title, year := parseReleaseName(name)
 	if title == "" {
 		title = name
 	}
-	return seriesMeta{Title: title, Year: year, Released: releasedFromYear(year)}, year > 0
+	return seriesMeta{Title: title, Year: year, Released: releasedFromYear(year)}, year > 0, nil
 }
 
 // episodeFile is one episode file and the directory that holds it, so the
@@ -169,25 +189,33 @@ type episodeFile struct {
 // season folder one level down, and any file directly in the series folder. The
 // walk goes one level deep, because a season folder is the only nesting a series
 // volume uses.
-func collectEpisodeFiles(seriesDir string, ignore ignoreSet) []episodeFile {
+func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, error) {
 	var files []episodeFile
-	for _, file := range listVideoFiles(seriesDir) {
+	videos, err := listVideoFiles(seriesDir)
+	if err != nil {
+		return files, err
+	}
+	for _, file := range videos {
 		files = append(files, episodeFile{dir: seriesDir, file: file})
 	}
 	entries, err := os.ReadDir(seriesDir)
 	if err != nil {
-		return files
+		return files, err
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || ignore.skips(entry.Name()) {
 			continue
 		}
 		seasonDir := filepath.Join(seriesDir, entry.Name())
-		for _, file := range listVideoFiles(seasonDir) {
+		videos, err := listVideoFiles(seasonDir)
+		if err != nil {
+			return files, err
+		}
+		for _, file := range videos {
 			files = append(files, episodeFile{dir: seasonDir, file: file})
 		}
 	}
-	return files
+	return files, nil
 }
 
 // scanEpisode reads one episode file into an item per episode it holds and one
@@ -201,9 +229,17 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) []episodeFile {
 // the file name where none does. An episode the scanner cannot number is left
 // out and reports no id, because it has no place under the series.
 func scanEpisode(root, library, seriesID string, episode episodeFile, result *walkResult) []string {
-	metas := episodeIdentity(episode)
+	metas, err := episodeIdentity(episode)
+	// An episode whose sidecar could not be read has no numbers this
+	// pass, and a row read from the file name alone could carry another
+	// episode's id.
+	if err != nil {
+		result.noteReadError(err)
+		return nil
+	}
 	absolute := filepath.Join(episode.dir, episode.file)
-	thumb := episodeThumb(root, episode.dir, episode.file)
+	thumb, err := episodeThumb(root, episode.dir, episode.file)
+	result.noteReadError(err)
 
 	var episodeItemIDs []string
 	for _, meta := range metas {
@@ -250,7 +286,11 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 		stream = &metas[0].Stream
 	}
 	container, videoCodec, audioCodec, width, height, durationMs := fileAttributes(episode.file, stream)
-	size, modified := statFile(absolute)
+	size, modified, err := statFile(absolute)
+	if err != nil {
+		result.noteReadError(err)
+		return episodeItemIDs
+	}
 	class := classifyFile(episode.file, filePlace{kind: libraryKindSeries, season: true})
 	result.files = append(result.files, fileRow{
 		Path:       relativePath(root, absolute),
@@ -284,13 +324,17 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 // is the source where one exists; the season folder and the file name fill a
 // number the sidecar left at zero, so a sidecar that names only the episode
 // still takes its season from the folder.
-func episodeIdentity(episode episodeFile) []episodeMeta {
+func episodeIdentity(episode episodeFile) ([]episodeMeta, error) {
 	var blocks []episodeMeta
 	nfoPath := filepath.Join(episode.dir, stripExtension(episode.file)+".nfo")
-	if data, err := os.ReadFile(nfoPath); err == nil {
+	data, err := os.ReadFile(nfoPath)
+	switch {
+	case err == nil:
 		if parsed, err := parseEpisodeNFOs(data); err == nil {
 			blocks = parsed
 		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return nil, err
 	}
 
 	var first episodeMeta
@@ -319,5 +363,5 @@ func episodeIdentity(episode episodeFile) []episodeMeta {
 		next.Episode = episodeNumbers[index]
 		metas = append(metas, next)
 	}
-	return metas
+	return metas, nil
 }

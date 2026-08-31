@@ -437,3 +437,55 @@ func TestWalkSeriesFallsBackToFolderNames(t *testing.T) {
 		t.Errorf("top-level episode = %+v, want s01e01 from the file name", placed)
 	}
 }
+
+// A series folder with no tvshow.nfo falls back to the folder name, and
+// the walk is complete.
+func TestASeriesWithNoSidecarKeepsThePathIdentity(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Show (2019)", "Season 01", "Show S01E01.mkv"), "video")
+
+	result := walkSeries(root, "house/series", nil)
+
+	if result.readError {
+		t.Error("a series with no sidecar marked the walk incomplete")
+	}
+	if len(result.series) != 1 || result.series[0].Id != "series:path:show-2019" {
+		t.Errorf("series = %+v, want the path-derived id", result.series)
+	}
+}
+
+// A tvshow.nfo the scanner cannot read marks the walk incomplete, for
+// the reason the movies walk does: the fall-back would change the series
+// id, and the sweep would then delete every episode under the old one.
+func TestAnUnreadableSeriesSidecarMarksTheWalkIncomplete(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show (2019)")
+	writeFile(t, filepath.Join(show, "Season 01", "Show S01E01.mkv"), "video")
+	if err := os.MkdirAll(filepath.Join(show, "tvshow.nfo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := walkSeries(root, "house/series", nil)
+
+	if !result.readError {
+		t.Error("a series sidecar that could not be read left the walk complete")
+	}
+}
+
+// An episode sidecar that cannot be read marks the walk incomplete too,
+// so an episode whose numbers the walk could not read is not swept as
+// departed.
+func TestAnUnreadableEpisodeSidecarMarksTheWalkIncomplete(t *testing.T) {
+	root := t.TempDir()
+	season := filepath.Join(root, "Show (2019)", "Season 01")
+	writeFile(t, filepath.Join(season, "Show S01E01.mkv"), "video")
+	if err := os.MkdirAll(filepath.Join(season, "Show S01E01.nfo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := walkSeries(root, "house/series", nil)
+
+	if !result.readError {
+		t.Error("an episode sidecar that could not be read left the walk complete")
+	}
+}

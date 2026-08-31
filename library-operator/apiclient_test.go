@@ -34,7 +34,7 @@ func TestServerVersionReadsTheVersionEndpoint(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(Version{GitVersion: "v1.34.1+k3s1"})
 	}))
 
-	version, err := ServerVersion(client)
+	version, err := ServerVersion(t.Context(), client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestRequestJSONTurnsStatusesIntoAnswers(t *testing.T) {
 				_, _ = w.Write([]byte(testCase.body))
 			}))
 
-			err := client.RequestJSON(http.MethodGet, "/version", nil, &Version{})
+			err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, &Version{})
 			if testCase.want != nil {
 				if !errors.Is(err, testCase.want) {
 					t.Fatalf("err = %v, want %v", err, testCase.want)
@@ -91,7 +91,7 @@ func TestRequestJSONAsksForJSONAndSendsNoTokenWithoutCredentials(t *testing.T) {
 		_, _ = w.Write([]byte("{}"))
 	}))
 
-	if err := client.RequestJSON(http.MethodGet, "/version", nil, nil); err != nil {
+	if err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if accept != "application/json" {
@@ -116,7 +116,7 @@ func TestRequestJSONSendsItsBodyAsJSON(t *testing.T) {
 		_, _ = w.Write([]byte("{}"))
 	}))
 
-	if err := client.RequestJSON(http.MethodPost, "/api/v1/namespaces/house/pods", []byte(`{"kind":"Pod"}`), nil); err != nil {
+	if err := client.RequestJSON(t.Context(), http.MethodPost, "/api/v1/namespaces/house/pods", []byte(`{"kind":"Pod"}`), nil); err != nil {
 		t.Fatal(err)
 	}
 	if contentType != "application/json" {
@@ -140,7 +140,7 @@ func TestRequestJSONSendsTheTokenItReadsFromDisk(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := NewClient(server.URL, server.Client(), directory)
-	if err := client.RequestJSON(http.MethodGet, "/version", nil, nil); err != nil {
+	if err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if authorization != "Bearer a-service-account-token" {
@@ -151,7 +151,7 @@ func TestRequestJSONSendsTheTokenItReadsFromDisk(t *testing.T) {
 func TestRequestJSONFailsWhenTheTokenIsMissing(t *testing.T) {
 	client := NewClient("https://kubernetes.default.svc", http.DefaultClient, t.TempDir())
 
-	err := client.RequestJSON(http.MethodGet, "/version", nil, nil)
+	err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "service account token") {
 		t.Fatalf("err = %v, want a missing token", err)
 	}
@@ -250,7 +250,7 @@ func TestInClusterClientAddressesTheServiceFromTheEnvironment(t *testing.T) {
 func TestRequestJSONFailsWhenTheAddressIsUnusable(t *testing.T) {
 	client := NewClient("https://kubernetes.default.svc\x7f", http.DefaultClient, "")
 
-	err := client.RequestJSON(http.MethodGet, "/version", nil, nil)
+	err := client.RequestJSON(t.Context(), http.MethodGet, "/version", nil, nil)
 
 	if err == nil || !strings.Contains(err.Error(), "/version") {
 		t.Fatalf("err = %v, want the request it could not make", err)
@@ -306,7 +306,7 @@ func TestListLibrariesReadsEveryNamespace(t *testing.T) {
 		}},
 	})
 
-	list, err := ListLibraries(client)
+	list, err := ListLibraries(t.Context(), client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 	client, recorded := recordingAPI(t, written)
 
-	back, err := PutLibraryStatus(client, written)
+	back, err := PutLibraryStatus(t.Context(), client, written)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 func TestPutLibraryStatusWritesAZeroCount(t *testing.T) {
 	client, recorded := recordingAPI(t, &Library{})
 
-	if _, err := PutLibraryStatus(client, &Library{
+	if _, err := PutLibraryStatus(t.Context(), client, &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
 		Status:   LibraryStatus{Titles: 0, Unidentified: 0},
 	}); err != nil {
@@ -373,7 +373,7 @@ func TestGetPersistentVolumeClaimReadsTheClaimTheLibraryNames(t *testing.T) {
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	})
 
-	claim, err := GetPersistentVolumeClaim(client, "house", "movies")
+	claim, err := GetPersistentVolumeClaim(t.Context(), client, "house", "movies")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,11 +391,11 @@ func TestGetPersistentVolumeReadsWhatServesTheStorage(t *testing.T) {
 		"metadata": map[string]any{"name": "pv-movies"},
 		"spec": map[string]any{
 			"capacity": map[string]any{"storage": "8Ti"},
-			"nfs":      map[string]any{"server": "movies.example", "path": "/volume1/movies"},
+			"nfs":      map[string]any{"server": "movies.example", "path": "/srv/media/movies"},
 		},
 	})
 
-	volume, err := GetPersistentVolume(client, "pv-movies")
+	volume, err := GetPersistentVolume(t.Context(), client, "pv-movies")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,39 +414,39 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		name string
 		call func(*Client) error
 	}{
-		{name: "ListLibraries", call: func(c *Client) error { _, err := ListLibraries(c); return err }},
-		{name: "PutLibraryStatus", call: func(c *Client) error { _, err := PutLibraryStatus(c, &Library{}); return err }},
+		{name: "ListLibraries", call: func(c *Client) error { _, err := ListLibraries(t.Context(), c); return err }},
+		{name: "PutLibraryStatus", call: func(c *Client) error { _, err := PutLibraryStatus(t.Context(), c, &Library{}); return err }},
 		{name: "GetPersistentVolumeClaim", call: func(c *Client) error {
-			_, err := GetPersistentVolumeClaim(c, "house", "movies")
+			_, err := GetPersistentVolumeClaim(t.Context(), c, "house", "movies")
 			return err
 		}},
-		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(c, "pv-movies"); return err }},
-		{name: "ListScannerPods", call: func(c *Client) error { _, err := ListScannerPods(c); return err }},
-		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(c, "house", "movies-scanner"); return err }},
-		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(c, &Pod{}); return err }},
-		{name: "DeletePod", call: func(c *Client) error { return DeletePod(c, "house", "movies-scanner") }},
+		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
+		{name: "ListScannerPods", call: func(c *Client) error { _, err := ListScannerPods(t.Context(), c); return err }},
+		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(t.Context(), c, "house", "movies-scanner"); return err }},
+		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(t.Context(), c, &Pod{}); return err }},
+		{name: "DeletePod", call: func(c *Client) error { return DeletePod(t.Context(), c, "house", "movies-scanner") }},
 		{name: "GetEndpointSlice", call: func(c *Client) error {
-			_, err := GetEndpointSlice(c, "house", "catalog")
+			_, err := GetEndpointSlice(t.Context(), c, "house", "catalog")
 			return err
 		}},
 		{name: "CreateEndpointSlice", call: func(c *Client) error {
-			_, err := CreateEndpointSlice(c, &EndpointSlice{})
+			_, err := CreateEndpointSlice(t.Context(), c, &EndpointSlice{})
 			return err
 		}},
 		{name: "UpdateEndpointSlice", call: func(c *Client) error {
-			_, err := UpdateEndpointSlice(c, &EndpointSlice{})
+			_, err := UpdateEndpointSlice(t.Context(), c, &EndpointSlice{})
 			return err
 		}},
 		{name: "GetService", call: func(c *Client) error {
-			_, err := GetService(c, "house", "catalog")
+			_, err := GetService(t.Context(), c, "house", "catalog")
 			return err
 		}},
 		{name: "CreateService", call: func(c *Client) error {
-			_, err := CreateService(c, &Service{})
+			_, err := CreateService(t.Context(), c, &Service{})
 			return err
 		}},
 		{name: "UpdateService", call: func(c *Client) error {
-			_, err := UpdateService(c, &Service{})
+			_, err := UpdateService(t.Context(), c, &Service{})
 			return err
 		}},
 	}

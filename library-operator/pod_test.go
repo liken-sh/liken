@@ -419,7 +419,7 @@ func TestListScannerPodsSelectsTheOperatorsOwnPods(t *testing.T) {
 		Items:    []Pod{{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}}},
 	})
 
-	list, err := ListScannerPods(client)
+	list, err := ListScannerPods(t.Context(), client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +442,7 @@ func TestGetPodReadsOnePodByName(t *testing.T) {
 		},
 	})
 
-	pod, err := GetPod(client, "house", "movies-scanner")
+	pod, err := GetPod(t.Context(), client, "house", "movies-scanner")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +456,7 @@ func TestGetPodReadsOnePodByName(t *testing.T) {
 func TestCreatePodPostsIntoTheLibrarysNamespace(t *testing.T) {
 	client, recorded := recordingAPI(t, Pod{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}})
 
-	created, err := CreatePod(client, &Pod{
+	created, err := CreatePod(t.Context(), client, &Pod{
 		APIVersion: podAPIVersion,
 		Kind:       "Pod",
 		Metadata: ObjectMeta{
@@ -499,7 +499,7 @@ func TestDeletePodTreatsAnAbsentPodAsDone(t *testing.T) {
 				w.WriteHeader(testCase.status)
 			}))
 
-			err := DeletePod(client, "house", "movies-scanner")
+			err := DeletePod(t.Context(), client, "house", "movies-scanner")
 
 			if (err != nil) != testCase.wantErr {
 				t.Fatalf("err = %v, want an error: %v", err, testCase.wantErr)

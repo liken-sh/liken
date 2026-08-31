@@ -6,7 +6,10 @@ package main
 // so the claim survives a pod roll and is garbage-collected with the
 // Library.
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
 
 // scannerCatalogClaimName is the durable catalog volume one Library's
 // scanner pod mounts. It is derived from the Library name, so every pass
@@ -46,11 +49,11 @@ func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentV
 // binds, so the operator provisions the claim rather than reconciling it. A
 // size a later Catalog grows to reaches a new claim, not this one. A conflict
 // on the create means another writer got there first, which is success.
-func (o *operator) standCatalogClaim(library *Library, catalog *NamespaceCatalog) error {
+func (o *operator) standCatalogClaim(ctx context.Context, library *Library, catalog *NamespaceCatalog) error {
 	namespace := library.Metadata.Namespace
 	name := scannerCatalogClaimName(library.Metadata.Name)
 
-	_, err := GetPersistentVolumeClaim(o.client, namespace, name)
+	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
 	if err == nil {
 		return nil
 	}
@@ -58,7 +61,7 @@ func (o *operator) standCatalogClaim(library *Library, catalog *NamespaceCatalog
 		return err
 	}
 
-	_, err = CreatePersistentVolumeClaim(o.client, buildCatalogClaim(library, catalog))
+	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildCatalogClaim(library, catalog))
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

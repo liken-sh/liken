@@ -72,7 +72,7 @@ func TestWebhookURLNamesTheServiceAndItsNamespace(t *testing.T) {
 func TestStandWebhookServiceCreatesTheServiceWhenThereIsNone(t *testing.T) {
 	cluster := newFakeCluster()
 
-	if err := testOperator(t, cluster).standWebhookService(studioMovies()); err != nil {
+	if err := testOperator(t, cluster).standWebhookService(t.Context(), studioMovies()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,11 +94,11 @@ func TestStandWebhookServiceCreatesTheServiceWhenThereIsNone(t *testing.T) {
 func TestStandWebhookServiceWritesOnDivergenceAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	operator := testOperator(t, cluster)
-	if err := operator.standWebhookService(studioMovies()); err != nil {
+	if err := operator.standWebhookService(t.Context(), studioMovies()); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := operator.standWebhookService(studioMovies()); err != nil {
+	if err := operator.standWebhookService(t.Context(), studioMovies()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +110,7 @@ func TestStandWebhookServiceWritesOnDivergenceAlone(t *testing.T) {
 	drifted.Spec.Selector = map[string]string{libraryLabelKey: "shows"}
 	cluster.holdService(drifted)
 
-	if err := operator.standWebhookService(studioMovies()); err != nil {
+	if err := operator.standWebhookService(t.Context(), studioMovies()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -127,14 +127,14 @@ func TestStandWebhookServiceWritesOnDivergenceAlone(t *testing.T) {
 func TestStandWebhookServiceKeepsTheAddressTheAPIServerAssigned(t *testing.T) {
 	cluster := newFakeCluster()
 	operator := testOperator(t, cluster)
-	if err := operator.standWebhookService(studioMovies()); err != nil {
+	if err := operator.standWebhookService(t.Context(), studioMovies()); err != nil {
 		t.Fatal(err)
 	}
 	drifted := cluster.heldService("house", "movies-scanner")
 	drifted.Metadata.OwnerReferences = nil
 	cluster.holdService(drifted)
 
-	if err := operator.standWebhookService(studioMovies()); err != nil {
+	if err := operator.standWebhookService(t.Context(), studioMovies()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,7 +157,7 @@ func TestStandWebhookServiceTreatsAConflictAsAnotherWriter(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).standWebhookService(studioMovies()); err != nil {
+	if err := testOperator(t, cluster).standWebhookService(t.Context(), studioMovies()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -166,7 +166,7 @@ func TestStandWebhookServiceReportsAFailedRead(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.broken[servicesPath("house")+"/movies-scanner"] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).standWebhookService(studioMovies())
+	err := testOperator(t, cluster).standWebhookService(t.Context(), studioMovies())
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -177,7 +177,7 @@ func TestStandWebhookServiceReportsAFailedWrite(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.broken[servicesPath("house")] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).standWebhookService(studioMovies())
+	err := testOperator(t, cluster).standWebhookService(t.Context(), studioMovies())
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -199,7 +199,7 @@ func TestStandWebhookServiceReportsAFailedUpdate(t *testing.T) {
 	}))
 	operator := newOperator(client, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 
-	err := operator.standWebhookService(studioMovies())
+	err := operator.standWebhookService(t.Context(), studioMovies())
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)

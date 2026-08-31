@@ -60,6 +60,9 @@ type folderRule struct {
 // below the root that no longer exists, which is a title deleted while the walk
 // ran. That is an ordinary event on a live volume, and the next walk reports
 // the deletion.
+//
+// A directory past the depth cap is unread in the same way, so it marks
+// the pass incomplete rather than returning silently.
 func (r folderRule) read(dir walkDirectory) (*walkResult, []walkDirectory) {
 	if dir.depth > 0 && r.isTitle(dir.path) {
 		folder := &walkResult{}
@@ -67,7 +70,7 @@ func (r folderRule) read(dir walkDirectory) (*walkResult, []walkDirectory) {
 		return folder, nil
 	}
 	if dir.depth > r.maxDepth {
-		return nil, nil
+		return &walkResult{readError: true}, nil
 	}
 	entries, err := os.ReadDir(dir.path)
 	if err != nil {

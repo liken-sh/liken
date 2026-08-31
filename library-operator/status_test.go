@@ -28,10 +28,11 @@ func boundVolume() binding {
 func readyPod(phase string, ready bool) *Pod {
 	return &Pod{
 		Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"},
-		Status: PodStatus{Phase: phase, ContainerStatuses: []ContainerStatus{
-			{Name: scannerContainer, Ready: ready},
-			{Name: catalogContainer, Ready: ready},
-		}},
+		Status: PodStatus{
+			Phase:                 phase,
+			InitContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: ready}},
+			ContainerStatuses:     []ContainerStatus{{Name: scannerContainer, Ready: ready}},
+		},
 	}
 }
 
@@ -319,10 +320,10 @@ func TestWriteLibraryStatusWritesOnlyAChange(t *testing.T) {
 	settled := deriveLibraryStatus(library, boundVolume(), withCatalog(), readyPod(podRunning, true),
 		&libraryReport{Titles: 12}, true, testNow)
 
-	if err := writeLibraryStatus(client, library, settled); err != nil {
+	if err := writeLibraryStatus(t.Context(), client, library, settled); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeLibraryStatus(client, library, settled); err != nil {
+	if err := writeLibraryStatus(t.Context(), client, library, settled); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "libraries"); got != 1 {
@@ -330,7 +331,7 @@ func TestWriteLibraryStatusWritesOnlyAChange(t *testing.T) {
 	}
 
 	settled.Titles = 13
-	if err := writeLibraryStatus(client, library, settled); err != nil {
+	if err := writeLibraryStatus(t.Context(), client, library, settled); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "libraries"); got != 2 {
@@ -347,7 +348,7 @@ func TestWriteLibraryStatusAcceptsAConflict(t *testing.T) {
 	cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/libraries/movies/status"] = http.StatusConflict
 	client := testOperator(t, cluster).client
 
-	err := writeLibraryStatus(client, library,
+	err := writeLibraryStatus(t.Context(), client, library,
 		deriveLibraryStatus(library, boundVolume(), withCatalog(), nil, nil, true, testNow))
 
 	if err != nil {
@@ -363,7 +364,7 @@ func TestWriteLibraryStatusReportsAFailedWrite(t *testing.T) {
 	cluster.broken["/apis/"+libraryAPIVersion+"/namespaces/house/libraries/movies/status"] = http.StatusInternalServerError
 	client := testOperator(t, cluster).client
 
-	err := writeLibraryStatus(client, library,
+	err := writeLibraryStatus(t.Context(), client, library,
 		deriveLibraryStatus(library, boundVolume(), withCatalog(), nil, nil, true, testNow))
 
 	if err == nil {

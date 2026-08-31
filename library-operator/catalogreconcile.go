@@ -2,10 +2,12 @@ package main
 
 // catalogreconcile.go stands the namespace catalog. A pass reconciles each
 // namespace's one Catalog into the catalog Service, the EndpointSlice, and
-// the Catalog's own status. A namespace with more than one Catalog stands no
-// cluster, and every Catalog in it is marked Blocked.
+// the Catalog's own status. A namespace with more than one Catalog stands
+// nothing new this pass: every Catalog in it is marked Blocked, and the
+// Service and the slice that already stand are left as they are.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,11 +21,11 @@ import (
 // reconcileCatalogs stands each namespace's catalog cluster from its one
 // Catalog. The catalog Service and EndpointSlice are owned by the Catalog,
 // which is their real owner: they describe the namespace's one Corrosion
-// cluster. A namespace with more than one Catalog stands no cluster, and
-// every Catalog in it is marked Blocked. A failure in one namespace is
+// cluster. A namespace with more than one Catalog marks every Catalog in
+// it Blocked and stands nothing new. A failure in one namespace is
 // reported, and the rest still stand.
-func (o *operator) reconcileCatalogs(byNamespace map[string][]*NamespaceCatalog) {
-	pods, err := ListScannerPods(o.client)
+func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string][]*NamespaceCatalog) {
+	pods, err := ListScannerPods(ctx, o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing scanner pods: %v\n", err)
 		return
@@ -33,7 +35,7 @@ func (o *operator) reconcileCatalogs(byNamespace map[string][]*NamespaceCatalog)
 		catalogs := byNamespace[namespace]
 		if len(catalogs) != 1 {
 			for _, catalog := range catalogs {
-				if err := o.writeCatalogStatus(catalog, blockedCatalogStatus(catalog, catalogs, now)); err != nil {
+				if err := o.writeCatalogStatus(ctx, catalog, blockedCatalogStatus(catalog, catalogs, now)); err != nil {
 					fmt.Fprintf(os.Stderr, "marking the catalog %s/%s blocked: %v\n",
 						catalog.Metadata.Namespace, catalog.Metadata.Name, err)
 				}
@@ -42,13 +44,13 @@ func (o *operator) reconcileCatalogs(byNamespace map[string][]*NamespaceCatalog)
 		}
 		catalog := catalogs[0]
 		owners := []OwnerReference{catalogObjectOwner(catalog)}
-		if err := o.standCatalogService(namespace, owners); err != nil {
+		if err := o.standCatalogService(ctx, namespace, owners); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog service in %s: %v\n", namespace, err)
 		}
-		if err := o.standCatalogEndpoints(namespace, owners, pods.Items); err != nil {
+		if err := o.standCatalogEndpoints(ctx, namespace, owners, pods.Items); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog endpoints in %s: %v\n", namespace, err)
 		}
-		if err := o.writeCatalogStatus(catalog, standingCatalogStatus(catalog, pods.Items, now)); err != nil {
+		if err := o.writeCatalogStatus(ctx, catalog, standingCatalogStatus(catalog, pods.Items, now)); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the catalog status in %s: %v\n", namespace, err)
 		}
 	}
@@ -122,13 +124,13 @@ func catalogMembers(namespace string, pods []Pod) []string {
 // Catalog carries, the rule writeLibraryStatus also follows, so a write on
 // every pass does not wake the catalogs watch that wakes the pass. A conflict
 // means another writer got there first, which the next pass reads.
-func (o *operator) writeCatalogStatus(catalog *NamespaceCatalog, desired CatalogStatus) error {
+func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCatalog, desired CatalogStatus) error {
 	same, err := sameCatalogStatus(catalog.Status, desired)
 	if err != nil || same {
 		return err
 	}
 	catalog.Status = desired
-	_, err = PutCatalogStatus(o.client, catalog)
+	_, err = PutCatalogStatus(ctx, o.client, catalog)
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

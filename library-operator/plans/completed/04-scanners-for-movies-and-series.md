@@ -49,8 +49,10 @@ contract is the same for every kind.
   arrives with no event waits for the next full walk.
 - It has no API-server credential.
 
-The project ships one image per kind. A settings block may name another
-image, which is how a person supplies a scanner of their own.
+One image serves every kind: the operator stamps the image the manifest
+names into the scanner container of every Library. A settings block may
+name another image, which is how a person supplies a scanner of their
+own.
 
 ## Marked and swept
 
@@ -250,5 +252,6 @@ Plan 04 shipped over releases 2026.08.30-001 through -011 and drilled on
   their titles, and the series reported its episodes under the right
   season and episode numbers, checked by hand against one series. A
   webhook drove a scoped rescan within the request, and adding a folder to
-  the `ignore` list removed its rows from the catalog. The catalog's
-  `state.db` for both libraries is 38 MB, which plan 06 budgets against.
+  the `ignore` list removed its rows from the catalog. Plan 06 budgets
+  against the measured size of the catalog's `state.db` for both
+  libraries.

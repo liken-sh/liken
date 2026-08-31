@@ -7,11 +7,11 @@
 # table and the key, so a pod changes one setting and keeps the rest.
 
 [db]
-# The catalog is derived from a walk of the volume, so it needs no
-# durability beyond a rescan, and the pod gives this directory an
-# `emptyDir`. The agent writes the database, its write-ahead log, its
-# subscription files, and its admin socket under this one directory, so
-# the container needs no other writable path.
+# The pod mounts the durable catalog claim on this directory, so a pod
+# that restarts keeps the catalog it holds. The agent writes the
+# database, its write-ahead log, its subscription files, and its admin
+# socket under this one directory, so the container needs no other
+# writable path.
 path = "/var/lib/corrosion/state.db"
 
 # Every agent in the cluster loads the same schema. Corrosion reads
@@ -78,6 +78,6 @@ bootstrap = ["catalog:8787"]
 [admin]
 # The admin socket answers `corrosion cluster members` and the other
 # operator commands. It moves off its default under `/var/run` so that
-# the `emptyDir` holds every path the agent writes, and the container
-# can run with a read-only root filesystem.
+# the one mounted directory holds every path the agent writes, and the
+# container can run with a read-only root filesystem.
 path = "/var/lib/corrosion/admin.sock"

@@ -65,6 +65,13 @@ func TestClassifyFile(t *testing.T) {
 		{name: "season02.nfo", place: series, wantType: fileTypeMetadata, wantRole: fileRoleSeason},
 		{name: "collection.nfo", place: movies, wantType: fileTypeMetadata, wantRole: fileRoleCollection},
 		{name: "Breaking Bad - S02E05.nfo", place: season, wantType: fileTypeMetadata, wantRole: fileRoleEpisode},
+		// A word a role is named for, inside a title, is part of the
+		// title. The role is the last token of the name, which is where
+		// the tools write it.
+		{name: "Discovery.jpg", place: movies, wantType: fileTypeImage},
+		{name: "Coverage.jpg", place: movies, wantType: fileTypeImage},
+		{name: "Sample People (2000).mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRolePrimary},
+		{name: "The Matrix (1999)-sample.mkv", place: movies, wantType: fileTypeVideo, wantRole: fileRoleSample},
 		{name: "release.txt", place: movies, wantType: fileTypeOther},
 		{name: "checksums.sfv", place: movies, wantType: fileTypeOther},
 	}
@@ -81,10 +88,7 @@ func TestClassifyFile(t *testing.T) {
 
 // The walk classifies a trickplay directory where it finds it, and never off
 // an extension, so this is the one role no file name states.
-func TestFileRoleOfATrickplayDirectory(t *testing.T) {
-	if got := fileRoleOf(fileTypeTrickplay, "The Matrix (1999).trickplay", filePlace{}); got != fileRoleTiles {
-		t.Errorf("role = %q, want %q", got, fileRoleTiles)
-	}
+func TestFileRoleOfACategoryWithNoVocabulary(t *testing.T) {
 	if got := fileRoleOf("", "anything", filePlace{}); got != "" {
 		t.Errorf("role = %q, want none for a category with no vocabulary", got)
 	}
@@ -198,21 +202,28 @@ func TestEpisodeItem(t *testing.T) {
 }
 
 func TestStatFileOnAMissingPath(t *testing.T) {
-	size, modified := statFile("testdata/nowhere/x.jpg")
+	size, modified, err := statFile("testdata/nowhere/x.jpg")
+	if err == nil {
+		t.Error("statFile read a path that is not there without an error")
+	}
 	if size != 0 || modified != 0 {
 		t.Errorf("statFile = %d %d, want zeroes for a path that cannot be read", size, modified)
 	}
 }
 
-// A directory the walk cannot read yields no rows and no subdirectories, so
-// a permission error on one folder does not end the walk.
+// A directory the walk cannot read yields no rows, no subdirectories,
+// and an error, so the folder marks the walk incomplete rather than
+// sweeping its files as departed.
 func TestFolderFilesOnAnUnreadableDirectory(t *testing.T) {
-	rows, subdirectories := folderFiles{
+	rows, subdirectories, err := folderFiles{
 		root:    "testdata",
 		dir:     "testdata/nowhere",
 		library: "house/movies",
 		item:    constantItem("movie:tmdb:1"),
 	}.read()
+	if err == nil {
+		t.Error("read answered a directory that cannot be read without an error")
+	}
 	if rows != nil || subdirectories != nil {
 		t.Errorf("read = %v %v, want nothing from a directory that cannot be read", rows, subdirectories)
 	}

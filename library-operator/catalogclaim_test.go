@@ -64,7 +64,7 @@ func TestBuildCatalogClaimOmitsAnEmptyClassAndDefaultsTheSize(t *testing.T) {
 func TestStandCatalogClaimCreatesTheClaimWhenThereIsNone(t *testing.T) {
 	cluster := newFakeCluster()
 
-	if err := testOperator(t, cluster).standCatalogClaim(studioMovies(), testCatalogWithSize("1Gi", "")); err != nil {
+	if err := testOperator(t, cluster).standCatalogClaim(t.Context(), studioMovies(), testCatalogWithSize("1Gi", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -88,7 +88,7 @@ func TestStandCatalogClaimLeavesAnExistingClaim(t *testing.T) {
 	}
 	operator := testOperator(t, cluster)
 
-	if err := operator.standCatalogClaim(studioMovies(), testCatalogWithSize("1Gi", "")); err != nil {
+	if err := operator.standCatalogClaim(t.Context(), studioMovies(), testCatalogWithSize("1Gi", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +103,7 @@ func TestStandCatalogClaimAcceptsAConflict(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).standCatalogClaim(studioMovies(), testCatalogWithSize("1Gi", "")); err != nil {
+	if err := testOperator(t, cluster).standCatalogClaim(t.Context(), studioMovies(), testCatalogWithSize("1Gi", "")); err != nil {
 		t.Fatalf("err = %v, want a conflict to read as success", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestStandCatalogClaimReportsAFailedRead(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/movies-catalog"] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).standCatalogClaim(studioMovies(), testCatalogWithSize("1Gi", ""))
+	err := testOperator(t, cluster).standCatalogClaim(t.Context(), studioMovies(), testCatalogWithSize("1Gi", ""))
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -128,7 +128,7 @@ func TestCreatePersistentVolumeClaimPostsIntoTheNamespace(t *testing.T) {
 		Metadata: ObjectMeta{Name: "movies-catalog", Namespace: "house"},
 	})
 
-	created, err := CreatePersistentVolumeClaim(client, buildCatalogClaim(studioMovies(), testCatalogWithSize("1Gi", "")))
+	created, err := CreatePersistentVolumeClaim(t.Context(), client, buildCatalogClaim(studioMovies(), testCatalogWithSize("1Gi", "")))
 	if err != nil {
 		t.Fatal(err)
 	}

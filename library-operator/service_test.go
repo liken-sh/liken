@@ -70,7 +70,7 @@ func TestStandCatalogServiceCreatesTheServiceWhenThereIsNone(t *testing.T) {
 	cluster := newFakeCluster()
 	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
 
-	if err := testOperator(t, cluster).standCatalogService(testLibraryNamespace, owners); err != nil {
+	if err := testOperator(t, cluster).standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,11 +93,11 @@ func TestStandCatalogServiceWritesOnDivergenceAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	operator := testOperator(t, cluster)
 	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
-	if err := operator.standCatalogService(testLibraryNamespace, owners); err != nil {
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := operator.standCatalogService(testLibraryNamespace, owners); err != nil {
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,7 +106,7 @@ func TestStandCatalogServiceWritesOnDivergenceAlone(t *testing.T) {
 	}
 
 	owners = append(owners, catalogOwner("shows", "shows-uid"))
-	if err := operator.standCatalogService(testLibraryNamespace, owners); err != nil {
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,11 +124,11 @@ func TestStandCatalogServiceWritesOnDivergenceAlone(t *testing.T) {
 func TestStandCatalogServiceKeepsTheAddressTheAPIServerAssigned(t *testing.T) {
 	cluster := newFakeCluster()
 	operator := testOperator(t, cluster)
-	if err := operator.standCatalogService(testLibraryNamespace, nil); err != nil {
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := operator.standCatalogService(testLibraryNamespace,
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace,
 		[]OwnerReference{catalogOwner("movies", "movies-uid")}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestStandCatalogServiceClearsASelectorItDidNotWrite(t *testing.T) {
 	cluster := newFakeCluster()
 	operator := testOperator(t, cluster)
 	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
-	if err := operator.standCatalogService(testLibraryNamespace, owners); err != nil {
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,7 +163,7 @@ func TestStandCatalogServiceClearsASelectorItDidNotWrite(t *testing.T) {
 	live.Spec.Selector = map[string]string{"app": "catalog"}
 	cluster.holdService(live)
 
-	if err := operator.standCatalogService(testLibraryNamespace, owners); err != nil {
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestStandCatalogServiceTreatsAConflictAsAnotherWriter(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).standCatalogService(testLibraryNamespace, nil); err != nil {
+	if err := testOperator(t, cluster).standCatalogService(t.Context(), testLibraryNamespace, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -186,7 +186,7 @@ func TestStandCatalogServiceReportsAFailedRead(t *testing.T) {
 	path := servicesPath(testLibraryNamespace) + "/" + catalogServiceName
 	cluster.broken[path] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).standCatalogService(testLibraryNamespace, nil)
+	err := testOperator(t, cluster).standCatalogService(t.Context(), testLibraryNamespace, nil)
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -201,7 +201,7 @@ func TestGetServiceReadsTheCatalogService(t *testing.T) {
 		Spec:     ServiceSpec{ClusterIP: headlessClusterIP, ClusterIPs: []string{headlessClusterIP}},
 	})
 
-	service, err := GetService(client, "house", "catalog")
+	service, err := GetService(t.Context(), client, "house", "catalog")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestCreateServicePostsIntoTheLibrarysNamespace(t *testing.T) {
 		Metadata: ObjectMeta{Name: "catalog", Namespace: "house"},
 	})
 
-	created, err := CreateService(client, buildCatalogService("house", nil))
+	created, err := CreateService(t.Context(), client, buildCatalogService("house", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestUpdateServiceWritesTheVersionItRead(t *testing.T) {
 	service := buildCatalogService("house", nil)
 	service.Metadata.ResourceVersion = "44"
 
-	written, err := UpdateService(client, service)
+	written, err := UpdateService(t.Context(), client, service)
 	if err != nil {
 		t.Fatal(err)
 	}

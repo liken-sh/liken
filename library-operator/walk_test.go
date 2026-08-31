@@ -315,8 +315,9 @@ func TestAFolderRuleReadsOneDirectory(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "a folder past the depth cap is not descended into",
-			dir:  walkDirectory{path: root, depth: movieGroupingDepth + 1},
+			name:      "a folder past the depth cap is unread and marks the walk incomplete",
+			dir:       walkDirectory{path: root, depth: movieGroupingDepth + 1},
+			wantError: true,
 		},
 	}
 	for _, testCase := range cases {

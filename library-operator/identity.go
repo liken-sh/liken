@@ -53,10 +53,20 @@ type walkResult struct {
 	// full walk names a sample of them in its log without holding every
 	// one. It carries one path per unidentified folder.
 	unidentifiedNames []string
-	// A walk that could not read the root read only part of the volume, so
-	// the prune-abort guard skips the prune for this pass and keeps the rows
-	// the walk did not reach.
+	// A walk that could not read a directory, a sidecar, or a file read
+	// only part of the volume, whatever the depth of the failure. The
+	// prune-abort guard then skips the prune for this pass and keeps the
+	// rows the walk did not reach.
 	readError bool
+}
+
+// noteReadError folds one failed read into the walk's incomplete mark. A
+// folder the scanner could not read in full must never sweep as departed,
+// and the mark is what holds the prune back.
+func (r *walkResult) noteReadError(err error) {
+	if err != nil {
+		r.readError = true
+	}
 }
 
 // appendFolder folds one folder's rows into a running buffer, so the streaming

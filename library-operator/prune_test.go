@@ -86,11 +86,19 @@ func TestPruneLibraryKeepsAnotherLibrarysRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:2", "Two")
 	seedTitle(t, catalog, "studio/films", "movie:tmdb:9", "Nine")
 
-	// No id carries this epoch, so a library-blind prune would delete both.
-	// The prune scopes to its library, so the other library's row stands.
-	removed, err := pruneLibrary(ctx, catalog, "house/movies", int64(2000))
+	// The walk read this library's first title alone. No id of the other
+	// library carries the epoch either, so a library-blind prune would
+	// take its rows with the departed title's. The prune scopes to its
+	// library, so the other library's row stands.
+	epoch := int64(2000)
+	if _, err := catalog.markSeen(ctx, titleMarks("movie:tmdb:1", "One"), epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := pruneLibrary(ctx, catalog, "house/movies", epoch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +109,10 @@ func TestPruneLibraryKeepsAnotherLibrarysRows(t *testing.T) {
 	if _, held := movies["movie:tmdb:9"]; !held {
 		t.Errorf("movies = %v, want the other library's row kept", movies)
 	}
-	if _, held := movies["movie:tmdb:1"]; held {
+	if _, held := movies["movie:tmdb:1"]; !held {
+		t.Errorf("movies = %v, want this library's marked row kept", movies)
+	}
+	if _, held := movies["movie:tmdb:2"]; held {
 		t.Errorf("movies = %v, want this library's unmarked row gone", movies)
 	}
 }
@@ -905,5 +916,141 @@ func TestPruneScopeDeletesOnlyTheNamedFoldersLinks(t *testing.T) {
 	}
 	if len(links) != 3 {
 		t.Errorf("links = %v, want no link swept outside the named folder", links)
+	}
+}
+
+// A rescan of a title nested under grouping folders sweeps that title's
+// own rows and no others. The resolver reads the same title folder the
+// walk read, so the sibling titles under the same grouping folder stand,
+// and no row is written for the grouping folder itself.
+func TestRescanOfANestedTitleKeepsItsSiblings(t *testing.T) {
+	root := titleTree(t,
+		filepath.Join("Genre", "Studio", "A (2001)"),
+		filepath.Join("Genre", "Studio", "B (2002)"))
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if len(fake.held(fake.movies)) != 2 {
+		t.Fatalf("movies = %v, want the two nested titles", fake.held(fake.movies))
+	}
+
+	scan.rescan(ctx, filepath.Join(root, "Genre", "Studio", "A (2001)", "movie.mkv"))
+
+	movies := fake.held(fake.movies)
+	if len(movies) != 2 {
+		t.Fatalf("movies = %v, want both titles after a rescan of one", movies)
+	}
+	for id, row := range movies {
+		if row.path == filepath.Join("Genre", "Studio") {
+			t.Errorf("movies holds %q at the grouping folder, which is no title", id)
+		}
+	}
+}
+
+// A rescan of a nested title that left the volume sweeps its rows, and
+// the sibling under the same grouping folder stands.
+func TestRescanOfADepartedNestedTitleSweepsItAlone(t *testing.T) {
+	root := titleTree(t,
+		filepath.Join("Genre", "Studio", "A (2001)"),
+		filepath.Join("Genre", "Studio", "B (2002)"))
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	ctx := context.Background()
+
+	scan.fullWalk(ctx)
+	if err := os.RemoveAll(filepath.Join(root, "Genre", "Studio", "B (2002)")); err != nil {
+		t.Fatal(err)
+	}
+
+	scan.rescan(ctx, filepath.Join(root, "Genre", "Studio", "B (2002)", "movie.mkv"))
+
+	movies := fake.held(fake.movies)
+	if len(movies) != 1 {
+		t.Fatalf("movies = %v, want only the title the volume still holds", movies)
+	}
+	for _, row := range movies {
+		if row.path != filepath.Join("Genre", "Studio", "A (2001)") {
+			t.Errorf("movies holds %+v, want the surviving nested title", row)
+		}
+	}
+}
+
+// A delete that changes no row while the query still answers with keys
+// is a sweep that would read and delete the same batch for as long as the
+// process runs, under the walk lock. It stops with an error instead, and
+// the next walk retries.
+func TestSweepStopsWhenABatchDeletesNothing(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+	fake.deletesNothing()
+
+	_, err := pruneLibrary(ctx, catalog, "house/movies", markedEpoch(t, catalog))
+
+	if err == nil {
+		t.Fatal("a sweep that deleted nothing ran on without an error")
+	}
+	if !strings.Contains(err.Error(), "deleted none") {
+		t.Errorf("error = %v, want the sweep's own no-progress error", err)
+	}
+}
+
+// markedEpoch marks one key so the prune's guard passes, and reports the
+// epoch it marked with.
+func markedEpoch(t *testing.T, catalog *Catalog) int64 {
+	t.Helper()
+	epoch := int64(4000)
+	if _, err := catalog.markSeen(t.Context(), []string{seenItem + "movie:tmdb:0"}, epoch); err != nil {
+		t.Fatal(err)
+	}
+	return epoch
+}
+
+// A walk that marked nothing describes a mark write that did not land,
+// so the prune refuses rather than sweeping every row the library holds.
+func TestPruneLibraryRefusesAnEpochThatMarkedNothing(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+
+	removed, err := pruneLibrary(ctx, catalog, "house/movies", int64(5000))
+
+	if err == nil {
+		t.Fatal("the prune swept a library on an epoch that marked nothing")
+	}
+	if removed != 0 {
+		t.Errorf("removed = %d, want nothing removed", removed)
+	}
+	if len(fake.held(fake.movies)) != 1 {
+		t.Errorf("movies = %v, want the seeded title kept", fake.held(fake.movies))
+	}
+}
+
+// A walk whose context ended read only part of the volume and wrote only
+// part of its rows, so it prunes nothing, writes no counts, and leaves
+// the last-walk time where the last whole walk left it.
+func TestACancelledWalkLeavesTheReportAlone(t *testing.T) {
+	root := titleTree(t, "A (2001)", "B (2002)")
+	scan, fake := fakeScanner(t, root, libraryKindMovies)
+	before := scan.report.LastWalk
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	scan.fullWalk(ctx)
+
+	if !scan.report.LastWalk.Equal(before) {
+		t.Errorf("lastWalk = %v, want the time the last whole walk left", scan.report.LastWalk)
+	}
+	if scan.report.Titles != 0 {
+		t.Errorf("titles = %d, want no count from a cancelled walk", scan.report.Titles)
+	}
+	if len(fake.held(fake.movies)) != 0 {
+		t.Errorf("movies = %v, want nothing written by a cancelled walk", fake.held(fake.movies))
 	}
 }

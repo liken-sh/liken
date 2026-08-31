@@ -10,6 +10,7 @@ package main
 // and no other.
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -70,9 +71,10 @@ type Endpoint struct {
 	TargetRef  *ObjectReference   `json:"targetRef,omitempty"`
 }
 
-// Ready is the only condition this operator states. The Service
-// publishes not-ready addresses too, so an agent that is starting is
-// still a peer to gossip with.
+// Ready is the only condition this operator states, and it carries the
+// kubelet's own verdict on the pod. The Service publishes not-ready
+// addresses too, so an agent that is starting is still a peer to gossip
+// with, and the slice still says which peers are up.
 type EndpointConditions struct {
 	Ready bool `json:"ready"`
 }
@@ -102,8 +104,8 @@ type EndpointPort struct {
 // another's cluster. A pod with no address is not a peer yet, and a
 // pod with a deletion timestamp is a peer no longer. The endpoints
 // sort by address, so the order the list arrived in never counts as a
-// divergence. The owners are every Library in the namespace, so the
-// garbage collector removes the slice when the last one goes.
+// divergence. The namespace's one Catalog owns the slice, so the garbage
+// collector removes it with that Catalog.
 func buildCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod) *EndpointSlice {
 	endpoints := []Endpoint{}
 	for index := range pods {
@@ -116,7 +118,7 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod
 		}
 		endpoints = append(endpoints, Endpoint{
 			Addresses:  []string{pod.Status.PodIP},
-			Conditions: EndpointConditions{Ready: true},
+			Conditions: EndpointConditions{Ready: everyContainerReady(pod)},
 			NodeName:   pod.Spec.NodeName,
 			TargetRef: &ObjectReference{
 				Kind:      "Pod",
@@ -161,12 +163,12 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod
 // instead of being overwritten. A conflict on the create means another
 // writer got there first, which is success: the next pass reads what
 // that writer wrote.
-func (o *operator) standCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod) error {
+func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, owners []OwnerReference, pods []Pod) error {
 	desired := buildCatalogEndpoints(namespace, owners, pods)
 
-	live, err := GetEndpointSlice(o.client, namespace, catalogServiceName)
+	live, err := GetEndpointSlice(ctx, o.client, namespace, catalogServiceName)
 	if errors.Is(err, ErrNotFound) {
-		_, err := CreateEndpointSlice(o.client, desired)
+		_, err := CreateEndpointSlice(ctx, o.client, desired)
 		if errors.Is(err, ErrConflict) {
 			return nil
 		}
@@ -180,7 +182,7 @@ func (o *operator) standCatalogEndpoints(namespace string, owners []OwnerReferen
 		return nil
 	}
 	desired.Metadata.ResourceVersion = live.Metadata.ResourceVersion
-	_, err = UpdateEndpointSlice(o.client, desired)
+	_, err = UpdateEndpointSlice(ctx, o.client, desired)
 	return err
 }
 

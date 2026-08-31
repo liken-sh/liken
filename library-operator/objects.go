@@ -296,7 +296,6 @@ type VolumeMount struct {
 type Volume struct {
 	Name                  string                             `json:"name"`
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
-	EmptyDir              *EmptyDirVolumeSource              `json:"emptyDir,omitempty"`
 }
 
 // ReadOnly here is the mount the kubelet makes, so a scanner cannot
@@ -304,16 +303,6 @@ type Volume struct {
 type PersistentVolumeClaimVolumeSource struct {
 	ClaimName string `json:"claimName"`
 	ReadOnly  bool   `json:"readOnly,omitempty"`
-}
-
-// An emptyDir is a directory the kubelet creates with the pod and
-// deletes with it. The catalog is derived, so a pod that restarts and
-// syncs again loses nothing.
-//
-// SizeLimit caps the volume, so a catalog that grows beyond what the
-// node can hold fails the pod instead of the node.
-type EmptyDirVolumeSource struct {
-	SizeLimit string `json:"sizeLimit,omitempty"`
 }
 
 // The pod status this operator reads: the phase, the per container
@@ -325,8 +314,12 @@ type PodStatus struct {
 	Message string `json:"message,omitempty"`
 	// PodIP is the address the kubelet assigned. It is the address the
 	// catalog agents gossip on, and a pod without one is not a peer yet.
-	PodIP             string            `json:"podIP,omitempty"`
-	ContainerStatuses []ContainerStatus `json:"containerStatuses,omitempty"`
+	PodIP string `json:"podIP,omitempty"`
+	// The catalog agent is a native sidecar, so the kubelet reports it
+	// here and not beside the scanner. A readiness gate that read only
+	// the list below would never see the agent at all.
+	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
+	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
 }
 
 // Ready is the kubelet's own verdict on the container, which is what

@@ -470,3 +470,23 @@ func TestPostSurfacesABadBaseURL(t *testing.T) {
 		t.Fatal("err = nil, want a request-construction error")
 	}
 }
+
+// The agent answers one result per statement. A body with fewer results
+// describes a batch the agent did not run in full, so the write fails
+// rather than reporting the rows the short answer happened to carry.
+func TestAShortTransactionAnswerIsAFailure(t *testing.T) {
+	catalog, recorder := recordingCatalog(t)
+	recorder.respBody = `{"results":[{"rows_affected":1}]}`
+
+	applied, err := catalog.UpsertMovies(t.Context(), []movieRow{
+		{Id: "movie:tmdb:1", Library: "house/movies", Path: "One"},
+		{Id: "movie:tmdb:2", Library: "house/movies", Path: "Two"},
+	})
+
+	if err == nil {
+		t.Error("a short transaction answer read as success")
+	}
+	if applied != 0 {
+		t.Errorf("applied = %d, want none from a batch the agent did not answer for", applied)
+	}
+}

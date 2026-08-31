@@ -9,6 +9,7 @@ package main
 // the pod.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,8 +37,8 @@ type binding struct {
 // scanner pod only when its storage is bound and its namespace holds
 // exactly one Catalog, because the pod's catalog agent joins the cluster
 // the Catalog stands and takes a volume the Catalog sizes.
-func (o *operator) reconcile(library *Library, choice catalogChoice) error {
-	bound, err := resolveStorage(o.client, library)
+func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice) error {
+	bound, err := resolveStorage(ctx, o.client, library)
 	if err != nil {
 		return err
 	}
@@ -50,24 +51,36 @@ func (o *operator) reconcile(library *Library, choice catalogChoice) error {
 	// pod, and an address with no pod behind it answers nothing.
 	var pod *Pod
 	if scannerStands(bound, choice) {
-		if err := o.standCatalogClaim(library, choice.catalog); err != nil {
+		if err := o.standCatalogClaim(ctx, library, choice.catalog); err != nil {
 			return err
 		}
-		if err := o.standWebhookService(library); err != nil {
+		if err := o.standWebhookService(ctx, library); err != nil {
 			return err
 		}
 		desired := buildScannerPod(library, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
-		pod, err = o.standScannerPod(desired)
+		pod, err = o.standScannerPod(ctx, desired)
 		if err != nil {
 			return err
 		}
+	} else if err := o.stopScannerPod(ctx, library); err != nil {
+		return err
 	}
 
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	report := o.reports.latestFor(namespace, name)
 	online := o.reports.onlineFor(namespace, name)
-	return writeLibraryStatus(o.client, library,
+	return writeLibraryStatus(ctx, o.client, library,
 		deriveLibraryStatus(library, bound, choice, pod, report, online, time.Now().UTC()))
+}
+
+// stopScannerPod removes the pod of a Library that no longer stands one.
+// The pass is level-triggered, so a Library whose claim or Catalog went
+// away loses its scanner on the next pass, rather than keeping a pod that
+// walks a volume the Library no longer reports. On every later pass the
+// pod is already absent, and an absent pod is success.
+func (o *operator) stopScannerPod(ctx context.Context, library *Library) error {
+	return DeletePod(ctx, o.client, library.Metadata.Namespace,
+		scannerPodName(library.Metadata.Name))
 }
 
 // scannerStands reports the one condition a Library's scanner needs: its
@@ -84,10 +97,10 @@ func scannerStands(bound binding, choice catalogChoice) bool {
 // waiting on a volume, and a volume that has gone are all states to
 // report. Only a request that fails is an error, because then the pass
 // does not know what the storage is.
-func resolveStorage(c *Client, library *Library) (binding, error) {
+func resolveStorage(ctx context.Context, c *Client, library *Library) (binding, error) {
 	namespace, name := library.Metadata.Namespace, library.Spec.Storage.Claim
 
-	claim, err := GetPersistentVolumeClaim(c, namespace, name)
+	claim, err := GetPersistentVolumeClaim(ctx, c, namespace, name)
 	if errors.Is(err, ErrNotFound) {
 		return binding{
 			reason: reasonClaimNotFound,
@@ -108,7 +121,7 @@ func resolveStorage(c *Client, library *Library) (binding, error) {
 		}, nil
 	}
 
-	volume, err := GetPersistentVolume(c, claim.Spec.VolumeName)
+	volume, err := GetPersistentVolume(ctx, c, claim.Spec.VolumeName)
 	if errors.Is(err, ErrNotFound) {
 		return binding{
 			reason: reasonVolumeNotFound,
@@ -164,15 +177,15 @@ func libraryVolume(volume *PersistentVolume) *LibraryVolume {
 // live comparison would either roll on every pass or grow a
 // field-by-field allowlist. This operator does the same with one
 // annotation on the pod it creates.
-func (o *operator) standScannerPod(desired *Pod) (*Pod, error) {
+func (o *operator) standScannerPod(ctx context.Context, desired *Pod) (*Pod, error) {
 	if err := stampTemplateHash(&desired.Metadata, desired.Spec); err != nil {
 		return nil, err
 	}
 	namespace, name := desired.Metadata.Namespace, desired.Metadata.Name
 
-	live, err := GetPod(o.client, namespace, name)
+	live, err := GetPod(ctx, o.client, namespace, name)
 	if errors.Is(err, ErrNotFound) {
-		created, err := CreatePod(o.client, desired)
+		created, err := CreatePod(ctx, o.client, desired)
 		if errors.Is(err, ErrConflict) {
 			// Another pass, or another copy of this operator, created
 			// the pod first, which is success. The next pass reads it.
@@ -204,7 +217,7 @@ func (o *operator) standScannerPod(desired *Pod) (*Pod, error) {
 	// carrying no stamp at all. The delete is the whole replacement:
 	// the next pass finds no pod and creates the one it built.
 	if !sameTemplate(&live.Metadata, &desired.Metadata) {
-		if err := DeletePod(o.client, namespace, name); err != nil {
+		if err := DeletePod(ctx, o.client, namespace, name); err != nil {
 			return nil, err
 		}
 		return nil, nil

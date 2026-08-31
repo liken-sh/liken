@@ -140,10 +140,10 @@ func TestAPersistentVolumeNamesWhatServesIt(t *testing.T) {
 	}{
 		{
 			name:       "an NFS export",
-			spec:       `{"capacity":{"storage":"8Ti"},"accessModes":["ReadOnlyMany"],"nfs":{"server":"movies.example","path":"/volume1/movies"}}`,
+			spec:       `{"capacity":{"storage":"8Ti"},"accessModes":["ReadOnlyMany"],"nfs":{"server":"movies.example","path":"/srv/media/movies"}}`,
 			wantSource: "nfs",
 			wantServer: "movies.example",
-			wantPath:   "/volume1/movies",
+			wantPath:   "/srv/media/movies",
 		},
 		{
 			name:       "a CSI driver this operator does not know",
@@ -191,7 +191,7 @@ func TestAPersistentVolumeSpecThatIsNotAnObjectFails(t *testing.T) {
 		spec string
 	}{
 		{name: "the spec is a string", spec: `"nfs"`},
-		{name: "the source is not an object", spec: `{"nfs":"movies.example:/volume1/movies"}`},
+		{name: "the source is not an object", spec: `{"nfs":"movies.example:/srv/media/movies"}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

@@ -25,7 +25,7 @@ func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 	pod := scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1")
 	cluster.pods["movies-scanner"] = &pod
 
-	testOperator(t, cluster).reconcileCatalogs(oneNamespace("house", catalog))
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog))
 
 	service := cluster.heldService("house", catalogServiceName)
 	if service == nil || len(service.Metadata.OwnerReferences) != 1 ||
@@ -56,7 +56,7 @@ func TestReconcileCatalogsMarksEveryCatalogBlockedWhenThereAreTwo(t *testing.T) 
 	first := seedCatalog(cluster, "first", "house")
 	second := seedCatalog(cluster, "second", "house")
 
-	testOperator(t, cluster).reconcileCatalogs(oneNamespace("house", first, second))
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second))
 
 	if cluster.heldService("house", catalogServiceName) != nil {
 		t.Error("the pass stood a catalog Service for a namespace with two Catalogs")
@@ -80,7 +80,7 @@ func TestReconcileCatalogsStopsWhenThePodsCannotBeListed(t *testing.T) {
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	cluster.broken[podsAllPath] = http.StatusInternalServerError
 
-	testOperator(t, cluster).reconcileCatalogs(oneNamespace("house", catalog))
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog))
 
 	if cluster.heldService("house", catalogServiceName) != nil {
 		t.Error("the pass stood a catalog Service without the pods it needs")
@@ -157,10 +157,10 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	catalog := cluster.heldCatalog("house-catalog")
 	settled := standingCatalogStatus(catalog, nil, testNow)
 
-	if err := operator.writeCatalogStatus(catalog, settled); err != nil {
+	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
 		t.Fatal(err)
 	}
-	if err := operator.writeCatalogStatus(catalog, settled); err != nil {
+	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "catalogs"); got != 1 {
@@ -168,7 +168,7 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	}
 
 	settled.StorageSize = "9Gi"
-	if err := operator.writeCatalogStatus(catalog, settled); err != nil {
+	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
 		t.Fatal(err)
 	}
 	if got := cluster.countRequests(http.MethodPut, "catalogs"); got != 2 {
@@ -195,7 +195,7 @@ func TestWriteCatalogStatusReadsAConflictAsSuccessAndReportsAFailure(t *testing.
 			operator := testOperator(t, cluster)
 			catalog := cluster.heldCatalog("house-catalog")
 
-			err := operator.writeCatalogStatus(catalog, standingCatalogStatus(catalog, nil, testNow))
+			err := operator.writeCatalogStatus(t.Context(), catalog, standingCatalogStatus(catalog, nil, testNow))
 
 			if testCase.wantErr && err == nil {
 				t.Fatal("err = nil, want the server's refusal")

@@ -108,6 +108,12 @@ func (c *Catalog) post(ctx context.Context, statements []statement) (int, error)
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return 0, fmt.Errorf("catalog transaction: decoding response: %w", err)
 	}
+	// One result per statement is the contract, so a short answer is a
+	// failure and never a batch that applied.
+	if len(result.Results) != len(statements) {
+		return 0, fmt.Errorf("catalog transaction: %d results for %d statements",
+			len(result.Results), len(statements))
+	}
 	applied := 0
 	for _, r := range result.Results {
 		if r.Error != "" {

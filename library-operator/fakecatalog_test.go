@@ -47,6 +47,11 @@ type fakeCatalog struct {
 	// movieBatches counts the transaction POSTs that carried a movie upsert,
 	// so a test reads how many times the streaming full walk flushed.
 	movieBatches int
+	// keepDeleted answers every delete with no rows affected and keeps
+	// the row, which models an agent whose delete lands on no row while
+	// the query still reads it. A test drives the sweep's no-progress
+	// guard with it.
+	keepDeleted bool
 }
 
 // newFakeCatalog builds an empty catalog and the client that writes and
@@ -90,11 +95,13 @@ func (f *fakeCatalog) serveTransactions(w http.ResponseWriter, r *http.Request) 
 			break
 		}
 	}
-	for _, s := range statements {
-		f.apply(s)
-	}
 	results := make([]map[string]any, len(statements))
-	for i := range results {
+	for i, s := range statements {
+		if f.keepDeleted && strings.HasPrefix(s.sql, "DELETE") {
+			results[i] = map[string]any{"rows_affected": 0}
+			continue
+		}
+		f.apply(s)
 		results[i] = map[string]any{"rows_affected": 1}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
@@ -156,8 +163,9 @@ func (f *fakeCatalog) serveQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// after the configured number of count reads, the next one fails,
-	// so a test drives the walk's second count read failing.
-	if strings.Contains(sql, "count(*)") {
+	// so a test drives the walk's second count read failing. The prune's
+	// own read of the seen table is not one of the walk's counts.
+	if strings.Contains(sql, "count(*)") && !strings.Contains(sql, "FROM seen") {
 		f.countReadsServed++
 		if f.countErrorsAfter > 0 && f.countReadsServed > f.countErrorsAfter {
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": "database is locked"})
@@ -177,6 +185,8 @@ func (f *fakeCatalog) serveQuery(w http.ResponseWriter, r *http.Request) {
 // evaluate runs the one read the SQL asks for and returns its cells.
 func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	switch {
+	case strings.Contains(sql, "count(*) FROM seen"):
+		return []any{float64(f.countMarks(num(p[0])))}
 	case strings.Contains(sql, "count(*) FROM files"):
 		return []any{float64(f.countIn(f.files, str(p[0])))}
 	case strings.Contains(sql, "count(*)"):
@@ -218,6 +228,18 @@ func (f *fakeCatalog) unmarkedLinks(sql string, p []any) []any {
 		keys = append(keys, path+linkKeySeparator+item)
 	}
 	return keys
+}
+
+// countMarks reports how many ids this epoch marked, the read the prune
+// guard makes before it sweeps anything.
+func (f *fakeCatalog) countMarks(epoch int64) int {
+	count := 0
+	for _, marked := range f.seen {
+		if marked == epoch {
+			count++
+		}
+	}
+	return count
 }
 
 func (f *fakeCatalog) countIn(table map[string]fakeRow, library string) int {
@@ -359,6 +381,14 @@ func (f *fakeCatalog) flushes() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.movieBatches
+}
+
+// deletesNothing makes every later delete land on no row, so a test
+// drives a sweep that reads the same batch again and again.
+func (f *fakeCatalog) deletesNothing() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keepDeleted = true
 }
 
 func inScope(path, folder string) bool {

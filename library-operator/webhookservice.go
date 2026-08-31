@@ -11,6 +11,7 @@ package main
 // and this operator writes no EndpointSlice.
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"slices"
@@ -80,13 +81,13 @@ func webhookURL(library *Library) string {
 // it, and never the object the pass built. clusterIP and clusterIPs are the
 // API server's, and both are immutable, so a write that omits the address it
 // assigned is refused.
-func (o *operator) standWebhookService(library *Library) error {
+func (o *operator) standWebhookService(ctx context.Context, library *Library) error {
 	desired := buildWebhookService(library)
 	namespace, name := desired.Metadata.Namespace, desired.Metadata.Name
 
-	live, err := GetService(o.client, namespace, name)
+	live, err := GetService(ctx, o.client, namespace, name)
 	if errors.Is(err, ErrNotFound) {
-		_, err := CreateService(o.client, desired)
+		_, err := CreateService(ctx, o.client, desired)
 		if errors.Is(err, ErrConflict) {
 			return nil
 		}
@@ -104,7 +105,7 @@ func (o *operator) standWebhookService(library *Library) error {
 	live.Spec.PublishNotReadyAddresses = desired.Spec.PublishNotReadyAddresses
 	live.Spec.Selector = desired.Spec.Selector
 	live.Spec.Ports = desired.Spec.Ports
-	_, err = UpdateService(o.client, live)
+	_, err = UpdateService(ctx, o.client, live)
 	return err
 }
 

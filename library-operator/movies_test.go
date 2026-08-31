@@ -5,6 +5,7 @@ package main
 // attributes, and the unidentified count are proved against real files.
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -301,5 +302,99 @@ func TestWalkMoviesDescendsThroughNestedGroupingFolders(t *testing.T) {
 	}
 	if nested.Path != filepath.Join("Genre", "Studio", "The Signal (2024)") {
 		t.Errorf("path = %q, want the folder relative to the root", nested.Path)
+	}
+}
+
+// A sidecar that is not there is an ordinary title with no provider id:
+// the walk falls back to the folder name and reads the volume in full.
+func TestAMovieWithNoSidecarKeepsThePathIdentity(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Solaris (1972)", "movie.mkv"), "video")
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if result.readError {
+		t.Error("a title with no sidecar marked the walk incomplete")
+	}
+	if len(result.movies) != 1 || result.movies[0].Id != "movie:path:solaris-1972" {
+		t.Errorf("movies = %+v, want the path-derived id", result.movies)
+	}
+}
+
+// A sidecar the scanner cannot read is not a sidecar that is not there.
+// The fall-back would mint a path-derived id for a title the catalog
+// holds under its provider id, and the sweep would then delete the
+// provider-derived rows. The walk marks itself incomplete instead, and
+// the prune stands down.
+func TestAnUnreadableMovieSidecarMarksTheWalkIncomplete(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+	// A directory in the sidecar's place is a read that fails for a
+	// reason other than an absent file, on every filesystem and for any
+	// user.
+	if err := os.MkdirAll(filepath.Join(dir, "movie.nfo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if !result.readError {
+		t.Error("a sidecar that could not be read left the walk complete")
+	}
+}
+
+// A hidden AppleDouble stub is a resource fork a storage appliance
+// leaves beside a video, and never a video the catalog holds. It sorts
+// before the video it shadows, so a walk that read it would make it the
+// primary file.
+func TestTheWalkSkipsAppleDoubleStubs(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "._Solaris.mkv"), "resource fork")
+	writeFile(t, filepath.Join(dir, "Solaris.mkv"), "video")
+
+	files := filesByPath(walkMovies(root, "house/movies", nil))
+
+	if _, held := files[filepath.Join("Solaris (1972)", "._Solaris.mkv")]; held {
+		t.Errorf("files = %v, want no row for the AppleDouble stub", files)
+	}
+	if _, held := files[filepath.Join("Solaris (1972)", "Solaris.mkv")]; !held {
+		t.Errorf("files = %v, want the video itself", files)
+	}
+}
+
+// A folder holding nothing but AppleDouble stubs is no title folder, so
+// the walk reads it as a grouping folder and mints no title.
+func TestAFolderOfAppleDoubleStubsIsNoTitle(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Solaris (1972)", "._Solaris.mkv"), "resource fork")
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.movies) != 0 {
+		t.Errorf("movies = %+v, want no title from a folder of stubs", result.movies)
+	}
+}
+
+// A folder whose sidecar could not be read writes no row this pass. A
+// row read from the folder name would carry a path-derived id beside the
+// provider-derived one the catalog already holds, and a browser would
+// then draw the title twice.
+func TestAnUnreadableSidecarWritesNoRow(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "movie.mkv"), "video")
+	if err := os.MkdirAll(filepath.Join(dir, "movie.nfo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.movies) != 0 {
+		t.Errorf("movies = %+v, want no row from a folder with no identity", result.movies)
+	}
+	if len(result.files) != 0 {
+		t.Errorf("files = %+v, want no file row either", result.files)
 	}
 }

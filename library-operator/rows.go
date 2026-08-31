@@ -252,8 +252,9 @@ func sortKey(title string) string {
 // slug is the legible display name for a URL and a screen, such as
 // the-matrix-1999. It lowercases the title, folds accents to ASCII, keeps
 // the article, hyphenates the rest, and appends the year where there is one.
-// The slug is a name and not the id, so nothing keys on it and a corrected
-// title changes it freely.
+// The slug is a display name and not the item's id, so a corrected title
+// changes it freely. What does key on a name is folderKey, the slug of a
+// folder's own name, which a title with no provider id rests its id on.
 func slug(title string, year int) string {
 	var b strings.Builder
 	// A run of separators becomes at most one hyphen, and only between two kept

@@ -17,8 +17,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"iter"
 	"net"
 	"net/http"
@@ -294,7 +296,8 @@ func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
 
 // fullWalk is the walk's one collector. A pool of workers reads the root, and
 // this goroutine takes their folders one at a time. It buffers the rows
-// until the buffer reaches scanFlushBatch, and flushes each buffer:
+// until the item rows reach scanFlushBatch; the file, link, and alias rows
+// travel with their items and stay uncounted. It flushes each buffer:
 // it upserts the rows and marks them with the walk's epoch. It then prunes
 // the rows the walk did not mark. It updates the counts and the last-walk
 // time, and moves the last-change time only when the catalog changed. A
@@ -332,6 +335,10 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	readError := false
 	var unidentifiedNames []string
 	flush := func() bool {
+		if err := ctx.Err(); err != nil {
+			s.logWalk("write a walk batch", err)
+			return false
+		}
 		if buffered == 0 {
 			return true
 		}
@@ -360,6 +367,14 @@ func (s *scanner) fullWalk(ctx context.Context) {
 		}
 	}
 	if !flush() {
+		return
+	}
+
+	// A cancelled walk read only part of the volume and wrote only part
+	// of its rows, so it prunes nothing, writes no counts, and leaves the
+	// last-walk time where it was.
+	if err := ctx.Err(); err != nil {
+		s.logWalk("finish the walk", err)
 		return
 	}
 
@@ -550,9 +565,14 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 }
 
 // titleFolderOf maps a path on the volume to the title or series folder
-// that holds it. A movies title folder is a child of the root or of a
-// grouping folder one level down; a series folder is always a child of
-// the root. A path outside the root maps to nothing.
+// that holds it. A path outside the root maps to nothing.
+//
+// The movies rule is the walk's own rule: step down the path through the
+// grouping folders, and stop at the first level that is a title folder or
+// that has left the volume, no deeper than the walk's grouping cap. A
+// level the scanner cannot read, and a path that names no title folder,
+// both map to nothing, and the caller then walks the whole root. A series
+// folder is always a child of the root.
 func (s *scanner) titleFolderOf(absolute string) string {
 	relative := relativePath(s.root, absolute)
 	if relative == absolute || relative == "." || strings.HasPrefix(relative, "..") {
@@ -562,17 +582,36 @@ func (s *scanner) titleFolderOf(absolute string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	first := path.Join(s.root, parts[0])
 	if s.kind == libraryKindSeries {
-		return first
+		return path.Join(s.root, parts[0])
 	}
-	if isMovieTitleFolder(first) {
-		return first
+
+	folder := s.root
+	for depth, part := range parts {
+		// The walk reads a title folder at one level past its grouping
+		// cap, because it tests a directory for a title before it tests
+		// the depth, so the resolver reaches the same level.
+		if depth > movieGroupingDepth {
+			return ""
+		}
+		folder = path.Join(folder, part)
+		info, err := os.Stat(folder)
+		// A folder that left the volume is the rescan's whole point: it
+		// marks nothing, and every row under it leaves.
+		if errors.Is(err, fs.ErrNotExist) {
+			return folder
+		}
+		// A level the scanner cannot read is not a title folder that
+		// left, and a prune scoped to it would delete rows the volume
+		// still holds.
+		if err != nil || !info.IsDir() {
+			return ""
+		}
+		if isMovieTitleFolder(folder) {
+			return folder
+		}
 	}
-	if len(parts) >= 2 {
-		return path.Join(first, parts[1])
-	}
-	return first
+	return ""
 }
 
 // splitPath splits a relative path into its elements, dropping the

@@ -20,10 +20,11 @@ func standingPod(t *testing.T, library *Library, phase string, ready bool) *Pod 
 	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
 		t.Fatal(err)
 	}
-	pod.Status = PodStatus{Phase: phase, ContainerStatuses: []ContainerStatus{
-		{Name: scannerContainer, Ready: ready},
-		{Name: catalogContainer, Ready: ready},
-	}}
+	pod.Status = PodStatus{
+		Phase:                 phase,
+		InitContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: ready}},
+		ContainerStatuses:     []ContainerStatus{{Name: scannerContainer, Ready: ready}},
+	}
 	return pod
 }
 
@@ -86,7 +87,7 @@ func TestReconcileReportsStorageThatIsNotBound(t *testing.T) {
 				cluster.claims["movies"] = one.claim
 			}
 
-			if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+			if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 				t.Fatal(err)
 			}
 
@@ -117,7 +118,7 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,7 +133,7 @@ func TestReconcileReportsTheVolumeBehindTheClaim(t *testing.T) {
 	if status.Volume == nil {
 		t.Fatal("the status reports no volume")
 	}
-	want := LibraryVolume{Name: "pv-movies", Type: "nfs", Server: "syn.example", Path: "/volume1/movies"}
+	want := LibraryVolume{Name: "pv-movies", Type: "nfs", Server: "syn.example", Path: "/srv/media/movies"}
 	if *status.Volume != want {
 		t.Errorf("volume = %+v, want %+v", *status.Volume, want)
 	}
@@ -144,7 +145,7 @@ func TestReconcileStandsTheWebhookServiceAndReportsItsAddress(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,7 +168,7 @@ func TestReconcileStandsNoWebhookServiceForAnUnboundLibrary(t *testing.T) {
 	library := boundHouse(cluster)
 	delete(cluster.claims, "movies")
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -186,7 +187,7 @@ func TestReconcileReportsAFailedWebhookService(t *testing.T) {
 	library := boundHouse(cluster)
 	cluster.broken[servicesPath("house")+"/movies-scanner"] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).reconcile(library, withCatalog())
+	err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog())
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -201,7 +202,7 @@ func TestReconcileReportsAVolumeItKnowsNothingAbout(t *testing.T) {
 	cluster.volumes["pv-movies"] = `{"metadata":{"name":"pv-movies"},"spec":` +
 		`{"csi":{"driver":"nas.example","volumeHandle":"movies"}}}`
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,7 +219,7 @@ func TestReconcileWaitsForACatalog(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(library, singleCatalog(nil)); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, singleCatalog(nil)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,7 +241,7 @@ func TestReconcileProvisionsTheCatalogClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +263,7 @@ func TestReconcileCreatesTheScannerPod(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -292,7 +293,7 @@ func TestReconcileReplacesAStalePod(t *testing.T) {
 	cluster.pods["movies-scanner"] = stale
 	operator := testOperator(t, cluster)
 
-	if err := operator.reconcile(library, withCatalog()); err != nil {
+	if err := operator.reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,7 +304,7 @@ func TestReconcileReplacesAStalePod(t *testing.T) {
 		t.Errorf("Ready = %+v, want PodPending while the pod is replaced", got)
 	}
 
-	if err := operator.reconcile(library, withCatalog()); err != nil {
+	if err := operator.reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -326,7 +327,7 @@ func TestReconcileLeavesATerminatingPodAlone(t *testing.T) {
 	leaving.Metadata.DeletionTimestamp = "2026-08-29T12:00:00Z"
 	cluster.pods["movies-scanner"] = leaving
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -345,7 +346,7 @@ func TestReconcileKeepsAMatchingPod(t *testing.T) {
 	library := boundHouse(cluster)
 	cluster.pods["movies-scanner"] = standingPod(t, library, podRunning, true)
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -364,7 +365,7 @@ func TestReconcileAcceptsAConflictOnCreate(t *testing.T) {
 	library := boundHouse(cluster)
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).reconcile(library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -390,7 +391,7 @@ func TestReconcileFailsWhenTheClusterCannotBeRead(t *testing.T) {
 			library := boundHouse(cluster)
 			cluster.broken[one.path] = http.StatusInternalServerError
 
-			err := testOperator(t, cluster).reconcile(library, withCatalog())
+			err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog())
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the pass could not read past")
@@ -409,11 +410,11 @@ func TestReconcileWritesASettledStatusOnce(t *testing.T) {
 	operator := testOperator(t, cluster)
 	operator.reports.fold("house", "movies", libraryReport{Titles: 12, Unidentified: 2})
 
-	if err := operator.reconcile(library, withCatalog()); err != nil {
+	if err := operator.reconcile(t.Context(), library, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 	written := cluster.heldLibrary("movies")
-	if err := operator.reconcile(written, withCatalog()); err != nil {
+	if err := operator.reconcile(t.Context(), written, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -488,5 +489,46 @@ func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 				t.Errorf("%s changed and the hash stayed %q", one.name, hash)
 			}
 		})
+	}
+}
+
+// A Library that loses a precondition loses its scanner pod. The pass is
+// level-triggered, so the pod that stood for a Library whose Catalog went
+// away is deleted on the next pass, rather than left to keep walking a
+// volume the Library no longer reports.
+func TestReconcileStopsTheScannerWhenThePreconditionGoes(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	operator := testOperator(t, cluster)
+
+	if err := operator.reconcile(t.Context(), library, withCatalog()); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.heldPod("movies-scanner") == nil {
+		t.Fatal("the first pass stood no scanner pod")
+	}
+
+	if err := operator.reconcile(t.Context(), library, singleCatalog(nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldPod("movies-scanner") != nil {
+		t.Error("the scanner pod stands for a Library with no Catalog")
+	}
+	// The conditions still report the precondition, not the delete.
+	if ready := conditionOf(t, cluster.heldLibrary("movies").Status, conditionReady); ready.Reason != reasonNoCatalog {
+		t.Errorf("Ready = %+v, want NoCatalog", ready)
+	}
+}
+
+// A Library that never stood a scanner asks for the delete anyway,
+// because the pass reads the whole state every time. An absent pod is
+// success, so the pass reports no error.
+func TestReconcileWithNoScannerToStopReportsNoError(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, singleCatalog(nil)); err != nil {
+		t.Fatalf("a pass with no pod to stop failed: %v", err)
 	}
 }

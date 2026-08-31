@@ -28,8 +28,8 @@ const (
 
 // catalogStatePath is where the catalog agent writes its database, its
 // write-ahead log, and its admin socket. The image's own configuration
-// names this one directory, so an emptyDir here is every writable path
-// the agent needs.
+// names this one directory, so the durable catalog claim mounted here is
+// every writable path the agent needs.
 const catalogStatePath = "/var/lib/corrosion"
 
 // The two variables the catalog agent reads. Corrosion takes an

@@ -127,9 +127,9 @@ Releases 2026.08.30-002 and 2026.08.30-003, rolled to `liken-1` on
 
 On the workstation, `local/catalog up` formed three agents in a few
 seconds, and each loaded `movies` from the schema. A seed of the lab's
-movies, 1257 title folders, posted through one agent in three batches
-of up to 500 statements in 0.199 s. The other two agents held all 1257
-rows 0.204 s after the last write returned, on a 100 ms poll. An update
+movies posted through one agent in 0.199 s, and the other two agents
+held every seeded row 0.204 s after the last write returned, on a
+100 ms poll. An update
 through one agent reached a subscriber's update stream on another in a
 median of 11.2 ms, 16.5 ms, and 11.2 ms over three runs of twenty. Two
 runs had a maximum under 24 ms; one sample in the sixty took 199 ms.

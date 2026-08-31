@@ -6,7 +6,6 @@ package main
 // is proved against a stateful fake in prune_test.go.
 
 import (
-	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -71,12 +70,8 @@ func oneMovie(id, path string) *walkResult {
 
 func TestUpsertWalkWritesTheItemFileAndAlias(t *testing.T) {
 	catalog, recorder := recordingCatalog(t)
-	wrote, err := upsertWalk(context.Background(), catalog, oneMovie("movie:tmdb:1", "One"))
-	if err != nil {
+	if err := upsertWalk(t.Context(), catalog, oneMovie("movie:tmdb:1", "One")); err != nil {
 		t.Fatal(err)
-	}
-	if !wrote {
-		t.Error("upsertWalk wrote rows but reported none")
 	}
 	kinds := sqlKinds(recorder)
 	if !containsKind(kinds, "INSERT MOVIES") || !containsKind(kinds, "INSERT FILES") || !containsKind(kinds, "INSERT ALIASES") {
@@ -84,21 +79,20 @@ func TestUpsertWalkWritesTheItemFileAndAlias(t *testing.T) {
 	}
 }
 
-func TestUpsertWalkReportsNothingWrittenForAnEmptyWalk(t *testing.T) {
-	catalog, _ := recordingCatalog(t)
-	wrote, err := upsertWalk(context.Background(), catalog, &walkResult{})
-	if err != nil {
+func TestUpsertWalkWritesNothingForAnEmptyWalk(t *testing.T) {
+	catalog, recorder := recordingCatalog(t)
+	if err := upsertWalk(t.Context(), catalog, &walkResult{}); err != nil {
 		t.Fatal(err)
 	}
-	if wrote {
-		t.Error("an empty walk reported a write")
+	if kinds := sqlKinds(recorder); len(kinds) != 0 {
+		t.Errorf("statements = %v, want none from an empty walk", kinds)
 	}
 }
 
 func TestUpsertWalkSurfacesAWriteError(t *testing.T) {
 	catalog, recorder := recordingCatalog(t)
 	recorder.status = 500
-	_, err := upsertWalk(context.Background(), catalog, oneMovie("movie:tmdb:1", "One"))
+	err := upsertWalk(t.Context(), catalog, oneMovie("movie:tmdb:1", "One"))
 	if err == nil {
 		t.Error("upsertWalk hid a catalog write failure")
 	}

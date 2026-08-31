@@ -10,6 +10,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,10 +48,11 @@ func movieFolderRule(root, library string, ignore ignoreSet) folderRule {
 // movie.nfo or a video file. A directory with neither is a grouping folder the
 // walk steps through.
 func isMovieTitleFolder(dir string) bool {
-	if fileExists(filepath.Join(dir, "movie.nfo")) {
+	if exists, err := fileExists(filepath.Join(dir, "movie.nfo")); err == nil && exists {
 		return true
 	}
-	return len(listVideoFiles(dir)) > 0
+	videos, err := listVideoFiles(dir)
+	return err == nil && len(videos) > 0
 }
 
 // scanMovieFolder reads one title folder into the result: a movie row, a file
@@ -60,7 +63,15 @@ func isMovieTitleFolder(dir string) bool {
 // accurate.
 func scanMovieFolder(root, dir, library string, result *walkResult) {
 	name := filepath.Base(dir)
-	meta, identified := movieIdentity(dir, name)
+	meta, identified, err := movieIdentity(dir, name)
+	// A folder whose sidecar could not be read has no identity this
+	// pass, so it writes no row. A row written from the name alone would
+	// carry a different id from the one the catalog holds. The walk is
+	// already marked incomplete, so the rows the catalog holds stand.
+	if err != nil {
+		result.noteReadError(err)
+		return
+	}
 
 	title := meta.Title
 	if !identified {
@@ -70,7 +81,8 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	key := folderKey(name)
 	id := itemID(scopeMovie, meta.ProviderIDs, key)
 	relativeDir := relativePath(root, dir)
-	primaryArt, allArt := discoverArt(root, dir)
+	primaryArt, allArt, err := discoverArt(root, dir)
+	result.noteReadError(err)
 
 	body := meta.Body
 	body.ProviderIDs = meta.ProviderIDs
@@ -95,13 +107,20 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	// video file reads its attributes from the sidecar; the rest read them from
 	// their own name.
 	videos := map[string]bool{}
-	for i, video := range listVideoFiles(dir) {
+	files, err := listVideoFiles(dir)
+	result.noteReadError(err)
+	for i, video := range files {
 		var stream *streamInfo
 		if i == 0 && meta.Stream.present() {
 			stream = &meta.Stream
 		}
 		videos[video] = true
-		result.files = append(result.files, movieFileRow(root, dir, video, library, id, stream))
+		row, err := movieFileRow(root, dir, video, library, id, stream)
+		result.noteReadError(err)
+		if err != nil {
+			continue
+		}
+		result.files = append(result.files, row)
 	}
 
 	scanMovieFiles(root, dir, library, id, videos, result)
@@ -119,17 +138,24 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 // falls back to the name parse, and it is identified only when the name yields
 // a year, the signal that the parse read a real release and not an arbitrary
 // folder.
-func movieIdentity(dir, name string) (movieMeta, bool) {
-	if data, err := os.ReadFile(filepath.Join(dir, "movie.nfo")); err == nil {
+// A sidecar that is not there falls through to the name parse. A sidecar
+// the scanner cannot read is an error, because falling through would mint
+// a different id and sweep the title's own rows.
+func movieIdentity(dir, name string) (movieMeta, bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "movie.nfo"))
+	switch {
+	case err == nil:
 		if meta, err := parseMovieNFO(data); err == nil && meta.Title != "" {
-			return meta, true
+			return meta, true, nil
 		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return movieMeta{}, false, err
 	}
 	title, year := parseReleaseName(name)
 	if title == "" {
 		title = name
 	}
-	return movieMeta{Title: title, Year: year, Released: releasedFromYear(year)}, year > 0
+	return movieMeta{Title: title, Year: year, Released: releasedFromYear(year)}, year > 0, nil
 }
 
 // releasedFromYear renders a year as the released column, or leaves it empty
@@ -144,10 +170,13 @@ func releasedFromYear(year int) string {
 // movieFileRow reads one video file into a file row linked to its movie. The
 // technical attributes come from the sidecar's streamdetails where one was
 // present, and from the file name where none was.
-func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo) fileRow {
+func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo) (fileRow, error) {
 	container, videoCodec, audioCodec, width, height, durationMs := fileAttributes(file, stream)
 	absolute := filepath.Join(dir, file)
-	size, modified := statFile(absolute)
+	size, modified, err := statFile(absolute)
+	if err != nil {
+		return fileRow{}, err
+	}
 	class := classifyFile(file, filePlace{kind: libraryKindMovies})
 	return fileRow{
 		Path:       relativePath(root, absolute),
@@ -165,14 +194,14 @@ func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo) f
 		Role:       class.Role,
 		Modified:   modified,
 		Items:      []string{itemID},
-	}
+	}, nil
 }
 
 // scanMovieFiles reads the rest of a movie title folder: the sidecar, the art,
 // the subtitles, the trickplay directory, and the extras folders beside the
 // feature. Every one of them links to the movie.
 func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, result *walkResult) {
-	rows, subdirectories := folderFiles{
+	rows, subdirectories, err := folderFiles{
 		root:    root,
 		dir:     dir,
 		library: library,
@@ -180,6 +209,7 @@ func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, r
 		item:    constantItem(itemID),
 		held:    videos,
 	}.read()
+	result.noteReadError(err)
 	result.files = append(result.files, rows...)
 
 	for _, name := range subdirectories {
@@ -187,13 +217,14 @@ func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, r
 		if extras == "" {
 			continue
 		}
-		rows, _ := folderFiles{
+		rows, _, err := folderFiles{
 			root:    root,
 			dir:     filepath.Join(dir, name),
 			library: library,
 			place:   filePlace{kind: libraryKindMovies, extras: extras},
 			item:    constantItem(itemID),
 		}.read()
+		result.noteReadError(err)
 		result.files = append(result.files, rows...)
 	}
 }

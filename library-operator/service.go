@@ -11,6 +11,7 @@ package main
 // Library.
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"slices"
@@ -62,9 +63,9 @@ type ServicePort struct {
 
 // buildCatalogService builds the Service for one namespace. It is a
 // function of the namespace and the owners alone, so two passes build
-// the same object. The owners are every Library in the namespace, so
-// the garbage collector removes the Service when the last one goes,
-// and the operator needs no delete verb.
+// the same object. The namespace's one Catalog owns the Service, so the
+// garbage collector removes it with that Catalog, and the operator needs
+// no delete verb.
 func buildCatalogService(namespace string, owners []OwnerReference) *Service {
 	return &Service{
 		APIVersion: serviceAPIVersion,
@@ -93,12 +94,12 @@ func buildCatalogService(namespace string, owners []OwnerReference) *Service {
 // set on it, never the object the pass built. clusterIP and clusterIPs
 // are immutable and the API server assigned them, so the write carries
 // back what the read answered.
-func (o *operator) standCatalogService(namespace string, owners []OwnerReference) error {
+func (o *operator) standCatalogService(ctx context.Context, namespace string, owners []OwnerReference) error {
 	desired := buildCatalogService(namespace, owners)
 
-	live, err := GetService(o.client, namespace, catalogServiceName)
+	live, err := GetService(ctx, o.client, namespace, catalogServiceName)
 	if errors.Is(err, ErrNotFound) {
-		_, err := CreateService(o.client, desired)
+		_, err := CreateService(ctx, o.client, desired)
 		if errors.Is(err, ErrConflict) {
 			return nil
 		}
@@ -115,7 +116,7 @@ func (o *operator) standCatalogService(namespace string, owners []OwnerReference
 	live.Spec.PublishNotReadyAddresses = desired.Spec.PublishNotReadyAddresses
 	live.Spec.Selector = desired.Spec.Selector
 	live.Spec.Ports = desired.Spec.Ports
-	_, err = UpdateService(o.client, live)
+	_, err = UpdateService(ctx, o.client, live)
 	return err
 }
 

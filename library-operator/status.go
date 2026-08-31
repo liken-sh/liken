@@ -7,6 +7,7 @@ package main
 // arrived in, and a function of its arguments cannot do otherwise.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -141,7 +142,14 @@ func readyCondition(bound binding, choice catalogChoice, pod *Pod, latest *libra
 // container in the pod ready. A pod the kubelet has said nothing about
 // is not ready: an empty list is a pod that is still starting, not a
 // pod whose containers all passed.
+//
+// The catalog agent counts here as much as the scanner does, and the
+// kubelet reports it under initContainerStatuses because it is a native
+// sidecar. A Library whose agent has not opened its API is not scanning.
 func everyContainerReady(pod *Pod) bool {
+	if !containerReady(pod.Status.InitContainerStatuses, catalogContainer) {
+		return false
+	}
 	if len(pod.Status.ContainerStatuses) == 0 {
 		return false
 	}
@@ -151,6 +159,17 @@ func everyContainerReady(pod *Pod) bool {
 		}
 	}
 	return true
+}
+
+// containerReady reads one named container's readiness out of a status
+// list. A container the kubelet has not reported is not ready.
+func containerReady(statuses []ContainerStatus, name string) bool {
+	for _, status := range statuses {
+		if status.Name == name {
+			return status.Ready
+		}
+	}
+	return false
 }
 
 // podPendingMessage prefers the kubelet's own words, because the
@@ -181,14 +200,14 @@ func podFailureMessage(pod *Pod) string {
 // operator watches its own collection, so a write on every pass would
 // wake the watch that wakes the pass, and the backstop tick would
 // become one write per library every ten seconds.
-func writeLibraryStatus(c *Client, library *Library, desired LibraryStatus) error {
+func writeLibraryStatus(ctx context.Context, c *Client, library *Library, desired LibraryStatus) error {
 	same, err := sameStatus(library.Status, desired)
 	if err != nil || same {
 		return err
 	}
 
 	library.Status = desired
-	_, err = PutLibraryStatus(c, library)
+	_, err = PutLibraryStatus(ctx, c, library)
 	if errors.Is(err, ErrConflict) {
 		// Something wrote this Library between the list and this
 		// write. That write bumped the resourceVersion, which wakes

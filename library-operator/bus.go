@@ -14,7 +14,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -212,20 +214,27 @@ func (b *Bus) writeLoop(ctx context.Context, conn net.Conn, out <-chan []byte) {
 }
 
 // readLoop reads whole packets and delivers each inbound PUBLISH to the
-// handler. A SUBACK and a PINGRESP are read and dropped: the client
-// asks for QoS 0, so a SUBACK carries nothing to act on, and a
-// PINGRESP only proves the broker is alive, which a successful read
-// already shows. Any read error ends the loop and the session.
+// handler. Any read error ends the loop and the session.
+//
+// A PINGRESP is read and dropped, because it only proves the broker is
+// alive, and a successful read already shows that. A SUBACK is checked: a
+// refused subscription is a reader that receives nothing for the life of
+// the session, and the line in the pod log is the only sign of it.
 func (b *Bus) readLoop(reader *bufio.Reader) {
 	for {
 		first, body, err := readPacket(reader)
 		if err != nil {
 			return
 		}
-		if first&0xF0 == mqttPublish {
+		switch first & 0xF0 {
+		case mqttPublish:
 			topic, payload, ok := parsePublish(body)
 			if ok && b.handler != nil {
 				b.handler(topic, payload)
+			}
+		case mqttSuback:
+			if err := parseSuback(body); err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
 			}
 		}
 	}
