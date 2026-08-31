@@ -17,10 +17,10 @@ minutes per iteration, and each iteration writes a permanent tag and a
 release into the registry, so the release history fills with versions
 whose only purpose was one drill.
 
-The cost shapes behavior in the wrong direction. A slow loop tempts a
-change to skip the cluster drill, or tempts several changes to pile
-into one release so they share the wait, and then a failure no longer
-says which change caused it.
+The cost shapes behavior in the wrong direction. A slow loop invites
+a person to skip the cluster drill, or to pile several changes into
+one release so they share the wait, and then a failure no longer says
+which change caused it.
 
 ## What an answer must preserve
 
