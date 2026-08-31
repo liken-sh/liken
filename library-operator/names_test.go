@@ -142,6 +142,38 @@ func TestFolderKey(t *testing.T) {
 	}
 }
 
+func TestFolderKeyAddsAHashSuffixToALetterlessSlug(t *testing.T) {
+	if got := folderKey("2012"); got != "2012-4b9a7f50" {
+		t.Errorf("folderKey = %q, want 2012-4b9a7f50", got)
+	}
+}
+
+func TestFolderKeyOfANameWithNoSlugIsTheHashAlone(t *testing.T) {
+	if got := folderKey("千と千尋の神隠し"); got != "3146d995" {
+		t.Errorf("folderKey = %q, want 3146d995", got)
+	}
+}
+
+func TestFolderKeySeparatesTwoNonLatinNamesOfTheSameYear(t *testing.T) {
+	first := folderKey("千と千尋の神隠し (2001)")
+	second := folderKey("君の名は。 (2001)")
+	if first == second {
+		t.Errorf("two names key the same: %q", first)
+	}
+	if first != "2001-6c16d9c8" {
+		t.Errorf("folderKey = %q, want 2001-6c16d9c8", first)
+	}
+	if second != "2001-f5c54d27" {
+		t.Errorf("folderKey = %q, want 2001-f5c54d27", second)
+	}
+}
+
+func TestFolderKeyIsStableForOneName(t *testing.T) {
+	if first, second := folderKey("千と千尋の神隠し (2001)"), folderKey("千と千尋の神隠し (2001)"); first != second {
+		t.Errorf("two passes differ: %q and %q", first, second)
+	}
+}
+
 func TestDiscoverArtAndTrickplay(t *testing.T) {
 	root := "testdata/movies"
 	dir := filepath.Join(root, "Action", "The Matrix (1999)")

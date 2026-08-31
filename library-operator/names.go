@@ -7,6 +7,8 @@ package main
 // none, and discovers the art and the trickplay directory a folder holds.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"os"
@@ -373,8 +375,23 @@ func episodeThumb(root, dir, file string) (string, error) {
 // folderKey is the slug of a folder's own name, the key a title with no provider
 // id rests its id on. It is stable for a folder that does not move, which is the
 // weak case the scanner accepts for a sidecar-less title.
+//
+// A slug with no letter says too little to key on: a non-Latin name
+// folds away to its year, or to nothing at all, and two such titles of
+// the same year would share one id. Such a slug carries the head of a
+// hash of the raw name, which parts them, and an empty slug is the hash
+// alone.
 func folderKey(name string) string {
-	return slug(name, 0)
+	key := slug(name, 0)
+	if strings.ContainsFunc(key, func(r rune) bool { return r >= 'a' && r <= 'z' }) {
+		return key
+	}
+	sum := sha256.Sum256([]byte(name))
+	hash := hex.EncodeToString(sum[:])[:8]
+	if key == "" {
+		return hash
+	}
+	return key + "-" + hash
 }
 
 // relativePath reports a path relative to the library root, the form every row
