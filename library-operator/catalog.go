@@ -270,17 +270,16 @@ func (c *Catalog) DeleteAliases(ctx context.Context, aliases []string) (int, err
 	return c.apply(ctx, deleteByKey("aliases", "alias", aliases))
 }
 
-// DeleteFileItemsByPath removes every link row a departed file held, by
-// its path. The prune deletes a file by path and knows none of the items
-// it linked, so one delete per path clears the whole link.
-func (c *Catalog) DeleteFileItemsByPath(ctx context.Context, paths []string) (int, error) {
-	return c.apply(ctx, deleteByKey("file_items", "path", paths))
-}
-
-// DeleteFileItemsByItem removes every link row a departed item held, by
-// its id. A title that changes its canonical id leaves its files on the
-// volume, so the prune never reaches those links by path, and without this
-// they point at an item the catalog no longer holds.
-func (c *Catalog) DeleteFileItemsByItem(ctx context.Context, items []string) (int, error) {
-	return c.apply(ctx, deleteByKey("file_items", "item", items))
+// DeleteFileItems removes link rows by both of their columns, because the pair
+// is the primary key of the table. A delete by one column alone would take
+// every other link the file or the item holds with it.
+func (c *Catalog) DeleteFileItems(ctx context.Context, links []fileItemKey) (int, error) {
+	statements := make([]statement, len(links))
+	for i, link := range links {
+		statements[i] = statement{
+			sql:    `DELETE FROM file_items WHERE path = ? AND item = ?`,
+			params: []any{link.Path, link.Item},
+		}
+	}
+	return c.apply(ctx, statements)
 }

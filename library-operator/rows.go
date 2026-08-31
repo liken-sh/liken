@@ -169,6 +169,13 @@ type fileRow struct {
 	Items      []string
 }
 
+// fileItemKey names one row of the link table: the file's path, and the id of
+// the item it belongs to.
+type fileItemKey struct {
+	Path string
+	Item string
+}
+
 // aliasRow maps one of an item's names to the item, with the source of the
 // name.
 type aliasRow struct {

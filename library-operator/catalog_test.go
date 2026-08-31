@@ -374,11 +374,15 @@ func TestDeleteByKeyMethods(t *testing.T) {
 	}
 }
 
-func TestDeleteFileItemsByPathRemovesEveryPair(t *testing.T) {
+func TestDeleteFileItemsNamesBothColumns(t *testing.T) {
 	rec := &catalogRecorder{}
 	catalog := testCatalog(t, rec)
 
-	_, err := catalog.DeleteFileItemsByPath(context.Background(), []string{"s01e01e02.mkv", "s02e01.mkv"})
+	links := []fileItemKey{
+		{Path: "s01e01e02.mkv", Item: "episode:tvdb:81189:s01e01"},
+		{Path: "s01e01e02.mkv", Item: "episode:tvdb:81189:s01e02"},
+	}
+	_, err := catalog.DeleteFileItems(context.Background(), links)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,11 +390,11 @@ func TestDeleteFileItemsByPathRemovesEveryPair(t *testing.T) {
 	if len(statements) != 2 {
 		t.Fatalf("statements = %d, want 2", len(statements))
 	}
-	if statements[0].sql != "DELETE FROM file_items WHERE path = ?" {
-		t.Errorf("sql = %q, want a delete on file_items by path", statements[0].sql)
+	if statements[0].sql != "DELETE FROM file_items WHERE path = ? AND item = ?" {
+		t.Errorf("sql = %q, want a delete on file_items by the pair", statements[0].sql)
 	}
-	if statements[0].params[0] != "s01e01e02.mkv" {
-		t.Errorf("params = %v, want the file path", statements[0].params)
+	if statements[0].params[0] != "s01e01e02.mkv" || statements[1].params[1] != "episode:tvdb:81189:s01e02" {
+		t.Errorf("params = %v / %v, want the path and each item", statements[0].params, statements[1].params)
 	}
 }
 

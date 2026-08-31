@@ -128,30 +128,10 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		delete(f.files, str(p[0]))
 	case strings.HasPrefix(s.sql, "DELETE FROM aliases"):
 		delete(f.aliases, str(p[0]))
-	case strings.HasPrefix(s.sql, "DELETE FROM file_items WHERE item"):
-		f.deleteFileItemsByItem(str(p[0]))
 	case strings.HasPrefix(s.sql, "DELETE FROM file_items"):
-		f.deleteFileItems(str(p[0]))
+		delete(f.fileItems, str(p[0])+"\x00"+str(p[1]))
 	case strings.HasPrefix(s.sql, "DELETE FROM seen"):
 		f.cleanSeen(num(p[0]))
-	}
-}
-
-func (f *fakeCatalog) deleteFileItems(path string) {
-	for key := range f.fileItems {
-		if strings.HasPrefix(key, path+"\x00") {
-			delete(f.fileItems, key)
-		}
-	}
-}
-
-// deleteFileItemsByItem clears the links to one item, whatever file holds
-// them, the delete a pruned item drives.
-func (f *fakeCatalog) deleteFileItemsByItem(item string) {
-	for key := range f.fileItems {
-		if strings.HasSuffix(key, "\x00"+item) {
-			delete(f.fileItems, key)
-		}
 	}
 }
 
@@ -204,7 +184,7 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 		count := f.countIn(f.movies, lib) + f.countIn(f.series, lib) + f.countIn(f.episodes, lib)
 		return []any{float64(count)}
 	case strings.Contains(sql, "FROM file_items"):
-		return f.orphanLinks(str(p[0]))
+		return f.unmarkedLinks(sql, p)
 	case strings.Contains(sql, "FROM aliases"):
 		return f.unmarkedAliases(sql, p)
 	default:
@@ -212,26 +192,32 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	}
 }
 
-// orphanLinks reads the items this library's files link to that no item
-// table holds, the read the link reconciliation drives.
-func (f *fakeCatalog) orphanLinks(library string) []any {
-	seen := map[string]bool{}
-	var items []any
+// unmarkedLinks reads the links this library's files hold that the current
+// epoch did not mark, honoring the folder scope where the query names one.
+func (f *fakeCatalog) unmarkedLinks(sql string, p []any) []any {
+	scoped := strings.Contains(sql, "path >=")
+	var library, folder string
+	var epoch int64
+	if scoped {
+		library, folder, epoch = str(p[0]), str(p[1]), num(p[4])
+	} else {
+		library, epoch = str(p[0]), num(p[1])
+	}
+	var keys []any
 	for key := range f.fileItems {
 		path, item, _ := strings.Cut(key, "\x00")
-		if f.files[path].library != library || seen[item] {
+		if f.files[path].library != library {
 			continue
 		}
-		_, isMovie := f.movies[item]
-		_, isSeries := f.series[item]
-		_, isEpisode := f.episodes[item]
-		if isMovie || isSeries || isEpisode {
+		if scoped && !inScope(path, folder) {
 			continue
 		}
-		seen[item] = true
-		items = append(items, item)
+		if f.seen[seenPrefix(sql)+path+linkKeySeparator+item] == epoch {
+			continue
+		}
+		keys = append(keys, path+linkKeySeparator+item)
 	}
-	return items
+	return keys
 }
 
 func (f *fakeCatalog) countIn(table map[string]fakeRow, library string) int {

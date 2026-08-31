@@ -14,7 +14,10 @@ package main
 // file, because cr-sqlite makes every table a schema file names a
 // replicated table. A table created through the write API stays local.
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // pruneBatch bounds how many unmarked ids the prune reads and deletes at
 // once, so the prune holds one batch and never the whole set. It is a var
@@ -45,7 +48,7 @@ func (c *Catalog) ensureSeen(ctx context.Context) error {
 	return err
 }
 
-// The key spaces of the seen table. Three kinds of key are marked, and an
+// The key spaces of the seen table. Four kinds of key are marked, and an
 // alias can be the same string as an item's id: a title that gains a
 // provider id keeps its old path-derived id as an alias of the new one. With
 // one key space, that alias marks the stale item row every walk, and the
@@ -55,7 +58,14 @@ const (
 	seenItem  = "item:"
 	seenFile  = "file:"
 	seenAlias = "alias:"
+	seenLink  = "link:"
 )
+
+// The separator between a link key's two halves. A path and an item id can
+// both hold most characters, so the separator is one neither ever holds, and
+// no two different pairs render the same key. SQL rebuilds the identical
+// string with char(31).
+const linkKeySeparator = "\x1f"
 
 // markSeen marks every id with the current epoch. A re-mark of an id
 // already present updates its epoch in place.
@@ -100,7 +110,7 @@ func (c *Catalog) countFiles(ctx context.Context, library string) (int, error) {
 	return c.queryInt(ctx, `SELECT count(*) FROM files WHERE library = ?`, []any{library})
 }
 
-// markKeys reads every id, file path, and alias a walk produced into one
+// markKeys reads every id, file path, link, and alias a walk produced into one
 // deduplicated list, the set the walk marks with its epoch. Each key carries
 // the prefix of its own key space, so an alias that reads the same as an
 // item's id marks the alias and not the item.
@@ -125,6 +135,9 @@ func markKeys(result *walkResult) []string {
 	}
 	for _, row := range result.files {
 		add(seenFile, row.Path)
+		for _, item := range row.Items {
+			add(seenLink, row.Path+linkKeySeparator+item)
+		}
 	}
 	for _, row := range result.aliases {
 		add(seenAlias, row.Alias)
@@ -171,10 +184,10 @@ func (c *Catalog) sweep(ctx context.Context, sql string, params []any, del func(
 
 // pruneLibrary deletes every catalog row this library holds that the
 // current epoch did not mark. It reads the unmarked ids through the query
-// API and deletes them by id, the form that needs no delete-time join
+// API and deletes them by key, the form that needs no delete-time join
 // against the local seen table. It prunes aliases first, while their items
-// still resolve the library scope, then the items, then the files. It
-// returns the count of rows removed.
+// still resolve the library scope, then the items, then the links, then the
+// files. It returns the count of rows removed.
 func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch int64) (int, error) {
 	removed := 0
 
@@ -198,10 +211,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	} {
 		n, err := catalog.sweep(ctx, itemPruneSQL(table.name, "id", seenItem), []any{library, epoch, pruneBatch},
 			func(ctx context.Context, keys []string) error {
-				if _, err := table.delete(ctx, keys); err != nil {
-					return err
-				}
-				_, err := catalog.DeleteFileItemsByItem(ctx, keys)
+				_, err := table.delete(ctx, keys)
 				return err
 			})
 		if err != nil {
@@ -210,12 +220,12 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		removed += n
 	}
 
-	n, err = catalog.sweep(ctx, itemPruneSQL("files", "path", seenFile), []any{library, epoch, pruneBatch},
+	// The link sweep runs before the file sweep, and the order matters. It
+	// scopes itself by joining files, so once a file row is deleted its own
+	// links join to nothing, and no query reaches them again.
+	n, err = catalog.sweep(ctx, linkPruneSQL(), []any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) error {
-			if _, err := catalog.DeleteFiles(ctx, keys); err != nil {
-				return err
-			}
-			_, err := catalog.DeleteFileItemsByPath(ctx, keys)
+			_, err := catalog.DeleteFileItems(ctx, fileItemKeys(keys))
 			return err
 		})
 	if err != nil {
@@ -223,7 +233,11 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
-	n, err = pruneOrphanLinks(ctx, catalog, library)
+	n, err = catalog.sweep(ctx, itemPruneSQL("files", "path", seenFile), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) error {
+			_, err := catalog.DeleteFiles(ctx, keys)
+			return err
+		})
 	if err != nil {
 		return removed, err
 	}
@@ -235,31 +249,28 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	return removed, nil
 }
 
-// pruneOrphanLinks deletes the link rows whose item the catalog no longer
-// holds. Deleting an item's links with the item covers the moment an item
-// leaves, and this covers every other way a link outlives its item: a
-// release that left them behind, a write that failed partway, a rescan the
-// prune could not finish. The invariant is that a link names an item, so
-// the walk reconciles it rather than trusting that every path into the
-// catalog remembered to.
-func pruneOrphanLinks(ctx context.Context, catalog *Catalog, library string) (int, error) {
-	return catalog.sweep(ctx, orphanLinkSQL(), []any{library, pruneBatch},
-		func(ctx context.Context, items []string) error {
-			_, err := catalog.DeleteFileItemsByItem(ctx, items)
-			return err
-		})
+// fileItemKeys splits each composite key the link sweep read back into the
+// file path and the item id, so the delete names both columns of the row.
+func fileItemKeys(keys []string) []fileItemKey {
+	links := make([]fileItemKey, len(keys))
+	for i, key := range keys {
+		path, item, _ := strings.Cut(key, linkKeySeparator)
+		links[i] = fileItemKey{Path: path, Item: item}
+	}
+	return links
 }
 
-// orphanLinkSQL reads the items this library's files link to that no item
-// table holds, one bounded batch. The link row carries no library of its
-// own, so the scope is the library its file belongs to.
-func orphanLinkSQL() string {
-	return `SELECT DISTINCT fi.item FROM file_items fi` +
+// linkPruneSQL reads the links of this library's files that the current epoch
+// did not mark, one bounded batch. A link row carries no library of its own,
+// so the scope is the library its file belongs to. It reads the two columns
+// joined by the same separator the mark used, so the comparison is one string
+// against one string.
+func linkPruneSQL() string {
+	return `SELECT fi.path || char(31) || fi.item FROM file_items fi` +
 		` JOIN files f ON f.path = fi.path` +
 		` WHERE f.library = ?` +
-		` AND fi.item NOT IN (SELECT id FROM movies)` +
-		` AND fi.item NOT IN (SELECT id FROM series)` +
-		` AND fi.item NOT IN (SELECT id FROM episodes)` +
+		` AND '` + seenLink + `' || fi.path || char(31) || fi.item` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
 		` LIMIT ?`
 }
 
@@ -294,7 +305,9 @@ func aliasPruneParams(library string, epoch int64) []any {
 // folder's own path, and every file and episode under it. It uses a range
 // over the path rather than a LIKE, so a folder name that holds a LIKE
 // metacharacter still scopes correctly and needs no escape.
-const pathScopeClause = `(path = ? OR (path >= ? AND path < ?))`
+func pathScopeClause(column string) string {
+	return `(` + column + ` = ? OR (` + column + ` >= ? AND ` + column + ` < ?))`
+}
 
 // pathScopeParams renders the three bounds pathScopeClause reads: the
 // folder's own path, and the half-open range that holds every path under
@@ -333,10 +346,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	} {
 		n, err := catalog.sweep(ctx, scopedItemPruneSQL(table.name, "id", seenItem), scopedItemPruneParams(library, folder, epoch),
 			func(ctx context.Context, keys []string) error {
-				if _, err := table.delete(ctx, keys); err != nil {
-					return err
-				}
-				_, err := catalog.DeleteFileItemsByItem(ctx, keys)
+				_, err := table.delete(ctx, keys)
 				return err
 			})
 		if err != nil {
@@ -345,12 +355,22 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 		removed += n
 	}
 
+	// The link sweep runs before the file sweep here for the same reason it
+	// does in pruneLibrary: it scopes itself by joining files, and a deleted
+	// file row puts its own links out of every query's reach.
+	n, err = catalog.sweep(ctx, scopedLinkPruneSQL(), scopedItemPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) error {
+			_, err := catalog.DeleteFileItems(ctx, fileItemKeys(keys))
+			return err
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
 	n, err = catalog.sweep(ctx, scopedItemPruneSQL("files", "path", seenFile), scopedItemPruneParams(library, folder, epoch),
 		func(ctx context.Context, keys []string) error {
-			if _, err := catalog.DeleteFiles(ctx, keys); err != nil {
-				return err
-			}
-			_, err := catalog.DeleteFileItemsByPath(ctx, keys)
+			_, err := catalog.DeleteFiles(ctx, keys)
 			return err
 		})
 	if err != nil {
@@ -360,11 +380,22 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	return removed, nil
 }
 
+// scopedLinkPruneSQL reads the links of one folder's files that the current
+// epoch did not mark, one bounded batch.
+func scopedLinkPruneSQL() string {
+	return `SELECT fi.path || char(31) || fi.item FROM file_items fi` +
+		` JOIN files f ON f.path = fi.path` +
+		` WHERE f.library = ? AND ` + pathScopeClause("f.path") +
+		` AND '` + seenLink + `' || fi.path || char(31) || fi.item` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` LIMIT ?`
+}
+
 // scopedItemPruneSQL reads the keys of one folder's rows in a table that
 // the current epoch did not mark, one bounded batch.
 func scopedItemPruneSQL(table, key, space string) string {
 	return `SELECT ` + key + ` FROM ` + table +
-		` WHERE library = ? AND ` + pathScopeClause + ` AND '` + space + `' || ` + key +
+		` WHERE library = ? AND ` + pathScopeClause("path") + ` AND '` + space + `' || ` + key +
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?) LIMIT ?`
 }
 
@@ -378,7 +409,7 @@ func scopedItemPruneParams(library, folder string, epoch int64) []any {
 // current epoch did not mark, scoped by the item ids the folder holds.
 func scopedAliasPruneSQL() string {
 	scope := func(table string) string {
-		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause
+		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")
 	}
 	return `SELECT alias FROM aliases` +
 		` WHERE '` + seenAlias + `' || alias NOT IN (SELECT id FROM seen WHERE epoch = ?)` +

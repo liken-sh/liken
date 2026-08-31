@@ -36,6 +36,18 @@ func seedTitle(t *testing.T, catalog *Catalog, library, id, path string) {
 	}
 }
 
+// titleMarks is the set of keys a walk of one seeded title marks: the item,
+// the file, the link between them, and the alias.
+func titleMarks(id, path string) []string {
+	file := path + "/movie.mkv"
+	return []string{
+		seenItem + id,
+		seenFile + file,
+		seenLink + file + linkKeySeparator + id,
+		seenAlias + id,
+	}
+}
+
 func TestPruneLibraryDeletesTheUnmarkedRows(t *testing.T) {
 	catalog, fake := newFakeCatalog(t)
 	ctx := context.Background()
@@ -47,8 +59,7 @@ func TestPruneLibraryDeletesTheUnmarkedRows(t *testing.T) {
 
 	// A later walk read only the first title, so only it carries the epoch.
 	epoch := int64(1000)
-	marked := []string{seenItem + "movie:tmdb:1", seenFile + "One/movie.mkv", seenAlias + "movie:tmdb:1"}
-	if _, err := catalog.markSeen(ctx, marked, epoch); err != nil {
+	if _, err := catalog.markSeen(ctx, titleMarks("movie:tmdb:1", "One"), epoch); err != nil {
 		t.Fatal(err)
 	}
 
@@ -56,8 +67,8 @@ func TestPruneLibraryDeletesTheUnmarkedRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 3 {
-		t.Errorf("removed = %d, want the departed movie, its file, and its alias", removed)
+	if removed != 4 {
+		t.Errorf("removed = %d, want the departed movie, its file, its link, and its alias", removed)
 	}
 	movies := fake.held(fake.movies)
 	if len(movies) != 1 || movies["movie:tmdb:1"].path != "One" {
@@ -83,7 +94,7 @@ func TestPruneLibraryKeepsAnotherLibrarysRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 3 {
+	if removed != 4 {
 		t.Errorf("removed = %d, want only this library's rows", removed)
 	}
 	movies := fake.held(fake.movies)
@@ -110,7 +121,7 @@ func TestPruneScopeDeletesOnlyTheFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 3 {
+	if removed != 4 {
 		t.Errorf("removed = %d, want only the named folder's rows", removed)
 	}
 	movies := fake.held(fake.movies)
@@ -153,17 +164,18 @@ func TestMarkKeysReadsEveryIdPathAndAliasInItsOwnKeySpace(t *testing.T) {
 		movies:   []movieRow{{Id: "movie:tmdb:1"}},
 		series:   []seriesRow{{Id: "series:tvdb:1"}},
 		episodes: []episodeRow{{Id: "episode:tvdb:1:s01e01"}},
-		files:    []fileRow{{Path: "one.mkv"}},
+		files:    []fileRow{{Path: "one.mkv", Items: []string{"movie:tmdb:1"}}},
 		aliases:  []aliasRow{{Alias: "movie:imdb:tt1"}, {Alias: "movie:tmdb:1"}},
 	}
 	keys := markKeys(result)
 	want := map[string]bool{
-		seenItem + "movie:tmdb:1":          true,
-		seenItem + "series:tvdb:1":         true,
-		seenItem + "episode:tvdb:1:s01e01": true,
-		seenFile + "one.mkv":               true,
-		seenAlias + "movie:imdb:tt1":       true,
-		seenAlias + "movie:tmdb:1":         true,
+		seenItem + "movie:tmdb:1":                                true,
+		seenItem + "series:tvdb:1":                               true,
+		seenItem + "episode:tvdb:1:s01e01":                       true,
+		seenFile + "one.mkv":                                     true,
+		seenLink + "one.mkv" + linkKeySeparator + "movie:tmdb:1": true,
+		seenAlias + "movie:imdb:tt1":                             true,
+		seenAlias + "movie:tmdb:1":                               true,
 	}
 	if len(keys) != len(want) {
 		t.Errorf("keys = %v, want %d keys", keys, len(want))
@@ -230,8 +242,8 @@ func TestFullWalkPrunesADepartedTitleAndCountsIt(t *testing.T) {
 	if len(movies) != 1 {
 		t.Fatalf("movies = %v, want only the surviving title", movies)
 	}
-	if scan.report.RemovedLastSweep != 3 {
-		t.Errorf("removedLastSweep = %d, want the departed movie, file, and alias", scan.report.RemovedLastSweep)
+	if scan.report.RemovedLastSweep != 4 {
+		t.Errorf("removedLastSweep = %d, want the departed movie, file, link, and alias", scan.report.RemovedLastSweep)
 	}
 }
 
@@ -531,8 +543,8 @@ func TestFullWalkPrunesADeletedPoster(t *testing.T) {
 	if len(files) != 2 {
 		t.Errorf("files = %v, want the video and the subtitle kept", files)
 	}
-	if scan.report.RemovedLastSweep != 1 {
-		t.Errorf("removedLastSweep = %d, want the one poster row", scan.report.RemovedLastSweep)
+	if scan.report.RemovedLastSweep != 2 {
+		t.Errorf("removedLastSweep = %d, want the poster row and its link", scan.report.RemovedLastSweep)
 	}
 }
 
@@ -635,9 +647,9 @@ func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
 	if item := fake.aliases[pathID]; item != "movie:tmdb:424242" {
 		t.Errorf("alias %s resolves to %q, want the provider id", pathID, item)
 	}
-	// The files stayed on the volume, so the prune never reaches their links
-	// by path. Without the delete by item they would point at an item the
-	// catalog no longer holds, and every reader would see the file twice.
+	// The files stayed on the volume, so the walk marks their links to the new
+	// item and marks none to the old one. The sweep then removes the stale
+	// link, which would otherwise show every reader the file twice.
 	for key := range fake.heldLinks() {
 		if strings.HasSuffix(key, "\x00"+pathID) {
 			t.Errorf("file_items holds %q, want no link to the departed item", key)
@@ -646,10 +658,9 @@ func TestAWalkPrunesATitleThatGainedAProviderID(t *testing.T) {
 }
 
 // A link row can outlive its item without the item ever passing through a
-// prune: a release that deleted the item and not its links leaves the row
-// stranded, and no later delete by item reaches it. The walk reconciles the
-// link table against the items, so the stranded row leaves on the next
-// clean walk.
+// prune. A release that deleted the item and not its links leaves the row
+// stranded, and no delete by item can reach it afterwards. No walk marks it,
+// so the next clean walk sweeps it.
 func TestPruneLibraryDeletesALinkWhoseItemIsAlreadyGone(t *testing.T) {
 	catalog, fake := newFakeCatalog(t)
 	ctx := context.Background()
@@ -666,8 +677,7 @@ func TestPruneLibraryDeletesALinkWhoseItemIsAlreadyGone(t *testing.T) {
 	}
 
 	epoch := int64(1000)
-	marked := []string{seenItem + "movie:tmdb:1", seenFile + "One/movie.mkv", seenAlias + "movie:tmdb:1"}
-	if _, err := catalog.markSeen(ctx, marked, epoch); err != nil {
+	if _, err := catalog.markSeen(ctx, titleMarks("movie:tmdb:1", "One"), epoch); err != nil {
 		t.Fatal(err)
 	}
 
@@ -682,5 +692,218 @@ func TestPruneLibraryDeletesALinkWhoseItemIsAlreadyGone(t *testing.T) {
 	}
 	if len(fake.heldLinks()) != 1 {
 		t.Errorf("links = %v, want only the live one", fake.heldLinks())
+	}
+}
+
+// A file that names two items keeps both links. A double-episode file holds
+// two episodes, the walk marks a link for each, and the sweep removes neither.
+// A sweep that worked by path, or that kept one link per file, would delete a
+// real episode's only reference to its video.
+func TestPruneLibraryKeepsEveryMarkedLinkOfAFile(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	path := "Show/S04E10-E11.mkv"
+	first, second := "episode:tvdb:1:s04e10", "episode:tvdb:1:s04e11"
+	episodes := []episodeRow{
+		{Id: first, Library: "house/series", Path: path, Title: first},
+		{Id: second, Library: "house/series", Path: path, Title: second},
+	}
+	if _, err := catalog.UpsertEpisodes(ctx, episodes); err != nil {
+		t.Fatal(err)
+	}
+	double := []fileRow{{Path: path, Library: "house/series", Present: true, Items: []string{first, second}}}
+	if _, err := catalog.UpsertFiles(ctx, double); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.UpsertFileItems(ctx, double); err != nil {
+		t.Fatal(err)
+	}
+
+	epoch := int64(1000)
+	marked := []string{
+		seenItem + first,
+		seenItem + second,
+		seenFile + path,
+		seenLink + path + linkKeySeparator + first,
+		seenLink + path + linkKeySeparator + second,
+	}
+	if _, err := catalog.markSeen(ctx, marked, epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pruneLibrary(ctx, catalog, "house/series", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	links := fake.heldLinks()
+	if len(links) != 2 {
+		t.Fatalf("links = %v, want both episodes of the double-episode file", links)
+	}
+	for _, item := range []string{first, second} {
+		if !links[path+"\x00"+item] {
+			t.Errorf("links = %v, want the link to %s kept", links, item)
+		}
+	}
+}
+
+// A file that leaves the volume takes its links with it. The walk marks
+// neither the file nor its link, and the link sweep runs before the file
+// sweep, so the link still joins to a file row when the sweep reads it.
+func TestPruneLibraryDeletesTheLinksOfADepartedFile(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+	extra := []fileRow{{Path: "One/extra.mkv", Library: "house/movies", Present: true, Items: []string{"movie:tmdb:1"}}}
+	if _, err := catalog.UpsertFiles(ctx, extra); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.UpsertFileItems(ctx, extra); err != nil {
+		t.Fatal(err)
+	}
+
+	// The second file left the volume, so the walk marked the title and the
+	// file that stands, and neither the departed file nor its link.
+	epoch := int64(1000)
+	if _, err := catalog.markSeen(ctx, titleMarks("movie:tmdb:1", "One"), epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pruneLibrary(ctx, catalog, "house/movies", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, held := fake.held(fake.files)["One/extra.mkv"]; held {
+		t.Errorf("files = %v, want the departed file gone", fake.held(fake.files))
+	}
+	links := fake.heldLinks()
+	if links["One/extra.mkv\x00movie:tmdb:1"] {
+		t.Errorf("links = %v, want the departed file's link gone", links)
+	}
+	if len(links) != 1 {
+		t.Errorf("links = %v, want only the standing file's link", links)
+	}
+}
+
+// An item that leaves the catalog takes its links with it, even where the file
+// that held them stays on the volume.
+func TestPruneLibraryDeletesTheLinksOfAPrunedItem(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+
+	// The file stands and the walk marked it, and the walk read no title
+	// there, so the item, its alias, and the link are all unmarked.
+	epoch := int64(1000)
+	if _, err := catalog.markSeen(ctx, []string{seenFile + "One/movie.mkv"}, epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pruneLibrary(ctx, catalog, "house/movies", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, held := fake.held(fake.movies)["movie:tmdb:1"]; held {
+		t.Errorf("movies = %v, want the unmarked item pruned", fake.held(fake.movies))
+	}
+	if _, held := fake.held(fake.files)["One/movie.mkv"]; !held {
+		t.Errorf("files = %v, want the marked file kept", fake.held(fake.files))
+	}
+	if len(fake.heldLinks()) != 0 {
+		t.Errorf("links = %v, want the pruned item's link gone", fake.heldLinks())
+	}
+}
+
+// Two title folders can derive the same provider id, and a corrected sidecar
+// then moves one folder's files from the first item to the second. The file
+// stays on the volume and both items stand, so a delete driven by a departed
+// file or a departed item reaches nothing. This is the case that needs the
+// walk to mark the link it read and the sweep to remove the one it did not.
+func TestPruneLibraryDeletesAStaleLinkWhileTheFileAndItemStand(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:2", "Two")
+
+	// The first title's file once read as both titles, the shape two folders
+	// that derived one id leave behind.
+	stale := []fileRow{{Path: "One/movie.mkv", Items: []string{"movie:tmdb:2"}}}
+	if _, err := catalog.UpsertFileItems(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	epoch := int64(1000)
+	marked := append(titleMarks("movie:tmdb:1", "One"), titleMarks("movie:tmdb:2", "Two")...)
+	if _, err := catalog.markSeen(ctx, marked, epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pruneLibrary(ctx, catalog, "house/movies", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	links := fake.heldLinks()
+	if links["One/movie.mkv\x00movie:tmdb:2"] {
+		t.Errorf("links = %v, want the stale link gone", links)
+	}
+	if !links["One/movie.mkv\x00movie:tmdb:1"] || !links["Two/movie.mkv\x00movie:tmdb:2"] {
+		t.Errorf("links = %v, want both marked links kept", links)
+	}
+	if _, held := fake.held(fake.movies)["movie:tmdb:2"]; !held {
+		t.Errorf("movies = %v, want the item the stale link named kept", fake.held(fake.movies))
+	}
+	if _, held := fake.held(fake.files)["One/movie.mkv"]; !held {
+		t.Errorf("files = %v, want the file the stale link named kept", fake.held(fake.files))
+	}
+}
+
+// A webhook rescan reconciles the links of the folder it names, and leaves
+// another folder's links alone.
+func TestPruneScopeDeletesOnlyTheNamedFoldersLinks(t *testing.T) {
+	catalog, fake := newFakeCatalog(t)
+	ctx := context.Background()
+	if err := catalog.ensureSeen(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "Action/One")
+	seedTitle(t, catalog, "house/movies", "movie:tmdb:2", "Action/Two")
+
+	// The rescan re-read the first folder and found its file under a new
+	// item, so the old link is unmarked and the new one is marked.
+	moved := []fileRow{{Path: "Action/One/movie.mkv", Items: []string{"movie:tmdb:3"}}}
+	if _, err := catalog.UpsertFileItems(ctx, moved); err != nil {
+		t.Fatal(err)
+	}
+	epoch := int64(3000)
+	marked := append(titleMarks("movie:tmdb:1", "Action/One"),
+		seenLink+"Action/One/movie.mkv"+linkKeySeparator+"movie:tmdb:3")
+	if _, err := catalog.markSeen(ctx, marked, epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := pruneScope(ctx, catalog, "house/movies", "Action/One", epoch); err != nil {
+		t.Fatal(err)
+	}
+
+	links := fake.heldLinks()
+	if !links["Action/One/movie.mkv\x00movie:tmdb:1"] || !links["Action/One/movie.mkv\x00movie:tmdb:3"] {
+		t.Errorf("links = %v, want the named folder's marked links kept", links)
+	}
+	if !links["Action/Two/movie.mkv\x00movie:tmdb:2"] {
+		t.Errorf("links = %v, want the other folder's link kept", links)
+	}
+	if len(links) != 3 {
+		t.Errorf("links = %v, want no link swept outside the named folder", links)
 	}
 }
