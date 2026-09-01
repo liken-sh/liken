@@ -204,6 +204,67 @@ func TestPassReconcilesEveryLibraryAndForgetsTheRest(t *testing.T) {
 	}
 }
 
+// the desk holds a report only because a retained message stands on
+// the bus, so a pass that drops one clears the topics behind it and
+// leaves a live library's own topics alone.
+func TestPassClearsTheTopicsOfALibraryTheCollectionDoesNotHold(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	operator, broker := operatorOnABroker(t, cluster)
+	operator.reports.fold("house", "movies", libraryReport{Titles: 12})
+	operator.reports.fold("house", "gone", libraryReport{Titles: 3})
+	operator.reports.availability("house", "gone", false)
+
+	operator.pass()
+
+	cleared := clearedTopics(t, broker, 2)
+	for _, topic := range libraryTopics("house", "gone") {
+		if !cleared[topic] {
+			t.Errorf("%s was not cleared", topic)
+		}
+	}
+	for _, topic := range libraryTopics("house", "movies") {
+		if cleared[topic] {
+			t.Errorf("%s was cleared, and the library still stands", topic)
+		}
+	}
+}
+
+// litter from a deletion an older release made reaches the desk over
+// the subscription at startup, and the first pass clears it.
+func TestPassClearsTheLitterOfALibraryItNeverSaw(t *testing.T) {
+	cluster := newFakeCluster()
+	operator, broker := operatorOnABroker(t, cluster)
+	operator.handleBusMessage(libraryStatusTopic(defaultTopicBase, "studio", "films"),
+		[]byte(`{"titles":4}`))
+	operator.handleBusMessage(libraryAvailabilityTopic(defaultTopicBase, "studio", "films"),
+		[]byte(availabilityOffline))
+
+	operator.pass()
+
+	cleared := clearedTopics(t, broker, 2)
+	for _, topic := range libraryTopics("studio", "films") {
+		if !cleared[topic] {
+			t.Errorf("%s was not cleared", topic)
+		}
+	}
+	if operator.reports.latestFor("studio", "films") != nil {
+		t.Error("the desk kept the report of a library that never existed")
+	}
+}
+
+// the operator's own clear comes back on its subscription, and folding
+// it would put back the desk state the pass just dropped.
+func TestHandleBusMessageIgnoresAClearedAvailability(t *testing.T) {
+	operator := testOperator(t, newFakeCluster())
+
+	operator.handleBusMessage(libraryAvailabilityTopic(defaultTopicBase, "house", "movies"), nil)
+
+	if held := operator.reports.retain(map[string]bool{}); len(held) != 0 {
+		t.Errorf("the desk holds %v, want nothing from a cleared availability", held)
+	}
+}
+
 // One library's broken claim does not stop the pass: the other library
 // is still reconciled, and the failure is reported and left behind.
 func TestPassCarriesOnPastOneBrokenLibrary(t *testing.T) {

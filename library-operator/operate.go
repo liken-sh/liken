@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -211,24 +212,36 @@ func (o *operator) pass() {
 		namespace, name := library.Metadata.Namespace, library.Metadata.Name
 		live[libraryKey(namespace, name)] = true
 
+		choice := singleCatalog(byNamespace[namespace])
+
 		// A deleting Library takes the departure and never the
 		// reconcile, because the reconcile would stand the scanner
 		// back up to rewrite the rows the sweep is deleting.
 		if library.Metadata.deleting() {
-			if err := o.depart(ctx, library, survivors[namespace]); err != nil {
+			if err := o.depart(ctx, library, survivors[namespace], choice); err != nil {
 				fmt.Fprintf(os.Stderr, "departing library %s/%s: %v\n", namespace, name, err)
 			}
 			continue
 		}
 
-		choice := singleCatalog(byNamespace[namespace])
 		if err := o.reconcile(ctx, library, choice); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n", namespace, name, err)
 		}
 	}
 	// The collection this pass read is the whole set of Libraries, so
 	// anything else the desk holds belongs to a Library that is gone.
-	o.reports.retain(live)
+	// The pass clears the topics of every key it drops, because the
+	// desk holds a key only while a retained message stands on the
+	// bus: a scanner that died after its Library released leaves its
+	// last will there, and a deletion from before this operator
+	// cleared topics left both. Only a pass may clear one, because
+	// the bus handler holds no Library list; the subscription
+	// delivers the litter, the desk holds it, and the next pass
+	// drops it.
+	for _, key := range o.reports.retain(live) {
+		namespace, name, _ := strings.Cut(key, "/")
+		o.clearLibraryTopics(namespace, name)
+	}
 	for key := range o.cleanupStands {
 		if !live[key] {
 			delete(o.cleanupStands, key)
@@ -247,13 +260,19 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	if !ok {
 		return
 	}
+	// An empty payload is how a retained topic is cleared, so it
+	// carries nothing to fold, for either kind. The rule must cover
+	// availability too: the operator subscribes to the topics it
+	// clears, so its own clears come back to it, and folding one as
+	// offline would put back the desk state the pass just dropped.
+	// The next pass would clear again, and the two would trade
+	// messages forever. A real scanner only ever publishes online or
+	// offline, so nothing real is dropped here.
+	if len(payload) == 0 {
+		return
+	}
 	switch kind {
 	case libraryStatusKind:
-		// An empty payload is how a retained topic is cleared, so it
-		// carries no report to fold.
-		if len(payload) == 0 {
-			return
-		}
 		var report libraryReport
 		if err := json.Unmarshal(payload, &report); err != nil {
 			fmt.Fprintf(os.Stderr, "reading the report on %s: %v\n", topic, err)

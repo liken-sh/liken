@@ -4,7 +4,6 @@ package main
 // does to the pod, the bus and the finalizer.
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -39,7 +38,7 @@ func TestDepartWaitsForEverySurvivor(t *testing.T) {
 			// the cleanup pod is up, so the ladder has reached the wait.
 			cluster.pods["movies-cleanup"] = readyCleanupPod()
 
-			if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+			if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 				t.Fatal(err)
 			}
 
@@ -82,7 +81,7 @@ func TestDepartReleasesWhenEverySurvivorIsClean(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/shows"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -97,38 +96,18 @@ func TestDepartReleasesWhenEverySurvivorIsClean(t *testing.T) {
 // the release empties the retained report and availability, so a later
 // subscriber reads nothing.
 func TestDepartClearsTheRetainedTopics(t *testing.T) {
-	address, accepted := testBroker(t)
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 	cluster.pods["movies-cleanup"] = readyCleanupPod()
-	operator := testOperator(t, cluster)
+	operator, broker := operatorOnABroker(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/shows"))
 
-	running, stop := context.WithCancel(context.Background())
-	t.Cleanup(stop)
-	operator.bus = newBus(address, "library-operator", nil, nil, nil)
-	go operator.bus.Run(running)
-	broker := <-accepted
-
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
-	cleared := map[string]bool{}
-	for range 2 {
-		message := waitForPublish(t, broker.pubs)
-		if len(message.payload) != 0 {
-			t.Errorf("the payload on %s is %q, want an empty one", message.topic, message.payload)
-		}
-		if !message.retained {
-			t.Errorf("the message on %s is not retained, so it clears nothing", message.topic)
-		}
-		cleared[message.topic] = true
-	}
-	for _, topic := range []string{
-		libraryStatusTopic(defaultTopicBase, "house", "movies"),
-		libraryAvailabilityTopic(defaultTopicBase, "house", "movies"),
-	} {
+	cleared := clearedTopics(t, broker, 2)
+	for _, topic := range libraryTopics("house", "movies") {
 		if !cleared[topic] {
 			t.Errorf("%s was not cleared", topic)
 		}

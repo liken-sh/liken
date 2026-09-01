@@ -379,6 +379,57 @@ func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 
+// operatorOnABroker is the operator of testOperator with its
+// bus connected to a broker the test reads. A test that watches what
+// the operator publishes needs the connection, because a publish made
+// while the client is disconnected is dropped at QoS 0. The helper
+// returns once the client has its write queue, so the first publish
+// after it goes out on the connection.
+func operatorOnABroker(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+	t.Helper()
+	address, accepted := testBroker(t)
+	operator := testOperator(t, cluster)
+
+	connected := make(chan *Bus, 1)
+	running, stop := context.WithCancel(context.Background())
+	t.Cleanup(stop)
+	operator.bus = newBus(address, "library-operator", nil, func(bus *Bus) { connected <- bus }, nil)
+	go operator.bus.Run(running)
+
+	broker := waitForBroker(t, accepted)
+	waitForConnect(t, connected)
+	return operator, broker
+}
+
+// clearedTopics reads the next count publishes and answers
+// with the topics they cleared. A message that clears a retained
+// topic is empty and retained, and one that is not fails the test,
+// because a payload of any length leaves the topic standing.
+func clearedTopics(t *testing.T, broker *fakeBroker, count int) map[string]bool {
+	t.Helper()
+	cleared := map[string]bool{}
+	for range count {
+		message := waitForPublish(t, broker.pubs)
+		if len(message.payload) != 0 {
+			t.Errorf("the payload on %s is %q, want an empty one", message.topic, message.payload)
+		}
+		if !message.retained {
+			t.Errorf("the message on %s is not retained, so it clears nothing", message.topic)
+		}
+		cleared[message.topic] = true
+	}
+	return cleared
+}
+
+// libraryTopics names the two retained topics one Library
+// stands on the bus, which is the pair a clear has to cover.
+func libraryTopics(namespace, name string) []string {
+	return []string{
+		libraryStatusTopic(defaultTopicBase, namespace, name),
+		libraryAvailabilityTopic(defaultTopicBase, namespace, name),
+	}
+}
+
 // testRunContext ends when the test does, so the bus the loop starts
 // stops dialing a broker that is not there.
 func testRunContext(t *testing.T) context.Context {

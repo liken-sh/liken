@@ -42,12 +42,16 @@ type departure struct {
 // depart runs one pass over a deleting Library. A Library that does
 // not hold this operator's finalizer is the API server's to remove,
 // and the pass leaves it alone.
-func (o *operator) depart(ctx context.Context, library *Library, survivors []string) error {
+//
+// The departure takes the namespace's catalog choice, because the
+// sweep may have to stand the catalog claim again, and the claim is
+// sized from the Catalog.
+func (o *operator) depart(ctx context.Context, library *Library, survivors []string, choice catalogChoice) error {
 	if !library.Metadata.holds(libraryFinalizer) && !library.Metadata.holds(formerLibraryFinalizer) {
 		return nil
 	}
 
-	stage, err := o.departureStage(ctx, library, survivors)
+	stage, err := o.departureStage(ctx, library, survivors, choice)
 	if err != nil {
 		return err
 	}
@@ -61,7 +65,7 @@ func (o *operator) depart(ctx context.Context, library *Library, survivors []str
 // departureStage reads every release rule before it acts, so a
 // departure that is already complete stands nothing, and a release
 // that failed repeats on the next pass without more churn.
-func (o *operator) departureStage(ctx context.Context, library *Library, survivors []string) (departure, error) {
+func (o *operator) departureStage(ctx context.Context, library *Library, survivors []string, choice catalogChoice) (departure, error) {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 
 	// No survivor means no copy of the catalog outlives this Library,
@@ -72,21 +76,18 @@ func (o *operator) departureStage(ctx context.Context, library *Library, survivo
 		return departure{clear: true}, nil
 	}
 
-	// A Library with no catalog claim never stood an agent, so it
-	// wrote no rows and there is nothing to sweep.
-	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, scannerCatalogClaimName(name))
-	if errors.Is(err, ErrNotFound) {
-		return departure{clear: true}, nil
-	}
-	if err != nil {
-		return departure{}, err
-	}
-
 	// The release rule: every survivor is online and no survivor's
 	// report names this library. An offline survivor holds the
 	// release, and that is correct, because its copy of the catalog
 	// still carries the rows and sheds them only after it returns
 	// and syncs.
+	//
+	// This rung also answers the Library that wrote no rows: no
+	// survivor's report names it, so it releases here, and the
+	// departure never asks whether its catalog claim ever existed.
+	// The rows are the question, so a claim a person deleted
+	// mid-life reads the same as one that never stood, and both end
+	// only when the survivors' reports come clean.
 	holder := o.survivorHoldingRows(namespace, name, survivors)
 	if holder == "" {
 		return departure{clear: true}, nil
@@ -104,6 +105,14 @@ func (o *operator) departureStage(ctx context.Context, library *Library, survivo
 			reason:  reasonStoppingScanner,
 			message: "the scanner pod is stopping, so nothing writes the catalog during the sweep",
 		}, nil
+	}
+
+	blocker, err := o.standDepartureClaim(ctx, library, choice)
+	if err != nil {
+		return departure{}, err
+	}
+	if blocker != "" {
+		return departure{reason: reasonBlocked, message: blocker}, nil
 	}
 
 	pod, err := o.standCleanupPod(ctx, library)
@@ -162,6 +171,33 @@ func (o *operator) scannerStopped(ctx context.Context, library *Library) (bool, 
 		return false, nil
 	}
 	return false, DeletePod(ctx, o.client, namespace, name)
+}
+
+// standDepartureClaim gives the cleanup pod a volume to mount, and
+// answers with the sentence a person has to act on, or empty when
+// the claim stands. A fresh empty claim is enough: the agent joins
+// the namespace's cluster, the rows arrive over gossip, and each
+// sweep tick deletes what has arrived, so the release still waits on
+// the survivors' own reports. A namespace with no single Catalog
+// blocks instead, because the claim is sized from the Catalog and
+// there is nothing to make the volume from; the departure retries
+// until the namespace holds exactly one.
+func (o *operator) standDepartureClaim(ctx context.Context, library *Library, choice catalogChoice) (string, error) {
+	namespace := library.Metadata.Namespace
+	name := scannerCatalogClaimName(library.Metadata.Name)
+
+	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
+	if err == nil {
+		return "", nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return "", err
+	}
+	if choice.catalog == nil {
+		return fmt.Sprintf("the catalog volume %s does not exist and the sweep cannot make one: %s",
+			name, choice.message), nil
+	}
+	return "", o.standCatalogClaim(ctx, library, choice.catalog)
 }
 
 // cleanupBlocker answers with the sentence a person has to act on: a

@@ -272,7 +272,10 @@ const (
 	// The Departing condition's reasons, in the order depart.go
 	// reaches them: the scanner pod is stopping, the cleanup pod is
 	// deleting the rows, the sweep ran here and a survivor's catalog
-	// still holds the rows, and the cleanup pod cannot run at all.
+	// still holds the rows, and the cleanup cannot run at all.
+	// Blocked covers a cleanup pod that failed or cannot be
+	// scheduled, and a catalog volume that is gone in a namespace
+	// with no single Catalog to size a new one from.
 	reasonStoppingScanner  = "StoppingScanner"
 	reasonSweeping         = "Sweeping"
 	reasonAwaitingSurvivor = "AwaitingSurvivor"

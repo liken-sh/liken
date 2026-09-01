@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -191,8 +192,12 @@ func (f *fakeCatalog) serveQuery(w http.ResponseWriter, r *http.Request) {
 }
 
 // evaluate runs the one read the SQL asks for and returns its cells.
+// The library-keys UNION routes first, because its branches name
+// every table and any later case would catch it by accident.
 func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	switch {
+	case strings.Contains(sql, "UNION"):
+		return f.libraryKeys()
 	case strings.Contains(sql, "count(*) FROM seen"):
 		return []any{float64(f.countMarks(num(p[0])))}
 	case strings.Contains(sql, "count(*) FROM files"):
@@ -208,6 +213,36 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	default:
 		return f.unmarkedItems(sql, p)
 	}
+}
+
+// libraryKeys answers the sorted set of libraries any table holds a
+// row for, the way the real UNION read does.
+func (f *fakeCatalog) libraryKeys() []any {
+	held := map[string]bool{}
+	for _, table := range []map[string]fakeRow{f.movies, f.series, f.episodes, f.files} {
+		for key := range table {
+			library, _, _ := strings.Cut(key, "\x00")
+			held[library] = true
+		}
+	}
+	for key := range f.aliases {
+		library, _, _ := strings.Cut(key, "\x00")
+		held[library] = true
+	}
+	for key := range f.fileItems {
+		library, _, _ := strings.Cut(key, "\x00")
+		held[library] = true
+	}
+	keys := make([]string, 0, len(held))
+	for key := range held {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	cells := make([]any, len(keys))
+	for i, key := range keys {
+		cells[i] = key
+	}
+	return cells
 }
 
 // unmarkedLinks reads the links this library holds that the current

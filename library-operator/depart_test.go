@@ -107,7 +107,7 @@ func TestDepartReleasesTheFormerFinalizer(t *testing.T) {
 	library := departingMovies(cluster)
 	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, nil); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, nil, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -138,7 +138,7 @@ func TestDepartReleasesTheLastLibraryAtOnce(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, nil); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, nil, withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -150,16 +150,16 @@ func TestDepartReleasesTheLastLibraryAtOnce(t *testing.T) {
 	}
 }
 
-// no catalog claim means no agent ever stood, so there are no rows and the
-// release is at once.
+// a library that wrote no rows is named by no survivor's report, so it
+// releases through the survivor rung, with or without a catalog claim.
 func TestDepartReleasesALibraryThatWroteNoRows(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 	delete(cluster.claims, "movies-catalog")
 	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	seedSurvivor(cluster, operator, true, holding("house/shows"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -168,6 +168,84 @@ func TestDepartReleasesALibraryThatWroteNoRows(t *testing.T) {
 	}
 	if cluster.heldPod("movies-cleanup") != nil {
 		t.Error("a cleanup pod stands for a library that wrote no rows")
+	}
+	if cluster.heldClaim("movies-catalog") != nil {
+		t.Error("a catalog claim stands for a library that had nothing to sweep")
+	}
+}
+
+// a claim deleted while the library lived leaves the rows in every
+// survivor, so the departure stands a fresh claim and sweeps from it.
+func TestDepartStandsACatalogClaimTheSweepNeeds(t *testing.T) {
+	cluster := newFakeCluster()
+	library := departingMovies(cluster)
+	delete(cluster.claims, "movies-catalog")
+	operator := testOperator(t, cluster)
+	seedSurvivor(cluster, operator, true, holding("house/movies"))
+
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldLibrary("movies") == nil {
+		t.Fatal("the finalizer was released while a survivor still held the rows")
+	}
+	if cluster.heldClaim("movies-catalog") == nil {
+		t.Error("the pass stood no catalog claim for the cleanup pod to mount")
+	}
+	if cluster.heldPod("movies-cleanup") == nil {
+		t.Error("the pass stood no cleanup pod")
+	}
+	if stage := departingCondition(t, cluster); stage.Reason != reasonSweeping {
+		t.Errorf("Departing = %+v, want %s", stage, reasonSweeping)
+	}
+}
+
+// a claim the sweep needs and a namespace with no single Catalog to
+// size it: the departure reports the blocker and releases nothing.
+func TestDepartReportsAClaimItCannotStand(t *testing.T) {
+	cases := []struct {
+		name   string
+		choice catalogChoice
+		want   string
+	}{
+		{name: "no Catalog", choice: singleCatalog(nil), want: "has no Catalog"},
+		{
+			name: "two Catalogs",
+			choice: singleCatalog([]*NamespaceCatalog{
+				{Metadata: ObjectMeta{Name: "one", Namespace: "house"}},
+				{Metadata: ObjectMeta{Name: "two", Namespace: "house"}},
+			}),
+			want: "2 Catalogs",
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library := departingMovies(cluster)
+			delete(cluster.claims, "movies-catalog")
+			operator := testOperator(t, cluster)
+			seedSurvivor(cluster, operator, true, holding("house/movies"))
+
+			if err := operator.depart(t.Context(), library, houseSurvivors(), one.choice); err != nil {
+				t.Fatal(err)
+			}
+
+			if cluster.heldLibrary("movies") == nil {
+				t.Fatal("the finalizer was released while the rows were still out there")
+			}
+			if cluster.heldPod("movies-cleanup") != nil {
+				t.Error("a cleanup pod stands with no catalog claim to mount")
+			}
+			stage := departingCondition(t, cluster)
+			if stage.Reason != reasonBlocked {
+				t.Fatalf("Departing = %+v, want %s", stage, reasonBlocked)
+			}
+			if !strings.Contains(stage.Message, "movies-catalog") ||
+				!strings.Contains(stage.Message, one.want) {
+				t.Errorf("message = %q, want the claim and %q in it", stage.Message, one.want)
+			}
+		})
 	}
 }
 
@@ -180,7 +258,7 @@ func TestDepartStopsTheScannerBeforeItSweeps(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,7 +287,7 @@ func TestDepartWaitsForAScannerPodThatIsStillGoing(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -229,7 +307,7 @@ func TestDepartStandsTheCleanupPod(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +335,7 @@ func TestDepartRecreatesACleanupPodThatFailed(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 	if cluster.heldPod("movies-cleanup") != nil {
@@ -272,7 +350,7 @@ func TestDepartRecreatesACleanupPodThatFailed(t *testing.T) {
 	}
 
 	// the next pass finds no pod and stands one again.
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 	if cluster.heldPod("movies-cleanup") == nil {
@@ -295,7 +373,7 @@ func TestDepartReportsACleanupPodThatCannotSchedule(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -317,7 +395,7 @@ func TestDepartLeavesALibraryItDoesNotHold(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -380,7 +458,7 @@ func TestDepartReportsAFailureItCannotReadPast(t *testing.T) {
 			seedSurvivor(cluster, operator, true, holding("house/movies"))
 			cluster.broken[one.path] = http.StatusInternalServerError
 
-			err := operator.depart(t.Context(), library, houseSurvivors())
+			err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog())
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the departure could not read past")
@@ -401,7 +479,7 @@ func TestDepartAnswersACleanupPodAnotherWriterCreated(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -421,7 +499,7 @@ func TestDepartWaitsForACleanupPodThatIsStillGoing(t *testing.T) {
 	operator := testOperator(t, cluster)
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -439,7 +517,7 @@ func TestDepartReportsTheSweepWhileTheBackoffHolds(t *testing.T) {
 	seedSurvivor(cluster, operator, true, holding("house/movies"))
 	operator.cleanupStands["house/movies"] = cleanupStand{count: 4, next: time.Now().Add(time.Hour)}
 
-	if err := operator.depart(t.Context(), library, houseSurvivors()); err != nil {
+	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
 		t.Fatal(err)
 	}
 

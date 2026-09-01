@@ -8,6 +8,7 @@ package main
 // so this desk is the only path a report takes to the control plane.
 
 import (
+	"slices"
 	"sync"
 	"time"
 )
@@ -134,19 +135,35 @@ func (r *reports) onlineFor(namespace, name string) bool {
 // shrink to match, so the desk never serves a report for a Library the
 // collection no longer holds and a Library created later under the same
 // name starts with none.
-func (r *reports) retain(live map[string]bool) {
+//
+// retain answers with the keys it dropped, because desk state for a
+// Library the collection does not hold is a retained message still
+// standing on the bus, and the pass is the only reader that holds
+// the whole Library list, so it is the one that clears those topics.
+// The keys come back sorted, so a pass clears them in one order and
+// a broker log reads the same way every time.
+func (r *reports) retain(live map[string]bool) []string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	dropped := map[string]bool{}
 	for key := range r.latest {
 		if !live[key] {
 			delete(r.latest, key)
+			dropped[key] = true
 		}
 	}
 	for key := range r.online {
 		if !live[key] {
 			delete(r.online, key)
+			dropped[key] = true
 		}
 	}
+	keys := make([]string, 0, len(dropped))
+	for key := range dropped {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // poke never blocks, and the wake channel buffers exactly one. A wake
