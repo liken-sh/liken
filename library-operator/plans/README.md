@@ -151,6 +151,10 @@ that took a hearing-impaired flag for Hindi.
 
 ## Open problems
 
+* [The media browser shows no battery
+  level](open-problems/the-media-browser-shows-no-battery-level.md).
+  The browser's idle view draws the level `media-operator` puts on the
+  `Player` status once one exists.
 * [Which libraries a screen
   shows](open-problems/which-libraries-a-screen-shows.md). The resource
   that binds screens to libraries is undesigned; every screen shows
