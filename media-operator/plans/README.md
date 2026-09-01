@@ -25,14 +25,6 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [22, The idle screen has a controller](22-the-idle-screen-has-a-controller.md).
-  `spec.idle.controller` names who draws a `Player`'s idle screen, the
-  way a `GatewayClass` names its controller. This operator draws it
-  only under its own name, keeps the display claim and the idle
-  command pod in every case, publishes the claim on `status.idle` for
-  a delegate's pod to reference, and deletes the claim's holders before
-  it replaces the claim.
-
 
 ## Completed
 
@@ -212,6 +204,19 @@ These plans are designed. Each keeps its number and moves to
   ten-entry `Keymap` through the guide, and the drill flushed out
   the two OS gaps `liken` fixed the same day, `/dev/uhid` delivery
   and the runtime-named Bluetooth patch firmware.
+
+* [22, The idle screen has a
+  controller](completed/22-the-idle-screen-has-a-controller.md). Built,
+  and drilled on `liken-1` on 2026-09-01 in release 2026.09.01-004.
+  `spec.idle.controller` names who draws a `Player`'s idle screen, the
+  way a `GatewayClass` names its controller. This operator draws it
+  only under its own name, keeps the display claim and the idle
+  command pod in every case, publishes the claim on `status.idle`, and
+  deletes the claim's holders before it replaces the claim. The drill
+  handed `lab-portable` to the library layer's browser, replaced the
+  claim under the delegate's pod and watched the pod come back, turned
+  the unit's idle screen off with `media.liken.sh/none`, and returned
+  it to the default. The idle command pod measured 2 MiB resident.
 
 ## Open problems
 
