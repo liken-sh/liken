@@ -119,18 +119,32 @@ operator's pass, and a `Deployment` would add an API group and a
 verb for a job the scanner pods do without one.
 
 A catalog mounted from a shared volume instead of a sidecar. That was
-the Litestream design, in [`rejected/`](rejected/).
+the Litestream design, in [`rejected/`](../rejected/).
 
 Reads through the sidecar's API. The API is for writes and for the
 stream. Reads from the file measured under 4 ms.
 
 ## Proof
 
-On `liken-1`: a `Player` set to `library.liken.sh/media-browser`
-stands a screen pod, the sidecar joins the scanners' cluster and
-receives their rows, and the browser draws the wall with poster art on
-the screen. A title added on the volume and indexed by a scanner
-appears on the screen within a few seconds. `media-operator`'s plan 22
-drill replaces the claim under the pod, and the pod comes back and
-draws again. The sidecar's resident memory after its restart is
-recorded on the box.
+Drilled on `liken-1` on 2026-09-01, on releases 2026.09.01-002 and
+-003. `lab-portable`, set to `library.liken.sh/media-browser`, stood
+`lab-portable-media-browser`. The sidecar joined the scanners' cluster
+and received their rows, and the browser drew the libraries on the
+screen. `media-operator`'s plan 22 drill replaced the claim under the
+pod, and the pod came back and drew again.
+
+The first pod drew black. The catalog volume was mounted into the
+sidecar alone, so the path `--catalog` named did not exist in the
+browser's filesystem, and the open failed with no log line. Release
+-003 mounts the volume into the browser and logs an unopenable catalog.
+
+Two measurements were not taken on the box. The freshness proof, a
+title added on the volume reaching the screen, ran on the workstation
+harness against the same source code: a scan in progress appeared on
+the open wall. The lab's volumes are shares this project reads and
+never writes, so it was not repeated on `liken-1`. The sidecar's memory
+at rest was not recorded, because the agent never restarts after its
+first sync. That first sync ran more than ten minutes on the lab's
+small box, at about one core and 205 MiB, and the restart that returns
+the memory is the [open problem on ingest
+memory](../open-problems/ingest-memory-and-restart.md).

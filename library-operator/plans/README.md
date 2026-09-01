@@ -35,14 +35,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [06, The catalog on a screen](06-the-catalog-on-a-screen.md). The
-  media browser as a `Player`'s idle screen, in a pod this operator
-  builds when the `Player` names it as idle controller: the browser,
-  the Corrosion sidecar, and the display claim `media-operator`
-  publishes. Built, released in 2026.09.01-002 and -003, and drawing
-  the libraries on `lab-portable` on `liken-1` since 2026-09-01. Two
-  proofs remain before it moves: a title added on the volume reaching
-  the screen, and the sidecar's resident memory at rest.
 * [07, The media browser](07-the-media-browser.md). Libraries on the
   screen, and the structure each kind gives.
 * [08, Playback from the media
@@ -101,6 +93,14 @@ for a later agent to shape.
   be a native client on the bus, and what it needs the result to be:
   a replaceable `spec.idle.image`, every fact from the bus, and the
   look from `brand`'s Iced crate.
+* [06, The catalog on a screen](completed/06-the-catalog-on-a-screen.md).
+  Built, released in 2026.09.01-002 and -003, and drilled on `liken-1`
+  on 2026-09-01. A `Player` that names this operator as its idle
+  controller gets a screen pod: the browser, the Corrosion sidecar with
+  the catalog on an `emptyDir`, every Library of the namespace mounted
+  read-only, and the display claim `media-operator` publishes on
+  `status.idle`. The drill found the browser container without the
+  catalog mount, fixed in -003. The screen takes no input until plan 07.
 * [15, The namespace catalog](completed/15-the-namespace-catalog.md).
   Built out of sequence during plan 04, and rolled to `liken-1` through
   release 2026.08.30-011. The `Catalog` CRD, one per namespace, that owns
