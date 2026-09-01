@@ -200,6 +200,127 @@ func TestDiscoverArtAndTrickplay(t *testing.T) {
 	}
 }
 
+// The art a folder holds is the art the files table already
+// classified, so a name-prefixed poster is the item's poster, a bare name wins
+// over a prefixed one, and the first name in order wins among equals.
+func TestDiscoverArtPicksByRole(t *testing.T) {
+	cases := []struct {
+		name        string
+		files       []string
+		wantPrimary string
+		wantAll     []string
+	}{
+		{
+			name:        "bare names",
+			files:       []string{"folder.jpg", "backdrop.jpg", "logo.png"},
+			wantPrimary: "folder.jpg",
+			wantAll:     []string{"folder.jpg", "backdrop.jpg", "logo.png"},
+		},
+		{
+			name:        "bare poster and fanart",
+			files:       []string{"poster.jpg", "fanart.jpg"},
+			wantPrimary: "poster.jpg",
+			wantAll:     []string{"poster.jpg", "fanart.jpg"},
+		},
+		{
+			name:        "folder wins over poster",
+			files:       []string{"folder.jpg", "poster.jpg"},
+			wantPrimary: "folder.jpg",
+			wantAll:     []string{"folder.jpg"},
+		},
+		{
+			name:        "backdrop wins over fanart",
+			files:       []string{"backdrop.jpg", "fanart.jpg"},
+			wantPrimary: "",
+			wantAll:     []string{"backdrop.jpg"},
+		},
+		{
+			name:        "a name-prefixed poster",
+			files:       []string{"The Karate Kid, Part III [1989]-poster.jpg"},
+			wantPrimary: "The Karate Kid, Part III [1989]-poster.jpg",
+			wantAll:     []string{"The Karate Kid, Part III [1989]-poster.jpg"},
+		},
+		{
+			name: "a name-prefixed set",
+			files: []string{
+				"Solaris (1972)-poster.jpg",
+				"Solaris (1972)-fanart.jpg",
+				"Solaris (1972)-clearlogo.png",
+			},
+			wantPrimary: "Solaris (1972)-poster.jpg",
+			wantAll: []string{
+				"Solaris (1972)-poster.jpg",
+				"Solaris (1972)-fanart.jpg",
+				"Solaris (1972)-clearlogo.png",
+			},
+		},
+		{
+			name:        "a bare poster wins over a prefixed one",
+			files:       []string{"Solaris (1972)-poster.jpg", "folder.jpg"},
+			wantPrimary: "folder.jpg",
+			wantAll:     []string{"folder.jpg"},
+		},
+		{
+			name:        "name order parts two prefixed posters",
+			files:       []string{"Solaris (1972)-poster.jpg", "Andrei Rublev (1966)-poster.jpg"},
+			wantPrimary: "Andrei Rublev (1966)-poster.jpg",
+			wantAll:     []string{"Andrei Rublev (1966)-poster.jpg"},
+		},
+		{
+			name:        "a folder with no art",
+			files:       []string{"Solaris (1972).mkv", "movie.nfo"},
+			wantPrimary: "",
+			wantAll:     nil,
+		},
+		{
+			name:        "an image the words do not name is no art",
+			files:       []string{"Solaris (1972).jpg", "Solaris (1972)-thumb.jpg"},
+			wantPrimary: "",
+			wantAll:     nil,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "Title (1970)")
+			for _, name := range testCase.files {
+				writeFile(t, filepath.Join(dir, name), "bytes")
+			}
+
+			primary, all, err := discoverArt(root, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if primary != underTitle(testCase.wantPrimary) {
+				t.Errorf("primary art = %q, want %q", primary, underTitle(testCase.wantPrimary))
+			}
+			var want []string
+			for _, name := range testCase.wantAll {
+				want = append(want, underTitle(name))
+			}
+			if !reflect.DeepEqual(all, want) {
+				t.Errorf("art = %v, want %v", all, want)
+			}
+		})
+	}
+}
+
+// underTitle renders a fixture's file name as the path relative to the
+// library root, the form every art path takes. An empty name stays empty.
+func underTitle(name string) string {
+	if name == "" {
+		return ""
+	}
+	return filepath.Join("Title (1970)", name)
+}
+
+func TestDiscoverArtOnAMissingFolder(t *testing.T) {
+	primary, all, err := discoverArt("testdata", filepath.Join("testdata", "nowhere"))
+	if err == nil {
+		t.Errorf("discoverArt = %q %v, want an error for a folder it cannot read", primary, all)
+	}
+}
+
 func TestListVideoFilesSkipsSidecars(t *testing.T) {
 	dir := filepath.Join("testdata", "movies", "Action", "The Matrix (1999)")
 	files, err := listVideoFiles(dir)

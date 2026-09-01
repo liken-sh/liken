@@ -7,6 +7,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -164,6 +165,35 @@ func TestWalkMoviesCountsAndIdentifies(t *testing.T) {
 	}
 }
 
+// The art the movie row carries is the art the file rows of the same
+// folder carry, so a folder whose only poster is name-prefixed is browsable.
+func TestWalkMoviesReadsNamePrefixedArt(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "Solaris (1972).mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Solaris (1972)-poster.jpg"), "image")
+	writeFile(t, filepath.Join(dir, "Solaris (1972)-fanart.jpg"), "image")
+
+	result := walkMovies(root, "house/movies", nil)
+	movies := moviesByTitle(result)
+	solaris, held := movies["Solaris"]
+	if !held {
+		t.Fatal("the walk did not read Solaris")
+	}
+	poster := filepath.Join("Solaris (1972)", "Solaris (1972)-poster.jpg")
+	if solaris.Art != poster {
+		t.Errorf("art = %q, want %q", solaris.Art, poster)
+	}
+	want := []string{poster, filepath.Join("Solaris (1972)", "Solaris (1972)-fanart.jpg")}
+	if !reflect.DeepEqual(solaris.Body.Art, want) {
+		t.Errorf("body art = %v, want %v", solaris.Body.Art, want)
+	}
+	files := filesByPath(result)
+	if row := files[poster]; row.Role != fileRolePoster {
+		t.Errorf("the poster's file row is %q, and the item's art is the same file", row.Role)
+	}
+}
+
 func TestWalkMoviesReadsFileAttributesFromStreamdetails(t *testing.T) {
 	result := walkMovies("testdata/movies", "house/movies", nil)
 	file, held := fileByItem(result, "movie:tmdb:603")
@@ -257,23 +287,32 @@ func TestWalkMoviesReadsARootLevelSidecarTitle(t *testing.T) {
 }
 
 // A folder named in the ignore list, and everything under it, is left
-// out of the walk, while a nil set catalogs it, so the ignore list is
-// what keeps a recycle bin off the catalog.
+// out of the walk, while a nil set catalogs it. The ignore list is what a
+// Library declares about its own volume. The service directories are skipped
+// by name whatever the ignore list holds, so a recycle bin stays off the
+// catalog with no configuration.
 func TestWalkMoviesSkipsIgnoredFolders(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "The Matrix (1999)", "movie.nfo"), `<movie><title>The Matrix</title><year>1999</year></movie>`)
-	writeFile(t, filepath.Join(root, "#recycle", "Old Movie (2001)", "old.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Archive", "Old Movie (2001)", "old.mkv"), "video")
+	writeFile(t, filepath.Join(root, "#recycle", "Deleted Movie (2002)", "gone.mkv"), "video")
 
-	kept := walkMovies(root, "house/movies", ignoreSet{"#recycle": true})
+	kept := walkMovies(root, "house/movies", ignoreSet{"Archive": true})
 	if kept.titles != 1 {
-		t.Fatalf("titles = %d, want only the title outside the recycle bin", kept.titles)
+		t.Fatalf("titles = %d, want only the title outside the ignored folder", kept.titles)
 	}
 	if kept.movies[0].Title != "The Matrix" {
 		t.Errorf("title = %q, want The Matrix", kept.movies[0].Title)
 	}
 
-	if all := walkMovies(root, "house/movies", nil); all.titles != 2 {
-		t.Errorf("titles with no ignore = %d, want both, including the recycled folder", all.titles)
+	all := walkMovies(root, "house/movies", nil)
+	if all.titles != 2 {
+		t.Errorf("titles with no ignore = %d, want both, including the archived folder", all.titles)
+	}
+	for _, movie := range all.movies {
+		if movie.Title == "Deleted Movie" {
+			t.Errorf("the walk read %q from the recycle bin", movie.Title)
+		}
 	}
 }
 

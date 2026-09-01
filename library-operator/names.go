@@ -287,38 +287,57 @@ func fileAttributes(name string, stream *streamInfo) (container, videoCodec, aud
 	return container, videoCodec, audioCodec, width, height, durationMs
 }
 
-// posterNames, backdropNames, and logoNames are the art a folder holds, each in
-// the order the scanner prefers. folder.jpg is the poster Jellyfin writes, and
-// the first name that exists is the one recorded.
-var (
-	posterNames   = []string{"folder.jpg", "poster.jpg", "folder.png", "poster.png", "cover.jpg"}
-	backdropNames = []string{"backdrop.jpg", "fanart.jpg", "backdrop.png", "fanart.png"}
-	logoNames     = []string{"logo.png", "clearlogo.png", "logo.jpg"}
-)
+// artRoles are the art an item row carries, in the order the body lists
+// them, and the first of them is the poster the item's own art column holds.
+var artRoles = []string{fileRolePoster, fileRoleBackdrop, fileRoleLogo}
 
 // discoverArt reads the art beside a title. The primary is the poster, the art
 // the item row carries; the full list is the poster, the backdrop, and the logo,
 // in that order, for the body. Every path is relative to the library root, so
 // the display draws the art from the volume and the scanner copies nothing.
+//
+// The art comes from the same classification the file rows carry, so
+// what the files table calls a poster is what the item row shows, and a
+// name-prefixed poster counts.
+//
+// One directory read answers for every role, and it opens no file.
+// Among the images of one role, a bare name wins over a name-prefixed one,
+// because a folder that holds both wrote folder.jpg for the whole title; among
+// equals the first in name order wins, which is the order os.ReadDir returns.
 func discoverArt(root, dir string) (string, []string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", nil, err
+	}
+	chosen := map[string]string{}
+	chosenIsBare := map[string]bool{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || skipName(name) || fileTypeOf(name) != fileTypeImage {
+			continue
+		}
+		role, bare := imageArt(strings.ToLower(stripAnyExtension(name)))
+		if role == "" {
+			continue
+		}
+		if _, taken := chosen[role]; taken && (!bare || chosenIsBare[role]) {
+			continue
+		}
+		chosen[role] = relativePath(root, filepath.Join(dir, name))
+		chosenIsBare[role] = bare
+	}
+
 	var primary string
 	var all []string
-	for group, names := range [][]string{posterNames, backdropNames, logoNames} {
-		for _, name := range names {
-			exists, err := fileExists(filepath.Join(dir, name))
-			if err != nil {
-				return primary, all, err
-			}
-			if !exists {
-				continue
-			}
-			relative := relativePath(root, filepath.Join(dir, name))
-			if group == 0 {
-				primary = relative
-			}
-			all = append(all, relative)
-			break
+	for i, role := range artRoles {
+		path, held := chosen[role]
+		if !held {
+			continue
 		}
+		if i == 0 {
+			primary = path
+		}
+		all = append(all, path)
 	}
 	return primary, all, nil
 }

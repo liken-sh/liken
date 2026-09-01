@@ -23,10 +23,9 @@ image="library-operator:local"
 # so a read against any of them shows the walk.
 catalog_api="http://127.0.0.1:20081"
 
-# How long the scanner runs. The walk runs once at start, before the bus
-# and the webhook, so a short window captures it and the timer sends TERM
-# to end the standing service.
-run_seconds="${RUN_SECONDS:-15}"
+# The cap on the run, because the walk itself ends the run and this
+# number only bounds a walk that never reaches its last line.
+run_seconds="${RUN_SECONDS:-600}"
 
 # The mount point inside the container, the path the pod mounts the claim
 # at. The media directory is mounted here read-only and the root is the
@@ -35,7 +34,7 @@ run_seconds="${RUN_SECONDS:-15}"
 container_mount="/library"
 
 usage() {
-  sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -69,8 +68,12 @@ fi
 # runs before the scanner connects to a bus and this harness watches the
 # catalog and not the report. --user runs it as the person at the
 # keyboard, so it reads a media directory they own.
+#
+# The scanner runs detached, because this script reads its log to
+# learn when the walk ended.
 echo "local/scan: walking $media as a $kind library into $catalog_api" >&2
-timeout --signal=TERM "$run_seconds" docker run --rm \
+container="library-operator-scan-$$"
+docker run --detach --name "$container" \
   --network host \
   --user "$(id -u):$(id -g)" \
   --volume "$media:$container_mount:ro" \
@@ -81,7 +84,59 @@ timeout --signal=TERM "$run_seconds" docker run --rm \
   --env LIBRARY_CATALOG_API="$catalog_api" \
   --env LIBRARY_BUS_ADDRESS= \
   --env LIBRARY_TOPIC_BASE= \
-  "$image" scan || true
+  "$image" scan >/dev/null
+
+# The scanner is a standing service and holds its container open long
+# after the walk, so every way out of this script removes it.
+cleanup() {
+  docker rm --force "$container" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+# The scanner logs one line for the end of its first walk, and that
+# line reports the prune as well, so the log is what this script waits
+# for and the timeout is only a cap on the wait.
+walk="capped"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >&2
+  case "$line" in
+    *"walk complete:"*)
+      walk="complete"
+      case "$line" in
+        *"prune deferred"*) walk="unpruned" ;;
+      esac
+      break
+      ;;
+    *"incomplete walk:"*)
+      walk="incomplete"
+      break
+      ;;
+  esac
+done < <(timeout --signal=TERM "$run_seconds" docker logs --follow "$container" 2>&1)
+
+# A log that ends with no walk line is either a scanner that left or a
+# walk still running at the cap, and the two are read apart here.
+if [ "$walk" = "capped" ] && [ -z "$(docker ps --quiet --filter "name=^${container}\$")" ]; then
+  walk="ended"
+fi
+
+# A walk prunes only when it read the whole directory, so a run that
+# did not finish leaves the rows of every file that left the directory.
+case "$walk" in
+  complete) ;;
+  unpruned)
+    echo "local/scan: the walk finished and its prune did not run; rows for files that left $media are still in the catalog" >&2
+    ;;
+  incomplete)
+    echo "local/scan: the walk did not read all of $media, so it pruned nothing; rows for files that left $media are still in the catalog" >&2
+    ;;
+  ended)
+    echo "local/scan: the scanner ended before it finished a walk; the catalog holds what it wrote up to that point" >&2
+    ;;
+  capped)
+    echo "local/scan: the walk did not finish within the RUN_SECONDS cap of ${run_seconds}s, so it pruned nothing; rows for files that left $media are still in the catalog, and a longer RUN_SECONDS finishes the walk" >&2
+    ;;
+esac
 
 # The row count the walk left, read straight off the agent, so a person
 # sees the walk landed without opening the database.

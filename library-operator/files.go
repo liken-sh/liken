@@ -83,10 +83,24 @@ const trickplayExtension = ".trickplay"
 // title, and the walk leaves them out with the dotfiles.
 var junkNames = map[string]bool{"thumbs.db": true, "desktop.ini": true}
 
-// skipName reports whether the walk leaves an entry out: a name that starts
-// with a dot, and the junk names above.
+// The service and trash directories a filesystem or a storage appliance
+// keeps beside the media. They hold no title. A Synology share root carries
+// #recycle, which is root-owned and mode 000, so a scanner that reads it marks
+// every pass incomplete and the prune never runs. The list is closed: no
+// patterns and no configuration, because the operator's own ignore list is
+// where a volume's other folders belong.
+var serviceNames = map[string]bool{
+	"#recycle": true, "@eadir": true, "$recycle.bin": true,
+	"lost+found": true, "system volume information": true,
+}
+
+// skipName reports whether the walk leaves an entry out: a name that
+// starts with a dot, the junk names above, and the service directories above.
+// The two name lists are matched without regard to case, the way the
+// appliances that write them vary it.
 func skipName(name string) bool {
-	return strings.HasPrefix(name, ".") || junkNames[strings.ToLower(name)]
+	lower := strings.ToLower(name)
+	return strings.HasPrefix(name, ".") || junkNames[lower] || serviceNames[lower]
 }
 
 // The extras folders Jellyfin writes beside a feature, and the one of them
@@ -303,16 +317,27 @@ var imageMarks = []struct {
 // that holds one of the words anywhere else, the way Discovery holds
 // disc, is not art.
 func imageRole(base string, place filePlace) string {
-	last := strings.TrimRight(lastToken(nameTokens(base)), "0123456789")
-	for _, entry := range imageMarks {
-		if strings.HasSuffix(last, entry.mark) {
-			return entry.role
-		}
+	if role, _ := imageArt(base); role != "" {
+		return role
 	}
 	if place.season {
 		return fileRoleStill
 	}
 	return ""
+}
+
+// imageArt reads which art an image is, from its name alone, and
+// whether that name is the bare mark word rather than a word after a
+// title, which is the one fact discoverArt needs beyond the role.
+func imageArt(base string) (role string, bare bool) {
+	tokens := nameTokens(base)
+	last := strings.TrimRight(lastToken(tokens), "0123456789")
+	for _, entry := range imageMarks {
+		if strings.HasSuffix(last, entry.mark) {
+			return entry.role, len(tokens) == 1 && last == entry.mark
+		}
+	}
+	return "", false
 }
 
 // metadataRole reads which sidecar an .nfo is. The fixed names win, and a

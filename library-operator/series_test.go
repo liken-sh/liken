@@ -406,6 +406,30 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+// A series folder's art is read the same way a movie folder's is, so a
+// name-prefixed poster beside tvshow.nfo is the series art.
+func TestWalkSeriesReadsNamePrefixedArt(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Twin Peaks (1990)")
+	writeFile(t, filepath.Join(dir, "Season 01", "Twin Peaks - S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Twin Peaks (1990)-poster.jpg"), "image")
+	writeFile(t, filepath.Join(dir, "Twin Peaks (1990)-clearlogo.png"), "image")
+
+	result := walkSeries(root, "house/series", nil)
+	if len(result.series) != 1 {
+		t.Fatalf("series rows = %d, want 1", len(result.series))
+	}
+	series := result.series[0]
+	poster := filepath.Join("Twin Peaks (1990)", "Twin Peaks (1990)-poster.jpg")
+	if series.Art != poster {
+		t.Errorf("art = %q, want %q", series.Art, poster)
+	}
+	want := []string{poster, filepath.Join("Twin Peaks (1990)", "Twin Peaks (1990)-clearlogo.png")}
+	if !reflect.DeepEqual(series.Body.Art, want) {
+		t.Errorf("body art = %v, want %v", series.Body.Art, want)
+	}
+}
+
 func TestWalkSeriesOnAMissingRoot(t *testing.T) {
 	if result := walkSeries("testdata/nowhere", "house/series", nil); result.titles != 0 {
 		t.Errorf("titles = %d, want an empty walk", result.titles)
@@ -487,5 +511,46 @@ func TestAnUnreadableEpisodeSidecarMarksTheWalkIncomplete(t *testing.T) {
 
 	if !result.readError {
 		t.Error("an episode sidecar that could not be read left the walk complete")
+	}
+}
+
+// A Synology share writes @eaDir inside every folder it holds. It is
+// not a season, so the season descent leaves it out by name and the files
+// under it are no episodes.
+func TestASeasonDescentSkipsAServiceDirectory(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "Show (2019)")
+	writeFile(t, filepath.Join(show, "Season 01", "Show S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(show, "@eaDir", "Show S01E02.mkv"), "video")
+
+	result := walkSeries(root, "house/series", nil)
+
+	if len(result.episodes) != 1 {
+		t.Fatalf("episodes = %+v, want only the one under Season 01", result.episodes)
+	}
+	if result.episodes[0].Episode != 1 {
+		t.Errorf("episode = %+v, want s01e01 and nothing from @eaDir", result.episodes[0])
+	}
+}
+
+// A service directory the scanner cannot read is never read, so it
+// leaves the pass complete and the prune runs. The season descent has to skip
+// it by name, the way the movie walk skips the share root's #recycle.
+func TestAnUnreadableServiceDirectoryLeavesASeriesWalkComplete(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a directory of mode 000")
+	}
+	root := t.TempDir()
+	show := filepath.Join(root, "Show (2019)")
+	writeFile(t, filepath.Join(show, "Season 01", "Show S01E01.mkv"), "video")
+	unreadableFolder(t, show, "#recycle")
+
+	result := walkSeries(root, "house/series", nil)
+
+	if result.readError {
+		t.Error("an unreadable service directory marked the series walk incomplete")
+	}
+	if len(result.episodes) != 1 {
+		t.Errorf("episodes = %+v, want the one the readable season holds", result.episodes)
 	}
 }

@@ -130,8 +130,19 @@ func TestSkipName(t *testing.T) {
 		{name: "Thumbs.db", want: true},
 		{name: "thumbs.db", want: true},
 		{name: "desktop.ini", want: true},
+		{name: "#recycle", want: true},
+		{name: "#RecycLe", want: true},
+		{name: "@eaDir", want: true},
+		{name: "@EADIR", want: true},
+		{name: "$RECYCLE.BIN", want: true},
+		{name: "$recycle.bin", want: true},
+		{name: "lost+found", want: true},
+		{name: "LOST+FOUND", want: true},
+		{name: "System Volume Information", want: true},
+		{name: "system volume information", want: true},
 		{name: "folder.jpg", want: false},
 		{name: "The Matrix (1999).mkv", want: false},
+		{name: "Recycle (2012)", want: false},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

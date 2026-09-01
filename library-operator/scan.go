@@ -364,6 +364,13 @@ func (s *scanner) fullWalk(ctx context.Context) {
 		if folder.readError {
 			readError = true
 		}
+		// The collector takes each folder as the worker hands it
+		// over, so a failed read reaches the log at the moment it happens
+		// and names the path. The summary line below reports only that the
+		// pass was incomplete.
+		for _, failure := range folder.readFailures {
+			s.logf("could not read %s: %v", failure.path, failure.err)
+		}
 		appendFolder(buffer, folder)
 		found := len(folder.movies) + len(folder.series) + len(folder.episodes)
 		items += found

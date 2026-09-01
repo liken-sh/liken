@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"iter"
 	"os"
@@ -70,18 +71,23 @@ func (r folderRule) read(dir walkDirectory) (*walkResult, []walkDirectory) {
 		return folder, nil
 	}
 	if dir.depth > r.maxDepth {
-		return &walkResult{readError: true}, nil
+		return unreadDirectory(dir.path, fmt.Errorf("deeper than the cap of %d grouping folders", r.maxDepth)), nil
 	}
 	entries, err := os.ReadDir(dir.path)
 	if err != nil {
 		if dir.depth > 0 && errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return &walkResult{readError: true}, nil
+		return unreadDirectory(dir.path, err), nil
 	}
 	var children []walkDirectory
 	for _, entry := range entries {
-		if !entry.IsDir() || r.ignore.skips(entry.Name()) {
+		// Two lists keep a directory out of the walk: skipName, the
+		// closed list of dot-names and service directories that hold no
+		// media anywhere, and the ignore set, the folders this Library
+		// names. Neither one is read, so neither one marks the pass
+		// incomplete.
+		if !entry.IsDir() || skipName(entry.Name()) || r.ignore.skips(entry.Name()) {
 			continue
 		}
 		children = append(children, walkDirectory{
@@ -90,6 +96,14 @@ func (r folderRule) read(dir walkDirectory) (*walkResult, []walkDirectory) {
 		})
 	}
 	return nil, children
+}
+
+// unreadDirectory is what one directory the walk could not read leaves
+// behind: the incomplete mark that holds the prune back, and the path and the
+// error the collector logs. A summary that says only that some read failed
+// leaves a person with nothing to fix.
+func unreadDirectory(path string, err error) *walkResult {
+	return &walkResult{readError: true, readFailures: []walkReadFailure{{path: path, err: err}}}
 }
 
 // walkTree streams the title folders under a root to the caller's loop, which

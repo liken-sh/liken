@@ -58,6 +58,17 @@ type walkResult struct {
 	// prune-abort guard then skips the prune for this pass and keeps the
 	// rows the walk did not reach.
 	readError bool
+	// the directories the walk left unread, with the error each read
+	// returned. The mark above says only that some read failed, so the
+	// collector logs these to name the paths a person has to fix.
+	readFailures []walkReadFailure
+}
+
+// walkReadFailure is one directory the walk could not read: the path it
+// tried and the error the read returned.
+type walkReadFailure struct {
+	path string
+	err  error
 }
 
 // noteReadError folds one failed read into the walk's incomplete mark. A
@@ -92,6 +103,7 @@ func collectFolders(folders iter.Seq[*walkResult]) *walkResult {
 		if folder.readError {
 			result.readError = true
 		}
+		result.readFailures = append(result.readFailures, folder.readFailures...)
 	}
 	return result
 }

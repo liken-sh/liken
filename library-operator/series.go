@@ -203,7 +203,12 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, err
 		return files, err
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() || ignore.skips(entry.Name()) {
+		// The season descent skips the same two lists the pool's
+		// descent skips: skipName, the closed list of dot-names and service
+		// directories that are no season anywhere, and the ignore set this
+		// Library declares. Neither one is read, so neither one marks the
+		// pass incomplete.
+		if !entry.IsDir() || skipName(entry.Name()) || ignore.skips(entry.Name()) {
 			continue
 		}
 		seasonDir := filepath.Join(seriesDir, entry.Name())

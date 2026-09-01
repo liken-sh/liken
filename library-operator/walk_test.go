@@ -5,8 +5,10 @@ package main
 // context, and a collector that stops reading.
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -341,6 +343,64 @@ func TestAFolderRuleReadsOneDirectory(t *testing.T) {
 			}
 			if !reflect.DeepEqual(names, testCase.wantChildren) {
 				t.Errorf("children = %v, want %v", names, testCase.wantChildren)
+			}
+		})
+	}
+}
+
+// unreadableFolder makes one directory under a root that the scanner cannot
+// read, and restores its mode in cleanup so the temporary directory deletes.
+func unreadableFolder(t *testing.T, root, name string) string {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.Mkdir(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	return dir
+}
+
+// A Synology share root holds #recycle, which is root-owned and unreadable.
+// The walk names every directory it could not read, so the pod log says which
+// path held the pass back, and a service directory is skipped rather than
+// read, so the pass completes and the prune runs.
+func TestTheWalkNamesADirectoryItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a directory of mode 000")
+	}
+	cases := []struct {
+		name     string
+		folder   string
+		complete bool
+	}{
+		{name: "an unreadable folder holds the pass back", folder: "Archive"},
+		{name: "an unreadable service folder is skipped", folder: "#recycle", complete: true},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := titleTree(t, "A (2001)", "B (2002)")
+			blocked := unreadableFolder(t, root, testCase.folder)
+			scan, _ := fakeScanner(t, root, libraryKindMovies)
+			var logged bytes.Buffer
+			scan.log = &logged
+
+			scan.fullWalk(context.Background())
+
+			log := logged.String()
+			if testCase.complete {
+				if !strings.Contains(log, "walk complete") {
+					t.Errorf("log = %q, want a walk that completed past the service folder", log)
+				}
+				if strings.Contains(log, blocked) {
+					t.Errorf("log = %q, want no read of the service folder %q", log, blocked)
+				}
+				return
+			}
+			if !strings.Contains(log, "incomplete walk") {
+				t.Errorf("log = %q, want the pass marked incomplete", log)
+			}
+			if !strings.Contains(log, "could not read "+blocked) {
+				t.Errorf("log = %q, want the path %q named", log, blocked)
 			}
 		})
 	}
