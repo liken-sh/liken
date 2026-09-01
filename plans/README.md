@@ -257,6 +257,11 @@ dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 These are the questions that liken owes an answer to. It does not have
 one yet. Each one has a document in [`open-problems/`](open-problems/).
 
+* [A missing firmware file reaches only the kernel
+  log](open-problems/a-missing-firmware-file-reaches-only-the-kernel-log.md).
+  A failed firmware request leaves the device degraded and the
+  `Machine` looking healthy; the gap doctrine and the operator's
+  kmsg cursor point at a status answer.
 * [Claiming unknown machines](open-problems/claiming-unknown-machines.md).
   `liken.machine=` identifies a machine that somebody declared before
   it booted, and nothing identifies the machine that nobody declared.
