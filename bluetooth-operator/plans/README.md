@@ -46,6 +46,14 @@ considered and why.
 * [The restore set is proven for one BR/EDR device](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
   The adapter's own `identity` file does not travel, and no LE device
   has been through a restore.
+* [BLE devices connect on demand](open-problems/ble-devices-connect-on-demand.md).
+  A BLE remote drops its link when idle and reconnects on a press, so
+  `connected` reads false for most of its life and its claim can park
+  on the `no-input-node` taint while it sleeps.
+* [Battery levels are not reported](open-problems/battery-levels-are-not-reported.md).
+  The operator reads no device's charge; BlueZ's `Battery1` and the
+  kernel's power supply class are the sources, and the media bus is the
+  home.
 * [The operator serves one adapter](open-problems/the-operator-serves-one-adapter.md).
   The bond store and controller discovery are written for one adapter,
   so a node with two adapters serves only the one the claim took.
