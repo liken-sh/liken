@@ -9,7 +9,7 @@ screen. The seven Lua modules that drew it are deleted, and the playback
 overlay stays exactly where it is.
 
 `library-operator` asked for this, and its [plan
-05](https://github.com/liken-sh/library-operator/blob/main/plans/05-the-idle-screen-in-iced.md)
+05](https://github.com/liken-sh/library-operator/blob/main/plans/completed/05-the-idle-screen-in-iced.md)
 states why. Nothing here knows about libraries. That repository runs
 this image on its screens and adds a browser beside it.
 
