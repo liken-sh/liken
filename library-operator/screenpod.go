@@ -54,6 +54,15 @@ const (
 	windowGraceSeconds  = "15"
 )
 
+// The three variables that carry status.idle.bus into the browser.
+// They are the names media-operator's own client reads, so the two
+// clients of one contract are wired the same way.
+const (
+	mediaBusAddressVariable    = "MEDIA_BUS_ADDRESS"
+	mediaCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
+	mediaScreenTopicVariable   = "MEDIA_PLAYER_SCREEN_TOPIC"
+)
+
 // ScreenPodName is the pod one Player becomes. The name is derived
 // rather than generated, so every pass names the same pod and the operator
 // needs no record of what it created.
@@ -195,13 +204,27 @@ func browserSidecar(player *Player, libraries []Library, image string) Container
 		claims = append(claims, ResourceClaim{Name: displayClaimName, Request: request})
 	}
 
+	environment := []EnvVar{
+		{Name: windowGraceVariable, Value: windowGraceSeconds},
+	}
+	// A Player whose status names a bus gets the three variables, and
+	// its browser takes the room's remotes. A Player under an older
+	// media-operator gets none of them, and its browser opens no
+	// connection and takes the keyboard alone. The template hash rolls
+	// the pod when the block appears.
+	if bus := player.idle().Bus; bus != nil {
+		environment = append(environment,
+			EnvVar{Name: mediaBusAddressVariable, Value: bus.Address},
+			EnvVar{Name: mediaCommandsTopicVariable, Value: bus.CommandsTopic},
+			EnvVar{Name: mediaScreenTopicVariable, Value: bus.ScreenTopic},
+		)
+	}
+
 	return Container{
-		Name:  browserContainer,
-		Image: image,
-		Args:  args,
-		Env: []EnvVar{
-			{Name: windowGraceVariable, Value: windowGraceSeconds},
-		},
+		Name:            browserContainer,
+		Image:           image,
+		Args:            args,
+		Env:             environment,
 		VolumeMounts:    mounts,
 		Resources:       ResourceRequirements{Claims: claims},
 		SecurityContext: unprivileged(),

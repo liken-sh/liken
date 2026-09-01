@@ -35,8 +35,10 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [07, The media browser](07-the-media-browser.md). Libraries on the
-  screen, and the structure each kind gives.
+* [07, The media browser](07-the-media-browser.md). The screen pod's
+  browser takes the room's remotes: the presses `media-operator`'s idle
+  command pod forwards on the bus, the shade it decides, and the
+  re-present when a `Play` ends.
 * [08, Playback from the media
   browser](08-playback-from-the-media-browser.md). From a chosen title
   to a `Play` on the same `Player`, and back.

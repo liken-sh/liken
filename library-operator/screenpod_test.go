@@ -473,3 +473,48 @@ func TestScreenNamespacesAreEveryPlayersNamespaceInOrder(t *testing.T) {
 		t.Errorf("namespaces = %v, want none", screenNamespaces(nil))
 	}
 }
+
+// The bus block on the status reaches the browser as the three
+// variables, so a remote's presses arrive on the commands topic and the
+// shade on the screen topic.
+func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
+	player := denScreen()
+	player.Status.Idle.Bus = &PlayerIdleBus{
+		Address:       "bus.liken-system.svc:1883",
+		CommandsTopic: "liken/media/players/house/den-tv/commands",
+		ScreenTopic:   "liken/media/players/house/den-tv/screen",
+	}
+
+	environment := map[string]string{}
+	for _, variable := range testScreenPod(player, houseLibraries()).Spec.Containers[0].Env {
+		environment[variable.Name] = variable.Value
+	}
+
+	want := map[string]string{
+		windowGraceVariable:        windowGraceSeconds,
+		mediaBusAddressVariable:    "bus.liken-system.svc:1883",
+		mediaCommandsTopicVariable: "liken/media/players/house/den-tv/commands",
+		mediaScreenTopicVariable:   "liken/media/players/house/den-tv/screen",
+	}
+	for name, value := range want {
+		if environment[name] != value {
+			t.Errorf("%s = %q, want %q", name, environment[name], value)
+		}
+	}
+	if len(environment) != len(want) {
+		t.Errorf("env = %v, want %d variables", environment, len(want))
+	}
+}
+
+// A Player under an older media-operator publishes no bus block,
+// and its browser opens no connection and takes the keyboard alone.
+func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
+	browser := testScreenPod(denScreen(), houseLibraries()).Spec.Containers[0]
+
+	for _, variable := range browser.Env {
+		switch variable.Name {
+		case mediaBusAddressVariable, mediaCommandsTopicVariable, mediaScreenTopicVariable:
+			t.Errorf("env = %+v, want no bus variable", browser.Env)
+		}
+	}
+}

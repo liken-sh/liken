@@ -9,6 +9,7 @@
 //! because it must reach the renderer directly. A frame capture and a frame
 //! clock are not part of the high-level entry point.
 
+mod app;
 pub mod capture;
 pub mod frame;
 pub mod graphics;
@@ -22,15 +23,15 @@ use std::sync::Arc;
 
 use iced_wgpu::graphics::Viewport;
 use iced_wgpu::{Renderer, wgpu};
-use iced_winit::core::{Color, Element, Event, Size, Theme};
+use iced_winit::Clipboard;
+use iced_winit::core::{Color, Element, Event, Theme};
 use iced_winit::runtime::user_interface;
 use iced_winit::winit;
-use iced_winit::{Clipboard, conversion};
 
-use winit::event::WindowEvent;
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::EventLoop;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+use app::{App, State};
 use capture::Captures;
 pub use options::{Invocation, Options};
 use stats::Stats;
@@ -104,6 +105,16 @@ pub trait Screen {
 
     /// Handle a message from a widget.
     fn update(&mut self, _message: Self::Message) {}
+
+    /// Whether the screen asked for a fresh Wayland surface. The harness reads
+    /// this on every wake of the loop, and the read clears the request, so one
+    /// ask maps one new surface.
+    fn surface_due(&mut self) -> bool {
+        false
+    }
+
+    /// The new surface is up, on the frame at `at` seconds.
+    fn surfaced(&mut self, _at: f64) {}
 }
 
 /// Run a screen to the end of its script and write what it measured.
@@ -158,6 +169,9 @@ pub struct Ready<S: Screen> {
     // Where the measurements go at exit, from --stats.
     pub(crate) stats_path: Option<PathBuf>,
     pub(crate) window: Arc<winit::window::Window>,
+    /// The instance every surface of this run comes from, held because the
+    /// re-present creates a second one.
+    pub(crate) instance: wgpu::Instance,
     pub(crate) device: wgpu::Device,
     pub(crate) surface: wgpu::Surface<'static>,
     pub(crate) format: wgpu::TextureFormat,
@@ -168,6 +182,12 @@ pub struct Ready<S: Screen> {
     pub(crate) modifiers: ModifiersState,
     pub(crate) events: Vec<Event>,
     pub(crate) resized: bool,
+    /// The app-id every window of this run asks for, held because the
+    /// re-present maps a second window.
+    pub(crate) app_id: String,
+    /// Whether a present is still waiting on a window the compositor has not
+    /// given yet.
+    pub(crate) surface_pending: bool,
     /// When the process began, for the time to the first frame.
     pub(crate) launched: std::time::Instant,
     /// The second the screen named for its next change, while the loop sleeps
@@ -196,199 +216,6 @@ pub struct Ready<S: Screen> {
     pub(crate) captures: Option<Captures>,
     pub(crate) stats: Stats,
     pub(crate) finished: bool,
-}
-
-/// The run and the one thing that outlives its window: the watchdog,
-/// which runs before the first window and after the last one.
-struct App<S: Screen> {
-    watchdog: Watchdog,
-    state: State<S>,
-}
-
-enum State<S: Screen> {
-    Loading {
-        screen: Option<S>,
-        options: Box<Options>,
-        launched: std::time::Instant,
-    },
-    Ready(Box<Ready<S>>),
-    /// The run is over and the graphics are already gone.
-    Done,
-}
-
-impl<S: Screen> winit::application::ApplicationHandler for App<S> {
-    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let App { watchdog, state } = self;
-        let State::Loading {
-            screen,
-            options,
-            launched,
-        } = state
-        else {
-            return;
-        };
-        let launched = *launched;
-
-        // The window comes first, so a compositor that gives none
-        // leaves the screen and the flags where they are and the watchdog
-        // running.
-        let Some(graphics) = graphics::open(event_loop, options.size, &options.app_id) else {
-            return;
-        };
-        watchdog.present();
-
-        let Options {
-            script,
-            capture_dir,
-            capture_at,
-            stats: stats_path,
-            quit_after,
-            // The binary reads the catalog flags before the run, so
-            // the harness carries them and uses none of them.
-            ..
-        } = *std::mem::take(options);
-
-        let viewport = Viewport::with_physical_size(
-            Size::new(graphics.size.0, graphics.size.1),
-            graphics.window.scale_factor() as f32,
-        );
-        let stats = Stats::new(
-            graphics.backend.clone(),
-            graphics.adapter.clone(),
-            graphics.size,
-        );
-
-        let screen = screen.take().expect("one window per run");
-        *state = State::Ready(Box::new(Ready {
-            screen,
-            timeline: Timeline::new(script, quit_after),
-            stats_path,
-            window: graphics.window,
-            device: graphics.device,
-            surface: graphics.surface,
-            format: graphics.format,
-            renderer: graphics.renderer,
-            viewport,
-            cache: user_interface::Cache::new(),
-            clipboard: Clipboard::unconnected(),
-            modifiers: ModifiersState::default(),
-            events: Vec::new(),
-            resized: false,
-            launched,
-            scheduled: None,
-            start: None,
-            drawn: 0.0,
-            stale: false,
-            captures: Captures::requested(capture_dir, capture_at),
-            stats,
-            finished: false,
-        }));
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &winit::event_loop::ActiveEventLoop,
-        _id: winit::window::WindowId,
-        event: WindowEvent,
-    ) {
-        let App { watchdog, state } = self;
-        let State::Ready(ready) = state else {
-            return;
-        };
-
-        match &event {
-            WindowEvent::RedrawRequested => {
-                ready.frame(event_loop);
-                return;
-            }
-            // The window went away, which is what a compositor restart
-            // under a running pod leaves behind. The grace starts again, and
-            // nothing in this process opens the connection a second time.
-            WindowEvent::Destroyed => {
-                watchdog.missing(std::time::Instant::now());
-                return;
-            }
-            WindowEvent::Resized(_) => ready.resized = true,
-            WindowEvent::CloseRequested => {
-                ready.stop(event_loop);
-                return;
-            }
-            WindowEvent::ModifiersChanged(new) => ready.modifiers = new.state(),
-            WindowEvent::KeyboardInput { event, .. } => {
-                if event.state.is_pressed()
-                    && let Some(name) = key_name(&event.logical_key)
-                    && ready.press(&name)
-                {
-                    ready.stop(event_loop);
-                    return;
-                }
-            }
-            _ => {}
-        }
-
-        if let Some(event) =
-            conversion::window_event(event, ready.window.scale_factor() as f32, ready.modifiers)
-        {
-            ready.events.push(event);
-        }
-    }
-
-    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        // The grace is checked here rather than in the frame, because a
-        // client with no window draws no frame.
-        self.watchdog.expire_if_late(std::time::Instant::now());
-
-        // A client waiting for a window has nothing to draw and a grace
-        // to check, so the loop takes every pass it can until one is up. Winit
-        // waits for an event otherwise, and a compositor that gives no window
-        // sends none.
-        if self.watchdog.counting() {
-            event_loop.set_control_flow(ControlFlow::Poll);
-            return;
-        }
-
-        let State::Ready(ready) = &mut self.state else {
-            return;
-        };
-
-        // The deadline is checked here as well as in the frame, so a run ends
-        // even if the compositor stops asking for frames. Before the first
-        // frame there is no timeline yet, so there is no deadline.
-        if let Some(start) = ready.start
-            && ready.timeline.past_deadline(start.elapsed().as_secs_f64())
-        {
-            ready.stop(event_loop);
-            return;
-        }
-
-        // The sources are pumped here, on every wake of the loop, because a
-        // covered client draws no frame: the compositor sends a hidden
-        // surface no frame callbacks.
-        if let Some(start) = ready.start
-            && ready.screen.pump(start.elapsed().as_secs_f64())
-        {
-            // What arrived changed the screen, so the frame on the glass is
-            // stale whatever the animations schedule, and the second
-            // scheduled before it no longer holds.
-            ready.scheduled = None;
-            ready.stale = true;
-        }
-
-        ready.pace(event_loop);
-    }
-
-    fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        if let State::Ready(ready) = &mut self.state {
-            ready.finish();
-        }
-        // Wgpu builds an instance for every backend it can reach, and the one
-        // for GL holds an EGL display on the compositor's connection. Its
-        // destructor speaks Wayland, so it has to run while the connection is
-        // open. winit closes the connection after this call and never before
-        // it, so the graphics are dropped here rather than where the loop
-        // returns.
-        self.state = State::Done;
-    }
 }
 
 /// The script's name for a key. A letter or a digit is itself, and

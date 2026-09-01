@@ -1,6 +1,8 @@
 // One pass of the frame loop: the script's keys, the draw, the capture, and
 // the numbers. The pass ends by setting the pace of the next one.
 
+use std::sync::Arc;
+
 use iced_wgpu::graphics::Viewport;
 use iced_wgpu::wgpu;
 use iced_winit::core::time::Instant;
@@ -9,7 +11,7 @@ use iced_winit::runtime::user_interface::UserInterface;
 use iced_winit::winit::event_loop::{ActiveEventLoop, ControlFlow};
 
 use super::capture::{self, Captures};
-use super::graphics::configure;
+use super::graphics::{self, configure};
 use super::stats::millis;
 use super::timeline::{self, Wake};
 use super::{QUIT, Ready, Screen};
@@ -253,6 +255,48 @@ impl<S: Screen> Ready<S> {
     /// Whether the run has taken every capture it asked for, which ends it.
     fn captured_everything(&self) -> bool {
         self.captures.as_ref().is_some_and(Captures::taken)
+    }
+
+    /// Map a fresh Wayland surface, and report whether one went up.
+    ///
+    /// Weston's kiosk-shell reveals a lower surface only along a code path
+    /// gated on a seat, and `liken`'s compositor has none, so a browser that a
+    /// film covered stays hidden until it maps a new surface. A newly mapped
+    /// toplevel is revealed along a seat-independent path.
+    ///
+    /// The new window is created before the old one is dropped, so the
+    /// browser is never without a surface and the screen never shows the
+    /// compositor's background. The assignments drop the old surface and then
+    /// the last reference to its window, in that order, because a surface
+    /// holds the window it was created from.
+    ///
+    /// A compositor that gives no second window leaves the first one drawing.
+    pub(crate) fn represent(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let size = self.viewport.physical_size();
+        let Some(window) = graphics::window(event_loop, (size.width, size.height), &self.app_id)
+        else {
+            return false;
+        };
+
+        let surface = match self.instance.create_surface(Arc::clone(&window)) {
+            Ok(surface) => surface,
+            Err(error) => {
+                eprintln!("media-browser: no surface on the new window: {error}");
+                return false;
+            }
+        };
+
+        configure(
+            &surface,
+            &self.device,
+            self.format,
+            size.width.max(1),
+            size.height.max(1),
+        );
+        self.surface = surface;
+        self.window = window;
+        eprintln!("media-browser: a new surface is up");
+        true
     }
 
     /// Write the statistics file once, whichever way the run ends.

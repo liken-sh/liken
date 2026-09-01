@@ -1,80 +1,109 @@
 # The media browser
 
-Plan 07. The client's second view: libraries on the screen, and the
-structure each kind gives. At the end of this plan a person in a room
-presses a button, sees the libraries, walks into one, and reaches a movie
-or an episode. Nothing plays yet.
+Plan 07. The screen pod's browser takes the room's remotes. At the end
+of this plan a person in a room presses a button, sees the libraries,
+walks into one, and reaches a movie or an episode. Nothing plays yet.
 
 ## The problem
 
-A catalog nobody can see is a database. The media browser draws it on a
-television, for a person ten feet away, driven by a remote with a
-handful of buttons, and it draws every kind without a built-in notion of
-any kind's shape. This plan is the smallest media browser that lets a
-person find a title. Rows and recommendations come later.
+Plan 06 put the browser on the screen, and it takes no input there.
+The browser already has its levels: the libraries, a movies library
+as a wall of posters, and a series library as series, seasons, and
+episodes, each level a fact of the kind's table and none of it code
+per kind. It moves focus on a handful of key names, `up`, `down`,
+`left`, `right`, `enter`, and `escape`, from a keyboard on a
+workstation and from the scripted timeline in a headless run. A
+remote in a room reaches none of that.
+
+The remotes speak the bus. `media-operator`'s idle command pod stands
+for every unit, whatever draws its screen, and holds the unit's
+keymaps, the focus mark of each controller, and the shade. Its plan 23
+does two things for a delegate: it publishes the broker and the two
+topics on `status.idle.bus`, and it forwards each navigation press on
+the `Player`'s commands topic while the unit plays nothing, the mark
+names the unit, and the screen is awake. The browser has no keymap,
+no focus mark, and no shade of its own, and this plan gives it none.
 
 ## The contract
 
-**Views.** The client has an idle view, plan 05's screen, and a browsing
-view. A press on a remote that names this `Player` opens the browsing
-view. Back from the top level, or the idle timer, returns to the idle
-view. The client publishes its view on the bus so the `Player` status
-can show it.
+**What the browser reads.** Three variables, set on the browser
+container from `status.idle.bus`: `MEDIA_BUS_ADDRESS`,
+`MEDIA_PLAYER_COMMANDS_TOPIC`, and `MEDIA_PLAYER_SCREEN_TOPIC`. They
+carry the names `media-operator`'s own client reads, so the two
+clients of one contract are wired the same way. A `Player` whose
+status has no `bus` block, which is a `Player` under an older
+`media-operator`, gets a pod without them. The browser then opens no
+connection and takes the keyboard alone, and the pod template rolls
+when the block appears.
 
-**Libraries.** The first screen lists every `Library` the client can
-see. In this plan that is every library in the catalog, because the
-resource that binds screens to libraries is an open problem. Each entry
-shows the library's name, kind, and count.
+**Presses.** The commands topic carries `{"action":"up"}` and the
+like. `up`, `down`, `left`, and `right` move focus as the keyboard
+arrows do, `select` is `enter`, and `back` is `escape`. Any other
+action is ignored. A press is a key by another route: one path takes
+the keyboard, the script, and the bus, so a press from a remote
+exercises exactly what the tests exercise.
 
-**Kinds give structure.** The media browser reads a kind's structure
-from the catalog and draws one of a small set of views.
+**The shade.** The screen topic carries the command pod's moments.
+`sleep` draws a black frame and holds it. `wake` draws the level the
+browser left, at the same focus. `present` maps a fresh surface, the
+port of `media-operator`'s own client: the compositor has no seat, so
+a surface a film covered stays hidden until a new one is mapped.
+`focus` changes nothing, because the browser draws no identity block
+to pulse.
 
-- A movies library is one list of titles, sorted by the scanner's sort
-  key, drawn as a wall of posters with the focused title larger and its
-  name beneath it. The head-to-head drew a wall of five thousand at 60
-  frames a second with a bounded decode cache, and those numbers are the
-  floor.
-- A series library is a list of series, then that series' seasons, then
-  that season's episodes, each level a list with its own art.
-- A later kind brings its own levels. The media browser draws lists and
-  walls it is given, and has no code per kind.
+**Back at the top.** Back below the libraries climbs one level, as it
+does from the keyboard. Back at the libraries publishes
+`{"action":"sleep"}` on the commands topic, and the command pod brings
+the shade down. The browser never sleeps itself, because the shade is
+the command pod's alone.
 
-**Navigation.** Up, down, left, right, select, and back arrive as
-commands on the bus, mapped by `media-operator` from whatever controller
-is bound. The media browser owns focus, because there is no keyboard or
-pointer for the toolkit to own it.
-
-**Freshness.** The media browser reads from its local file and re-reads
-what the update stream names, so a title that arrives on the volume
-appears on the wall while the wall is open.
-
-**Art.** Posters and backdrops are read from the volume at the paths the
-catalog stores, decoded and scaled to the size they are drawn at, and
-cached with a bound. The library's volume is mounted read-only into the
-idle pod for that, through the mounts field from plan 06.
+**Freshness and art.** As plan 06 left them: the browser re-reads what
+the update stream names, so a title that lands on the volume appears
+on the open wall, and posters are read from the mounted volumes,
+decoded at the size they are drawn at, and cached with a bound. The
+workstation measured 130.9 MiB resident during a full scroll of the
+wall, beside the head-to-head's 115 MB.
 
 ## The local harness
 
-`local/browse` runs the media browser in a window against the
-workstation's catalog and takes key presses from the keyboard, mapped to
-the same command names used on the bus. The scripted timeline and
-capture flags let an agent see a frame without a screen.
+`local/browse` already takes the keyboard under the same names. The
+three variables are read from the environment when set, so a run
+against a local broker is the same binary with them exported, and no
+second script is needed.
 
 ## What was set aside
 
-Search, filters, and rows like "recently added" and "continue watching".
-They belong to the open problem on what a screen shows and to the
-watch-state plan. A person can find a movie without them.
+Search, filters, and rows like "recently added" and "continue
+watching". They belong to the open problem on what a screen shows and
+to the watch-state plan. A person can find a movie without them.
 
 A web view. A web page has no place on a ten-foot screen driven by six
 buttons.
 
+A keymap in the browser, and a subscription to the remotes' own
+topics. Every client would then reproduce the focus gate and the
+shade, and `media-operator`'s plan 23 sets that aside for the same
+reason.
+
+A built-in idle view beside the browsing view. An earlier draft of this
+plan had both, with a press opening the browser and the idle timer
+returning to a clock. The browser is the delegated unit's idle screen
+now, and the shade is what the timer brings down. A screensaver drawn
+from the libraries' art is welcome later work, and not this plan's.
+
+Publishing the browser's view on the bus for the `Player` status. No
+consumer reads it.
+
 ## Proof
 
-On `liken-1`: from the idle view, a press on the room's remote opens the
-libraries. The movies library opens as a wall with the right count, focus
-moves with the arrows, and the focused title's name is right. The series
-library opens to series, then seasons, then episodes, checked against
-one series by hand. Back returns through each level to the idle view.
-The media browser's resident memory on the box during a full scroll of
-the wall is recorded beside the head-to-head's 115 MB.
+On `liken-1`, on `lab-portable` with both of its controllers paired:
+from the X6 and from the pad, the arrows move focus, select opens the
+movies library as a wall with the right count, a held arrow repeats,
+and the focused title's name is right. The series library opens to
+series, then seasons, then episodes, checked against one series by
+hand. Back climbs each level, back at the libraries darkens the
+screen, and the next press wakes it and moves nothing. A `Play`
+created on `lab-portable` covers the browser, and its end re-presents
+the browser at the same focus. The browser's resident memory on the
+box during a full scroll of the wall is recorded beside the
+workstation's 130.9 MiB.

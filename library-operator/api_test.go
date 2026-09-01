@@ -248,3 +248,44 @@ func TestAnEnvVarCarriesADownwardAPIReference(t *testing.T) {
 		})
 	}
 }
+
+// The field names are media-operator's, so the decode reads the
+// status that operator publishes and not a shape this one invented.
+func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
+	status := PlayerStatus{}
+	raw := `{"idle":{"controller":"library.liken.sh/media-browser",` +
+		`"claim":"den-tv-idle-devices","requests":["draw"],` +
+		`"bus":{"address":"bus.liken-system.svc:1883",` +
+		`"commandsTopic":"liken/media/players/house/den-tv/commands",` +
+		`"screenTopic":"liken/media/players/house/den-tv/screen"}}}`
+	if err := json.Unmarshal([]byte(raw), &status); err != nil {
+		t.Fatal(err)
+	}
+
+	bus := status.Idle.Bus
+	if bus == nil {
+		t.Fatalf("idle = %+v, want the bus block", status.Idle)
+	}
+	want := PlayerIdleBus{
+		Address:       "bus.liken-system.svc:1883",
+		CommandsTopic: "liken/media/players/house/den-tv/commands",
+		ScreenTopic:   "liken/media/players/house/den-tv/screen",
+	}
+	if *bus != want {
+		t.Errorf("bus = %+v, want %+v", *bus, want)
+	}
+}
+
+// An older media-operator publishes no bus block, and the absent
+// block is nothing rather than an empty one.
+func TestPlayerIdleStatusWithoutABusReadsNone(t *testing.T) {
+	status := PlayerStatus{}
+	raw := `{"idle":{"controller":"library.liken.sh/media-browser","claim":"den-tv-idle-devices"}}`
+	if err := json.Unmarshal([]byte(raw), &status); err != nil {
+		t.Fatal(err)
+	}
+
+	if status.Idle.Bus != nil {
+		t.Errorf("bus = %+v, want none", status.Idle.Bus)
+	}
+}

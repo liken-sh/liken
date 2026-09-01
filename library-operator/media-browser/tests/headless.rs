@@ -430,3 +430,45 @@ fn a_capture_run_writes_its_frames_and_ends_after_the_last_one() {
     assert_eq!(measured["height"], serde_json::json!(1080));
     assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
 }
+
+// A browser wired to a broker that answers nothing still draws the
+// wall and takes its own keys. The three variables are what the operator sets
+// from the Player's status, and a broker that is down must not hold a screen
+// dark.
+#[test]
+fn a_browser_wired_to_a_broker_that_is_down_still_draws() {
+    let dir = workspace("bus");
+    let frames = dir.join("frames");
+
+    let run = headless_with(
+        &dir,
+        &[
+            // A port on loopback that nothing listens on, so every
+            // session the reader opens fails and it waits to try again.
+            ("MEDIA_BUS_ADDRESS", "127.0.0.1:1"),
+            (
+                "MEDIA_PLAYER_COMMANDS_TOPIC",
+                "liken/media/players/house/den-tv/commands",
+            ),
+            (
+                "MEDIA_PLAYER_SCREEN_TOPIC",
+                "liken/media/players/house/den-tv/screen",
+            ),
+        ],
+        &[
+            "--script",
+            "0.5:enter",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "1.2",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    drawn(&frames.join("001.20.png"), &run);
+}

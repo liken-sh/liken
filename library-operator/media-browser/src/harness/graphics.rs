@@ -14,6 +14,9 @@ use winit::platform::wayland::WindowAttributesExtWayland;
 /// Everything that exists only after the compositor gives the process a window.
 pub struct Graphics {
     pub window: Arc<winit::window::Window>,
+    /// The wgpu instance the first surface came from. A re-present creates
+    /// the next surface from the same one.
+    pub instance: wgpu::Instance,
     pub device: wgpu::Device,
     pub surface: wgpu::Surface<'static>,
     pub format: wgpu::TextureFormat,
@@ -137,6 +140,7 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Opt
 
     Some(Graphics {
         window,
+        instance,
         device,
         surface,
         format,

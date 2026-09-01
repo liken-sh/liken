@@ -293,9 +293,21 @@ type PlayerStatus struct {
 // container states. The requests are media-operator's own list: render is
 // there only for a Player whose display claim holds one.
 type PlayerIdleStatus struct {
-	Controller string   `json:"controller,omitempty"`
-	Claim      string   `json:"claim,omitempty"`
-	Requests   []string `json:"requests,omitempty"`
+	Controller string         `json:"controller,omitempty"`
+	Claim      string         `json:"claim,omitempty"`
+	Requests   []string       `json:"requests,omitempty"`
+	Bus        *PlayerIdleBus `json:"bus,omitempty"`
+}
+
+// PlayerIdleBus is the broker and the two topics media-operator
+// publishes for a delegate's client: the commands topic the presses
+// arrive on, and the screen topic the idle command pod states its
+// moments on. An older media-operator publishes no block, and the
+// browser then takes the keyboard alone.
+type PlayerIdleBus struct {
+	Address       string `json:"address,omitempty"`
+	CommandsTopic string `json:"commandsTopic,omitempty"`
+	ScreenTopic   string `json:"screenTopic,omitempty"`
 }
 
 // The condition types this operator publishes. Bound reports the
