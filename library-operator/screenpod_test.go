@@ -128,14 +128,30 @@ func TestScreenPodBrowserReadsTheCatalogAndEveryLibraryRoot(t *testing.T) {
 	}
 }
 
+// The browser reads the agent's database file itself, so the catalog
+// volume reaches the browser container as well as the agent, at the
+// path its --catalog argument names.
+func TestScreenPodBrowserMountsTheCatalogFile(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+	browser := pod.Spec.Containers[0]
+
+	for _, mount := range browser.VolumeMounts {
+		if mount.Name == catalogVolumeName && mount.MountPath == catalogStatePath && !mount.ReadOnly {
+			return
+		}
+	}
+	t.Errorf("the browser mounts %+v, want %s at %s", browser.VolumeMounts, catalogVolumeName, catalogStatePath)
+}
+
 // A namespace with no Library still stands a screen: the browser draws
-// the wall the catalog holds, and it reads no volume.
+// the wall the catalog holds, and it mounts the catalog and no media
+// volume.
 func TestScreenPodWithNoLibrariesMountsNone(t *testing.T) {
 	pod := testScreenPod(denScreen(), nil)
 
 	browser := pod.Spec.Containers[0]
-	if len(browser.VolumeMounts) != 0 {
-		t.Errorf("volumeMounts = %+v, want none", browser.VolumeMounts)
+	if len(browser.VolumeMounts) != 1 || browser.VolumeMounts[0].Name != catalogVolumeName {
+		t.Errorf("volumeMounts = %+v, want the catalog alone", browser.VolumeMounts)
 	}
 	if strings.Contains(strings.Join(browser.Args, " "), "--library-root") {
 		t.Errorf("args = %v, want no library root", browser.Args)

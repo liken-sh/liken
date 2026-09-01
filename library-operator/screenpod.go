@@ -164,7 +164,16 @@ func browserSidecar(player *Player, libraries []Library, image string) Container
 		"--catalog", path.Join(catalogStatePath, catalogStateFile),
 		"--updates", defaultCatalogAPI,
 	}
-	mounts := []VolumeMount{}
+	// The browser reads the agent's database file straight off the
+	// shared volume, so the catalog volume is mounted here as well as in
+	// the agent. Without this mount the path --catalog names does not
+	// exist in the browser's filesystem, the open fails, and the wall
+	// draws an empty library list. The mount is not read-only, because
+	// SQLite in WAL mode opens a read-only connection through the -shm
+	// file beside the database, and that file must be writable.
+	mounts := []VolumeMount{
+		{Name: catalogVolumeName, MountPath: catalogStatePath},
+	}
 	for index := range libraries {
 		library := &libraries[index]
 		mountPath := path.Join(librariesMountPath, library.Metadata.Name)

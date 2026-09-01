@@ -41,11 +41,22 @@ impl SidecarSource {
 
     // The connection opens on demand and drops on any failure, because
     // plan 06 lets the sidecar be absent for a moment. A missing or
-    // half-born file reads as empty, and the next call retries.
+    // half-born file reads as empty, and the next call retries. The
+    // failure is logged, because a wall that draws nothing looks the
+    // same whether the catalog is empty or the file is unreachable, and
+    // the log is where the difference shows.
     fn read<T>(&mut self, run: impl Fn(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
         if self.connection.is_none() {
             let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-            self.connection = Connection::open_with_flags(&self.database, flags).ok();
+            match Connection::open_with_flags(&self.database, flags) {
+                Ok(connection) => self.connection = Some(connection),
+                Err(error) => {
+                    eprintln!(
+                        "media-browser: cannot open the catalog {}: {error}",
+                        self.database.display()
+                    );
+                }
+            }
         }
         let Some(connection) = self.connection.as_ref() else {
             return Vec::new();
