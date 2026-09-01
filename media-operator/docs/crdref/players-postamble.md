@@ -100,8 +100,26 @@ indicator, and every message after it is a press.
 
 ### `commands`
 
-The operator's channel to the `Player`'s idle pod. It carries
-`{"action": "re-present"}` when a `Play` ends, and the idle command pod
-states the `present` moment on [`screen`](#screen). A controller
-never sends it, and it carries none of the media actions a
-[Play's commands topic](/docs/reference/plays/#commands) accepts.
+The display commands around the `Player`'s idle screen. None is
+retained, because each is an event and not a state, and a controller
+sends none of them directly.
+
+| `action` | Writer | What it says |
+|---|---|---|
+| `re-present` | the operator | A `Play` ended. The idle command pod states the `present` moment on [`screen`](#screen), and the idle client maps a fresh surface. |
+| `up`, `down`, `left`, `right`, `select`, `back` | the idle command pod | One navigation press, forwarded under a delegate controller for the delegate's client to answer. |
+| `sleep` | a delegate's client | Back had no level left to climb. The idle command pod brings the shade down. |
+
+The presses arrive as `{"action": "up"}` and the like, the shape a
+[Play's commands topic](/docs/reference/plays/#commands) carries, so a
+client reads one vocabulary on both trees. They are forwarded only
+under a delegate controller, and only through the gates every other
+press reads: the unit plays nothing, the remote's mark names this
+`Player`, the press is a down edge, and the screen is awake. A binding
+whose `Keymap` repeats it is published again while the control is
+held. Under `media.liken.sh/idle-screen` no press is forwarded, and
+back is sleep.
+
+The `sleep` request acts while the unit plays nothing and the screen
+is awake, and it brings the shade down exactly as the operator's own
+back press does. It is the one message a delegate's client writes.

@@ -95,6 +95,38 @@ restart the container. The operator's own client exits with code 7 in
 that case, so a person reading a container's last state finds the same
 code whichever client the image runs.
 
+## Read the presses
+
+The idle command pod keeps the unit's keymaps, the focus gate, and the
+shade under a delegate, so your client holds none of them. It joins
+the bus with the three facts under `status.idle.bus` instead:
+
+    status:
+      idle:
+        bus:
+          address: bus.liken-system.svc:1883
+          commandsTopic: liken/media/players/den/den/commands
+          screenTopic: liken/media/players/den/den/screen
+
+* `address` is the broker, as `host:port`.
+* `commandsTopic` is where the presses arrive, as `{"action": "up"}`
+  for `up`, `down`, `left`, `right`, `select`, and `back`. Only a press
+  from a controller whose mark names this `Player` arrives, only while
+  the unit plays nothing, and only while the screen is awake. A press
+  on a sleeping screen wakes it and reaches you as nothing. A held
+  control whose `Keymap` repeats it arrives again while it is held.
+* `screenTopic` is where the idle command pod states its moments:
+  `sleep` and `wake`, retained, and `focus` and `present`, not. Draw a
+  black frame on `sleep`, draw again on `wake`, and map a fresh
+  surface on `present`, because a surface a film covered stays hidden
+  on a seatless compositor until a new one is mapped.
+
+Your client writes one message. When back is pressed with no level
+left to climb, publish `{"action": "sleep"}` on `commandsTopic`, and
+the idle command pod brings the shade down the way it does for its own
+client. The operator holds the broker and the topic base, so read the
+topics from the status and derive none.
+
 ## Expect the claim to change
 
 A `ResourceClaim` is immutable. When the `Player`'s display selector

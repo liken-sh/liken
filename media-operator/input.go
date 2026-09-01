@@ -54,6 +54,32 @@ const (
 // holds no case for it and it reaches no player program.
 const actionRePresent = "re-present"
 
+// actionSleep is display plumbing beside re-present. A delegate's
+// client publishes it on the Player's commands topic when back has no
+// level left to climb, and the idle command pod brings the shade down.
+// A controller never sends it, and the stock client never needs it,
+// because the command pod sleeps that client on back directly.
+const actionSleep = "sleep"
+
+// navigationActions are the six actions a delegate's client answers.
+// The idle command pod forwards each one to the client under a
+// delegate and forwards none under this operator's own controller.
+var navigationActions = map[string]bool{
+	actionUp:     true,
+	actionDown:   true,
+	actionLeft:   true,
+	actionRight:  true,
+	actionSelect: true,
+	actionBack:   true,
+}
+
+// isNavigationAction reports whether an action is one of the six a
+// delegate's client answers, the way isVolumeAction names the two the
+// level reads.
+func isNavigationAction(action string) bool {
+	return navigationActions[action]
+}
+
 // amountActions are the actions that move by an amount: seconds for
 // seek, a step for volume and chapter. The sign is the direction, so
 // one action serves both bumpers.

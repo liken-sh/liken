@@ -111,6 +111,11 @@ const (
 	// status topics, so the sidecar parses no topic.
 	idlePanelTopicVariable = "IDLE_PANEL_TOPIC"
 
+	// The resolved controller name, on the idle command pod. The pod
+	// compares it to this operator's own name to learn whether a
+	// delegate's client is there to answer a navigation press.
+	idleControllerVariable = "IDLE_CONTROLLER"
+
 	// The topic the idle command pod publishes the screen's
 	// moments on, and the idle client reads them off. The operator sets
 	// it on the idle command pod and on every idle client pod, because

@@ -266,6 +266,7 @@ func TestBuildIdleCommandPodStandsOnItsOwn(t *testing.T) {
 		idleFadeAfterSecondsVariable: "600",
 		idleOffAfterSecondsVariable:  "0",
 		idlePanelTopicVariable:       playerPanelTopic(testTopicBase, "house", "theater"),
+		idleControllerVariable:       idleControllerOwn,
 	}
 	if env := containerEnv(held); !reflect.DeepEqual(env, wantEnv) {
 		t.Errorf("env = %+v, want %+v", env, wantEnv)
@@ -607,6 +608,19 @@ func TestBuildIdleCommandPodCarriesTheOffWindow(t *testing.T) {
 	mustMatch(t, env[idleOffAfterSecondsVariable], "1800")
 	mustMatch(t, env[idlePanelTopicVariable],
 		playerPanelTopic(testTopicBase, "house", "theater"))
+}
+
+// the resolved controller name reaches the idle command pod on its
+// container, so the pod answers a navigation press the way the
+// controller that drew the screen calls for.
+func TestBuildIdleCommandPodCarriesTheResolvedController(t *testing.T) {
+	player := standingIdlePlayer()
+	delegate := "library.liken.sh/media-browser"
+	idle := resolveIdle(&IdlePolicy{Controller: delegate}, nil, testIdleImage)
+
+	pod := buildIdleCommandPod(player, testSidecarImage, testBusAddress, testTopicBase, idle, nil)
+
+	mustMatch(t, envValue(pod.Spec.Containers[0], idleControllerVariable), delegate)
 }
 
 // namedIdleImage is the image a tier names for the idle client in these

@@ -25,6 +25,13 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
+* [23, Presses reach a delegate](23-presses-reach-a-delegate.md).
+  `status.idle` gains the broker and the two topics a delegate's
+  client reads. Under a delegate the idle command pod forwards the
+  navigation presses, back included, on the `Player`'s commands
+  topic, and reads a `sleep` request there from a client with nowhere
+  left to go back to.
+
 
 ## Completed
 

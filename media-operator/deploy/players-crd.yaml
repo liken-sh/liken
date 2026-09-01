@@ -426,3 +426,26 @@ spec:
                         media.liken.sh/none.
                       items:
                         type: string
+                    bus:
+                      type: object
+                      description: |-
+                        The bus facts a delegate's client reads. The block is
+                        present whenever the idle command pod stands, which is
+                        under every controller but media.liken.sh/none.
+                      properties:
+                        address:
+                          type: string
+                          description: |-
+                            The broker, as host:port. It is the address the
+                            operator itself connects to.
+                        commandsTopic:
+                          type: string
+                          description: |-
+                            The topic the idle command pod forwards navigation
+                            presses on under a delegate, and the topic a client
+                            publishes its sleep request on.
+                        screenTopic:
+                          type: string
+                          description: |-
+                            The topic the idle command pod states its moments
+                            on: sleep, wake, focus, and present.

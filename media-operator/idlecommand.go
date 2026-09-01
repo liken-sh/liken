@@ -94,6 +94,13 @@ type idleCommander struct {
 	// names it on every idle pod, so publishScreen needs no guard.
 	screenTopic string
 
+	// Whether a delegate draws this unit's screen, read once from the
+	// resolved controller name on the container. Under a delegate a
+	// navigation press is forwarded and back is one of them; under this
+	// operator's own client back is sleep and nothing is forwarded. It
+	// never changes after start, so it takes no lock.
+	delegated bool
+
 	// The unit's volume topic, empty for a Player with no sinks.
 	// Empty is the speaker gate: the sidecar subscribes to no level and
 	// answers no volume press.
@@ -212,9 +219,13 @@ func runIdleCommand() {
 		statusTopic:   statusTopic,
 		runCtx:        runCtx,
 		panelTopic:    os.Getenv(idlePanelTopicVariable),
-		screenTopic:   os.Getenv(playerScreenTopicVariable),
-		volumeTopic:   os.Getenv(playerVolumeTopicVariable),
-		playerName:    os.Getenv(playerNameVariable),
+		// Every name but this operator's own is a delegate, the same
+		// comparison the operator makes. A pod under media.liken.sh/none
+		// never stands, so that name never reaches here.
+		delegated:   os.Getenv(idleControllerVariable) != idleControllerOwn,
+		screenTopic: os.Getenv(playerScreenTopicVariable),
+		volumeTopic: os.Getenv(playerVolumeTopicVariable),
+		playerName:  os.Getenv(playerNameVariable),
 		remotes: idleRemoteMap(
 			os.Getenv(idleRemoteEventsTopicsVariable),
 			os.Getenv(idleRemoteKeymapTopicsVariable),
@@ -335,11 +346,12 @@ func idleCommandClientID(commandsTopic string) string {
 	return "idle-command-" + strings.ReplaceAll(commandsTopic, "/", "-")
 }
 
-// handle folds one message from either subscription. The two topics carry
-// different messages, so the topic says which this is: the status topic
-// carries the unit's state, and the commands topic carries a named
-// command, of which only the re-present acts. A payload that does not
-// decode, or any other action, does nothing, so a newer command on the
+// handle folds one message from any subscription, and the topic says
+// which message this is: the status topic carries the unit's state, and
+// the commands topic carries a named command. Two commands act, the
+// operator's re-present and a client's sleep. Every other action does
+// nothing, the presses this pod forwarded and reads back included, and
+// so does a payload that does not decode, so a newer command on the
 // topic has no effect rather than a crash.
 //
 // The Bus calls this on its reader goroutine, so the topics are served in
@@ -383,17 +395,19 @@ func (ic *idleCommander) handle(topic string, payload []byte) {
 	if err := json.Unmarshal(payload, &command); err != nil {
 		return
 	}
-	if command.Action != actionRePresent {
-		return
+	switch command.Action {
+	case actionRePresent:
+		// The present states the screen back to the idle client, so it
+		// acts only while the unit plays nothing, the same gate back, volume,
+		// and cycle read.
+		ic.mu.Lock()
+		if ic.idle {
+			ic.publishScreen(screenMessage{Event: screenPresentEvent})
+		}
+		ic.mu.Unlock()
+	case actionSleep:
+		ic.sleepOnRequest()
 	}
-	// The present states the screen back to the idle client, so it
-	// acts only while the unit plays nothing, the same gate back, volume,
-	// and cycle read.
-	ic.mu.Lock()
-	if ic.idle {
-		ic.publishScreen(screenMessage{Event: screenPresentEvent})
-	}
-	ic.mu.Unlock()
 }
 
 // idleStatus is the one field of the status the sidecar reads for
@@ -451,16 +465,19 @@ func isPressEdge(event remoteEvent) bool {
 
 // onRemoteEvent folds one press into the fade. A sleeping screen wakes
 // on any press, so a person gets the screen back with whatever control
-// they touched. A press named back, while the unit plays nothing,
-// states sleep at once. A press named volume or mute, while the
-// unit plays nothing and the screen is awake, publishes the unit's
-// next level, and the level reaches the client on the subscription
-// like any other change. The two gates on it are deliberate: a press on a
-// sleeping screen is a wake and nothing more, and a unit that plays
-// has the film's own pod answering its presses. A binding whose
-// keymap repeats it steps again while the control is held, on the
-// same clock the translator ticks during a film. Every other press
-// restarts the quiet window.
+// they touched, and that press does nothing else. Under a delegate a
+// navigation press, while the unit plays nothing, is published on the
+// commands topic for the client to answer. Back is one of the six, so
+// back does not sleep the screen there; only the client knows whether
+// back has anywhere to go. Under this operator's own controller no
+// press is forwarded and back states sleep at once. A press named
+// volume or mute, while the unit plays nothing and the screen is awake,
+// publishes the unit's next level under either controller. The gates
+// are deliberate: a press on a sleeping screen is a wake and nothing
+// more, and a unit that plays has the film's own pod answering its
+// presses. A binding whose keymap repeats it publishes again while the
+// control is held, on the same clock the translator ticks during a
+// film. Every other press restarts the quiet window.
 //
 // An event that is not a down edge, or does not decode, changes
 // nothing: it neither wakes, nor sleeps, nor restarts the window.
@@ -503,6 +520,12 @@ func (ic *idleCommander) onRemoteEvent(topic string, remote idleRemote, payload 
 	case ic.asleep:
 		ic.asleep = false
 		moment = screenWakeEvent
+	case ic.delegated && ic.idle && named && isNavigationAction(binding.Action):
+		// The delegate's client draws the list, so the press reaches
+		// it and this pod decides nothing about it. Back is one of the
+		// six, so the sleep case below never runs under a delegate.
+		press = mediaCommand{Action: binding.Action}
+		repeat = binding.RepeatInterval > 0
 	case ic.idle && named && binding.Action == actionBack:
 		ic.asleep = true
 		moment = screenSleepEvent
@@ -517,7 +540,7 @@ func (ic *idleCommander) onRemoteEvent(topic string, remote idleRemote, payload 
 		ic.publishCycle(remote)
 		return
 	}
-	ic.pressVolume(press)
+	ic.applyPress(press)
 	if repeat {
 		ic.startRepeat(event.Code, press, binding.RepeatDelay, binding.RepeatInterval)
 	}
@@ -737,7 +760,7 @@ func (ic *idleCommander) startRepeat(code uint16, press mediaCommand, delayMilli
 	go runRepeat(ctx,
 		time.Duration(delayMillis)*time.Millisecond,
 		time.Duration(intervalMillis)*time.Millisecond,
-		func() { ic.repeatVolume(press) })
+		func() { ic.repeatPress(press) })
 }
 
 // stopRepeat ends the repeat a release names. A release for a code with
@@ -764,12 +787,13 @@ func (ic *idleCommander) stopAllRepeats() {
 	ic.repeatMu.Unlock()
 }
 
-// repeatVolume is one tick of a held volume control. It reads the two
-// press gates again on every tick, because a Play can start or the
-// screen can sleep mid-hold, and a tick in either state must publish
-// nothing. A tick that acts restarts the quiet window the way the press
-// did, so a long hold never fades the screen it is adjusting.
-func (ic *idleCommander) repeatVolume(press mediaCommand) {
+// repeatPress is one tick of a held control, a volume step or a
+// forwarded arrow alike. It reads the two press gates again on every
+// tick, because a Play can start or the screen can sleep mid-hold, and
+// a tick in either state must publish nothing. A tick that acts
+// restarts the quiet window the way the press did, so a long hold never
+// fades the screen it is working.
+func (ic *idleCommander) repeatPress(press mediaCommand) {
 	ic.mu.Lock()
 	act := ic.idle && !ic.asleep
 	if act {
@@ -777,7 +801,7 @@ func (ic *idleCommander) repeatVolume(press mediaCommand) {
 	}
 	ic.mu.Unlock()
 	if act {
-		ic.pressVolume(press)
+		ic.applyPress(press)
 	}
 }
 

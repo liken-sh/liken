@@ -15,14 +15,15 @@ func TestIdleCommandClientIDDerivesFromTheTopic(t *testing.T) {
 	mustMatch(t, idleCommandClientID(topic), "idle-command-liken-media-players-house-theater-commands")
 }
 
-// Any action other than re-present, and a payload that does not decode,
-// state nothing, so a newer command on the topic leaves the screen as it
-// is rather than crashing the sidecar.
-func TestIdleCommandHandleActsOnlyOnRePresent(t *testing.T) {
+// Only re-present and sleep act. Every other action, a press the pod
+// forwarded and reads back included, and a payload that does not
+// decode, leave the screen as it is rather than crashing the pod.
+func TestIdleCommandHandleActsOnTwoActionsAlone(t *testing.T) {
 	ic, watch := fadingCommander(t, 0, nil)
 	sendActivity(t, ic, playerIdle)
 
 	ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionPause}))
+	ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionUp}))
 	ic.handle(ic.commandsTopic, []byte("not json"))
 
 	noMoment(t, watch, 100*time.Millisecond)

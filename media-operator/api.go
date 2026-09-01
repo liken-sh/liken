@@ -100,6 +100,23 @@ type PlayerIdleStatus struct {
 	Controller string   `json:"controller"`
 	Claim      string   `json:"claim,omitempty"`
 	Requests   []string `json:"requests,omitempty"`
+
+	// Bus is what a delegate's client reads to join the unit on the
+	// bus. It is present whenever the idle command pod stands, which is
+	// under every controller but media.liken.sh/none.
+	Bus *PlayerIdleBus `json:"bus,omitempty"`
+}
+
+// PlayerIdleBus names the broker and the two topics a delegate's client
+// needs. The presses arrive on the commands topic and the client's one
+// request, a sleep, goes back on it. The idle command pod states its
+// moments on the screen topic. The broker and the topic base are this
+// operator's configuration, so the status carries the built topics and
+// a client derives none.
+type PlayerIdleBus struct {
+	Address       string `json:"address"`
+	CommandsTopic string `json:"commandsTopic"`
+	ScreenTopic   string `json:"screenTopic"`
 }
 
 // The three panel states, each folded from the Display's

@@ -765,7 +765,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		}
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
-		desired.Idle = deriveIdleStatus(idle.Controller, o.idleClaimFor(player))
+		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase, o.idleClaimFor(player))
 		o.seedVolume(player, key)
 		// The status goes out before the re-present, and the order is what
 		// the returning idle screen draws from. The client animates the

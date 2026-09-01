@@ -236,13 +236,13 @@ func playCommandsTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/commands"
 }
 
-// playerCommandsTopic carries the display commands the operator sends
-// one Player's idle pod, the re-present that returns the screen to the
-// idle client when a Play ends. It is not retained, because a re-present is an event
-// and not a state, the same as the play-commands and remote-events
-// topics. It stays off the plays tree because it drives the standing
-// idle pod, not a Play, and it carries no media vocabulary a controller
-// sends.
+// playerCommandsTopic carries the display commands around one Player's
+// idle screen: the re-present the operator sends when a Play ends, the
+// navigation presses the idle command pod forwards under a delegate,
+// and the sleep a delegate's client asks for. It is not retained,
+// because each of them is an event and not a state. It stays off the
+// plays tree because it drives the standing idle screen, not a Play,
+// and a controller sends nothing on it directly.
 func playerCommandsTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/commands"
 }

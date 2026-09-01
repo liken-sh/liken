@@ -369,10 +369,22 @@ func TestPlayTitleFallsBackForAPlayWithNoItems(t *testing.T) {
 	mustMatch(t, playTitle(&play), "sailing")
 }
 
+// testIdleBus is the bus block every unit in these tests carries: the
+// broker the operator holds and the two topics the command pod stands
+// on for the theater.
+func testIdleBus() *PlayerIdleBus {
+	return &PlayerIdleBus{
+		Address:       testBusAddress,
+		CommandsTopic: playerCommandsTopic(testTopicBase, "house", "theater"),
+		ScreenTopic:   playerScreenTopic(testTopicBase, "house", "theater"),
+	}
+}
+
 // the idle block reports the resolved controller and, where a
-// controller draws, the claim a delegate references and the requests it
-// carries. A Player with no idle claim reports no block, and under
-// media.liken.sh/none the block carries the controller alone.
+// controller draws, the claim a delegate references, the requests it
+// carries, and the bus a delegate's client reads. A Player with no idle
+// claim reports no block, and under media.liken.sh/none the block
+// carries the controller alone.
 func TestDeriveIdleStatus(t *testing.T) {
 	player := standingIdlePlayer()
 	drawOnly := standingIdlePlayer()
@@ -380,47 +392,56 @@ func TestDeriveIdleStatus(t *testing.T) {
 
 	cases := []struct {
 		name       string
+		player     *Player
 		controller string
 		claim      *ResourceClaim
 		want       *PlayerIdleStatus
 	}{
 		{
 			name:       "no claim, so no block",
+			player:     player,
 			controller: idleControllerOwn,
 			want:       nil,
 		},
 		{
 			name:       "this operator draws",
+			player:     player,
 			controller: idleControllerOwn,
 			claim:      buildIdleClaim(player, "display-draw"),
 			want: &PlayerIdleStatus{
 				Controller: idleControllerOwn,
 				Claim:      "theater-idle-devices",
 				Requests:   []string{"draw", "render"},
+				Bus:        testIdleBus(),
 			},
 		},
 		{
 			name:       "a delegate draws",
+			player:     player,
 			controller: "library.liken.sh/media-browser",
 			claim:      buildIdleClaim(player, "display-draw"),
 			want: &PlayerIdleStatus{
 				Controller: "library.liken.sh/media-browser",
 				Claim:      "theater-idle-devices",
 				Requests:   []string{"draw", "render"},
+				Bus:        testIdleBus(),
 			},
 		},
 		{
 			name:       "a unit with no render node",
+			player:     drawOnly,
 			controller: "library.liken.sh/media-browser",
 			claim:      buildIdleClaim(drawOnly, "display-draw"),
 			want: &PlayerIdleStatus{
 				Controller: "library.liken.sh/media-browser",
 				Claim:      "theater-idle-devices",
 				Requests:   []string{"draw"},
+				Bus:        testIdleBus(),
 			},
 		},
 		{
 			name:       "nothing draws",
+			player:     player,
 			controller: idleControllerNone,
 			claim:      buildIdleClaim(player, "display-draw"),
 			want:       &PlayerIdleStatus{Controller: idleControllerNone},
@@ -428,7 +449,7 @@ func TestDeriveIdleStatus(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := deriveIdleStatus(one.controller, one.claim)
+			got := deriveIdleStatus(one.player, one.controller, testBusAddress, testTopicBase, one.claim)
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("idle = %+v, want %+v", got, one.want)
 			}

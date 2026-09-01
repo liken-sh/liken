@@ -68,17 +68,30 @@ func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatu
 // names no display-draw class, and such a unit reports no idle block at
 // all. Under media.liken.sh/none nothing draws and no claim stands, so
 // the block carries the controller alone.
-func deriveIdleStatus(controller string, claim *ResourceClaim) *PlayerIdleStatus {
+//
+// The bus block rides with the claim. The idle command pod stands
+// under every controller but media.liken.sh/none, and the broker and
+// the topic base are this operator's configuration, so the status is
+// where a delegate's client learns both.
+func deriveIdleStatus(
+	player *Player, controller, busAddress, topicBase string, claim *ResourceClaim,
+) *PlayerIdleStatus {
 	if claim == nil {
 		return nil
 	}
 	if controller == idleControllerNone {
 		return &PlayerIdleStatus{Controller: controller}
 	}
+	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 	return &PlayerIdleStatus{
 		Controller: controller,
 		Claim:      claim.Metadata.Name,
 		Requests:   claimRequests(claim),
+		Bus: &PlayerIdleBus{
+			Address:       busAddress,
+			CommandsTopic: playerCommandsTopic(topicBase, namespace, name),
+			ScreenTopic:   playerScreenTopic(topicBase, namespace, name),
+		},
 	}
 }
 

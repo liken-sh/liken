@@ -354,6 +354,9 @@ func buildIdleCommandPod(
 			{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, namespace, name)},
 			{Name: playerStatusTopicVariable, Value: playerStatusTopic(topicBase, namespace, name)},
 			{Name: playerScreenTopicVariable, Value: playerScreenTopic(topicBase, namespace, name)},
+			// The resolved controller. The pod forwards a navigation
+			// press only when a delegate's client is there to answer it.
+			{Name: idleControllerVariable, Value: idle.Controller},
 		},
 	}
 	// The fade window travels on every pod, because the resolver
