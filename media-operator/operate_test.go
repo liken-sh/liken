@@ -219,6 +219,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		reports:               newReports(wake),
 		focus:                 newFocusDesk(wake),
 		presence:              newPresenceDesk(wake),
+		codes:                 newCodesDesk(wake),
 		panels:                newPanelDesk(wake),
 		panelOverrides:        map[string]panelOverride{},
 		panelFaults:           map[string]string{},
@@ -413,7 +414,7 @@ func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 
 	want := "GET " + playsPath +
 		",GET " + mediaPrefsPath + "/" + mediaPreferencesName +
-		",GET " + playersPath + ",GET " + remotesAllPath + ",GET " + keymapsPath
+		",GET " + playersPath + ",GET " + keymapsPath + ",GET " + remotesAllPath
 	if strings.Join(cluster.requests, ",") != want {
 		t.Errorf("requests = %v, want the collection lists and the default MediaPreferences", cluster.requests)
 	}
@@ -803,6 +804,74 @@ func TestAPassSkipsAnUnchangedRemoteStatus(t *testing.T) {
 	for _, request := range cluster.requests[settled:] {
 		mustMatch(t, strings.HasSuffix(request, "/remotes/sofa/status"), false)
 	}
+}
+
+// The pass reports the gap on the Remote, which is the codes the
+// controller declares that its Keymap does not bind, and a status that
+// already reads the same gap is not written again.
+func TestAPassWritesTheUnboundCodesOntoTheRemote(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.codes.setCodes(controllerKey("house", "sofa"), remoteCodes{
+		Keys: []uint16{0x0a4, 0x130},
+		Axes: []uint16{0x10, 0x11},
+	})
+
+	media.pass()
+
+	want := []UnboundCode{{Code: 0x0a4, Name: "KEY_PLAYPAUSE", Type: unboundKey}}
+	if !reflect.DeepEqual(cluster.remotes["sofa"].Status.Unbound, want) {
+		t.Errorf("unbound = %+v, want %+v", cluster.remotes["sofa"].Status.Unbound, want)
+	}
+
+	settled := len(cluster.requests)
+	media.pass()
+	for _, request := range cluster.requests[settled:] {
+		mustMatch(t, strings.HasSuffix(request, "/remotes/sofa/status"), false)
+	}
+}
+
+// A Remote with no Keymap is the state discovery serves, and every
+// code its controller declares is unbound.
+func TestARemoteWithNoKeymapReportsEveryDeclaredCode(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("")
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.codes.setCodes(controllerKey("house", "sofa"), remoteCodes{
+		Keys: []uint16{0x130},
+		Axes: []uint16{0x10},
+	})
+
+	media.pass()
+
+	want := []UnboundCode{
+		{Code: 0x130, Name: "BTN_SOUTH", Type: unboundKey},
+		{Code: 0x10, Name: "ABS_HAT0X", Type: unboundAxis},
+	}
+	if !reflect.DeepEqual(cluster.remotes["sofa"].Status.Unbound, want) {
+		t.Errorf("unbound = %+v, want %+v", cluster.remotes["sofa"].Status.Unbound, want)
+	}
+}
+
+// A codes document reaches the desk through the bus alone, and the
+// pod's own clear empties it.
+func TestTheCodesTopicReachesTheDeskAndItsClearEmptiesIt(t *testing.T) {
+	wake := make(chan struct{}, 1)
+	media := &operator{topicBase: defaultTopicBase, codes: newCodesDesk(wake)}
+	topic := remoteCodesTopic(defaultTopicBase, "house", "sofa")
+
+	media.handleBusMessage(topic, []byte(`{"keys":[304]}`))
+	codes, held := media.codes.codesFor(controllerKey("house", "sofa"))
+	mustMatch(t, held, true)
+	mustMatchAll(t, codes.Keys, []uint16{0x130})
+
+	media.handleBusMessage(topic, nil)
+	_, stillHeld := media.codes.codesFor(controllerKey("house", "sofa"))
+	mustMatch(t, stillHeld, false)
 }
 
 // A Keymap edit is bus state, not pod shape. The container set is fixed
@@ -1461,6 +1530,7 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		reports:               newReports(nil),
 		focus:                 newFocusDesk(nil),
 		presence:              newPresenceDesk(nil),
+		codes:                 newCodesDesk(nil),
 		panels:                newPanelDesk(nil),
 		volumes:               newVolumeDesk(),
 		playerStatusPublished: map[string]string{},

@@ -53,6 +53,35 @@ func TestCompileKeymapTurnsEveryNameIntoItsCode(t *testing.T) {
 	}
 }
 
+// A media remote reports transport keys and no gamepad button, so a
+// Keymap binds the KEY_ names beside the BTN_ ones.
+func TestCompileKeymapBindsTheKeysAMediaRemoteReports(t *testing.T) {
+	keymap := &Keymap{
+		Metadata: ObjectMeta{Name: "remote"},
+		Spec: KeymapSpec{
+			Buttons: []KeymapButton{
+				{Press: "KEY_PLAYPAUSE", Action: actionPause},
+				{Press: "KEY_OK", Action: actionSelect},
+				{Press: "BTN_DPAD_UP", Action: actionUp},
+			},
+		},
+	}
+
+	bindings, err := compileKeymap(keymap)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []compiledBinding{
+		{EventType: evKey, Code: 0x0a4, Value: 1, Action: actionPause},
+		{EventType: evKey, Code: 0x160, Value: 1, Action: actionSelect},
+		{EventType: evKey, Code: 0x220, Value: 1, Action: actionUp},
+	}
+	if !reflect.DeepEqual(bindings, want) {
+		t.Errorf("bindings = %+v, want %+v", bindings, want)
+	}
+}
+
 // A compile error becomes the Play's status message, so each one
 // must name the Keymap, the entry, and the rule it broke.
 func TestCompileKeymapRefusesWhatItCannotCompile(t *testing.T) {
@@ -61,12 +90,12 @@ func TestCompileKeymapRefusesWhatItCannotCompile(t *testing.T) {
 		keymap *Keymap
 		says   []string
 	}{{
-		name: "a button name no Linux driver reports",
+		name: "a button name the kernel does not give a code",
 		keymap: &Keymap{
 			Metadata: ObjectMeta{Name: "gamepad"},
-			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_MIDDLE", Action: actionPause}}},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_TRIANGLE", Action: actionPause}}},
 		},
-		says: []string{"gamepad", "BTN_MIDDLE"},
+		says: []string{"gamepad", "BTN_TRIANGLE"},
 	}, {
 		name: "an axis outside the two hat axes",
 		keymap: &Keymap{

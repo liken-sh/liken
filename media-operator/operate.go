@@ -131,6 +131,11 @@ type operator struct {
 	// pass that republishes the Player status the idle screen reads.
 	presence *presenceDesk
 
+	// codes is the desk for each controller's declared code set, built
+	// on the same wake: a code set that changed wakes the pass that
+	// rewrites the Remote status the gap appears on.
+	codes *codesDesk
+
 	// panels is the desk for each unit's panel desire, built on
 	// the same wake: a desire that changed wakes the pass that writes
 	// the override onto the screen's Display.
@@ -250,6 +255,7 @@ func operate() {
 	desk := newReports(wake)
 	focusDesk := newFocusDesk(wake)
 	presenceDesk := newPresenceDesk(wake)
+	codesDesk := newCodesDesk(wake)
 	panels := newPanelDesk(wake)
 	media := &operator{
 		client:                client,
@@ -262,6 +268,7 @@ func operate() {
 		reports:               desk,
 		focus:                 focusDesk,
 		presence:              presenceDesk,
+		codes:                 codesDesk,
 		panels:                panels,
 		panelOverrides:        map[string]panelOverride{},
 		panelFaults:           map[string]string{},
@@ -292,6 +299,7 @@ func operate() {
 	media.bus.Subscribe(remoteFocusCycleFilter(topicBase))
 	media.bus.Subscribe(remotePresenceFilter(topicBase))
 	media.bus.Subscribe(remoteAvailabilityFilter(topicBase))
+	media.bus.Subscribe(remoteCodesFilter(topicBase))
 	media.bus.Subscribe(playerPanelFilter(topicBase))
 	media.bus.Subscribe(playerVolumeFilter(topicBase))
 	go media.bus.Run(context.Background())
@@ -422,8 +430,9 @@ func (o *operator) pass() {
 		o.reconcileFocus(players.Items)
 		o.reconcilePlayers(players.Items, list.Items, zone, defaultIdle)
 	}
-	o.reconcileRemotes()
-	o.reconcileKeymaps()
+	// The keymaps compile first, because the Remote statuses report the
+	// codes the compiled tables leave unbound.
+	o.reconcileRemotes(o.reconcileKeymaps())
 }
 
 // handleBusMessage folds one bus message into the report desk or the
@@ -476,7 +485,27 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		if len(payload) == 0 {
 			return
 		}
-		o.presence.setAvailability(controllerKey(namespace, name), string(payload) == availabilityOnline)
+		online := string(payload) == availabilityOnline
+		o.presence.setAvailability(controllerKey(namespace, name), online)
+		// The same signal gates the declared codes, because a retained
+		// document outlives the pod that wrote it.
+		o.codes.setAvailability(controllerKey(namespace, name), online)
+		return
+	}
+	// An empty payload on the codes topic is the pod's own clear,
+	// published when the controller's nodes vanish, so the desk drops
+	// the document rather than keep a stale one.
+	if namespace, name, ok := parseRemoteCodesTopic(o.topicBase, topic); ok {
+		key := controllerKey(namespace, name)
+		if len(payload) == 0 {
+			o.codes.clear(key)
+			return
+		}
+		var codes remoteCodes
+		if err := json.Unmarshal(payload, &codes); err != nil {
+			return
+		}
+		o.codes.setCodes(key, codes)
 		return
 	}
 	// An empty payload is a cleared retained value and not a live
@@ -643,11 +672,16 @@ func (o *operator) reclaimPlays(live map[string]bool) {
 // a running translation. A topic whose Keymap no longer exists has its
 // retained value cleared with an empty publish, so a deleted Keymap
 // leaves nothing behind on the bus.
-func (o *operator) reconcileKeymaps() {
+//
+// It returns the compiled tables by Keymap name, because the Remote
+// statuses this pass writes report the codes those tables leave
+// unbound, and the compile has already run here.
+func (o *operator) reconcileKeymaps() map[string][]compiledBinding {
+	compiled := map[string][]compiledBinding{}
 	list, err := ListKeymaps(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
-		return
+		return compiled
 	}
 	present := make(map[string]bool, len(list.Items))
 	for index := range list.Items {
@@ -663,6 +697,7 @@ func (o *operator) reconcileKeymaps() {
 			fmt.Fprintf(os.Stderr, "marshaling keymap %s: %v\n", keymap.Metadata.Name, err)
 			continue
 		}
+		compiled[keymap.Metadata.Name] = bindings
 		present[topic] = true
 		// The topic is retained, so republishing an unchanged table is
 		// churn a new subscriber does not need: it reads the current value
@@ -680,6 +715,7 @@ func (o *operator) reconcileKeymaps() {
 			delete(o.keymapPublished, topic)
 		}
 	}
+	return compiled
 }
 
 // reconcilePlayers writes every Player's status, publishes the same state
@@ -866,7 +902,7 @@ func (o *operator) publishRePresent(namespace, name string) {
 // not anything plays, so this pass is its own read of the whole collection
 // and not derived from the Plays. It runs after reconcileFocus on the same
 // pass, so the status reports the mark this pass settled.
-func (o *operator) reconcileRemotes() {
+func (o *operator) reconcileRemotes(keymaps map[string][]compiledBinding) {
 	list, err := ListAllRemotes(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
@@ -881,7 +917,13 @@ func (o *operator) reconcileRemotes() {
 			fmt.Fprintf(os.Stderr, "reconciling remote %s/%s: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
+		// The one status this pass builds carries the mark and the gap
+		// together, because two writers of one status would alternate
+		// and each write wakes the watch.
 		desired := RemoteStatus{Player: o.focus.markFor(key)}
+		if declared, held := o.codes.codesFor(key); held {
+			desired.Unbound = unboundCodes(declared, keymaps[remote.Spec.Keymap])
+		}
 		if err := writeRemoteStatus(o.client, remote, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing remote %s/%s status: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
@@ -892,6 +934,7 @@ func (o *operator) reconcileRemotes() {
 	// whole collection here already, so this is the one place that reads
 	// which controllers remain.
 	o.presence.retain(live)
+	o.codes.retain(live)
 }
 
 // writeRemoteStatus follows the same two rules as the Play's and the
@@ -899,12 +942,16 @@ func (o *operator) reconcileRemotes() {
 // conflict earns one retry. The operator watches Remotes, so a needless
 // write would wake the loop that just wrote it, a pass per pass forever.
 func writeRemoteStatus(c *Client, remote *Remote, desired RemoteStatus) error {
-	if remote.Status == desired {
+	same, err := sameRemoteStatus(remote.Status, desired)
+	if err != nil {
+		return err
+	}
+	if same {
 		return nil
 	}
 
 	remote.Status = desired
-	_, err := PutRemoteStatus(c, remote)
+	_, err = PutRemoteStatus(c, remote)
 	if !errors.Is(err, ErrConflict) {
 		return err
 	}
@@ -917,12 +964,28 @@ func writeRemoteStatus(c *Client, remote *Remote, desired RemoteStatus) error {
 	if err != nil {
 		return err
 	}
-	if fresh.Status == desired {
-		return nil
+	same, err = sameRemoteStatus(fresh.Status, desired)
+	if err != nil || same {
+		return err
 	}
 	fresh.Status = desired
 	_, err = PutRemoteStatus(c, fresh)
 	return err
+}
+
+// sameRemoteStatus compares the marshaled forms, the way the Play's
+// and the Player's writers compare, because the marshaled form is what
+// the API server stores and what omitempty decides.
+func sameRemoteStatus(current, desired RemoteStatus) (bool, error) {
+	was, err := json.Marshal(current)
+	if err != nil {
+		return false, err
+	}
+	wants, err := json.Marshal(desired)
+	if err != nil {
+		return false, err
+	}
+	return string(was) == string(wants), nil
 }
 
 // reconcile takes one Play from the Player it names to the status it

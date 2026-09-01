@@ -141,6 +141,12 @@ const (
 	remoteNamespaceVariable = "MEDIA_REMOTE_NAMESPACE"
 	remoteNameVariable      = "MEDIA_REMOTE_NAME"
 
+	// The discovery mode, set on the standing pod only where the
+	// Remote's spec asks for it, so a pod that reads nothing here runs
+	// the ordinary selection rule.
+	remoteDiscoveryVariable = "MEDIA_REMOTE_DISCOVERY"
+	discoveryOn             = "true"
+
 	// The three topics the operator hands each translator sidecar: the
 	// controller's events topic it reads, the retained keymap topic it
 	// reads the table from, and the focus topic it gates on. The translator

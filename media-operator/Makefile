@@ -13,6 +13,16 @@
 .PHONY: test
 test: test-go test-idle test-docs
 
+# keycodes.go is generated from the kernel header named here, and it is
+# committed, so a build needs the header only when the table is
+# regenerated against a newer kernel.
+INPUT_EVENT_CODES ?= /usr/include/linux/input-event-codes.h
+
+.PHONY: codes
+codes:
+	go run keycodegen.go $(INPUT_EVENT_CODES) keycodes.go
+	gofmt -w keycodes.go
+
 # The coverage gate measures on its own run, on a pinned toolchain.
 # Go 1.27 splits a basic block into one profile row per run of code
 # inside it, and repeats the whole block's statement count on every

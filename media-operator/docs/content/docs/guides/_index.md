@@ -5,10 +5,11 @@ weight: 10
 
 # Guides
 
-The guides give the steps to operate this project. Today there is
-one, the [install](/docs/guides/install/), because after the install
-the work is declaring resources, and the
-[reference](/docs/reference/) describes each one.
+The guides give the steps to operate this project. There are two:
+the [install](/docs/guides/install/), and
+[mapping a controller](/docs/guides/mapping-a-controller/) whose
+codes no one has written down. After those, the work is declaring
+resources, and the [reference](/docs/reference/) describes each one.
 
 ## How the pieces fit
 

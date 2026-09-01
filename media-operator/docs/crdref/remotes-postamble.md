@@ -11,8 +11,10 @@ the controller first connects, then keeps running through every later sleep.
 
 ## Status
 
-The operator writes one fact on a `Remote`: `status.player`, the
-`Player` its focus mark names now. `kubectl get remotes` shows
+The operator writes two facts on a `Remote`. `status.player` is the
+`Player` its focus mark names now. `status.unbound` is the gap:
+every code the controller declares that its `Keymap` does not bind,
+which empties as the `Keymap` grows. `kubectl get remotes` shows
 each controller's `Keymap`, the unit it drives, and its age. A
 `Remote` whose `Keymap` does not compile shows the failure on the
 `Play` that uses it.
@@ -27,6 +29,7 @@ base.
 |----------------|--------------|----------|-------------------------------|
 | `events`       | the `Remote`'s pod | no       | one evdev event               |
 | `presence`     | the `Remote`'s pod | yes      | `{"connected": true}`         |
+| `codes`        | the `Remote`'s pod | yes      | the declared code set         |
 | `availability` | the `Remote`'s pod | yes      | `online` or `offline`         |
 | `focus`        | operator     | yes      | the name of the `Player` it drives |
 | `focus/cycle`  | the focus holder | no   | a request to advance focus    |
@@ -58,6 +61,20 @@ so presence comes straight from the device. The topic is retained, so the
 operator reads the current value the instant it subscribes, and it
 folds the flag into the [`Player` status](/docs/reference/players/)
 it publishes.
+
+### codes
+
+The codes the controller declares, read from its nodes' capability
+bitmaps at every node open:
+
+    {"keys": [304, 305], "axes": [16, 17]}
+
+The set is complete with no button pressed, because the bitmaps
+state every code a node can report. The topic is retained, because
+a declared set is a state and not an event, and the pod clears it
+with an empty payload when the nodes vanish. The operator subtracts
+the `Keymap`'s bindings from the set and reports the gap as
+`status.unbound` on the `Remote`.
 
 ### availability
 

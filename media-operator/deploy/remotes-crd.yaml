@@ -49,7 +49,7 @@ spec:
           properties:
             spec:
               type: object
-              required: [device, keymap]
+              required: [device]
               description: >-
                 The controller and the Keymap for its model.
               properties:
@@ -78,18 +78,33 @@ spec:
                         chooses.
                 keymap:
                   type: string
-                  minLength: 1
                   description: >-
                     The Keymap for this controller's model, by name. A
                     Keymap is cluster-scoped, so the name carries no
                     namespace. A Player entry in spec.remotes may
                     override it per unit, so one controller can map
-                    two ways on two units.
+                    two ways on two units. The field is optional,
+                    because a person mapping unknown hardware has no
+                    Keymap yet: declare the Remote, run discovery,
+                    then write the Keymap the log teaches.
+                discovery:
+                  type: boolean
+                  description: >-
+                    The teaching mode for unknown hardware. The
+                    standing pod keeps every input node the claim
+                    delivered and logs each event the way a Keymap
+                    names it, so a person presses every button and
+                    reads the codes out of the pod log. Events still
+                    publish to the bus, so a controller in discovery
+                    still drives its unit. Turning the mode on or off
+                    replaces the standing pod, which drops controller
+                    input for a few seconds.
             status:
               type: object
               description: >-
-                What the operator reports about this controller. The
-                one field names the unit its presses reach now.
+                What the operator reports about this controller: the
+                unit its presses reach now, and the declared codes
+                its Keymap leaves unbound.
               properties:
                 player:
                   type: string
@@ -97,3 +112,43 @@ spec:
                     The Player this Remote's focus mark names now:
                     the unit its presses reach, idle or playing. It
                     is empty while no Player lists this Remote.
+                # The map is keyed on code and type together, because
+                # one number can name both a key and an axis: KEY_Q and
+                # ABS_HAT0X are both 16. The list carries no maxItems,
+                # because the evdev ABI bounds a node's key codes at 768
+                # and the gap shrinks toward empty as the Keymap grows.
+                unbound:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [code, type]
+                  description: >-
+                    The gap, never the census: every code this
+                    controller declares that its Keymap does not bind.
+                    A controller whose Keymap binds every declared code
+                    reports nothing here, and the field is absent while
+                    no standing pod has reported. The list shrinks as
+                    the Keymap grows, so it measures a mapping's
+                    progress during discovery and stands as a
+                    completeness check after.
+                  items:
+                    type: object
+                    required: [code, type]
+                    properties:
+                      code:
+                        type: integer
+                        description: >-
+                          The raw evdev code, the number the
+                          controller reports on the wire.
+                      name:
+                        type: string
+                        description: >-
+                          The evdev name for the code, which is the
+                          name a Keymap binds it by. It is empty when
+                          the kernel gives the code no name, and such
+                          a code cannot be bound.
+                      type:
+                        type: string
+                        enum: [key, abs]
+                        description: >-
+                          Which event type carries the code: key for
+                          a button, abs for a hat axis.

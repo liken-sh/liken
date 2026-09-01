@@ -72,9 +72,9 @@ func TestBitmapCarriesOneBitPerCode(t *testing.T) {
 	}
 }
 
-// The reader keeps a node that reports any bindable button or hat
-// axis, with no keymap to narrow it. A node that reports codes outside
-// buttonCodes and axisCodes, as a touchpad does, is not a controller.
+// The reader keeps any node that declares a key code or a hat axis,
+// because a Keymap may bind either and the reader holds no keymap to
+// narrow it. A node that declares neither is not a controller.
 func TestControllerBitmapsKeepTheNodeThatCarriesInput(t *testing.T) {
 	cases := []struct {
 		name string
@@ -101,9 +101,21 @@ func TestControllerBitmapsKeepTheNodeThatCarriesInput(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "a touchpad that reports neither",
+			name: "a media remote that reports transport keys alone",
+			keys: bitmapOf(keyBitmapBytes, 0x0a4, 0x160),
+			axes: bitmapOf(absBitmapBytes),
+			want: true,
+		},
+		{
+			name: "a touchpad that reports a touch button",
 			keys: bitmapOf(keyBitmapBytes, 0x14a),
 			axes: bitmapOf(absBitmapBytes, 0x35),
+			want: true,
+		},
+		{
+			name: "motion sensors, which report no key code at all",
+			keys: bitmapOf(keyBitmapBytes),
+			axes: bitmapOf(absBitmapBytes, 0x00, 0x01, 0x02),
 			want: false,
 		},
 		{
@@ -164,4 +176,107 @@ func bitmapOf(length int, codes ...uint16) []byte {
 		bitmap[code/8] |= 1 << (code % 8)
 	}
 	return bitmap
+}
+
+// The reader requests each node's name from the kernel, and the ioctl
+// number carries the buffer's length the way the bitmap requests do.
+func TestNameRequestNumber(t *testing.T) {
+	mustMatch(t, nameRequest(nodeNameBytes), uintptr(0x80804506))
+}
+
+// The kernel writes the name with a trailing NUL and reports the bytes
+// it wrote, so the string ends at the NUL and an empty answer is no
+// name.
+func TestTheNodeNameEndsAtTheKernelsNul(t *testing.T) {
+	cases := []struct {
+		name    string
+		buffer  []byte
+		written int
+		want    string
+	}{
+		{
+			name:    "a name and its NUL",
+			buffer:  append([]byte("Wireless Controller\x00"), make([]byte, 20)...),
+			written: 20,
+			want:    "Wireless Controller",
+		},
+		{
+			name:    "a name the kernel did not terminate",
+			buffer:  []byte("Wireless Controller"),
+			written: 19,
+			want:    "Wireless Controller",
+		},
+		{
+			name:    "an answer of nothing",
+			buffer:  make([]byte, 16),
+			written: 0,
+			want:    "",
+		},
+		{
+			name:    "a length past the buffer",
+			buffer:  []byte("pad"),
+			written: 64,
+			want:    "pad",
+		},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			mustMatch(t, nodeName(each.buffer, each.written), each.want)
+		})
+	}
+}
+
+// The declared codes are what the node's bitmaps state it can report,
+// read with no button pressed, in code order.
+func TestTheDeclaredCodesComeOffTheBitmaps(t *testing.T) {
+	mustMatchAll(t, declaredKeyCodes(bitmapOf(keyBitmapBytes, 0x131, 0x130, 0x2ff)),
+		[]uint16{0x130, 0x131, 0x2ff})
+	mustMatchAll(t, declaredKeyCodes(bitmapOf(keyBitmapBytes)), nil)
+	mustMatchAll(t, declaredHatAxes(bitmapOf(absBitmapBytes, 0x00, 0x10, 0x11)),
+		[]uint16{0x10, 0x11})
+	mustMatchAll(t, declaredHatAxes(bitmapOf(absBitmapBytes, 0x00, 0x01)), nil)
+}
+
+// One line per node carries the decision and the counts behind it, so
+// a controller that reaches nothing shows why.
+func TestTheVerdictLineCarriesTheDecisionAndItsCounts(t *testing.T) {
+	cases := []struct {
+		name string
+		node nodeVerdict
+		want string
+	}{
+		{
+			name: "a gamepad's button node",
+			node: nodeVerdict{
+				Path: "/dev/input/event3", Name: "Wireless Controller",
+				Keys: 52, Hats: 2, Keep: true,
+			},
+			want: `event3 "Wireless Controller" keep: 52 key codes, 2 hat axes`,
+		},
+		{
+			name: "the motion sensors beside it",
+			node: nodeVerdict{
+				Path: "/dev/input/event5", Name: "Wireless Controller Motion Sensors",
+				Keep: false,
+			},
+			want: `event5 "Wireless Controller Motion Sensors" reject: no key codes, no hat axes`,
+		},
+		{
+			name: "a node with one of each",
+			node: nodeVerdict{Path: "/dev/input/event9", Name: "pad", Keys: 1, Hats: 1, Keep: true},
+			want: `event9 "pad" keep: 1 key code, 1 hat axis`,
+		},
+		{
+			name: "a node the kernel names nothing",
+			node: nodeVerdict{Path: "/dev/input/event9", Keys: 3, Keep: true},
+			want: `event9 "" keep: 3 key codes, no hat axes`,
+		},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			mustMatch(t, each.node.line(), each.want)
+		})
+	}
 }

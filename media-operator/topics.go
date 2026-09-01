@@ -36,14 +36,16 @@ const (
 	playAvailabilityKind = "availability"
 )
 
-// The kind at the end of the two remotes topics the operator reads for a
-// controller's presence. They are separate constants from the plays kinds
-// above, because the two trees carry different payloads under the same two
-// words: a plays status is one run's report, and a remotes presence is one
-// controller's connected flag.
+// The kinds at the end of the three remotes topics the operator reads
+// for a controller. They are separate constants from the plays kinds
+// above, because the two trees carry different payloads under the same
+// words.
 const (
 	remotePresenceKind     = "presence"
 	remoteAvailabilityKind = "availability"
+	// The third retained remotes kind, the codes one controller
+	// declares.
+	remoteCodesKind = "codes"
 )
 
 // The last segment of the players topic that carries the panel
@@ -121,6 +123,27 @@ func remotePresenceTopic(base, namespace, name string) string {
 // a connected controller.
 func remoteAvailabilityTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/" + remoteAvailabilityKind
+}
+
+// remoteCodesTopic carries the codes one controller declares, as
+// {"keys": [...], "axes": [...]}. The standing remote pod publishes it
+// retained at every node open, because a declared set is a state and
+// not an event, and clears it with an empty payload when the nodes
+// vanish.
+func remoteCodesTopic(base, namespace, name string) string {
+	return base + "/remotes/" + namespace + "/" + name + "/" + remoteCodesKind
+}
+
+// remoteCodesFilter is the operator's subscription that reaches every
+// controller's declared codes.
+func remoteCodesFilter(base string) string {
+	return base + "/remotes/+/+/" + remoteCodesKind
+}
+
+// parseRemoteCodesTopic maps a codes topic back to the controller it
+// names.
+func parseRemoteCodesTopic(base, topic string) (namespace, name string, ok bool) {
+	return parseRemoteTopic(base, topic, remoteCodesKind)
 }
 
 // remotePresenceFilter is the operator's subscription that reaches every

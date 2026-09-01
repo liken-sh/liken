@@ -38,10 +38,12 @@ These plans are designed. Each keeps its number and moves to
   modules that drew the screen are deleted, and the playback overlay
   stays. The library layer depends on it.
 * [21, A remote that teaches its
-  keymap](21-a-remote-that-teaches-its-keymap.md). A stub. A discovery
-  mode of the remote pod logs every key code as it arrives, named the
-  way a `Keymap` names it, so a person maps unknown hardware by
-  pressing its buttons. The details wait for a design pass.
+  keymap](21-a-remote-that-teaches-its-keymap.md). Built, and
+  awaiting its drill. `spec.discovery` on the `Remote` keeps every
+  node and logs each event with a paste-ready `Keymap` entry, the
+  button vocabulary widens to the kernel's whole `EV_KEY` space, and
+  `status.unbound` reports the declared codes the `Keymap` does not
+  bind.
 
 ## Completed
 

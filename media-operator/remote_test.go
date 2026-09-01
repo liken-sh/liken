@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -65,6 +69,7 @@ func testReader(t *testing.T) (*reader, *fakeBroker) {
 		eventsTopic:       remoteEventsTopic(defaultTopicBase, "house", "sofa"),
 		presenceTopic:     remotePresenceTopic(defaultTopicBase, "house", "sofa"),
 		availabilityTopic: remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"),
+		codesTopic:        remoteCodesTopic(defaultTopicBase, "house", "sofa"),
 	}, brokers[0]
 }
 
@@ -113,4 +118,120 @@ func TestTheReaderRepublishesItsRetainedStateOnConnect(t *testing.T) {
 	presence := waitForPublish(t, broker.pubs)
 	mustMatch(t, presence.topic, remotePresenceTopic(defaultTopicBase, "house", "sofa"))
 	mustMatch(t, string(presence.payload), `{"connected":true}`)
+}
+
+// The declared codes are the union over the kept nodes, in code order
+// and with no repeat.
+func TestTheDeclaredCodesAreTheUnionOverTheKeptNodes(t *testing.T) {
+	nodes := []openNode{
+		{
+			keys: bitmapOf(keyBitmapBytes, 0x131, 0x130),
+			axes: bitmapOf(absBitmapBytes, 0x11),
+		},
+		{
+			keys: bitmapOf(keyBitmapBytes, 0x130, 0x14a),
+			axes: bitmapOf(absBitmapBytes, 0x00, 0x10),
+		},
+	}
+
+	codes := declaredCodes(nodes)
+
+	mustMatchAll(t, codes.Keys, []uint16{0x130, 0x131, 0x14a})
+	mustMatchAll(t, codes.Axes, []uint16{0x10, 0x11})
+}
+
+// A node-open cycle logs one line per node, and a scan that finds the
+// same picture logs nothing.
+func TestTheReaderLogsAVerdictOnlyWhenThePictureChanges(t *testing.T) {
+	var log bytes.Buffer
+	r := &reader{log: &log}
+
+	r.logVerdicts([]string{"event3 \"pad\" keep: 2 key codes, no hat axes"})
+	first := log.String()
+	r.logVerdicts([]string{"event3 \"pad\" keep: 2 key codes, no hat axes"})
+	mustMatch(t, log.String(), first)
+
+	r.logVerdicts([]string{"event4 \"pad\" reject: no key codes, no hat axes"})
+	mustMatch(t, strings.Contains(log.String(), "event4"), true)
+	mustMatch(t, strings.HasPrefix(first, "remote: event3"), true)
+}
+
+// The declared codes are a state, so the pod publishes them retained
+// at every node open, clears them when the nodes vanish, and
+// republishes whichever stands on a reconnect.
+func TestTheReaderPublishesTheDeclaredCodesRetained(t *testing.T) {
+	r, broker := testReader(t)
+
+	r.publishCodes(remoteCodes{Keys: []uint16{0x130}, Axes: []uint16{0x10}})
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, published.retained, true)
+	mustMatch(t, string(published.payload), `{"keys":[304],"axes":[16]}`)
+
+	r.onConnect(r.bus)
+	waitForPublish(t, broker.pubs)
+	waitForPublish(t, broker.pubs)
+	again := waitForPublish(t, broker.pubs)
+	mustMatch(t, again.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, string(again.payload), `{"keys":[304],"axes":[16]}`)
+
+	r.clearCodes()
+	cleared := waitForPublish(t, broker.pubs)
+	mustMatch(t, cleared.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, len(cleared.payload), 0)
+	mustMatch(t, cleared.retained, true)
+}
+
+// A reader in discovery logs each event the way a Keymap names it and
+// publishes it all the same, so a controller a person maps still
+// drives the unit it holds.
+func TestADiscoveringReaderLogsEachEventAndPublishesItAnyway(t *testing.T) {
+	r, broker := testReader(t)
+	r.discovery = true
+	var log bytes.Buffer
+	r.log = &log
+
+	read, write, err := os.Pipe()
+	mustSucceed(t, err)
+	_, err = write.Write(eventBytes(inputEvent{Type: evKey, Code: 0x130, Value: 1}))
+	mustSucceed(t, err)
+	mustSucceed(t, write.Close())
+
+	r.readAndPublish(context.Background(), []openNode{
+		{file: read, path: "/dev/input/event3", name: "Wireless Controller"},
+	})
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, remoteEventsTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, string(published.payload), `{"type":1,"code":304,"value":1}`)
+
+	written := log.String()
+	for _, want := range []string{
+		`event3 "Wireless Controller"`, "EV_KEY (1)", "BTN_SOUTH (304)", "press (1)",
+		"- press: BTN_SOUTH", "action: <one of",
+	} {
+		mustMatch(t, strings.Contains(written, want), true)
+	}
+}
+
+// Out of discovery the reader logs no event, because a healthy run's
+// log is empty.
+func TestAnOrdinaryReaderLogsNoEvent(t *testing.T) {
+	r, broker := testReader(t)
+	var log bytes.Buffer
+	r.log = &log
+
+	read, write, err := os.Pipe()
+	mustSucceed(t, err)
+	_, err = write.Write(eventBytes(inputEvent{Type: evKey, Code: 0x130, Value: 1}))
+	mustSucceed(t, err)
+	mustSucceed(t, write.Close())
+
+	r.readAndPublish(context.Background(), []openNode{
+		{file: read, path: "/dev/input/event3", name: "Wireless Controller"},
+	})
+
+	waitForPublish(t, broker.pubs)
+	mustMatch(t, log.String(), "")
 }

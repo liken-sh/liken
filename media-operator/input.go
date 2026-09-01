@@ -133,28 +133,25 @@ const (
 	evAbs uint16 = 0x03
 )
 
-// buttonCodes are the evdev key names a Keymap's buttons may use,
-// with the codes the kernel gives them in input-event-codes.h. The
-// names are the API and the numbers are the wire: a Keymap says
-// BTN_SOUTH because every Linux controller driver reports the south
-// face button under that code, whatever the glyph on the plastic.
-var buttonCodes = map[string]uint16{
-	"BTN_SOUTH":  0x130,
-	"BTN_EAST":   0x131,
-	"BTN_C":      0x132,
-	"BTN_NORTH":  0x133,
-	"BTN_WEST":   0x134,
-	"BTN_Z":      0x135,
-	"BTN_TL":     0x136,
-	"BTN_TR":     0x137,
-	"BTN_TL2":    0x138,
-	"BTN_TR2":    0x139,
-	"BTN_SELECT": 0x13a,
-	"BTN_START":  0x13b,
-	"BTN_MODE":   0x13c,
-	"BTN_THUMBL": 0x13d,
-	"BTN_THUMBR": 0x13e,
+// keyCode is one row of the kernel's EV_KEY table, which keycodes.go
+// holds whole, generated from input-event-codes.h. The names are the
+// API and the numbers are the wire: a Keymap says BTN_SOUTH because
+// every Linux controller driver reports the south face button under
+// that code, whatever the glyph on the plastic.
+type keyCode struct {
+	Name string
+	Code uint16
 }
+
+// buttonCodes are the evdev key names a Keymap's buttons may use,
+// which is the whole EV_KEY name space, so a gamepad's face buttons
+// and a media remote's transport keys are alike bindable.
+var buttonCodes = codesByName(keyCodes)
+
+// keyCodeNames names one code back, for a report of what a controller
+// declares. Where the kernel gives one code several names, the first
+// wins.
+var keyCodeNames = namesByCode(keyCodes)
 
 // axisCodes are the hat axes a Keymap's axes may name. The analog
 // sticks are deliberately absent: a resting thumb reports at 250Hz,
@@ -162,6 +159,37 @@ var buttonCodes = map[string]uint16{
 var axisCodes = map[string]uint16{
 	"ABS_HAT0X": 0x10,
 	"ABS_HAT0Y": 0x11,
+}
+
+// axisCodeNames names one hat axis back, the way keyCodeNames names a
+// key code back.
+var axisCodeNames = namesByCode([]keyCode{
+	{Name: "ABS_HAT0X", Code: 0x10},
+	{Name: "ABS_HAT0Y", Code: 0x11},
+})
+
+// codesByName builds the name-to-code lookup a compile reads. Every
+// alias resolves to the code it names.
+func codesByName(table []keyCode) map[string]uint16 {
+	codes := make(map[string]uint16, len(table))
+	for _, each := range table {
+		codes[each.Name] = each.Code
+	}
+	return codes
+}
+
+// namesByCode builds the code-to-name lookup a report reads. The first
+// name wins, because the table is in the header's order and an alias
+// follows the name it aliases.
+func namesByCode(table []keyCode) map[uint16]string {
+	names := make(map[uint16]string, len(table))
+	for _, each := range table {
+		if _, named := names[each.Code]; named {
+			continue
+		}
+		names[each.Code] = each.Name
+	}
+	return names
 }
 
 // The IPC socket's home. mpv serves its JSON IPC socket on an emptyDir

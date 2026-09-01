@@ -87,6 +87,13 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 			{Name: topicBaseVariable, Value: topicBase},
 		},
 	}
+	// The discovery variable is set only where the Remote asks for the
+	// mode, so an ordinary Remote's pod carries the spec it always
+	// carried and does not roll for a field it does not use.
+	if remote.Spec.Discovery {
+		container.Env = append(container.Env,
+			EnvVar{Name: remoteDiscoveryVariable, Value: discoveryOn})
+	}
 	// The one container holds the claim's one request, the controller
 	// this Remote selects.
 	for _, request := range claimRequests(claim) {

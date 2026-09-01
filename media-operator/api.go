@@ -479,17 +479,36 @@ type Remote struct {
 // Player the controller's retained focus mark names, so kubectl answers
 // which unit a press reaches without a read of the bus. It is empty while
 // no Player in the namespace lists the Remote.
+//
+// Unbound is the gap: every code the controller declares that its
+// Keymap does not bind. It is empty when the Keymap binds every
+// declared code, and absent while no standing pod has reported.
 type RemoteStatus struct {
-	Player string `json:"player,omitempty"`
+	Player  string        `json:"player,omitempty"`
+	Unbound []UnboundCode `json:"unbound,omitempty"`
+}
+
+// UnboundCode is one code the controller declares and the Keymap
+// leaves unbound: the raw evdev code, its name where the kernel gives
+// it one, and which event type carries it.
+type UnboundCode struct {
+	Code uint16 `json:"code"`
+	Name string `json:"name,omitempty"`
+	Type string `json:"type"`
 }
 
 // A Remote holds its device selector and the Keymap for its model,
 // and it names no player. A Player names the Remotes it owns through
 // spec.remotes, so the unit that owns a controller is the one that
 // lists it.
+//
+// Discovery is the teaching mode: the standing pod keeps every node
+// the claim delivered and logs each event the way a Keymap names it.
+// Turning it on or off replaces the standing pod.
 type RemoteSpec struct {
-	Device RemoteDevice `json:"device"`
-	Keymap string       `json:"keymap"`
+	Device    RemoteDevice `json:"device"`
+	Keymap    string       `json:"keymap,omitempty"`
+	Discovery bool         `json:"discovery,omitempty"`
 }
 
 // The controller is selected the way a Player's display is, by a

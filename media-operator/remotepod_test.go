@@ -138,6 +138,68 @@ func TestBuildRemotePodRunsTheReaderInTheRemoteMode(t *testing.T) {
 	}
 }
 
+// A Remote that asks for discovery carries the mode to its reader as
+// one variable, and a Remote that does not carries none, so an
+// ordinary Remote's pod spec is what it always was.
+func TestTheDiscoveryModeReachesTheReaderAsOneVariable(t *testing.T) {
+	cases := []struct {
+		name      string
+		discovery bool
+		want      string
+		set       bool
+	}{
+		{name: "a Remote in discovery", discovery: true, want: discoveryOn, set: true},
+		{name: "an ordinary Remote", discovery: false, set: false},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			remote := standingRemote()
+			remote.Spec.Discovery = each.discovery
+			pod := buildRemotePod(remote, buildRemoteClaim(remote),
+				testSidecarImage, testBusAddress, testTopicBase)
+
+			container := pod.Spec.Containers[0]
+			held := false
+			for _, entry := range container.Env {
+				if entry.Name == remoteDiscoveryVariable {
+					held = true
+					mustMatch(t, entry.Value, each.want)
+				}
+			}
+			mustMatch(t, held, each.set)
+		})
+	}
+}
+
+// Turning discovery on changes the pod's template and not the claim's,
+// so the pass replaces the reader pod alone and the controller keeps
+// its allocation.
+func TestTurningDiscoveryOnRollsThePodAndNotTheClaim(t *testing.T) {
+	ordinary := standingRemote()
+	discovering := standingRemote()
+	discovering.Spec.Discovery = true
+
+	ordinaryPod := buildRemotePod(ordinary, buildRemoteClaim(ordinary),
+		testSidecarImage, testBusAddress, testTopicBase)
+	discoveringPod := buildRemotePod(discovering, buildRemoteClaim(discovering),
+		testSidecarImage, testBusAddress, testTopicBase)
+
+	podHash, err := templateHash(ordinaryPod.Spec)
+	mustSucceed(t, err)
+	discoveringHash, err := templateHash(discoveringPod.Spec)
+	mustSucceed(t, err)
+	if podHash == discoveringHash {
+		t.Errorf("the pod template hash did not change, so the reader would not roll")
+	}
+
+	claimHash, err := templateHash(buildRemoteClaim(ordinary).Spec)
+	mustSucceed(t, err)
+	discoveringClaimHash, err := templateHash(buildRemoteClaim(discovering).Spec)
+	mustSucceed(t, err)
+	mustMatch(t, discoveringClaimHash, claimHash)
+}
+
 // The first reconcile creates the claim and the standing pod. A second
 // reconcile creates nothing, because both are already there.
 func TestReconcileRemoteCreatesTheClaimAndThePodOnce(t *testing.T) {

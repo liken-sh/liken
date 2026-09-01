@@ -79,17 +79,20 @@ spec:
                     properties:
                       press:
                         type: string
-                        minLength: 1
+                        pattern: '^(BTN|KEY)_[A-Z0-9_]+$'
                         description: >-
-                          The button, by its evdev key name, such as
-                          BTN_SOUTH. Every Linux controller driver
-                          reports the same position under the same
-                          name, so the name works across models. The
-                          names this operator accepts: BTN_SOUTH,
-                          BTN_EAST, BTN_C, BTN_NORTH, BTN_WEST,
-                          BTN_Z, BTN_TL, BTN_TR, BTN_TL2, BTN_TR2,
-                          BTN_SELECT, BTN_START, BTN_MODE,
-                          BTN_THUMBL, and BTN_THUMBR.
+                          The button, by its evdev key name: BTN_SOUTH
+                          on a gamepad, KEY_PLAYPAUSE on a media
+                          remote. Every Linux driver reports the same
+                          button under the same name, so the name
+                          works across models. Any name in the
+                          kernel's EV_KEY space is accepted; the
+                          pattern here catches a typo's shape, and the
+                          operator's compile is the gate on the name
+                          itself. A Remote in discovery logs the name
+                          of every code its controller reports, so
+                          the names come from the log, not from a
+                          vendor document.
                       action:
                         type: string
                         enum: [pause, mute, seek, volume, chapter, subtitles, audio, info, cycle-focus, up, down, left, right, select, back]

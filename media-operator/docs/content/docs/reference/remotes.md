@@ -32,7 +32,8 @@ The controller and the Keymap for its model.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--device"></span>`device` | [object](#specdevice) | yes | The controller itself, selected out of the devices the hardware operators publish. There are no parameters: nothing prepares an input device, and its nodes are read as they are. |
-| <span id="spec--keymap"></span>`keymap` | string | yes | The Keymap for this controller's model, by name. A Keymap is cluster-scoped, so the name carries no namespace. A Player entry in spec.remotes may override it per unit, so one controller can map two ways on two units. |
+| <span id="spec--keymap"></span>`keymap` | string | no | The Keymap for this controller's model, by name. A Keymap is cluster-scoped, so the name carries no namespace. A Player entry in spec.remotes may override it per unit, so one controller can map two ways on two units. The field is optional, because a person mapping unknown hardware has no Keymap yet: declare the Remote, run discovery, then write the Keymap the log teaches. |
+| <span id="spec--discovery"></span>`discovery` | boolean | no | The teaching mode for unknown hardware. The standing pod keeps every input node the claim delivered and logs each event the way a Keymap names it, so a person presses every button and reads the codes out of the pod log. Events still publish to the bus, so a controller in discovery still drives its unit. Turning the mode on or off replaces the standing pod, which drops controller input for a few seconds. |
 
 ### spec.device
 
@@ -45,11 +46,22 @@ The controller itself, selected out of the devices the hardware operators publis
 
 ## status
 
-What the operator reports about this controller. The one field names the unit its presses reach now.
+What the operator reports about this controller: the unit its presses reach now, and the declared codes its Keymap leaves unbound.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--player"></span>`player` | string | no | The Player this Remote's focus mark names now: the unit its presses reach, idle or playing. It is empty while no Player lists this Remote. |
+| <span id="status--unbound"></span>`unbound` | [\[\]object](#statusunbound) | no | The gap, never the census: every code this controller declares that its Keymap does not bind. A controller whose Keymap binds every declared code reports nothing here, and the field is absent while no standing pod has reported. The list shrinks as the Keymap grows, so it measures a mapping's progress during discovery and stands as a completeness check after. |
+
+### status.unbound[]
+
+The gap, never the census: every code this controller declares that its Keymap does not bind. A controller whose Keymap binds every declared code reports nothing here, and the field is absent while no standing pod has reported. The list shrinks as the Keymap grows, so it measures a mapping's progress during discovery and stands as a completeness check after.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusunbound--code"></span>`code` | integer | yes | The raw evdev code, the number the controller reports on the wire. |
+| <span id="statusunbound--name"></span>`name` | string | no | The evdev name for the code, which is the name a Keymap binds it by. It is empty when the kernel gives the code no name, and such a code cannot be bound. |
+| <span id="statusunbound--type"></span>`type` | string | yes | Which event type carries the code: key for a button, abs for a hat axis. One of: `key`, `abs`. |
 
 ## The Remote's pod
 
@@ -64,8 +76,10 @@ the controller first connects, then keeps running through every later sleep.
 
 ## Status
 
-The operator writes one fact on a `Remote`: `status.player`, the
-`Player` its focus mark names now. `kubectl get remotes` shows
+The operator writes two facts on a `Remote`. `status.player` is the
+`Player` its focus mark names now. `status.unbound` is the gap:
+every code the controller declares that its `Keymap` does not bind,
+which empties as the `Keymap` grows. `kubectl get remotes` shows
 each controller's `Keymap`, the unit it drives, and its age. A
 `Remote` whose `Keymap` does not compile shows the failure on the
 `Play` that uses it.
@@ -80,6 +94,7 @@ base.
 |----------------|--------------|----------|-------------------------------|
 | `events`       | the `Remote`'s pod | no       | one evdev event               |
 | `presence`     | the `Remote`'s pod | yes      | `{"connected": true}`         |
+| `codes`        | the `Remote`'s pod | yes      | the declared code set         |
 | `availability` | the `Remote`'s pod | yes      | `online` or `offline`         |
 | `focus`        | operator     | yes      | the name of the `Player` it drives |
 | `focus/cycle`  | the focus holder | no   | a request to advance focus    |
@@ -111,6 +126,20 @@ so presence comes straight from the device. The topic is retained, so the
 operator reads the current value the instant it subscribes, and it
 folds the flag into the [`Player` status](/docs/reference/players/)
 it publishes.
+
+### codes
+
+The codes the controller declares, read from its nodes' capability
+bitmaps at every node open:
+
+    {"keys": [304, 305], "axes": [16, 17]}
+
+The set is complete with no button pressed, because the bitmaps
+state every code a node can report. The topic is retained, because
+a declared set is a state and not an event, and the pod clears it
+with an empty payload when the nodes vanish. The operator subtracts
+the `Keymap`'s bindings from the set and reports the gap as
+`status.unbound` on the `Remote`.
 
 ### availability
 

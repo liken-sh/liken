@@ -134,3 +134,62 @@ func TestSendCommandWritesOneJSONLine(t *testing.T) {
 		t.Errorf("command = %q", got)
 	}
 }
+
+// The button vocabulary is the whole EV_KEY name space, so a Keymap
+// may name a face button, a transport key, or a d-pad button, at the
+// codes the kernel gives them.
+func TestTheButtonCodesCarryTheWholeKeyNameSpace(t *testing.T) {
+	cases := []struct {
+		name string
+		code uint16
+		want bool
+	}{
+		{name: "BTN_SOUTH", code: 0x130, want: true},
+		{name: "BTN_A", code: 0x130, want: true},
+		{name: "BTN_THUMBR", code: 0x13e, want: true},
+		{name: "BTN_DPAD_UP", code: 0x220, want: true},
+		{name: "BTN_TRIGGER_HAPPY1", code: 0x2c0, want: true},
+		{name: "KEY_PLAYPAUSE", code: 0x0a4, want: true},
+		{name: "KEY_OK", code: 0x160, want: true},
+		{name: "KEY_HOMEPAGE", code: 0x00ac, want: true},
+		{name: "KEY_MAX", want: false},
+		{name: "ABS_HAT0X", want: false},
+		{name: "BTN_NOTHING", want: false},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			code, known := buttonCodes[each.name]
+			mustMatch(t, known, each.want)
+			if each.want {
+				mustMatch(t, code, each.code)
+			}
+		})
+	}
+}
+
+// A code names back, so a report reads in the names a Keymap uses.
+// The first name the header states wins where the kernel gives one
+// code several.
+func TestACodeNamesItselfBack(t *testing.T) {
+	cases := []struct {
+		name string
+		code uint16
+		want string
+	}{
+		{name: "the name a gamepad's face button reports", code: 0x130, want: "BTN_SOUTH"},
+		{name: "a transport key", code: 0x0a4, want: "KEY_PLAYPAUSE"},
+		{name: "a hat axis", code: 0x10, want: "ABS_HAT0X"},
+		{name: "a code the kernel names nothing", code: 0x2ff, want: ""},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			if each.want != "" && strings.HasPrefix(each.want, "ABS_") {
+				mustMatch(t, axisCodeNames[each.code], each.want)
+				return
+			}
+			mustMatch(t, keyCodeNames[each.code], each.want)
+		})
+	}
+}
