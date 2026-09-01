@@ -21,6 +21,9 @@ func main() {
 		case scanMode:
 			runScan()
 			return
+		case cleanupMode:
+			runCleanup()
+			return
 		}
 	}
 

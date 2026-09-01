@@ -61,6 +61,11 @@ type operator struct {
 	// two watches and the bus handler, because a wake says nothing
 	// beyond "read the collection again".
 	wake chan struct{}
+
+	// The recreate backoff of each departing Library's cleanup pod,
+	// keyed the way the report desk keys a Library, and dropped when
+	// the Library goes.
+	cleanupStands map[string]cleanupStand
 }
 
 // newOperator builds the operator and the two things it listens
@@ -78,10 +83,13 @@ func newOperator(client *Client, scannerImage, corrosionImage, busAddress, topic
 		topicBase:      topicBase,
 		reports:        newReports(wake),
 		wake:           wake,
+		cleanupStands:  map[string]cleanupStand{},
 	}
-	// The operator publishes nothing, so it names no will: it is a
-	// reader of every scanner's topics and no scanner reads a topic of
-	// its own.
+	// The operator names no will. Its one publish is the empty
+	// retained payload that drops a departed library's topics, and a
+	// will replaces nothing about that: there is no message of the
+	// operator's own that a broker should stand in for when the
+	// connection breaks.
 	library.bus = newBus(busAddress, "library-operator", nil, nil, library.handleBusMessage)
 	library.bus.Subscribe(libraryStatusFilter(topicBase))
 	library.bus.Subscribe(libraryAvailabilityFilter(topicBase))
@@ -193,20 +201,39 @@ func (o *operator) pass() {
 		return
 	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
+	// The release rule reads every other Library in a namespace, so
+	// the pass groups the survivors once for all of them.
+	survivors := survivingLibraries(libraries.Items)
 
 	live := make(map[string]bool, len(libraries.Items))
 	for index := range libraries.Items {
 		library := &libraries.Items[index]
-		live[libraryKey(library.Metadata.Namespace, library.Metadata.Name)] = true
-		choice := singleCatalog(byNamespace[library.Metadata.Namespace])
+		namespace, name := library.Metadata.Namespace, library.Metadata.Name
+		live[libraryKey(namespace, name)] = true
+
+		// A deleting Library takes the departure and never the
+		// reconcile, because the reconcile would stand the scanner
+		// back up to rewrite the rows the sweep is deleting.
+		if library.Metadata.deleting() {
+			if err := o.depart(ctx, library, survivors[namespace]); err != nil {
+				fmt.Fprintf(os.Stderr, "departing library %s/%s: %v\n", namespace, name, err)
+			}
+			continue
+		}
+
+		choice := singleCatalog(byNamespace[namespace])
 		if err := o.reconcile(ctx, library, choice); err != nil {
-			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n",
-				library.Metadata.Namespace, library.Metadata.Name, err)
+			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n", namespace, name, err)
 		}
 	}
 	// The collection this pass read is the whole set of Libraries, so
 	// anything else the desk holds belongs to a Library that is gone.
 	o.reports.retain(live)
+	for key := range o.cleanupStands {
+		if !live[key] {
+			delete(o.cleanupStands, key)
+		}
+	}
 
 	o.reconcileCatalogs(ctx, byNamespace)
 }

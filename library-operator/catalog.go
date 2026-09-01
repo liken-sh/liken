@@ -289,6 +289,11 @@ func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []s
 	return c.apply(ctx, deleteByKey("aliases", "alias", library, aliases))
 }
 
+// The six replicated tables of the schema: the set a whole-library
+// read and a whole-library sweep both cover. A table added to the
+// schema is one entry here, and both reach it.
+var catalogTables = []string{"aliases", "movies", "series", "episodes", "file_items", "files"}
+
 // DeleteFileItems names all three columns of the link row, because all
 // three are the primary key. A delete by fewer would take every other
 // link the library, the file, or the item holds with it.

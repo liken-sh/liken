@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -107,6 +108,8 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			list.Items = append(list.Items, *f.catalogs[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/libraries/"):
+		f.patchLibrary(w, r, name)
 	case strings.Contains(r.URL.Path, "/catalogs/") && strings.HasSuffix(r.URL.Path, "/status"):
 		var written NamespaceCatalog
 		_ = json.NewDecoder(r.Body).Decode(&written)
@@ -159,6 +162,44 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		answer(w, f.pods[name])
 	}
+}
+
+// the API server's own behavior: conditional on the stated
+// resourceVersion, and a deleting object with no finalizer left is
+// removed.
+func (f *fakeCluster) patchLibrary(w http.ResponseWriter, r *http.Request, name string) {
+	held := f.libraries[name]
+	if held == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var patch struct {
+		Metadata struct {
+			ResourceVersion string   `json:"resourceVersion"`
+			Finalizers      []string `json:"finalizers"`
+		} `json:"metadata"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&patch)
+	if patch.Metadata.ResourceVersion != held.Metadata.ResourceVersion {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	held.Metadata.Finalizers = patch.Metadata.Finalizers
+	held.Metadata.ResourceVersion = nextVersion(held.Metadata.ResourceVersion)
+	if held.Metadata.deleting() && len(held.Metadata.Finalizers) == 0 {
+		delete(f.libraries, name)
+	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// the resourceVersion a write produces, which every later conditional
+// write on the object has to state.
+func nextVersion(current string) string {
+	number, err := strconv.Atoi(current)
+	if err != nil {
+		return "1"
+	}
+	return strconv.Itoa(number + 1)
 }
 
 // namespaceOf reads the namespace out of a collection path, which is

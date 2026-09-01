@@ -393,3 +393,51 @@ func TestHandleBusMessageMarksAScannerOnline(t *testing.T) {
 		t.Error("an availability message folded a report")
 	}
 }
+
+// the pass sends a deleting Library to the departure and a standing one to
+// the reconcile, in one turn.
+func TestPassDepartsADeletingLibraryAndReconcilesTheRest(t *testing.T) {
+	cluster := newFakeCluster()
+	departingMovies(cluster)
+	operator := testOperator(t, cluster)
+	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	cluster.claims["shows"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "shows", Namespace: "house"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
+		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
+	}
+
+	operator.pass()
+
+	if cluster.heldPod("movies-cleanup") == nil {
+		t.Error("the pass stood no cleanup pod for the departing library")
+	}
+	if cluster.heldPod("movies-scanner") != nil {
+		t.Error("the pass stood a scanner for a library on its way out")
+	}
+	if cluster.heldPod("shows-scanner") == nil {
+		t.Error("the surviving library was not reconciled")
+	}
+	if phase := cluster.heldLibrary("movies").Status.Phase; phase != phaseDeparting {
+		t.Errorf("phase = %q, want %s", phase, phaseDeparting)
+	}
+}
+
+// a cleanup pod's backoff is dropped with the Library it belonged to, so
+// the map is as short-lived as the departures.
+func TestPassForgetsTheBackoffOfALibraryThatIsGone(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	operator := testOperator(t, cluster)
+	operator.cleanupStands["house/movies"] = cleanupStand{count: 1}
+	operator.cleanupStands["house/gone"] = cleanupStand{count: 1}
+
+	operator.pass()
+
+	if _, held := operator.cleanupStands["house/movies"]; !held {
+		t.Error("the backoff of a Library that exists was dropped")
+	}
+	if _, held := operator.cleanupStands["house/gone"]; held {
+		t.Error("the backoff of a Library the collection no longer holds was kept")
+	}
+}

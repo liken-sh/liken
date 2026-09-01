@@ -2,8 +2,11 @@ package main
 
 // The scanner pod is what a Library becomes at run time: one pod per
 // Library, in the Library's namespace, owned by it. Deleting the
-// Library is the whole teardown, because the garbage collector takes
-// an owned pod with its owner.
+// Library starts the departure in depart.go: the operator's
+// finalizer holds the object while a cleanup pod takes this pod's
+// place and sweeps the library's rows out of the namespace's
+// catalog. Then the garbage collector takes every owned object with
+// its owner.
 //
 // The pod holds two containers. The scanner walks the volume and
 // reports what it holds over the bus, and the catalog agent holds the

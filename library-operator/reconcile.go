@@ -38,6 +38,10 @@ type binding struct {
 // exactly one Catalog, because the pod's catalog agent joins the cluster
 // the Catalog stands and takes a volume the Catalog sizes.
 func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice) error {
+	if err := o.holdLibrary(ctx, library); err != nil {
+		return err
+	}
+
 	bound, err := resolveStorage(ctx, o.client, library)
 	if err != nil {
 		return err
@@ -71,6 +75,33 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 	online := o.reports.onlineFor(namespace, name)
 	return writeLibraryStatus(ctx, o.client, library,
 		deriveLibraryStatus(library, bound, choice, pod, report, online, time.Now().UTC()))
+}
+
+// holdLibrary puts the finalizer on a Library that does not carry
+// it, so a later delete waits for the departure in depart.go instead
+// of taking the rows' only sweeper with the object. A Library from
+// before this operator held finalizers adopts one here on its next
+// pass. The patch produces a new resourceVersion, and the copy
+// carries it forward so the status write later in this pass states
+// the version the server now holds.
+func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
+	if library.Metadata.holds(libraryFinalizer) {
+		return nil
+	}
+	finalizers := library.Metadata.with(libraryFinalizer)
+	version, err := PatchLibraryFinalizers(ctx, o.client, library.Metadata.Namespace,
+		library.Metadata.Name, library.Metadata.ResourceVersion, finalizers)
+	if errors.Is(err, ErrConflict) {
+		// A write between the list and this patch wakes the
+		// libraries watch, and the next pass patches again.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	library.Metadata.Finalizers = finalizers
+	library.Metadata.ResourceVersion = version
+	return nil
 }
 
 // stopScannerPod removes the pod of a Library that no longer stands one.

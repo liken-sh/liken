@@ -162,10 +162,11 @@ type PodList struct {
 	Items    []Pod    `json:"items"`
 }
 
-// The pod spec's few fields: restartPolicy Always because a scanner is
-// a standing service and not a run to completion, and a termination
-// grace period long enough for a busy catalog agent to finish its
-// exit.
+// The pod spec's few fields: a restartPolicy, Always on the scanner
+// pod because a scanner is a standing service, and Never on the
+// cleanup pod because a restart there would hide a failure the
+// operator reports as Blocked. The termination grace period is long
+// enough for a busy catalog agent to finish its exit.
 type PodSpec struct {
 	RestartPolicy string `json:"restartPolicy,omitempty"`
 	// NodeName is written by the scheduler, never by the builder. The
@@ -320,7 +321,28 @@ type PodStatus struct {
 	// the list below would never see the agent at all.
 	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
 	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
+	// Read for one answer: why a cleanup pod does not schedule. The
+	// scheduler writes that sentence on the PodScheduled condition,
+	// and the pod's own status.message stays empty.
+	Conditions []PodCondition `json:"conditions,omitempty"`
 }
+
+// PodCondition is the fields this operator reads of a pod condition.
+// Status is a string rather than a bool, because a condition has
+// three states: True, False, and Unknown.
+type PodCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// The one pod condition this operator reads, and the verdict that
+// says the scheduler has not placed the pod.
+const (
+	podScheduled     = "PodScheduled"
+	conditionIsFalse = "False"
+)
 
 // Ready is the kubelet's own verdict on the container, which is what
 // the Library's Ready condition folds. A Running pod whose catalog

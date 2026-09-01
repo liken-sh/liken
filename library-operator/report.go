@@ -35,6 +35,13 @@ type libraryReport struct {
 	// partial walk caused is visible on the bus without a shell. The operator
 	// folds it into Library status.
 	RemovedLastSweep int `json:"removedLastSweep"`
+	// CatalogLibraries is the sorted set of libraries this scanner's
+	// own catalog holds rows for, which is more than the one library
+	// it walks: every agent in a namespace holds the whole
+	// namespace's catalog. The operator reads this field to tell
+	// when a departed library's rows have left every survivor's
+	// copy, so this is the field that releases a finalizer.
+	CatalogLibraries []string `json:"catalogLibraries,omitempty"`
 }
 
 // reports holds the newest report per Library and the wake the loop

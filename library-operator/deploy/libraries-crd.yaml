@@ -19,8 +19,13 @@
 # a new kind is a new block and one more clause in that rule, and the
 # kinds already there do not change.
 #
-# The scanner pod is owned by the Library, so deleting the Library is
-# the whole teardown: the garbage collector takes the pod with it.
+# The scanner pod is owned by the Library, and a Library's rows are
+# replicated to every catalog agent in its namespace. So a delete is
+# a departure: the operator holds a finalizer on the Library, sweeps
+# those rows out of every surviving copy, and only then lets the
+# object go, garbage-collecting the pod and the claim with it.
+# status.phase reads Departing for that window, and the Departing
+# condition names the step the teardown has reached.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -272,7 +277,11 @@ spec:
                     What the scanner is doing. Scanning while it walks the
                     volume, Idle between walks, Pending while the storage
                     or the catalog is not ready, and Offline when no
-                    scanner is running.
+                    scanner is running. Departing means the Library is
+                    deleted and the operator holds it open while a
+                    cleanup pod takes this library's rows out of the
+                    namespace's catalog; the Departing condition says
+                    which step that teardown has reached.
                 titles:
                   type: integer
                   minimum: 0
@@ -346,7 +355,12 @@ spec:
                     when its pod runs with every container ready and
                     the operator holds a report for this library, and
                     False with the reason NotBound, PodPending,
-                    PodFailed, or NoReport.
+                    PodFailed, or NoReport. Departing reports the
+                    teardown of a deleted Library: True for as long as
+                    the operator's finalizer holds the object open,
+                    with the reason StoppingScanner, Sweeping,
+                    AwaitingSurvivor, or Blocked, and a message that
+                    names what the teardown waits on.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.
@@ -373,9 +387,11 @@ spec:
                         type: string
                         enum: ["True", "False", "Unknown"]
                         description: >-
-                          The verdict. Both condition types on a
-                          Library state a healthy fact, so True is the
-                          good verdict for both. Unknown means the
+                          The verdict. Bound and Ready state a healthy
+                          fact, so True is the good verdict for both.
+                          Departing states work in progress, so its
+                          True says the teardown is running, and its
+                          reason says how far. Unknown means the
                           operator cannot tell yet.
                       observedGeneration:
                         type: integer

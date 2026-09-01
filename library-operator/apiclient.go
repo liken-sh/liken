@@ -94,7 +94,21 @@ func InClusterClient() (*Client, error) {
 // RequestJSON sends one request and decodes the answer, turning every
 // non-2xx status into an error that carries the server's own message.
 func (c *Client) RequestJSON(ctx context.Context, method, path string, body []byte, out any) error {
-	resp, err := c.Do(ctx, method, path, body)
+	return c.RequestWithType(ctx, method, path, jsonContentType, body, out)
+}
+
+// The two content types this client sends. A PATCH needs its own,
+// because the API server reads which patch dialect a request speaks
+// from the Content-Type header alone.
+const (
+	jsonContentType = "application/json"
+	mergePatchType  = "application/merge-patch+json"
+)
+
+// RequestWithType is RequestJSON with the request's own content type
+// stated, which is what a merge patch needs.
+func (c *Client) RequestWithType(ctx context.Context, method, path, contentType string, body []byte, out any) error {
+	resp, err := c.do(ctx, method, path, contentType, body)
 	if err != nil {
 		return err
 	}
@@ -122,6 +136,12 @@ func (c *Client) RequestJSON(ctx context.Context, method, path string, body []by
 // The context is the caller's, so a pass that ends takes its requests
 // with it, and a watch runs for as long as its own context does.
 func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*http.Response, error) {
+	return c.do(ctx, method, path, jsonContentType, body)
+}
+
+// do is Do with the body's content type stated, so one request path
+// sends both a JSON write and a merge patch.
+func (c *Client) do(ctx context.Context, method, path, contentType string, body []byte) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -143,7 +163,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*htt
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	return c.http.Do(req)
 }
@@ -256,6 +276,36 @@ func PutLibraryStatus(ctx context.Context, c *Client, library *Library) (*Librar
 		return nil, err
 	}
 	return written, nil
+}
+
+// PatchLibraryFinalizers writes a Library's finalizer list and
+// answers with the resourceVersion the write produced, which a
+// caller needs before it writes the same object again in one pass.
+//
+// It is a merge patch and not a replace, because a replace sends
+// every field this program models and drops every field it does not,
+// which would take a person's own labels and annotations off the
+// Library. The resourceVersion inside the patch makes the write
+// conditional the same way a replace is: a write that raced another
+// answers ErrConflict instead of clobbering it.
+func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, resourceVersion string, finalizers []string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"resourceVersion": resourceVersion,
+			"finalizers":      finalizers,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	var patched struct {
+		Metadata ObjectMeta `json:"metadata"`
+	}
+	path := libraryPath(namespace, name)
+	if err := c.RequestWithType(ctx, http.MethodPatch, path, mergePatchType, body, &patched); err != nil {
+		return "", err
+	}
+	return patched.Metadata.ResourceVersion, nil
 }
 
 // ListCatalogs answers a whole pass with one request, and the list's

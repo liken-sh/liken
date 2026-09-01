@@ -8,6 +8,7 @@ package main
 // server fills in the rest.
 
 import (
+	"slices"
 	"time"
 )
 
@@ -19,6 +20,13 @@ const (
 	podAPIVersion     = "v1"
 )
 
+// The finalizer this operator holds on every Library. It keeps a
+// deleted Library open until the departure in depart.go has swept
+// the library's rows out of every surviving agent's catalog. The
+// name is in this operator's own group, so the finalizer says which
+// controller answers for it.
+const libraryFinalizer = "library.liken.sh/sweep"
+
 // ObjectMeta carries what this operator reads or writes: name and
 // namespace for the URL, resourceVersion for the conditional write,
 // uid with ownerReferences so the garbage collector takes a scanner
@@ -29,7 +37,9 @@ const (
 // pod, which is how a pass tells a live pod from the pod it would
 // build now. deletionTimestamp is set by the API server on an object
 // on its way out, and a pod with one set is left alone until the
-// delete completes.
+// delete completes. finalizers is here because the operator holds a
+// Library open past the delete request, and that window is where the
+// departure in depart.go sweeps the catalog.
 type ObjectMeta struct {
 	Name              string            `json:"name,omitempty"`
 	Namespace         string            `json:"namespace,omitempty"`
@@ -38,8 +48,41 @@ type ObjectMeta struct {
 	ResourceVersion   string            `json:"resourceVersion,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 	Annotations       map[string]string `json:"annotations,omitempty"`
+	Finalizers        []string          `json:"finalizers,omitempty"`
 	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
+}
+
+// deleting reports that somebody asked for this object's deletion.
+// The API server does not remove an object that carries a finalizer;
+// it writes the deletion timestamp instead, and that window is where
+// the departure runs.
+func (m ObjectMeta) deleting() bool { return m.DeletionTimestamp != "" }
+
+// holds reports whether this object carries the named finalizer.
+func (m ObjectMeta) holds(finalizer string) bool {
+	return slices.Contains(m.Finalizers, finalizer)
+}
+
+// with answers the finalizer list with one added, and without
+// answers it with one removed. Both answer a new slice, because the
+// caller's copy is the object as the server has it, and a patch that
+// fails must leave that copy alone.
+func (m ObjectMeta) with(finalizer string) []string {
+	if m.holds(finalizer) {
+		return m.Finalizers
+	}
+	return append(slices.Clone(m.Finalizers), finalizer)
+}
+
+func (m ObjectMeta) without(finalizer string) []string {
+	kept := []string{}
+	for _, held := range m.Finalizers {
+		if held != finalizer {
+			kept = append(kept, held)
+		}
+	}
+	return kept
 }
 
 // An ownerReference ties an object's life to its owner's: the garbage
@@ -195,9 +238,13 @@ type LibraryVolume struct {
 // The condition types this operator publishes. Bound reports the
 // storage and Ready reports the scanner. A library whose claim never
 // binds shows the cause in Bound, and Ready reads NotBound beside it.
+// Departing reports the teardown of a deleted Library: it is the one
+// condition here whose True states work in progress rather than a
+// healthy fact, and its reason says how far the teardown reached.
 const (
-	conditionBound = "Bound"
-	conditionReady = "Ready"
+	conditionBound     = "Bound"
+	conditionReady     = "Ready"
+	conditionDeparting = "Departing"
 )
 
 // The reasons each condition takes. A reason is one CamelCase word a
@@ -215,16 +262,28 @@ const (
 	reasonPodPending   = "PodPending"
 	reasonPodFailed    = "PodFailed"
 	reasonNoReport     = "NoReport"
+
+	// The Departing condition's reasons, in the order depart.go
+	// reaches them: the scanner pod is stopping, the cleanup pod is
+	// deleting the rows, the sweep ran here and a survivor's catalog
+	// still holds the rows, and the cleanup pod cannot run at all.
+	reasonStoppingScanner  = "StoppingScanner"
+	reasonSweeping         = "Sweeping"
+	reasonAwaitingSurvivor = "AwaitingSurvivor"
+	reasonBlocked          = "Blocked"
 )
 
-// The four values status.phase takes. libraryPhase in status.go derives
-// one of them from the Ready condition, the scanner's availability on the
-// bus, and the newest report.
+// The values status.phase takes. libraryPhase in status.go derives
+// the first four from the Ready condition, the scanner's
+// availability on the bus, and the newest report. Departing is not
+// derived: depart.go writes it on a Library with a deletion
+// timestamp, for as long as the finalizer holds the object open.
 const (
-	phasePending  = "Pending"
-	phaseOffline  = "Offline"
-	phaseScanning = "Scanning"
-	phaseIdle     = "Idle"
+	phasePending   = "Pending"
+	phaseOffline   = "Offline"
+	phaseScanning  = "Scanning"
+	phaseIdle      = "Idle"
+	phaseDeparting = "Departing"
 )
 
 // ConditionStatus is a condition's verdict. It is a string rather than

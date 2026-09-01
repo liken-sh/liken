@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // The queries endpoint every read posts to.
@@ -23,9 +24,33 @@ const queriesPath = "/v1/queries"
 // event line, so a single event cannot grow the reader without end.
 const queryReadLimit = 1 << 20
 
+// LibraryKeys reads the sorted set of libraries this agent's own
+// catalog holds rows for. It is the departure signal in plan 21: a
+// survivor whose set no longer names a departed library has applied
+// the deletes. The set needs no LIMIT, because it is bounded by the
+// namespace's count of Libraries and not by its count of rows.
+//
+// A UNION rather than six reads, because UNION drops the duplicates,
+// so one request answers the whole set, and every branch reads only
+// the library-leading primary key its table already has.
+func (c *Catalog) LibraryKeys(ctx context.Context) ([]string, error) {
+	return c.queryStrings(ctx, libraryKeysSQL(), nil)
+}
+
+// libraryKeysSQL builds the read from the same table list the sweep
+// deletes from, so a table added to the schema reaches both.
+func libraryKeysSQL() string {
+	branches := make([]string, len(catalogTables))
+	for i, table := range catalogTables {
+		branches[i] = `SELECT library FROM ` + table
+	}
+	return strings.Join(branches, " UNION ") + ` ORDER BY 1`
+}
+
 // queryStrings runs a read query and returns the first column of every
-// row as a string. The query carries its own LIMIT, so the slice holds
-// one bounded batch and never the whole table.
+// row as a string. Every caller's query bounds its own answer, by a
+// LIMIT or by a set that is small by nature, so the slice never holds
+// a whole table.
 func (c *Catalog) queryStrings(ctx context.Context, sql string, params []any) ([]string, error) {
 	var out []string
 	err := c.stream(ctx, sql, params, func(cells []any) error {

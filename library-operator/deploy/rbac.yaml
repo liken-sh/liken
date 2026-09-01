@@ -10,6 +10,12 @@
 # objects carry. It deletes no object a person created. Every grant is
 # cluster-wide, because a Library can be in any namespace.
 #
+# The operator also holds a finalizer on every Library, so a delete
+# waits on a cleanup pod that takes the departed library's rows out
+# of the namespace's catalog. The finalizer is why libraries carry
+# patch below, and the departure is the one reason beyond a stale
+# template that the operator deletes a pod.
+#
 # It also stands one Service per Library, over that Library's scanner
 # pod, which is the address the scanner's webhook answers on.
 #
@@ -30,11 +36,15 @@ rules:
   # The libraries, across every namespace, because a cluster keeps its
   # media in whatever namespace it likes and the operator is one
   # Deployment for the cluster. The watch is the wake signal; every
-  # pass re-reads with a list. Read-only: a person declares a Library
-  # and the operator never edits one.
+  # pass re-reads with a list. A person declares a Library and the
+  # operator never edits one: the patch is for the finalizer list
+  # alone, sent as a merge patch so a person's own fields on the
+  # Library survive the write. The finalizer holds a deleted Library
+  # open until its rows are out of every surviving agent's catalog.
+  # There is no update verb, because nothing here rewrites a spec.
   - apiGroups: [library.liken.sh]
     resources: [libraries]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, patch]
   # Only the status half. The API server's subresource split is what
   # keeps this operator from ever rewriting a spec a person declared.
   - apiGroups: [library.liken.sh]
@@ -73,6 +83,12 @@ rules:
   # longer stands a scanner. The list and watch are cluster-scoped, because a Library
   # lives in any namespace, and the watch wakes the loop when a scanner
   # pod becomes ready or Kubernetes removes one.
+  #
+  # A deleting Library stands a cleanup pod, which this rule also
+  # covers: the operator creates, reads, and deletes it on the same
+  # terms. The departure's two deletes are the stop of the scanner
+  # before the sweep, and the retirement of the cleanup pod when the
+  # deletes have reached every surviving peer.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]

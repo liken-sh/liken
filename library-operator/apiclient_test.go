@@ -346,6 +346,55 @@ func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 }
 
+// a merge patch states the one list it edits and carries the
+// resourceVersion, and the Content-Type header names the patch dialect.
+func TestPatchLibraryFinalizersSendsAConditionalMergePatch(t *testing.T) {
+	var contentType, body, asked string
+	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		read, _ := io.ReadAll(r.Body)
+		contentType, body, asked = r.Header.Get("Content-Type"), string(read), r.Method+" "+r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"metadata": map[string]any{"resourceVersion": "1201"},
+		})
+	}))
+
+	version, err := PatchLibraryFinalizers(t.Context(), client, "house", "movies", "1200",
+		[]string{libraryFinalizer})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if asked != "PATCH /apis/library.liken.sh/v1alpha1/namespaces/house/libraries/movies" {
+		t.Errorf("request = %q, want the PATCH of the Library itself", asked)
+	}
+	if contentType != mergePatchType {
+		t.Errorf("content type = %q, want %q", contentType, mergePatchType)
+	}
+	if !strings.Contains(body, `"resourceVersion":"1200"`) {
+		t.Errorf("body = %s, want the resourceVersion that makes the write conditional", body)
+	}
+	if !strings.Contains(body, libraryFinalizer) {
+		t.Errorf("body = %s, want the finalizer list", body)
+	}
+	if version != "1201" {
+		t.Errorf("resourceVersion = %q, want the one the write produced", version)
+	}
+}
+
+// a Library changed since the list answers the conflict the caller carries
+// on from.
+func TestPatchLibraryFinalizersReportsAConflict(t *testing.T) {
+	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	}))
+
+	_, err := PatchLibraryFinalizers(t.Context(), client, "house", "movies", "1200", nil)
+
+	if !errors.Is(err, ErrConflict) {
+		t.Errorf("err = %v, want ErrConflict", err)
+	}
+}
+
 // A zero-title report is an answer, so the count goes on the wire as 0
 // rather than being dropped as an empty field.
 func TestPutLibraryStatusWritesAZeroCount(t *testing.T) {
@@ -416,6 +465,10 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 	}{
 		{name: "ListLibraries", call: func(c *Client) error { _, err := ListLibraries(t.Context(), c); return err }},
 		{name: "PutLibraryStatus", call: func(c *Client) error { _, err := PutLibraryStatus(t.Context(), c, &Library{}); return err }},
+		{name: "PatchLibraryFinalizers", call: func(c *Client) error {
+			_, err := PatchLibraryFinalizers(t.Context(), c, "house", "movies", "1", nil)
+			return err
+		}},
 		{name: "GetPersistentVolumeClaim", call: func(c *Client) error {
 			_, err := GetPersistentVolumeClaim(t.Context(), c, "house", "movies")
 			return err

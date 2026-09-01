@@ -227,6 +227,14 @@ func (s *scanner) serve(stopped context.Context) {
 		defer close(timerDone)
 		s.runTimer(running)
 	}()
+	// The set of libraries the catalog holds changes on gossip from
+	// a peer as well as on this scanner's own writes, so a loop of
+	// its own reads it.
+	librariesDone := make(chan struct{})
+	go func() {
+		defer close(librariesDone)
+		s.watchCatalogLibraries(running)
+	}()
 
 	<-stopped.Done()
 
@@ -237,6 +245,7 @@ func (s *scanner) serve(stopped context.Context) {
 	time.Sleep(scanFlushGrace)
 	stopBus()
 	<-timerDone
+	<-librariesDone
 }
 
 // startWebhook opens the import endpoint. A bind that fails leaves the
@@ -436,6 +445,11 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	}
 	s.mutex.Unlock()
 
+	// The walk's own prune can take the last row this catalog held
+	// for some library, so the set is re-read here and the walk's
+	// deferred publish carries it.
+	s.refreshCatalogLibraries(ctx)
+
 	s.logWalkComplete(titles, unidentified, removed, unidentifiedNames, time.Since(started))
 }
 
@@ -558,6 +572,7 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 		return
 	}
 	s.logf("rescanned %s: wrote %d, removed %d", relative, written, removed)
+	s.refreshCatalogLibraries(ctx)
 	s.mutex.Lock()
 	s.report.LastChange = time.Now().UTC()
 	s.mutex.Unlock()

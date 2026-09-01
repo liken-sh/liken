@@ -28,6 +28,9 @@ const catalogSchemaPath = "corrosion/schema/catalog.sql"
 // prune runs here with no agent and no cr-sqlite.
 type sqliteAgent struct {
 	db *sql.DB
+	// the most statements one posted transaction carried, so a test reads the
+	// bound a chunked sweep keeps.
+	largestBatch int
 }
 
 // newSQLiteCatalog opens a database with the shipped schema, serves it
@@ -72,6 +75,7 @@ func (a *sqliteAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // result per statement, the shape the write client reads.
 func (a *sqliteAgent) serveTransaction(w http.ResponseWriter, r *http.Request) {
 	statements := parseStatements(readBody(r))
+	a.largestBatch = max(a.largestBatch, len(statements))
 	results := make([]map[string]any, len(statements))
 	for i, s := range statements {
 		outcome, err := a.db.Exec(s.sql, s.params...)
