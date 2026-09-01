@@ -1,7 +1,8 @@
 # A Library takes its rows with it
 
-Plan 21, a stub. The shape is chosen; the details wait for a design
-pass before the build.
+Plan 21. A finalizer holds a deleted `Library` until a cleanup pod
+sweeps its rows out of the catalog, so a library's rows never outlive
+it.
 
 ## The problem
 
@@ -36,16 +37,23 @@ A finalizer on the `Library`, and a cleanup pod:
 4. When the cleanup pod succeeds, the operator removes the finalizer,
    and the claim and the rest follow the owner references out.
 
-## To design before the build
+## What the build chose
 
-- The escape hatch: what unsticks the finalizer when the cleanup pod
-  cannot run or cannot finish (no nodes, no storage, a namespace under
-  deletion). A stuck finalizer holds the `Library` forever, and that
-  is the classic cost of this pattern.
-- The cleanup pod's contract: its claim (fresh, or none and join as a
-  memory-backed peer), its bounded lifetime, and how the operator
-  reads success.
-- The last-library case: when no peer remains to replicate to, the
-  sweep has nothing to clean and the finalizer should release at once.
+The build answered three of the four questions this plan left open,
+and the commit messages record the details.
+
+- The escape hatch: there is no timeout. The operator reports any
+  blocker in the `Departing` condition and releases the finalizer
+  only when every surviving scanner is online and none still names
+  the departed library.
+- The cleanup pod's contract: it runs on the library's own catalog
+  claim, or on a fresh one when that claim is already gone, and it
+  deletes the six tables' rows in key batches of 500, because a
+  whole-table delete wedged a harness peer. The operator reads
+  success through the survivor reports, not through the pod alone.
+- The last-library case: the drill found that the last scanner's
+  retained Last Will republished onto a topic the release had
+  cleared. Every pass now clears the retained topics of any library
+  the `Library` collection does not hold.
 - Whether the same sweep serves a `Library` whose `spec` moves to a
-  different volume, which departs the old rows the same way.
+  different volume stays open.

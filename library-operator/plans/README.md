@@ -126,14 +126,23 @@ that took a hearing-impaired flag for Hindi.
   Built, and released in 2026.08.30-012. The `Service` over each
   scanner pod, with the selector the pod's own labels give it, and the
   address in `status.webhook`.
-* [20, Library-scoped catalog keys](20-library-scoped-keys.md). Every
-  replicated table's primary key leads with the library, so Libraries
-  that share a namespace never touch each other's rows. Ships against
-  fresh databases through a versioned claim name, with a rescan.
-* [21, A Library takes its rows with it](21-a-library-takes-its-rows-with-it.md).
-  A stub. A finalizer stops a deleted Library's scanner and launches a
-  cleanup pod that scours the library's rows out of the catalog, so a
-  Library's rows never outlive it. The details wait for a design pass.
+* [20, Library-scoped catalog keys](completed/20-library-scoped-keys.md).
+  Built, released in 2026.08.31-002, and drilled on `liken-1` on
+  2026-08-31. Every replicated table's primary key leads with the
+  library, so Libraries that share a namespace never touch each
+  other's rows. The change shipped against fresh databases through a
+  versioned claim name, with a rescan, and 2026.08.31-003 returned
+  the claim to its plain name after every scanner moved to a fresh
+  database.
+* [21, A Library takes its rows with
+  it](completed/21-a-library-takes-its-rows-with-it.md). Built,
+  released in 2026.08.31-004 through -006, and running on `liken-1`.
+  A finalizer stops a deleted `Library`'s scanner and launches a
+  cleanup pod that sweeps the library's rows out of the catalog, so a
+  `Library`'s rows never outlive it. The drill found two gaps, closed
+  in -006: the last scanner's retained Last Will republished onto a
+  cleared topic, and a departure whose claim was deleted by hand
+  released while survivors still held the rows.
 
 ## Open problems
 

@@ -7,7 +7,7 @@ today in `mpv` and Lua. Every plan after this one draws on a screen that
 client owns.
 
 The work is `media-operator`'s, and [plan
-20](https://github.com/liken-sh/media-operator/blob/main/plans/20-the-idle-screen-is-its-own-image.md)
+20](https://github.com/liken-sh/media-operator/blob/main/plans/completed/20-the-idle-screen-is-its-own-image.md)
 in that repository states it. This document states why the library layer
 asked for it and what it needs the result to be.
 
