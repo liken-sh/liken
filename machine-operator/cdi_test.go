@@ -139,6 +139,26 @@ func TestRefreshDeliversTheBusNodeAloneAfterADriverDetach(t *testing.T) {
 	}
 }
 
+func TestRefreshDeliversUHIDAfterTheModuleLoads(t *testing.T) {
+	// The module loop loads a declared module with no reboot, so
+	// /dev/uhid can appear after the kubelet prepared the adapter's
+	// claim, and the pass that follows writes it into the spec the
+	// next pod receives.
+	fixture := newDRAFixture(t)
+	fixture.addBluetooth(t)
+	fixture.allocated = "usb-1-8-1-0"
+	prepared(t, fixture)
+
+	fixture.loadUHID(t)
+	refreshCDISpecs(draSysfsRoot)
+
+	paths := specPaths(t, fixture, "claim-1")
+	slices.Sort(paths)
+	if !slices.Equal(paths, []string{"/dev/bus/usb/001/008", "/dev/uhid"}) {
+		t.Errorf("paths = %v, want the uhid node beside the usbfs node", paths)
+	}
+}
+
 func TestRefreshIgnoresFilesItDidNotWrite(t *testing.T) {
 	// containerd reads every spec in this directory, and another
 	// driver's file can sit beside liken's.

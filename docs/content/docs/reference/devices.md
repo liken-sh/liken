@@ -265,14 +265,24 @@ these claims can communicate with the whole device.
 
 ### Bluetooth adapters
 
-A claim on a Bluetooth adapter delivers the adapter's usbfs node, and
-nothing else. The adapter has no node of its own. A program reaches a
-radio through an `AF_BLUETOOTH` socket, and it binds that socket to an
+A claim on a Bluetooth adapter delivers the adapter's usbfs node and,
+on a machine whose `spec.modules` declares `uhid`, the `/dev/uhid`
+node. The adapter has no node of its own. A program reaches a radio
+through an `AF_BLUETOOTH` socket, and it binds that socket to an
 adapter by index. The kernel registers no `/dev` entry anywhere the
 adapter owns. The claim states which workload owns the radio, and it
 holds that workload on the machine the radio is in. A stack that drives the
 radio through the kernel opens its socket with the capabilities of its
 own container, because a claim grants no privilege.
+
+`/dev/uhid` rides the adapter's claim because it is the kernel's
+inlet for a HID stack that runs in userspace. BlueZ carries HID over
+GATT there and writes this node to present a BLE peripheral as an
+input device, while classic Bluetooth HID rides `hidp` inside the
+kernel and needs no node. Declare the `uhid` module on a machine
+whose adapter serves BLE input devices. Without it, such a device
+pairs and connects, but no input node ever appears, and `bluetoothd`
+logs `input-hog profile accept failed`.
 
 `liken` stops the delivery walk at a `bluetooth` subtree. The kernel
 puts the HID device of a connected peripheral under the adapter's own

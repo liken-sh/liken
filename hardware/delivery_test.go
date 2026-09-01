@@ -247,6 +247,45 @@ func TestDeliveryPrunesAtABluetoothSubtree(t *testing.T) {
 	}
 }
 
+// miscDevice registers a node in the misc class, the shape sysfs
+// gives a driver that owns one character node and no bus device of
+// its own.
+func (f *fakeSysfs) miscDevice(name, devname string) {
+	f.t.Helper()
+	dir := filepath.Join(f.root, "class", "misc", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dev"), []byte("10:239\n"), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte("DEVNAME="+devname+"\n"), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func TestMiscNodeReportsTheNodeTheClassPublishes(t *testing.T) {
+	// A misc device has no place in any bus device's subtree, so the
+	// walk never reaches it, and the class directory is where the
+	// kernel publishes its node.
+	sysfs := newFakeSysfs(t)
+	sysfs.miscDevice("uhid", "uhid")
+
+	if node := MiscNode(sysfs.root, "uhid"); node != "/dev/uhid" {
+		t.Errorf("MiscNode = %q, want /dev/uhid", node)
+	}
+}
+
+func TestMiscNodeReportsNothingForAModuleThatIsNotLoaded(t *testing.T) {
+	// The class directory appears when the module registers the
+	// device, so its absence is the answer: the node does not exist.
+	sysfs := newFakeSysfs(t)
+
+	if node := MiscNode(sysfs.root, "uhid"); node != "" {
+		t.Errorf("MiscNode = %q, want nothing", node)
+	}
+}
+
 func TestDeliveryKeepsNodesUnderAUSBHIDDevice(t *testing.T) {
 	// The boundary is the bluetooth subsystem, and not the HID device
 	// below it. usbhid registers the UPS's hidraw node inside a HID

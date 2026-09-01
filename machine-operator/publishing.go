@@ -30,6 +30,9 @@ package main
 // socket, so the policy names this shape by its driver rather than by
 // the kinds it delivers. The device it publishes carries the usbfs
 // node.
+// On a machine whose modules include uhid, the device also carries
+// /dev/uhid, because a Bluetooth stack is what that node exists for.
+// claimDelivery states the reasoning.
 //
 // The mechanism is generic; the tables below are deliberately not.
 // Only a shape somebody examined splits. Everything else publishes
@@ -93,6 +96,30 @@ var audioSubsystems = map[string]bool{"sound": true, "input": true}
 // displaySuffix names the published device that carries a graphics
 // device's card node.
 const displaySuffix = "-display"
+
+// claimDelivery is the delivery walk plus the nodes a claim receives
+// from outside the device's own subtree. A Bluetooth adapter's claim
+// also receives /dev/uhid when the machine has that node. /dev/uhid
+// is the kernel's inlet for a HID stack that runs in userspace:
+// BlueZ carries HID over GATT there and writes this node to present
+// a BLE peripheral as an input device, while classic HID rides hidp
+// inside the kernel and needs no node. So the node exists for a
+// Bluetooth stack's use, and the adapter's claim is what a Bluetooth
+// stack holds. The node exists only while the machine declares the
+// uhid module, and a machine that declares none delivers what it
+// delivered before.
+func claimDelivery(sysRoot string, d hardware.Device) hardware.Delivery {
+	delivery := hardware.InspectDelivery(sysRoot, d)
+	if !bluetoothAdapter(d) {
+		return delivery
+	}
+	node := hardware.MiscNode(sysRoot, "uhid")
+	if node == "" {
+		return delivery
+	}
+	delivery.Nodes = append(delivery.Nodes, hardware.DeliveredNode{Path: node, Subsystem: "misc"})
+	return delivery
+}
 
 // publishDevices applies the policy to one device and what it
 // delivers. Most of the policy reads the delivery alone, because the
@@ -303,14 +330,17 @@ func publishAudio(delivery hardware.Delivery) []publishedDevice {
 // states which workload owns the radio, and it holds that workload on
 // the machine the radio is plugged into, which is what a Bluetooth
 // service in a container needs. The usbfs node is what a userspace
-// stack opens if it drives the hardware itself, and it is the only
-// node the adapter has to give.
+// stack opens if it drives the hardware itself.
 //
 // Any node left in the subtree belongs to the adapter, because the
 // walk already removed the peripherals' nodes, so the delivery
 // carries it beside the usbfs node. An adapter with no usbfs node
 // publishes nothing, because such a claim would deliver no node at
 // all.
+//
+// The delivery can also carry /dev/uhid, which claimDelivery adds
+// from outside the subtree, and this device is where that node
+// reaches a claim.
 //
 // The device is exclusive. The kernel arbitrates nothing between two
 // Bluetooth stacks on one radio: both scan, both pair, and each one

@@ -32,6 +32,12 @@ package hardware
 // interface belongs to also has a usbfs node, and that is the node
 // every libusb program opens. The walk reports it beside the subtree's
 // nodes, because both belong to the same claim.
+//
+// One more node can belong to a claim from outside any subtree. The
+// kernel registers a misc device such as /dev/uhid under no bus
+// device, so the walk cannot reach it, and MiscNode below reads the
+// misc class directly. The publish policy decides which claim
+// receives such a node.
 
 import (
 	"fmt"
@@ -178,6 +184,20 @@ func usbfsNode(sysRoot string, d Device) string {
 		return ""
 	}
 	return fmt.Sprintf("/dev/bus/usb/%03d/%03d", bus, device)
+}
+
+// MiscNode reports the /dev node of a named misc device, or nothing
+// while the module that registers the device is not loaded. The
+// kernel lists every misc device under /sys/class/misc, where its
+// uevent file publishes the node's path as DEVNAME, the same way a
+// subtree's entries do, and devtmpfs creates the node the moment the
+// class entry appears.
+func MiscNode(sysRoot, name string) string {
+	devname := ueventDevName(filepath.Join(sysRoot, "class", "misc", name))
+	if devname == "" {
+		return ""
+	}
+	return "/dev/" + devname
 }
 
 // isSubtreeBoundary reports whether a sysfs directory ends the walk.

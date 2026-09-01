@@ -159,7 +159,7 @@ func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePre
 // prefix alone identifies nothing.
 func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device) (publishedDevice, bool) {
 	if device, ok := byName[name]; ok {
-		for _, p := range publishDevices(device, hardware.InspectDelivery(sysRoot, device)) {
+		for _, p := range publishDevices(device, claimDelivery(sysRoot, device)) {
 			if p.Suffix == "" {
 				return p, true
 			}
@@ -170,7 +170,7 @@ func resolveAllocated(name string, sysRoot string, byName map[string]hardware.De
 		if !strings.HasPrefix(name, bare+"-") {
 			continue
 		}
-		for _, p := range publishDevices(device, hardware.InspectDelivery(sysRoot, device)) {
+		for _, p := range publishDevices(device, claimDelivery(sysRoot, device)) {
 			if bare+p.Suffix == name {
 				return p, true
 			}

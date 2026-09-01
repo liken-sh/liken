@@ -256,6 +256,73 @@ func TestPrepareDeliversTheUsbfsNodeOfABluetoothAdapter(t *testing.T) {
 	}
 }
 
+// loadUHID registers the misc device the uhid module creates, which
+// a machine has only while its spec.modules declares uhid.
+func (f *draFixture) loadUHID(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(draSysfsRoot, "class", "misc", "uhid")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dev"), []byte("10:239\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte("DEVNAME=uhid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepareDeliversUHIDWithABluetoothAdapter(t *testing.T) {
+	// BlueZ carries HID over GATT in userspace and presents the
+	// peripheral as an input device by writing /dev/uhid, so a stack
+	// in an unprivileged container needs that node beside the
+	// adapter, and the HID profile fails without it.
+	fixture := newDRAFixture(t)
+	fixture.addBluetooth(t)
+	fixture.loadUHID(t)
+	fixture.allocated = "usb-1-8-1-0"
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	paths := specPaths(t, fixture, "claim-1")
+	slices.Sort(paths)
+	if !slices.Equal(paths, []string{"/dev/bus/usb/001/008", "/dev/uhid"}) {
+		t.Errorf("paths = %v, want the usbfs node and the uhid node", paths)
+	}
+}
+
+func TestPrepareDeliversUHIDToNoOtherDevice(t *testing.T) {
+	// /dev/uhid belongs to the adapter's claim alone, because a
+	// Bluetooth stack is what the node exists for.
+	fixture := newDRAFixture(t)
+	fixture.enumerate(t, 4)
+	fixture.loadUHID(t)
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	paths := specPaths(t, fixture, "claim-1")
+	slices.Sort(paths)
+	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004", "/dev/sda"}) {
+		t.Errorf("paths = %v, want the stick's own nodes", paths)
+	}
+}
+
 func TestPrepareDeliversOnlyTheRenderNodeOfAGPU(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.addGPU(t)

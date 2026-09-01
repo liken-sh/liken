@@ -102,6 +102,13 @@ The hardware report names these modules for you, as comments, when you
 install the machine. See
 [Install a cluster](/docs/guides/install/#first-run-the-hardware-report).
 
+One module serves a stack rather than a device: `uhid`. Declare it on
+a machine whose Bluetooth adapter serves BLE input devices, such as a
+remote or a keyboard, and the adapter's claim then delivers
+`/dev/uhid`. The
+[device reference](/docs/reference/devices/#bluetooth-adapters)
+states why.
+
 ## 3. Say what your workload needs
 
 A `DeviceClass` is a named set of conditions on hardware. Write one
