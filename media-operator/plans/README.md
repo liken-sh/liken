@@ -25,11 +25,6 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [19, A claim as a media reference](19-a-claim-as-a-media-reference.md).
-  A third URI scheme, `claim://`, names a `PersistentVolumeClaim` in
-  the `Play`'s namespace and a path inside it, so a `Play` plays from
-  any volume the cluster can mount and names no server. The library
-  layer depends on it.
 * [21, A remote that teaches its
   keymap](21-a-remote-that-teaches-its-keymap.md). Built, and
   awaiting its drill. `spec.discovery` on the `Remote` keeps every
@@ -193,6 +188,18 @@ These plans are designed. Each keeps its number and moves to
   playback overlay stays. Releases -002 through -005 fixed a covered
   client's stall: the client presents without vsync, reads the bus on
   every wake, and heals a lost present.
+* [19, A claim as a media
+  reference](completed/19-a-claim-as-a-media-reference.md). Built,
+  released in 2026.09.01-002, and drilled on `liken-1` on 2026-09-01.
+  The third scheme, `claim://<claim>/<path>`, mounts a
+  `PersistentVolumeClaim` beside the `Play`, read-only, in the same
+  `/media/N` numbering the NFS mounts use, and the operator reads no
+  claim and no `PersistentVolume`. The drill resolved a film, its
+  logo, and its trickplay through one claim mount and played it, and
+  the existing `nfs://` plays still ran. A `Play` on an absent claim
+  parked `Pending` with an empty message, so 2026.09.01-003 reads
+  the scheduler's message from the `PodScheduled` condition into the
+  status, which now names the claim.
 
 ## Open problems
 
