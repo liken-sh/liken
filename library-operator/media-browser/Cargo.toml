@@ -35,16 +35,32 @@ iced_widget = { version = "=0.14.2", default-features = false, features = [
 ] }
 # liken-iced carries the mark and the palette. It parses them out of
 # liken.svg and liken.css, so the mark on this screen and the mark on a page
-# are one drawing and cannot drift. The crate lives in the brand repository,
+# are one drawing and cannot drift. The crate is in the brand repository,
 # which this directory takes as a submodule because the image build context is
 # this directory alone. The repository holds a second checkout of the same
 # repository at docs/themes/brand for the documentation theme, and the two
 # pins move together.
 liken-iced = { path = "brand/iced" }
-# image writes the captured frames. They are PNGs and nothing else.
-image = { version = "=0.25.10", default-features = false, features = ["png"] }
+# image writes the captured frames as PNG and decodes the posters,
+# which are JPEG and PNG on the volumes, so no other decoder builds.
+image = { version = "=0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+] }
 # serde_json writes the measurements file.
 serde_json = "=1.0.151"
+# rusqlite reads the sidecar's file; bundled compiles its own SQLite so
+# the read path loads no extension and matches no system library.
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+# ureq holds the streaming update subscriptions; it decodes the chunked
+# body and puts a timeout on every read; the defaults come off because the
+# agent answers on loopback with no TLS and no compression.
+ureq = { version = "=2.12.1", default-features = false }
+
+[dev-dependencies]
+# tempfile holds the fixture databases and the fixture volumes the
+# tests build.
+tempfile = "=3.27.0"
 
 # The measurements need optimized code with symbols the profile does not strip.
 [profile.release]

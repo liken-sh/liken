@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# local/browse opens the media browser on the catalog the local
+# three-agent cluster holds, so a change to the views, the source, or the
+# poster store is seen against real scanned rows and real art.
+#
+# Usage:
+#   local/browse [NAME=DIR ...] [FLAGS ...]
+#
+# NAME is the catalog's library column, namespace/name, and DIR is the
+# directory that library was scanned from; the pairs are recorded and reused
+# by a later run that names none. Every other argument reaches the client, so
+# --headless, --script, --capture, and --stats all work.
+set -euo pipefail
+
+# The repository is the directory above this file, so every path resolves
+# from this script's own directory and none is absolute.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/.." && pwd)"
+
+# The first agent's file and API. The media browser reads the file
+# straight off the disk and takes its update streams from the API, which is
+# the pod's shape from plan 06 with the sidecar on loopback.
+catalog="$repo/local/state/catalog/agent-1/state.db"
+updates="http://127.0.0.1:20081"
+
+# Where the library roots of the last run are recorded, under the same
+# state directory the agents write and .gitignore excludes.
+recorded="$repo/local/state/browse-roots"
+
+usage() {
+  sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+roots=()
+flags=()
+headless=()
+for argument in "$@"; do
+  case "$argument" in
+    --help) usage ;;
+    # local/media-browser reads --headless as its first argument, so
+    # it is taken out of the order it arrived in and put back at the front.
+    --headless) headless=(--headless) ;;
+    *=*) roots+=("$argument") ;;
+    *) flags+=("$argument") ;;
+  esac
+done
+
+# Roots given on this run are recorded only after the catalog check
+# below accepts them, so a mistyped name is never replayed by a later
+# bare run.
+record=false
+if [ "${#roots[@]}" -gt 0 ]; then
+  record=true
+elif [ -f "$recorded" ]; then
+  mapfile -t roots <"$recorded"
+fi
+
+# The local cluster must be up, because the file the media browser
+# reads is an agent's database, and a stopped agent leaves it at the rows of
+# its last run.
+if ! curl --silent --fail --max-time 2 \
+  --header 'content-type: application/json' \
+  --data '"SELECT 1"' "$updates/v1/queries" >/dev/null 2>&1; then
+  echo "local/browse: no catalog agent answers on $updates; run 'local/catalog up' first" >&2
+  exit 1
+fi
+
+# The NAME of a root is the catalog's library column, namespace/name,
+# and the poster store holds one root per library key, so a NAME the
+# catalog does not hold answers no poster for every item and the wall
+# draws placeholders and reports nothing.
+#
+# The union is the browser's own libraries query, so this reads the
+# same keys the first screen lists.
+mapfile -t keys < <(curl --silent --fail --max-time 5 \
+  --header 'content-type: application/json' \
+  --data '"SELECT library FROM movies UNION SELECT library FROM series ORDER BY library"' \
+  "$updates/v1/queries" 2>/dev/null |
+  jq --raw-output 'select(has("row")) | .row[1][0]')
+
+if [ "${#roots[@]}" -gt 0 ]; then
+  for root in "${roots[@]}"; do
+    name="${root%%=*}"
+    case " ${keys[*]} " in
+      *" $name "*) continue ;;
+    esac
+    if [ "${#keys[@]}" -eq 0 ]; then
+      echo "local/browse: $name names no library; the catalog holds none, so run 'local/scan' first" >&2
+    else
+      echo "local/browse: $name names no library; the catalog holds ${keys[*]}" >&2
+    fi
+    exit 1
+  done
+fi
+
+if [ "$record" = true ]; then
+  mkdir -p "$(dirname "$recorded")"
+  printf '%s\n' "${roots[@]}" >"$recorded"
+fi
+
+# The reverse gap fails silently too: a library the catalog holds with
+# no root draws every poster slot as a placeholder. That is a warning
+# rather than an error, because browsing the other libraries is still
+# useful.
+for key in "${keys[@]}"; do
+  covered=false
+  for root in "${roots[@]}"; do
+    [ "${root%%=*}" = "$key" ] && covered=true && break
+  done
+  if [ "$covered" = false ]; then
+    echo "local/browse: no root for $key; its art will draw as placeholders; pass $key=DIR" >&2
+  fi
+done
+
+if [ ! -f "$catalog" ]; then
+  echo "local/browse: $catalog does not exist; run 'local/catalog up' first" >&2
+  exit 1
+fi
+
+if [ "${#roots[@]}" -eq 0 ]; then
+  echo "local/browse: no library roots; pass NAME=DIR, as local/scan named the library" >&2
+fi
+
+arguments=("${headless[@]}" --catalog "$catalog" --updates "$updates")
+for root in "${roots[@]}"; do
+  arguments+=(--library-root "$root")
+done
+
+exec "$here/media-browser" "${arguments[@]}" "${flags[@]}"

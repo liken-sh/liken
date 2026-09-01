@@ -21,9 +21,31 @@ pub fn text() -> Color {
     palette::dark().ink
 }
 
-/// The size of the one line the browser draws, in logical pixels, large
-/// enough to read from a couch.
-pub const TITLE: f32 = 64.0;
+/// The color of secondary text, the dark scheme's `--ink-muted`.
+pub fn muted() -> Color {
+    palette::dark().ink_muted
+}
+
+/// The accent that marks focus, the dark scheme's `--link`.
+pub fn accent() -> Color {
+    palette::dark().link
+}
+
+/// The fill of a placeholder art slot and a focused row's ground: the
+/// dark scheme's `--page`, slightly lighter than the black ground.
+pub fn slot() -> Color {
+    palette::dark().page
+}
+
+/// The size of the focused title's name under its poster, in logical
+/// pixels, large enough to read from a couch.
+pub const NAME: f32 = 34.0;
+
+/// The size of a list row's name.
+pub const ROW_NAME: f32 = 40.0;
+
+/// The size of secondary text: details and placeholder titles.
+pub const DETAIL: f32 = 28.0;
 
 /// The one family the whole display draws in. The image installs the face, and
 /// the toolkit resolves it by name. With no installed match the toolkit falls
@@ -42,5 +64,12 @@ mod tests {
     #[test]
     fn the_text_is_the_brand_ink() {
         assert_eq!(text(), palette::dark().ink);
+    }
+
+    #[test]
+    fn the_secondary_colors_come_from_the_dark_scheme() {
+        assert_eq!(muted(), palette::dark().ink_muted);
+        assert_eq!(accent(), palette::dark().link);
+        assert_eq!(slot(), palette::dark().page);
     }
 }

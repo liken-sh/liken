@@ -2,5 +2,11 @@
 // its measurements have unit tests that open no window.
 
 pub mod browser;
+pub mod catalog;
+pub mod focus;
 pub mod harness;
+pub mod levels;
 pub mod look;
+pub mod posters;
+pub mod sample;
+pub mod views;

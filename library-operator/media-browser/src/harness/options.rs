@@ -8,6 +8,9 @@ use std::path::PathBuf;
 pub const HELP: &str = "\
 media-browser [FLAGS]
 
+  --catalog PATH           the sidecar's SQLite file; without it, the sample
+  --updates URL            the agent's HTTP API base
+  --library-root NAME=PATH where a library's volume is read; repeatable
   --script \"0.0:p,3.0:o\"   key events at seconds from the first frame
   --capture DIR            where captured PNGs go
   --capture-at \"0.5,3.2\"   one PNG of the rendered frame at each second listed;
@@ -33,6 +36,14 @@ pub enum Invocation {
 /// The flags the media browser accepts.
 #[derive(Debug, PartialEq)]
 pub struct Options {
+    /// The sidecar's SQLite file. Without it the binary browses the
+    /// sample catalog and reads no volume.
+    pub catalog: Option<PathBuf>,
+    /// The base of the agent's HTTP API, where the update streams are.
+    pub updates: Option<String>,
+    /// Where each library's volume is read, keyed by the catalog's
+    /// library column, `namespace/name`.
+    pub library_roots: Vec<(String, PathBuf)>,
     /// Key events at seconds from the first frame, in the order they fire.
     pub script: Vec<(f64, String)>,
     /// Where captured PNGs go, and at what seconds.
@@ -49,6 +60,9 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            catalog: None,
+            updates: None,
+            library_roots: Vec::new(),
             script: Vec::new(),
             capture_dir: None,
             capture_at: Vec::new(),
@@ -74,6 +88,9 @@ impl Options {
 
             match arg.as_str() {
                 "--help" => return Ok(Invocation::Help),
+                "--catalog" => options.catalog = Some(PathBuf::from(value()?)),
+                "--updates" => options.updates = Some(value()?),
+                "--library-root" => options.library_roots.push(parse_root(&value()?)?),
                 "--script" => options.script = parse_script(&value()?)?,
                 "--capture" => options.capture_dir = Some(PathBuf::from(value()?)),
                 "--capture-at" => options.capture_at = parse_times(&value()?)?,
@@ -91,8 +108,33 @@ impl Options {
             }
         }
 
+        // The stream and the volumes are read for a catalog, so
+        // either flag without one is a run that could not do what it asked
+        // for.
+        if options.catalog.is_none() {
+            if options.updates.is_some() {
+                return Err("--updates needs --catalog".to_string());
+            }
+            if !options.library_roots.is_empty() {
+                return Err("--library-root needs --catalog".to_string());
+            }
+        }
+
         Ok(Invocation::Run(options))
     }
+}
+
+/// One library root, written `NAME=PATH`, where the name is the
+/// catalog's library column and the path is where that volume is read.
+pub fn parse_root(raw: &str) -> Result<(String, PathBuf), String> {
+    let (name, path) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("bad --library-root {raw}"))?;
+    if name.is_empty() || path.is_empty() {
+        return Err(format!("bad --library-root {raw}"));
+    }
+
+    Ok((name.to_string(), PathBuf::from(path)))
 }
 
 /// A scripted timeline: `SECONDS:KEY` steps, comma separated, sorted by time so
@@ -213,6 +255,63 @@ mod tests {
         assert_eq!(options.stats, Some(PathBuf::from("/stats.json")));
         assert_eq!(options.quit_after, Some(3.0));
         assert_eq!(options.size, (1280, 720));
+    }
+
+    #[test]
+    fn the_catalog_flags_land_in_the_options() {
+        let Ok(Invocation::Run(options)) = Options::parse(args(
+            "--catalog /state/state.db --updates http://127.0.0.1:20081 \
+             --library-root local/movies=/films --library-root local/series=/shows",
+        )) else {
+            panic!("the flags parse");
+        };
+
+        assert_eq!(options.catalog, Some(PathBuf::from("/state/state.db")));
+        assert_eq!(options.updates, Some("http://127.0.0.1:20081".to_string()));
+        assert_eq!(
+            options.library_roots,
+            vec![
+                ("local/movies".to_string(), PathBuf::from("/films")),
+                ("local/series".to_string(), PathBuf::from("/shows")),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_catalog_flags_are_all_optional() {
+        let Ok(Invocation::Run(options)) = Options::parse(Vec::new()) else {
+            panic!("no flags parse");
+        };
+
+        assert_eq!(options.catalog, None);
+        assert_eq!(options.updates, None);
+        assert!(options.library_roots.is_empty());
+    }
+
+    #[test]
+    fn a_stream_or_a_volume_without_a_catalog_is_an_error() {
+        assert_eq!(
+            Options::parse(args("--updates http://127.0.0.1:20081")),
+            Err("--updates needs --catalog".to_string())
+        );
+        assert_eq!(
+            Options::parse(args("--library-root local/movies=/films")),
+            Err("--library-root needs --catalog".to_string())
+        );
+    }
+
+    #[test]
+    fn a_library_root_is_a_name_and_a_path_around_an_equals() {
+        assert_eq!(
+            parse_root("local/movies=/films"),
+            Ok(("local/movies".to_string(), PathBuf::from("/films")))
+        );
+        assert_eq!(
+            parse_root("local/movies"),
+            Err("bad --library-root local/movies".to_string())
+        );
+        assert!(parse_root("=/films").is_err());
+        assert!(parse_root("local/movies=").is_err());
     }
 
     #[test]

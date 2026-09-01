@@ -212,6 +212,70 @@ fn quoted(argument: &str) -> String {
     format!("'{}'", argument.replace('\'', r"'\''"))
 }
 
+// A catalog fixture in the shape the sidecar's file has, with one
+// library of one movie and a poster beside it on the volume.
+fn fixture(dir: &Path) -> (PathBuf, PathBuf) {
+    let database = dir.join("state.db");
+    let connection = rusqlite::Connection::open(&database).expect("open the fixture database");
+    let schema = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../corrosion/schema/catalog.sql"
+    );
+    connection
+        .execute_batch(&std::fs::read_to_string(schema).expect("read the schema"))
+        .expect("apply the schema");
+    connection
+        .execute(
+            "INSERT INTO movies (library, id, kind, title, sort_key, released, art) \
+             VALUES ('drill/films', 'movie:path:one', 'movies', 'Vespera Coppice', \
+             'vespera coppice', '1994', 'poster.jpg')",
+            (),
+        )
+        .expect("insert the fixture movie");
+
+    let volume = dir.join("volume");
+    std::fs::create_dir_all(&volume).expect("the volume needs a directory");
+    image::RgbImage::from_pixel(200, 300, image::Rgb([210, 140, 30]))
+        .save(volume.join("poster.jpg"))
+        .expect("write the fixture poster");
+
+    (database, volume)
+}
+
+#[test]
+fn a_catalog_run_draws_the_poster_the_volume_holds() {
+    let dir = workspace("catalog");
+    let frames = dir.join("frames");
+    let (database, volume) = fixture(&dir);
+
+    // No agent answers on port 1, so this run reads the file alone
+    // and its update streams find nothing.
+    let run = headless(
+        &dir,
+        &[
+            "--catalog",
+            &text(&database),
+            "--updates",
+            "http://127.0.0.1:1",
+            "--library-root",
+            &format!("drill/films={}", text(&volume)),
+            "--script",
+            "0.5:enter",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "2.0",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    drawn(&frames.join("002.00.png"), &run);
+}
+
 #[test]
 fn the_scripted_quit_key_ends_the_run() {
     let dir = workspace("quit");
@@ -241,6 +305,40 @@ fn the_scripted_quit_key_ends_the_run() {
 
     let measured = measurements(&stats, &run);
     assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
+}
+
+#[test]
+fn a_descent_draws_the_wall() {
+    let dir = workspace("wall");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.5:enter,0.8:right,1.1:down",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "1.6",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+
+    let frame = frames.join("001.60.png");
+    assert_eq!(
+        image::image_dimensions(&frame).ok(),
+        Some((1920, 1080)),
+        "{}\n{}",
+        frame.display(),
+        run.log
+    );
+    drawn(&frame, &run);
 }
 
 #[test]

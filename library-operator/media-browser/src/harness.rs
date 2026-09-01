@@ -53,8 +53,9 @@ pub trait Screen {
         Color::BLACK
     }
 
-    /// One key press, named the way the script names it: a single letter, or
-    /// `up`, `down`, `left`, `right`.
+    /// One key press, named the way the script names it: a single
+    /// letter, or one of the names `key_name` gives the arrows,
+    /// `enter`, `escape`, and `backspace`.
     fn key(&mut self, name: &str);
 
     /// Fold in what the screen's own sources delivered since the last call,
@@ -115,8 +116,7 @@ pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), S
     // The screen's own sources wake the loop through this proxy, so a
     // delivery folds the moment it lands. The event it sends carries
     // nothing: the wake is the message, and `about_to_wait` pumps on it.
-    // The browser has no source of its own yet; the bus that will feed it
-    // takes this handle.
+    // The browser hands it to its catalog source and its poster store.
     let proxy = event_loop.create_proxy();
     screen.wake_by(Arc::new(move || {
         let _ = proxy.send_event(());
@@ -210,6 +210,9 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             stats: stats_path,
             quit_after,
             size,
+            // The binary reads the catalog flags before the run, so
+            // the harness carries them and uses none of them.
+            ..
         } = std::mem::take(options);
 
         let graphics = graphics::open(event_loop, size);
@@ -334,8 +337,9 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
     }
 }
 
-/// The script's name for a key. A letter or a digit is itself, and the arrows
-/// carry the names a scripted timeline uses.
+/// The script's name for a key. A letter or a digit is itself, and
+/// the arrows, enter, escape, and backspace carry the names a scripted
+/// timeline uses.
 pub fn key_name(key: &Key) -> Option<String> {
     match key {
         Key::Character(text) => Some(text.to_lowercase()),
@@ -343,6 +347,9 @@ pub fn key_name(key: &Key) -> Option<String> {
         Key::Named(NamedKey::ArrowDown) => Some("down".into()),
         Key::Named(NamedKey::ArrowLeft) => Some("left".into()),
         Key::Named(NamedKey::ArrowRight) => Some("right".into()),
+        Key::Named(NamedKey::Enter) => Some("enter".into()),
+        Key::Named(NamedKey::Escape) => Some("escape".into()),
+        Key::Named(NamedKey::Backspace) => Some("backspace".into()),
         _ => None,
     }
 }
@@ -365,6 +372,22 @@ mod tests {
         assert_eq!(
             key_name(&Key::Named(NamedKey::ArrowLeft)),
             Some("left".to_string())
+        );
+    }
+
+    #[test]
+    fn the_navigation_keys_carry_their_script_names() {
+        assert_eq!(
+            key_name(&Key::Named(NamedKey::Enter)),
+            Some("enter".to_string())
+        );
+        assert_eq!(
+            key_name(&Key::Named(NamedKey::Escape)),
+            Some("escape".to_string())
+        );
+        assert_eq!(
+            key_name(&Key::Named(NamedKey::Backspace)),
+            Some("backspace".to_string())
         );
     }
 
