@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -85,10 +86,16 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 // carries it forward so the status write later in this pass states
 // the version the server now holds.
 func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
-	if library.Metadata.holds(libraryFinalizer) {
+	if library.Metadata.holds(libraryFinalizer) && !library.Metadata.holds(formerLibraryFinalizer) {
 		return nil
 	}
-	finalizers := library.Metadata.with(libraryFinalizer)
+	// The former name goes in the same patch that puts the current
+	// one on, so a Library from the release that named it swaps in
+	// one write.
+	finalizers := library.Metadata.without(formerLibraryFinalizer)
+	if !slices.Contains(finalizers, libraryFinalizer) {
+		finalizers = append(finalizers, libraryFinalizer)
+	}
 	version, err := PatchLibraryFinalizers(ctx, o.client, library.Metadata.Namespace,
 		library.Metadata.Name, library.Metadata.ResourceVersion, finalizers)
 	if errors.Is(err, ErrConflict) {

@@ -5,6 +5,7 @@ package main
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,43 @@ func TestReconcileHoldsALibraryAgainstDeletion(t *testing.T) {
 	}
 	if got := cluster.countRequests(http.MethodPatch, "libraries"); got != 1 {
 		t.Errorf("patches = %d, want one", got)
+	}
+}
+
+// a Library that adopted the finalizer under its former name swaps to
+// the current one in a single patch, so a Library held by release
+// 2026.08.31-004 still deletes under this one.
+func TestReconcileSwapsTheFormerFinalizer(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
+
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
+		t.Fatal(err)
+	}
+
+	held := cluster.heldLibrary("movies")
+	if !slices.Equal(held.Metadata.Finalizers, []string{libraryFinalizer}) {
+		t.Errorf("finalizers = %v, want only %s", held.Metadata.Finalizers, libraryFinalizer)
+	}
+	if got := cluster.countRequests(http.MethodPatch, "libraries"); got != 1 {
+		t.Errorf("patches = %d, want one", got)
+	}
+}
+
+// a deleting Library that still holds only the former name departs and
+// releases the same way, so no Library sticks on the retired name.
+func TestDepartReleasesTheFormerFinalizer(t *testing.T) {
+	cluster := newFakeCluster()
+	library := departingMovies(cluster)
+	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
+
+	if err := testOperator(t, cluster).depart(t.Context(), library, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldLibrary("movies") != nil {
+		t.Error("the Library still stands, so the former finalizer was not released")
 	}
 }
 

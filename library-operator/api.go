@@ -25,7 +25,13 @@ const (
 // the library's rows out of every surviving agent's catalog. The
 // name is in this operator's own group, so the finalizer says which
 // controller answers for it.
-const libraryFinalizer = "library.liken.sh/sweep"
+const libraryFinalizer = "library.liken.sh/cleanup-library"
+
+// Release 2026.08.31-004 named the finalizer sweep. The operator
+// still reads that name so a Library which adopted it under that
+// release swaps to the current name on a pass, and deletes instead
+// of sticking on a finalizer nothing releases.
+const formerLibraryFinalizer = "library.liken.sh/sweep"
 
 // ObjectMeta carries what this operator reads or writes: name and
 // namespace for the URL, resourceVersion for the conditional write,
@@ -75,10 +81,10 @@ func (m ObjectMeta) with(finalizer string) []string {
 	return append(slices.Clone(m.Finalizers), finalizer)
 }
 
-func (m ObjectMeta) without(finalizer string) []string {
+func (m ObjectMeta) without(finalizers ...string) []string {
 	kept := []string{}
 	for _, held := range m.Finalizers {
-		if held != finalizer {
+		if !slices.Contains(finalizers, held) {
 			kept = append(kept, held)
 		}
 	}

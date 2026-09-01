@@ -43,7 +43,7 @@ type departure struct {
 // not hold this operator's finalizer is the API server's to remove,
 // and the pass leaves it alone.
 func (o *operator) depart(ctx context.Context, library *Library, survivors []string) error {
-	if !library.Metadata.holds(libraryFinalizer) {
+	if !library.Metadata.holds(libraryFinalizer) && !library.Metadata.holds(formerLibraryFinalizer) {
 		return nil
 	}
 
@@ -210,7 +210,8 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library) error {
 	o.clearLibraryTopics(namespace, name)
 
 	_, err := PatchLibraryFinalizers(ctx, o.client, namespace, name,
-		library.Metadata.ResourceVersion, library.Metadata.without(libraryFinalizer))
+		library.Metadata.ResourceVersion,
+		library.Metadata.without(libraryFinalizer, formerLibraryFinalizer))
 	if errors.Is(err, ErrNotFound) {
 		// An object that is already gone is the state this release
 		// was for.
