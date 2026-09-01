@@ -31,6 +31,13 @@ fn workspace(name: &str) -> PathBuf {
 
 // Run the media browser under cage with these flags and wait for it to end.
 fn headless(dir: &Path, flags: &[&str]) -> Run {
+    headless_with(dir, &[], flags)
+}
+
+// The same run with variables set on the client alone. The app-id and the
+// window grace arrive that way in a pod, so a test that reads them states
+// them here and not on the command line.
+fn headless_with(dir: &Path, environment: &[(&str, &str)], flags: &[&str]) -> Run {
     let log_path = dir.join("log");
     let exit_path = dir.join("exit");
     let log_file = std::fs::File::create(&log_path).expect("create the log");
@@ -56,6 +63,9 @@ fn headless(dir: &Path, flags: &[&str]) -> Run {
         quoted(&text(&ready_path)),
         CAP.as_secs() * 20
     );
+    for (name, value) in environment {
+        line.push_str(&format!("{name}={} ", quoted(value)));
+    }
     line.push_str(&quoted(BINARY));
     for flag in flags {
         line.push(' ');
@@ -305,6 +315,38 @@ fn the_scripted_quit_key_ends_the_run() {
 
     let measured = measurements(&stats, &run);
     assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
+}
+
+// A run whose claim named an app-id asks the compositor for a window
+// under that name, and the armed watchdog stops when the window arrives:
+// the run ends on its own key at 0, not at the watchdog's 7.
+#[test]
+fn a_claimed_screen_names_the_window_and_stops_the_watchdog() {
+    let dir = workspace("app-id");
+
+    let run = headless_with(
+        &dir,
+        &[
+            ("DISPLAY_APP_ID", "media-den-tv"),
+            ("WINDOW_GRACE_SECONDS", "15"),
+        ],
+        &[
+            "--script",
+            "0.5:q",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    assert!(
+        run.seconds < 20.0,
+        "the q at 0.5 s ended the run: {} s\n{}",
+        run.seconds,
+        run.log
+    );
 }
 
 #[test]

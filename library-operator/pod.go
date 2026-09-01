@@ -29,11 +29,17 @@ const (
 	catalogVolumeName = "catalog"
 )
 
-// catalogStatePath is where the catalog agent writes its database, its
+// CatalogStatePath is where the catalog agent writes its database, its
 // write-ahead log, and its admin socket. The image's own configuration
 // names this one directory, so the durable catalog claim mounted here is
 // every writable path the agent needs.
 const catalogStatePath = "/var/lib/corrosion"
+
+// The database file the agent writes under that directory, from
+// corrosion/config.toml. The media browser reads the catalog straight from
+// this file, so the name is stated here and in the image's configuration and
+// nowhere else.
+const catalogStateFile = "state.db"
 
 // The two variables the catalog agent reads. Corrosion takes an
 // environment variable over the matching setting in its configuration
@@ -59,13 +65,13 @@ const (
 	gossipAddress         = "$(" + podIPVariable + "):8787"
 )
 
-// catalogBinary is the Corrosion binary the image's entrypoint
+// CatalogBinary is the Corrosion binary the image's entrypoint
 // runs, from corrosion/Dockerfile. The kubelet's probes run it with the
 // query subcommand, which reaches the agent's loopback API from inside
 // the container.
 const catalogBinary = "/corrosion"
 
-// scannerGracePeriod is how long the kubelet waits between the SIGTERM
+// ScannerGracePeriod is how long the kubelet waits between the SIGTERM
 // and the kill. A busy catalog agent flushes its database on the way
 // out, so the pod asks for a minute rather than the default 30
 // seconds.
@@ -91,14 +97,14 @@ const (
 	catalogMemoryLimit   = "512Mi"
 )
 
-// scannerPodName is the pod one Library becomes. The name is derived
+// ScannerPodName is the pod one Library becomes. The name is derived
 // rather than generated, so every pass names the same pod and the
 // operator needs no record of what it created.
 func scannerPodName(library string) string {
 	return library + "-scanner"
 }
 
-// buildScannerPod writes the pod one Library becomes. It is a function
+// BuildScannerPod writes the pod one Library becomes. It is a function
 // of the Library and the operator's own settings alone, so two passes
 // over an unchanged Library build the same pod, which is what makes
 // the template hash mean anything.
@@ -159,7 +165,7 @@ func buildScannerPod(library *Library, scannerImage, corrosionImage, busAddress,
 	}
 }
 
-// scannerLabels is the label pair that names one Library's scanner pod. The
+// ScannerLabels is the label pair that names one Library's scanner pod. The
 // pod carries them, the webhook Service selects on them, and the catalog
 // claim is marked with them, so all three read one function and no two of
 // them can drift apart.
@@ -170,7 +176,7 @@ func scannerLabels(library string) map[string]string {
 	}
 }
 
-// libraryOwner ties the pod's life to the Library's. Controller is
+// LibraryOwner ties the pod's life to the Library's. Controller is
 // true because exactly one thing manages this pod, and the UID is what
 // the garbage collector matches: a Library deleted and recreated under
 // the same name is a different owner, and the old pod goes.
@@ -184,7 +190,7 @@ func libraryOwner(library *Library) OwnerReference {
 	}
 }
 
-// scannerSidecar builds the container that walks the volume. It runs
+// ScannerSidecar builds the container that walks the volume. It runs
 // this operator's own image in its scan role, unless the kind's
 // settings block names an image of its own, which is how a person
 // supplies a scanner the project does not ship.
@@ -231,7 +237,7 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 	}
 }
 
-// catalogSidecar builds the Corrosion agent. The image carries the
+// CatalogSidecar builds the Corrosion agent. The image carries the
 // agent's configuration and runs it as its default command, so the pod
 // states only what the image cannot know: the address the agent
 // announces, and the directory it writes.
@@ -278,7 +284,7 @@ func catalogSidecar(image string) Container {
 	}
 }
 
-// catalogProbe builds a probe that runs the catalog agent's query
+// CatalogProbe builds a probe that runs the catalog agent's query
 // command inside the container on the given schedule. The query reaches
 // the agent's loopback API and exits zero only when it answers.
 func catalogProbe(period, failureThreshold int) *Probe {
@@ -289,7 +295,7 @@ func catalogProbe(period, failureThreshold int) *Probe {
 	}
 }
 
-// unprivileged is the security context both containers carry. One
+// Unprivileged is the security context both containers carry. One
 // reads a mounted volume and the other writes a database on a
 // loopback socket, so neither needs a capability, and neither may
 // gain one.

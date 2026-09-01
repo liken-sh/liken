@@ -122,7 +122,7 @@ func TestStandWebhookServiceWritesOnDivergenceAlone(t *testing.T) {
 	}
 }
 
-// clusterIP and clusterIPs belong to the API server, and both are immutable,
+// ClusterIP and clusterIPs belong to the API server, and both are immutable,
 // so an update writes back the address the read returned.
 func TestStandWebhookServiceKeepsTheAddressTheAPIServerAssigned(t *testing.T) {
 	cluster := newFakeCluster()
@@ -197,7 +197,7 @@ func TestStandWebhookServiceReportsAFailedUpdate(t *testing.T) {
 			Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"},
 		})
 	}))
-	operator := newOperator(client, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+	operator := newOperator(client, testScannerImage, testCorrosionImage, testBrowserImage, testBusAddress, defaultTopicBase)
 
 	err := operator.standWebhookService(t.Context(), studioMovies())
 

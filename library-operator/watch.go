@@ -24,12 +24,12 @@ func watchContext() context.Context {
 	return context.Background()
 }
 
-// watchRetryPause is how long a watcher waits before it re-lists after
+// WatchRetryPause is how long a watcher waits before it re-lists after
 // a dropped stream, and a variable so a test drives a reconnect in
 // milliseconds.
 var watchRetryPause = 2 * time.Second
 
-// watchLibraries resumes each stream from a resourceVersion, so no
+// WatchLibraries resumes each stream from a resourceVersion, so no
 // change is missed between reconnects. A 410 Gone and a routine stream
 // end recover the same way: list the collection, wake the loop, and
 // watch again from the list's own version.
@@ -65,7 +65,7 @@ func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
-// watchCatalogs wakes the loop on every Catalog change, so a Library
+// WatchCatalogs wakes the loop on every Catalog change, so a Library
 // waiting on its namespace's Catalog proceeds on the next pass, and a
 // second Catalog is marked Blocked without a backstop tick's delay. The
 // recovery is watchLibraries's: a dropped stream or a 410 Gone lists the
@@ -92,7 +92,36 @@ func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
-// watchPods wakes the loop on every change to a scanner pod, and the
+// WatchPlayers wakes the loop on every Player change, so a Player that
+// names this operator as its idle controller gets a screen pod without a
+// backstop tick's delay, and one that names another controller loses its
+// screen pod as fast. The recovery is watchLibraries's: a dropped stream or a
+// 410 Gone lists the collection, wakes the loop, and resumes from the list's
+// version. A list that fails leaves the resume point where it was, which is
+// what a cluster with no media-operator answers on every turn.
+func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := playersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListPlayers(watchContext(), c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing players to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
+// WatchPods wakes the loop on every change to a scanner pod, and the
 // label selector keeps the stream to this operator's own pods. Every
 // event earns a wake here, because a Library is Ready only while its
 // pod runs with every container ready: the update that turns a
@@ -124,7 +153,7 @@ func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
-// readWatchStream reads one connection's worth of events. The returned
+// ReadWatchStream reads one connection's worth of events. The returned
 // version is where the next watch resumes.
 func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- struct{}) string {
 	decoder := json.NewDecoder(resp.Body)
@@ -156,7 +185,7 @@ func readWatchStream(resp *http.Response, resourceVersion string, wake chan<- st
 	}
 }
 
-// poke never blocks, and the wake channel buffers exactly one. A wake
+// Poke never blocks, and the wake channel buffers exactly one. A wake
 // already queued says everything a second one would say, because the
 // pass that answers it reads the whole collection.
 func poke(wake chan<- struct{}) {

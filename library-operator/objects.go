@@ -178,13 +178,25 @@ type PodSpec struct {
 	// default is true, and only an explicit false keeps the namespace's
 	// default ServiceAccount token out of the pod.
 	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
-	// initContainers holds the native sidecar. A container here
+	// InitContainers holds the native sidecar. A container here
 	// with restartPolicy Always starts before the containers below and
 	// keeps running beside them, so the kubelet brings the catalog agent
 	// up and passes its startupProbe before it starts the scanner.
 	InitContainers []Container `json:"initContainers,omitempty"`
 	Containers     []Container `json:"containers"`
 	Volumes        []Volume    `json:"volumes,omitempty"`
+	// The claims the pod holds, under the names its containers ask for
+	// them by. A screen pod names the display claim media-operator stood for
+	// its Player, and no other pod this operator builds holds one.
+	ResourceClaims []PodResourceClaim `json:"resourceClaims,omitempty"`
+}
+
+// One claim the pod holds. Name is the pod-local name a container's
+// resources.claims entry refers to, and ResourceClaimName is the
+// ResourceClaim in the pod's namespace it stands for.
+type PodResourceClaim struct {
+	Name              string `json:"name"`
+	ResourceClaimName string `json:"resourceClaimName,omitempty"`
 }
 
 // Command replaces the image's entrypoint, which is how one image runs
@@ -249,6 +261,18 @@ type ExecAction struct {
 type ResourceRequirements struct {
 	Requests map[string]string `json:"requests,omitempty"`
 	Limits   map[string]string `json:"limits,omitempty"`
+	// The requests of the pod's claims this container takes. A claim
+	// can hold several devices, and a container receives only the requests it
+	// names here.
+	Claims []ResourceClaim `json:"claims,omitempty"`
+}
+
+// One request of one claim the container takes. Name is the pod-local
+// claim name from the pod spec, and Request is the name of a request inside
+// that claim.
+type ResourceClaim struct {
+	Name    string `json:"name"`
+	Request string `json:"request,omitempty"`
 }
 
 // A scanner reads a volume and writes to a socket on its own pod, so
@@ -294,10 +318,21 @@ type VolumeMount struct {
 
 // A scanner pod carries two volumes: the library's claim, mounted
 // read-only, and the catalog agent's durable claim.
+//
+// a screen pod carries one claim per Library of its namespace, all
+// read-only, and an emptyDir for its catalog agent. That agent holds a copy of
+// the namespace's catalog and rebuilds it from its peers on every start, so
+// nothing on a screen has to survive the pod.
 type Volume struct {
 	Name                  string                             `json:"name"`
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
+	EmptyDir              *EmptyDirVolumeSource              `json:"emptyDir,omitempty"`
 }
+
+// An emptyDir the kubelet creates with the pod and removes with it. The
+// operator states no size and no medium, so the volume is on the node's own
+// disk and the kubelet's ephemeral storage limits hold it.
+type EmptyDirVolumeSource struct{}
 
 // ReadOnly here is the mount the kubelet makes, so a scanner cannot
 // write to the media volume even if its own mount said otherwise.
@@ -338,7 +373,6 @@ type PodCondition struct {
 }
 
 // The one pod condition this operator reads, and the verdict that
-// says the scheduler has not placed the pod.
 const (
 	podScheduled     = "PodScheduled"
 	conditionIsFalse = "False"

@@ -27,19 +27,23 @@ func TestOperateRequiresItsEnvironment(t *testing.T) {
 		unset   string
 		scanner string
 		catalog string
+		browser string
 		bus     string
 	}{
 		{name: "no scanner image", unset: scannerImageVariable,
-			catalog: testCorrosionImage, bus: testBusAddress},
+			catalog: testCorrosionImage, browser: testBrowserImage, bus: testBusAddress},
 		{name: "no catalog image", unset: corrosionImageVariable,
-			scanner: testScannerImage, bus: testBusAddress},
+			scanner: testScannerImage, browser: testBrowserImage, bus: testBusAddress},
+		{name: "no media browser image", unset: browserImageVariable,
+			scanner: testScannerImage, catalog: testCorrosionImage, bus: testBusAddress},
 		{name: "no broker", unset: busAddressVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage},
+			scanner: testScannerImage, catalog: testCorrosionImage, browser: testBrowserImage},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Setenv(scannerImageVariable, one.scanner)
 			t.Setenv(corrosionImageVariable, one.catalog)
+			t.Setenv(browserImageVariable, one.browser)
 			t.Setenv(busAddressVariable, one.bus)
 
 			err := operate()
@@ -54,6 +58,7 @@ func TestOperateRequiresItsEnvironment(t *testing.T) {
 func TestOperateRefusesOutsideACluster(t *testing.T) {
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
+	t.Setenv(browserImageVariable, testBrowserImage)
 	t.Setenv(busAddressVariable, testBusAddress)
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
@@ -65,7 +70,7 @@ func TestOperateRefusesOutsideACluster(t *testing.T) {
 	}
 }
 
-// testClusterEnvironment builds the pod's whole environment: the
+// TestClusterEnvironment builds the pod's whole environment: the
 // images, the broker, the two address variables, a mounted CA and
 // token, and an API server that answers as Kubernetes does. The
 // returned channel closes when that server is reached.
@@ -91,6 +96,7 @@ func testClusterEnvironment(t *testing.T, cluster *fakeCluster) chan struct{} {
 	t.Setenv("KUBERNETES_SERVICE_PORT", port)
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
+	t.Setenv(browserImageVariable, testBrowserImage)
 	// Port 1 answers nothing, so the bus reconnects for the length of
 	// the test and no pass waits on it.
 	t.Setenv(busAddressVariable, "127.0.0.1:1")
@@ -204,7 +210,7 @@ func TestPassReconcilesEveryLibraryAndForgetsTheRest(t *testing.T) {
 	}
 }
 
-// the desk holds a report only because a retained message stands on
+// The desk holds a report only because a retained message stands on
 // the bus, so a pass that drops one clears the topics behind it and
 // leaves a live library's own topics alone.
 func TestPassClearsTheTopicsOfALibraryTheCollectionDoesNotHold(t *testing.T) {
@@ -230,7 +236,7 @@ func TestPassClearsTheTopicsOfALibraryTheCollectionDoesNotHold(t *testing.T) {
 	}
 }
 
-// litter from a deletion an older release made reaches the desk over
+// Litter from a deletion an older release made reaches the desk over
 // the subscription at startup, and the first pass clears it.
 func TestPassClearsTheLitterOfALibraryItNeverSaw(t *testing.T) {
 	cluster := newFakeCluster()
@@ -253,7 +259,7 @@ func TestPassClearsTheLitterOfALibraryItNeverSaw(t *testing.T) {
 	}
 }
 
-// the operator's own clear comes back on its subscription, and folding
+// The operator's own clear comes back on its subscription, and folding
 // it would put back the desk state the pass just dropped.
 func TestHandleBusMessageIgnoresAClearedAvailability(t *testing.T) {
 	operator := testOperator(t, newFakeCluster())
@@ -349,6 +355,69 @@ func TestPassStandsACatalogInEveryNamespaceThatHoldsALibrary(t *testing.T) {
 	}
 }
 
+// A pass stands the screen of every delegated Player, in the namespace
+// the Player is in, and the screen pod joins that namespace's catalog
+// slice beside the scanner pod.
+func TestPassStandsTheScreenOfADelegatedPlayer(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	scanner := standingPod(t, library, podRunning, true)
+	scanner.Spec.NodeName = "nuc-1"
+	scanner.Status.PodIP = "10.42.1.7"
+	cluster.pods[scanner.Metadata.Name] = scanner
+	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	seedPlayer(cluster, "kitchen-radio", testLibraryNamespace, "media.liken.sh/idle-screen")
+	operator := testOperator(t, cluster)
+
+	operator.pass()
+
+	pod := cluster.heldPod("den-tv-media-browser")
+	if pod == nil {
+		t.Fatal("the pass stood no screen pod")
+	}
+	if cluster.heldPod("kitchen-radio-media-browser") != nil {
+		t.Error("the pass stood a screen for a Player another controller serves")
+	}
+
+	// The pod has no address until the kubelet gives it one, so the
+	// slice carries it from the pass after that.
+	pod.Status.PodIP = "10.42.2.4"
+	pod.Status.InitContainerStatuses = []ContainerStatus{{Name: catalogContainer, Ready: true}}
+	pod.Status.ContainerStatuses = []ContainerStatus{{Name: browserContainer, Ready: true}}
+
+	operator.pass()
+
+	slice := cluster.heldEndpointSlice(testLibraryNamespace, catalogServiceName)
+	if slice == nil {
+		t.Fatal("the pass wrote no catalog slice")
+	}
+	addresses := []string{}
+	for _, endpoint := range slice.Endpoints {
+		addresses = append(addresses, endpoint.Addresses[0])
+	}
+	if len(addresses) != 2 || addresses[0] != "10.42.1.7" || addresses[1] != "10.42.2.4" {
+		t.Errorf("addresses = %v, want the scanner and the screen", addresses)
+	}
+}
+
+// A cluster with no media-operator serves no Players. The pass reports
+// that, stands no screen, and reconciles every Library as it would
+// otherwise.
+func TestPassCarriesOnWithNoPlayersToRead(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	cluster.broken[playersPath] = http.StatusNotFound
+
+	testOperator(t, cluster).pass()
+
+	if cluster.heldPod("movies-scanner") == nil {
+		t.Error("the pass stood no scanner pod")
+	}
+	if cluster.heldLibrary("movies").Status.Conditions == nil {
+		t.Error("the pass wrote no status for the library")
+	}
+}
+
 // A failure to list the pods, to read a Service, or to read a slice is
 // reported and does not stop the pass. Every Library still gets its
 // status.
@@ -358,6 +427,7 @@ func TestPassCarriesOnPastABrokenCatalogObject(t *testing.T) {
 		path string
 	}{
 		{name: "the pods cannot be listed", path: podsAllPath},
+		{name: "the screen pods cannot be listed", path: podsAllPath + "?" + screenPodsQuery},
 		{name: "the Service cannot be read",
 			path: servicesPath(testLibraryNamespace) + "/" + catalogServiceName},
 		{name: "the slice cannot be read",
@@ -455,7 +525,7 @@ func TestHandleBusMessageMarksAScannerOnline(t *testing.T) {
 	}
 }
 
-// the pass sends a deleting Library to the departure and a standing one to
+// The pass sends a deleting Library to the departure and a standing one to
 // the reconcile, in one turn.
 func TestPassDepartsADeletingLibraryAndReconcilesTheRest(t *testing.T) {
 	cluster := newFakeCluster()
@@ -484,7 +554,7 @@ func TestPassDepartsADeletingLibraryAndReconcilesTheRest(t *testing.T) {
 	}
 }
 
-// a cleanup pod's backoff is dropped with the Library it belonged to, so
+// A cleanup pod's backoff is dropped with the Library it belonged to, so
 // the map is as short-lived as the departures.
 func TestPassForgetsTheBackoffOfALibraryThatIsGone(t *testing.T) {
 	cluster := newFakeCluster()

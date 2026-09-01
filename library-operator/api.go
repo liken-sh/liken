@@ -20,6 +20,10 @@ const (
 	podAPIVersion     = "v1"
 )
 
+// The group media-operator serves. This operator reads Players from it
+// and writes none, so the group appears here for the read path alone.
+const playerAPIVersion = "media.liken.sh/v1alpha1"
+
 // The finalizer this operator holds on every Library. It keeps a
 // deleted Library open until the departure in depart.go has swept
 // the library's rows out of every surviving agent's catalog. The
@@ -59,18 +63,18 @@ type ObjectMeta struct {
 	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
 }
 
-// deleting reports that somebody asked for this object's deletion.
+// Deleting reports that somebody asked for this object's deletion.
 // The API server does not remove an object that carries a finalizer;
 // it writes the deletion timestamp instead, and that window is where
 // the departure runs.
 func (m ObjectMeta) deleting() bool { return m.DeletionTimestamp != "" }
 
-// holds reports whether this object carries the named finalizer.
+// Holds reports whether this object carries the named finalizer.
 func (m ObjectMeta) holds(finalizer string) bool {
 	return slices.Contains(m.Finalizers, finalizer)
 }
 
-// with answers the finalizer list with one added, and without
+// With answers the finalizer list with one added, and without
 // answers it with one removed. Both answer a new slice, because the
 // caller's copy is the object as the server has it, and a patch that
 // fails must leave that copy alone.
@@ -156,7 +160,7 @@ const (
 	libraryKindSeries = "series"
 )
 
-// settings is the block that matches the kind, which is the block the
+// Settings is the block that matches the kind, which is the block the
 // scanner receives. Keeping the choice here keeps the Go side and the
 // CRD's rule saying the same thing, so a new kind is one more case
 // here and one more clause there.
@@ -239,6 +243,59 @@ type LibraryVolume struct {
 	Type   string `json:"type,omitempty"`
 	Server string `json:"server,omitempty"`
 	Path   string `json:"path,omitempty"`
+}
+
+// A Player is media-operator's unit of equipment. This operator reads
+// one for its status.idle alone: the block media-operator publishes for the controller it
+// delegated the idle screen to. Nothing here is written back, so the type
+// carries no spec.
+type Player struct {
+	APIVersion string       `json:"apiVersion,omitempty"`
+	Kind       string       `json:"kind,omitempty"`
+	Metadata   ObjectMeta   `json:"metadata"`
+	Status     PlayerStatus `json:"status"`
+}
+
+// The idle block the Player carries, and an empty one for a Player that
+// carries none. The empty block names no controller and no claim, so a Player
+// with no idle status is a Player this operator stands nothing for.
+func (p *Player) idle() PlayerIdleStatus {
+	if p.Status.Idle == nil {
+		return PlayerIdleStatus{}
+	}
+	return *p.Status.Idle
+}
+
+// Whether this operator stands the Player's idle screen. The pass acts
+// on status.idle and never on spec.idle: the spec can inherit its controller
+// from MediaPreferences, and media-operator alone resolves those tiers.
+func (p *Player) delegated() bool {
+	return p.idle().Controller == screenController
+}
+
+// The collection ListPlayers answers. Its resourceVersion is where the
+// player watch begins.
+type PlayerList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Player `json:"items"`
+}
+
+// The half of a Player's status this operator acts on. The idle block
+// is absent on a Player that stands no idle screen.
+type PlayerStatus struct {
+	Idle *PlayerIdleStatus `json:"idle,omitempty"`
+}
+
+// What media-operator publishes for the idle controller it delegated
+// to. Controller names that controller, and this operator acts only on its own
+// name. Claim is the ResourceClaim media-operator stood for the screen, in the
+// Player's namespace, and Requests names the requests in it the browser
+// container states. The requests are media-operator's own list: render is
+// there only for a Player whose display claim holds one.
+type PlayerIdleStatus struct {
+	Controller string   `json:"controller,omitempty"`
+	Claim      string   `json:"claim,omitempty"`
+	Requests   []string `json:"requests,omitempty"`
 }
 
 // The condition types this operator publishes. Bound reports the

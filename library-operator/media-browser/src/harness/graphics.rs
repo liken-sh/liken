@@ -9,6 +9,7 @@ use iced_winit::core::{Font, Pixels};
 use iced_winit::winit;
 
 use winit::event_loop::ActiveEventLoop;
+use winit::platform::wayland::WindowAttributesExtWayland;
 
 /// Everything that exists only after the compositor gives the process a window.
 pub struct Graphics {
@@ -22,21 +23,48 @@ pub struct Graphics {
     pub size: (u32, u32),
 }
 
+/// Ask the compositor for a window. The answer is `None` when it gave
+/// none, and the watchdog reads that as a client with nothing to draw on.
+///
+/// `app_id` is the Wayland app-id the display claim delivered, and the
+/// compositor places the window on the claimed screen by it. An empty id asks
+/// for none, which is a run on a workstation where no claim named one.
+pub fn window(
+    event_loop: &ActiveEventLoop,
+    size: (u32, u32),
+    app_id: &str,
+) -> Option<Arc<winit::window::Window>> {
+    let mut attributes = winit::window::WindowAttributes::default()
+        .with_title("liken media browser")
+        // A kiosk client draws no title bar. winit's Wayland
+        // backend draws one otherwise, and it takes 35 rows off
+        // the surface the compositor gave the window.
+        .with_decorations(false)
+        .with_inner_size(winit::dpi::PhysicalSize::new(size.0, size.1));
+
+    if !app_id.is_empty() {
+        // The general name is the Wayland app-id. The instance name is
+        // the second half of the same protocol field, and the compositor reads
+        // neither of the two for anything this client needs.
+        attributes = attributes.with_name(app_id, "");
+    }
+
+    match event_loop.create_window(attributes) {
+        Ok(window) => Some(Arc::new(window)),
+        Err(error) => {
+            eprintln!("media-browser: the compositor gave no window: {error}");
+            None
+        }
+    }
+}
+
 /// Open the window, pick an adapter, and build the renderer that draws into it.
-pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32)) -> Graphics {
-    let window = Arc::new(
-        event_loop
-            .create_window(
-                winit::window::WindowAttributes::default()
-                    .with_title("liken media browser")
-                    // A kiosk client draws no title bar. winit's Wayland
-                    // backend draws one otherwise, and it takes 35 rows off
-                    // the surface the compositor gave the window.
-                    .with_decorations(false)
-                    .with_inner_size(winit::dpi::PhysicalSize::new(size.0, size.1)),
-            )
-            .expect("create window"),
-    );
+///
+/// a compositor that gives no window answers `None` here, so the run
+/// leaves the watchdog counting and the kubelet reads the exit code the
+/// watchdog states.
+pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Option<Graphics> {
+    let window = window(event_loop, size, app_id)?;
 
     let physical = window.inner_size();
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -76,7 +104,7 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32)) -> Graphics {
         (format, adapter, device, queue)
     });
 
-    // cage takes the next free `wayland-N`, which is not `wayland-1` when
+    // Cage takes the next free `wayland-N`, which is not `wayland-1` when
     // another compositor already holds that name, so the local script reads the
     // name out of this line rather than guessing it.
     println!(
@@ -107,7 +135,7 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32)) -> Graphics {
         Shell::headless(),
     );
 
-    Graphics {
+    Some(Graphics {
         window,
         device,
         surface,
@@ -116,7 +144,7 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32)) -> Graphics {
         backend: format!("{:?}", info.backend),
         adapter: info.name.clone(),
         size: (physical.width.max(1), physical.height.max(1)),
-    }
+    })
 }
 
 /// Point the swapchain at a size. Every resize runs through here.

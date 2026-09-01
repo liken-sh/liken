@@ -10,8 +10,13 @@ use media_browser::sample;
 fn main() {
     match Options::parse(std::env::args().skip(1)) {
         Ok(Invocation::Help) => print!("{HELP}"),
-        Ok(Invocation::Run(options)) => {
-            if let Err(error) = run(options) {
+        Ok(Invocation::Run(mut options)) => {
+            // The app-id and the window grace are not flags. The
+            // display claim delivers one into the container and the operator
+            // sets the other, so the binary reads both here, after the flags
+            // and before the window.
+            options.from_environment();
+            if let Err(error) = run(*options) {
                 eprintln!("media-browser: {error}");
                 std::process::exit(1);
             }

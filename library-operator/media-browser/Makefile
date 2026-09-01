@@ -10,7 +10,7 @@
 # The floor on line coverage, as a percentage. CI enforces the same
 # number through this file. Raise it when the tests earn it; never
 # lower it.
-COVERAGE_FLOOR := 90
+COVERAGE_FLOOR := 95
 
 .PHONY: test
 test:

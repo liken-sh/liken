@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// binding is what a Library's storage resolved to: the volume behind
+// Binding is what a Library's storage resolved to: the volume behind
 // the claim, and the reason and message the Bound condition carries. A
 // binding with no volume is a Library that cannot be scanned, and the
 // reason names which of the three ways it failed.
@@ -29,7 +29,7 @@ type binding struct {
 	message string
 }
 
-// reconcile brings one Library into line and reports on it. It reads
+// Reconcile brings one Library into line and reports on it. It reads
 // the whole state every pass rather than acting on what an event
 // carried, so the same facts reach the same status whatever order the
 // events arrived in.
@@ -63,7 +63,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 			return err
 		}
 		desired := buildScannerPod(library, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
-		pod, err = o.standScannerPod(ctx, desired)
+		pod, err = o.standPod(ctx, desired)
 		if err != nil {
 			return err
 		}
@@ -78,7 +78,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		deriveLibraryStatus(library, bound, choice, pod, report, online, time.Now().UTC()))
 }
 
-// holdLibrary puts the finalizer on a Library that does not carry
+// HoldLibrary puts the finalizer on a Library that does not carry
 // it, so a later delete waits for the departure in depart.go instead
 // of taking the rows' only sweeper with the object. A Library from
 // before this operator held finalizers adopts one here on its next
@@ -111,7 +111,7 @@ func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
 	return nil
 }
 
-// stopScannerPod removes the pod of a Library that no longer stands one.
+// StopScannerPod removes the pod of a Library that no longer stands one.
 // The pass is level-triggered, so a Library whose claim or Catalog went
 // away loses its scanner on the next pass, rather than keeping a pod that
 // walks a volume the Library no longer reports. On every later pass the
@@ -121,7 +121,7 @@ func (o *operator) stopScannerPod(ctx context.Context, library *Library) error {
 		scannerPodName(library.Metadata.Name))
 }
 
-// scannerStands reports the one condition a Library's scanner needs: its
+// ScannerStands reports the one condition a Library's scanner needs: its
 // storage is bound, and its namespace holds exactly one Catalog. The pass
 // reads it to create the objects, and the status derivation reads it to
 // report the webhook address, so the two cannot answer differently.
@@ -129,7 +129,7 @@ func scannerStands(bound binding, choice catalogChoice) bool {
 	return bound.volume != nil && choice.catalog != nil
 }
 
-// resolveStorage reads the claim a Library names and the volume behind
+// ResolveStorage reads the claim a Library names and the volume behind
 // it. Every answer that is the cluster's own state is a binding rather
 // than a failure: a claim a person has not created, a claim still
 // waiting on a volume, and a volume that has gone are all states to
@@ -179,7 +179,7 @@ func resolveStorage(ctx context.Context, c *Client, library *Library) (binding, 
 	}, nil
 }
 
-// claimState names what a claim is doing, for the message the Bound
+// ClaimState names what a claim is doing, for the message the Bound
 // condition carries. Pending is a claim no volume has answered, and
 // Lost is a claim whose volume has gone.
 func claimState(claim *PersistentVolumeClaim) string {
@@ -189,7 +189,7 @@ func claimState(claim *PersistentVolumeClaim) string {
 	return claim.Status.Phase
 }
 
-// libraryVolume reports what serves the storage. The type is the name
+// LibraryVolume reports what serves the storage. The type is the name
 // of the volume's own source key, so a cluster that serves its movies
 // through a driver this operator knows nothing about still reports
 // which one. The NFS pair is filled for an NFS volume alone, because
@@ -203,11 +203,12 @@ func libraryVolume(volume *PersistentVolume) *LibraryVolume {
 	return reported
 }
 
-// standScannerPod brings the cluster into line with the pod this pass
-// built, and returns the pod that stands after it: the live pod when
-// it matches the template, the created pod when there was none, and
-// nil when this pass deleted a stale one or another writer created it
-// first.
+// StandPod brings the cluster into line with the pod a pass built, and
+// returns the pod that stands after it: the live pod when it matches the
+// template, the created pod when there was none, and nil when this pass
+// deleted a stale one or another writer created it first. Every pod this
+// operator stands and rebuilds goes through here: a Library's scanner pod and
+// a Player's screen pod both.
 //
 // A Deployment finds a stale pod by stamping a hash of the template it
 // built and comparing that hash, never by comparing live specs,
@@ -215,7 +216,7 @@ func libraryVolume(volume *PersistentVolume) *LibraryVolume {
 // live comparison would either roll on every pass or grow a
 // field-by-field allowlist. This operator does the same with one
 // annotation on the pod it creates.
-func (o *operator) standScannerPod(ctx context.Context, desired *Pod) (*Pod, error) {
+func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
 	if err := stampTemplateHash(&desired.Metadata, desired.Spec); err != nil {
 		return nil, err
 	}
@@ -243,10 +244,11 @@ func (o *operator) standScannerPod(ctx context.Context, desired *Pod) (*Pod, err
 	// it completes, so one divergence causes one delete and not one
 	// delete per pass.
 	//
-	// This wait is also the ReadWriteOnce handoff. The catalog claim admits
-	// one pod at a time, so the pass creates the replacement only after the
-	// old pod releases the claim, which is the create on the not-found branch
-	// above.
+	// this wait is also the ReadWriteOnce handoff for a scanner pod,
+	// whose catalog claim admits one pod at a time: the pass creates the
+	// replacement only after the old pod releases the claim, which is the
+	// create on the not-found branch above. A screen pod's catalog is an
+	// emptyDir and needs no handoff.
 	if live.Metadata.DeletionTimestamp != "" {
 		return live, nil
 	}
@@ -263,7 +265,7 @@ func (o *operator) standScannerPod(ctx context.Context, desired *Pod) (*Pod, err
 	return live, nil
 }
 
-// templateHash reduces one built spec to the string the annotation
+// TemplateHash reduces one built spec to the string the annotation
 // carries. fnv-1a is enough, because the whole job is to tell one
 // pass's output from another's. Nothing signs the value and nothing
 // outside this operator reads it, so the hash needs no collision
@@ -284,7 +286,7 @@ func templateHash(spec any) (string, error) {
 	return strconv.FormatUint(sum.Sum64(), 16), nil
 }
 
-// stampTemplateHash writes the hash of one built spec onto the object
+// StampTemplateHash writes the hash of one built spec onto the object
 // that carries it. The caller hands in the metadata and the spec of
 // the same object, and the stamp is what a later pass compares
 // against.
@@ -300,7 +302,7 @@ func stampTemplateHash(metadata *ObjectMeta, spec any) error {
 	return nil
 }
 
-// sameTemplate reports whether a live pod carries the hash the pass
+// SameTemplate reports whether a live pod carries the hash the pass
 // just stamped on the pod it built. An absent annotation reads as an
 // empty string, which never equals a hash, so a pod created by
 // anything but this operator counts as diverged.

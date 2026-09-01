@@ -3,6 +3,19 @@
 // for both.
 
 use std::path::PathBuf;
+use std::time::Duration;
+
+/// The Wayland app-id the surface must ask for. The display claim
+/// delivers it into the container at run time, and the compositor places the
+/// window on the claimed output by it. An empty value asks for no app-id,
+/// which is a run on a workstation where no claim named one.
+pub const APP_ID: &str = "DISPLAY_APP_ID";
+
+/// The seconds the browser waits for a window before it exits. An unset
+/// or non-positive value leaves the watchdog off, so a run outside a pod never
+/// exits for a missing window. The operator sets it on the browser container of
+/// every screen pod.
+pub const WINDOW_GRACE: &str = "WINDOW_GRACE_SECONDS";
 
 /// The help the binary prints for `--help`.
 pub const HELP: &str = "\
@@ -27,8 +40,10 @@ workstation with no flags at all. Quit with q.
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
 pub enum Invocation {
+    // The options are boxed because they are much the larger of the two
+    // answers, and every caller of the parse would carry that size.
     /// Open a window with these options.
-    Run(Options),
+    Run(Box<Options>),
     /// Print [`HELP`] and stop.
     Help,
 }
@@ -55,6 +70,12 @@ pub struct Options {
     pub quit_after: Option<f64>,
     /// The window size to ask the compositor for.
     pub size: (u32, u32),
+    /// The Wayland app-id every window this run maps asks for, from
+    /// [`APP_ID`]. Nothing on the command line sets it.
+    pub app_id: String,
+    /// How long the run waits for a window before it exits, from
+    /// [`WINDOW_GRACE`]. Nothing leaves the watchdog off.
+    pub window_grace: Option<Duration>,
 }
 
 impl Default for Options {
@@ -69,6 +90,8 @@ impl Default for Options {
             stats: None,
             quit_after: None,
             size: (1920, 1080),
+            app_id: String::new(),
+            window_grace: None,
         }
     }
 }
@@ -120,8 +143,35 @@ impl Options {
             }
         }
 
-        Ok(Invocation::Run(options))
+        Ok(Invocation::Run(Box::new(options)))
     }
+}
+
+impl Options {
+    /// Read what the container was told. A pod cannot discover the
+    /// app-id its display claim delivered or the grace the operator set, so
+    /// both arrive in the environment and neither is a flag.
+    pub fn from_environment(&mut self) {
+        self.read_environment(|name| std::env::var(name).ok());
+    }
+
+    /// The same read against any source of values. The environment is
+    /// global to a process, so a test states the variables here instead of
+    /// setting them and racing every other test in the binary.
+    pub fn read_environment(&mut self, value: impl Fn(&str) -> Option<String>) {
+        self.app_id = value(APP_ID).unwrap_or_default();
+        self.window_grace = grace(&value(WINDOW_GRACE).unwrap_or_default());
+    }
+}
+
+/// The window grace, in seconds. Anything but a positive number leaves
+/// the watchdog off.
+fn grace(text: &str) -> Option<Duration> {
+    let seconds: f64 = text.trim().parse().ok()?;
+    if seconds <= 0.0 || !seconds.is_finite() {
+        return None;
+    }
+    Some(Duration::from_secs_f64(seconds))
 }
 
 /// One library root, written `NAME=PATH`, where the name is the
@@ -206,7 +256,7 @@ mod tests {
     fn no_flags_is_a_run_with_the_defaults() {
         assert_eq!(
             Options::parse(Vec::new()),
-            Ok(Invocation::Run(Options::default()))
+            Ok(Invocation::Run(Box::default()))
         );
     }
 
@@ -312,6 +362,50 @@ mod tests {
         );
         assert!(parse_root("=/films").is_err());
         assert!(parse_root("local/movies=").is_err());
+    }
+
+    fn environment(pairs: &[(&str, &str)]) -> Options {
+        let pairs: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        let mut options = Options::default();
+        options.read_environment(|name| {
+            pairs
+                .iter()
+                .find(|(set, _)| set == name)
+                .map(|(_, value)| value.clone())
+        });
+        options
+    }
+
+    #[test]
+    fn an_empty_environment_names_no_screen_and_arms_nothing() {
+        let options = environment(&[]);
+        assert_eq!(options.app_id, "");
+        assert_eq!(options.window_grace, None);
+    }
+
+    #[test]
+    fn the_claim_names_the_screen_and_the_operator_arms_the_watchdog() {
+        let options = environment(&[(APP_ID, "media-den-tv"), (WINDOW_GRACE, "15")]);
+        assert_eq!(options.app_id, "media-den-tv");
+        assert_eq!(options.window_grace, Some(Duration::from_secs(15)));
+    }
+
+    #[test]
+    fn a_positive_grace_arms_the_watchdog() {
+        assert_eq!(grace("15"), Some(Duration::from_secs(15)));
+        assert_eq!(grace(" 1.5 "), Some(Duration::from_secs_f64(1.5)));
+    }
+
+    #[test]
+    fn anything_but_a_positive_grace_leaves_it_off() {
+        assert_eq!(grace(""), None);
+        assert_eq!(grace("0"), None);
+        assert_eq!(grace("-5"), None);
+        assert_eq!(grace("soon"), None);
+        assert_eq!(grace("inf"), None);
     }
 
     #[test]

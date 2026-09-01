@@ -49,6 +49,10 @@ spec:
               value: ghcr.io/liken-sh/library-operator:latest
             - name: CORROSION_IMAGE
               value: ghcr.io/liken-sh/library-operator-corrosion:latest
+            # The media browser one screen pod runs, stamped into every
+            # screen pod the same way, so a cluster pins it with the others.
+            - name: BROWSER_IMAGE
+              value: ghcr.io/liken-sh/library-operator-media-browser:latest
           securityContext:
             capabilities:
               drop: ["ALL"]

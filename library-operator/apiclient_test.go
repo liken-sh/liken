@@ -322,6 +322,57 @@ func TestListLibrariesReadsEveryNamespace(t *testing.T) {
 
 // The status goes through its own subresource, so this request can
 // never touch the spec a person declared.
+// A pass reads every Player in the cluster with one request, and it
+// reads the idle block media-operator publishes.
+func TestListPlayersReadsEveryNamespace(t *testing.T) {
+	client, recorded := recordingAPI(t, PlayerList{
+		Metadata: ListMeta{ResourceVersion: "1200"},
+		Items: []Player{{
+			Metadata: ObjectMeta{Name: "den-tv", Namespace: "house"},
+			Status: PlayerStatus{Idle: &PlayerIdleStatus{
+				Controller: screenController,
+				Claim:      "den-tv-idle-devices",
+				Requests:   []string{"draw"},
+			}},
+		}},
+	})
+
+	list, err := ListPlayers(t.Context(), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectRequest(t, recorded, http.MethodGet, "/apis/media.liken.sh/v1alpha1/players")
+	if list.Metadata.ResourceVersion != "1200" {
+		t.Errorf("resourceVersion = %q, want the collection's 1200", list.Metadata.ResourceVersion)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("items = %+v, want the one player the server answered", list.Items)
+	}
+	idle := list.Items[0].idle()
+	if idle.Claim != "den-tv-idle-devices" || len(idle.Requests) != 1 {
+		t.Errorf("idle = %+v, want the claim and the requests", idle)
+	}
+	if !list.Items[0].delegated() {
+		t.Error("the player is not delegated, but it names this operator")
+	}
+}
+
+// A screen pod list is narrowed by the screen pods' own name label, so
+// it never answers with a scanner pod.
+func TestListScreenPodsSelectsTheScreenPodsAlone(t *testing.T) {
+	client, recorded := recordingAPI(t, PodList{Metadata: ListMeta{ResourceVersion: "1200"}})
+
+	if _, err := ListScreenPods(t.Context(), client); err != nil {
+		t.Fatal(err)
+	}
+
+	expectRequest(t, recorded, http.MethodGet, "/api/v1/pods")
+	if got := recorded.query.Get("labelSelector"); got != "app.kubernetes.io/name=library-media-browser" {
+		t.Errorf("labelSelector = %q, want the screen selector", got)
+	}
+}
+
 func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	written := &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house", ResourceVersion: "1200"},
@@ -346,7 +397,7 @@ func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 }
 
-// a merge patch states the one list it edits and carries the
+// A merge patch states the one list it edits and carries the
 // resourceVersion, and the Content-Type header names the patch dialect.
 func TestPatchLibraryFinalizersSendsAConditionalMergePatch(t *testing.T) {
 	var contentType, body, asked string
@@ -381,7 +432,7 @@ func TestPatchLibraryFinalizersSendsAConditionalMergePatch(t *testing.T) {
 	}
 }
 
-// a Library changed since the list answers the conflict the caller carries
+// A Library changed since the list answers the conflict the caller carries
 // on from.
 func TestPatchLibraryFinalizersReportsAConflict(t *testing.T) {
 	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -474,7 +525,9 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 			return err
 		}},
 		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
+		{name: "ListPlayers", call: func(c *Client) error { _, err := ListPlayers(t.Context(), c); return err }},
 		{name: "ListScannerPods", call: func(c *Client) error { _, err := ListScannerPods(t.Context(), c); return err }},
+		{name: "ListScreenPods", call: func(c *Client) error { _, err := ListScreenPods(t.Context(), c); return err }},
 		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(t.Context(), c, "house", "movies-scanner"); return err }},
 		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(t.Context(), c, &Pod{}); return err }},
 		{name: "DeletePod", call: func(c *Client) error { return DeletePod(t.Context(), c, "house", "movies-scanner") }},

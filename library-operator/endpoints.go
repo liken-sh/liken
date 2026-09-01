@@ -4,14 +4,17 @@ package main
 // catalog. That name is in the sidecar image's configuration file,
 // because Corrosion reads no bootstrap list from the environment. The
 // pod's own search path resolves the name to the Service in the pod's
-// namespace, in service.go. That Service names no selector, so this
-// operator writes the slice behind it, over the scanner pods of that
-// namespace and no other. So an agent joins its namespace's cluster
-// and no other.
+// namespace, in service.go.
+//
+// that Service names no selector, so this operator writes the slice
+// behind it, over the scanner pods and the screen pods of that namespace and
+// no others. So an agent joins its namespace's cluster and no other.
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -96,20 +99,22 @@ type EndpointPort struct {
 	Port     int32  `json:"port"`
 }
 
-// buildCatalogEndpoints builds the slice for one namespace. It is a
-// function of the namespace, the owners, and the pods alone, so two
-// passes over the same cluster build the same object. The pass hands
-// in every scanner pod in the cluster, and this reads only the ones in
-// its namespace, which is what keeps one namespace's agents out of
-// another's cluster. A pod with no address is not a peer yet, and a
-// pod with a deletion timestamp is a peer no longer. The endpoints
-// sort by address, so the order the list arrived in never counts as a
-// divergence. The namespace's one Catalog owns the slice, so the garbage
-// collector removes it with that Catalog.
-func buildCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod) *EndpointSlice {
+// BuildCatalogEndpoints builds the slice for one namespace. It is a
+// function of the namespace, the owners, and the pods alone, so two passes
+// over the same cluster build the same object. The pass hands in every scanner
+// pod and every screen pod in the cluster, and this reads only the ones in its
+// namespace, which is what keeps one namespace's agents out of another's
+// cluster. Both kinds are peers: a screen's agent gossips like a scanner's, so
+// a screen is a bootstrap peer for the next screen when no scanner is up. A
+// pod with no address is not a peer yet, and a pod with a deletion timestamp
+// is a peer no longer. The endpoints sort by address, so the order the lists
+// arrived in never counts as a divergence. The namespace's one Catalog owns
+// the slice, so the garbage collector removes it with that Catalog.
+func buildCatalogEndpoints(namespace string, owners []OwnerReference, scanners, screens []Pod) *EndpointSlice {
 	endpoints := []Endpoint{}
-	for index := range pods {
-		pod := &pods[index]
+	peers := slices.Concat(scanners, screens)
+	for index := range peers {
+		pod := &peers[index]
 		if pod.Metadata.Namespace != namespace {
 			continue
 		}
@@ -151,7 +156,7 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod
 	}
 }
 
-// standCatalogEndpoints brings the live slice of one namespace into
+// StandCatalogEndpoints brings the live slice of one namespace into
 // line with the one this pass built. It writes on divergence only: it
 // reads the live slice, compares the owners, the endpoints, and the
 // ports, and writes only when they differ. That is this project's rule
@@ -163,8 +168,8 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, pods []Pod
 // instead of being overwritten. A conflict on the create means another
 // writer got there first, which is success: the next pass reads what
 // that writer wrote.
-func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, owners []OwnerReference, pods []Pod) error {
-	desired := buildCatalogEndpoints(namespace, owners, pods)
+func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, owners []OwnerReference, scanners, screens []Pod) error {
+	desired := buildCatalogEndpoints(namespace, owners, scanners, screens)
 
 	live, err := GetEndpointSlice(ctx, o.client, namespace, catalogServiceName)
 	if errors.Is(err, ErrNotFound) {
@@ -186,7 +191,7 @@ func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, 
 	return err
 }
 
-// sameEndpoints compares only what this operator states: the owners,
+// SameEndpoints compares only what this operator states: the owners,
 // the endpoints, and the ports. It compares the counts first, so an
 // absent list and an empty list read as the same thing. A namespace
 // with no scanner pod leaves an absent list behind, and without this
@@ -209,4 +214,45 @@ func sameEndpoints(live, desired *EndpointSlice) bool {
 		}
 	}
 	return true
+}
+
+// GetEndpointSlice reads the live catalog slice of one namespace, for
+// the owners and endpoints it holds now and for the resourceVersion
+// the write is made conditional on. An absent slice is ErrNotFound,
+// which the pass answers by creating one.
+func GetEndpointSlice(ctx context.Context, c *Client, namespace, name string) (*EndpointSlice, error) {
+	slice := &EndpointSlice{}
+	if err := c.RequestJSON(ctx, http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
+		return nil, err
+	}
+	return slice, nil
+}
+
+func CreateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+	body, err := json.Marshal(slice)
+	if err != nil {
+		return nil, err
+	}
+	created := &EndpointSlice{}
+	path := endpointSlicesPath(slice.Metadata.Namespace)
+	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// UpdateEndpointSlice writes the whole slice back. The resourceVersion
+// in the body makes the write conditional, so a slice that changed
+// underneath answers ErrConflict, and the next pass reads it again.
+func UpdateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
+	body, err := json.Marshal(slice)
+	if err != nil {
+		return nil, err
+	}
+	written := &EndpointSlice{}
+	path := endpointSlicesPath(slice.Metadata.Namespace) + "/" + slice.Metadata.Name
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
 }

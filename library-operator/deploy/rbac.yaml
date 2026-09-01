@@ -19,6 +19,12 @@
 # It also stands one Service per Library, over that Library's scanner
 # pod, which is the address the scanner's webhook answers on.
 #
+# it also reads the Players media-operator publishes, and stands one
+# screen pod for each Player that names it as the idle controller. It writes
+# no Player. A screen pod is deleted for a third reason beyond a stale
+# template and a departure: the Player it stands for named another idle
+# controller, or none.
+#
 # The scanner pods hold no credential of their own. They report over
 # the bus, and the operator writes what they report, so nothing in this
 # file grants a scanner anything.
@@ -59,6 +65,14 @@ rules:
   - apiGroups: [library.liken.sh]
     resources: [catalogs/status]
     verbs: [update]
+  # The Players, across every namespace, read-only. media-operator owns
+  # them and writes them; this operator reads status.idle and writes no Player
+  # at all. It stands a screen pod for a Player whose status.idle.controller
+  # names it, and takes that pod down when the name changes. The watch is the
+  # wake signal, and every pass re-reads with a list.
+  - apiGroups: [media.liken.sh]
+    resources: [players]
+    verbs: [get, list, watch]
   # The media claim each Library names, read by name to learn whether it
   # is bound and which volume it is bound to. The catalog claim each
   # scanner pod mounts, created once per Library and owned by it, so the
@@ -77,6 +91,10 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumes]
     verbs: [get]
+  # The pods rule below also covers the screen pods: one per delegated
+  # Player, created, read back, and deleted on the same terms as a scanner
+  # pod. The delete covers the rebuild of a stale template and the screen of a
+  # Player that named another idle controller.
   # The scanner pods: created once per Library and read back on every
   # pass. The delete verb covers two deletes: the rebuild of a pod whose
   # template hash no longer matches, and the stop of a Library that no

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// scannerPodAt is a scanner pod as the API server answers one: a
+// ScannerPodAt is a scanner pod as the API server answers one: a
 // name, a namespace, a UID, a node, and an address.
 func scannerPodAt(name, namespace, address, node string) Pod {
 	return Pod{
@@ -32,6 +32,38 @@ func scannerPodAt(name, namespace, address, node string) Pod {
 	}
 }
 
+// ScreenPodAt is a screen pod as the API server answers one, with the
+// name label of its own kind.
+func screenPodAt(name, namespace, address, node string) Pod {
+	pod := scannerPodAt(name, namespace, address, node)
+	pod.Metadata.Labels = map[string]string{scannerLabelKey: screenLabelValue}
+	pod.Status.ContainerStatuses = []ContainerStatus{{Name: browserContainer, Ready: true}}
+	return pod
+}
+
+// A screen's catalog agent gossips like a scanner's, so a ready screen
+// pod is a peer in the same slice. That is what makes a screen the
+// bootstrap peer of the next screen when no scanner is up.
+func TestCatalogEndpointsCarryTheScreenPodsBesideTheScanners(t *testing.T) {
+	slice := buildCatalogEndpoints(testLibraryNamespace, nil,
+		[]Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")},
+		[]Pod{
+			screenPodAt("den-tv-media-browser", testLibraryNamespace, "10.42.2.4", "nuc-2"),
+			screenPodAt("studio-tv-media-browser", "studio", "10.42.3.9", "nuc-3"),
+		})
+
+	if len(slice.Endpoints) != 2 {
+		t.Fatalf("endpoints = %+v, want the scanner and the screen of the namespace", slice.Endpoints)
+	}
+	screen := slice.Endpoints[1]
+	if screen.Addresses[0] != "10.42.2.4" || !screen.Conditions.Ready {
+		t.Errorf("endpoint = %+v, want the ready screen pod", screen)
+	}
+	if screen.TargetRef == nil || screen.TargetRef.Name != "den-tv-media-browser" {
+		t.Errorf("targetRef = %+v, want the screen pod", screen.TargetRef)
+	}
+}
+
 // A pod the kubelet has not marked ready is still an address in the
 // slice, because the Service publishes not-ready addresses and a forming
 // cluster has no ready agents. The condition carries the kubelet's own
@@ -40,7 +72,7 @@ func TestCatalogEndpointsReportAStartingAgentAsNotReady(t *testing.T) {
 	starting := scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")
 	starting.Status.InitContainerStatuses = []ContainerStatus{{Name: catalogContainer, Ready: false}}
 
-	slice := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{starting})
+	slice := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{starting}, nil)
 
 	if len(slice.Endpoints) != 1 {
 		t.Fatalf("endpoints = %+v, want the starting pod's address", slice.Endpoints)
@@ -63,7 +95,7 @@ func TestCatalogEndpointsCarryTheAddressedScannerPodsOfOneNamespace(t *testing.T
 		scannerPodAt("series-scanner", "studio", "10.42.3.2", "nuc-4"),
 		pending,
 		leaving,
-	})
+	}, nil)
 
 	if len(slice.Endpoints) != 1 {
 		t.Fatalf("endpoints = %+v, want the one addressed pod of the namespace", slice.Endpoints)
@@ -91,7 +123,7 @@ func TestCatalogEndpointsCarryTheAddressedScannerPodsOfOneNamespace(t *testing.T
 // found by, and the managed-by label that keeps the slice controllers
 // in kube-controller-manager off it.
 func TestCatalogEndpointsCarryTheServiceMarks(t *testing.T) {
-	slice := buildCatalogEndpoints(testLibraryNamespace, nil, nil)
+	slice := buildCatalogEndpoints(testLibraryNamespace, nil, nil, nil)
 
 	if slice.Metadata.Name != catalogServiceName || slice.Metadata.Namespace != testLibraryNamespace {
 		t.Errorf("metadata = %+v, want the catalog slice in the Library's namespace", slice.Metadata)
@@ -116,7 +148,7 @@ func TestCatalogEndpointsCarryTheServiceMarks(t *testing.T) {
 func TestCatalogEndpointsAreOwnedByItsCatalog(t *testing.T) {
 	owners := []OwnerReference{catalogOwner("house-catalog", "house-catalog-uid")}
 
-	slice := buildCatalogEndpoints(testLibraryNamespace, owners, nil)
+	slice := buildCatalogEndpoints(testLibraryNamespace, owners, nil, nil)
 
 	if len(slice.Metadata.OwnerReferences) != 1 {
 		t.Fatalf("ownerReferences = %+v, want the one Catalog", slice.Metadata.OwnerReferences)
@@ -132,7 +164,7 @@ func TestCatalogEndpointsAreOwnedByItsCatalog(t *testing.T) {
 // With no scanner pods the slice still exists, and it carries an
 // empty endpoints list and not null.
 func TestCatalogEndpointsWithNoScannerPodsAreEmptyAndNotNull(t *testing.T) {
-	body, err := json.Marshal(buildCatalogEndpoints(testLibraryNamespace, nil, nil))
+	body, err := json.Marshal(buildCatalogEndpoints(testLibraryNamespace, nil, nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,11 +181,11 @@ func TestCatalogEndpointsSortByAddress(t *testing.T) {
 	first := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{
 		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1"),
 		scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.0.3", "nuc-2"),
-	})
+	}, nil)
 	second := buildCatalogEndpoints(testLibraryNamespace, nil, []Pod{
 		scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.0.3", "nuc-2"),
 		scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1"),
-	})
+	}, nil)
 
 	if first.Endpoints[0].Addresses[0] != "10.42.0.3" {
 		t.Errorf("addresses = %v, want the lowest address first",
@@ -176,7 +208,7 @@ func TestStandCatalogEndpointsCreatesTheSliceWhenThereIsNone(t *testing.T) {
 	cluster := newFakeCluster()
 	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")}
 
-	if err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, pods); err != nil {
+	if err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, pods, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -197,11 +229,11 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 	operator := testOperator(t, cluster)
 	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
 	pods := []Pod{scannerPodAt("movies-scanner", testLibraryNamespace, "10.42.1.7", "nuc-1")}
-	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -210,7 +242,7 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 	}
 
 	pods = append(pods, scannerPodAt("shows-scanner", testLibraryNamespace, "10.42.2.4", "nuc-2"))
-	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -223,7 +255,7 @@ func TestStandCatalogEndpointsWritesOnDivergenceAlone(t *testing.T) {
 	}
 
 	owners = append(owners, catalogOwner("shows", "shows-uid"))
-	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods); err != nil {
+	if err := operator.standCatalogEndpoints(t.Context(), testLibraryNamespace, owners, pods, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -241,7 +273,7 @@ func TestStandCatalogEndpointsTreatsAConflictAsAnotherWriter(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, nil); err != nil {
+	if err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -251,7 +283,7 @@ func TestStandCatalogEndpointsReportsAFailedRead(t *testing.T) {
 	path := endpointSlicesPath(testLibraryNamespace) + "/" + catalogServiceName
 	cluster.broken[path] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, nil)
+	err := testOperator(t, cluster).standCatalogEndpoints(t.Context(), testLibraryNamespace, nil, nil, nil)
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
@@ -284,7 +316,7 @@ func TestCreateEndpointSlicePostsIntoTheLibrarysNamespace(t *testing.T) {
 		Metadata: ObjectMeta{Name: "catalog", Namespace: "house"},
 	})
 
-	created, err := CreateEndpointSlice(t.Context(), client, buildCatalogEndpoints("house", nil, nil))
+	created, err := CreateEndpointSlice(t.Context(), client, buildCatalogEndpoints("house", nil, nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +337,7 @@ func TestUpdateEndpointSliceWritesTheVersionItRead(t *testing.T) {
 	client, recorded := recordingAPI(t, EndpointSlice{
 		Metadata: ObjectMeta{Name: "catalog", Namespace: "house", ResourceVersion: "45"},
 	})
-	slice := buildCatalogEndpoints("house", nil, nil)
+	slice := buildCatalogEndpoints("house", nil, nil, nil)
 	slice.Metadata.ResourceVersion = "44"
 
 	written, err := UpdateEndpointSlice(t.Context(), client, slice)
@@ -352,10 +384,10 @@ func TestSameEndpointsComparesWhatTheOperatorStates(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			live := buildCatalogEndpoints(testLibraryNamespace, owners, pods)
+			live := buildCatalogEndpoints(testLibraryNamespace, owners, pods, nil)
 			one.change(live)
 
-			desired := buildCatalogEndpoints(testLibraryNamespace, owners, pods)
+			desired := buildCatalogEndpoints(testLibraryNamespace, owners, pods, nil)
 			if got := sameEndpoints(live, desired); got != one.same {
 				t.Errorf("sameEndpoints = %v, want %v", got, one.same)
 			}

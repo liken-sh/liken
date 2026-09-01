@@ -19,10 +19,11 @@ import (
 const (
 	testScannerImage   = "ghcr.io/liken-sh/library-operator:test"
 	testCorrosionImage = "ghcr.io/liken-sh/library-operator-corrosion:test"
+	testBrowserImage   = "ghcr.io/liken-sh/library-operator-media-browser:test"
 	testBusAddress     = "bus.liken-system.svc:1883"
 )
 
-// studioMovies is the Library every test in this package starts from: a
+// StudioMovies is the Library every test in this package starts from: a
 // movies library over a claim in the house namespace.
 func studioMovies() *Library {
 	return &Library{
@@ -366,7 +367,7 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 	}
 }
 
-// podContainer reads one container the pod carries by name, across the
+// PodContainer reads one container the pod carries by name, across the
 // scanner in containers and the catalog agent in initContainers, so a
 // test names a container and never an index into either list.
 func podContainer(t *testing.T, pod *Pod, name string) Container {
@@ -381,14 +382,14 @@ func podContainer(t *testing.T, pod *Pod, name string) Container {
 	return Container{}
 }
 
-// catalogSidecarOf reads the catalog agent, which the pod carries as a
+// CatalogSidecarOf reads the catalog agent, which the pod carries as a
 // native sidecar in initContainers.
 func catalogSidecarOf(t *testing.T, pod *Pod) Container {
 	t.Helper()
 	return podContainer(t, pod, catalogContainer)
 }
 
-// podVolume reads the pod volume one mount names, so a test proves the
+// PodVolume reads the pod volume one mount names, so a test proves the
 // mount and the source it points at together.
 func podVolume(t *testing.T, pod *Pod, name string) Volume {
 	t.Helper()
@@ -401,7 +402,7 @@ func podVolume(t *testing.T, pod *Pod, name string) Volume {
 	return Volume{}
 }
 
-// containerEnvironment reads a container's literal environment, the
+// ContainerEnvironment reads a container's literal environment, the
 // variables with a value the operator wrote itself.
 func containerEnvironment(container Container) map[string]string {
 	environment := map[string]string{}

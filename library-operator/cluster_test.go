@@ -19,7 +19,7 @@ import (
 	"testing"
 )
 
-// fakeCluster holds the objects an API server would, and records every
+// FakeCluster holds the objects an API server would, and records every
 // request, so a test reads what a pass did as well as what it left
 // behind.
 type fakeCluster struct {
@@ -28,8 +28,11 @@ type fakeCluster struct {
 	// The Catalogs the operator reads and writes, by name, one per
 	// namespace in the ordinary case.
 	catalogs map[string]*NamespaceCatalog
-	claims   map[string]*PersistentVolumeClaim
-	pods     map[string]*Pod
+	// The Players media-operator would publish, which the operator reads
+	// and never writes.
+	players map[string]*Player
+	claims  map[string]*PersistentVolumeClaim
+	pods    map[string]*Pod
 	// The catalog objects the operator writes, by namespace and name,
 	// because the operator stands one of each in every namespace that
 	// holds a Library.
@@ -43,16 +46,16 @@ type fakeCluster struct {
 	volumes  map[string]string
 	requests []string
 
-	// broken maps a path to the status the server answers it with,
+	// Broken maps a path to the status the server answers it with,
 	// which is how a test drives the failure a pass reports and
 	// carries on from.
 	broken map[string]int
 
-	// refuseCreate answers every creation, of a pod or of a catalog
+	// RefuseCreate answers every creation, of a pod or of a catalog
 	// object, with a conflict: the state a second writer leaves behind.
 	refuseCreate bool
 
-	// parked holds every watch request open, because a watcher has no
+	// Parked holds every watch request open, because a watcher has no
 	// stop and a watch that ended would set it reconnecting.
 	parked chan struct{}
 }
@@ -61,6 +64,7 @@ func newFakeCluster() *fakeCluster {
 	return &fakeCluster{
 		libraries: map[string]*Library{},
 		catalogs:  map[string]*NamespaceCatalog{},
+		players:   map[string]*Player{},
 		claims:    map[string]*PersistentVolumeClaim{},
 		volumes:   map[string]string{},
 		pods:      map[string]*Pod{},
@@ -85,7 +89,14 @@ func (f *fakeCluster) handler() http.Handler {
 
 func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
-	if status := f.broken[r.URL.Path]; status != 0 {
+	// A test breaks a path, or one request against a path: the two pod
+	// lists differ by their selector alone, so the whole request line is
+	// the key that tells them apart.
+	status := f.broken[r.URL.Path]
+	if status == 0 {
+		status = f.broken[r.URL.RequestURI()]
+	}
+	if status != 0 {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte("the API server is unwell"))
 		return
@@ -106,6 +117,12 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		list := CatalogList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.catalogs) {
 			list.Items = append(list.Items, *f.catalogs[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == playersPath:
+		list := PlayerList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.players) {
+			list.Items = append(list.Items, *f.players[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/libraries/"):
@@ -132,6 +149,9 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == podsAllPath:
 		list := PodList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.pods) {
+			if !selects(r.URL.Query().Get("labelSelector"), f.pods[key]) {
+				continue
+			}
 			list.Items = append(list.Items, *f.pods[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
@@ -164,7 +184,19 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// the API server's own behavior: conditional on the stated
+// Selects answers the way the API server answers a label selector: an
+// equality selector keeps the pods that carry the pair, and an empty
+// selector keeps every pod. The operator sends one pair and no other form,
+// so a list of scanner pods never answers with a screen pod.
+func selects(selector string, pod *Pod) bool {
+	if selector == "" {
+		return true
+	}
+	key, value, _ := strings.Cut(selector, "=")
+	return pod.Metadata.Labels[key] == value
+}
+
+// The API server's own behavior: conditional on the stated
 // resourceVersion, and a deleting object with no finalizer left is
 // removed.
 func (f *fakeCluster) patchLibrary(w http.ResponseWriter, r *http.Request, name string) {
@@ -192,7 +224,7 @@ func (f *fakeCluster) patchLibrary(w http.ResponseWriter, r *http.Request, name 
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// the resourceVersion a write produces, which every later conditional
+// The resourceVersion a write produces, which every later conditional
 // write on the object has to state.
 func nextVersion(current string) string {
 	number, err := strconv.Atoi(current)
@@ -202,7 +234,7 @@ func nextVersion(current string) string {
 	return strconv.Itoa(number + 1)
 }
 
-// namespaceOf reads the namespace out of a collection path, which is
+// NamespaceOf reads the namespace out of a collection path, which is
 // how the fake cluster keys the objects a namespaced verb writes. A
 // path with no namespace segment answers an empty string, and no verb
 // the operator sends takes one.
@@ -215,7 +247,7 @@ func namespaceOf(urlPath string) string {
 	return namespace
 }
 
-// serveEndpointSlice answers a catalog slice the way the API server
+// ServeEndpointSlice answers a catalog slice the way the API server
 // does: an absent slice is a 404, a create stores what the body
 // carries, and an update replaces it. The stored resourceVersion is
 // what a conditional write is checked against.
@@ -242,12 +274,12 @@ func (f *fakeCluster) writeEndpointSlice(w http.ResponseWriter, r *http.Request,
 	_ = json.NewEncoder(w).Encode(written)
 }
 
-// assignedClusterIP is the address the fake API server gives a Service
+// AssignedClusterIP is the address the fake API server gives a Service
 // that asked for none, which is what an update must carry back
 // untouched.
 const assignedClusterIP = "10.43.0.7"
 
-// serveService answers a Service the same way, and it assigns the
+// ServeService answers a Service the same way, and it assigns the
 // clusterIP the API server would: a headless Service keeps the None the
 // operator asked for, and any other Service is given an address. The
 // value is the API server's from then on.
@@ -280,7 +312,7 @@ func (f *fakeCluster) writeService(w http.ResponseWriter, r *http.Request, resou
 	_ = json.NewEncoder(w).Encode(written)
 }
 
-// held reads one object out of the cluster under the lock, so a test
+// Held reads one object out of the cluster under the lock, so a test
 // that inspects the cluster while a watch request is in flight reads
 // no torn map.
 func (f *fakeCluster) heldPod(name string) *Pod {
@@ -307,7 +339,7 @@ func (f *fakeCluster) heldService(namespace, name string) *Service {
 	return f.services[namespace+"/"+name]
 }
 
-// holdService puts a Service into the cluster as something other than
+// HoldService puts a Service into the cluster as something other than
 // this operator wrote it, so a test drives the divergence a pass finds
 // and repairs.
 func (f *fakeCluster) holdService(service *Service) {
@@ -328,7 +360,25 @@ func (f *fakeCluster) heldClaim(name string) *PersistentVolumeClaim {
 	return f.claims[name]
 }
 
-// countRequests counts the requests of one method against one kind of
+// SeedPlayer puts one Player in the cluster with the idle block
+// media-operator would publish. An empty controller stands for a Player with
+// no idle block at all.
+func seedPlayer(cluster *fakeCluster, name, namespace, controller string) *Player {
+	player := &Player{
+		Metadata: ObjectMeta{Name: name, Namespace: namespace, UID: name + "-uid"},
+	}
+	if controller != "" {
+		player.Status.Idle = &PlayerIdleStatus{
+			Controller: controller,
+			Claim:      name + "-idle-devices",
+			Requests:   []string{"draw", "render"},
+		}
+	}
+	cluster.players[name] = player
+	return player
+}
+
+// CountRequests counts the requests of one method against one kind of
 // object, so a test reads what a pass did rather than only what it
 // left.
 func (f *fakeCluster) countRequests(method, kind string) int {
@@ -364,7 +414,7 @@ func sortedNames[T any](objects map[string]*T) []string {
 // catalog Service and EndpointSlice are in.
 const testLibraryNamespace = "house"
 
-// testOperator builds the operator around one fake cluster. Its bus is
+// TestOperator builds the operator around one fake cluster. Its bus is
 // never run by the tests that only take a pass, so a publish finds no
 // write queue and drops, which is what a pass wants with no broker
 // under the test.
@@ -376,10 +426,10 @@ func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
 	return newOperator(NewClient(server.URL, server.Client(), ""),
-		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testCorrosionImage, testBrowserImage, testBusAddress, defaultTopicBase)
 }
 
-// operatorOnABroker is the operator of testOperator with its
+// OperatorOnABroker is the operator of testOperator with its
 // bus connected to a broker the test reads. A test that watches what
 // the operator publishes needs the connection, because a publish made
 // while the client is disconnected is dropped at QoS 0. The helper
@@ -401,7 +451,7 @@ func operatorOnABroker(t *testing.T, cluster *fakeCluster) (*operator, *fakeBrok
 	return operator, broker
 }
 
-// clearedTopics reads the next count publishes and answers
+// ClearedTopics reads the next count publishes and answers
 // with the topics they cleared. A message that clears a retained
 // topic is empty and retained, and one that is not fails the test,
 // because a payload of any length leaves the topic standing.
@@ -421,7 +471,7 @@ func clearedTopics(t *testing.T, broker *fakeBroker, count int) map[string]bool 
 	return cleared
 }
 
-// libraryTopics names the two retained topics one Library
+// LibraryTopics names the two retained topics one Library
 // stands on the bus, which is the pair a clear has to cover.
 func libraryTopics(namespace, name string) []string {
 	return []string{
@@ -430,7 +480,7 @@ func libraryTopics(namespace, name string) []string {
 	}
 }
 
-// testRunContext ends when the test does, so the bus the loop starts
+// TestRunContext ends when the test does, so the bus the loop starts
 // stops dialing a broker that is not there.
 func testRunContext(t *testing.T) context.Context {
 	t.Helper()
@@ -439,7 +489,7 @@ func testRunContext(t *testing.T) context.Context {
 	return ctx
 }
 
-// catalogOwner is the ownerReference the catalog Service and
+// CatalogOwner is the ownerReference the catalog Service and
 // EndpointSlice carry, so a test states the owner it expects in the
 // same shape a pass builds. The Catalog owns both, and it is the
 // controller, because a namespace holds one Catalog.
@@ -447,7 +497,7 @@ func catalogOwner(name, uid string) OwnerReference {
 	return OwnerReference{APIVersion: catalogAPIVersion, Kind: "Catalog", Name: name, UID: uid, Controller: true}
 }
 
-// seedCatalog seeds one Catalog in a namespace, so a Library there
+// SeedCatalog seeds one Catalog in a namespace, so a Library there
 // proceeds and the operator stands the namespace's catalog cluster.
 func seedCatalog(cluster *fakeCluster, name, namespace string) *NamespaceCatalog {
 	catalog := &NamespaceCatalog{
@@ -457,19 +507,19 @@ func seedCatalog(cluster *fakeCluster, name, namespace string) *NamespaceCatalog
 	return catalog
 }
 
-// testNamespaceCatalog is one Catalog a reconcile reads, so a test
+// TestNamespaceCatalog is one Catalog a reconcile reads, so a test
 // hands reconcile the choice a namespace with one Catalog resolves to.
 func testNamespaceCatalog() *NamespaceCatalog {
 	return &NamespaceCatalog{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house", UID: "house-catalog-uid"}}
 }
 
-// withCatalog is the catalog choice a namespace with one Catalog
+// WithCatalog is the catalog choice a namespace with one Catalog
 // resolves to, the ordinary state a Library is reconciled against.
 func withCatalog() catalogChoice {
 	return catalogChoice{catalog: testNamespaceCatalog()}
 }
 
-// boundHouse seeds the cluster with a movies Library over a claim bound
+// BoundHouse seeds the cluster with a movies Library over a claim bound
 // to an NFS volume, and the namespace's one Catalog, which is the
 // ordinary state every other state is read against.
 func boundHouse(cluster *fakeCluster) *Library {
@@ -487,7 +537,7 @@ func boundHouse(cluster *fakeCluster) *Library {
 	return library
 }
 
-// boundStudio seeds a second Library in a second namespace, over a
+// BoundStudio seeds a second Library in a second namespace, over a
 // claim of its own and with its own Catalog, so a test sees two catalog
 // clusters stand apart.
 func boundStudio(cluster *fakeCluster) *Library {

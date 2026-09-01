@@ -1,6 +1,6 @@
 package main
 
-// catalogreconcile.go stands the namespace catalog. A pass reconciles each
+// Catalogreconcile.go stands the namespace catalog. A pass reconciles each
 // namespace's one Catalog into the catalog Service, the EndpointSlice, and
 // the Catalog's own status. A namespace with more than one Catalog stands
 // nothing new this pass: every Catalog in it is marked Blocked, and the
@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-// reconcileCatalogs stands each namespace's catalog cluster from its one
+// ReconcileCatalogs stands each namespace's catalog cluster from its one
 // Catalog. The catalog Service and EndpointSlice are owned by the Catalog,
 // which is their real owner: they describe the namespace's one Corrosion
 // cluster. A namespace with more than one Catalog marks every Catalog in
@@ -28,6 +28,14 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 	pods, err := ListScannerPods(ctx, o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing scanner pods: %v\n", err)
+		return
+	}
+	// The screen pods are peers of the same cluster, so the slice each
+	// namespace stands carries both kinds. A list that fails ends the step,
+	// because a slice written without the screens would drop peers that are up.
+	screens, err := ListScreenPods(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing screen pods: %v\n", err)
 		return
 	}
 	now := time.Now().UTC()
@@ -47,7 +55,7 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		if err := o.standCatalogService(ctx, namespace, owners); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog service in %s: %v\n", namespace, err)
 		}
-		if err := o.standCatalogEndpoints(ctx, namespace, owners, pods.Items); err != nil {
+		if err := o.standCatalogEndpoints(ctx, namespace, owners, pods.Items, screens.Items); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog endpoints in %s: %v\n", namespace, err)
 		}
 		if err := o.writeCatalogStatus(ctx, catalog, standingCatalogStatus(catalog, pods.Items, now)); err != nil {
@@ -56,7 +64,7 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 	}
 }
 
-// catalogObjectOwner is the ownerReference the catalog Service and
+// CatalogObjectOwner is the ownerReference the catalog Service and
 // EndpointSlice carry. One Catalog per namespace owns both, so it is the
 // controller, and the garbage collector removes them when the Catalog is
 // deleted.
@@ -70,7 +78,7 @@ func catalogObjectOwner(catalog *NamespaceCatalog) OwnerReference {
 	}
 }
 
-// standingCatalogStatus reports the cluster the Catalog stands: its member
+// StandingCatalogStatus reports the cluster the Catalog stands: its member
 // agent pods and the storage size the agents were given, with a Ready
 // condition.
 func standingCatalogStatus(catalog *NamespaceCatalog, pods []Pod, now time.Time) CatalogStatus {
@@ -89,7 +97,7 @@ func standingCatalogStatus(catalog *NamespaceCatalog, pods []Pod, now time.Time)
 	}
 }
 
-// blockedCatalogStatus marks a Catalog Blocked when its namespace holds more
+// BlockedCatalogStatus marks a Catalog Blocked when its namespace holds more
 // than one, with a condition that names the conflict. The Catalog stands no
 // cluster, so it reports no members.
 func blockedCatalogStatus(catalog *NamespaceCatalog, catalogs []*NamespaceCatalog, now time.Time) CatalogStatus {
@@ -106,7 +114,7 @@ func blockedCatalogStatus(catalog *NamespaceCatalog, catalogs []*NamespaceCatalo
 	}
 }
 
-// catalogMembers is the member agent pods of the namespace's cluster: the
+// CatalogMembers is the member agent pods of the namespace's cluster: the
 // scanner pods in the namespace, by name, sorted so two passes read the same
 // list.
 func catalogMembers(namespace string, pods []Pod) []string {
@@ -120,7 +128,7 @@ func catalogMembers(namespace string, pods []Pod) []string {
 	return members
 }
 
-// writeCatalogStatus writes only a status that differs from the one the
+// WriteCatalogStatus writes only a status that differs from the one the
 // Catalog carries, the rule writeLibraryStatus also follows, so a write on
 // every pass does not wake the catalogs watch that wakes the pass. A conflict
 // means another writer got there first, which the next pass reads.
@@ -137,7 +145,7 @@ func (o *operator) writeCatalogStatus(ctx context.Context, catalog *NamespaceCat
 	return err
 }
 
-// sameCatalogStatus compares the marshaled form, because that is what the
+// SameCatalogStatus compares the marshaled form, because that is what the
 // API server stores and what each field's omitempty decides.
 func sameCatalogStatus(current, desired CatalogStatus) (bool, error) {
 	was, err := json.Marshal(current)

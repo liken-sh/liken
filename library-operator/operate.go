@@ -30,21 +30,27 @@ import (
 const (
 	scannerImageVariable   = "SCANNER_IMAGE"
 	corrosionImageVariable = "CORROSION_IMAGE"
+	browserImageVariable   = "BROWSER_IMAGE"
 )
 
-// backstopInterval is how often the loop reconciles with nothing to
+// The name this operator answers to as an idle controller. A Player
+// whose status.idle.controller reads this gets a screen pod, and no other
+// Player does. media-operator writes the name; this operator only compares it.
+const screenController = "library.liken.sh/media-browser"
+
+// BackstopInterval is how often the loop reconciles with nothing to
 // prompt it. The tick recovers a lost watch event, and it is what
 // notices a pod that changed phase while the watch was down.
 const backstopInterval = 10 * time.Second
 
-// passTimeout bounds every request one pass makes. The pass owns the
+// PassTimeout bounds every request one pass makes. The pass owns the
 // context rather than taking the stop signal, so a shutdown lets the pass
 // in flight finish its writes, and the loop returns on the next turn. A
 // pass whose API server stops answering ends here, and the next pass
 // starts clean. It is a variable so a test drives a short timeout.
 var passTimeout = 30 * time.Second
 
-// operator holds what every pass needs: the client it reads and writes
+// Operator holds what every pass needs: the client it reads and writes
 // through, the settings it stamps into each scanner pod, the bus, and
 // the desk the bus folds each report onto. They are fields rather than
 // globals so a test builds an operator around a desk and a cluster it
@@ -53,12 +59,13 @@ type operator struct {
 	client         *Client
 	scannerImage   string
 	corrosionImage string
+	browserImage   string
 	busAddress     string
 	topicBase      string
 	bus            *Bus
 	reports        *reports
 
-	// wake is the loop's own wake channel, and one channel serves the
+	// Wake is the loop's own wake channel, and one channel serves the
 	// two watches and the bus handler, because a wake says nothing
 	// beyond "read the collection again".
 	wake chan struct{}
@@ -69,17 +76,18 @@ type operator struct {
 	cleanupStands map[string]cleanupStand
 }
 
-// newOperator builds the operator and the two things it listens
+// NewOperator builds the operator and the two things it listens
 // through: the desk that holds each Library's newest report, and the
 // bus subscriptions that fill it. The subscriptions are remembered
 // here and sent on every connection, so they outlive a broker
 // restart.
-func newOperator(client *Client, scannerImage, corrosionImage, busAddress, topicBase string) *operator {
+func newOperator(client *Client, scannerImage, corrosionImage, browserImage, busAddress, topicBase string) *operator {
 	wake := make(chan struct{}, 1)
 	library := &operator{
 		client:         client,
 		scannerImage:   scannerImage,
 		corrosionImage: corrosionImage,
+		browserImage:   browserImage,
 		busAddress:     busAddress,
 		topicBase:      topicBase,
 		reports:        newReports(wake),
@@ -97,7 +105,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, busAddress, topic
 	return library
 }
 
-// operate reads the operator's environment and returns its failure
+// Operate reads the operator's environment and returns its failure
 // instead of exiting, so main is the only place that ends the process
 // and a test drives the whole setup. A missing setting fails here,
 // before the first pass, because a pod that cannot name the images it
@@ -110,6 +118,12 @@ func operate() error {
 	corrosionImage := os.Getenv(corrosionImageVariable)
 	if corrosionImage == "" {
 		return fmt.Errorf("%s is unset; the Deployment must name the catalog image", corrosionImageVariable)
+	}
+	// The media browser one screen pod runs. The operator refuses to
+	// start without it for the reason it refuses without the other two.
+	browserImage := os.Getenv(browserImageVariable)
+	if browserImage == "" {
+		return fmt.Errorf("%s is unset; the Deployment must name the media browser image", browserImageVariable)
 	}
 	busAddress := os.Getenv(busAddressVariable)
 	if busAddress == "" {
@@ -133,10 +147,10 @@ func operate() error {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	return newOperator(client, scannerImage, corrosionImage, busAddress, topicBase).run(stopped, os.Stdout)
+	return newOperator(client, scannerImage, corrosionImage, browserImage, busAddress, topicBase).run(stopped, os.Stdout)
 }
 
-// run is the operator without the process around it, so a test drives
+// Run is the operator without the process around it, so a test drives
 // the whole loop against an API server it controls. It returns when
 // the context ends, which is the stop signal.
 func (o *operator) run(stopped context.Context, report io.Writer) error {
@@ -160,12 +174,23 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("listing scanner pods: %w", err)
 	}
+	// A Player belongs to media-operator, and a cluster that runs none
+	// serves no such collection. That failure is reported and the operator
+	// carries on with the libraries, so a cluster with no screens still scans.
+	// The watch then resumes from an empty version, which the API server reads
+	// as the state it holds now.
+	players, err := ListPlayers(startup, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
+		players = &PlayerList{}
+	}
 	fmt.Fprintf(report, "library.liken.sh: operating %d libraries over %s\n",
 		len(libraries.Items), o.busAddress)
 
 	go watchLibraries(o.client, libraries.Metadata.ResourceVersion, o.wake)
 	go watchCatalogs(o.client, catalogs.Metadata.ResourceVersion, o.wake)
 	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake)
+	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake)
 
 	ticker := time.NewTicker(backstopInterval)
 	defer ticker.Stop()
@@ -180,11 +205,16 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	}
 }
 
-// pass reconciles every Library in the cluster against its namespace's
+// Pass reconciles every Library in the cluster against its namespace's
 // Catalog, then stands the catalog cluster of each namespace that holds
 // a Catalog. That is the namespace's work and not one Library's. A
 // failure on one object is reported and the pass continues, because one
 // library's broken claim must not freeze every other library's status.
+//
+// it stands the screen of every delegated Player as well, after the
+// libraries and before the catalog cluster, so the catalog step reads the
+// screen pods this pass created. A pod with no address yet reaches the
+// EndpointSlice on the pass after the kubelet gives it one.
 func (o *operator) pass() {
 	ctx, done := context.WithTimeout(context.Background(), passTimeout)
 	defer done()
@@ -200,6 +230,15 @@ func (o *operator) pass() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing catalogs: %v\n", err)
 		return
+	}
+	// The Players are read after the Catalogs and reported the same
+	// way, except that a failure here is not the end of the pass: a cluster
+	// with no media-operator serves no Players, and its libraries are still
+	// scanned and still reported.
+	players, err := ListPlayers(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
+		players = &PlayerList{}
 	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
 	// The release rule reads every other Library in a namespace, so
@@ -248,10 +287,23 @@ func (o *operator) pass() {
 		}
 	}
 
+	// The screen pods are read once for every namespace, so the pass
+	// deletes only a pod that stands. A list that fails costs the pass
+	// its deletes and nothing else: a delegated Player is still stood,
+	// and the pod of one that switched away goes on the next pass.
+	screens, err := ListScreenPods(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing screen pods: %v\n", err)
+		screens = &PodList{}
+	}
+	for _, namespace := range screenNamespaces(players.Items) {
+		o.reconcileScreens(ctx, namespace, players.Items, libraries.Items, screens.Items)
+	}
+
 	o.reconcileCatalogs(ctx, byNamespace)
 }
 
-// handleBusMessage folds one message from the broker onto the report
+// HandleBusMessage folds one message from the broker onto the report
 // desk. It runs on the bus reader's goroutine, so it does nothing
 // beyond the fold, and the wake the desk raises is what carries the
 // message into the next pass.

@@ -29,7 +29,7 @@ import (
 // The path the kubelet mounts the ServiceAccount credentials on.
 const defaultServiceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-// serviceAccountDir is a variable so a test points it at a directory
+// ServiceAccountDir is a variable so a test points it at a directory
 // it controls.
 var serviceAccountDir = defaultServiceAccountDir
 
@@ -139,7 +139,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body []byte) (*htt
 	return c.do(ctx, method, path, jsonContentType, body)
 }
 
-// do is Do with the body's content type stated, so one request path
+// Do is Do with the body's content type stated, so one request path
 // sends both a JSON write and a merge patch.
 func (c *Client) do(ctx context.Context, method, path, contentType string, body []byte) (*http.Response, error) {
 	var reader io.Reader
@@ -168,7 +168,7 @@ func (c *Client) do(ctx context.Context, method, path, contentType string, body 
 	return c.http.Do(req)
 }
 
-// drain reads whatever the caller left in the body, then closes it.
+// Drain reads whatever the caller left in the body, then closes it.
 // Go returns a connection to its pool only when the body reaches
 // EOF, so an early close costs a fresh connection and TLS handshake,
 // and reaches the server as a hang-up on a request it answered.
@@ -205,7 +205,12 @@ const (
 	librariesPath = "/apis/" + libraryAPIVersion + "/libraries"
 	// The Catalogs, listed and watched across every namespace and
 	// written back per namespace, the same shape as the Libraries.
-	catalogsPath  = "/apis/" + libraryAPIVersion + "/catalogs"
+	catalogsPath = "/apis/" + libraryAPIVersion + "/catalogs"
+	// The Players, listed and watched across every namespace,
+	// read-only. A Player is media-operator's object, and this operator
+	// reads the collection to find the screens delegated to it.
+	playersPath = "/apis/" + playerAPIVersion + "/players"
+
 	libraryPrefix = "/apis/" + libraryAPIVersion + "/namespaces/"
 	corePrefix    = "/api/v1/namespaces/"
 	volumesPath   = "/api/v1/persistentvolumes"
@@ -216,11 +221,16 @@ const (
 	endpointSlicePrefix = "/apis/" + endpointSliceAPIVersion + "/namespaces/"
 )
 
-// scannerPodsQuery narrows a pod list or a pod watch to this
+// ScannerPodsQuery narrows a pod list or a pod watch to this
 // operator's own scanner pods, by the name label every scanner pod
 // carries. The equals sign inside the selector is percent-encoded, so
 // the server reads one parameter and not two.
 const scannerPodsQuery = "labelSelector=" + scannerLabelKey + "%3D" + scannerLabelValue
+
+// The same narrowing for the screen pods, which carry a name label of
+// their own. The two selectors keep the two kinds of pod apart, so a list of
+// one never answers with the other.
+const screenPodsQuery = "labelSelector=" + scannerLabelKey + "%3D" + screenLabelValue
 
 func libraryPath(namespace, name string) string {
 	return libraryPrefix + namespace + "/libraries/" + name
@@ -308,6 +318,18 @@ func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, res
 	return patched.Metadata.ResourceVersion, nil
 }
 
+// ListPlayers reads every Player in the cluster with one request, the
+// way the pass reads the Libraries. The list's resourceVersion is where the
+// player watch resumes from. A cluster with no media-operator serves no such
+// collection, and the failure is the caller's to report and carry on from.
+func ListPlayers(ctx context.Context, c *Client) (*PlayerList, error) {
+	list := &PlayerList{}
+	if err := c.RequestJSON(ctx, http.MethodGet, playersPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 // ListCatalogs answers a whole pass with one request, and the list's
 // resourceVersion is where the catalogs watch resumes from.
 func ListCatalogs(ctx context.Context, c *Client) (*CatalogList, error) {
@@ -385,6 +407,18 @@ func ListScannerPods(ctx context.Context, c *Client) (*PodList, error) {
 	return list, nil
 }
 
+// ListScreenPods reads this operator's screen pods across every
+// namespace, on the same terms as the scanner pods. The catalog EndpointSlice
+// carries both kinds, because a screen's catalog agent is a peer of the
+// namespace's cluster like a scanner's.
+func ListScreenPods(ctx context.Context, c *Client) (*PodList, error) {
+	list := &PodList{}
+	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+screenPodsQuery, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 func GetPod(ctx context.Context, c *Client, namespace, name string) (*Pod, error) {
 	pod := &Pod{}
 	if err := c.RequestJSON(ctx, http.MethodGet, podsPath(namespace)+"/"+name, nil, pod); err != nil {
@@ -414,47 +448,6 @@ func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
 		return nil
 	}
 	return err
-}
-
-// GetEndpointSlice reads the live catalog slice of one namespace, for
-// the owners and endpoints it holds now and for the resourceVersion
-// the write is made conditional on. An absent slice is ErrNotFound,
-// which the pass answers by creating one.
-func GetEndpointSlice(ctx context.Context, c *Client, namespace, name string) (*EndpointSlice, error) {
-	slice := &EndpointSlice{}
-	if err := c.RequestJSON(ctx, http.MethodGet, endpointSlicesPath(namespace)+"/"+name, nil, slice); err != nil {
-		return nil, err
-	}
-	return slice, nil
-}
-
-func CreateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
-	body, err := json.Marshal(slice)
-	if err != nil {
-		return nil, err
-	}
-	created := &EndpointSlice{}
-	path := endpointSlicesPath(slice.Metadata.Namespace)
-	if err := c.RequestJSON(ctx, http.MethodPost, path, body, created); err != nil {
-		return nil, err
-	}
-	return created, nil
-}
-
-// UpdateEndpointSlice writes the whole slice back. The resourceVersion
-// in the body makes the write conditional, so a slice that changed
-// underneath answers ErrConflict, and the next pass reads it again.
-func UpdateEndpointSlice(ctx context.Context, c *Client, slice *EndpointSlice) (*EndpointSlice, error) {
-	body, err := json.Marshal(slice)
-	if err != nil {
-		return nil, err
-	}
-	written := &EndpointSlice{}
-	path := endpointSlicesPath(slice.Metadata.Namespace) + "/" + slice.Metadata.Name
-	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
-		return nil, err
-	}
-	return written, nil
 }
 
 // GetService reads the live catalog Service of one namespace. The
