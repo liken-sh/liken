@@ -30,13 +30,6 @@ These plans are designed. Each keeps its number and moves to
   the `Play`'s namespace and a path inside it, so a `Play` plays from
   any volume the cluster can mount and names no server. The library
   layer depends on it.
-* [20, The idle screen is its own
-  image](20-the-idle-screen-is-its-own-image.md). The idle screen
-  leaves `mpv` and becomes `media-operator-idle`, a Rust client on the
-  Iced toolkit that reads the bus. The sidecar publishes its four
-  decisions on a screen topic and loses its socket, the seven Lua
-  modules that drew the screen are deleted, and the playback overlay
-  stays. The library layer depends on it.
 * [21, A remote that teaches its
   keymap](21-a-remote-that-teaches-its-keymap.md). Built, and
   awaiting its drill. `spec.discovery` on the `Remote` keeps every
@@ -190,6 +183,16 @@ These plans are designed. Each keeps its number and moves to
   the failure plan 17's process memory could not survive. The lift
   needed the display-operator's 2026.08.27-003 (`spec` defaults to
   `{}`, because server-side apply prunes an empty spec).
+* [20, The idle screen is its own
+  image](completed/20-the-idle-screen-is-its-own-image.md). Built,
+  and released in 2026.08.31-001, with fixes through 2026.08.31-005,
+  and running on `liken-1`. The idle screen is `media-operator-idle`,
+  a Rust client on the Iced toolkit that reads the bus. The sidecar
+  publishes its four decisions on a screen topic and has no socket,
+  the seven Lua modules that drew the screen are deleted, and the
+  playback overlay stays. Releases -002 through -005 fixed a covered
+  client's stall: the client presents without vsync, reads the bus on
+  every wake, and heals a lost present.
 
 ## Open problems
 
