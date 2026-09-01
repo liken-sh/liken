@@ -39,7 +39,10 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   media browser as a `Player`'s idle screen, in a pod this operator
   builds when the `Player` names it as idle controller: the browser,
   the Corrosion sidecar, and the display claim `media-operator`
-  publishes.
+  publishes. Built, released in 2026.09.01-002 and -003, and drawing
+  the libraries on `lab-portable` on `liken-1` since 2026-09-01. Two
+  proofs remain before it moves: a title added on the volume reaching
+  the screen, and the sidecar's resident memory at rest.
 * [07, The media browser](07-the-media-browser.md). Libraries on the
   screen, and the structure each kind gives.
 * [08, Playback from the media
