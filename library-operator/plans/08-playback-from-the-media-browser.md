@@ -111,3 +111,24 @@ thumbnails, and `kubectl get plays` shows it running. Back, or the end
 of the movie, returns the screen to the wall at the same focus. Select
 on an episode plays it and the rest of its season in order, and the
 `Play` status names the current item as it advances.
+
+### The drill record
+
+Released as 2026.09.01-005 and drilled on `lab-portable` on
+2026-09-01 with the X6. A bus tap on both topic trees showed the path:
+the forwarded select and the play request in the same second, the
+`Player` at Starting three seconds later and at Playing at five, and
+on back the status at Idle, `re-present`, and `present` in one second,
+after which the browser took presses at the focus it held. Two movies
+were played this way. Each `Play` carried a `claim://` reference on the
+library's claim and a presentation with the type, the hint, the title,
+the year, the art, and the trickplay path.
+
+Two checks are still open, because the drill ended before them: the
+episode pick, which should queue the rest of the season and advance
+`status.item`, and the thumbnails on the scrub bar, which nobody
+confirmed by eye. The next drill covers both.
+
+One tweak is agreed and waits for the next round: the `Play` name
+should carry the chosen item's slug before the generated suffix, so a
+`kubectl get plays` reads as titles.
