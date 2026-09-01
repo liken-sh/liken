@@ -7,6 +7,10 @@
 # whole module tree. The kernel pin defines the set, and a kernel
 # bump re-derives it.
 #
+# Derivation is the floor, not the whole set: the Bluetooth patch
+# families below ship beside the declared names, because their
+# drivers construct those names at runtime and declare nothing.
+#
 # The full linux-firmware tree is about 1.9 GB, and most of it
 # describes hardware that an x86 server kernel cannot drive (ARM
 # SoCs, phone parts). Derivation keeps what this kernel can actually
@@ -31,6 +35,16 @@
 # whoever adds one decides this again. The composable release design
 # is the option for anyone who needs them sooner: an nvidia-inclusive
 # image is a rebuild with one more directory.
+#
+# nvidia/ is the named exclusion, and the Bluetooth patch families
+# are the named inclusion. btintel, btrtl, btbcm, and btqca build
+# their patch file names at runtime from a controller's own revision
+# fields, so no module declares them and derivation cannot see them.
+# The gap hides in normal use, because a patched controller keeps its
+# patch across warm reboots. It surfaces when a cold power reset
+# drops the controller to its ROM and the kernel asks for a file the
+# image never carried, which leaves an unpatched radio. See
+# ship_bluetooth below.
 #
 # A name that resolves no way at all is recorded in the manifest.
 # These are drivers whose firmware upstream never shipped (some
@@ -120,6 +134,7 @@ awk '/^Link:/ {print $2 " " $4}' "$tree/WHENCE" >"$links"
 shipped=0
 aliased=0
 excluded=0
+bluetooth=0
 unshipped=()
 
 # resolve_link prints the tree-relative target of an alias, or
@@ -152,6 +167,28 @@ ship_regdb() {
         mkdir -p "$fw/$(dirname "$file")"
         cp "$regdb/$file" "$fw/$file"
     }
+}
+
+# ship_bluetooth ships the Bluetooth vendors' patch families whole:
+# intel/ibt-*, rtl_bt/, brcm/BCM*.hcd, and qca/. The four drivers
+# name these files at runtime, so derivation cannot see them, and a
+# glob that named chips would re-open the gap at the next chip. All
+# of qca/ ships because that directory carries the vendor's Bluetooth
+# firmware; its Wi-Fi blobs live under ath10k/ and ath11k/, which
+# derivation already covers. The function runs with the working
+# directory at the tree, like the derivation loop, and before the
+# alias loop, which is what gives these families their WHENCE links.
+ship_bluetooth() {
+    local file
+    while IFS= read -r file; do
+        ship "$file"
+        bluetooth=$((bluetooth + 1))
+    done < <(
+        find intel -maxdepth 1 -type f -name 'ibt-*'
+        find rtl_bt -type f
+        find brcm -maxdepth 1 -type f -name 'BCM*.hcd'
+        find qca -type f
+    )
 }
 
 cd "$tree"
@@ -191,6 +228,8 @@ while IFS= read -r name; do
     fi
 done <"$names"
 
+ship_bluetooth
+
 # Materialize every alias whose target shipped. Aliases beyond the
 # declared names cost nothing and cover names that drivers construct
 # at runtime.
@@ -219,10 +258,11 @@ cp -r "$tree/LICENSES" "$fw/LICENSES"
     echo "wireless-regdb $regdb_version"
     echo
     echo "shipped: $shipped names as files, $aliased through WHENCE links"
+    echo "bluetooth: $bluetooth files from the four named vendor families"
     echo "excluded: $excluded names under nvidia/ (the named exception)"
     echo "unshipped: ${#unshipped[@]} names with no file in this release:"
     printf '  %s\n' "${unshipped[@]}"
 } >"$manifest"
 
 echo "firmware for kernel $release:"
-du -sh "$fw" | cut -f1 | xargs -I{} echo "  {} from $shipped names, $aliased aliases, ${#unshipped[@]} unshipped (see derived.txt)"
+du -sh "$fw" | cut -f1 | xargs -I{} echo "  {} from $shipped names, $aliased aliases, $bluetooth Bluetooth files, ${#unshipped[@]} unshipped (see derived.txt)"
