@@ -35,10 +35,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [05, The idle screen in Iced](05-the-idle-screen-in-iced.md). Why the
-  library layer needs `media-operator`'s idle screen to be a native
-  client on the bus, and what it needs the result to be. The work is
-  `media-operator`'s, and this plan builds no code here.
 * [06, The catalog on a screen](06-the-catalog-on-a-screen.md). The
   Corrosion sidecar in the idle pod, and the update stream the media
   browser reads.
@@ -93,6 +89,13 @@ for a later agent to shape.
   descent through grouping folders, the durable catalog on a `Library`-owned
   claim sized by the namespace `Catalog` (plan 15), the Corrosion native
   sidecar gated by an exec probe, and the scanner's progress logging.
+* [05, The idle screen in
+  Iced](completed/05-the-idle-screen-in-iced.md). Done by
+  `media-operator`'s plan 20 in its 2026.08.31 releases; this plan
+  built no code here. Why the library layer needs the idle screen to
+  be a native client on the bus, and what it needs the result to be:
+  a replaceable `spec.idle.image`, every fact from the bus, and the
+  look from `brand`'s Iced crate.
 * [15, The namespace catalog](completed/15-the-namespace-catalog.md).
   Built out of sequence during plan 04, and rolled to `liken-1` through
   release 2026.08.30-011. The `Catalog` CRD, one per namespace, that owns
