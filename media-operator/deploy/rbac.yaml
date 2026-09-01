@@ -110,6 +110,13 @@ rules:
   # changed. The list and watch verbs are cluster-scoped, because a Play
   # lives in any namespace and the pod watch wakes the loop when
   # Kubernetes removes a playback pod anywhere.
+  #
+  # the delete verb also deletes pods this operator did not
+  # create. A display claim names every pod that holds it in
+  # status.reservedFor, and an allocated claim stays Terminating until
+  # every holder is gone, so each of those pods goes before the claim is
+  # replaced. Under a delegated idle screen one of those holders is the
+  # delegate's own pod.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]

@@ -82,6 +82,24 @@ type PlayerStatus struct {
 	// Panel is what the screen's Display last observed, empty
 	// until a Display carries an observation.
 	Panel string `json:"panel,omitempty"`
+
+	// Idle is the resolved idle screen controller and, where a
+	// controller draws, the standing claim a delegate references and the
+	// requests that claim carries. It is nil for a Player that drives no
+	// screen and for a cluster that names no display-draw class.
+	Idle *PlayerIdleStatus `json:"idle,omitempty"`
+}
+
+// PlayerIdleStatus is what a delegate reads to draw this unit's
+// idle screen. Controller is the resolved name, always set. Claim is the
+// standing claim in the Player's namespace, which the delegate's pod
+// references by name. Requests are the claim's request names in claim
+// order, one per resources.claims entry the delegate's container states.
+// Under media.liken.sh/none the block carries the controller alone.
+type PlayerIdleStatus struct {
+	Controller string   `json:"controller"`
+	Claim      string   `json:"claim,omitempty"`
+	Requests   []string `json:"requests,omitempty"`
 }
 
 // The three panel states, each folded from the Display's
@@ -167,6 +185,13 @@ type IdlePolicy struct {
 	// window, the backlight or the panel's power. Empty defers to the
 	// next tier.
 	OffMode string `json:"offMode,omitempty"`
+
+	// Controller names the operator that draws this unit's idle
+	// screen, a domain-qualified name the way a GatewayClass names its
+	// controllerName. Empty defers to the next tier, and where no tier
+	// states one the built-in is media.liken.sh/idle-screen, this
+	// operator's own name.
+	Controller string `json:"controller,omitempty"`
 }
 
 // The two ways a panel goes dark, and the two override blocks they

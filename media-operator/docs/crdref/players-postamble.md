@@ -58,7 +58,7 @@ outside 0 to 100 is clamped to the range.
 
 ### `panel`
 
-The desire the idle sidecar states for the unit's screen:
+The desire the idle command pod states for the unit's screen:
 
     {"desire": "off"}
 
@@ -70,7 +70,7 @@ the panel actually shows comes back the other way, from the
 
 ### `screen`
 
-What the idle sidecar decided for the unit's screen, one moment per
+What the idle command pod decided for the unit's screen, one moment per
 message:
 
     {"event": "focus", "remote": 1}
@@ -101,7 +101,7 @@ indicator, and every message after it is a press.
 ### `commands`
 
 The operator's channel to the `Player`'s idle pod. It carries
-`{"action": "re-present"}` when a `Play` ends, and the idle sidecar
+`{"action": "re-present"}` when a `Play` ends, and the idle command pod
 states the `present` moment on [`screen`](#screen). A controller
 never sends it, and it carries none of the media actions a
 [Play's commands topic](/docs/reference/plays/#commands) accepts.

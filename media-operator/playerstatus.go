@@ -57,6 +57,31 @@ func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatu
 	return PlayerStatus{Activity: playerIdle}
 }
 
+// deriveIdleStatus reports what a delegate reads to draw this
+// unit's idle screen: the resolved controller, the standing claim in the
+// Player's namespace, and that claim's request names in claim order. A
+// delegate acts on the status and never on the spec, because the spec
+// may inherit its controller from MediaPreferences and only this
+// operator resolves the tiers.
+//
+// A nil claim is a Player that drives no screen, or a cluster that
+// names no display-draw class, and such a unit reports no idle block at
+// all. Under media.liken.sh/none nothing draws and no claim stands, so
+// the block carries the controller alone.
+func deriveIdleStatus(controller string, claim *ResourceClaim) *PlayerIdleStatus {
+	if claim == nil {
+		return nil
+	}
+	if controller == idleControllerNone {
+		return &PlayerIdleStatus{Controller: controller}
+	}
+	return &PlayerIdleStatus{
+		Controller: controller,
+		Claim:      claim.Metadata.Name,
+		Requests:   claimRequests(claim),
+	}
+}
+
 // playerBusStatus is the presentable state of one unit, the whole of what
 // the operator says to the idle screen. The Kubernetes status stays the
 // record of what the Player is doing; this is the same fact plus the words

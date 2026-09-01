@@ -2,7 +2,7 @@
 // the operator says about a unit. The operator folds the Kubernetes objects
 // into it, so this client resolves nothing and reads one payload.
 //
-// `media-operator` writes it in `playerstatus.go`, and the idle sidecar
+// `media-operator` writes it in `playerstatus.go`, and the idle command pod
 // follows the same topic.
 
 use serde::Deserialize;

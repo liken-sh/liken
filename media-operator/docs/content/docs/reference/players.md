@@ -129,6 +129,7 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="specidle--controller"></span>`controller` | string | no | The operator that draws this unit's idle screen, as a domain-qualified name. Two names belong to the media operator: media.liken.sh/idle-screen, which is the default and draws the idle screen this operator ships, and media.liken.sh/none, under which nothing draws an idle screen on this unit and no claim stands. Any other name hands the screen to the operator that answers to it, which reads status.idle for the claim to reference and the requests it carries; image has no effect under such a name, because that operator brings its own pod. Omit it to inherit the default MediaPreferences. Pattern: `^[a-z0-9.-]+/[a-z0-9-]+$`. |
 | <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus: the status topic, the volume topic where the unit has sinks, and the screen topic that carries the shade (sleep and wake), the focus marks, and the present moments. Omit it to inherit the default MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
 | <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
 | <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
@@ -143,6 +144,17 @@ What plays on this Player now, written only by the media operator. It is derived
 | <span id="status--activity"></span>`activity` | string | no | Whether the Player performs a run now. Playing is a Play running on it, Starting is a Play whose pod has not begun, and Idle is no Play at all. One of: `Playing`, `Starting`, `Idle`. |
 | <span id="status--play"></span>`play` | string | no | The name of the Play on this Player, in the same namespace. Empty while the Player is Idle. |
 | <span id="status--panel"></span>`panel` | string | no | What the screen's Display last observed: On, BacklightOff, or Off. Empty until a Display carries an observation for the unit's screen. |
+| <span id="status--idle"></span>`idle` | [object](#statusidle) | no | What draws this unit's idle screen, and what the operator that draws it needs. It is absent for a Player that drives no screen and where the cluster names no display-draw class. An operator that draws a delegated screen reads this block and never the spec, because the spec may inherit its controller from the default MediaPreferences and only the media operator resolves the tiers. |
+
+### status.idle
+
+What draws this unit's idle screen, and what the operator that draws it needs. It is absent for a Player that drives no screen and where the cluster names no display-draw class. An operator that draws a delegated screen reads this block and never the spec, because the spec may inherit its controller from the default MediaPreferences and only the media operator resolves the tiers.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusidle--controller"></span>`controller` | string | no | The resolved controller name, after spec.idle.controller, the default MediaPreferences, and the built-in media.liken.sh/idle-screen resolve in that order. |
+| <span id="statusidle--claim"></span>`claim` | string | no | The standing ResourceClaim on this unit's screen, in the Player's namespace. The pod that draws references it by name in its resourceClaims. Empty under media.liken.sh/none, where no claim stands. |
+| <span id="statusidle--requests"></span>`requests` | []string | no | The claim's request names, in claim order: draw, and render where the Player states a render node. The container that draws states one resources.claims entry per name. Empty under media.liken.sh/none. |
 
 ## On the bus
 
@@ -204,7 +216,7 @@ outside 0 to 100 is clamped to the range.
 
 ### `panel`
 
-The desire the idle sidecar states for the unit's screen:
+The desire the idle command pod states for the unit's screen:
 
     {"desire": "off"}
 
@@ -216,7 +228,7 @@ the panel actually shows comes back the other way, from the
 
 ### `screen`
 
-What the idle sidecar decided for the unit's screen, one moment per
+What the idle command pod decided for the unit's screen, one moment per
 message:
 
     {"event": "focus", "remote": 1}
@@ -247,7 +259,7 @@ indicator, and every message after it is a press.
 ### `commands`
 
 The operator's channel to the `Player`'s idle pod. It carries
-`{"action": "re-present"}` when a `Play` ends, and the idle sidecar
+`{"action": "re-present"}` when a `Play` ends, and the idle command pod
 states the `present` moment on [`screen`](#screen). A controller
 never sends it, and it carries none of the media actions a
 [Play's commands topic](/docs/reference/plays/#commands) accepts.

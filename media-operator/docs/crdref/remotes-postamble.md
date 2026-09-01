@@ -106,7 +106,7 @@ idle screen.
 
 A press bound to `cycle-focus` publishes on `focus/cycle`. Only the
 holder of focus publishes it, the translator during a film and the
-idle sidecar between films. The operator reads the request and
+idle command pod between films. The operator reads the request and
 advances the mark to the next bound `Player` by name, wrapping the
 last back to the first. A controller bound to one unit wraps to
 the same `Player`, and the operator republishes the mark, which

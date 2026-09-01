@@ -1,7 +1,7 @@
 //! The preview keys, the workstation stand-in for the bus, and the legend that
 //! names them on the screen itself.
 //!
-//! On a cluster the idle sidecar publishes the `Player`'s status, its level,
+//! On a cluster the idle command pod publishes the `Player`'s status, its level,
 //! and the screen's moments, and the pod has no keyboard. On a workstation
 //! `local/idle` sets `IDLE_PREVIEW=1` and the keys below build the same
 //! [`Message`] values those topics carry. The client folds each one through

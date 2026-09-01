@@ -172,7 +172,7 @@ func (tr *translator) handle(topic string, payload []byte) {
 // empty a running translation.
 //
 // The repeat milliseconds are clamped here for the same reason
-// the idle sidecar clamps its own tables.
+// the idle command pod clamps its own tables.
 func (tr *translator) setTable(payload []byte) {
 	var table []compiledBinding
 	if err := json.Unmarshal(payload, &table); err != nil {
@@ -304,7 +304,7 @@ func (tr *translator) repeatLoop(ctx context.Context, command mediaCommand, dela
 }
 
 // runRepeat is the one clock a held control ticks on, for the translator
-// during a film and for the idle sidecar between films, so a hold feels
+// during a film and for the idle command pod between films, so a hold feels
 // the same on both screens. It waits the delay, which is what separates
 // a tap from a hold, then fires every interval. It ends on the context,
 // which the release cancels, or on the safety window.

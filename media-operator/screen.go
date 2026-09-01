@@ -85,9 +85,25 @@ type DisplayObserved struct {
 }
 
 // The claim status the scheduler writes. The operator reads it
-// for one question: which device the draw request took.
+// for two questions: which device the draw request took, and which pods
+// hold the claim now.
 type ResourceClaimStatus struct {
 	Allocation *DeviceAllocationResult `json:"allocation,omitempty"`
+
+	// ReservedFor names every object that holds an allocated
+	// claim. An allocated claim carries the delete-protection finalizer,
+	// so a delete stays in Terminating until every holder is gone.
+	ReservedFor []ClaimConsumer `json:"reservedFor,omitempty"`
+}
+
+// One holder of an allocated claim. The field names match DRA's
+// ResourceClaimConsumerReference. Resource is the plural resource name,
+// and the operator acts on pods alone.
+type ClaimConsumer struct {
+	APIGroup string `json:"apiGroup,omitempty"`
+	Resource string `json:"resource,omitempty"`
+	Name     string `json:"name,omitempty"`
+	UID      string `json:"uid,omitempty"`
 }
 
 type DeviceAllocationResult struct {
@@ -216,7 +232,7 @@ type panelOverride struct {
 }
 
 // reconcilePanel settles one unit's panel and answers the
-// state its status carries. The desire is the idle sidecar's, the
+// state its status carries. The desire is the idle command pod's, the
 // override is this operator's write, and the observed state is the
 // display-operator's. A unit whose screen carries no Display keeps
 // its panel lit: there is no second writer to fall back to.

@@ -289,3 +289,122 @@ func centerPixel(t *testing.T, path string, w, h, stride int) (b, g, r byte) {
 	offset := (h/2)*stride + (w/2)*4
 	return pixels[offset+0], pixels[offset+1], pixels[offset+2]
 }
+
+// A directory the bridge cannot read as a trickplay set has no layout
+// and no sheets, so a scrub over it crops nothing.
+func TestFindLayoutAndHighestSheetOnDirectoriesThatCarryNoSheets(t *testing.T) {
+	loose := t.TempDir()
+	mustSucceed(t, os.WriteFile(filepath.Join(loose, "poster.jpg"), []byte("x"), 0o644))
+	mustSucceed(t, os.MkdirAll(filepath.Join(loose, "extras"), 0o755))
+
+	mixed := t.TempDir()
+	mustSucceed(t, os.MkdirAll(filepath.Join(mixed, "sheets"), 0o755))
+	for _, name := range []string{"notes.txt", "cover.png", "first.jpg"} {
+		mustSucceed(t, os.WriteFile(filepath.Join(mixed, name), []byte("x"), 0o644))
+	}
+
+	t.Run("no directory names a layout", func(t *testing.T) {
+		_, _, _, _, ok := findLayout(loose)
+		mustMatch(t, ok, false)
+	})
+	t.Run("the directory is not there", func(t *testing.T) {
+		_, _, _, _, ok := findLayout(filepath.Join(loose, "absent"))
+		mustMatch(t, ok, false)
+	})
+	t.Run("no file is a numbered sheet", func(t *testing.T) {
+		mustMatch(t, highestSheet(mixed), 0)
+	})
+	t.Run("the sheet directory is not there", func(t *testing.T) {
+		mustMatch(t, highestSheet(filepath.Join(mixed, "absent")), 0)
+	})
+}
+
+// A sheet directory the bridge cannot crop a tile from answers nothing,
+// and the display then scrubs with no thumbnail.
+func TestServeTrickplayAnswersNothingWhenItCannotCrop(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, c *commander)
+	}{
+		{
+			name: "the item names no trickplay set",
+			setup: func(t *testing.T, c *commander) {
+				c.presentations = []json.RawMessage{json.RawMessage(emptyPresentation)}
+			},
+		},
+		{
+			name: "the block is not a presentation",
+			setup: func(t *testing.T, c *commander) {
+				c.presentations = []json.RawMessage{json.RawMessage(`"not a block"`)}
+			},
+		},
+		{
+			name: "no directory names a layout",
+			setup: func(t *testing.T, c *commander) {
+				c.presentations = []json.RawMessage{trickBlock(t.TempDir())}
+			},
+		},
+		{
+			name: "the sheet is not an image",
+			setup: func(t *testing.T, c *commander) {
+				root := t.TempDir()
+				layout := filepath.Join(root, "16 - 2x2")
+				mustSucceed(t, os.MkdirAll(layout, 0o755))
+				mustSucceed(t, os.WriteFile(filepath.Join(layout, "0.jpg"), []byte("not an image"), 0o644))
+				c.presentations = []json.RawMessage{trickBlock(root)}
+			},
+		},
+		{
+			name: "the sheet is too short to hold its rows",
+			setup: func(t *testing.T, c *commander) {
+				root := t.TempDir()
+				layout := filepath.Join(root, "16 - 2x2")
+				mustSucceed(t, os.MkdirAll(layout, 0o755))
+				file, err := os.Create(filepath.Join(layout, "0.jpg"))
+				mustSucceed(t, err)
+				defer file.Close()
+				mustSucceed(t, jpeg.Encode(file, image.NewRGBA(image.Rect(0, 0, 32, 1)), nil))
+				c.presentations = []json.RawMessage{trickBlock(root)}
+			},
+		},
+		{
+			name: "the art directory is not there",
+			setup: func(t *testing.T, c *commander) {
+				c.artDir = filepath.Join(t.TempDir(), "absent")
+				c.presentations = []json.RawMessage{trickBlock(writeSheet(t, map[int]color.RGBA{0: {R: 200, A: 255}}))}
+			},
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			t.Setenv(trickplayIntervalVariable, "10s")
+			c, lines := bridgeToMPV(t)
+			c.artItem = 1
+			each.setup(t, c)
+
+			c.serveTrickplay(artRequest{kind: artKindTrickplay, timeMs: 5_000, width: 24, height: 24})
+
+			expectNoArtReply(t, lines)
+		})
+	}
+}
+
+// A time past the end of the film maps past the last sheet on disk, so
+// the bridge clamps to the highest sheet and answers with a tile from it.
+func TestServeTrickplayClampsATimePastTheLastSheet(t *testing.T) {
+	t.Setenv(trickplayIntervalVariable, "10s")
+	c, lines := bridgeToMPV(t)
+	c.artItem = 1
+	c.presentations = []json.RawMessage{trickBlock(writeSheet(t, map[int]color.RGBA{0: {G: 200, A: 255}}))}
+
+	go c.serveTrickplay(artRequest{kind: artKindTrickplay, timeMs: 9_000_000, width: 24, height: 24})
+
+	path, w, h, stride := parseArtReply(t, waitForLine(t, lines))
+	mustMatch(t, w, 24)
+	mustExist(t, path)
+
+	b, g, r := centerPixel(t, path, w, h, stride)
+	if !(g > 150 && r < 60 && b < 60) {
+		t.Fatalf("center pixel bgra = (%d,%d,%d), want the green cell 0 of the last sheet", b, g, r)
+	}
+}

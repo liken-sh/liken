@@ -1,6 +1,6 @@
 package main
 
-// These tests cover the idle sidecar's fade: the quiet window it arms
+// These tests cover the idle command pod's fade: the quiet window it arms
 // only while the unit plays nothing, the press that restarts it and
 // lifts the shade, the status that leaves Idle, and the back press a
 // person sleeps the screen with by hand.
@@ -111,7 +111,7 @@ func fadeTopics() (events, keymap string) {
 		keymapTopic(defaultTopicBase, "gamepad")
 }
 
-// idleTestPlayer is the Player every idle sidecar in these tests
+// idleTestPlayer is the Player every idle command pod in these tests
 // stands for, the same name its commands and status topics carry.
 const idleTestPlayer = "theater"
 
@@ -139,7 +139,7 @@ func focusedRemotes(t *testing.T, remotes map[string]string) (map[string]idleRem
 	return records, marks
 }
 
-// fadingCommander builds one idle sidecar for a Player, with its quiet
+// fadingCommander builds one idle command pod for a Player, with its quiet
 // window in milliseconds so the fade lands inside a test rather than
 // ten minutes after it. The watch it returns holds both halves of what
 // the sidecar sends: every moment on the screen topic, and every other

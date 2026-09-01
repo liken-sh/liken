@@ -1,10 +1,11 @@
 package main
 
-// The operator owns two standing pairs: a Player's idle claim with its
-// idle pod, and a Remote's controller claim with its reader pod. Both
-// stand whether or not anything plays, and both follow the template the
-// current pass would build. This file holds the hash that tells one from
-// the other, and the rule both reconciles run.
+// The operator owns three kinds of standing objects: a Player's idle claim
+// with its idle client pod, a Player's idle command pod, which holds no
+// claim, and a Remote's controller claim with its reader pod. Each one
+// stands whether or not anything plays, and each follows the template the
+// current pass would build. This file holds the hash that tells one
+// template from another, and the rule every standing reconcile runs.
 //
 // A Deployment finds a stale pod by stamping a hash of the template it
 // built and comparing that hash, never by comparing live specs, because
@@ -61,6 +62,37 @@ func stampTemplateHash(metadata *ObjectMeta, spec any) error {
 	return nil
 }
 
+// standing is what one pass wants for a claim and a pod that
+// stand between runs: the namespace and the names to read in the
+// cluster, and the objects this pass would build under those names. A
+// nil object is one the pass no longer wants, and the name beside it is
+// what the pass deletes. An empty claim name is a standing pod that
+// holds no claim.
+type standing struct {
+	namespace string
+	claimName string
+	claim     *ResourceClaim
+	podName   string
+	pod       *Pod
+}
+
+// standingPair is the standing of a Remote or of the idle screen
+// this operator draws itself: one claim and one pod, both built by this
+// pass and both wanted.
+func standingPair(claim *ResourceClaim, pod *Pod) standing {
+	return standing{
+		namespace: claim.Metadata.Namespace,
+		claimName: claim.Metadata.Name,
+		claim:     claim,
+		podName:   pod.Metadata.Name,
+		pod:       pod,
+	}
+}
+
+// podsResource is the resource name a claim's status.reservedFor
+// carries for a pod. This operator acts on that kind of holder alone.
+const podsResource = "pods"
+
 // reconcileStanding brings one standing pair into line with the claim and
 // the pod this pass would build. It stamps both with their template
 // hashes, reads what the cluster holds, and replaces whichever object no
@@ -75,24 +107,36 @@ func stampTemplateHash(metadata *ObjectMeta, spec any) error {
 // controller the allocation it holds, and the reader pod comes back
 // running instead of Pending.
 //
+// An object the pass no longer wants is deleted on the same two
+// rules: an unwanted claim takes its holders with it, and an unwanted pod
+// goes alone.
+//
 // A 409 on either create means another pass, or another copy of this
 // operator, created the object first, which is success.
-func (o *operator) reconcileStanding(claim *ResourceClaim, pod *Pod) error {
-	if err := stampTemplateHash(&claim.Metadata, claim.Spec); err != nil {
-		return err
+func (o *operator) reconcileStanding(want standing) error {
+	if want.claim != nil {
+		if err := stampTemplateHash(&want.claim.Metadata, want.claim.Spec); err != nil {
+			return err
+		}
 	}
-	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
-		return err
+	if want.pod != nil {
+		if err := stampTemplateHash(&want.pod.Metadata, want.pod.Spec); err != nil {
+			return err
+		}
 	}
-	namespace := claim.Metadata.Namespace
+	namespace := want.namespace
 
-	liveClaim, err := GetResourceClaim(o.client, namespace, claim.Metadata.Name)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
+	var liveClaim *ResourceClaim
+	claimStands := false
+	if want.claimName != "" {
+		held, err := GetResourceClaim(o.client, namespace, want.claimName)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		liveClaim, claimStands = held, err == nil
 	}
-	claimStands := err == nil
 
-	livePod, err := GetPod(o.client, namespace, pod.Metadata.Name)
+	livePod, err := GetPod(o.client, namespace, want.podName)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
@@ -114,33 +158,64 @@ func (o *operator) reconcileStanding(claim *ResourceClaim, pod *Pod) error {
 	// So the first release that carries the stamp rolls every standing
 	// pod once, and the pass after that reads matching hashes and deletes
 	// nothing.
-	if claimStands && !sameTemplate(&liveClaim.Metadata, &claim.Metadata) {
-		// The pod goes first. A claim in use carries a finalizer until
-		// every pod that holds it is gone, so deleting the claim under a
-		// running pod would leave the claim terminating for as long as the
-		// pod runs.
+	if claimStands && (want.claim == nil || !sameTemplate(&liveClaim.Metadata, &want.claim.Metadata)) {
+		own := ""
 		if podStands {
-			if err := DeletePod(o.client, namespace, pod.Metadata.Name); err != nil {
-				return err
-			}
+			own = want.podName
 		}
-		return DeleteResourceClaim(o.client, namespace, claim.Metadata.Name)
+		if err := o.deleteClaimHolders(liveClaim, own); err != nil {
+			return err
+		}
+		return DeleteResourceClaim(o.client, namespace, want.claimName)
 	}
-	if podStands && !sameTemplate(&livePod.Metadata, &pod.Metadata) {
-		return DeletePod(o.client, namespace, pod.Metadata.Name)
+	if podStands && (want.pod == nil || !sameTemplate(&livePod.Metadata, &want.pod.Metadata)) {
+		return DeletePod(o.client, namespace, want.podName)
 	}
 
-	if !claimStands {
-		if _, err := CreateResourceClaim(o.client, claim); err != nil && !errors.Is(err, ErrConflict) {
+	if want.claim != nil && !claimStands {
+		if _, err := CreateResourceClaim(o.client, want.claim); err != nil && !errors.Is(err, ErrConflict) {
 			return err
 		}
 	}
-	if !podStands {
-		if _, err := CreatePod(o.client, pod); err != nil && !errors.Is(err, ErrConflict) {
+	if want.pod != nil && !podStands {
+		if _, err := CreatePod(o.client, want.pod); err != nil && !errors.Is(err, ErrConflict) {
 			return err
 		}
 	}
 	return nil
+}
+
+// deleteClaimHolders deletes every pod that holds one claim,
+// before the claim itself goes. A claim in use carries the
+// delete-protection finalizer until every holder is gone, so deleting the
+// claim under a running pod would leave it Terminating for as long as
+// that pod runs. status.reservedFor is the holder list, and it is the
+// one place this operator learns of a delegate's pod, which it did not
+// create.
+//
+// own is this operator's own pod for the claim, which goes whether
+// or not the list names it: a pod still Pending holds no reservation, and
+// leaving it would let it schedule against the replacement claim. An
+// absent pod is a holder that already went, which the delete reads as
+// success.
+func (o *operator) deleteClaimHolders(claim *ResourceClaim, own string) error {
+	namespace := claim.Metadata.Namespace
+	deleted := map[string]bool{}
+	if claim.Status != nil {
+		for _, holder := range claim.Status.ReservedFor {
+			if holder.Resource != podsResource || deleted[holder.Name] {
+				continue
+			}
+			if err := DeletePod(o.client, namespace, holder.Name); err != nil {
+				return err
+			}
+			deleted[holder.Name] = true
+		}
+	}
+	if own == "" || deleted[own] {
+		return nil
+	}
+	return DeletePod(o.client, namespace, own)
 }
 
 // sameTemplate reports whether a live object carries the hash the pass

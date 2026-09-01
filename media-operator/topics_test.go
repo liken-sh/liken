@@ -20,6 +20,7 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "remote availability", got: remoteAvailabilityTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/availability"},
 		{name: "remote presence filter", got: remotePresenceFilter(base), want: "liken/media/remotes/+/+/presence"},
 		{name: "remote availability filter", got: remoteAvailabilityFilter(base), want: "liken/media/remotes/+/+/availability"},
+		{name: "remote codes filter", got: remoteCodesFilter(base), want: "liken/media/remotes/+/+/codes"},
 		{name: "player status", got: playerStatusTopic(base, "house", "theater"), want: "liken/media/players/house/theater/status"},
 		{name: "focus filter", got: remoteFocusFilter(base), want: "liken/media/remotes/+/+/focus"},
 		{name: "focus cycle filter", got: remoteFocusCycleFilter(base), want: "liken/media/remotes/+/+/focus/cycle"},

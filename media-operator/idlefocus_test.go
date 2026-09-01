@@ -1,6 +1,6 @@
 package main
 
-// These tests cover the idle sidecar's focus gate: the presses it answers
+// These tests cover the idle command pod's focus gate: the presses it answers
 // only for a controller whose mark names this Player, the focus and the wake
 // a live mark brings, the retained catch-up that brings neither, and the
 // cycle request a focused press publishes.
@@ -273,7 +273,7 @@ func TestIdleCycleFocusDoesNotWakeTheScreen(t *testing.T) {
 }
 
 // A Play owns the presses on the unit it runs on, and its own translator
-// publishes the cycle, so the idle sidecar publishes none while one runs.
+// publishes the cycle, so the idle command pod publishes none while one runs.
 func TestIdleCycleFocusPublishesNothingWhileAPlayRuns(t *testing.T) {
 	events, keymap := fadeTopics()
 	ic, watch := fadingCommander(t, 0, map[string]string{events: keymap})

@@ -11,12 +11,12 @@
 profile: coverage.out
 
 threshold:
-  total: 78
+  total: 85
 
 override:
   # The EDL: pure parsing and timeline arithmetic.
   - path: ^edl$
-    threshold: 86
+    threshold: 93
   # The local harness: a developer tool for driving a player on a
   # workstation, not something the operator ships.
   - path: ^local/edl$

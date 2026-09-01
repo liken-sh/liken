@@ -1,6 +1,6 @@
 //! The shade: how far the whole screen is darkened.
 //!
-//! The idle sidecar owns the quiet timer and sends the two moments the cover
+//! The idle command pod owns the quiet timer and sends the two moments the cover
 //! reads. This module only eases between clear and opaque. Going dark is slow
 //! and coming back is fast, because a screen that fades on its own has no one
 //! watching it, and a person who pressed a button is waiting.

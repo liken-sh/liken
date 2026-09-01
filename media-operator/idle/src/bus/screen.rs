@@ -1,4 +1,4 @@
-// The four events on the `Player`'s screen topic: the idle sidecar's own
+// The four events on the `Player`'s screen topic: the idle command pod's own
 // decisions, which this client reads off the bus.
 //
 // The shade events are state, so the sidecar publishes them retained and

@@ -2,7 +2,7 @@ package main
 
 // The panel desk is the boundary between the bus and the
 // reconcile loop for one unit's panel, the way the presence desk is
-// for a controller. The idle sidecar holds no API credentials, so it
+// for a controller. The idle command pod holds no API credentials, so it
 // publishes its desire for the panel, and the pass turns the desk's
 // newest desire into an override on the screen's Display.
 

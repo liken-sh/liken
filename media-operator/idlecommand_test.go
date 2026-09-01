@@ -1,6 +1,6 @@
 package main
 
-// These tests cover the idle command sidecar: the bus identity it takes
+// These tests cover the idle command pod: the bus identity it takes
 // from its commands topic, and the one command it acts on.
 
 import (
@@ -9,7 +9,7 @@ import (
 )
 
 // The sidecar's bus identity comes from its commands topic, so one
-// identity per Player falls out and two idle sidecars never collide.
+// identity per Player falls out and two idle command pods never collide.
 func TestIdleCommandClientIDDerivesFromTheTopic(t *testing.T) {
 	topic := playerCommandsTopic(defaultTopicBase, "house", "theater")
 	mustMatch(t, idleCommandClientID(topic), "idle-command-liken-media-players-house-theater-commands")
@@ -55,4 +55,63 @@ func TestIdleCommandARePresentStatesNothingWhileAPlayRuns(t *testing.T) {
 	ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionRePresent}))
 
 	noMoment(t, watch, 100*time.Millisecond)
+}
+
+// The idle screen list arrives as one variable holding a line per entry.
+// An unset variable is no lines at all, not one empty line.
+func TestSplitIdleLines(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		lines []string
+	}{
+		{name: "two lines", value: "first\nsecond", lines: []string{"first", "second"}},
+		{name: "one line", value: "first", lines: []string{"first"}},
+		{name: "the variable is unset", lines: nil},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			mustMatchAll(t, splitIdleLines(each.value), each.lines)
+		})
+	}
+}
+
+// The idle command pod states the desire it holds on every bus session, because
+// the retained topic can hold the off desire of the process before it. A Player
+// with no panel topic states no desire.
+func TestPublishDesireStatesTheDesireTheSidecarHolds(t *testing.T) {
+	cases := []struct {
+		name    string
+		topic   string
+		desire  string
+		payload string
+	}{
+		{
+			name:    "the panel stands on a topic",
+			topic:   playerPanelTopic(defaultTopicBase, "house", "theater"),
+			desire:  panelDesireOff,
+			payload: `{"desire":"off"}`,
+		},
+		{name: "the Player names no panel topic", desire: panelDesireOff},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			published := make(chan string, 2)
+			ic := &idleCommander{
+				panelTopic: each.topic,
+				desire:     each.desire,
+				publish: func(topic string, payload []byte, retained bool) {
+					published <- topic + " " + string(payload)
+				},
+			}
+
+			ic.publishDesire()
+
+			if each.payload == "" {
+				mustMatch(t, len(published), 0)
+				return
+			}
+			mustMatch(t, <-published, each.topic+" "+each.payload)
+		})
+	}
 }

@@ -87,7 +87,7 @@ const (
 	idlePlayerNameVariable       = "IDLE_PLAYER_NAME"
 	idlePlayerComponentsVariable = "IDLE_PLAYER_COMPONENTS"
 
-	// The idle sidecar's fade wiring. The first carries the resolved
+	// The idle command pod's fade wiring. The first carries the resolved
 	// quiet window in seconds, where zero means the screen never fades
 	// on its own. The three topic lists are newline-joined and aligned by
 	// position, so each remote's events topic pairs with the keymap topic
@@ -111,10 +111,10 @@ const (
 	// status topics, so the sidecar parses no topic.
 	idlePanelTopicVariable = "IDLE_PANEL_TOPIC"
 
-	// The topic the sidecar publishes the screen's moments on, and the
-	// idle client reads them off. The operator sets it on both
-	// containers of every idle pod, because the sidecar decides those
-	// moments whichever client draws them.
+	// The topic the idle command pod publishes the screen's
+	// moments on, and the idle client reads them off. The operator sets
+	// it on the idle command pod and on every idle client pod, because
+	// the command pod decides those moments whichever client draws them.
 	playerScreenTopicVariable = "MEDIA_PLAYER_SCREEN_TOPIC"
 
 	// The command sidecar carries every item's presentation block, baked

@@ -59,28 +59,32 @@ func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
 func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
-	base, err := templateHash(plainIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase, "America/New_York").Spec)
+	base, err := templateHash(plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York").Spec)
+	mustSucceed(t, err)
+	commandBase, err := templateHash(plainIdleCommandPod(player).Spec)
 	mustSucceed(t, err)
 
 	cases := []struct {
 		name string
+		base string
 		pod  *Pod
 	}{
-		{"the sidecar image", plainIdlePod(player, claim, testSidecarImage+"-next", testBusAddress, testTopicBase, "America/New_York")},
-		{"the idle image", buildIdlePod(player, claim, testSidecarImage, testBusAddress,
-			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage+"-next"), nil)},
-		{"the timezone", plainIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase, "Europe/Berlin")},
-		{"the fade policy", buildIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase,
-			"America/New_York", resolveIdle(fadeAfter(60), nil, testIdleImage), nil)},
-		{"a remote", buildIdlePod(player, claim, testSidecarImage, testBusAddress, testTopicBase,
-			"America/New_York", resolveIdle(nil, nil, testIdleImage),
+		{"the idle image", base, buildIdlePod(player, claim, testBusAddress,
+			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage+"-next"))},
+		{"the timezone", base, plainIdlePod(player, claim, testBusAddress, testTopicBase, "Europe/Berlin")},
+		{"the sidecar image", commandBase, buildIdleCommandPod(player, testSidecarImage+"-next",
+			testBusAddress, testTopicBase, resolveIdle(nil, nil, testIdleImage), nil)},
+		{"the fade policy", commandBase, buildIdleCommandPod(player, testSidecarImage, testBusAddress,
+			testTopicBase, resolveIdle(fadeAfter(60), nil, testIdleImage), nil)},
+		{"a remote", commandBase, buildIdleCommandPod(player, testSidecarImage, testBusAddress,
+			testTopicBase, resolveIdle(nil, nil, testIdleImage),
 			[]idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}})},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			hash, err := templateHash(one.pod.Spec)
 			mustSucceed(t, err)
-			if hash == base {
+			if hash == one.base {
 				t.Errorf("%s changed and the hash stayed %q", one.name, hash)
 			}
 		})
@@ -258,7 +262,7 @@ func TestReconcileIdleRollsThePodOnAPlayerEdit(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, media.idleDisplayClass)
 	seedStanding(t, cluster, claim,
-		plainIdlePod(player, claim, media.sidecarImage, media.busAddress, media.topicBase, "America/New_York"))
+		plainIdlePod(player, claim, media.busAddress, media.topicBase, "America/New_York"))
 
 	player.Spec.DisplayName = "Studio Lab"
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
@@ -281,4 +285,99 @@ func TestReconcileIdleRollsThePodOnAPlayerEdit(t *testing.T) {
 		env[entry.Name] = entry.Value
 	}
 	mustMatch(t, env[idlePlayerNameVariable], "Studio Lab")
+}
+
+// reservedBy marks one claim as held by the named pods, the way the
+// scheduler marks an allocated claim.
+func reservedBy(claim *ResourceClaim, pods ...string) {
+	claim.Status = &ResourceClaimStatus{}
+	for _, pod := range pods {
+		claim.Status.ReservedFor = append(claim.Status.ReservedFor,
+			ClaimConsumer{Resource: "pods", Name: pod, UID: pod + "-uid"})
+	}
+}
+
+// deleteOrder is the objects one pass deleted, in the order it sent the
+// deletes, as kind and name.
+func deleteOrder(cluster *fakeCluster) []string {
+	var sent []string
+	for _, request := range cluster.requests {
+		if !strings.HasPrefix(request, http.MethodDelete) {
+			continue
+		}
+		parts := strings.Split(request, "/")
+		sent = append(sent, parts[len(parts)-2]+"/"+parts[len(parts)-1])
+	}
+	return sent
+}
+
+// a claim the pass would rebuild takes every pod that holds it
+// with it, the delegate's pod included, because an allocated claim stays
+// Terminating until every holder is gone. The holders go before the
+// claim.
+func TestReconcileStandingDeletesTheClaimHoldersBeforeTheClaim(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.idleDisplayClass = "display-draw"
+	player := standingIdlePlayer()
+	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
+	claim := buildIdleClaim(player, media.idleDisplayClass)
+	mustSucceed(t, stampTemplateHash(&claim.Metadata, claim.Spec))
+	reservedBy(claim, "browser")
+	cluster.claims[claim.Metadata.Name] = claim
+	cluster.pods["browser"] = &Pod{Metadata: ObjectMeta{Name: "browser", Namespace: "house"}}
+
+	player.Spec.Render = nil
+	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
+
+	if _, stands := cluster.pods["browser"]; stands {
+		t.Errorf("the delegate's pod stands over a stale claim: %v", cluster.requests)
+	}
+	if _, stands := cluster.claims["theater-idle-devices"]; stands {
+		t.Errorf("the stale claim stands: %v", cluster.requests)
+	}
+	mustMatchAll(t, deleteOrder(cluster), []string{"pods/browser", "resourceclaims/theater-idle-devices"})
+}
+
+// a holder the API server no longer holds is a pod that already
+// went, so the delete reads the absence as success and the claim follows.
+func TestReconcileStandingReadsAnAbsentHolderAsGone(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.idleDisplayClass = "display-draw"
+	player := standingIdlePlayer()
+	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
+	claim := buildIdleClaim(player, media.idleDisplayClass)
+	mustSucceed(t, stampTemplateHash(&claim.Metadata, claim.Spec))
+	reservedBy(claim, "browser")
+	cluster.claims[claim.Metadata.Name] = claim
+
+	player.Spec.Render = nil
+	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
+
+	if _, stands := cluster.claims["theater-idle-devices"]; stands {
+		t.Errorf("the stale claim stands: %v", cluster.requests)
+	}
+}
+
+// a pod the pass no longer wants is deleted though its template
+// never changed, and the claim it referenced stands, because the claim is
+// still wanted.
+func TestReconcileStandingDeletesAPodItNoLongerWants(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.idleDisplayClass = "display-draw"
+	player := standingIdlePlayer()
+	claim := buildIdleClaim(player, media.idleDisplayClass)
+	seedStanding(t, cluster, claim, plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York"))
+
+	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
+	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
+
+	if _, stands := cluster.pods["theater-idle"]; stands {
+		t.Errorf("the idle client pod stands under a delegate: %v", cluster.requests)
+	}
+	if _, stands := cluster.claims["theater-idle-devices"]; !stands {
+		t.Errorf("the claim went with the pod: %v", cluster.requests)
+	}
 }

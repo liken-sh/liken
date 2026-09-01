@@ -1,6 +1,6 @@
 package main
 
-// These tests cover the idle sidecar's half of the level: the level it
+// These tests cover the idle command pod's half of the level: the level it
 // holds so a press has something to step from, the press it publishes,
 // the two states it does not press in, and the speaker gate that turns
 // the whole path off.
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// volumeCommander builds one idle sidecar that holds a volume topic, with
+// volumeCommander builds one idle command pod that holds a volume topic, with
 // no fade window so nothing but the test drives it.
 func volumeCommander(t *testing.T, remotes map[string]string) (*idleCommander, *idleWatch) {
 	t.Helper()
@@ -104,7 +104,7 @@ func TestAnIdleMutePressPublishesTheToggledFlag(t *testing.T) {
 }
 
 // A unit that is playing has the film's own pod answering its
-// presses, so the idle sidecar publishes no level while a Play runs. Two
+// presses, so the idle command pod publishes no level while a Play runs. Two
 // publishers on one press would race to the same value for no gain.
 func TestTheIdleSidecarPressesNoVolumeWhileAPlayRuns(t *testing.T) {
 	events, keymap := fadeTopics()
@@ -134,7 +134,7 @@ func TestAPressOnASleepingScreenOnlyWakesIt(t *testing.T) {
 	noPublish(t, watch, 100*time.Millisecond)
 }
 
-// A Player with no sinks hands its idle sidecar no volume topic.
+// A Player with no sinks hands its idle command pod no volume topic.
 // That sidecar answers no press and applies no level, because a unit with
 // nothing to hear has no level to mean anything.
 func TestAnIdleSidecarWithNoSpeakersIgnoresTheVolume(t *testing.T) {
@@ -220,7 +220,7 @@ func TestAPlayStartedMidHoldSilencesTheRepeat(t *testing.T) {
 	releaseButton(t, ic, events, "BTN_NORTH")
 }
 
-// The idle sidecar clamps a repeat the same way the translator
+// The idle command pod clamps a repeat the same way the translator
 // does, and the press proves it: a table off the bus that names an
 // interval no Duration holds would panic the ticker this press starts,
 // on a goroutine that takes the sidecar down with it.

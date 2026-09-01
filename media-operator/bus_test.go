@@ -8,6 +8,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -259,4 +260,91 @@ func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
 	// has nowhere to go.
 	bus.Publish("liken/media/plays/house/movie/status", []byte("x"), true)
 	// The test proves only that the call returns and panics on nothing.
+}
+
+// The client newBus builds dials the address over TCP. Nothing answers
+// this port, so the dial fails rather than reaching some other broker.
+func TestNewBusDialsTheAddressOverTCP(t *testing.T) {
+	bus := newBus("127.0.0.1:1", "media-operator", nil, nil, nil)
+
+	_, err := bus.dial(context.Background())
+
+	if err == nil {
+		t.Fatal("the dial reached something on a port nothing listens on")
+	}
+}
+
+// A broker that never answers is retried ever more slowly, up to the
+// ceiling, so a broker that is down does not become a tight reconnect loop.
+func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
+	shorterBackoff(t)
+	waits := make(chan time.Duration, 16)
+	last := time.Now()
+
+	bus := newBus("pipe", "media-operator", nil, nil, nil)
+	bus.dial = func(ctx context.Context) (net.Conn, error) {
+		waits <- time.Since(last)
+		last = time.Now()
+		return nil, errors.New("the broker is down")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		bus.Run(ctx)
+	}()
+
+	// The first dial is immediate. Each wait after it is twice the
+	// one before, up to the ceiling the third wait already reaches.
+	floors := []time.Duration{0, busMinBackoff, 2 * busMinBackoff, busMaxBackoff, busMaxBackoff}
+	for dial, floor := range floors {
+		select {
+		case waited := <-waits:
+			if waited < floor {
+				t.Errorf("dial %d came %v after the one before, want at least %v", dial+1, waited, floor)
+			}
+		case <-time.After(busTestTimeout):
+			t.Fatal("the client stopped dialing")
+		}
+	}
+	cancel()
+
+	select {
+	case <-stopped:
+	case <-time.After(busTestTimeout):
+		t.Fatal("Run did not return when its context ended")
+	}
+}
+
+// Run returns while it waits out a backoff, so a pod that is shutting
+// down does not sit through the whole wait.
+func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
+	minWas, maxWas := busMinBackoff, busMaxBackoff
+	t.Cleanup(func() { busMinBackoff, busMaxBackoff = minWas, maxWas })
+	busMinBackoff, busMaxBackoff = time.Minute, time.Minute
+
+	dialed := make(chan struct{}, 1)
+	bus := newBus("pipe", "media-operator", nil, nil, nil)
+	bus.dial = func(ctx context.Context) (net.Conn, error) {
+		dialed <- struct{}{}
+		return nil, errors.New("the broker is down")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		bus.Run(ctx)
+	}()
+
+	<-dialed
+	cancel()
+
+	select {
+	case <-stopped:
+	case <-time.After(busTestTimeout):
+		t.Fatal("Run waited out the whole backoff")
+	}
 }

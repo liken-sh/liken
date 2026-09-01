@@ -889,3 +889,38 @@ func TestResolveIdleSettlesEachFieldOnItsOwn(t *testing.T) {
 func ptr[T any](value T) *T {
 	return &value
 }
+
+// the controller resolves the Player's block first, then the
+// household default, then the built-in name this operator answers to.
+func TestResolveIdleControllerTierWins(t *testing.T) {
+	cases := []struct {
+		name     string
+		player   *IdlePolicy
+		defaults *IdlePolicy
+		want     string
+	}{
+		{
+			name:     "the Player over the default",
+			player:   &IdlePolicy{Controller: "library.liken.sh/media-browser"},
+			defaults: &IdlePolicy{Controller: idleControllerNone},
+			want:     "library.liken.sh/media-browser",
+		},
+		{
+			name:     "the default where the Player states none",
+			defaults: &IdlePolicy{Controller: "library.liken.sh/media-browser"},
+			want:     "library.liken.sh/media-browser",
+		},
+		{name: "the built-in where neither states one", want: idleControllerOwn},
+		{
+			name:     "an empty controller on the Player",
+			player:   &IdlePolicy{Controller: ""},
+			defaults: &IdlePolicy{Controller: idleControllerNone},
+			want:     idleControllerNone,
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, resolveIdle(one.player, one.defaults, testIdleImage).Controller, one.want)
+		})
+	}
+}

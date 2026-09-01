@@ -5,7 +5,10 @@ package main
 // the panel, the override each desire writes there, and what a
 // cluster with no Display does instead.
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
 
 // The monitor id the display-operator publishes for the
 // screen, which is also the name of its Display.
@@ -262,6 +265,28 @@ func TestAPrunedUnitLiftsItsOverride(t *testing.T) {
 	mustMatch(t, len(media.panelOverrides), 0)
 }
 
+// A unit switched to media.liken.sh/none draws nothing, so a dark
+// panel it left behind is lifted the way a deleted unit's is, and the
+// desk drops the desire so no later pass applies it again.
+func TestAUnitSwitchedToNoneLiftsItsOverride(t *testing.T) {
+	cluster := screenCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	key := playerKey("house", "theater")
+
+	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	player := *cluster.players["theater"]
+	player.Spec.Idle = &IdlePolicy{Controller: idleControllerNone}
+	media.reconcilePlayers([]Player{player}, nil, "", nil)
+
+	mustMatch(t, len(cluster.applies), 2)
+	if cluster.applies[1].override != nil {
+		t.Errorf("the lift carried %+v, want no override", cluster.applies[1].override)
+	}
+	mustMatch(t, len(media.panelOverrides), 0)
+	mustMatch(t, media.panels.stateFor(key), "")
+	mustMatch(t, cluster.players["theater"].Status.Panel, "")
+}
+
 // A unit whose panel was lit owes the screen nothing, so its
 // entry goes with no write at all.
 func TestAPrunedUnitWithTheOnDesireLiftsNothing(t *testing.T) {
@@ -342,6 +367,61 @@ func TestADeviceWithNoMonitorIDNamesNoScreen(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	_, found := newScreens(media.client).monitorFor(housePlayer())
+
+	mustMatch(t, found, false)
+}
+
+// The allocated draw device the lookup walks to, named the way a
+// ResourceSlice entry is keyed: by driver, by pool, and by device.
+func allocatedDrawDevice() DeviceRequestAllocationResult {
+	return DeviceRequestAllocationResult{
+		Request: idleDrawRequest,
+		Driver:  "display.liken.sh",
+		Pool:    "nuc5",
+		Device:  "card0-dp-1-draw",
+	}
+}
+
+// The lookup answers no screen when no slice carries the allocated
+// device, which is a driver whose slices this operator cannot place.
+func TestTheMonitorLookupWalksPastSlicesThatDoNotHoldTheDevice(t *testing.T) {
+	otherDriver := monitorSlice()
+	otherDriver.Spec.Driver = "gpu.liken.sh"
+	otherPool := monitorSlice()
+	otherPool.Spec.Pool.Name = "nuc6"
+	otherDevice := monitorSlice()
+	otherDevice.Spec.Devices[0].Name = "card0-hdmi-1-draw"
+
+	cases := []struct {
+		name   string
+		slices []ResourceSlice
+	}{
+		{name: "no driver published a slice"},
+		{name: "the slice is another driver's", slices: []ResourceSlice{otherDriver}},
+		{name: "the slice is another pool's", slices: []ResourceSlice{otherPool}},
+		{name: "the pool holds another device", slices: []ResourceSlice{otherDevice}},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			// The slices are already read, so the lookup needs no
+			// client and reads the list the case names.
+			lookup := &screens{slices: each.slices, listed: true}
+
+			_, found := lookup.monitorOf(allocatedDrawDevice())
+
+			mustMatch(t, found, false)
+		})
+	}
+}
+
+// A slice list the API server refuses names no screen, so the pass
+// writes no override rather than one built on a guess.
+func TestTheMonitorLookupAnswersNothingWhenTheSliceListFails(t *testing.T) {
+	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	_, found := newScreens(client).monitorOf(allocatedDrawDevice())
 
 	mustMatch(t, found, false)
 }

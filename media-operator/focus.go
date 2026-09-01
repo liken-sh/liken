@@ -2,7 +2,7 @@ package main
 
 // Focus is which unit holds a controller's presses right now. One
 // controller can drive several units, so its one events topic has several
-// readers: a translator in every Play's pod, and the idle sidecar of every
+// readers: a translator in every Play's pod, and the idle command pod of every
 // unit that lists it. Without a gate, one press would reach them all. A
 // retained mark per Remote names the one Player that owns the presses, and
 // every reader gates on the mark. The mark names a Player and never a Play:

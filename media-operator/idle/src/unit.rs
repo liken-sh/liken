@@ -158,7 +158,7 @@ impl Unit {
     /// Ease the shade toward black or toward clear.
     ///
     /// An ease already running that way runs on, and a cover already at that
-    /// end stays there. The idle sidecar sends a wake on every press, so
+    /// end stays there. The idle command pod sends a wake on every press, so
     /// without that rule a run of presses would restart the ease and hold the
     /// screen dim for as long as the presses keep arriving.
     fn cover(&mut self, down: bool, at: f64) {

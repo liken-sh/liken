@@ -4,6 +4,9 @@ package edl
 // quoting that lets a file name or a title carry a comma.
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -117,6 +120,41 @@ func TestSegmentPath(t *testing.T) {
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			mustMatch(t, SegmentPath(each.dir, each.file), each.want)
+		})
+	}
+}
+
+// A file the caller names is a timeline only when it opens with the
+// header. Anything else is the media file it names, and the caller plays it as
+// one.
+func TestReadFile(t *testing.T) {
+	dir := t.TempDir()
+	timeline := filepath.Join(dir, "album.edl")
+	mustSucceed(t, os.WriteFile(timeline, []byte(Header+"\ntrack.flac,180\n"), 0o644))
+	plain := filepath.Join(dir, "track.flac")
+	mustSucceed(t, os.WriteFile(plain, []byte("not a timeline"), 0o644))
+
+	cases := []struct {
+		name string
+		path string
+		ok   bool
+	}{
+		{name: "a timeline", path: timeline, ok: true},
+		{name: "a media file", path: plain},
+		{name: "a file that is not there", path: filepath.Join(dir, "absent.edl")},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			text, ok := ReadFile(each.path)
+			if ok != each.ok {
+				t.Fatalf("ok = %v, want %v", ok, each.ok)
+			}
+			if ok && !strings.HasPrefix(text, Header) {
+				t.Errorf("text = %q, want it to open with the header", text)
+			}
+			if !ok && text != "" {
+				t.Errorf("text = %q, want it empty", text)
+			}
 		})
 	}
 }

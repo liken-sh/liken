@@ -368,3 +368,113 @@ func TestPlayTitleFallsBackForAPlayWithNoItems(t *testing.T) {
 
 	mustMatch(t, playTitle(&play), "sailing")
 }
+
+// the idle block reports the resolved controller and, where a
+// controller draws, the claim a delegate references and the requests it
+// carries. A Player with no idle claim reports no block, and under
+// media.liken.sh/none the block carries the controller alone.
+func TestDeriveIdleStatus(t *testing.T) {
+	player := standingIdlePlayer()
+	drawOnly := standingIdlePlayer()
+	drawOnly.Spec.Render = nil
+
+	cases := []struct {
+		name       string
+		controller string
+		claim      *ResourceClaim
+		want       *PlayerIdleStatus
+	}{
+		{
+			name:       "no claim, so no block",
+			controller: idleControllerOwn,
+			want:       nil,
+		},
+		{
+			name:       "this operator draws",
+			controller: idleControllerOwn,
+			claim:      buildIdleClaim(player, "display-draw"),
+			want: &PlayerIdleStatus{
+				Controller: idleControllerOwn,
+				Claim:      "theater-idle-devices",
+				Requests:   []string{"draw", "render"},
+			},
+		},
+		{
+			name:       "a delegate draws",
+			controller: "library.liken.sh/media-browser",
+			claim:      buildIdleClaim(player, "display-draw"),
+			want: &PlayerIdleStatus{
+				Controller: "library.liken.sh/media-browser",
+				Claim:      "theater-idle-devices",
+				Requests:   []string{"draw", "render"},
+			},
+		},
+		{
+			name:       "a unit with no render node",
+			controller: "library.liken.sh/media-browser",
+			claim:      buildIdleClaim(drawOnly, "display-draw"),
+			want: &PlayerIdleStatus{
+				Controller: "library.liken.sh/media-browser",
+				Claim:      "theater-idle-devices",
+				Requests:   []string{"draw"},
+			},
+		},
+		{
+			name:       "nothing draws",
+			controller: idleControllerNone,
+			claim:      buildIdleClaim(player, "display-draw"),
+			want:       &PlayerIdleStatus{Controller: idleControllerNone},
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			got := deriveIdleStatus(one.controller, one.claim)
+			if !reflect.DeepEqual(got, one.want) {
+				t.Errorf("idle = %+v, want %+v", got, one.want)
+			}
+		})
+	}
+}
+
+// a Player that drives no screen, and a cluster that names no
+// display-draw class, both leave the unit with no idle claim, which is
+// what leaves the status with no idle block.
+func TestIdleClaimForTheUnitsWithNoIdleScreen(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	if claim := media.idleClaimFor(standingIdlePlayer()); claim != nil {
+		t.Errorf("a cluster with no display-draw class built %+v", claim.Metadata)
+	}
+
+	media.idleDisplayClass = "display-draw"
+	speakerOnly := standingIdlePlayer()
+	speakerOnly.Spec.Display = nil
+	if claim := media.idleClaimFor(speakerOnly); claim != nil {
+		t.Errorf("a Player with no screen built %+v", claim.Metadata)
+	}
+	if claim := media.idleClaimFor(standingIdlePlayer()); claim == nil {
+		t.Error("a Player that drives a screen built no idle claim")
+	}
+}
+
+// the pass writes the idle block onto the Player, so a delegate
+// reads the claim and its requests from the status of the unit it draws.
+func TestReconcilePlayersWritesTheIdleBlock(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.idleDisplayClass = "display-draw"
+	player := standingIdlePlayer()
+	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
+	cluster.players["theater"] = player
+
+	media.reconcilePlayers([]Player{*player}, nil, "America/New_York", nil)
+
+	written := cluster.players["theater"].Status.Idle
+	if written == nil {
+		t.Fatalf("no idle block was written: %v", cluster.requests)
+	}
+	mustMatch(t, written.Controller, "library.liken.sh/media-browser")
+	mustMatch(t, written.Claim, "theater-idle-devices")
+	mustMatchAll(t, written.Requests, []string{"draw", "render"})
+}

@@ -327,3 +327,23 @@ func mustMatchAll[T comparable](t *testing.T, got, want []T) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
+
+// The album's facts come from the first file that carries tags. A folder
+// whose files carry none has no facts, and the caller then names the album by
+// its folder.
+func TestAlbumFactsFromFilesThatCarryNoTags(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"01.flac", "02.flac"} {
+		mustSucceed(t, os.WriteFile(filepath.Join(dir, name), []byte("not a media file"), 0o644))
+	}
+
+	facts := AlbumFacts([]string{
+		filepath.Join(dir, "absent.flac"),
+		filepath.Join(dir, "01.flac"),
+		filepath.Join(dir, "02.flac"),
+	})
+
+	if facts != (Facts{}) {
+		t.Errorf("facts = %+v, want none", facts)
+	}
+}

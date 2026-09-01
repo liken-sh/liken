@@ -298,6 +298,19 @@ const defaultOffAfterSeconds int64 = 0
 // backlight still answers DDC and the restore cannot strand.
 const defaultOffMode = offModeBacklight
 
+// The two controller names this operator answers to.
+// idleControllerOwn is the built-in default, and this operator stands
+// the claim, the idle client pod, and the idle command pod for it.
+// Under idleControllerNone nothing draws an idle screen on the unit:
+// this operator stands no claim and no pod, and it leaves the panel
+// alone. The precedent is kubernetes.io/no-provisioner. Every other
+// name is a delegate, and this operator compares a name to these two
+// and to nothing else.
+const (
+	idleControllerOwn  = "media.liken.sh/idle-screen"
+	idleControllerNone = "media.liken.sh/none"
+)
+
 // resolvedIdle is one Player's settled idle policy. The two windows
 // are set on the idle pod as plain values, and the off mode stays
 // with the operator, which writes the override.
@@ -305,6 +318,11 @@ type resolvedIdle struct {
 	// The image the idle client runs, always set, because the operator's
 	// own IDLE_IMAGE is the floor under both tiers.
 	Image string
+
+	// The name of the operator that draws this unit's idle
+	// screen, always set, because idleControllerOwn is the floor under
+	// both tiers.
+	Controller string
 
 	FadeAfterSeconds int64
 
@@ -321,21 +339,24 @@ type resolvedIdle struct {
 // two the cluster states.
 func resolveIdle(player, defaults *IdlePolicy, image string) resolvedIdle {
 	var fade, off []*int64
-	var mode, images []string
+	var mode, images, controllers []string
 	if player != nil {
 		fade = append(fade, player.FadeAfterSeconds)
 		off = append(off, player.OffAfterSeconds)
 		mode = append(mode, player.OffMode)
 		images = append(images, player.Image)
+		controllers = append(controllers, player.Controller)
 	}
 	if defaults != nil {
 		fade = append(fade, defaults.FadeAfterSeconds)
 		off = append(off, defaults.OffAfterSeconds)
 		mode = append(mode, defaults.OffMode)
 		images = append(images, defaults.Image)
+		controllers = append(controllers, defaults.Controller)
 	}
 	return resolvedIdle{
 		Image:            firstStatedString(append(images, image)),
+		Controller:       firstStatedString(append(controllers, idleControllerOwn)),
 		FadeAfterSeconds: firstStatedSeconds(fade, defaultFadeAfterSeconds),
 		OffAfterSeconds:  firstStatedSeconds(off, defaultOffAfterSeconds),
 		OffMode:          firstStatedIdleMode(mode),

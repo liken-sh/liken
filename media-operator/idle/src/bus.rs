@@ -4,7 +4,7 @@
 //! Everything this screen draws is a bus fact or a sidecar decision, so this
 //! client subscribes to three topics and needs no socket. The status
 //! and the volume topics are retained `Player` state the operator publishes.
-//! The screen topic carries the idle sidecar's own decisions: the shade
+//! The screen topic carries the idle command pod's own decisions: the shade
 //! travels retained, and the moments do not.
 //!
 //! The reader runs on a thread of its own and delivers into a channel the
@@ -54,7 +54,7 @@ pub enum Message {
     /// The unit's listening level. `pressed` is false for the broker's
     /// catch-up and true for a press.
     Level { volume: Volume, pressed: bool },
-    /// One moment the idle sidecar decided.
+    /// One moment the idle command pod decided.
     Screen(screen::Event),
 }
 

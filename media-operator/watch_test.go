@@ -51,20 +51,22 @@ type listTurn struct {
 // from a script the test loads, and records what every request asked
 // for.
 type watchAPI struct {
-	turns   chan watchTurn
-	lists   chan listTurn
-	watched chan url.Values
-	listed  chan string
-	parked  chan struct{}
+	turns        chan watchTurn
+	lists        chan listTurn
+	watched      chan url.Values
+	watchedPaths chan string
+	listed       chan string
+	parked       chan struct{}
 }
 
 func newWatchAPI() *watchAPI {
 	return &watchAPI{
-		turns:   make(chan watchTurn, 8),
-		lists:   make(chan listTurn, 8),
-		watched: make(chan url.Values, 8),
-		listed:  make(chan string, 8),
-		parked:  make(chan struct{}),
+		turns:        make(chan watchTurn, 8),
+		lists:        make(chan listTurn, 8),
+		watched:      make(chan url.Values, 8),
+		watchedPaths: make(chan string, 8),
+		listed:       make(chan string, 8),
+		parked:       make(chan struct{}),
 	}
 }
 
@@ -97,6 +99,7 @@ func (a *watchAPI) handler() http.Handler {
 // of reconnecting.
 func (a *watchAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	a.watched <- r.URL.Query()
+	a.watchedPaths <- r.URL.Path
 	turn := watchTurn{hold: a.parked}
 	select {
 	case scripted := <-a.turns:

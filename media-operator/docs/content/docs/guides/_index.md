@@ -5,11 +5,13 @@ weight: 10
 
 # Guides
 
-The guides give the steps to operate this project. There are two:
-the [install](/docs/guides/install/), and
+The guides give the steps to operate this project: the
+[install](/docs/guides/install/),
 [mapping a controller](/docs/guides/mapping-a-controller/) whose
-codes no one has written down. After those, the work is declaring
-resources, and the [reference](/docs/reference/) describes each one.
+codes no one has written down, and
+[handing the idle screen to another controller](/docs/guides/handing-the-idle-screen-to-another-controller/).
+After those, the work is declaring resources, and the
+[reference](/docs/reference/) describes each one.
 
 ## How the pieces fit
 

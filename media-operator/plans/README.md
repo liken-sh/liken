@@ -25,6 +25,14 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
+* [22, The idle screen has a controller](22-the-idle-screen-has-a-controller.md).
+  `spec.idle.controller` names who draws a `Player`'s idle screen, the
+  way a `GatewayClass` names its controller. This operator draws it
+  only under its own name, keeps the display claim and the idle
+  command pod in every case, publishes the claim on `status.idle` for
+  a delegate's pod to reference, and deletes the claim's holders before
+  it replaces the claim.
+
 
 ## Completed
 

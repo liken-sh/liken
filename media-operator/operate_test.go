@@ -1543,7 +1543,7 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 
 // A Player that was playing and now names no Play crossed the play-end
 // edge, so the operator publishes a re-present to its commands topic, not
-// retained, and the idle command sidecar recreates the surface. The Idle
+// retained, and the idle command pod recreates the surface. The Idle
 // status goes out first, so the display reads the film is over before the
 // reveal that follows the re-present.
 func TestAPlayEndPublishesTheIdleStatusThenARePresent(t *testing.T) {
@@ -1618,7 +1618,7 @@ func TestAReportedEndingPublishesTheIdleStatusThenARePresent(t *testing.T) {
 
 // A Player already idle stays idle across the pass, which is no edge, so
 // the operator publishes nothing. Without the guard the backstop would
-// poke the idle sidecar every tick.
+// poke the idle command pod every tick.
 func TestAnIdlePlayerPublishesNoRePresent(t *testing.T) {
 	cluster := newFakeCluster()
 	media, broker := playersOperator(t, cluster)

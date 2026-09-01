@@ -72,7 +72,7 @@ const SLASH_BORDER: f32 = 2.0;
 
 /// The row's own fade, from 0 off screen to 1 full.
 ///
-/// The command sidecar publishes a press after it applies a level from the bus,
+/// The idle command pod publishes a press after it applies a level from the bus,
 /// and never for the retained value a client reads when it first connects. So
 /// the row answers a press, and it stays off screen while a pod restores the
 /// level it starts with.

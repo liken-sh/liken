@@ -135,5 +135,5 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 func (o *operator) reconcileRemote(remote *Remote) error {
 	claim := buildRemoteClaim(remote)
 	pod := buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase)
-	return o.reconcileStanding(claim, pod)
+	return o.reconcileStanding(standingPair(claim, pod))
 }

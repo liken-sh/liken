@@ -48,7 +48,7 @@ const (
 
 // actionRePresent is display plumbing, not part of the media vocabulary
 // above. The operator publishes it to a Player's commands topic when a
-// Play ends. The idle command sidecar reads it and states the present
+// Play ends. The idle command pod reads it and states the present
 // moment, and the idle client maps a fresh surface, so a seatless kiosk
 // shell shows the clock again. A controller never sends it, so commandFor
 // holds no case for it and it reaches no player program.

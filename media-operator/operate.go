@@ -733,6 +733,11 @@ func (o *operator) reconcileKeymaps() map[string][]compiledBinding {
 func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string, defaultIdle *IdlePolicy) {
 	published := make(map[string]bool, len(players))
 	live := make(map[string]bool, len(players))
+	// The units whose idle screen something draws. A unit under
+	// media.liken.sh/none leaves this set, and the panel desks treat
+	// it the way they treat a deleted unit: its desire is dropped and
+	// a dark panel it left behind takes a lift.
+	drawn := make(map[string]bool, len(players))
 	// One screens for the pass, so the driver's ResourceSlices
 	// are listed at most once however many units the cluster holds.
 	lookup := newScreens(o.client)
@@ -741,11 +746,26 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 		live[key] = true
 		desired := derivePlayerStatus(player, plays, o.reports)
+		idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
 		// The panel state is what the screen's Display last
 		// observed, so the status reports the hardware and not what
 		// the media layer asked for.
-		desired.Panel = o.reconcilePanel(player, key, lookup,
-			resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage).OffMode)
+		if idle.Controller == idleControllerNone {
+			// Nothing draws, so no desire is settled and the panel
+			// reports nothing. The retained desire is cleared once,
+			// while the desk still holds it, so a restarted operator
+			// does not read the idle command pod's last word back off
+			// the broker after that pod is gone.
+			if o.panels.stateFor(key) != "" {
+				o.bus.Publish(playerPanelTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name), nil, true)
+			}
+		} else {
+			drawn[key] = true
+			desired.Panel = o.reconcilePanel(player, key, lookup, idle.OffMode)
+		}
+		// The idle block is what a delegate reads to draw this
+		// unit's screen, so it goes on the status before the write.
+		desired.Idle = deriveIdleStatus(idle.Controller, o.idleClaimFor(player))
 		o.seedVolume(player, key)
 		// The status goes out before the re-present, and the order is what
 		// the returning idle screen draws from. The client animates the
@@ -761,7 +781,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		// reveals a lower surface only along a code path gated on a seat,
 		// and liken's compositor has none, so the idle clock does not return
 		// on its own. On the edge from any active state to idle, the
-		// operator publishes a re-present. The idle command sidecar states
+		// operator publishes a re-present. The idle command pod states
 		// the present moment, the client maps a fresh surface, and kiosk
 		// reveals that one. The edge reads the stored status against the
 		// derived one, so the re-present goes out once as the Player settles
@@ -782,12 +802,12 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
 	}
-	// The panel desk shrinks to the Players the cluster still holds,
-	// the way the presence desk shrinks to its Remotes.
-	o.panels.retain(live)
+	// The panel desk shrinks to the units something draws, the way
+	// the presence desk shrinks to its Remotes.
+	o.panels.retain(drawn)
 	// The overrides shrink the same way, and a unit dropped
 	// while its panel was dark takes a lift on the way out.
-	o.retainPanels(live)
+	o.retainPanels(drawn)
 	// The volume desk shrinks the same way. The retained level itself
 	// stays on the broker, so a Player recreated under the same name
 	// keeps the level the room was left at.
@@ -886,7 +906,7 @@ func (o *operator) volumeFor(play *Play) (volumeState, bool) {
 
 // publishRePresent publishes the re-present to a Player's commands topic,
 // not retained, because a re-present is an event and not a state. The
-// idle command sidecar subscribes to that topic and states the present
+// idle command pod subscribes to that topic and states the present
 // moment on the screen topic, and the client maps a fresh surface, so the
 // clock shows again after a Play ends.
 func (o *operator) publishRePresent(namespace, name string) {

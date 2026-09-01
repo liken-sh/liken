@@ -100,6 +100,21 @@ spec:
                     while nothing plays, read for each field a
                     Player's own block leaves unset.
                   properties:
+                    controller:
+                      type: string
+                      pattern: '^[a-z0-9.-]+/[a-z0-9-]+$'
+                      description: >-
+                        The operator that draws every idle screen
+                        the household does not override, as a
+                        domain-qualified name. Two names belong to the
+                        media operator: media.liken.sh/idle-screen, the
+                        default, which draws the idle screen this
+                        operator ships, and media.liken.sh/none, under
+                        which nothing draws an idle screen and no claim
+                        stands. Any other name hands each screen to the
+                        operator that answers to it, which reads a
+                        Player's status.idle for the claim to reference
+                        and the requests it carries.
                     image:
                       type: string
                       description: >-

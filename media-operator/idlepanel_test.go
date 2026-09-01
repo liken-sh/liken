@@ -1,6 +1,6 @@
 package main
 
-// These tests cover the idle sidecar's panel half: the second window
+// These tests cover the idle command pod's panel half: the second window
 // that states the off desire, the wake that states the on desire, and
 // the retained topic both stand on. The sidecar writes no hardware,
 // so nothing here holds a wire.
@@ -25,7 +25,7 @@ type panelSetup struct {
 	remotes map[string]string
 }
 
-// panelCommander builds one idle sidecar with both windows in
+// panelCommander builds one idle command pod with both windows in
 // milliseconds, so the fade and the off window land inside a test.
 func panelCommander(t *testing.T, setup panelSetup) (*idleCommander, *idleWatch) {
 	t.Helper()

@@ -1,10 +1,11 @@
 package main
 
-// The idle command sidecar holds the idle screen's timers, keymaps, and
-// focus gate. It states each moment the idle client draws on the Player's
-// screen topic, as one JSON object each, and the client reads them there.
-// It is a native sidecar beside that client, and it subscribes to the
-// Player's commands and status topics.
+// The idle command pod holds the idle screen's timers, keymaps,
+// and focus gate. It states each moment the idle client draws on the
+// Player's screen topic, as one JSON object each, and the client reads
+// them there. It runs in a pod of its own, one per unit whatever draws
+// that unit's screen, and it subscribes to the Player's commands and
+// status topics.
 //
 // The re-present is the whole fix for a seatless compositor. Weston's
 // kiosk-shell reveals a lower surface only along a code path gated on a
@@ -69,7 +70,7 @@ type screenMessage struct {
 	Remote *int   `json:"remote,omitempty"`
 }
 
-// idleCommander holds the idle command sidecar's two inputs, the commands
+// idleCommander holds the idle command pod's two inputs, the commands
 // and status topics it subscribes to, and the run context every held
 // control's repeat runs under.
 //
@@ -199,7 +200,7 @@ func runIdleCommand() {
 	commandsTopic := os.Getenv(playerCommandsTopicVariable)
 	statusTopic := os.Getenv(playerStatusTopicVariable)
 
-	// The idle command sidecar is its container's PID 1, so the signal
+	// The idle command pod is its container's PID 1, so the signal
 	// context ends the run on the kubelet's SIGTERM. Every held control's
 	// repeat runs under it, so a repeat in progress ends when the run does.
 	runCtx, stopRun := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

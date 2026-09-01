@@ -1,35 +1,31 @@
 package main
 
-// Each Player that drives a screen reconciles into one standing idle
-// pod, owned by the Player through an owner reference, so deleting the
-// Player tears the pod down. The pod draws the clock while no Play runs.
-// It holds a shared draw device on the Player's screen, so the idle pod
-// and a Play's own pod draw to one screen at once. A Play's mpv starts
-// with the same app-id and draws over the idle clock.
+// Each Player that drives a screen reconciles into a standing
+// claim on the screen and, where this operator draws the idle screen
+// itself, one standing idle client pod. Both are owned by the Player
+// through an owner reference, so deleting the Player tears them down.
+// The pod draws the clock while no Play runs. The claim holds a shared
+// draw device on the Player's screen, so the idle pod and a Play's own
+// pod draw to one screen at once. A Play's mpv starts with the same
+// app-id and draws over the idle clock.
 //
-// The client that draws is a choice. spec.idle.image names it, and a
-// Player that names none runs the image the operator reads from
-// IDLE_IMAGE. Every client starts with its image's own entrypoint and
-// reads the unit's state off the bus, so one contract serves the client
-// this project ships and any other a household states.
-//
-// The clock does not return on its own when the Play ends. Weston's
-// kiosk-shell reveals a lower surface only along a code path gated on a
-// seat, and liken's compositor has none, so the idle surface stays
-// hidden though the idle client still runs. So the pod carries a second
-// container, the idle command sidecar. It states the present moment on
-// the screen topic, the client maps a fresh surface, and kiosk reveals
-// that one.
+// Who draws is a choice. spec.idle.controller names the operator that
+// draws, and under this operator's own name spec.idle.image names the
+// client. A Player that names no image runs the image the operator
+// reads from IDLE_IMAGE. Every client starts with its image's own
+// entrypoint and reads the unit's state off the bus, so one contract
+// serves the client this project ships and any other a household
+// states.
 
 import (
 	"strconv"
 	"strings"
 )
 
-// The two containers in the standing idle pod. idleContainer runs the
-// idle client and draws the clock; idleCommandContainer is the native
-// sidecar that holds the timers and states each moment the client draws.
-// Each name is the job the container does.
+// The one container of each standing idle pod. idleContainer runs
+// the idle client and draws the clock; idleCommandContainer holds the
+// timers and states each moment a client draws. Each name is the job the
+// container does.
 const (
 	idleContainer        = "idle"
 	idleCommandContainer = "idle-command"
@@ -51,6 +47,13 @@ const idleWindowGraceSeconds = 15
 // job, so a person reading either object finds the other.
 func idlePodName(player string) string {
 	return player + "-idle"
+}
+
+// idleCommandPodName is a Player's standing idle command pod, the
+// idle pod's name plus the job of the one container it runs, so a person
+// reading either pod finds the other.
+func idleCommandPodName(player string) string {
+	return idlePodName(player) + "-command"
 }
 
 // idleClaimName is the idle pod's claim, the pod's name plus the suffix
@@ -125,11 +128,12 @@ func idleComponents(player *Player) []string {
 	return components
 }
 
-// idleRemoteTopics is one of the unit's controllers as the idle pod reads
-// it: the topic its presses arrive on, the topic its compiled keymap
-// stands on, and the topic its focus mark stands on. Keymap is empty for a
-// controller with no keymap. The sidecar gates every press on the mark
-// naming this Player, and it builds the cycle topic from the focus topic.
+// idleRemoteTopics is one of the unit's controllers as the idle
+// command pod reads it: the topic its presses arrive on, the topic its
+// compiled keymap stands on, and the topic its focus mark stands on.
+// Keymap is empty for a controller with no keymap. The idle command pod
+// gates every press on the mark naming this Player, and it builds the
+// cycle topic from the focus topic.
 type idleRemoteTopics struct {
 	Events string
 	Keymap string
@@ -206,13 +210,12 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 	return claim
 }
 
-// buildIdlePod writes the standing idle pod: the idle client holding
-// the draw and render requests and drawing the clock, beside the idle
-// command sidecar that states each moment the client draws.
-//
-// sidecarImage carries this operator's binary alone, which the sidecar
-// runs in its idle-command mode. The client's own image is idle.Image,
-// which resolveIdle settles.
+// buildIdlePod writes the standing idle client pod: one container
+// that holds the draw and render requests and draws the clock. The
+// client's image is idle.Image, which resolveIdle settles, and the pod
+// runs only where the resolved controller is this operator's own. It
+// carries no timers, because the idle command pod holds those for every
+// unit whatever draws its screen.
 //
 // restartPolicy is Always because the pod is a service and not a job: a
 // crash restarts it, and the pod ends only when the Player is deleted.
@@ -226,22 +229,9 @@ func buildIdleClaim(player *Player, displayClass string) *ResourceClaim {
 // retained status replaces them, so an edit to the Player shows with no
 // pod restart.
 func buildIdlePod(
-	player *Player, claim *ResourceClaim, sidecarImage, busAddress, topicBase, timeZone string,
-	idle resolvedIdle, remotes []idleRemoteTopics,
+	player *Player, claim *ResourceClaim, busAddress, topicBase, timeZone string, idle resolvedIdle,
 ) *Pod {
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
-	// The client and the sidecar read the same three topics of the same
-	// unit, so each one is built once here and set on both containers.
-	statusTopic := playerStatusTopic(topicBase, namespace, name)
-	screenTopic := playerScreenTopic(topicBase, namespace, name)
-	// The volume topic is the speaker gate as well as the address, the
-	// way wire.go states it. A Player with no sinks has no level to mean
-	// anything, so neither container reads a topic here, the client draws
-	// no level, and the sidecar answers no volume press.
-	volumeTopic := ""
-	if len(player.Spec.Sinks) > 0 {
-		volumeTopic = playerVolumeTopic(topicBase, namespace, name)
-	}
 
 	// Every idle client is an image with its own entrypoint, so the
 	// container names no command. A Player that states one runs that
@@ -280,15 +270,15 @@ func buildIdlePod(
 
 	// Every idle client reads the bus for itself, so the container
 	// carries the address and the three topics the screen draws from:
-	// the unit's retained state, its level, and the moments the sidecar
-	// decides.
+	// the unit's retained state, its level, and the moments the idle
+	// command pod decides.
 	container.Env = append(container.Env,
 		EnvVar{Name: busAddressVariable, Value: busAddress},
-		EnvVar{Name: playerStatusTopicVariable, Value: statusTopic},
-		EnvVar{Name: playerScreenTopicVariable, Value: screenTopic})
-	if volumeTopic != "" {
+		EnvVar{Name: playerStatusTopicVariable, Value: playerStatusTopic(topicBase, namespace, name)},
+		EnvVar{Name: playerScreenTopicVariable, Value: playerScreenTopic(topicBase, namespace, name)})
+	if topic := idleVolumeTopic(player, topicBase); topic != "" {
 		container.Env = append(container.Env,
-			EnvVar{Name: playerVolumeTopicVariable, Value: volumeTopic})
+			EnvVar{Name: playerVolumeTopicVariable, Value: topic})
 	}
 
 	// The idle container holds every request the claim carries,
@@ -298,12 +288,60 @@ func buildIdlePod(
 			ContainerClaim{Name: podClaimName, Request: request})
 	}
 
-	// The idle command sidecar subscribes to the Player's commands and
-	// status topics and states what it decides on the screen topic. It
-	// holds no device and no volume, because it reads the bus and writes
-	// the bus. Every topic is pre-built here, because the operator holds
-	// the topic base and the sidecar parses no topic of its own.
-	sidecar := Container{
+	return &Pod{
+		APIVersion: podAPIVersion,
+		Kind:       "Pod",
+		Metadata: ObjectMeta{
+			Name:            idlePodName(name),
+			Namespace:       namespace,
+			OwnerReferences: []OwnerReference{playerOwner(player)},
+		},
+		Spec: PodSpec{
+			RestartPolicy: "Always",
+			ResourceClaims: []PodResourceClaim{{
+				Name:              podClaimName,
+				ResourceClaimName: claim.Metadata.Name,
+			}},
+			Containers: []Container{container},
+		},
+	}
+}
+
+// idleVolumeTopic is the unit's level topic, or empty for a unit with no
+// speakers. The volume topic is the speaker gate as well as the address,
+// the way wire.go states it. A Player with no sinks has no level to mean
+// anything, so neither idle pod reads a topic here, the client draws no
+// level, and the command pod answers no volume press.
+func idleVolumeTopic(player *Player, topicBase string) string {
+	if len(player.Spec.Sinks) == 0 {
+		return ""
+	}
+	return playerVolumeTopic(topicBase, player.Metadata.Namespace, player.Metadata.Name)
+}
+
+// buildIdleCommandPod writes the standing idle command pod: one
+// container, in the idle-command mode of this operator's own binary,
+// that holds the fade and off windows, the panel desire, and the press
+// gate. It reads the bus and writes the bus, so it holds no device, no
+// claim, and no volume.
+//
+// It is a pod of its own for every unit whose controller is
+// anything but media.liken.sh/none, so one shape serves every unit and
+// the delegated path is the path the default exercises every day. A
+// delegate learns neither its image nor its environment.
+//
+// sidecarImage carries this operator's binary alone. Every topic
+// is pre-built here, because the operator holds the topic base and the
+// command pod parses no topic of its own.
+//
+// restartPolicy is Always because the pod is a service and not a job: a
+// crash restarts it, and the pod ends only when the Player is deleted.
+func buildIdleCommandPod(
+	player *Player, sidecarImage, busAddress, topicBase string,
+	idle resolvedIdle, remotes []idleRemoteTopics,
+) *Pod {
+	namespace, name := player.Metadata.Namespace, player.Metadata.Name
+	container := Container{
 		Name:    idleCommandContainer,
 		Image:   sidecarImage,
 		Command: []string{"/media-operator", idleCommandMode},
@@ -314,15 +352,14 @@ func buildIdlePod(
 			// operator writes marks from metadata.name.
 			{Name: playerNameVariable, Value: name},
 			{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, namespace, name)},
-			{Name: playerStatusTopicVariable, Value: statusTopic},
-			{Name: playerScreenTopicVariable, Value: screenTopic},
+			{Name: playerStatusTopicVariable, Value: playerStatusTopic(topicBase, namespace, name)},
+			{Name: playerScreenTopicVariable, Value: playerScreenTopic(topicBase, namespace, name)},
 		},
-		RestartPolicy: sidecarRestartPolicy,
 	}
 	// The fade window travels on every pod, because the resolver
-	// settles it for every Player and zero is a policy the sidecar
+	// settles it for every Player and zero is a policy the command pod
 	// must read, not infer from an absent variable.
-	sidecar.Env = append(sidecar.Env, EnvVar{
+	container.Env = append(container.Env, EnvVar{
 		Name:  idleFadeAfterSecondsVariable,
 		Value: strconv.FormatInt(idle.FadeAfterSeconds, 10),
 	})
@@ -330,7 +367,7 @@ func buildIdlePod(
 	// window is, and the panel topic arrives whole. The off mode
 	// stays with the operator, because the operator writes the
 	// override.
-	sidecar.Env = append(sidecar.Env,
+	container.Env = append(container.Env,
 		EnvVar{
 			Name:  idleOffAfterSecondsVariable,
 			Value: strconv.FormatInt(idle.OffAfterSeconds, 10),
@@ -339,18 +376,18 @@ func buildIdlePod(
 			Name:  idlePanelTopicVariable,
 			Value: playerPanelTopic(topicBase, namespace, name),
 		})
-	if volumeTopic != "" {
-		sidecar.Env = append(sidecar.Env,
-			EnvVar{Name: playerVolumeTopicVariable, Value: volumeTopic})
+	if topic := idleVolumeTopic(player, topicBase); topic != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: playerVolumeTopicVariable, Value: topic})
 	}
-	// The three remote lists stay index-aligned, so the sidecar pairs each
-	// events topic with the keymap that names its presses and the focus
-	// topic that carries its mark. A remote's position in them is its
-	// spec.remotes order, and the sidecar sends that index with the focus
+	// The three remote lists stay index-aligned, so the command pod pairs
+	// each events topic with the keymap that names its presses and the
+	// focus topic that carries its mark. A remote's position in them is
+	// its spec.remotes order, and the pod sends that index with the focus
 	// pulse. A Player with no remotes sends none of the variables, and the
 	// fade then runs on the timer alone.
 	if len(remotes) > 0 {
-		sidecar.Env = append(sidecar.Env,
+		container.Env = append(container.Env,
 			EnvVar{
 				Name:  idleRemoteEventsTopicsVariable,
 				Value: joinIdleRemotes(remotes, func(r idleRemoteTopics) string { return r.Events }),
@@ -369,39 +406,66 @@ func buildIdlePod(
 		APIVersion: podAPIVersion,
 		Kind:       "Pod",
 		Metadata: ObjectMeta{
-			Name:            idlePodName(name),
+			Name:            idleCommandPodName(name),
 			Namespace:       namespace,
 			OwnerReferences: []OwnerReference{playerOwner(player)},
 		},
 		Spec: PodSpec{
-			RestartPolicy:  "Always",
-			InitContainers: []Container{sidecar},
-			ResourceClaims: []PodResourceClaim{{
-				Name:              podClaimName,
-				ResourceClaimName: claim.Metadata.Name,
-			}},
-			Containers: []Container{container},
+			RestartPolicy: "Always",
+			Containers:    []Container{container},
 		},
 	}
 }
 
-// reconcileIdle reconciles one Player into its standing idle claim and
-// pod, both owned by the Player. It builds nothing when the Player drives
-// no screen or when the cluster names no display-draw class, which is how
-// a cluster turns the idle screen off.
+// idleClaimFor is the standing claim on one Player's screen, or nil when
+// the Player drives no screen or the cluster names no display-draw class,
+// which is how a cluster turns the idle screen off. Every part of the
+// pass that reads the idle claim reads it here, so the reconcile and the
+// status answer the same question once.
+func (o *operator) idleClaimFor(player *Player) *ResourceClaim {
+	if player.Spec.Display == nil || o.idleDisplayClass == "" {
+		return nil
+	}
+	return buildIdleClaim(player, o.idleDisplayClass)
+}
+
+// reconcileIdle reconciles one Player into the standing objects
+// its resolved controller calls for, all of them owned by the Player. It
+// builds nothing when the Player drives no screen or when the cluster
+// names no display-draw class.
 //
-// The pair follows the template, the way the standing remote pod does: an
-// edit to the Player, or a release that changes either image, deletes
+// The controller decides which objects stand.
+// media.liken.sh/idle-screen is this operator's own, and it stands the
+// claim, the idle client pod, and the idle command pod. Under
+// media.liken.sh/none nothing stands. Every other name is a delegate:
+// the claim and the idle command pod stand, and the delegate's own
+// operator builds the pod that draws.
+//
+// The objects follow the template, the way the standing remote pod does:
+// an edit to the Player, or a release that changes either image, deletes
 // the stale object and the next pass creates the replacement. Recreating
 // the idle pod blinks the idle screen once. A release and a spec edit
 // are both deliberate acts, so the pass rolls the pod with no guard.
 func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *IdlePolicy) error {
-	if player.Spec.Display == nil || o.idleDisplayClass == "" {
+	claim := o.idleClaimFor(player)
+	if claim == nil {
 		return nil
 	}
-	claim := buildIdleClaim(player, o.idleDisplayClass)
 	idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
-	remotes := gatherIdleRemotes(o.client, player, o.topicBase)
-	pod := buildIdlePod(player, claim, o.sidecarImage, o.busAddress, o.topicBase, timeZone, idle, remotes)
-	return o.reconcileStanding(claim, pod)
+	namespace, name := player.Metadata.Namespace, player.Metadata.Name
+
+	screen := standing{namespace: namespace, claimName: claim.Metadata.Name, podName: idlePodName(name)}
+	command := standing{namespace: namespace, podName: idleCommandPodName(name)}
+	if idle.Controller != idleControllerNone {
+		screen.claim = claim
+		remotes := gatherIdleRemotes(o.client, player, o.topicBase)
+		command.pod = buildIdleCommandPod(player, o.sidecarImage, o.busAddress, o.topicBase, idle, remotes)
+		if idle.Controller == idleControllerOwn {
+			screen.pod = buildIdlePod(player, claim, o.busAddress, o.topicBase, timeZone, idle)
+		}
+	}
+	if err := o.reconcileStanding(screen); err != nil {
+		return err
+	}
+	return o.reconcileStanding(command)
 }

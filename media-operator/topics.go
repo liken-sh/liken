@@ -82,7 +82,7 @@ func remoteFocusTopic(base, namespace, name string) string {
 
 // remoteFocusCycleTopic carries the cycle request a source press
 // publishes. Only the holder of focus publishes it, the translator during
-// a film and the idle sidecar between films, and the operator reads it to
+// a film and the idle command pod between films, and the operator reads it to
 // advance the mark. It is not retained, because a cycle is an event and
 // not a state.
 func remoteFocusCycleTopic(base, namespace, name string) string {
@@ -258,7 +258,7 @@ func playerStatusTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/status"
 }
 
-// playerPanelTopic carries the panel state one unit's idle sidecar
+// playerPanelTopic carries the panel state one unit's idle command pod
 // publishes, retained, because the panel is a state and not an event.
 // The sidecar holds no API credentials, so the operator folds this
 // topic into the Player's status.
@@ -306,7 +306,7 @@ func playerVolumeTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerVolumeKind
 }
 
-// playerScreenTopic carries the four moments the idle sidecar decides
+// playerScreenTopic carries the four moments the idle command pod decides
 // for one unit's screen: the shade down, the shade up, a focus mark
 // that named this unit, and the surface the idle client presents again
 // when a Play ends. The sidecar is the only writer, and whichever
