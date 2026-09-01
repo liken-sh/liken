@@ -66,6 +66,12 @@ replace the action line with one word from its list. Only the press
 earns an entry; a release or a repeat logs a line that states so,
 because a `Keymap` binds the press alone.
 
+If the controller has modes, press every button in every mode. A
+combined remote can emit different codes for one button per mode: an
+air-mouse shell emits `BTN_LEFT` for its OK button in mouse mode and
+`KEY_ENTER` in keys mode. Bind every name a button emits, so the
+button works whichever mode the shell wakes in.
+
 ## Read the codes you did not press
 
     kubectl get remote den-remote -o yaml
