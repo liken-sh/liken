@@ -62,7 +62,7 @@ One entry in the playlist: the URI to play and, optionally, how it should look.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path to a mount on the playback pod. A URI whose scheme the operator does not know fails the Play before any pod exists. |
+| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path and claim://claim/path to a mount on the playback pod. A URI whose scheme the operator does not know fails the Play before any pod exists. |
 | <span id="specitems--presentation"></span>`presentation` | [object](#specitemspresentation) | no | How the item should look, for the fields the display cannot read from the file. The library that fed the item supplies these, and the display prefers them over the container's tags. Omit the block for a loose file, and the display falls back to the file's own tags. |
 
 #### spec.items[].presentation
@@ -82,9 +82,9 @@ How the item should look, for the fields the display cannot read from the file. 
 | <span id="specitemspresentation--date"></span>`date` | string | no | The air date of an episode, shown on its line. Give it as an ISO date like 2017-03-05, and the display formats it. |
 | <span id="specitemspresentation--artist"></span>`artist` | string | no | The artist of a music item, shown in the header under the title. For an album this field is the one source; a standalone track can also leave it unset and let its own tags supply it. |
 | <span id="specitemspresentation--album"></span>`album` | string | no | The record a music item belongs to, shown in the header beside the year. It fills in the same way the artist does. |
-| <span id="specitemspresentation--art"></span>`art` | string | no | The cover art URI, nfs:// or https://, resolved the way the media URI is. It is the first place the cover is looked for; a picture embedded in the file and a cover.jpg beside it follow, and the pod reads both of those itself. |
-| <span id="specitemspresentation--logo"></span>`logo` | string | no | The logo art URI, nfs:// or https://, resolved the way the media URI is. The display shows it in the header in place of the title. |
-| <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The X.trickplay directory URI, nfs:// or https://, resolved the way the media URI is. The display shows a tile from it on the scrub cursor. |
+| <span id="specitemspresentation--art"></span>`art` | string | no | The cover art URI, claim://, nfs:// or https://, resolved the way the media URI is. It is the first place the cover is looked for; a picture embedded in the file and a cover.jpg beside it follow, and the pod reads both of those itself. |
+| <span id="specitemspresentation--logo"></span>`logo` | string | no | The logo art URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows it in the header in place of the title. |
+| <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The X.trickplay directory URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows a tile from it on the scrub cursor. |
 
 ### spec.volume
 

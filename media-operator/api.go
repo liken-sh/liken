@@ -293,8 +293,8 @@ type PlayItem struct {
 //
 // It carries the text fields and two art references, the logo and the
 // trickplay directory. The resolver rewrites each the way it rewrites the
-// media URI, so an nfs reference shares the media's mount and an https
-// reference stays a URL.
+// media URI, so an nfs reference or a claim reference shares the media's
+// mount and an https reference stays a URL.
 type Presentation struct {
 	Type         string `json:"type,omitempty"`
 	Hint         string `json:"hint,omitempty"`
@@ -750,15 +750,26 @@ type VolumeMount struct {
 // The kubelet mounts it with the kernel's NFS client, through the
 // mount helper liken's image carries.
 type Volume struct {
-	Name     string                `json:"name"`
-	NFS      *NFSVolumeSource      `json:"nfs,omitempty"`
-	EmptyDir *EmptyDirVolumeSource `json:"emptyDir,omitempty"`
+	Name                  string                             `json:"name"`
+	NFS                   *NFSVolumeSource                   `json:"nfs,omitempty"`
+	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
+	EmptyDir              *EmptyDirVolumeSource              `json:"emptyDir,omitempty"`
 }
 
 type NFSVolumeSource struct {
 	Server   string `json:"server"`
 	Path     string `json:"path"`
 	ReadOnly bool   `json:"readOnly,omitempty"`
+}
+
+// A claim volume names a PersistentVolumeClaim in the pod's namespace.
+// The kubelet resolves the claim when it starts the pod, so the operator
+// reads no claim and no PersistentVolume, and its RBAC gains no rule.
+// Read-only here and on the mount, because a player never writes to a
+// library.
+type PersistentVolumeClaimVolumeSource struct {
+	ClaimName string `json:"claimName"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
 // An emptyDir is a directory the kubelet creates with the pod and

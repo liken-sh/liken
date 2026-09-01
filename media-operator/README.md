@@ -28,7 +28,8 @@ hardware, running `mpv` under a thin supervisor, with every device
 claim, toleration, and socket built from the `Player` spec. Each
 `Remote` has its own pod, which publishes button events to a
 message bus, and the playback pod applies the bindings. Media
-arrives by URI: `https://` streams, and `nfs://` mounts. Media
+arrives by URI: `https://` streams, `nfs://` mounts an export, and
+`claim://` mounts a `PersistentVolumeClaim` beside the `Play`. Media
 library management is a separate concern, and this project does
 none of it.
 

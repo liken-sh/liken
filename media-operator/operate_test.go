@@ -386,7 +386,7 @@ func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 	if status.Phase != phaseFailed {
 		t.Errorf("phase = %q, want Failed", status.Phase)
 	}
-	want := "the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://"
+	want := "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, and claim://"
 	if status.Message != want {
 		t.Errorf("message = %q, want %q", status.Message, want)
 	}

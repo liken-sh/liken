@@ -2,14 +2,18 @@ package main
 
 // The resolver is the extension point the design names: a new
 // scheme becomes an entry here, and the Play spec never changes
-// shape. Of the two schemes today, https:// costs the pod nothing
-// but an argument, and nfs:// costs it a volume the kubelet mounts
-// with the kernel's NFS client.
+// shape. Of the three schemes today, https:// costs the pod nothing
+// but an argument, nfs:// costs it a volume the kubelet mounts with
+// the kernel's NFS client, and claim:// costs it a claim the kubelet
+// resolves to whatever storage backs it.
 //
 // The resolver reads the media and the art URIs in one pass. It groups every
 // nfs:// URI by server, mounts each server's common ancestor once, and
 // rewrites each file's path under that mount. So a film and its logo in one
-// folder become one read-only mount of that folder.
+// folder become one read-only mount of that folder. A claim:// URI groups by
+// claim name and mounts the claim at its own root, because the claim already
+// bounds what the pod can read. The servers and the claims share one run of
+// mount numbers, in the order the playlist first names each of them.
 
 import (
 	"fmt"
@@ -18,10 +22,10 @@ import (
 	"strings"
 )
 
-// mediaMountPrefix is where the NFS directories land in the playback
-// pod, numbered by first appearance in the playlist. A directory
-// name would need escaping to be a mount path; an ordinal never
-// does.
+// mediaMountPrefix is where the media mounts land in the playback
+// pod, NFS directories and claims alike, numbered by first appearance
+// in the playlist. A directory or claim name would need escaping to
+// be a mount path; an ordinal never does.
 const mediaMountPrefix = "/media/"
 
 // resolution is one resolved playlist: the player's arguments in
@@ -51,12 +55,42 @@ type nfsRef struct {
 	segments []string
 }
 
+// claimRef is one parsed claim:// URI: the claim it names, and the path
+// segments under the claim's root. The last segment is the file, or an
+// album's folder.
+type claimRef struct {
+	claim    string
+	segments []string
+}
+
 // resolvedRef is one URI classified for the pod. A passthrough is an https://
 // URL, or an empty art field the pod uses as it is. An nfs reference rewrites
-// to a path under its server's mount.
+// to a path under its server's mount, and a claim reference to a path under
+// its claim's mount.
 type resolvedRef struct {
 	passthrough string
 	nfs         *nfsRef
+	claim       *claimRef
+}
+
+// mountKey names one mount the pod needs: an NFS server or a claim. Both
+// kinds key one map and one run of ordinals, so a mount's number says when
+// the playlist first named it and nothing about its kind.
+type mountKey struct {
+	scheme string
+	name   string
+}
+
+// mount reports the mount a reference needs and the path segments under it.
+// A passthrough reports none, because the pod uses the URL as it is.
+func (r resolvedRef) mount() (mountKey, []string, bool) {
+	switch {
+	case r.nfs != nil:
+		return mountKey{scheme: schemeNFS, name: r.nfs.server}, r.nfs.segments, true
+	case r.claim != nil:
+		return mountKey{scheme: schemeClaim, name: r.claim.claim}, r.claim.segments, true
+	}
+	return mountKey{}, nil, false
 }
 
 // resolvePlay turns the spec's items into what the pod needs. An https
@@ -73,15 +107,24 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 	trickRefs := make([]resolvedRef, len(items))
 	artRefs := make([]resolvedRef, len(items))
 
-	var serverOrder []string
-	seen := map[string]bool{}
-	dirLists := map[string][][]string{}
-	register := func(n *nfsRef) {
-		if !seen[n.server] {
-			seen[n.server] = true
-			serverOrder = append(serverOrder, n.server)
+	var mountOrder []mountKey
+	seen := map[mountKey]bool{}
+	dirLists := map[mountKey][][]string{}
+	register := func(ref resolvedRef) {
+		key, segments, ok := ref.mount()
+		if !ok {
+			return
 		}
-		dirLists[n.server] = append(dirLists[n.server], n.segments[:len(n.segments)-1])
+		if !seen[key] {
+			seen[key] = true
+			mountOrder = append(mountOrder, key)
+		}
+		// Only an nfs reference narrows its mount, to the common
+		// ancestor of its directories. A claim mounts at its root,
+		// so it contributes no directory.
+		if ref.nfs != nil {
+			dirLists[key] = append(dirLists[key], segments[:len(segments)-1])
+		}
 	}
 
 	for index, item := range items {
@@ -100,9 +143,7 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 			return resolution{}, err
 		}
 		mediaRefs[index] = media
-		if media.nfs != nil {
-			register(media.nfs)
-		}
+		register(media)
 
 		logo, trickplay, cover := "", "", ""
 		if item.Presentation != nil {
@@ -116,9 +157,7 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 				return resolution{}, err
 			}
 			logoRefs[index] = art
-			if art.nfs != nil {
-				register(art.nfs)
-			}
+			register(art)
 		}
 		if trickplay != "" {
 			trick, err := parseRef(trickplay)
@@ -126,9 +165,7 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 				return resolution{}, err
 			}
 			trickRefs[index] = trick
-			if trick.nfs != nil {
-				register(trick.nfs)
-			}
+			register(trick)
 		}
 		if cover != "" {
 			art, err := parseRef(cover)
@@ -136,40 +173,42 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 				return resolution{}, err
 			}
 			artRefs[index] = art
-			if art.nfs != nil {
-				register(art.nfs)
-			}
+			register(art)
 		}
 	}
 
-	ancestor := map[string][]string{}
-	ordinal := map[string]int{}
+	ancestor := map[mountKey][]string{}
+	ordinal := map[mountKey]int{}
 	var resolved resolution
-	for index, server := range serverOrder {
-		anc := commonPrefix(dirLists[server])
+	for index, key := range mountOrder {
+		anc := commonPrefix(dirLists[key])
 		ord := index + 1
-		ancestor[server] = anc
-		ordinal[server] = ord
-		name := "media-" + strconv.Itoa(ord)
-		resolved.Volumes = append(resolved.Volumes, Volume{
-			Name: name,
-			NFS:  &NFSVolumeSource{Server: server, Path: "/" + strings.Join(anc, "/"), ReadOnly: true},
-		})
+		ancestor[key] = anc
+		ordinal[key] = ord
+		volume := Volume{Name: "media-" + strconv.Itoa(ord)}
+		switch key.scheme {
+		case schemeNFS:
+			volume.NFS = &NFSVolumeSource{Server: key.name, Path: "/" + strings.Join(anc, "/"), ReadOnly: true}
+		case schemeClaim:
+			volume.PersistentVolumeClaim = &PersistentVolumeClaimVolumeSource{ClaimName: key.name, ReadOnly: true}
+		}
+		resolved.Volumes = append(resolved.Volumes, volume)
 		// Read-only in both places, on the volume and on the mount,
 		// because a player never writes to a library.
 		resolved.Mounts = append(resolved.Mounts, VolumeMount{
-			Name:      name,
+			Name:      volume.Name,
 			MountPath: mountPathFor(ord),
 			ReadOnly:  true,
 		})
 	}
 
 	rewrite := func(ref resolvedRef) string {
-		if ref.nfs == nil {
+		key, segments, ok := ref.mount()
+		if !ok {
 			return ref.passthrough
 		}
-		remainder := ref.nfs.segments[len(ancestor[ref.nfs.server]):]
-		return mountPathFor(ordinal[ref.nfs.server]) + "/" + strings.Join(remainder, "/")
+		remainder := segments[len(ancestor[key]):]
+		return mountPathFor(ordinal[key]) + "/" + strings.Join(remainder, "/")
 	}
 	resolved.Items = make([]string, len(items))
 	resolved.Logos = make([]string, len(items))
@@ -335,9 +374,15 @@ func firstStatedString(tiers []string) string {
 	return ""
 }
 
+const (
+	schemeNFS   = "nfs"
+	schemeClaim = "claim"
+)
+
 // parseRef classifies one URI. An https URI passes through. An nfs URI parses
-// into a server and a path. Any other scheme, or a missing one, fails the
-// whole Play, so a Play that can never run leaves no half-built objects behind.
+// into a server and a path, and a claim URI into a claim name and a path.
+// Any other scheme, or a missing one, fails the whole Play, so a Play that
+// can never run leaves no half-built objects behind.
 func parseRef(raw string) (resolvedRef, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
@@ -346,17 +391,23 @@ func parseRef(raw string) (resolvedRef, error) {
 	switch parsed.Scheme {
 	case "https":
 		return resolvedRef{passthrough: raw}, nil
-	case "nfs":
+	case schemeNFS:
 		ref, err := parseNFS(parsed, raw)
 		if err != nil {
 			return resolvedRef{}, err
 		}
 		return resolvedRef{nfs: ref}, nil
+	case schemeClaim:
+		ref, err := parseClaim(parsed, raw)
+		if err != nil {
+			return resolvedRef{}, err
+		}
+		return resolvedRef{claim: ref}, nil
 	case "":
-		return resolvedRef{}, fmt.Errorf("the URI %q carries no scheme; the operator resolves https:// and nfs://", raw)
+		return resolvedRef{}, fmt.Errorf("the URI %q carries no scheme; the operator resolves https://, nfs://, and claim://", raw)
 	default:
 		return resolvedRef{}, fmt.Errorf(
-			"the scheme %s:// is not one the operator resolves; it resolves https:// and nfs://",
+			"the scheme %s:// is not one the operator resolves; it resolves https://, nfs://, and claim://",
 			parsed.Scheme)
 	}
 }
@@ -377,6 +428,21 @@ func parseNFS(parsed *url.URL, raw string) (*nfsRef, error) {
 		return nil, fmt.Errorf("the URI %q names no directory to mount", raw)
 	}
 	return &nfsRef{server: parsed.Host, segments: segments}, nil
+}
+
+// parseClaim reads the claim name and the path segments from one claim URI.
+// A URI that names no claim, or no path inside it, fails, because neither
+// names a file the pod can reach. One segment is enough, because the claim's
+// own root is the mount and no directory has to be chosen.
+func parseClaim(parsed *url.URL, raw string) (*claimRef, error) {
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("the URI %q names no claim", raw)
+	}
+	segments := splitPath(parsed.Path)
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("the URI %q names no path in the claim", raw)
+	}
+	return &claimRef{claim: parsed.Host, segments: segments}, nil
 }
 
 // splitPath breaks a URL path into its non-empty segments.

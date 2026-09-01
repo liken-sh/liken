@@ -42,8 +42,8 @@ Media you can run this way:
   display and the sound on the claimed sinks,
 * an album to a lone speaker,
 * a season of episodes, played in order and run to completion,
-* any `https://` stream or `nfs://` mount, named by URI in the
-  `Play`.
+* any `https://` stream, `nfs://` export, or `claim://` volume, named
+  by URI in the `Play`.
 
 Start here:
 

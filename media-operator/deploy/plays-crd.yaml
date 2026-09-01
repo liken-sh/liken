@@ -116,9 +116,9 @@ spec:
                         description: >-
                           The operator resolves https:// to a stream the
                           player reads directly, and nfs://host/export/path
-                          to a mount on the playback pod. A URI whose
-                          scheme the operator does not know fails the Play
-                          before any pod exists.
+                          and claim://claim/path to a mount on the playback
+                          pod. A URI whose scheme the operator does not know
+                          fails the Play before any pod exists.
                       presentation:
                         type: object
                         description: >-
@@ -194,23 +194,23 @@ spec:
                           art:
                             type: string
                             description: >-
-                              The cover art URI, nfs:// or https://, resolved
-                              the way the media URI is. It is the first place
+                              The cover art URI, claim://, nfs:// or https://,
+                              resolved the way the media URI is. It is the first place
                               the cover is looked for; a picture embedded in
                               the file and a cover.jpg beside it follow, and
                               the pod reads both of those itself.
                           logo:
                             type: string
                             description: >-
-                              The logo art URI, nfs:// or https://, resolved
-                              the way the media URI is. The display shows it in
-                              the header in place of the title.
+                              The logo art URI, claim://, nfs:// or https://,
+                              resolved the way the media URI is. The display
+                              shows it in the header in place of the title.
                           trickplay:
                             type: string
                             description: >-
-                              The X.trickplay directory URI, nfs:// or https://,
-                              resolved the way the media URI is. The display
-                              shows a tile from it on the scrub cursor.
+                              The X.trickplay directory URI, claim://, nfs:// or
+                              https://, resolved the way the media URI is. The
+                              display shows a tile from it on the scrub cursor.
                 start:
                   type: string
                   description: >-

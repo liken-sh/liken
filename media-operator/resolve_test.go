@@ -1,9 +1,10 @@
 package main
 
-// These tests cover the two schemes the resolver handles and what each
-// one costs the playback pod: an https URI costs an argument, and an
-// nfs URI costs a share of a mount, a rewritten argument, and a
-// rewritten logo when the presentation carries one.
+// These tests cover the three schemes the resolver handles and what
+// each one costs the playback pod: an https URI costs an argument, and
+// an nfs URI costs a share of a mount, a rewritten argument, and a
+// rewritten logo when the presentation carries one. A claim URI costs
+// a read-only mount of the whole claim and a rewritten path under it.
 
 import (
 	"reflect"
@@ -307,6 +308,212 @@ func TestResolveAnAlbumDirectory(t *testing.T) {
 	}
 }
 
+// A claim:// item mounts the claim itself, read-only, and the URI's path
+// is the path under that mount.
+func TestResolveMountsAClaimAtItsRoot(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems("claim://films/movies/film.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"/media/1/movies/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
+		t.Errorf("items = %v, want %v", resolved.Items, want)
+	}
+	volumes := []Volume{{
+		Name:                  "media-1",
+		PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "films", ReadOnly: true},
+	}}
+	if !reflect.DeepEqual(resolved.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
+	}
+	mounts := []VolumeMount{{Name: "media-1", MountPath: "/media/1", ReadOnly: true}}
+	if !reflect.DeepEqual(resolved.Mounts, mounts) {
+		t.Errorf("mounts = %+v, want %+v", resolved.Mounts, mounts)
+	}
+}
+
+// A film, its logo, and its trickplay tiles on one claim cost one mount,
+// wherever each sits under the claim.
+func TestResolveOneClaimCostsOneMount(t *testing.T) {
+	resolved, err := resolvePlay([]PlayItem{{
+		URI: "claim://library/movies/film/film.mkv",
+		Presentation: &Presentation{
+			Logo:      "claim://library/art/film/logo.png",
+			Trickplay: "claim://library/movies/film/film.trickplay",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"/media/1/movies/film/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
+		t.Errorf("items = %v, want %v", resolved.Items, want)
+	}
+	if want := []string{"/media/1/art/film/logo.png"}; !reflect.DeepEqual(resolved.Logos, want) {
+		t.Errorf("logos = %v, want %v", resolved.Logos, want)
+	}
+	if want := []string{"/media/1/movies/film/film.trickplay"}; !reflect.DeepEqual(resolved.Trickplays, want) {
+		t.Errorf("trickplays = %v, want %v", resolved.Trickplays, want)
+	}
+	volumes := []Volume{{
+		Name:                  "media-1",
+		PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "library", ReadOnly: true},
+	}}
+	if !reflect.DeepEqual(resolved.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
+	}
+	if len(resolved.Mounts) != 1 {
+		t.Errorf("mounts = %+v, want one", resolved.Mounts)
+	}
+}
+
+// Two claims cost two mounts, numbered by first appearance in the
+// playlist.
+func TestResolveMountsOneVolumePerClaim(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems(
+		"claim://films/movies/film.mkv",
+		"claim://shows/episodes/episode.mkv",
+		"claim://films/movies/other.mkv",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []string{"/media/1/movies/film.mkv", "/media/2/episodes/episode.mkv", "/media/1/movies/other.mkv"}
+	if !reflect.DeepEqual(resolved.Items, items) {
+		t.Errorf("items = %v, want %v", resolved.Items, items)
+	}
+	volumes := []Volume{
+		{Name: "media-1", PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "films", ReadOnly: true}},
+		{Name: "media-2", PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "shows", ReadOnly: true}},
+	}
+	if !reflect.DeepEqual(resolved.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
+	}
+	mounts := []VolumeMount{
+		{Name: "media-1", MountPath: "/media/1", ReadOnly: true},
+		{Name: "media-2", MountPath: "/media/2", ReadOnly: true},
+	}
+	if !reflect.DeepEqual(resolved.Mounts, mounts) {
+		t.Errorf("mounts = %+v, want %+v", resolved.Mounts, mounts)
+	}
+}
+
+// The servers and the claims share one run of mount numbers, in the order
+// the playlist first names each of them.
+func TestResolveNumbersServersAndClaimsTogether(t *testing.T) {
+	resolved, err := resolvePlay(mediaItems(
+		"nfs://nas.example/export/films/first.mkv",
+		"claim://library/movies/second.mkv",
+		"nfs://nas.example/export/films/third.mkv",
+		"claim://archive/clips/fourth.mkv",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := []string{
+		"/media/1/first.mkv",
+		"/media/2/movies/second.mkv",
+		"/media/1/third.mkv",
+		"/media/3/clips/fourth.mkv",
+	}
+	if !reflect.DeepEqual(resolved.Items, items) {
+		t.Errorf("items = %v, want %v", resolved.Items, items)
+	}
+	volumes := []Volume{
+		{Name: "media-1", NFS: &NFSVolumeSource{Server: "nas.example", Path: "/export/films", ReadOnly: true}},
+		{Name: "media-2", PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "library", ReadOnly: true}},
+		{Name: "media-3", PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "archive", ReadOnly: true}},
+	}
+	if !reflect.DeepEqual(resolved.Volumes, volumes) {
+		t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volumes)
+	}
+}
+
+// An album on a claim is one directory item. The album rule is the same
+// for every scheme.
+func TestResolveAnAlbumDirectoryOnAClaim(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+	}{
+		{name: "a directory", uri: "claim://music/albums/Third Album"},
+		{name: "a directory with a trailing slash", uri: "claim://music/albums/Third Album/"},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			resolved, err := resolvePlay([]PlayItem{{
+				URI:          each.uri,
+				Presentation: &Presentation{Type: "music", Hint: "album"},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{"/media/1/albums/Third Album"}; !reflect.DeepEqual(resolved.Items, want) {
+				t.Errorf("items = %v, want %v", resolved.Items, want)
+			}
+			volume := Volume{
+				Name:                  "media-1",
+				PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "music", ReadOnly: true},
+			}
+			if len(resolved.Volumes) != 1 || !reflect.DeepEqual(resolved.Volumes[0], volume) {
+				t.Errorf("volumes = %+v, want %+v", resolved.Volumes, volume)
+			}
+		})
+	}
+}
+
+// A directory on a claim that no block marks as an album is refused, for
+// the reason every other directory item is.
+func TestResolveRefusesAClaimDirectoryThatIsNoAlbum(t *testing.T) {
+	_, err := resolvePlay(mediaItems("claim://music/albums/Third Album/"))
+	if err == nil {
+		t.Fatal("a directory that is no album resolved")
+	}
+	want := `the URI "claim://music/albums/Third Album/" names a directory; ` +
+		"mark the item as an album with type music and hint album, or name a file"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+// A claim URI that names no claim, or no path inside it, resolves
+// nothing, and the error quotes the URI the Play carries.
+func TestResolveRefusesAClaimURIItCannotMount(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+		want string
+	}{
+		{
+			name: "no claim name",
+			uri:  "claim:///movies/film.mkv",
+			want: `the URI "claim:///movies/film.mkv" names no claim`,
+		},
+		{
+			name: "no path in the claim",
+			uri:  "claim://films",
+			want: `the URI "claim://films" names no path in the claim`,
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			resolved, err := resolvePlay(mediaItems(each.uri))
+			if err == nil {
+				t.Fatalf("%q resolved to %+v", each.uri, resolved)
+			}
+			if err.Error() != each.want {
+				t.Errorf("error = %q, want %q", err.Error(), each.want)
+			}
+			if len(resolved.Items) != 0 || len(resolved.Volumes) != 0 || len(resolved.Mounts) != 0 {
+				t.Errorf("a refused list resolved %+v", resolved)
+			}
+		})
+	}
+}
+
 // An https logo stays a URL for the bridge to fetch, and the media
 // beside it still mounts.
 func TestResolveAnHTTPSLogoStaysAURL(t *testing.T) {
@@ -344,7 +551,7 @@ func TestResolveLeavesAnAbsentLogoEmpty(t *testing.T) {
 	}
 }
 
-// An unresolvable scheme's error names the two the operator does
+// An unresolvable scheme's error names the three the operator does
 // resolve, because the reader is writing a Play and needs the
 // vocabulary.
 func TestResolveNamesTheSchemesItResolves(t *testing.T) {
@@ -352,7 +559,7 @@ func TestResolveNamesTheSchemesItResolves(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown scheme resolved")
 	}
-	want := "the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://"
+	want := "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, and claim://"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}

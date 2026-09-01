@@ -255,8 +255,8 @@ func commandSidecar(
 // definite value the sidecar forwards as it is.
 //
 // Each block carries the resolved logo for its item, so the bridge reads an
-// nfs logo by an in-pod path and mpv fetches an https logo by its URL. The
-// cover art resolves the same way.
+// nfs or claim logo by an in-pod path and mpv fetches an https logo by its
+// URL. The cover art resolves the same way.
 func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) string {
 	blocks := make([]json.RawMessage, len(items))
 	for index, item := range items {
