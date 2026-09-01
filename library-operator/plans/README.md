@@ -35,10 +35,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [07, The media browser](07-the-media-browser.md). The screen pod's
-  browser takes the room's remotes: the presses `media-operator`'s idle
-  command pod forwards on the bus, the shade it decides, and the
-  re-present when a `Play` ends.
 * [08, Playback from the media
   browser](08-playback-from-the-media-browser.md). From a chosen title
   to a `Play` on the same `Player`, and back.
@@ -103,6 +99,13 @@ for a later agent to shape.
   read-only, and the display claim `media-operator` publishes on
   `status.idle`. The drill found the browser container without the
   catalog mount, fixed in -003. The screen takes no input until plan 07.
+* [07, The media browser](completed/07-the-media-browser.md). Built,
+  released in 2026.09.01-004, and drilled on `liken-1` on 2026-09-01.
+  The screen pod's browser takes the room's remotes over the bus: the
+  presses `media-operator`'s idle command pod forwards arrive as keys,
+  the shade moments draw black and draw again, back at the libraries
+  asks for the shade, and a `Play`'s end re-presents the browser where
+  it was. The browser measured 92 MiB resident on the box.
 * [15, The namespace catalog](completed/15-the-namespace-catalog.md).
   Built out of sequence during plan 04, and rolled to `liken-1` through
   release 2026.08.30-011. The `Catalog` CRD, one per namespace, that owns

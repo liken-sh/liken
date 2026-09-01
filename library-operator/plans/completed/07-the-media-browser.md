@@ -107,3 +107,17 @@ created on `lab-portable` covers the browser, and its end re-presents
 the browser at the same focus. The browser's resident memory on the
 box during a full scroll of the wall is recorded beside the
 workstation's 130.9 MiB.
+
+Drilled on `liken-1` on 2026-09-01, in release 2026.09.01-004, with
+`media-operator` at its 2026.09.01-005. The screen pod carried the three
+variables, and the broker logged the browser's connection. From the X6,
+the arrows moved focus on the libraries and on the wall, select opened
+and descended, a held arrow repeated, and back climbed each level. Back
+at the libraries published the `sleep` request, the shade came down in
+the same second, and the next press woke the screen and moved nothing.
+A one-off `Play` covered the browser, and its end published `present`;
+the browser mapped a fresh surface and drew where it had been. The
+browser measured 92 MiB resident after a full scroll of the wall, on
+the box, beside the workstation's 130.9 MiB. The series levels were not
+walked by hand in this drill; the same code drew them on the
+workstation, and plan 08 walks them when an episode is chosen to play.
