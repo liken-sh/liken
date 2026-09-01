@@ -99,18 +99,30 @@ that controller translates nothing and nothing fails.
 
 ## The proof
 
-The drill runs on a controller that emits only `KEY_*` codes, the
-case the plan exists for, beside three checks the build assumed:
+Built in release 2026.09.01-001 and drilled on the testbed on
+2026-09-01, on a DualSense and on an X6 mini keyboard remote, the
+`KEY_*`-only device the plan exists for. The three checks the build
+assumed all passed:
 
 1. The claim's CDI spec narrows `/dev/input` to the one controller.
-   Discovery keeps every delivered node on that assumption; if a
-   claimed pod sees the whole directory, the bypass must narrow.
-2. The declared bitmap is a superset of what arrives: every press
-   publishes a code the bitmap set, and the bitmap holds no code no
-   control produces.
+   Read from the node's CDI directory: the DualSense's claim
+   delivers exactly its own three event nodes, so discovery's
+   keep-everything bypass sees only the claimed controller.
+2. The declared bitmap matches reality in both directions. Every
+   one of the DualSense's 17 declared key codes was produced by a
+   real control, and no press produced an undeclared code.
 3. The full flow of the
-   [mapping guide](../docs/content/docs/guides/mapping-a-controller.md):
-   declare a
-   `Remote` with no `Keymap`, turn on discovery, press every
-   button, write the `Keymap` from the log, and watch
-   `status.unbound` empty.
+   [mapping guide](../../docs/content/docs/guides/mapping-a-controller.md)
+   ran end to end on the X6: a `Remote` with no `Keymap`, discovery
+   on, every front-cluster button pressed, and a ten-entry `Keymap`
+   lifted from the log. `status.unbound` fell from 275 to 265, the
+   keyboard on the shell's back that stays deliberately unbound.
+
+The drill also surfaced what the mode exists to surface. The
+verdict lines showed the X6's OK button is a mouse click and its
+house-glyph button emits `KEY_BACK`, facts no vendor document
+states. And the first `KEY_*` device on the testbed flushed out two
+OS gaps that `liken` fixed in its own releases the same day: a BLE
+HID stack needs `/dev/uhid` delivered with the adapter's claim, and
+the Bluetooth vendors' runtime-named patch firmware never shipped
+from a modinfo-derived set.

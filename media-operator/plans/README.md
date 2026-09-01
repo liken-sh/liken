@@ -25,13 +25,6 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [21, A remote that teaches its
-  keymap](21-a-remote-that-teaches-its-keymap.md). Built, and
-  awaiting its drill. `spec.discovery` on the `Remote` keeps every
-  node and logs each event with a paste-ready `Keymap` entry, the
-  button vocabulary widens to the kernel's whole `EV_KEY` space, and
-  `status.unbound` reports the declared codes the `Keymap` does not
-  bind.
 
 ## Completed
 
@@ -200,6 +193,17 @@ These plans are designed. Each keeps its number and moves to
   parked `Pending` with an empty message, so 2026.09.01-003 reads
   the scheduler's message from the `PodScheduled` condition into the
   status, which now names the claim.
+* [21, A remote that teaches its
+  keymap](completed/21-a-remote-that-teaches-its-keymap.md). Built,
+  and drilled on the testbed on 2026-09-01 in release
+  2026.09.01-001. `spec.discovery` on the `Remote` keeps every node
+  and logs each event with a paste-ready `Keymap` entry, the button
+  vocabulary widens to the kernel's whole `EV_KEY` space, and
+  `status.unbound` reports the declared codes the `Keymap` does not
+  bind. An X6 mini keyboard remote was mapped from nothing to a
+  ten-entry `Keymap` through the guide, and the drill flushed out
+  the two OS gaps `liken` fixed the same day, `/dev/uhid` delivery
+  and the runtime-named Bluetooth patch firmware.
 
 ## Open problems
 
