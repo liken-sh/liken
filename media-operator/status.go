@@ -96,13 +96,29 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 		// A pod that has not started yet is a Play still Pending.
 		// The ordinary hold is allocation: a Player whose devices no
 		// one machine can satisfy parks its pod unschedulable, and
-		// the pod's own message says which request wants.
+		// the pod's own message says which request wants. The
+		// scheduler's holds, a claim that does not exist among them,
+		// arrive on a condition instead, so the fold reads both.
 		status.Phase = phasePending
 		if pod.Status.Message != "" {
 			status.Message = pod.Status.Message
+		} else {
+			status.Message = podConditionMessage(pod)
 		}
 	}
 	return status
+}
+
+// podConditionMessage is the scheduler's word on a pod it cannot place:
+// the message of the first condition that is false. A claim that does
+// not exist parks a pod this way, and the message names the claim.
+func podConditionMessage(pod *Pod) string {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Status == "False" && condition.Message != "" {
+			return condition.Message
+		}
+	}
+	return ""
 }
 
 // foldReport passes the item, the position, and the duration through

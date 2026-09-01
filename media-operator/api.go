@@ -789,7 +789,17 @@ type PodStatus struct {
 	Phase             string            `json:"phase,omitempty"`
 	Reason            string            `json:"reason,omitempty"`
 	Message           string            `json:"message,omitempty"`
+	Conditions        []PodCondition    `json:"conditions,omitempty"`
 	ContainerStatuses []ContainerStatus `json:"containerStatuses,omitempty"`
+}
+
+// The scheduler explains a pod it cannot place on the PodScheduled
+// condition, not in the pod's message, so a hold like a claim that
+// does not exist is only readable here.
+type PodCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 
 type ContainerStatus struct {

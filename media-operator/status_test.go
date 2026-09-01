@@ -43,6 +43,13 @@ func TestDerivePlayStatus(t *testing.T) {
 	unschedulable := playbackPod(podPending)
 	unschedulable.Status.Message = "no machine holds every claimed device"
 
+	parked := playbackPod(podPending)
+	parked.Status.Conditions = []PodCondition{{
+		Type:    "PodScheduled",
+		Status:  "False",
+		Message: `0/2 nodes are available: persistentvolumeclaim "films" not found.`,
+	}}
+
 	cases := []struct {
 		name     string
 		player   *Player
@@ -84,6 +91,15 @@ func TestDerivePlayStatus(t *testing.T) {
 			Phase:   phasePending,
 			Pod:     "movie-playback",
 			Message: "no machine holds every claimed device",
+		},
+	}, {
+		name:   "a pod the scheduler parks reports the condition's message",
+		player: player,
+		pod:    parked,
+		want: PlayStatus{
+			Phase:   phasePending,
+			Pod:     "movie-playback",
+			Message: `0/2 nodes are available: persistentvolumeclaim "films" not found.`,
 		},
 	}, {
 		name:   "a running pod with no report yet carries no numbers",
