@@ -4,7 +4,7 @@
 
 use iced_widget::image::Handle;
 
-use crate::catalog::{EpisodeRow, LibraryEntry, Source, Title};
+use crate::catalog::{EpisodeRow, LibraryEntry, PlayItem, Selection, Source, Title};
 use crate::harness::Waker;
 use crate::posters::Posters;
 
@@ -75,6 +75,12 @@ impl Source for Catalog {
                 art: String::new(),
             })
             .collect()
+    }
+
+    // The sample invents titles and no files, so a select on one starts
+    // nothing. A workstation run browses and plays nothing.
+    fn play(&mut self, _library: &str, _selection: &Selection) -> Vec<PlayItem> {
+        Vec::new()
     }
 
     fn changed(&mut self) -> bool {
@@ -163,6 +169,21 @@ mod tests {
     #[test]
     fn the_sample_reports_no_changes() {
         assert!(!Catalog.changed());
+    }
+
+    #[test]
+    fn a_select_on_the_sample_resolves_no_file() {
+        let mut catalog = Catalog;
+        assert!(
+            catalog
+                .play(
+                    "sample/features",
+                    &Selection::Movie {
+                        id: "movie:sample:0001".into()
+                    }
+                )
+                .is_empty()
+        );
     }
 
     #[test]

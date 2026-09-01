@@ -37,30 +37,39 @@ episode, the browser publishes a request on a topic this operator
 names. The operator sets the topic on the browser container, beside
 the three variables plan 07 set, because the browser knows neither
 this operator's topic base nor the `Player`'s name. The request
-carries the library key, the kind, and the item id, the same three
-values the browser's own rows carry. The operator, which has the
-RBAC, reads the request, resolves the item, and creates the `Play` in
-the `Player`'s namespace.
+carries the library key and the list to play: for each item, the path
+of its main file relative to the library root, the path of its
+trickplay directory, and the presentation. The operator, which has
+the RBAC, reads the request and creates the `Play` in the `Player`'s
+namespace.
+
+The browser resolves the list, and not the operator, because the
+browser holds the catalog. The sidecar's file is beside it. Corrosion's
+API binds to loopback in every pod, and the catalog `Service` carries
+only the gossip port, so the operator can read no namespace's catalog.
 
 The screen holds no credential, the bus is already the screen's one
 path out, and a media browser of another make that speaks the same
 topic gets the same service.
 
-**Resolving an item.** The operator builds the `Play` from the catalog
-and the `Library`. A title's main file, from `files` through
-`file_items`, joined to the `Library`'s claim and root, becomes
-`claim://<claim>/<root>/<path>`. The file's `trickplay` column becomes
-the trickplay reference in the same form. The row's title, year, and
-series fields fill the presentation, so the film's display shows the
-words the wall showed. A movie is one item. An episode becomes a list,
-the chosen episode first and the rest of its season after it in
-episode order, so one `Play` plays the season. The start is the
-beginning, because there is no watch state yet.
+**Resolving an item.** The browser builds the list from the catalog.
+A title's main file is its row in `files`, through `file_items`, whose
+`type` is `video` and whose `role` is `primary`. The row's `trickplay`
+column comes with it. The item's title, year, series, season, episode,
+and art fill the presentation, so the film's display shows the words
+the wall showed. A movie is one item. An episode becomes a list, the
+chosen episode first and the rest of its season after it in episode
+order, so one `Play` plays the season. The start is the beginning,
+because there is no watch state yet. A title with no main file
+publishes nothing and logs the gap.
 
-A request that names an item the catalog no longer holds, or a
-library with no claim, is logged and dropped. The browser draws what
-the catalog holds, so the case is a race with a prune and not a
-person's mistake.
+**Stamping the claim.** The operator joins each path to the
+`Library`'s claim and root, so a file becomes
+`claim://<claim>/<root>/<path>`, and the trickplay and art paths take
+the same form. A path that is absolute or that climbs above the root
+is refused, so a request names nothing outside the library it came
+from. A request that names a `Library` the `Player`'s namespace does
+not hold, or one with no claim, is logged and dropped.
 
 **Who may ask.** The operator subscribes to the request topics of the
 `Player`s it serves, and it creates a `Play` only on a `Player` whose
@@ -76,9 +85,10 @@ the `Play` ends, `present` returns the browser at the same focus.
 
 `local/browse` publishes the request when the topic variable is set
 and does nothing on select when it is not, so the workstation needs no
-cluster and no broker to browse. The resolve runs against a fixture
-catalog in the Go tests, where the reference, the trickplay path, and
-the list order are checked.
+cluster and no broker to browse. The crate's tests check the resolve
+against a fixture catalog: the file path, the trickplay path, and the
+list order. The Go tests check the claim stamp and the refusals
+against the fake cluster.
 
 ## What was set aside
 

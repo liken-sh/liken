@@ -1,10 +1,12 @@
 package main
 
-// The bus topic layout. A scanner pod holds no API credentials, so
-// every fact it learns about a library reaches the control plane over
-// the bus. This file builds the topics it publishes and the filters
-// the operator subscribes to, so it is the public contract of the
-// bus and the one place another program reads to follow a library.
+// The bus topic layout. No pod this operator stands holds an API
+// credential, so every fact a scanner learns about a library, and
+// every choice a person makes on a screen, reaches the control plane
+// over the bus. This file builds the topics the pods publish and the
+// filters the operator subscribes to, so it is the public contract of
+// the bus and the one place another program reads to follow a library
+// or to ask for a play.
 //
 // The broker is the one the media operator runs. Each topic extends a
 // base the operator holds as one string, liken/library by default, so
@@ -63,6 +65,45 @@ func libraryStatusFilter(base string) string {
 // scanner's availability signal.
 func libraryAvailabilityFilter(base string) string {
 	return base + "/libraries/+/+/" + libraryAvailabilityKind
+}
+
+// playRequestKind is the last level of a play request topic. A screen
+// pod publishes what a person chose here, because the browser holds
+// the catalog and the operator holds the credential that creates a
+// Play.
+const playRequestKind = "play"
+
+// playRequestTopic carries one Player's play requests. The operator
+// sets it on the browser container, because the browser knows neither
+// this operator's topic base nor the Player's name.
+func playRequestTopic(base, namespace, player string) string {
+	return base + "/players/" + namespace + "/" + player + "/" + playRequestKind
+}
+
+// playRequestFilter is the subscription that reaches every Player's
+// play requests. A media browser of another make that publishes here
+// gets the same service.
+func playRequestFilter(base string) string {
+	return base + "/players/+/+/" + playRequestKind
+}
+
+// parsePlayRequestTopic maps an inbound play topic back to the Player
+// it names. The operator creates a Play only for a Player it serves,
+// so the topic is what says which Player asked.
+func parsePlayRequestTopic(base, topic string) (namespace, player string, ok bool) {
+	prefix := base + "/players/"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
+	if len(parts) != 3 {
+		return "", "", false
+	}
+	namespace, player = parts[0], parts[1]
+	if namespace == "" || player == "" || parts[2] != playRequestKind {
+		return "", "", false
+	}
+	return namespace, player, true
 }
 
 // parseLibraryTopic maps an inbound libraries topic back to the

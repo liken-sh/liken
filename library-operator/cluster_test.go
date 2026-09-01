@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +39,10 @@ type fakeCluster struct {
 	// holds a Library.
 	slices   map[string]*EndpointSlice
 	services map[string]*Service
+	// The Plays the operator creates, in the order it created them. They
+	// are a list and not a map, because every Play takes a name the API
+	// server mints.
+	plays []Play
 
 	// A PersistentVolume is held as the body the API server serves,
 	// because a volume names its storage with a key on the spec and
@@ -168,6 +173,8 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveEndpointSlice(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case strings.Contains(r.URL.Path, "/services"):
 		f.serveService(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/plays"):
+		f.createPlay(w, r)
 	case r.Method == http.MethodPost:
 		if f.refuseCreate {
 			w.WriteHeader(http.StatusConflict)
@@ -182,6 +189,26 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		answer(w, f.pods[name])
 	}
+}
+
+// The suffix the API server mints onto a generateName. Its own is
+// random; this one is fixed, so a test names the object a pass created.
+const mintedSuffix = "b2k9x"
+
+// CreatePlay answers a create the way the API server does: the name is
+// minted from the generateName, and the object it answers with is the one it
+// holds.
+func (f *fakeCluster) createPlay(w http.ResponseWriter, r *http.Request) {
+	if f.refuseCreate {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	var created Play
+	_ = json.NewDecoder(r.Body).Decode(&created)
+	created.Metadata.Name = created.Metadata.GenerateName + mintedSuffix
+	created.Metadata.GenerateName = ""
+	f.plays = append(f.plays, created)
+	_ = json.NewEncoder(w).Encode(created)
 }
 
 // Selects answers the way the API server answers a label selector: an
@@ -319,6 +346,12 @@ func (f *fakeCluster) heldPod(name string) *Pod {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	return f.pods[name]
+}
+
+func (f *fakeCluster) heldPlays() []Play {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return slices.Clone(f.plays)
 }
 
 func (f *fakeCluster) heldLibrary(name string) *Library {

@@ -1,6 +1,7 @@
 // The socket half of the bus: the thread that holds the connection, the
-// subscribe it sends on every session, and the one request the browser
-// publishes.
+// subscribe it sends on every session, and the two requests the browser
+// publishes, the sleep on the commands topic and the play on the library
+// operator's topic.
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -47,6 +48,9 @@ pub struct Reader {
     /// The publishing half of the same connection the thread drives.
     client: Broker,
     commands: String,
+    /// The topic the library operator reads play requests on, or empty
+    /// where the operator named none.
+    play: String,
 }
 
 impl std::fmt::Debug for Reader {
@@ -62,7 +66,16 @@ impl Reader {
     ///
     /// `client_id` must name this client alone, because a broker closes the
     /// older connection when two arrive under one identifier.
-    pub fn open(address: &str, client_id: &str, commands: String, screen: String) -> Option<Self> {
+    ///
+    /// `play` may be empty. An older library operator sets no play
+    /// topic, and the browser then browses and asks for nothing.
+    pub fn open(
+        address: &str,
+        client_id: &str,
+        commands: String,
+        screen: String,
+        play: String,
+    ) -> Option<Self> {
         let (host, port) = broker(address)?;
         if commands.is_empty() || screen.is_empty() {
             return None;
@@ -90,15 +103,23 @@ impl Reader {
             waker,
             client,
             commands,
+            play,
         })
     }
 
     /// Publish one payload on the commands topic. The publish is queued rather
     /// than sent, because the reader thread is what drives the connection.
     pub fn publish(&self, payload: &'static [u8]) {
-        if let Err(error) =
-            self.client
-                .try_publish(self.commands.as_str(), QoS::AtMostOnce, false, payload)
+        self.send(self.commands.as_str(), payload.to_vec());
+    }
+
+    // One publish at QoS 0, not retained. A request is a moment, and a
+    // broker that held the last one would replay it to the operator on
+    // every reconnect.
+    fn send(&self, topic: &str, payload: Vec<u8>) {
+        if let Err(error) = self
+            .client
+            .try_publish(topic, QoS::AtMostOnce, false, payload)
         {
             eprintln!("media-browser: bus: {error}");
         }
@@ -112,6 +133,14 @@ impl Bus for Reader {
 
     fn request_sleep(&self) {
         self.publish(SLEEP);
+    }
+
+    fn request_play(&self, payload: Vec<u8>) {
+        if self.play.is_empty() {
+            eprintln!("media-browser: no play topic, so this browser starts nothing");
+            return;
+        }
+        self.send(self.play.as_str(), payload);
     }
 
     fn wake_on_delivery(&self, wake: Waker) {

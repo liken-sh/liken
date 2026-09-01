@@ -62,6 +62,7 @@ fn bus(options: &Options) -> Option<Box<dyn Bus>> {
         &client_id,
         options.commands_topic.clone(),
         options.screen_topic.clone(),
+        options.play_topic.clone(),
     )?;
 
     Some(Box::new(reader))

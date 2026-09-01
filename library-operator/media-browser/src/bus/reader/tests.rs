@@ -13,6 +13,7 @@ use crate::bus::screen;
 
 const COMMANDS: &str = "liken/media/players/house/den-tv/commands";
 const SCREEN: &str = "liken/media/players/house/den-tv/screen";
+const PLAY: &str = "liken/library/players/house/den-tv/play";
 
 // The longest a test waits for a press or a publish.
 const CAP: Duration = Duration::from_secs(10);
@@ -144,11 +145,18 @@ fn delivered(reader: &Reader) -> Message {
 }
 
 fn reader(address: &str) -> Reader {
+    named(address, PLAY.into())
+}
+
+// A reader with the play topic the test names, so a test drives both the
+// operator that named one and the older operator that named none.
+fn named(address: &str, play: String) -> Reader {
     Reader::open(
         address,
         "media-browser-test",
         COMMANDS.into(),
         SCREEN.into(),
+        play,
     )
     .expect("the reader opens against an address and two topics")
 }
@@ -293,16 +301,64 @@ fn a_dropped_receiver_ends_the_thread() {
 
 #[test]
 fn a_browser_with_no_broker_and_one_with_no_topics_open_no_reader() {
-    assert!(Reader::open("", "media-browser", COMMANDS.into(), SCREEN.into()).is_none());
-    assert!(Reader::open("broker:1883", "media-browser", String::new(), SCREEN.into()).is_none());
+    assert!(
+        Reader::open(
+            "",
+            "media-browser",
+            COMMANDS.into(),
+            SCREEN.into(),
+            PLAY.into()
+        )
+        .is_none()
+    );
+    assert!(
+        Reader::open(
+            "broker:1883",
+            "media-browser",
+            String::new(),
+            SCREEN.into(),
+            PLAY.into()
+        )
+        .is_none()
+    );
     assert!(
         Reader::open(
             "broker:1883",
             "media-browser",
             COMMANDS.into(),
-            String::new()
+            String::new(),
+            PLAY.into()
         )
         .is_none()
+    );
+}
+
+#[test]
+fn a_play_request_reaches_the_topic_the_operator_named() {
+    let (address, published) = fixture(br#"{"action":"up"}"#);
+    let reader = reader(&address);
+
+    reader.request_play(br#"{"library":"default/films"}"#.to_vec());
+
+    assert_eq!(
+        published.recv_timeout(CAP).expect("the play request"),
+        (PLAY.to_string(), br#"{"library":"default/films"}"#.to_vec())
+    );
+}
+
+#[test]
+fn a_browser_with_no_play_topic_publishes_no_request() {
+    let (address, published) = fixture(br#"{"action":"up"}"#);
+    let reader = named(&address, String::new());
+
+    reader.request_play(br#"{"library":"default/films"}"#.to_vec());
+    // The sleep request that follows proves the connection carried the
+    // dropped request first.
+    reader.request_sleep();
+
+    assert_eq!(
+        published.recv_timeout(CAP).expect("the sleep request"),
+        (COMMANDS.to_string(), SLEEP.to_vec())
     );
 }
 

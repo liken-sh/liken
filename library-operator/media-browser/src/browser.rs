@@ -11,8 +11,8 @@ use iced_widget::{Space, canvas};
 use iced_winit::core::{Color, Element, Length, Theme};
 
 use crate::bus::screen::Event;
-use crate::bus::{Bus, Message};
-use crate::catalog::Source;
+use crate::bus::{Bus, Message, play};
+use crate::catalog::{Selection, Source};
 use crate::focus;
 use crate::harness::{Screen, Waker};
 use crate::levels::{Fetch, Level, Shape, shapes_of};
@@ -112,14 +112,19 @@ impl<S: Source, P: Posters> Browser<S, P> {
         }
     }
 
-    // A descent pushes the next level of the focused row, and the
-    // next level is a fact of the kind's table: the shape at the next depth,
-    // or nothing when the row is as deep as its kind goes.
+    // A select on the focused row does one of two things, and the
+    // kind's table decides which. Where the kind has a level below this
+    // one, the descent pushes it. Where it has none, the row is a movie
+    // or an episode, and the select is the play request.
     fn descend(&mut self) {
         let top = self.top();
         let Some(row) = top.rows.get(top.focus) else {
             return;
         };
+        // What a select on the deepest row of a kind chose. A movie and
+        // an episode have nothing below them, so the descent that finds
+        // no next level is the play request.
+        let mut chosen = None;
         let next = match &top.fetch {
             Fetch::Libraries => Some((
                 shapes_of(&row.kind)[0],
@@ -128,16 +133,20 @@ impl<S: Source, P: Posters> Browser<S, P> {
                     kind: row.kind.clone(),
                 },
             )),
-            Fetch::Titles { library, kind } => shapes_of(kind).get(1).map(|shape| {
-                (
+            Fetch::Titles { library, kind } => match shapes_of(kind).get(1) {
+                Some(shape) => Some((
                     *shape,
                     Fetch::Seasons {
                         library: library.clone(),
                         kind: kind.clone(),
                         series: row.id.clone(),
                     },
-                )
-            }),
+                )),
+                None => {
+                    chosen = Some((library.clone(), Selection::Movie { id: row.id.clone() }));
+                    None
+                }
+            },
             Fetch::Seasons {
                 library,
                 kind,
@@ -155,11 +164,48 @@ impl<S: Source, P: Posters> Browser<S, P> {
                     },
                 )
             }),
-            Fetch::Episodes { .. } => None,
+            Fetch::Episodes {
+                library,
+                series,
+                season,
+            } => {
+                chosen = Some((
+                    library.clone(),
+                    Selection::Episode {
+                        series: series.clone(),
+                        season: *season,
+                        episode: row.number,
+                    },
+                ));
+                None
+            }
         };
+        if let Some((library, selection)) = chosen {
+            self.request_play(&library, &selection);
+            return;
+        }
         if let Some((shape, fetch)) = next {
             let level = Level::new(shape, fetch, &mut self.source);
             self.stack.push(level);
+        }
+    }
+
+    // Resolve the choice through the catalog and publish it. The browser
+    // resolves the list because it holds the catalog, and the operator
+    // creates the `Play` because it holds the credential. A choice with
+    // no main file starts nothing, and the line in the pod log is the
+    // only sign of the gap.
+    fn request_play(&mut self, library: &str, selection: &Selection) {
+        let items = self.source.play(library, selection);
+        if items.is_empty() {
+            eprintln!(
+                "media-browser: no file to play for {} in {library}",
+                selection.named()
+            );
+            return;
+        }
+        if let Some(bus) = &self.bus {
+            bus.request_play(play::payload(library, &items));
         }
     }
 

@@ -78,10 +78,95 @@ pub trait Source {
     /// One season's episodes, in order.
     fn episodes(&mut self, library: &str, series: &str, season: i64) -> Vec<EpisodeRow>;
 
+    /// The play list one choice resolves to. A movie is one item or
+    /// none. An episode is itself and every later episode of its season,
+    /// in episode order. A choice whose own main file is missing
+    /// resolves to nothing, because a play that skipped what the person
+    /// chose is worse than no play at all.
+    fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem>;
+
     /// Whether anything changed since the last call.
     fn changed(&mut self) -> bool;
 
     /// Take the handle that wakes the loop, for a source with a stream of
     /// its own. A source with no stream takes it and does nothing.
     fn wake_by(&mut self, wake: Waker);
+}
+
+/// What a person chose on the wall, as the two things that resolve to a
+/// play list: a movie by its id, and an episode by its series, season,
+/// and aired number. The library is not in here because every read
+/// takes it beside the choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    /// One movie, named by its provider-scoped id.
+    Movie {
+        /// The movie's id inside its library.
+        id: String,
+    },
+    /// One episode, and with it the rest of its season.
+    Episode {
+        /// The parent series' id inside the library.
+        series: String,
+        /// The aired season number.
+        season: i64,
+        /// The aired episode number the person chose.
+        episode: i64,
+    },
+}
+
+impl Selection {
+    /// The choice as one line, for the log line a resolve that found
+    /// nothing writes.
+    pub fn named(&self) -> String {
+        match self {
+            Self::Movie { id } => id.clone(),
+            Self::Episode {
+                series,
+                season,
+                episode,
+            } => format!("{series} S{season}E{episode}"),
+        }
+    }
+}
+
+/// One item of a play list: the main file's path relative to the
+/// library root, and the words the film's own display shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayItem {
+    /// The main file's path, relative to the library root.
+    pub path: String,
+    /// The presentation the operator passes through to the `Play`.
+    pub presentation: Presentation,
+}
+
+/// media-operator's own presentation block, as the catalog answers it.
+/// Every empty field is left out of the request, so this type carries
+/// the same absences the JSON does.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Presentation {
+    /// The medium, `video` for everything this plan resolves. It is
+    /// `type` in the JSON, which Rust reserves.
+    pub kind: String,
+    /// What the item is, `movie` or `series`.
+    pub hint: String,
+    /// The movie's title. An episode carries none.
+    pub title: String,
+    /// The series' title, from the series row.
+    pub series: String,
+    /// The aired season number.
+    pub season: i64,
+    /// The aired episode number.
+    pub episode: i64,
+    /// The episode's own title.
+    pub episode_title: String,
+    /// The year of release, the first four digits of the catalog's
+    /// released column.
+    pub year: i64,
+    /// The full ISO date of release, where the catalog holds one.
+    pub date: String,
+    /// The art path, relative to the library root.
+    pub art: String,
+    /// The trickplay path, relative to the library root.
+    pub trickplay: String,
 }

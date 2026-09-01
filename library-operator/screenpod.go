@@ -63,6 +63,11 @@ const (
 	mediaScreenTopicVariable   = "MEDIA_PLAYER_SCREEN_TOPIC"
 )
 
+// The topic the browser publishes a play request on. It is this
+// operator's own variable and not media-operator's, because this
+// operator names the topic and reads it.
+const libraryPlayTopicVariable = "LIBRARY_PLAY_TOPIC"
+
 // ScreenPodName is the pod one Player becomes. The name is derived
 // rather than generated, so every pass names the same pod and the operator
 // needs no record of what it created.
@@ -99,7 +104,7 @@ func playerOwner(player *Player) OwnerReference {
 // settings alone, so two passes over an unchanged namespace build the same
 // pod, which is what makes the template hash mean anything. The Libraries are
 // read in name order for the same reason.
-func buildScreenPod(player *Player, libraries []Library, browserImage, corrosionImage string) *Pod {
+func buildScreenPod(player *Player, libraries []Library, browserImage, corrosionImage, topicBase string) *Pod {
 	grace := int64(scannerGracePeriod)
 	// The browser holds no Kubernetes credential. It reads the catalog
 	// from the agent beside it, and nothing in the pod speaks to the API
@@ -150,7 +155,7 @@ func buildScreenPod(player *Player, libraries []Library, browserImage, corrosion
 				catalogSidecar(corrosionImage),
 			},
 			Containers: []Container{
-				browserSidecar(player, shown, browserImage),
+				browserSidecar(player, shown, browserImage, topicBase),
 			},
 			Volumes: volumes,
 			// The display claim media-operator stood for this Player.
@@ -168,7 +173,7 @@ func buildScreenPod(player *Player, libraries []Library, browserImage, corrosion
 // alone, because it holds no API credential to look one up with. Each library
 // claim is mounted read-only, so the browser cannot write to a media volume
 // whatever it does.
-func browserSidecar(player *Player, libraries []Library, image string) Container {
+func browserSidecar(player *Player, libraries []Library, image, topicBase string) Container {
 	args := []string{
 		"--catalog", path.Join(catalogStatePath, catalogStateFile),
 		"--updates", defaultCatalogAPI,
@@ -217,6 +222,11 @@ func browserSidecar(player *Player, libraries []Library, image string) Container
 			EnvVar{Name: mediaBusAddressVariable, Value: bus.Address},
 			EnvVar{Name: mediaCommandsTopicVariable, Value: bus.CommandsTopic},
 			EnvVar{Name: mediaScreenTopicVariable, Value: bus.ScreenTopic},
+			// The play topic travels with the three, because it is the
+			// same connection. A browser with no broker publishes no
+			// request, so the topic alone would name nothing.
+			EnvVar{Name: libraryPlayTopicVariable, Value: playRequestTopic(
+				topicBase, player.Metadata.Namespace, player.Metadata.Name)},
 		)
 	}
 
@@ -273,7 +283,7 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, playe
 			}
 			continue
 		}
-		desired := buildScreenPod(player, inNamespace, o.browserImage, o.corrosionImage)
+		desired := buildScreenPod(player, inNamespace, o.browserImage, o.corrosionImage, o.topicBase)
 		if _, err := o.standPod(ctx, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the screen of %s/%s: %v\n", namespace, name, err)
 		}

@@ -8,6 +8,7 @@
 //! drains on every wake of its loop, so a broker that answers slowly never
 //! delays a frame.
 
+pub mod play;
 pub mod press;
 pub mod reader;
 pub mod screen;
@@ -20,9 +21,14 @@ pub trait Bus {
     /// Every message that arrived since the last call. The call never blocks.
     fn drain(&self) -> Vec<Message>;
 
-    /// Ask the idle command pod to bring the shade down. It is the one request
-    /// a client makes, from its top level with nowhere left to go back to.
+    /// Ask the idle command pod to bring the shade down, from the top
+    /// level with nowhere left to go back to.
     fn request_sleep(&self);
+
+    /// Ask the library operator to play the list this payload carries.
+    /// The browser resolves the list because it holds the catalog, and
+    /// the operator creates the `Play` because it holds the credential.
+    fn request_play(&self, payload: Vec<u8>);
 
     /// Wake the loop on every delivery, so a press shows on the next
     /// frame rather than at the next scheduled second.

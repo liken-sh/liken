@@ -34,6 +34,16 @@ func TestTopicsCarryTheLibraryLayout(t *testing.T) {
 			got:  libraryAvailabilityFilter(base),
 			want: "liken/library/libraries/+/+/availability",
 		},
+		{
+			name: "play",
+			got:  playRequestTopic(base, "house", "den-tv"),
+			want: "liken/library/players/house/den-tv/play",
+		},
+		{
+			name: "play filter",
+			got:  playRequestFilter(base),
+			want: "liken/library/players/+/+/play",
+		},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -108,5 +118,47 @@ func TestATopicRoundTripsThroughTheParser(t *testing.T) {
 	}
 	if namespace != "attic" || name != "series" || kind != libraryStatusKind {
 		t.Errorf("parsed (%q, %q, %q), want (attic, series, status)", namespace, name, kind)
+	}
+}
+
+func TestParsePlayRequestTopicNamesThePlayer(t *testing.T) {
+	base := defaultTopicBase
+	cases := []struct {
+		name      string
+		topic     string
+		namespace string
+		player    string
+		ok        bool
+	}{
+		{
+			name:      "a play topic",
+			topic:     playRequestTopic(base, "house", "den-tv"),
+			namespace: "house",
+			player:    "den-tv",
+			ok:        true,
+		},
+		{name: "a topic under another base", topic: "other/players/house/den-tv/play"},
+		{name: "the media operator's own tree", topic: "liken/media/players/house/den-tv/commands"},
+		{name: "a libraries topic", topic: libraryStatusTopic(base, "house", "movies")},
+		{name: "a players topic with a kind this operator does not read", topic: base + "/players/house/den-tv/screen"},
+		{name: "a players topic missing its name", topic: base + "/players/house/play"},
+		{name: "a players topic with a level too many", topic: base + "/players/house/den-tv/play/extra"},
+		{name: "an empty namespace", topic: base + "/players//den-tv/play"},
+		{name: "an empty name", topic: base + "/players/house//play"},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			namespace, player, ok := parsePlayRequestTopic(base, each.topic)
+			if ok != each.ok {
+				t.Fatalf("ok = %v, want %v", ok, each.ok)
+			}
+			if !ok {
+				return
+			}
+			if namespace != each.namespace || player != each.player {
+				t.Errorf("parsed (%q, %q), want (%q, %q)",
+					namespace, player, each.namespace, each.player)
+			}
+		})
 	}
 }

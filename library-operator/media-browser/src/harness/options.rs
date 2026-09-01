@@ -29,6 +29,12 @@ pub const COMMANDS_TOPIC: &str = "MEDIA_PLAYER_COMMANDS_TOPIC";
 /// moments.
 pub const SCREEN_TOPIC: &str = "MEDIA_PLAYER_SCREEN_TOPIC";
 
+/// The topic the library operator reads this `Player`'s play requests
+/// on. It is the library operator's own variable, not media-operator's,
+/// because that operator names the topic, and the browser knows neither
+/// the topic base nor the `Player`'s name.
+pub const PLAY_TOPIC: &str = "LIBRARY_PLAY_TOPIC";
+
 /// The help the binary prints for `--help`.
 pub const HELP: &str = "\
 media-browser [FLAGS]
@@ -94,6 +100,9 @@ pub struct Options {
     pub bus_address: String,
     pub commands_topic: String,
     pub screen_topic: String,
+    /// The play topic, from [`PLAY_TOPIC`]. A run that misses it browses
+    /// and starts nothing.
+    pub play_topic: String,
 }
 
 impl Default for Options {
@@ -113,6 +122,7 @@ impl Default for Options {
             bus_address: String::new(),
             commands_topic: String::new(),
             screen_topic: String::new(),
+            play_topic: String::new(),
         }
     }
 }
@@ -186,6 +196,7 @@ impl Options {
         self.bus_address = value(BUS_ADDRESS).unwrap_or_default();
         self.commands_topic = value(COMMANDS_TOPIC).unwrap_or_default();
         self.screen_topic = value(SCREEN_TOPIC).unwrap_or_default();
+        self.play_topic = value(PLAY_TOPIC).unwrap_or_default();
     }
 }
 
@@ -417,6 +428,7 @@ mod tests {
         assert_eq!(options.bus_address, "");
         assert_eq!(options.commands_topic, "");
         assert_eq!(options.screen_topic, "");
+        assert_eq!(options.play_topic, "");
     }
 
     #[test]
@@ -425,6 +437,7 @@ mod tests {
             (BUS_ADDRESS, "bus.liken-system.svc:1883"),
             (COMMANDS_TOPIC, "liken/media/players/house/den-tv/commands"),
             (SCREEN_TOPIC, "liken/media/players/house/den-tv/screen"),
+            (PLAY_TOPIC, "liken/library/players/house/den-tv/play"),
         ]);
 
         assert_eq!(options.bus_address, "bus.liken-system.svc:1883");
@@ -435,6 +448,10 @@ mod tests {
         assert_eq!(
             options.screen_topic,
             "liken/media/players/house/den-tv/screen"
+        );
+        assert_eq!(
+            options.play_topic,
+            "liken/library/players/house/den-tv/play"
         );
     }
 

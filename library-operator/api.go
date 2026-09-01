@@ -49,9 +49,13 @@ const formerLibraryFinalizer = "library.liken.sh/sweep"
 // on its way out, and a pod with one set is left alone until the
 // delete completes. finalizers is here because the operator holds a
 // Library open past the delete request, and that window is where the
-// departure in depart.go sweeps the catalog.
+// departure in depart.go sweeps the catalog. generateName is the prefix
+// the API server mints a name from; a Play carries it in place of a
+// name, because every start of a title is its own Play and the operator
+// keeps no record of what it created.
 type ObjectMeta struct {
 	Name              string            `json:"name,omitempty"`
+	GenerateName      string            `json:"generateName,omitempty"`
 	Namespace         string            `json:"namespace,omitempty"`
 	UID               string            `json:"uid,omitempty"`
 	Generation        int64             `json:"generation,omitempty"`
@@ -308,6 +312,48 @@ type PlayerIdleBus struct {
 	Address       string `json:"address,omitempty"`
 	CommandsTopic string `json:"commandsTopic,omitempty"`
 	ScreenTopic   string `json:"screenTopic,omitempty"`
+}
+
+// Play is media-operator's unit of playback: the Players it plays on
+// and the items it plays in order. This operator creates Plays and
+// reads none, so the type carries no status.
+type Play struct {
+	APIVersion string     `json:"apiVersion,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   ObjectMeta `json:"metadata"`
+	Spec       PlaySpec   `json:"spec"`
+}
+
+// PlaySpec names the Players and the items. A request from one screen
+// names one Player.
+type PlaySpec struct {
+	Players []string   `json:"players,omitempty"`
+	Items   []PlayItem `json:"items,omitempty"`
+}
+
+// PlayItem is one item: the media reference the Player accepts, and
+// the words the film's own display shows. The reference is a claim
+// URI, which mounts the library's claim read-only on the playback pod.
+type PlayItem struct {
+	URI          string            `json:"uri"`
+	Presentation *PlayPresentation `json:"presentation,omitempty"`
+}
+
+// PlayPresentation is what the display shows about one item, in
+// media-operator's own field names. Every field is optional, because
+// the catalog holds what the volume holds and no more.
+type PlayPresentation struct {
+	Type         string `json:"type,omitempty"`
+	Hint         string `json:"hint,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Series       string `json:"series,omitempty"`
+	Season       int    `json:"season,omitempty"`
+	Episode      int    `json:"episode,omitempty"`
+	EpisodeTitle string `json:"episodeTitle,omitempty"`
+	Year         int    `json:"year,omitempty"`
+	Date         string `json:"date,omitempty"`
+	Art          string `json:"art,omitempty"`
+	Trickplay    string `json:"trickplay,omitempty"`
 }
 
 // The condition types this operator publishes. Bound reports the

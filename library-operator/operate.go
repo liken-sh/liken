@@ -65,6 +65,11 @@ type operator struct {
 	bus            *Bus
 	reports        *reports
 
+	// The play requests the bus handler holds for the next pass. A
+	// screen's choice reaches the API server only here, because the
+	// screen pod holds no credential of its own.
+	plays *playRequests
+
 	// Wake is the loop's own wake channel, and one channel serves the
 	// two watches and the bus handler, because a wake says nothing
 	// beyond "read the collection again".
@@ -91,6 +96,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 		busAddress:     busAddress,
 		topicBase:      topicBase,
 		reports:        newReports(wake),
+		plays:          newPlayRequests(wake),
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
 	}
@@ -102,6 +108,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 	library.bus = newBus(busAddress, "library-operator", nil, nil, library.handleBusMessage)
 	library.bus.Subscribe(libraryStatusFilter(topicBase))
 	library.bus.Subscribe(libraryAvailabilityFilter(topicBase))
+	library.bus.Subscribe(playRequestFilter(topicBase))
 	return library
 }
 
@@ -299,15 +306,27 @@ func (o *operator) pass() {
 	for _, namespace := range screenNamespaces(players.Items) {
 		o.reconcileScreens(ctx, namespace, players.Items, libraries.Items, screens.Items)
 	}
+	// The play requests are served last, on the collections this pass
+	// already read. A request is one moment: the pass creates its Play
+	// now or drops it, and the person presses again.
+	o.createPlays(ctx, players.Items, libraries.Items)
 
 	o.reconcileCatalogs(ctx, byNamespace)
 }
 
-// HandleBusMessage folds one message from the broker onto the report
-// desk. It runs on the bus reader's goroutine, so it does nothing
-// beyond the fold, and the wake the desk raises is what carries the
+// HandleBusMessage folds one message from the broker onto the place
+// that holds it: a library report onto the desk, a play request onto
+// its queue. It runs on the bus reader's goroutine, so it does nothing
+// beyond the fold, and the wake each fold raises is what carries the
 // message into the next pass.
 func (o *operator) handleBusMessage(topic string, payload []byte) {
+	// A play request is the one message that is not a report. It is
+	// held for the next pass, because creating a Play is a write and
+	// the bus reader's goroutine makes none.
+	if namespace, player, ok := parsePlayRequestTopic(o.topicBase, topic); ok {
+		o.readPlayRequest(namespace, player, topic, payload)
+		return
+	}
 	namespace, name, kind, ok := parseLibraryTopic(o.topicBase, topic)
 	if !ok {
 		return

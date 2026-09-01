@@ -248,6 +248,13 @@ func claimsPath(namespace string) string {
 	return corePrefix + namespace + "/persistentvolumeclaims"
 }
 
+// playsPath is the plays collection of one namespace. A Play is
+// created in the Player's namespace, which is the Library's namespace
+// as well, so no reference this operator makes crosses a namespace.
+func playsPath(namespace string) string {
+	return "/apis/" + playerAPIVersion + "/namespaces/" + namespace + "/plays"
+}
+
 func podsPath(namespace string) string {
 	return corePrefix + namespace + "/pods"
 }
@@ -434,6 +441,21 @@ func CreatePod(ctx context.Context, c *Client, pod *Pod) (*Pod, error) {
 	}
 	created := &Pod{}
 	if err := c.RequestJSON(ctx, http.MethodPost, podsPath(pod.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// CreatePlay posts the Play one play request became. The API server
+// mints the name from the prefix, because a person may start the same
+// title twice and each start is its own Play.
+func CreatePlay(ctx context.Context, c *Client, play *Play) (*Play, error) {
+	body, err := json.Marshal(play)
+	if err != nil {
+		return nil, err
+	}
+	created := &Play{}
+	if err := c.RequestJSON(ctx, http.MethodPost, playsPath(play.Metadata.Namespace), body, created); err != nil {
 		return nil, err
 	}
 	return created, nil

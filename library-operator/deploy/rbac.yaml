@@ -25,9 +25,10 @@
 # template and a departure: the Player it stands for named another idle
 # controller, or none.
 #
-# The scanner pods hold no credential of their own. They report over
-# the bus, and the operator writes what they report, so nothing in this
-# file grants a scanner anything.
+# The scanner pods and the screen pods hold no credential of their own.
+# A scanner reports over the bus, and the operator writes what it
+# reports. A screen asks over the bus, and the operator creates the
+# Play it asked for. So nothing in this file grants a pod anything.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -73,6 +74,14 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [players]
     verbs: [get, list, watch]
+  # The Plays this operator creates, one per request a screen publishes
+  # on the bus. Create alone: the operator never reads, edits, or
+  # deletes a Play, because media-operator owns its whole life once it
+  # exists. The grant is cluster-wide because a Play is created in the
+  # Player's namespace, and a Player can be in any namespace.
+  - apiGroups: [media.liken.sh]
+    resources: [plays]
+    verbs: [create]
   # The media claim each Library names, read by name to learn whether it
   # is bound and which volume it is bound to. The catalog claim each
   # scanner pod mounts, created once per Library and owned by it, so the

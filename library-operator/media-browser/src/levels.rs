@@ -48,6 +48,10 @@ pub struct Row {
     /// The library's kind, carried only on a library row because the
     /// descent into it needs the kind's level table.
     pub kind: String,
+    /// The aired episode number, carried only on an episode row because
+    /// a play request names the episode it starts from by that number.
+    /// Every other row carries zero.
+    pub number: i64,
 }
 
 impl Row {
@@ -64,6 +68,7 @@ impl Row {
             detail: format!("{} · {}", entry.kind, entry.items),
             art: String::new(),
             kind: entry.kind,
+            number: 0,
         }
     }
 
@@ -74,6 +79,7 @@ impl Row {
             detail: title.released,
             art: title.art,
             kind: String::new(),
+            number: 0,
         }
     }
 
@@ -84,6 +90,7 @@ impl Row {
             detail: String::new(),
             art: String::new(),
             kind: String::new(),
+            number: 0,
         }
     }
 
@@ -94,6 +101,7 @@ impl Row {
             detail: format!("S{} E{}", episode.season, episode.episode),
             art: episode.art,
             kind: String::new(),
+            number: episode.episode,
         }
     }
 }
@@ -280,6 +288,7 @@ mod tests {
             art: String::new(),
         });
         assert_eq!(row.detail, "S2 E4");
+        assert_eq!(row.number, 4);
     }
 
     #[test]

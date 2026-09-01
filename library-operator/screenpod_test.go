@@ -49,7 +49,7 @@ func houseLibraries() []Library {
 }
 
 func testScreenPod(player *Player, libraries []Library) *Pod {
-	return buildScreenPod(player, libraries, testBrowserImage, testCorrosionImage)
+	return buildScreenPod(player, libraries, testBrowserImage, testCorrosionImage, defaultTopicBase)
 }
 
 // The pod's name, namespace, owner, and marks are what tie it to the
@@ -495,6 +495,7 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 		mediaBusAddressVariable:    "bus.liken-system.svc:1883",
 		mediaCommandsTopicVariable: "liken/media/players/house/den-tv/commands",
 		mediaScreenTopicVariable:   "liken/media/players/house/den-tv/screen",
+		libraryPlayTopicVariable:   "liken/library/players/house/den-tv/play",
 	}
 	for name, value := range want {
 		if environment[name] != value {
@@ -513,7 +514,8 @@ func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
 
 	for _, variable := range browser.Env {
 		switch variable.Name {
-		case mediaBusAddressVariable, mediaCommandsTopicVariable, mediaScreenTopicVariable:
+		case mediaBusAddressVariable, mediaCommandsTopicVariable, mediaScreenTopicVariable,
+			libraryPlayTopicVariable:
 			t.Errorf("env = %+v, want no bus variable", browser.Env)
 		}
 	}

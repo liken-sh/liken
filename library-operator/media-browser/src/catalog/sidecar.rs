@@ -8,9 +8,10 @@ use std::sync::atomic::Ordering;
 
 use rusqlite::{Connection, OpenFlags, Row};
 
-use crate::catalog::{EpisodeRow, LibraryEntry, Source, Title};
+use crate::catalog::{EpisodeRow, LibraryEntry, PlayItem, Selection, Source, Title};
 use crate::harness::Waker;
 
+mod play;
 mod updates;
 
 // The file opens read-only because only scanners write, through their
@@ -159,6 +160,18 @@ impl Source for SidecarSource {
                 })
             })
         })
+    }
+
+    fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem> {
+        match selection {
+            Selection::Movie { id } => self.read(|connection| play::movie(connection, library, id)),
+            Selection::Episode {
+                series,
+                season,
+                episode,
+            } => self
+                .read(|connection| play::episodes(connection, library, series, *season, *episode)),
+        }
     }
 
     fn changed(&mut self) -> bool {

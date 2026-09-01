@@ -9,7 +9,7 @@ use iced_widget::image::Handle;
 
 use super::*;
 use crate::bus::screen::Event;
-use crate::catalog::{EpisodeRow, LibraryEntry, Title};
+use crate::catalog::{EpisodeRow, LibraryEntry, PlayItem, Presentation, Title};
 
 #[derive(Default)]
 struct Fake {
@@ -17,6 +17,10 @@ struct Fake {
     changed: bool,
     woken: bool,
     calls: Vec<&'static str>,
+    // The play list this source answers, and the last choice it was asked
+    // to resolve.
+    items: Vec<PlayItem>,
+    chosen: Option<(String, Selection)>,
 }
 
 impl Source for Fake {
@@ -60,9 +64,15 @@ impl Source for Fake {
             id: "e1".into(),
             title: "Segment 1".into(),
             season,
-            episode: 1,
+            episode: 4,
             art: String::new(),
         }]
+    }
+
+    fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem> {
+        self.calls.push("play");
+        self.chosen = Some((library.to_string(), selection.clone()));
+        self.items.clone()
     }
 
     fn changed(&mut self) -> bool {
@@ -136,7 +146,7 @@ fn a_series_library_gives_three_lists() {
     assert_eq!(browser.top().rows[0].name, "Season 1");
     browser.key("down");
     browser.key("enter");
-    assert_eq!(browser.top().rows[0].detail, "S2 E1");
+    assert_eq!(browser.top().rows[0].detail, "S2 E4");
     browser.key("enter");
     assert_eq!(browser.stack.len(), 3);
 }
@@ -274,6 +284,7 @@ struct FakeBus {
     inbound: Arc<Mutex<Vec<Message>>>,
     sleeps: Arc<AtomicUsize>,
     woken: Arc<AtomicUsize>,
+    plays: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
 impl Bus for FakeBus {
@@ -283,6 +294,13 @@ impl Bus for FakeBus {
 
     fn request_sleep(&self) {
         self.sleeps.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn request_play(&self, payload: Vec<u8>) {
+        self.plays
+            .lock()
+            .expect("no test panics with the lock")
+            .push(payload);
     }
 
     fn wake_on_delivery(&self, _wake: Waker) {
@@ -428,4 +446,166 @@ fn the_wake_reaches_the_bus() {
     Screen::wake_by(&mut browser, Arc::new(|| {}));
 
     assert_eq!(bus.woken.load(Ordering::SeqCst), 1);
+}
+
+// One resolved item, so a test reads what the browser published rather
+// than what a catalog would have answered.
+fn one_item() -> PlayItem {
+    PlayItem {
+        path: "Some Film (1999)/Some Film (1999).mkv".into(),
+        presentation: Presentation {
+            kind: "video".into(),
+            hint: "movie".into(),
+            title: "Some Film".into(),
+            year: 1999,
+            ..Presentation::default()
+        },
+    }
+}
+
+// The browser on a bus, with the play list its source answers.
+fn playing(items: Vec<PlayItem>) -> (Browser<Fake, NoPosters>, FakeBus) {
+    let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.source.items = items;
+    (browser, bus)
+}
+
+// The one request the browser published, decoded.
+fn published(bus: &FakeBus) -> serde_json::Value {
+    let plays = bus.plays.lock().expect("no test panics with the lock");
+    assert_eq!(plays.len(), 1);
+    serde_json::from_slice(&plays[0]).expect("the request is JSON")
+}
+
+#[test]
+fn a_select_on_a_movie_asks_the_operator_to_play_it() {
+    let (mut browser, bus) = playing(vec![one_item()]);
+    browser.key("enter");
+
+    browser.key("enter");
+
+    assert_eq!(
+        browser.source.chosen,
+        Some((
+            "screening/films".to_string(),
+            Selection::Movie {
+                id: "movies:1".into()
+            }
+        ))
+    );
+    assert_eq!(
+        published(&bus),
+        serde_json::json!({
+            "library": "screening/films",
+            "items": [{
+                "path": "Some Film (1999)/Some Film (1999).mkv",
+                "presentation": {
+                    "type": "video",
+                    "hint": "movie",
+                    "title": "Some Film",
+                    "year": 1999,
+                },
+            }],
+        })
+    );
+}
+
+#[test]
+fn a_select_on_a_movie_opens_no_level() {
+    let (mut browser, _bus) = playing(vec![one_item()]);
+    browser.key("enter");
+
+    browser.key("enter");
+
+    assert_eq!(browser.stack.len(), 1);
+}
+
+#[test]
+fn a_select_on_an_episode_names_the_episode_the_row_carries() {
+    let (mut browser, _bus) = playing(vec![one_item()]);
+    browser.key("down");
+    browser.key("enter");
+    browser.key("enter");
+    browser.key("down");
+    browser.key("enter");
+
+    browser.key("enter");
+
+    assert_eq!(
+        browser.source.chosen,
+        Some((
+            "screening/serials".to_string(),
+            Selection::Episode {
+                series: "series:1".into(),
+                season: 2,
+                episode: 4,
+            }
+        ))
+    );
+}
+
+#[test]
+fn a_select_on_an_episode_publishes_the_list_in_the_order_it_resolved() {
+    let mut second = one_item();
+    second.path = "Later.mkv".into();
+    let (mut browser, bus) = playing(vec![one_item(), second]);
+    browser.key("down");
+    browser.key("enter");
+    browser.key("enter");
+    browser.key("enter");
+
+    browser.key("enter");
+
+    let request = published(&bus);
+    assert_eq!(
+        request["items"][0]["path"],
+        "Some Film (1999)/Some Film (1999).mkv"
+    );
+    assert_eq!(request["items"][1]["path"], "Later.mkv");
+}
+
+#[test]
+fn a_select_on_a_series_descends_and_asks_for_no_play() {
+    let (mut browser, bus) = playing(vec![one_item()]);
+    browser.key("down");
+    browser.key("enter");
+
+    browser.key("enter");
+
+    assert_eq!(browser.stack.len(), 2);
+    assert_eq!(browser.source.chosen, None);
+    assert!(
+        bus.plays
+            .lock()
+            .expect("no test panics with the lock")
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_title_with_no_file_to_play_publishes_nothing() {
+    let (mut browser, bus) = playing(Vec::new());
+    browser.key("enter");
+
+    browser.key("enter");
+
+    assert!(browser.source.chosen.is_some());
+    assert!(
+        bus.plays
+            .lock()
+            .expect("no test panics with the lock")
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_select_on_a_movie_with_no_bus_publishes_nothing() {
+    let mut browser = browser(3);
+    browser.source.items = vec![one_item()];
+    browser.key("enter");
+
+    browser.key("enter");
+
+    assert_eq!(browser.stack.len(), 1);
+    assert!(browser.source.chosen.is_some());
 }
