@@ -110,3 +110,15 @@ browser and both of its controllers paired:
    press wakes the screen and moves nothing.
 4. A `Play` on `lab-portable` covers the browser, and its end
    re-presents the browser where it was.
+
+Drilled on `liken-1` on 2026-09-01, in release 2026.09.01-005, with the
+library layer's browser at its release 2026.09.01-004. The status
+carried the broker and both topics, and the delegate's pod carried
+them as variables. From the X6, every arrow, select, and back arrived
+on the commands topic as the press it named, a held arrow repeated, and
+the wall moved with them. Back at the browser's top level arrived as
+the client's `sleep` request, followed within the same second by the
+command pod's `sleep` moment; the next press arrived as `wake` and
+nothing else. A one-off `Play` covered the browser, and its deletion
+published `re-present`, then `present`, and the browser drew again
+where it was. The idle command pod stayed at 2 MiB resident.
