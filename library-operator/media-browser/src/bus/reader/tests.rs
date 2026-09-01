@@ -163,14 +163,14 @@ fn named(address: &str, play: String) -> Reader {
 
 #[test]
 fn a_press_on_the_commands_topic_reaches_the_browser() {
-    let (address, _published) = fixture(br#"{"action":"up"}"#);
+    let (address, _published) = fixture(br#"{"key":"KEY_UP","value":1}"#);
 
     assert_eq!(delivered(&reader(&address)), Message::Press("up"));
 }
 
 #[test]
 fn a_moment_this_browser_does_not_name_reaches_nothing() {
-    let (address, published) = fixture(br#"{"action":"mute"}"#);
+    let (address, published) = fixture(br#"{"key":"KEY_MUTE","value":1}"#);
     let reader = reader(&address);
 
     // The sleep request that follows proves the connection carried
@@ -185,7 +185,7 @@ fn a_moment_this_browser_does_not_name_reaches_nothing() {
 
 #[test]
 fn the_sleep_request_reaches_the_commands_topic() {
-    let (address, published) = fixture(br#"{"action":"up"}"#);
+    let (address, published) = fixture(br#"{"key":"KEY_UP","value":1}"#);
     let reader = reader(&address);
 
     reader.request_sleep();
@@ -212,7 +212,7 @@ fn a_broker_that_answers_nothing_delivers_nothing() {
 
 #[test]
 fn a_delivery_wakes_the_loop() {
-    let (address, _published) = fixture(br#"{"action":"up"}"#);
+    let (address, _published) = fixture(br#"{"key":"KEY_UP","value":1}"#);
     let reader = reader(&address);
     let woken = std::sync::Arc::new(AtomicUsize::new(0));
     let counter = std::sync::Arc::clone(&woken);
@@ -293,7 +293,7 @@ fn a_dropped_receiver_ends_the_thread() {
     assert!(!forward(
         &Session::new(COMMANDS.into(), SCREEN.into()),
         COMMANDS,
-        br#"{"action":"up"}"#,
+        br#"{"key":"KEY_UP","value":1}"#,
         &sender,
         &waker
     ));
@@ -335,7 +335,7 @@ fn a_browser_with_no_broker_and_one_with_no_topics_open_no_reader() {
 
 #[test]
 fn a_play_request_reaches_the_topic_the_operator_named() {
-    let (address, published) = fixture(br#"{"action":"up"}"#);
+    let (address, published) = fixture(br#"{"key":"KEY_UP","value":1}"#);
     let reader = reader(&address);
 
     reader.request_play(br#"{"library":"default/films"}"#.to_vec());
@@ -348,7 +348,7 @@ fn a_play_request_reaches_the_topic_the_operator_named() {
 
 #[test]
 fn a_browser_with_no_play_topic_publishes_no_request() {
-    let (address, published) = fixture(br#"{"action":"up"}"#);
+    let (address, published) = fixture(br#"{"key":"KEY_UP","value":1}"#);
     let reader = named(&address, String::new());
 
     reader.request_play(br#"{"library":"default/films"}"#.to_vec());
@@ -402,7 +402,7 @@ fn an_ipv6_literal_with_no_brackets_answers_on_the_mqtt_default() {
 
 #[test]
 fn a_reader_prints_as_a_reader() {
-    let (address, _published) = fixture(br#"{"action":"up"}"#);
+    let (address, _published) = fixture(br#"{"key":"KEY_UP","value":1}"#);
 
     assert!(format!("{:?}", reader(&address)).starts_with("Reader"));
 }

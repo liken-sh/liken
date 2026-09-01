@@ -58,8 +58,8 @@ impl Session {
     }
 
     /// The topics to subscribe to. The commands topic carries the browser's
-    /// own sleep request back to it, and `press::parse` names no key for that
-    /// action, so the browser reads its own publish as nothing.
+    /// own sleep request back to it, and that request names no key, so the
+    /// browser reads its own publish as nothing.
     pub fn filters(&self) -> Vec<String> {
         vec![self.commands.clone(), self.screen.clone()]
     }
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn a_press_decodes_off_the_commands_topic() {
         assert_eq!(
-            session().deliver(COMMANDS, br#"{"action":"select"}"#),
+            session().deliver(COMMANDS, br#"{"key":"KEY_SELECT","value":1}"#),
             Some(Message::Press("enter"))
         );
     }
