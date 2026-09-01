@@ -239,6 +239,9 @@ has decided yet what work they become.
   enforce one instance across a rollout or a partition. A `Lease` in
   `coordination.k8s.io` makes it a true singleton, and opens a
   quasi-HA path.
+* [The idle screen shows no battery level](open-problems/the-idle-screen-shows-no-battery-level.md).
+  A remote's charge is not on `Remote.status` and not beside its name
+  on the idle screen; the read is `bluetooth-operator`'s open problem.
 * [The bus authorizes nothing](open-problems/the-bus-authorizes-nothing.md).
   Any client that reaches the broker can publish or subscribe to any
   topic, so the trust boundary is the whole cluster. Acceptable for one
