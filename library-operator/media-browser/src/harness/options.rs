@@ -17,18 +17,6 @@ pub const APP_ID: &str = "DISPLAY_APP_ID";
 /// every screen pod.
 pub const WINDOW_GRACE: &str = "WINDOW_GRACE_SECONDS";
 
-/// The broker's address, written host:port, from the bus block
-/// media-operator publishes on the Player's status.
-pub const BUS_ADDRESS: &str = "MEDIA_BUS_ADDRESS";
-
-/// The Player's commands topic, where the room's presses arrive and
-/// where the browser asks for the shade.
-pub const COMMANDS_TOPIC: &str = "MEDIA_PLAYER_COMMANDS_TOPIC";
-
-/// The Player's screen topic, which carries the idle command pod's own
-/// moments.
-pub const SCREEN_TOPIC: &str = "MEDIA_PLAYER_SCREEN_TOPIC";
-
 /// The topic the library operator reads this `Player`'s play requests
 /// on. It is the library operator's own variable, not media-operator's,
 /// because that operator names the topic, and the browser knows neither
@@ -94,12 +82,6 @@ pub struct Options {
     /// How long the run waits for a window before it exits, from
     /// [`WINDOW_GRACE`]. Nothing leaves the watchdog off.
     pub window_grace: Option<Duration>,
-    /// The broker and the Player's two topics, from [`BUS_ADDRESS`],
-    /// [`COMMANDS_TOPIC`], and [`SCREEN_TOPIC`]. All three are what opens a
-    /// connection; a run that misses one takes the keyboard alone.
-    pub bus_address: String,
-    pub commands_topic: String,
-    pub screen_topic: String,
     /// The play topic, from [`PLAY_TOPIC`]. A run that misses it browses
     /// and starts nothing.
     pub play_topic: String,
@@ -119,9 +101,6 @@ impl Default for Options {
             size: (1920, 1080),
             app_id: String::new(),
             window_grace: None,
-            bus_address: String::new(),
-            commands_topic: String::new(),
-            screen_topic: String::new(),
             play_topic: String::new(),
         }
     }
@@ -180,9 +159,11 @@ impl Options {
 
 impl Options {
     /// Read what the container was told. A pod cannot discover the
-    /// app-id its display claim delivered, the grace the operator set, or the
-    /// broker and topics the Player's status named, so all of them arrive in
-    /// the environment and none is a flag.
+    /// app-id its display claim delivered, the grace the operator set,
+    /// or the topic this operator reads play requests on, so all three
+    /// arrive in the environment and none is a flag. The bus wiring
+    /// arrives the same way and `media-screen` reads it, so none of it
+    /// is here.
     pub fn from_environment(&mut self) {
         self.read_environment(|name| std::env::var(name).ok());
     }
@@ -193,9 +174,6 @@ impl Options {
     pub fn read_environment(&mut self, value: impl Fn(&str) -> Option<String>) {
         self.app_id = value(APP_ID).unwrap_or_default();
         self.window_grace = grace(&value(WINDOW_GRACE).unwrap_or_default());
-        self.bus_address = value(BUS_ADDRESS).unwrap_or_default();
-        self.commands_topic = value(COMMANDS_TOPIC).unwrap_or_default();
-        self.screen_topic = value(SCREEN_TOPIC).unwrap_or_default();
         self.play_topic = value(PLAY_TOPIC).unwrap_or_default();
     }
 }
@@ -423,32 +401,14 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_environment_names_no_broker_and_no_topics() {
-        let options = environment(&[]);
-        assert_eq!(options.bus_address, "");
-        assert_eq!(options.commands_topic, "");
-        assert_eq!(options.screen_topic, "");
-        assert_eq!(options.play_topic, "");
+    fn an_empty_environment_names_no_play_topic() {
+        assert_eq!(environment(&[]).play_topic, "");
     }
 
     #[test]
-    fn the_status_names_the_broker_and_the_players_two_topics() {
-        let options = environment(&[
-            (BUS_ADDRESS, "bus.liken-system.svc:1883"),
-            (COMMANDS_TOPIC, "liken/media/players/house/den-tv/commands"),
-            (SCREEN_TOPIC, "liken/media/players/house/den-tv/screen"),
-            (PLAY_TOPIC, "liken/library/players/house/den-tv/play"),
-        ]);
+    fn this_operator_names_the_play_topic() {
+        let options = environment(&[(PLAY_TOPIC, "liken/library/players/house/den-tv/play")]);
 
-        assert_eq!(options.bus_address, "bus.liken-system.svc:1883");
-        assert_eq!(
-            options.commands_topic,
-            "liken/media/players/house/den-tv/commands"
-        );
-        assert_eq!(
-            options.screen_topic,
-            "liken/media/players/house/den-tv/screen"
-        );
         assert_eq!(
             options.play_topic,
             "liken/library/players/house/den-tv/play"

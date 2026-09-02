@@ -22,6 +22,7 @@ import (
 	"os"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -54,13 +55,34 @@ const (
 	windowGraceSeconds  = "15"
 )
 
-// The three variables that carry status.idle.bus into the browser.
-// They are the names media-operator's own client reads, so the two
-// clients of one contract are wired the same way.
+// The variables that carry status.idle into the browser. They are the
+// names media-operator's own client reads, and the media-screen crate
+// both clients link reads them in its wiring.rs, so the two clients of
+// one contract are wired the same way. They name the broker, the
+// Player's own object name that every focus mark holds, the retained
+// status, the level, the commands topic that carries the re-present,
+// the panel topic the client states the panel desire on, and the two
+// newline-joined lists of the unit's controllers. The level variable is
+// absent for a unit with no sinks.
 const (
-	mediaBusAddressVariable    = "MEDIA_BUS_ADDRESS"
-	mediaCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
-	mediaScreenTopicVariable   = "MEDIA_PLAYER_SCREEN_TOPIC"
+	mediaBusAddressVariable         = "MEDIA_BUS_ADDRESS"
+	mediaPlayerNameVariable         = "MEDIA_PLAYER_NAME"
+	mediaStatusTopicVariable        = "MEDIA_PLAYER_STATUS_TOPIC"
+	mediaVolumeTopicVariable        = "MEDIA_PLAYER_VOLUME_TOPIC"
+	mediaCommandsTopicVariable      = "MEDIA_PLAYER_COMMANDS_TOPIC"
+	mediaPanelTopicVariable         = "MEDIA_PLAYER_PANEL_TOPIC"
+	mediaRemoteEventsTopicsVariable = "MEDIA_REMOTE_EVENTS_TOPICS"
+	mediaRemoteFocusTopicsVariable  = "MEDIA_REMOTE_FOCUS_TOPICS"
+)
+
+// The two windows the browser runs itself, in seconds. They are always
+// set beside the bus block, because the crate holds the timers and an
+// absent variable is not a policy a client can read. Zero on the fade
+// means the screen never fades on its own, and zero on the off window
+// leaves the panel lit.
+const (
+	idleFadeAfterSecondsVariable = "IDLE_FADE_AFTER_SECONDS"
+	idleOffAfterSecondsVariable  = "IDLE_OFF_AFTER_SECONDS"
 )
 
 // The topic the browser publishes a play request on. It is this
@@ -209,20 +231,42 @@ func browserSidecar(player *Player, libraries []Library, image, topicBase string
 		claims = append(claims, ResourceClaim{Name: displayClaimName, Request: request})
 	}
 
+	idle := player.idle()
 	environment := []EnvVar{
 		{Name: windowGraceVariable, Value: windowGraceSeconds},
 	}
-	// A Player whose status names a bus gets the three variables, and
-	// its browser takes the room's remotes. A Player under an older
-	// media-operator gets none of them, and its browser opens no
-	// connection and takes the keyboard alone. The template hash rolls
-	// the pod when the block appears.
-	if bus := player.idle().Bus; bus != nil {
+	// A Player whose status names a bus gets the wiring, and its browser
+	// takes the room's remotes. A Player under an older media-operator
+	// gets none of it, and its browser opens no connection and takes the
+	// keyboard alone. The template hash rolls the pod when the block
+	// appears.
+	if bus := idle.Bus; bus != nil {
 		environment = append(environment,
 			EnvVar{Name: mediaBusAddressVariable, Value: bus.Address},
+			// The Player's own object name, which is what every focus
+			// mark holds. A client that reads no name matches no mark
+			// and answers no press.
+			EnvVar{Name: mediaPlayerNameVariable, Value: player.Metadata.Name},
+			EnvVar{Name: mediaStatusTopicVariable, Value: bus.StatusTopic},
+		)
+		// The level topic is the speaker gate as well as the address,
+		// so a unit with no sinks carries no variable rather than an
+		// empty one.
+		if bus.VolumeTopic != "" {
+			environment = append(environment,
+				EnvVar{Name: mediaVolumeTopicVariable, Value: bus.VolumeTopic})
+		}
+		environment = append(environment,
 			EnvVar{Name: mediaCommandsTopicVariable, Value: bus.CommandsTopic},
-			EnvVar{Name: mediaScreenTopicVariable, Value: bus.ScreenTopic},
-			// The play topic travels with the three, because it is the
+			EnvVar{Name: mediaPanelTopicVariable, Value: bus.PanelTopic},
+		)
+		environment = append(environment, remoteTopics(bus.Remotes)...)
+		environment = append(environment,
+			EnvVar{Name: idleFadeAfterSecondsVariable,
+				Value: strconv.FormatInt(idle.FadeAfterSeconds, 10)},
+			EnvVar{Name: idleOffAfterSecondsVariable,
+				Value: strconv.FormatInt(idle.OffAfterSeconds, 10)},
+			// The play topic travels with the rest, because it is the
 			// same connection. A browser with no broker publishes no
 			// request, so the topic alone would name nothing.
 			EnvVar{Name: libraryPlayTopicVariable, Value: playRequestTopic(
@@ -238,6 +282,28 @@ func browserSidecar(player *Player, libraries []Library, image, topicBase string
 		VolumeMounts:    mounts,
 		Resources:       ResourceRequirements{Claims: claims},
 		SecurityContext: unprivileged(),
+	}
+}
+
+// remoteTopics is the unit's controllers as the two newline-joined
+// lists the crate reads. They pair by position: a line's number is the
+// controller's place in spec.remotes, which is the index a focus moment
+// carries, so a controller with no focus topic contributes an empty
+// line rather than shifting the pairing. A unit with no controllers
+// carries neither variable.
+func remoteTopics(remotes []PlayerIdleRemote) []EnvVar {
+	if len(remotes) == 0 {
+		return nil
+	}
+	events := make([]string, 0, len(remotes))
+	focuses := make([]string, 0, len(remotes))
+	for _, remote := range remotes {
+		events = append(events, remote.Events)
+		focuses = append(focuses, remote.Focus)
+	}
+	return []EnvVar{
+		{Name: mediaRemoteEventsTopicsVariable, Value: strings.Join(events, "\n")},
+		{Name: mediaRemoteFocusTopicsVariable, Value: strings.Join(focuses, "\n")},
 	}
 }
 

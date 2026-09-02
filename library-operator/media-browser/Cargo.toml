@@ -52,9 +52,14 @@ serde_json = "=1.0.151"
 # rusqlite reads the sidecar's file; bundled compiles its own SQLite so
 # the read path loads no extension and matches no system library.
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
-# PROSE: rumqttc is the connection to the broker; plain TCP so no TLS stack
-# enters the build; the version is media-operator's own pin.
-rumqttc = { version = "=0.25.1", default-features = false }
+# media-screen is the bus half of a screen client: the connection, the
+# timers, the focus gate, the shade, the volume step, the cycle request,
+# and the panel desire. media-operator ships it and its own idle client
+# links it, so the two clients of one contract hold the same rules. It
+# brings rumqttc, so this manifest names no broker client of its own.
+# The pin is a media-operator release tag, the way the cluster overlays
+# pin an image, and Cargo.lock holds the commit the tag named.
+media-screen = { git = "https://github.com/liken-sh/media-operator", tag = "2026.09.02-002" }
 # ureq holds the streaming update subscriptions; it decodes the chunked
 # body and puts a timeout on every read; the defaults come off because the
 # agent answers on loopback with no TLS and no compression.

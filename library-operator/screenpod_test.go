@@ -474,28 +474,60 @@ func TestScreenNamespacesAreEveryPlayersNamespaceInOrder(t *testing.T) {
 	}
 }
 
-// The bus block on the status reaches the browser as the three
-// variables, so a remote's presses arrive on the commands topic and the
-// shade on the screen topic.
-func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
+// The bus block on the status reaches the browser as the variables
+// the media-screen crate reads, so a remote's presses arrive on that
+// controller's events topic and the browser runs the two windows itself.
+func denScreenOnTheBus() *Player {
 	player := denScreen()
+	player.Status.Idle.FadeAfterSeconds = 600
+	player.Status.Idle.OffAfterSeconds = 1800
 	player.Status.Idle.Bus = &PlayerIdleBus{
 		Address:       "bus.liken-system.svc:1883",
+		StatusTopic:   "liken/media/players/house/den-tv/status",
+		VolumeTopic:   "liken/media/players/house/den-tv/volume",
 		CommandsTopic: "liken/media/players/house/den-tv/commands",
-		ScreenTopic:   "liken/media/players/house/den-tv/screen",
+		PanelTopic:    "liken/media/players/house/den-tv/panel",
+		Remotes: []PlayerIdleRemote{
+			{
+				Events: "liken/media/remotes/house/sofa/events",
+				Focus:  "liken/media/remotes/house/sofa/focus",
+			},
+			{
+				Events: "liken/media/remotes/house/armchair/events",
+				Focus:  "liken/media/remotes/house/armchair/focus",
+			},
+		},
 	}
+	return player
+}
 
+// The browser container's environment, by name.
+func browserEnvironment(player *Player) map[string]string {
 	environment := map[string]string{}
 	for _, variable := range testScreenPod(player, houseLibraries()).Spec.Containers[0].Env {
 		environment[variable.Name] = variable.Value
 	}
+	return environment
+}
+
+func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
+	environment := browserEnvironment(denScreenOnTheBus())
 
 	want := map[string]string{
 		windowGraceVariable:        windowGraceSeconds,
 		mediaBusAddressVariable:    "bus.liken-system.svc:1883",
+		mediaPlayerNameVariable:    "den-tv",
+		mediaStatusTopicVariable:   "liken/media/players/house/den-tv/status",
+		mediaVolumeTopicVariable:   "liken/media/players/house/den-tv/volume",
 		mediaCommandsTopicVariable: "liken/media/players/house/den-tv/commands",
-		mediaScreenTopicVariable:   "liken/media/players/house/den-tv/screen",
-		libraryPlayTopicVariable:   "liken/library/players/house/den-tv/play",
+		mediaPanelTopicVariable:    "liken/media/players/house/den-tv/panel",
+		mediaRemoteEventsTopicsVariable: "liken/media/remotes/house/sofa/events\n" +
+			"liken/media/remotes/house/armchair/events",
+		mediaRemoteFocusTopicsVariable: "liken/media/remotes/house/sofa/focus\n" +
+			"liken/media/remotes/house/armchair/focus",
+		idleFadeAfterSecondsVariable: "600",
+		idleOffAfterSecondsVariable:  "1800",
+		libraryPlayTopicVariable:     "liken/library/players/house/den-tv/play",
 	}
 	for name, value := range want {
 		if environment[name] != value {
@@ -507,16 +539,74 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 	}
 }
 
+// Both windows are set whatever they hold, because zero is a policy:
+// no fade, and a panel that stays lit.
+func TestScreenPodStatesBothWindowsEvenAtZero(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.FadeAfterSeconds = 0
+	player.Status.Idle.OffAfterSeconds = 0
+
+	environment := browserEnvironment(player)
+
+	if environment[idleFadeAfterSecondsVariable] != "0" {
+		t.Errorf("fade = %q, want 0", environment[idleFadeAfterSecondsVariable])
+	}
+	if environment[idleOffAfterSecondsVariable] != "0" {
+		t.Errorf("off = %q, want 0", environment[idleOffAfterSecondsVariable])
+	}
+}
+
+// The volume topic is the speaker gate, so a unit with no sinks
+// carries no variable at all.
+func TestScreenPodWithNoSinksNamesNoVolumeTopic(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.VolumeTopic = ""
+
+	environment := browserEnvironment(player)
+
+	if _, set := environment[mediaVolumeTopicVariable]; set {
+		t.Errorf("env = %v, want no volume topic", environment)
+	}
+}
+
+// A unit with no controllers carries neither list, because an empty
+// list and one empty line are not the same thing to the crate.
+func TestScreenPodWithNoRemotesNamesNeitherList(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.Remotes = nil
+
+	environment := browserEnvironment(player)
+
+	for _, name := range []string{
+		mediaRemoteEventsTopicsVariable, mediaRemoteFocusTopicsVariable,
+	} {
+		if _, set := environment[name]; set {
+			t.Errorf("env = %v, want no %s", environment, name)
+		}
+	}
+}
+
+// A controller with no focus topic contributes an empty line, so the
+// two lists stay paired by position.
+func TestScreenPodKeepsTheRemoteListsPairedByPosition(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.Remotes[0].Focus = ""
+
+	environment := browserEnvironment(player)
+
+	if environment[mediaRemoteFocusTopicsVariable] !=
+		"\nliken/media/remotes/house/armchair/focus" {
+		t.Errorf("focus topics = %q, want an empty first line",
+			environment[mediaRemoteFocusTopicsVariable])
+	}
+}
+
 // A Player under an older media-operator publishes no bus block,
 // and its browser opens no connection and takes the keyboard alone.
 func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
-	browser := testScreenPod(denScreen(), houseLibraries()).Spec.Containers[0]
+	environment := browserEnvironment(denScreen())
 
-	for _, variable := range browser.Env {
-		switch variable.Name {
-		case mediaBusAddressVariable, mediaCommandsTopicVariable, mediaScreenTopicVariable,
-			libraryPlayTopicVariable:
-			t.Errorf("env = %+v, want no bus variable", browser.Env)
-		}
+	if len(environment) != 1 || environment[windowGraceVariable] != windowGraceSeconds {
+		t.Errorf("env = %v, want the window grace alone", environment)
 	}
 }

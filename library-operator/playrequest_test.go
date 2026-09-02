@@ -55,6 +55,16 @@ func film(path string) playRequestItem {
 	}
 }
 
+// The same request with the slug the catalog holds for the chosen item.
+func slugRequest(slug string, items ...playRequestItem) []byte {
+	request := playRequest{Library: testLibraryKey, Slug: slug, Items: items}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
 // The request reaches the operator the way the broker delivers it: on
 // the Player's own play topic.
 func publishPlay(operator *operator, payload []byte) {
@@ -395,5 +405,94 @@ func TestAnItemWithNoPresentationCarriesNone(t *testing.T) {
 	item := cluster.heldPlays()[0].Spec.Items[0]
 	if item.URI != testFilmClaimed || item.Presentation != nil {
 		t.Errorf("item = %+v, want %q with no presentation", item, testFilmClaimed)
+	}
+}
+
+func TestAPlayCarriesTheChosenItemsSlugInItsName(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, slugRequest("some-film-1999", film(testFilmPath)))
+
+	operator.pass()
+
+	name := cluster.heldPlays()[0].Metadata.Name
+	if name != testPlayer+"-some-film-1999-"+mintedSuffix {
+		t.Errorf("name = %q, want the player, the slug, and the minted suffix", name)
+	}
+}
+
+// The catalog builds the slug, but it arrives over the bus, so the
+// operator folds it to what a name may hold.
+func TestTheSlugFoldsToALabelFragment(t *testing.T) {
+	cases := []struct {
+		name string
+		slug string
+		want string
+	}{
+		{"a slug the catalog built passes through", "some-film-1999", "some-film-1999"},
+		{"a title folds to lowercase and hyphens", "Some Film (1999)", "some-film-1999"},
+		{"a run of separators becomes one hyphen", "a  --  b", "a-b"},
+		{"the edges carry no hyphen", "--some film--", "some-film"},
+		{"a letter this fold does not name becomes a hyphen", "séance", "s-ance"},
+		{"a slug of nothing but separators folds to nothing", "--- ---", ""},
+		{"an empty slug folds to nothing", "", ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := labelFragment(testCase.slug); got != testCase.want {
+				t.Errorf("fold = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// The name has a budget, and a fragment longer than it ends on a whole
+// word where one is in reach.
+func TestALongSlugIsCutToTheBudget(t *testing.T) {
+	cases := []struct {
+		name     string
+		fragment string
+		budget   int
+		want     string
+	}{
+		{"a fragment inside the budget is itself", "some-film-1999", 42, "some-film-1999"},
+		{"a fragment at the budget is itself", "abcde", 5, "abcde"},
+		{"the cut falls back to the last hyphen", "some-film-of-1999", 14, "some-film-of"},
+		{"a fragment with no hyphen in reach is cut hard", "abcdefghij", 4, "abcd"},
+		{"a budget of nothing leaves no fragment", "some-film", 0, ""},
+		{"a player longer than the budget leaves no fragment", "some-film", -3, ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := capped(testCase.fragment, testCase.budget); got != testCase.want {
+				t.Errorf("cap = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// The whole name fits inside the budget, whatever the slug holds, so
+// the API server's own suffix lands inside a label.
+func TestAPlayNameFitsTheBudget(t *testing.T) {
+	long := "the-very-long-title-of-a-film-nobody-has-heard-of-1999"
+
+	name := playGenerateName(testPlayer, long)
+
+	if len(name) > playNameBudget {
+		t.Errorf("name = %q, %d bytes, want at most %d", name, len(name), playNameBudget)
+	}
+	if name != testPlayer+"-the-very-long-title-of-a-film-nobody-has-" {
+		t.Errorf("name = %q, want the cut at a hyphen", name)
+	}
+}
+
+// A request that names no slug, and one whose slug folds to nothing,
+// name the Player alone, because a name is worth less than a Play that
+// starts.
+func TestAPlayWithNoUsableSlugNamesThePlayerAlone(t *testing.T) {
+	if got := playGenerateName(testPlayer, ""); got != testPlayer+"-" {
+		t.Errorf("name = %q, want %q", got, testPlayer+"-")
+	}
+	if got := playGenerateName(testPlayer, "((( )))"); got != testPlayer+"-" {
+		t.Errorf("name = %q, want %q", got, testPlayer+"-")
 	}
 }

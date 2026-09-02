@@ -136,6 +136,10 @@ impl Selection {
 pub struct PlayItem {
     /// The main file's path, relative to the library root.
     pub path: String,
+    /// The catalog's slug for this item, such as `some-film-1999`. The
+    /// operator folds the chosen item's slug into the `Play`'s name, so
+    /// `kubectl get plays` reads as titles.
+    pub slug: String,
     /// The presentation the operator passes through to the `Play`.
     pub presentation: Presentation,
 }

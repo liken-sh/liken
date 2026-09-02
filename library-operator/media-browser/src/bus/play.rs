@@ -9,9 +9,19 @@ use crate::catalog::{PlayItem, Presentation};
 
 /// The request as bytes. `library` is the catalog's library column,
 /// `namespace/name`, and every path is relative to that library's root.
+///
+/// The slug is the chosen item's, which is the first of the list: the
+/// movie, or the episode a person picked, with the rest of its season
+/// after it. The operator folds it into the `Play`'s name. A list that
+/// resolved nothing carries an empty slug, and the operator then names
+/// the `Play` after the unit alone.
 pub fn payload(library: &str, items: &[PlayItem]) -> Vec<u8> {
     let mut request = Map::new();
     request.insert("library".into(), Value::from(library));
+    request.insert(
+        "slug".into(),
+        Value::from(items.first().map(|item| item.slug.as_str()).unwrap_or("")),
+    );
     request.insert(
         "items".into(),
         Value::Array(items.iter().map(one).collect()),
@@ -65,6 +75,7 @@ mod tests {
     fn movie() -> PlayItem {
         PlayItem {
             path: "Some Film (1999)/Some Film (1999).mkv".into(),
+            slug: "some-film-1999".into(),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
@@ -87,6 +98,7 @@ mod tests {
             decoded("default/films", &[movie()]),
             serde_json::json!({
                 "library": "default/films",
+                "slug": "some-film-1999",
                 "items": [{
                     "path": "Some Film (1999)/Some Film (1999).mkv",
                     "presentation": {
@@ -106,6 +118,7 @@ mod tests {
     fn an_episode_request_carries_the_series_the_numbers_and_the_date() {
         let item = PlayItem {
             path: "Show/S01/Show S01E02.mkv".into(),
+            slug: "show-s01e02".into(),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "series".into(),
@@ -139,6 +152,7 @@ mod tests {
                 "default/films",
                 &[PlayItem {
                     path: "film.mkv".into(),
+                    slug: String::new(),
                     presentation: Presentation::default(),
                 }]
             )["items"][0]["presentation"],

@@ -1,7 +1,9 @@
-// The media browser: a stack of levels over a catalog source and a poster
-// store. The keyboard and the bus fold through one key handler. The libraries
-// level is always the bottom of the stack, so the screen is never empty, and
-// back from that level asks the idle command pod for the shade.
+// The media browser: a stack of levels over a catalog source and a
+// poster store. The keyboard and the bus fold through one key handler.
+// The libraries level is always the bottom of the stack, so the screen
+// is never empty, and back from that level asks for the shade. The
+// `media-screen` crate holds the shade, the focus gate, and the two
+// windows, so a press that reaches this file is one to act on.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -10,8 +12,9 @@ use iced_wgpu::Renderer;
 use iced_widget::{Space, canvas};
 use iced_winit::core::{Color, Element, Length, Theme};
 
-use crate::bus::screen::Event;
-use crate::bus::{Bus, Message, play};
+use media_screen::{Bus, Moment};
+
+use crate::bus::play;
 use crate::catalog::{Selection, Source};
 use crate::focus;
 use crate::harness::{Screen, Waker};
@@ -36,8 +39,12 @@ pub struct Browser<S: Source, P: Posters> {
     // The connection to the room's remotes, or nothing on a run that takes
     // the keyboard alone.
     bus: Option<Box<dyn Bus>>,
-    // Whether the shade is down. The browser never decides it, because the
-    // shade is the idle command pod's alone; it reads the moment and draws.
+    // The topic this operator reads play requests on. The browser
+    // publishes on the connection the crate already holds, so the topic
+    // is held here and not in the crate, which reads none of it.
+    play_topic: String,
+    // Whether the shade is down. The browser never decides it: it asks for
+    // the shade, the crate decides, and the moment comes back here.
     asleep: bool,
     // Whether a present asked for a fresh Wayland surface.
     surface_due: bool,
@@ -53,15 +60,18 @@ impl<S: Source, P: Posters> Browser<S, P> {
             libraries,
             stack: Vec::new(),
             bus: None,
+            play_topic: String::new(),
             asleep: false,
             surface_due: false,
         }
     }
 
-    /// The browser on a bus. A `Player` whose status names no bus wires none,
-    /// and the browser then takes the keyboard alone.
-    pub fn with_bus(mut self, bus: Option<Box<dyn Bus>>) -> Self {
+    /// The browser on a bus, and the topic it publishes a play request
+    /// on. A `Player` whose status names no bus wires none, and the
+    /// browser then takes the keyboard alone.
+    pub fn with_bus(mut self, bus: Option<Box<dyn Bus>>, play_topic: String) -> Self {
         self.bus = bus;
+        self.play_topic = play_topic;
         self
     }
 
@@ -70,29 +80,36 @@ impl<S: Source, P: Posters> Browser<S, P> {
         self.asleep
     }
 
-    // Fold one message in. A press is a key by another route, and the moments
-    // are the idle command pod's decisions about the screen.
-    fn receive(&mut self, message: Message) {
-        match message {
-            Message::Press(name) => self.key(name),
-            Message::Screen(Event::Sleep) => self.asleep = true,
-            Message::Screen(Event::Wake) => self.asleep = false,
-            Message::Screen(Event::Present) => self.surface_due = true,
-            // The browser draws no identity block, so a focus pulses nothing.
-            Message::Screen(Event::Focus { .. }) => {}
+    // Fold one moment in. A press is a key by another route, and the
+    // crate already applied the focus gate and the play gate, so a
+    // press that arrives here is one to act on. A press the browser
+    // binds no key for changes nothing.
+    fn receive(&mut self, moment: Moment) {
+        match moment {
+            Moment::Press(name) => {
+                if let Some(key) = key_of(name) {
+                    self.key(key);
+                }
+            }
+            Moment::Sleep => self.asleep = true,
+            Moment::Wake => self.asleep = false,
+            Moment::Present => self.surface_due = true,
+            // The browser draws no identity block, no unit status, and
+            // no volume row, so these three change nothing here.
+            Moment::Focus { .. } | Moment::Status(_) | Moment::Level { .. } => {}
         }
     }
 
     // Fold everything the bus delivered since the last wake. The answer is
     // whether anything folded.
     fn drain_bus(&mut self) -> bool {
-        let messages = match &self.bus {
+        let moments = match &self.bus {
             Some(bus) => bus.drain(),
             None => return false,
         };
-        let folded = !messages.is_empty();
-        for message in messages {
-            self.receive(message);
+        let folded = !moments.is_empty();
+        for moment in moments {
+            self.receive(moment);
         }
         folded
     }
@@ -204,24 +221,37 @@ impl<S: Source, P: Posters> Browser<S, P> {
             );
             return;
         }
-        if let Some(bus) = &self.bus {
-            bus.request_play(play::payload(library, &items));
+        let Some(bus) = &self.bus else {
+            return;
+        };
+        // An older library operator names no topic, and the browser
+        // then browses and starts nothing. The line in the pod log is
+        // the only sign of the gap.
+        if self.play_topic.is_empty() {
+            eprintln!("media-browser: no play topic, so this browser starts nothing");
+            return;
         }
+        // A request is an event, so it is not retained: a broker that
+        // held the last one would replay it to the operator on every
+        // reconnect.
+        bus.publish(&self.play_topic, play::payload(library, &items), false);
     }
 
     // Back pops one descent and re-reads the level it uncovers,
     // because a change that landed while the level was covered was folded
     // into the level that was shown at the time and not into this one.
     //
-    // At the libraries there is nowhere to climb, so a browser on a bus asks
-    // the idle command pod for the shade. It never sleeps itself.
+    // At the libraries there is nowhere to climb, so a browser on a bus
+    // asks for the shade. Only the browser knows whether back has
+    // anywhere to go, which is why the crate never sleeps on back
+    // itself.
     fn back(&mut self) {
         if self.stack.pop().is_some() {
             self.reread_top();
             return;
         }
         if let Some(bus) = &self.bus {
-            bus.request_sleep();
+            bus.sleep();
         }
     }
 }
@@ -318,6 +348,22 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     // and the loop waits on events.
     fn next_frame(&self, _at: f64) -> Option<f64> {
         None
+    }
+}
+
+/// One kernel key name as the browser key it is. Several names reach one
+/// key, because remotes differ in the name they send for OK and for back.
+/// Select is enter and back is escape, so a press from a remote takes the
+/// path the keyboard and the script take.
+fn key_of(name: &str) -> Option<&'static str> {
+    match name {
+        "KEY_UP" => Some("up"),
+        "KEY_DOWN" => Some("down"),
+        "KEY_LEFT" => Some("left"),
+        "KEY_RIGHT" => Some("right"),
+        "KEY_ENTER" | "KEY_OK" | "KEY_SELECT" | "KEY_KPENTER" => Some("enter"),
+        "KEY_BACK" | "KEY_ESC" | "KEY_EXIT" => Some("escape"),
+        _ => None,
     }
 }
 

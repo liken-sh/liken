@@ -31,9 +31,16 @@ fn insert_movie(path: &Path, library: &str, id: &str, title: &str, sort_key: &st
     let connection = Connection::open(path).unwrap();
     connection
         .execute(
-            "INSERT INTO movies (library, id, kind, title, sort_key, released, art) \
-             VALUES (?, ?, 'movies', ?, ?, '1999', ?)",
-            (library, id, title, sort_key, format!("{id}.jpg")),
+            "INSERT INTO movies (library, id, kind, title, sort_key, released, art, slug) \
+             VALUES (?, ?, 'movies', ?, ?, '1999', ?, ?)",
+            (
+                library,
+                id,
+                title,
+                sort_key,
+                format!("{id}.jpg"),
+                format!("{}-1999", sort_key),
+            ),
         )
         .unwrap();
 }
@@ -67,8 +74,8 @@ fn insert_released_episode(
     let connection = Connection::open(path).unwrap();
     connection
         .execute(
-            "INSERT INTO episodes (library, id, kind, title, series, season, episode, released, art) \
-             VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO episodes (library, id, kind, title, series, season, episode, released, art, slug) \
+             VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?, ?)",
             (
                 library,
                 id,
@@ -78,6 +85,7 @@ fn insert_released_episode(
                 episode,
                 released,
                 format!("{id}.jpg"),
+                format!("s{season:02}e{episode:02}"),
             ),
         )
         .unwrap();
@@ -370,6 +378,7 @@ fn a_movie_plays_its_primary_video_file() {
         source.play("default/films", &movie_chosen()),
         vec![PlayItem {
             path: "The Matrix/The Matrix.mkv".into(),
+            slug: "matrix-1999".into(),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
@@ -456,6 +465,20 @@ fn an_episode_plays_itself_and_the_rest_of_its_season() {
     let items = source.play("default/shows", &episode_chosen(2));
     let paths: Vec<&str> = items.iter().map(|item| item.path.as_str()).collect();
     assert_eq!(paths, ["Lost/S01E2.mkv", "Lost/S01E3.mkv"]);
+}
+
+// The operator names a Play after the chosen item, so every item
+// carries the slug its own row holds.
+#[test]
+fn every_item_carries_the_slug_its_row_holds() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(2));
+    let slugs: Vec<&str> = items.iter().map(|item| item.slug.as_str()).collect();
+    assert_eq!(slugs, ["s01e02", "s01e03"]);
 }
 
 #[test]

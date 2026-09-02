@@ -8,8 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use iced_widget::image::Handle;
 
 use super::*;
-use crate::bus::screen::Event;
 use crate::catalog::{EpisodeRow, LibraryEntry, PlayItem, Presentation, Title};
+
+// The topic the operator names on a screen pod, so a test reads what the
+// browser published on the topic a cluster would give it.
+const PLAY_TOPIC: &str = "liken/library/players/house/den-tv/play";
 
 #[derive(Default)]
 struct Fake {
@@ -277,30 +280,33 @@ fn the_view_builds_for_both_shapes() {
     let _ = browser.view();
 }
 
-// The bus a test folds through: the messages a broker would deliver, and
+// One message the browser published, as a test reads it back.
+type Published = (String, Vec<u8>, bool);
+
+// The bus a test folds through: the moments the crate would deliver, and
 // the requests the browser publishes, with no socket under either.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 struct FakeBus {
-    inbound: Arc<Mutex<Vec<Message>>>,
+    inbound: Arc<Mutex<Vec<Moment>>>,
     sleeps: Arc<AtomicUsize>,
     woken: Arc<AtomicUsize>,
-    plays: Arc<Mutex<Vec<Vec<u8>>>>,
+    published: Arc<Mutex<Vec<Published>>>,
 }
 
 impl Bus for FakeBus {
-    fn drain(&self) -> Vec<Message> {
+    fn drain(&self) -> Vec<Moment> {
         std::mem::take(&mut self.inbound.lock().expect("no test panics with the lock"))
     }
 
-    fn request_sleep(&self) {
+    fn sleep(&self) {
         self.sleeps.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn request_play(&self, payload: Vec<u8>) {
-        self.plays
+    fn publish(&self, topic: &str, payload: Vec<u8>, retained: bool) {
+        self.published
             .lock()
             .expect("no test panics with the lock")
-            .push(payload);
+            .push((topic.to_string(), payload, retained));
     }
 
     fn wake_on_delivery(&self, _wake: Waker) {
@@ -308,18 +314,26 @@ impl Bus for FakeBus {
     }
 }
 
-fn on_bus(movies: usize, messages: Vec<Message>) -> (Browser<Fake, NoPosters>, FakeBus) {
+fn on_bus(movies: usize, moments: Vec<Moment>) -> (Browser<Fake, NoPosters>, FakeBus) {
     let bus = FakeBus::default();
-    *bus.inbound.lock().expect("no test panics with the lock") = messages;
+    *bus.inbound.lock().expect("no test panics with the lock") = moments;
     (
-        browser(movies).with_bus(Some(Box::new(bus.clone()))),
+        browser(movies).with_bus(Some(Box::new(bus.clone())), PLAY_TOPIC.into()),
         bus.clone(),
     )
 }
 
+// Whether the browser published anything at all.
+fn published_nothing(bus: &FakeBus) -> bool {
+    bus.published
+        .lock()
+        .expect("no test panics with the lock")
+        .is_empty()
+}
+
 #[test]
 fn a_press_on_the_bus_moves_focus_like_the_keyboard() {
-    let (mut browser, _bus) = on_bus(3, vec![Message::Press("down")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_DOWN")]);
 
     assert!(browser.pump(1.0));
 
@@ -328,11 +342,45 @@ fn a_press_on_the_bus_moves_focus_like_the_keyboard() {
 
 #[test]
 fn select_on_the_bus_descends() {
-    let (mut browser, _bus) = on_bus(3, vec![Message::Press("enter")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_SELECT")]);
 
     assert!(browser.pump(1.0));
 
     assert_eq!(browser.top().shape, Shape::Wall);
+}
+
+#[test]
+fn the_arrows_are_themselves() {
+    assert_eq!(key_of("KEY_UP"), Some("up"));
+    assert_eq!(key_of("KEY_DOWN"), Some("down"));
+    assert_eq!(key_of("KEY_LEFT"), Some("left"));
+    assert_eq!(key_of("KEY_RIGHT"), Some("right"));
+}
+
+#[test]
+fn every_name_a_remote_gives_select_is_enter() {
+    for name in ["KEY_ENTER", "KEY_OK", "KEY_SELECT", "KEY_KPENTER"] {
+        assert_eq!(key_of(name), Some("enter"));
+    }
+}
+
+#[test]
+fn every_name_a_remote_gives_back_is_escape() {
+    for name in ["KEY_BACK", "KEY_ESC", "KEY_EXIT"] {
+        assert_eq!(key_of(name), Some("escape"));
+    }
+}
+
+#[test]
+fn a_press_this_browser_binds_no_key_for_changes_nothing() {
+    assert_eq!(key_of("KEY_PLAYPAUSE"), None);
+
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_PLAYPAUSE")]);
+
+    assert!(browser.pump(1.0));
+
+    assert_eq!(browser.top().focus, 0);
+    assert!(browser.stack.is_empty());
 }
 
 #[test]
@@ -344,12 +392,11 @@ fn an_empty_bus_folds_nothing() {
 
 #[test]
 fn the_shade_covers_the_browser_and_lifts_it() {
-    let (mut browser, _bus) = on_bus(3, vec![Message::Screen(Event::Sleep)]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep]);
     browser.pump(1.0);
     assert!(browser.asleep());
 
-    *_bus.inbound.lock().expect("no test panics with the lock") =
-        vec![Message::Screen(Event::Wake)];
+    *_bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
     browser.pump(2.0);
 
     assert!(!browser.asleep());
@@ -357,10 +404,7 @@ fn the_shade_covers_the_browser_and_lifts_it() {
 
 #[test]
 fn a_press_that_arrives_asleep_keeps_the_focus() {
-    let (mut browser, _bus) = on_bus(
-        3,
-        vec![Message::Screen(Event::Sleep), Message::Press("down")],
-    );
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep, Moment::Press("KEY_DOWN")]);
 
     browser.pump(1.0);
 
@@ -370,7 +414,7 @@ fn a_press_that_arrives_asleep_keeps_the_focus() {
 
 #[test]
 fn an_asleep_browser_draws_a_black_frame() {
-    let (mut browser, _bus) = on_bus(3, vec![Message::Screen(Event::Sleep)]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep]);
     browser.pump(1.0);
 
     assert!(browser.asleep());
@@ -380,7 +424,7 @@ fn an_asleep_browser_draws_a_black_frame() {
 
 #[test]
 fn a_present_asks_the_harness_for_a_fresh_surface() {
-    let (mut browser, _bus) = on_bus(3, vec![Message::Screen(Event::Present)]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Present]);
 
     browser.pump(1.0);
 
@@ -390,7 +434,7 @@ fn a_present_asks_the_harness_for_a_fresh_surface() {
 
 #[test]
 fn a_focus_changes_nothing() {
-    let (mut browser, _bus) = on_bus(3, vec![Message::Screen(Event::Focus { remote: 0 })]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Focus { remote: 0 }]);
 
     assert!(browser.pump(1.0));
 
@@ -400,7 +444,7 @@ fn a_focus_changes_nothing() {
 }
 
 #[test]
-fn back_at_the_libraries_asks_the_command_pod_for_the_shade() {
+fn back_at_the_libraries_asks_for_the_shade() {
     let (mut browser, bus) = on_bus(3, Vec::new());
 
     browser.key("escape");
@@ -453,6 +497,7 @@ fn the_wake_reaches_the_bus() {
 fn one_item() -> PlayItem {
     PlayItem {
         path: "Some Film (1999)/Some Film (1999).mkv".into(),
+        slug: "some-film-1999".into(),
         presentation: Presentation {
             kind: "video".into(),
             hint: "movie".into(),
@@ -470,11 +515,15 @@ fn playing(items: Vec<PlayItem>) -> (Browser<Fake, NoPosters>, FakeBus) {
     (browser, bus)
 }
 
-// The one request the browser published, decoded.
+// The one request the browser published, decoded. The topic is the
+// operator's own and a request is a moment, so it is not retained.
 fn published(bus: &FakeBus) -> serde_json::Value {
-    let plays = bus.plays.lock().expect("no test panics with the lock");
+    let plays = bus.published.lock().expect("no test panics with the lock");
     assert_eq!(plays.len(), 1);
-    serde_json::from_slice(&plays[0]).expect("the request is JSON")
+    let (topic, payload, retained) = &plays[0];
+    assert_eq!(topic, PLAY_TOPIC);
+    assert!(!retained);
+    serde_json::from_slice(payload).expect("the request is JSON")
 }
 
 #[test]
@@ -497,6 +546,7 @@ fn a_select_on_a_movie_asks_the_operator_to_play_it() {
         published(&bus),
         serde_json::json!({
             "library": "screening/films",
+            "slug": "some-film-1999",
             "items": [{
                 "path": "Some Film (1999)/Some Film (1999).mkv",
                 "presentation": {
@@ -574,12 +624,7 @@ fn a_select_on_a_series_descends_and_asks_for_no_play() {
 
     assert_eq!(browser.stack.len(), 2);
     assert_eq!(browser.source.chosen, None);
-    assert!(
-        bus.plays
-            .lock()
-            .expect("no test panics with the lock")
-            .is_empty()
-    );
+    assert!(published_nothing(&bus));
 }
 
 #[test]
@@ -590,12 +635,22 @@ fn a_title_with_no_file_to_play_publishes_nothing() {
     browser.key("enter");
 
     assert!(browser.source.chosen.is_some());
-    assert!(
-        bus.plays
-            .lock()
-            .expect("no test panics with the lock")
-            .is_empty()
-    );
+    assert!(published_nothing(&bus));
+}
+
+// An older library operator names no play topic, and the browser then
+// browses and asks for nothing.
+#[test]
+fn a_select_with_no_play_topic_publishes_nothing() {
+    let bus = FakeBus::default();
+    let mut browser = browser(3).with_bus(Some(Box::new(bus.clone())), String::new());
+    browser.source.items = vec![one_item()];
+    browser.key("enter");
+
+    browser.key("enter");
+
+    assert!(browser.source.chosen.is_some());
+    assert!(published_nothing(&bus));
 }
 
 #[test]

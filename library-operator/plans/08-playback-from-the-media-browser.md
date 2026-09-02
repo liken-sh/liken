@@ -26,22 +26,32 @@ What the lower layer already gives this plan, read from
 * `Play.status.item` already reports which item of the list plays,
   beside the position inside it. An earlier draft of this plan asked
   for that field; it exists, and the watch-state plan reads it later.
-* When the `Play` ends, the idle command pod states `present` on the
-  screen topic, and the browser maps a fresh surface at the focus it
-  held, which plan 07 built.
+* When the `Play` ends, the operator publishes `re-present` on the
+  `Player`'s commands topic. The `media-screen` crate the browser links
+  reads it, and the browser maps a fresh surface at the focus it held,
+  which plan 07 built.
 
 ## The contract
 
 **The request goes over the bus.** On select, on a movie or an
 episode, the browser publishes a request on a topic this operator
 names. The operator sets the topic on the browser container, beside
-the three variables plan 07 set, because the browser knows neither
-this operator's topic base nor the `Player`'s name. The request
-carries the library key and the list to play: for each item, the path
-of its main file relative to the library root, the path of its
-trickplay directory, and the presentation. The operator, which has
-the RBAC, reads the request and creates the `Play` in the `Player`'s
-namespace.
+the wiring the `media-screen` crate reads, because the browser knows
+neither this operator's topic base nor the `Player`'s name. The
+browser publishes on the connection the crate already holds. The
+request carries the library key, the slug of the chosen item, and the
+list to play: for each item, the path of its main file relative to the
+library root, the path of its trickplay directory, and the
+presentation. The operator, which has the RBAC, reads the request and
+creates the `Play` in the `Player`'s namespace.
+
+**The slug names the `Play`.** The slug is the catalog's, for the
+movie or the chosen episode, which is the first item of the list. The
+operator folds it to a DNS-1123 label fragment and caps it so the
+whole prefix fits in 50 bytes, cutting at a hyphen where one is in
+reach, then names the `Play` `<player>-<slug>-<suffix>`, so
+`kubectl get plays` reads as titles. A request with no usable slug
+names the `Play` after the `Player` alone.
 
 The browser resolves the list, and not the operator, because the
 browser holds the catalog. The sidecar's file is beside it. Corrosion's
@@ -129,6 +139,6 @@ episode pick, which should queue the rest of the season and advance
 `status.item`, and the thumbnails on the scrub bar, which nobody
 confirmed by eye. The next drill covers both.
 
-One tweak is agreed and waits for the next round: the `Play` name
-should carry the chosen item's slug before the generated suffix, so a
-`kubectl get plays` reads as titles.
+The slug in the `Play` name is built and waits for the same drill:
+`kubectl get plays` names each run after the chosen title, and a long
+title is cut at a hyphen and not inside a word.

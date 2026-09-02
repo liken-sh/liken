@@ -255,9 +255,14 @@ func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 	status := PlayerStatus{}
 	raw := `{"idle":{"controller":"library.liken.sh/media-browser",` +
 		`"claim":"den-tv-idle-devices","requests":["draw"],` +
+		`"fadeAfterSeconds":600,"offAfterSeconds":1800,` +
 		`"bus":{"address":"bus.liken-system.svc:1883",` +
+		`"statusTopic":"liken/media/players/house/den-tv/status",` +
+		`"volumeTopic":"liken/media/players/house/den-tv/volume",` +
 		`"commandsTopic":"liken/media/players/house/den-tv/commands",` +
-		`"screenTopic":"liken/media/players/house/den-tv/screen"}}}`
+		`"panelTopic":"liken/media/players/house/den-tv/panel",` +
+		`"remotes":[{"events":"liken/media/remotes/house/sofa/events",` +
+		`"focus":"liken/media/remotes/house/sofa/focus"}]}}}`
 	if err := json.Unmarshal([]byte(raw), &status); err != nil {
 		t.Fatal(err)
 	}
@@ -266,13 +271,45 @@ func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 	if bus == nil {
 		t.Fatalf("idle = %+v, want the bus block", status.Idle)
 	}
+	if status.Idle.FadeAfterSeconds != 600 || status.Idle.OffAfterSeconds != 1800 {
+		t.Errorf("windows = %d and %d, want 600 and 1800",
+			status.Idle.FadeAfterSeconds, status.Idle.OffAfterSeconds)
+	}
 	want := PlayerIdleBus{
 		Address:       "bus.liken-system.svc:1883",
+		StatusTopic:   "liken/media/players/house/den-tv/status",
+		VolumeTopic:   "liken/media/players/house/den-tv/volume",
 		CommandsTopic: "liken/media/players/house/den-tv/commands",
-		ScreenTopic:   "liken/media/players/house/den-tv/screen",
+		PanelTopic:    "liken/media/players/house/den-tv/panel",
+		Remotes: []PlayerIdleRemote{{
+			Events: "liken/media/remotes/house/sofa/events",
+			Focus:  "liken/media/remotes/house/sofa/focus",
+		}},
 	}
-	if *bus != want {
+	if !reflect.DeepEqual(*bus, want) {
 		t.Errorf("bus = %+v, want %+v", *bus, want)
+	}
+}
+
+// A unit with no sinks carries no volume topic and a unit with no
+// controllers no remotes, so both read as absent rather than empty.
+func TestPlayerIdleBusWithNoSinksAndNoRemotesReadsNeither(t *testing.T) {
+	status := PlayerStatus{}
+	raw := `{"idle":{"controller":"library.liken.sh/media-browser",` +
+		`"fadeAfterSeconds":0,"offAfterSeconds":0,` +
+		`"bus":{"address":"bus.liken-system.svc:1883",` +
+		`"statusTopic":"liken/media/players/house/den-tv/status",` +
+		`"commandsTopic":"liken/media/players/house/den-tv/commands",` +
+		`"panelTopic":"liken/media/players/house/den-tv/panel"}}}`
+	if err := json.Unmarshal([]byte(raw), &status); err != nil {
+		t.Fatal(err)
+	}
+
+	if status.Idle.Bus.VolumeTopic != "" {
+		t.Errorf("volume topic = %q, want none", status.Idle.Bus.VolumeTopic)
+	}
+	if len(status.Idle.Bus.Remotes) != 0 {
+		t.Errorf("remotes = %+v, want none", status.Idle.Bus.Remotes)
 	}
 }
 

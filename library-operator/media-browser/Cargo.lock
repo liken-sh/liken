@@ -1598,11 +1598,21 @@ dependencies = [
  "iced_winit",
  "image",
  "liken-iced",
- "rumqttc",
+ "media-screen",
  "rusqlite",
  "serde_json",
  "tempfile",
  "ureq",
+]
+
+[[package]]
+name = "media-screen"
+version = "0.1.0"
+source = "git+https://github.com/liken-sh/media-operator?tag=2026.09.02-002#845adc459eedfb21a5efd663050134dcdbbf9f8d"
+dependencies = [
+ "rumqttc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

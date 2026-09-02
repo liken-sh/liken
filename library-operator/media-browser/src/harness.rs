@@ -41,8 +41,11 @@ use watchdog::Watchdog;
 /// The key that ends a run, from the keyboard or from a script.
 pub const QUIT: &str = "q";
 
-/// A handle that wakes the screen's event loop from any thread.
-pub type Waker = Arc<dyn Fn() + Send + Sync>;
+/// A handle that wakes the screen's event loop from any thread. It is
+/// the crate's own type, because the bus hands one back to the browser
+/// through [`media_screen::Bus::wake_on_delivery`], and two aliases of
+/// one shape would drift.
+pub use media_screen::Waker;
 
 /// What the harness needs from a screen. The harness advances the clock, hands
 /// over each key the script or the keyboard produced, and asks for a view.

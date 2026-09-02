@@ -296,22 +296,47 @@ type PlayerStatus struct {
 // Player's namespace, and Requests names the requests in it the browser
 // container states. The requests are media-operator's own list: render is
 // there only for a Player whose display claim holds one.
+//
+// FadeAfterSeconds and OffAfterSeconds are the seconds before the
+// screen fades and the seconds before the panel goes dark.
+// media-operator resolves both and always writes them, because zero is
+// a policy and an absent field is not one. The browser holds the
+// timers, through the media-screen crate, so media-operator settles the
+// policy and the client runs it.
 type PlayerIdleStatus struct {
-	Controller string         `json:"controller,omitempty"`
-	Claim      string         `json:"claim,omitempty"`
-	Requests   []string       `json:"requests,omitempty"`
-	Bus        *PlayerIdleBus `json:"bus,omitempty"`
+	Controller string   `json:"controller"`
+	Claim      string   `json:"claim,omitempty"`
+	Requests   []string `json:"requests,omitempty"`
+
+	FadeAfterSeconds int64 `json:"fadeAfterSeconds"`
+	OffAfterSeconds  int64 `json:"offAfterSeconds"`
+
+	Bus *PlayerIdleBus `json:"bus,omitempty"`
 }
 
-// PlayerIdleBus is the broker and the two topics media-operator
-// publishes for a delegate's client: the commands topic the presses
-// arrive on, and the screen topic the idle command pod states its
-// moments on. An older media-operator publishes no block, and the
-// browser then takes the keyboard alone.
+// PlayerIdleBus is the broker and every topic a delegate's client reads
+// or writes: the retained status, the level, the commands topic that
+// carries the re-present, the panel topic the client states the panel
+// desire on, and the unit's controllers. VolumeTopic is empty for a
+// unit with no sinks, which is the speaker gate. An older
+// media-operator publishes no block, and the browser then takes the
+// keyboard alone.
 type PlayerIdleBus struct {
-	Address       string `json:"address,omitempty"`
-	CommandsTopic string `json:"commandsTopic,omitempty"`
-	ScreenTopic   string `json:"screenTopic,omitempty"`
+	Address       string             `json:"address"`
+	StatusTopic   string             `json:"statusTopic"`
+	VolumeTopic   string             `json:"volumeTopic,omitempty"`
+	CommandsTopic string             `json:"commandsTopic"`
+	PanelTopic    string             `json:"panelTopic"`
+	Remotes       []PlayerIdleRemote `json:"remotes,omitempty"`
+}
+
+// PlayerIdleRemote is one of the unit's controllers as a client reads
+// it: the topic its presses arrive on and the topic its focus mark is
+// on. The list is in spec.remotes order, because that position is the
+// index a focus moment carries.
+type PlayerIdleRemote struct {
+	Events string `json:"events"`
+	Focus  string `json:"focus"`
 }
 
 // Play is media-operator's unit of playback: the Players it plays on

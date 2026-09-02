@@ -20,7 +20,8 @@ const MAIN_FILE: &str = "JOIN file_items ON file_items.library = item.library AN
 /// the movie holds no main file.
 pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Result<Vec<PlayItem>> {
     let sql = format!(
-        "SELECT item.title, item.released, item.art, MIN(files.path), files.trickplay \
+        "SELECT item.title, item.released, item.art, MIN(files.path), files.trickplay, \
+                item.slug \
          FROM movies item {MAIN_FILE} \
          WHERE item.library = ? AND item.id = ? GROUP BY item.id"
     );
@@ -28,6 +29,7 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
         let released: String = row.get(1)?;
         Ok(PlayItem {
             path: row.get(3)?,
+            slug: row.get(5)?,
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
@@ -54,7 +56,7 @@ pub fn episodes(
 ) -> rusqlite::Result<Vec<PlayItem>> {
     let sql = format!(
         "SELECT item.episode, item.title, item.released, item.art, IFNULL(parent.title, ''), \
-                MIN(files.path), files.trickplay \
+                MIN(files.path), files.trickplay, item.slug \
          FROM episodes item {MAIN_FILE} \
          LEFT JOIN series parent ON parent.library = item.library AND parent.id = item.series \
          WHERE item.library = ? AND item.series = ? AND item.season = ? AND item.episode >= ? \
@@ -83,6 +85,7 @@ pub fn episodes(
                 number,
                 PlayItem {
                     path: row.get(5)?,
+                    slug: row.get(7)?,
                     presentation,
                 },
             ))

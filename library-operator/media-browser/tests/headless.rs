@@ -432,9 +432,9 @@ fn a_capture_run_writes_its_frames_and_ends_after_the_last_one() {
 }
 
 // A browser wired to a broker that answers nothing still draws the
-// wall and takes its own keys. The three variables are what the operator sets
-// from the Player's status, and a broker that is down must not hold a screen
-// dark.
+// wall and takes its own keys. The variables are what the operator sets
+// from the Player's status, and a broker that is down must not hold a
+// screen dark.
 #[test]
 fn a_browser_wired_to_a_broker_that_is_down_still_draws() {
     let dir = workspace("bus");
@@ -446,13 +446,32 @@ fn a_browser_wired_to_a_broker_that_is_down_still_draws() {
             // A port on loopback that nothing listens on, so every
             // session the reader opens fails and it waits to try again.
             ("MEDIA_BUS_ADDRESS", "127.0.0.1:1"),
+            ("MEDIA_PLAYER_NAME", "den-tv"),
+            (
+                "MEDIA_PLAYER_STATUS_TOPIC",
+                "liken/media/players/house/den-tv/status",
+            ),
             (
                 "MEDIA_PLAYER_COMMANDS_TOPIC",
                 "liken/media/players/house/den-tv/commands",
             ),
             (
-                "MEDIA_PLAYER_SCREEN_TOPIC",
-                "liken/media/players/house/den-tv/screen",
+                "MEDIA_PLAYER_PANEL_TOPIC",
+                "liken/media/players/house/den-tv/panel",
+            ),
+            (
+                "MEDIA_REMOTE_EVENTS_TOPICS",
+                "liken/media/remotes/house/sofa/events",
+            ),
+            (
+                "MEDIA_REMOTE_FOCUS_TOPICS",
+                "liken/media/remotes/house/sofa/focus",
+            ),
+            ("IDLE_FADE_AFTER_SECONDS", "600"),
+            ("IDLE_OFF_AFTER_SECONDS", "1800"),
+            (
+                "LIBRARY_PLAY_TOPIC",
+                "liken/library/players/house/den-tv/play",
             ),
         ],
         &[

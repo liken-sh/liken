@@ -11,6 +11,7 @@ use iced_winit::{Clipboard, conversion};
 use winit::event::WindowEvent;
 use winit::event_loop::ControlFlow;
 use winit::keyboard::ModifiersState;
+use winit::window::WindowId;
 
 use super::capture::Captures;
 use super::stats::Stats;
@@ -112,7 +113,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
-        _id: winit::window::WindowId,
+        id: WindowId,
         event: WindowEvent,
     ) {
         let App { watchdog, state } = self;
@@ -128,7 +129,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             // The window went away, which is what a compositor restart
             // under a running pod leaves behind. The grace starts again, and
             // nothing in this process opens the connection a second time.
-            WindowEvent::Destroyed => {
+            other if lost_its_window(other, id, ready.window.id()) => {
                 watchdog.missing(std::time::Instant::now());
                 return;
             }
@@ -227,5 +228,48 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         // it, so the graphics are dropped here rather than where the loop
         // returns.
         self.state = State::Done;
+    }
+}
+
+/// Whether one window event says the window the run draws on now went
+/// away. A `present` maps a new window before it drops the old one, so
+/// a `Destroyed` arrives for a window the run has already replaced.
+/// Without this guard the grace starts on that stale window, and the
+/// browser exits 7 fifteen seconds after every `Play`, which puts a
+/// person back at the libraries. The idle client's harness in
+/// `media-operator` reads the same rule.
+fn lost_its_window(event: &WindowEvent, destroyed: WindowId, drawing: WindowId) -> bool {
+    matches!(event, WindowEvent::Destroyed) && destroyed == drawing
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Two identifiers of a run's own, because a test opens no window.
+    fn ids() -> (WindowId, WindowId) {
+        (WindowId::from(1), WindowId::from(2))
+    }
+
+    #[test]
+    fn the_window_the_run_draws_on_going_away_is_a_loss() {
+        let (drawing, _replaced) = ids();
+        assert!(lost_its_window(&WindowEvent::Destroyed, drawing, drawing));
+    }
+
+    #[test]
+    fn a_window_the_present_already_replaced_going_away_is_no_loss() {
+        let (drawing, replaced) = ids();
+        assert!(!lost_its_window(&WindowEvent::Destroyed, replaced, drawing));
+    }
+
+    #[test]
+    fn an_event_that_is_not_a_destroyed_is_no_loss() {
+        let (drawing, _replaced) = ids();
+        assert!(!lost_its_window(
+            &WindowEvent::CloseRequested,
+            drawing,
+            drawing
+        ));
     }
 }

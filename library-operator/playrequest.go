@@ -23,10 +23,14 @@ import (
 // payload, so a request cannot name a Player other than the one whose
 // topic carried it.
 type playRequest struct {
-	Namespace string            `json:"-"`
-	Player    string            `json:"-"`
-	Library   string            `json:"library"`
-	Items     []playRequestItem `json:"items"`
+	Namespace string `json:"-"`
+	Player    string `json:"-"`
+	Library   string `json:"library"`
+	// The catalog's slug for the item the person chose, the movie's or
+	// the chosen episode's. It names the Play and nothing else, so a
+	// request that carries none still plays.
+	Slug  string            `json:"slug"`
+	Items []playRequestItem `json:"items"`
 }
 
 // playRequestItem is one item of the list. Every path is relative to
@@ -144,11 +148,72 @@ func (r playRequest) play(players []Player, libraries []Library) (*Play, error) 
 		APIVersion: playerAPIVersion,
 		Kind:       "Play",
 		Metadata: ObjectMeta{
-			GenerateName: r.Player + "-",
+			GenerateName: playGenerateName(r.Player, r.Slug),
 			Namespace:    r.Namespace,
 		},
 		Spec: PlaySpec{Players: []string{r.Player}, Items: items},
 	}, nil
+}
+
+// The longest prefix the operator asks the API server to mint a name
+// from, counting the Player, the slug, and the two hyphens that join
+// them. The API server appends its own suffix, so this budget leaves
+// room for it inside a DNS-1123 label.
+const playNameBudget = 50
+
+// playGenerateName is the prefix the API server mints a Play name from.
+// The slug is in it so that kubectl get plays reads as titles instead
+// of one line per unit. A request that carries no slug, or one whose
+// slug folds to nothing, falls back to the Player alone, because a Play
+// that starts matters more than its name.
+func playGenerateName(player, slug string) string {
+	fragment := capped(labelFragment(slug), playNameBudget-len(player)-2)
+	if fragment == "" {
+		return player + "-"
+	}
+	return player + "-" + fragment + "-"
+}
+
+// labelFragment folds a catalog slug to a DNS-1123 label fragment.
+// Lowercase letters and digits pass through, a run of anything else
+// becomes one hyphen, and the fragment carries no leading or trailing
+// hyphen. The operator folds a slug the catalog already built because
+// the request comes over the bus from a pod, so nothing but this
+// function guarantees the shape a name needs.
+func labelFragment(text string) string {
+	var folded strings.Builder
+	pendingHyphen := false
+	for _, letter := range strings.ToLower(text) {
+		switch {
+		case letter >= 'a' && letter <= 'z', letter >= '0' && letter <= '9':
+			if pendingHyphen && folded.Len() > 0 {
+				folded.WriteByte('-')
+			}
+			pendingHyphen = false
+			folded.WriteRune(letter)
+		default:
+			pendingHyphen = true
+		}
+	}
+	return folded.String()
+}
+
+// capped is the cap on the fragment, in bytes. A fragment longer than
+// the budget is cut back to the last hyphen inside it, so a name ends
+// on a whole word where one is in reach and on the hard cut where none
+// is. A budget of nothing leaves no fragment.
+func capped(fragment string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if len(fragment) <= budget {
+		return fragment
+	}
+	cut := fragment[:budget]
+	if at := strings.LastIndexByte(cut, '-'); at >= 0 {
+		cut = cut[:at]
+	}
+	return cut
 }
 
 // player is the Player this request names, and only when this
