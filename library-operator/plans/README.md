@@ -39,6 +39,10 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   `liken-1`, with the numbers written down.
 * [10, The documentation site](10-the-documentation-site.md). The manual
   and the generated reference, written after plan 09.
+* [22, A screen per kind](22-a-screen-per-kind.md). A movie page with
+  its set strip, a series page with season dividers, the wall's band
+  for the controls to come, sets in the catalog, and the principle
+  that a kind is a screen design in the browser.
 
 ## Future
 
@@ -172,9 +176,6 @@ that took a hearing-impaired flag for Hindi.
   shows](open-problems/which-libraries-a-screen-shows.md). The resource
   that binds screens to libraries is undesigned; every screen shows
   every library until it exists.
-* [Every node stores every
-  table](open-problems/every-node-stores-every-table.md). A Corrosion
-  agent replicates the whole database.
 * [Ingest memory and the restart that returns
   it](open-problems/ingest-memory-and-restart.md). A first full sync
   peaks at up to 380 MB; a restart returns the agent to 74 MB.

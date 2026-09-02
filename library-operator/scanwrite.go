@@ -29,6 +29,7 @@ func flushWalk(ctx context.Context, catalog *Catalog, result *walkResult, epoch 
 func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) error {
 	steps := []func() (int, error){
 		func() (int, error) { return catalog.UpsertMovies(ctx, result.movies) },
+		func() (int, error) { return catalog.UpsertSets(ctx, result.sets) },
 		func() (int, error) { return catalog.UpsertSeries(ctx, result.series) },
 		func() (int, error) { return catalog.UpsertEpisodes(ctx, result.episodes) },
 		func() (int, error) { return catalog.UpsertFiles(ctx, result.files) },

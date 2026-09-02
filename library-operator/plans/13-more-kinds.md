@@ -3,8 +3,8 @@
 Plan 13. A stub for later agents to shape, one kind at a time. The
 design names music, photos, audiobooks, books, and games. Each is a new
 scanner image, a new settings block on `Library`, a body shape in the
-catalog, and views in the media browser that the media browser is given
-rather than built with.
+catalog, and screens in the media browser designed for that kind and
+composed from the browser's shared primitives, as plan 22 sets out.
 
 ## Music
 
@@ -12,9 +12,8 @@ Tags in the files are the truth, and the folder layout is a hint.
 `media-operator` plays an album as one timeline with tracks as chapters
 and reads album art from the files, so the catalog's music body contains
 what the player already reads. Music libraries reach a hundred thousand
-files, which makes the catalog's size on every screen a budget question;
-see [every node stores every
-table](open-problems/every-node-stores-every-table.md).
+files. Every screen stores the whole catalog, so a large kind's row
+size and count set a budget on a one-gigabyte box.
 
 ## Photos and home video
 

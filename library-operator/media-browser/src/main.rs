@@ -52,7 +52,9 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
 
     let Some(catalog) = options.catalog.clone() else {
         return harness::run(
-            Browser::new(sample::Catalog, sample::NoArt).with_bus(bus, play_topic),
+            Browser::new(sample::Catalog, sample::NoArt)
+                .with_page(options.size)
+                .with_bus(bus, play_topic),
             options,
         );
     };
@@ -62,10 +64,12 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     let updates = options.updates.clone().unwrap_or_default();
     let source = SidecarSource::new(catalog, &updates);
     let roots = options.library_roots.iter().cloned().collect();
-    let posters = Volumes::new(roots, volumes::budget(options.size.0));
+    let posters = Volumes::new(roots, volumes::budget(options.size));
 
     harness::run(
-        Browser::new(source, posters).with_bus(bus, play_topic),
+        Browser::new(source, posters)
+            .with_page(options.size)
+            .with_bus(bus, play_topic),
         options,
     )
 }

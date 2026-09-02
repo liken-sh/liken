@@ -1,7 +1,7 @@
-// The media browser: a stack of levels over a catalog source and a
+// The media browser: a stack of screens over a catalog source and a
 // poster store. The keyboard and the bus fold through one key handler.
-// The libraries level is always the bottom of the stack, so the screen
-// is never empty, and back from that level asks for the shade. The
+// The libraries screen is always the bottom of the stack, so the screen
+// is never empty, and back from that screen asks for the shade. The
 // `media-screen` crate holds the shade, the focus gate, and the two
 // windows, so a press that reaches this file is one to act on.
 
@@ -9,20 +9,17 @@ use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
-use iced_widget::{Space, canvas};
+use iced_widget::Space;
 use iced_winit::core::{Color, Element, Length, Theme};
 
 use media_screen::{Bus, Moment};
 
 use crate::bus::play;
 use crate::catalog::{Selection, Source};
-use crate::focus;
 use crate::harness::{Screen, Waker};
-use crate::levels::{Fetch, Level, Shape, shapes_of};
 use crate::look;
 use crate::posters::Posters;
-use crate::views::list::List;
-use crate::views::wall::{self, Wall};
+use crate::screens::{self, Step, libraries};
 
 /// The browsing screen, generic over where its rows and its posters
 /// come from, so one browser draws the sidecar's file, a test fixture, and
@@ -32,10 +29,10 @@ pub struct Browser<S: Source, P: Posters> {
     // The store is in a RefCell because a canvas program draws through
     // a shared reference while the store mutates its cache.
     posters: RefCell<P>,
-    // The libraries level is a field of its own, so the type guarantees
-    // a level to draw; the stack holds only descents.
-    libraries: Level,
-    stack: Vec<Level>,
+    // The libraries screen is a field of its own, so the type guarantees
+    // a screen to draw; the stack holds only descents.
+    libraries: screens::Screen,
+    stack: Vec<screens::Screen>,
     // The connection to the room's remotes, or nothing on a run that takes
     // the keyboard alone.
     bus: Option<Box<dyn Bus>>,
@@ -48,12 +45,29 @@ pub struct Browser<S: Source, P: Posters> {
     asleep: bool,
     // Whether a present asked for a fresh Wayland surface.
     surface_due: bool,
+    // The size a page's backdrop is decoded at, which is the size of the
+    // window.
+    page: (u32, u32),
+    // The second of the last frame. The rest is measured from it.
+    clock: f64,
+    // The second at which the focused item's backdrop is asked for, or
+    // nothing while focus moves or after the ask is spent.
+    rest: Option<f64>,
 }
+
+// How long focus stands still before the browser asks the store for the
+// backdrop of the page under it. A press inside this window replaces the
+// ask, so a walk across a wall decodes the backdrop of the item a person
+// stopped on and no other.
+const REST: f64 = 0.3;
+
+// The size a run that asked for no window size decodes a backdrop at.
+const PAGE: (u32, u32) = (1920, 1080);
 
 impl<S: Source, P: Posters> Browser<S, P> {
     /// Open the browser on its first screen, the libraries.
     pub fn new(mut source: S, posters: P) -> Self {
-        let libraries = Level::new(Shape::List, Fetch::Libraries, &mut source);
+        let libraries = screens::Screen::Libraries(libraries::Libraries::new(&mut source));
         Self {
             source,
             posters: RefCell::new(posters),
@@ -63,7 +77,18 @@ impl<S: Source, P: Posters> Browser<S, P> {
             play_topic: String::new(),
             asleep: false,
             surface_due: false,
+            page: PAGE,
+            clock: 0.0,
+            rest: None,
         }
+    }
+
+    /// The browser on a window of this size. A page's backdrop is decoded
+    /// at this size, so the decode the wall asked for is the one the page
+    /// draws.
+    pub fn with_page(mut self, page: (u32, u32)) -> Self {
+        self.page = page;
+        self
     }
 
     /// The browser on a bus, and the topic it publishes a play request
@@ -114,12 +139,8 @@ impl<S: Source, P: Posters> Browser<S, P> {
         folded
     }
 
-    fn top(&self) -> &Level {
+    fn top(&self) -> &screens::Screen {
         self.stack.last().unwrap_or(&self.libraries)
-    }
-
-    fn top_mut(&mut self) -> &mut Level {
-        self.stack.last_mut().unwrap_or(&mut self.libraries)
     }
 
     fn reread_top(&mut self) {
@@ -129,82 +150,31 @@ impl<S: Source, P: Posters> Browser<S, P> {
         }
     }
 
-    // A select on the focused row does one of two things, and the
-    // kind's table decides which. Where the kind has a level below this
-    // one, the descent pushes it. Where it has none, the row is a movie
-    // or an episode, and the select is the play request.
-    fn descend(&mut self) {
-        let top = self.top();
-        let Some(row) = top.rows.get(top.focus) else {
-            return;
-        };
-        // What a select on the deepest row of a kind chose. A movie and
-        // an episode have nothing below them, so the descent that finds
-        // no next level is the play request.
-        let mut chosen = None;
-        let next = match &top.fetch {
-            Fetch::Libraries => Some((
-                shapes_of(&row.kind)[0],
-                Fetch::Titles {
-                    library: row.id.clone(),
-                    kind: row.kind.clone(),
-                },
-            )),
-            Fetch::Titles { library, kind } => match shapes_of(kind).get(1) {
-                Some(shape) => Some((
-                    *shape,
-                    Fetch::Seasons {
-                        library: library.clone(),
-                        kind: kind.clone(),
-                        series: row.id.clone(),
-                    },
-                )),
-                None => {
-                    chosen = Some((library.clone(), Selection::Movie { id: row.id.clone() }));
-                    None
-                }
-            },
-            Fetch::Seasons {
-                library,
-                kind,
-                series,
-            } => shapes_of(kind).get(2).map(|shape| {
-                (
-                    *shape,
-                    Fetch::Episodes {
-                        library: library.clone(),
-                        series: series.clone(),
-                        // Season rows mint their ids from the season
-                        // number, so the parse cannot fail on rows this
-                        // program built.
-                        season: row.id.parse().unwrap_or(0),
-                    },
-                )
-            }),
-            Fetch::Episodes {
-                library,
-                series,
-                season,
-            } => {
-                chosen = Some((
-                    library.clone(),
-                    Selection::Episode {
-                        series: series.clone(),
-                        season: *season,
-                        episode: row.number,
-                    },
-                ));
-                None
+    // Do what the screen that took the press asked for. Only the browser
+    // holds the stack, so a screen names the screen it opens and never
+    // pushes one itself.
+    fn take(&mut self, step: Step) {
+        match step {
+            Step::Stay => {}
+            Step::Open(screen) => self.stack.push(screen),
+            Step::Replace(screen) => {
+                self.stack.pop();
+                self.stack.push(screen);
             }
-        };
-        if let Some((library, selection)) = chosen {
-            self.request_play(&library, &selection);
+            Step::Play { library, selection } => self.request_play(&library, &selection),
+        }
+    }
+
+    // Ask the store for the backdrop of the page under the focused item,
+    // at the size the page draws it. The answer is dropped. The ask is
+    // the point: the decode lands in the cache before the page opens.
+    fn prefetch(&mut self) {
+        let top = self.stack.last().unwrap_or(&self.libraries);
+        let Some((library, art)) = top.resting(&mut self.source) else {
             return;
-        }
-        if let Some((shape, fetch)) = next {
-            let level = Level::new(shape, fetch, &mut self.source);
-            self.stack.push(level);
-        }
+        };
+        let (width, height) = self.page;
+        let _ = self.posters.get_mut().poster(&library, &art, width, height);
     }
 
     // Resolve the choice through the catalog and publish it. The browser
@@ -237,9 +207,10 @@ impl<S: Source, P: Posters> Browser<S, P> {
         bus.publish(&self.play_topic, play::payload(library, &items), false);
     }
 
-    // Back pops one descent and re-reads the level it uncovers,
-    // because a change that landed while the level was covered was folded
-    // into the level that was shown at the time and not into this one.
+    // Back pops one descent and re-reads the screen it uncovers,
+    // because a change that landed while that screen was covered was
+    // folded into the screen that was shown at the time and not into
+    // this one.
     //
     // At the libraries there is nowhere to climb, so a browser on a bus
     // asks for the shade. Only the browser knows whether back has
@@ -271,22 +242,22 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     }
 
     fn key(&mut self, name: &str) {
-        match name {
-            "enter" => self.descend(),
-            "escape" | "backspace" => self.back(),
-            _ => {
-                let top = self.top_mut();
-                top.focus = match top.shape {
-                    Shape::Wall => focus::wall(top.focus, top.rows.len(), wall::COLUMNS, name),
-                    Shape::List => focus::list(top.focus, top.rows.len(), name),
-                };
-            }
+        if name == "escape" || name == "backspace" {
+            self.back();
+        } else {
+            let top = self.stack.last_mut().unwrap_or(&mut self.libraries);
+            let step = top.key(name, &mut self.source);
+            self.take(step);
         }
+        // Every press starts the rest again, so the store decodes the
+        // backdrop of the item a person stopped on and not of every item
+        // focus passed over.
+        self.rest = self.top().prefetches().then_some(self.clock + REST);
     }
 
     // A poster that landed changes the frame and not the rows, so a
     // delivery redraws what is already read and only a changed source
-    // re-reads the level.
+    // re-reads the screen.
     fn pump(&mut self, _at: f64) -> bool {
         let folded = self.drain_bus();
         let delivered = self.posters.get_mut().delivered();
@@ -311,43 +282,32 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         std::mem::take(&mut self.surface_due)
     }
 
-    fn tick(&mut self, _at: f64) {}
+    // The clock is read here alone, so the rest is measured on the same
+    // clock the harness drives every frame with.
+    fn tick(&mut self, at: f64) {
+        self.clock = at;
+        if self.rest.is_some_and(|due| at >= due) {
+            self.rest = None;
+            self.prefetch();
+        }
+    }
 
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer> {
         // The shade is down, so the frame is the clear color and nothing over
-        // it. The level and its focus are held for the wake.
+        // it. The screen and its focus are held for the wake.
         if self.asleep {
             return Space::new().width(Length::Fill).height(Length::Fill).into();
         }
 
-        let top = self.top();
-        match top.shape {
-            Shape::Wall => canvas(Wall {
-                rows: &top.rows,
-                focus: top.focus,
-                library: top.fetch.library(),
-                posters: &self.posters,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            Shape::List => canvas(List {
-                rows: &top.rows,
-                focus: top.focus,
-                library: top.fetch.library(),
-                posters: &self.posters,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-        }
+        self.top().view(&self.posters)
     }
 
     // Every view here is still until something changes it, and the
     // source wakes the loop itself, so an idle browser schedules nothing
-    // and the loop waits on events.
+    // and the loop waits on events. The one frame it schedules is the end
+    // of a rest, and that frame is spent the moment the clock reaches it.
     fn next_frame(&self, _at: f64) -> Option<f64> {
-        None
+        self.rest
     }
 }
 

@@ -37,9 +37,47 @@ pub fn slot() -> Color {
     palette::dark().page
 }
 
+/// The scrim over art that is drawn but not chosen, such as the siblings
+/// in a set strip. The veils are black and not the brand's page color,
+/// for the reason the ground is: they sit over art.
+pub fn scrim() -> Color {
+    Color::from_rgba(0.0, 0.0, 0.0, 0.62)
+}
+
+/// The darkest end of the gradient over a page's backdrop, at the corner
+/// the text sits in.
+pub fn shade() -> Color {
+    Color::from_rgba(0.0, 0.0, 0.0, 0.94)
+}
+
+/// The far end of every gradient over art. It leaves the art as it is.
+pub const CLEAR: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.0);
+
 /// The size of the focused title's name under its poster, in logical
 /// pixels, large enough to read from a couch.
 pub const NAME: f32 = 34.0;
+
+/// The size of a page's title, where the item has no logo.
+pub const TITLE: f32 = 76.0;
+
+/// The size of a page's facts line.
+pub const FACTS: f32 = 30.0;
+
+/// The size of a page's tagline.
+pub const TAGLINE: f32 = 34.0;
+
+/// The size of a page's plot.
+pub const PLOT: f32 = 28.0;
+
+/// The size of the word in a button.
+pub const BUTTON: f32 = 30.0;
+
+/// The size of the heading over a strip, and of the controls in a wall's
+/// band.
+pub const HEADING: f32 = 26.0;
+
+/// The size of the credits and the cast on a page.
+pub const CREDITS: f32 = 26.0;
 
 /// The size of a list row's name.
 pub const ROW_NAME: f32 = 40.0;
@@ -71,5 +109,13 @@ mod tests {
         assert_eq!(muted(), palette::dark().ink_muted);
         assert_eq!(accent(), palette::dark().link);
         assert_eq!(slot(), palette::dark().page);
+    }
+
+    #[test]
+    fn the_veils_over_art_are_black_and_only_the_alpha_differs() {
+        assert_eq!(scrim().r, 0.0);
+        assert_eq!(shade().r, 0.0);
+        assert!(shade().a > scrim().a);
+        assert_eq!(CLEAR.a, 0.0);
     }
 }

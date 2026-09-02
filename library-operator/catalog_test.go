@@ -112,7 +112,8 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 		Id: "movie:tmdb:603", Library: "house/movies", Kind: "movies",
 		Path: "The Matrix (1999)", Title: "The Matrix", SortKey: "Matrix",
 		Slug: "the-matrix-1999", Released: "1999", Added: 1700000000, Art: "folder.jpg", Duration: 8160,
-		Body: movieBody{Plot: "A hacker learns the truth."},
+		Body:  movieBody{Plot: "A hacker learns the truth."},
+		SetID: "set:tmdb:2344",
 	}
 	applied, err := catalog.UpsertMovies(context.Background(), []movieRow{row})
 	if err != nil {
@@ -142,8 +143,8 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	if strings.Contains(got.sql, "603") || strings.Contains(got.sql, "Matrix") {
 		t.Errorf("sql = %q, want no values concatenated in", got.sql)
 	}
-	if len(got.params) != 12 {
-		t.Fatalf("params = %d, want 12", len(got.params))
+	if len(got.params) != 13 {
+		t.Fatalf("params = %d, want 13", len(got.params))
 	}
 	if got.params[0] != "house/movies" {
 		t.Errorf("params[0] = %v, want the library", got.params[0])
@@ -157,6 +158,9 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	}
 	if got.params[11] != "the-matrix-1999" {
 		t.Errorf("params[11] = %v, want the slug", got.params[11])
+	}
+	if got.params[12] != "set:tmdb:2344" {
+		t.Errorf("params[12] = %v, want the set the movie belongs to", got.params[12])
 	}
 }
 

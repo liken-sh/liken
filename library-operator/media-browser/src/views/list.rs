@@ -9,8 +9,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle, Size, Theme, mouse};
 
-use super::{artwork, label, scroll};
-use crate::levels::Row;
+use super::{Card, artwork, label, scroll};
 use crate::look;
 use crate::posters::Posters;
 
@@ -40,9 +39,9 @@ pub fn thumb(index: usize, offset: f32) -> Rectangle {
 
 /// The list program: the rows, the focus, and the poster store its
 /// thumbnails come from.
-pub struct List<'a, P> {
+pub struct List<'a, T, P> {
     /// The rows in draw order.
-    pub rows: &'a [Row],
+    pub rows: &'a [T],
     /// The focused row's index.
     pub focus: usize,
     /// The library the art paths resolve against.
@@ -52,7 +51,7 @@ pub struct List<'a, P> {
     pub posters: &'a RefCell<P>,
 }
 
-impl<Message, P: Posters> canvas::Program<Message, Theme, Renderer> for List<'_, P> {
+impl<Message, T: Card, P: Posters> canvas::Program<Message, Theme, Renderer> for List<'_, T, P> {
     type State = ();
 
     fn draw(
@@ -86,10 +85,17 @@ impl<Message, P: Posters> canvas::Program<Message, Theme, Renderer> for List<'_,
             }
 
             let thumb = thumb(index, offset);
-            artwork(&mut frame, &mut *posters, self.library, &row.art, thumb, "");
+            artwork(
+                &mut frame,
+                &mut *posters,
+                self.library,
+                row.art(),
+                thumb,
+                "",
+            );
 
             frame.fill_text(label(
-                &row.name,
+                row.name(),
                 Point::new(thumb.x + thumb.width + PAD, top + ROW_HEIGHT / 2.0),
                 look::ROW_NAME,
                 look::text(),
@@ -97,9 +103,9 @@ impl<Message, P: Posters> canvas::Program<Message, Theme, Renderer> for List<'_,
                 Vertical::Center,
                 bounds.width * 0.6,
             ));
-            if !row.detail.is_empty() {
+            if !row.detail().is_empty() {
                 frame.fill_text(label(
-                    &row.detail,
+                    row.detail(),
                     Point::new(bounds.width - PAD, top + ROW_HEIGHT / 2.0),
                     look::DETAIL,
                     look::muted(),
@@ -115,10 +121,10 @@ impl<Message, P: Posters> canvas::Program<Message, Theme, Renderer> for List<'_,
         for index in range.end..(range.end + 1).min(self.rows.len()) {
             let row = &self.rows[index];
             let ahead = thumb(index, offset);
-            if !row.art.is_empty() {
+            if !row.art().is_empty() {
                 let _ = posters.poster(
                     self.library,
-                    &row.art,
+                    row.art(),
                     ahead.width as u32,
                     ahead.height as u32,
                 );

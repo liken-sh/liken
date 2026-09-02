@@ -101,6 +101,7 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 		Art:      primaryArt,
 		Duration: meta.Duration,
 		Body:     body,
+		SetID:    meta.SetID,
 	})
 
 	// The sidecar's streamdetails describe the primary file, so only the first

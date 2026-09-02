@@ -84,9 +84,8 @@ screen's sidecar restarts once after its first full sync, or the pod
 starts with the catalog already on disk. A busy agent took more than 30
 s to exit on `SIGTERM`, so pods that run one set a longer termination
 grace period. Every agent stores every table of the cluster, so a
-movies-only screen also stores the series catalog; the first large kind
-makes that a budget question, in [every node stores every
-table](../open-problems/every-node-stores-every-table.md).
+movies-only screen also stores the series catalog. That is the design;
+plan 13 weighs the cost when the first large kind arrives.
 
 **The bus has two jobs.** The catalog needs no bus, because the agent
 pushes changes. The scanner's status report goes over the bus to the

@@ -139,6 +139,9 @@ func markKeys(result *walkResult) []string {
 	for _, row := range result.movies {
 		add(seenItem, row.Id)
 	}
+	for _, row := range result.sets {
+		add(seenItem, row.Id)
+	}
 	for _, row := range result.series {
 		add(seenItem, row.Id)
 	}
@@ -240,6 +243,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		delete func(context.Context, string, []string) (int, error)
 	}{
 		{"movies", catalog.DeleteMovies},
+		{"sets", catalog.DeleteSets},
 		{"series", catalog.DeleteSeries},
 		{"episodes", catalog.DeleteEpisodes},
 	} {

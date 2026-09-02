@@ -340,6 +340,9 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	}
 
 	buffer := &walkResult{}
+	// The fold lives for the whole walk, so a set derives from every member
+	// the walk reads and not from the batch its members landed in.
+	sets := setFold{}
 	buffered, items, titles, unidentified := 0, 0, 0, 0
 	readError := false
 	var unidentifiedNames []string
@@ -372,6 +375,7 @@ func (s *scanner) fullWalk(ctx context.Context) {
 			s.logf("could not read %s: %v", failure.path, failure.err)
 		}
 		appendFolder(buffer, folder)
+		sets.add(folder.movies)
 		found := len(folder.movies) + len(folder.series) + len(folder.episodes)
 		items += found
 		buffered += found
@@ -401,6 +405,16 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	// The next clean walk replaces the counts.
 	if incompleteWalk(readError, items, before) {
 		s.logIncompleteWalk(readError, items, before)
+		return
+	}
+
+	// The sets are written after the last folder, because a set is derived
+	// from all of its members. They carry the walk's own epoch, so a set
+	// whose last member left the volume is unmarked and the prune below takes
+	// it. A write that fails returns before the prune, because a prune with
+	// no set marked would sweep every set the catalog holds.
+	if err := flushWalk(ctx, s.catalog, &walkResult{sets: sets.rows()}, epoch); err != nil {
+		s.logWalk("write the sets", err)
 		return
 	}
 
@@ -562,6 +576,19 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 		}
 	}
 
+	// The sets this folder's movies named are read before the upsert, so a
+	// movie that left its set still names the set that has to be derived
+	// again. The set the folder names now is affected as well.
+	var affected []string
+	if s.kind == libraryKindMovies {
+		held, err := s.catalog.setIDsUnder(ctx, s.library, relative)
+		if err != nil {
+			s.logWalk("read the sets of a rescan", err)
+			return
+		}
+		affected = append(held, setIDsOf(result.movies)...)
+	}
+
 	if err := flushWalk(ctx, s.catalog, result, epoch); err != nil {
 		s.logWalk("write a rescan", err)
 		return
@@ -570,6 +597,14 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 	removed, err := pruneScope(ctx, s.catalog, s.library, relative, epoch)
 	if err != nil {
 		s.logWalk("prune a rescan", err)
+		return
+	}
+
+	// A rescan reads one folder and not a set's other members, so each
+	// affected set derives again from the movie rows the catalog holds, after
+	// the prune has taken the rows this folder lost.
+	if err := reconcileSets(ctx, s.catalog, s.library, affected); err != nil {
+		s.logWalk("write the sets of a rescan", err)
 		return
 	}
 

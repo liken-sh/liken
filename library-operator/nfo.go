@@ -28,9 +28,12 @@ type nfoActor struct {
 }
 
 // nfoSet is a set element, either a plain name or a nested name element.
+// tmdbcolid is the collection id Jellyfin writes on the element, and it
+// scopes the set's id where the sidecar carries one.
 type nfoSet struct {
-	Name  string `xml:"name"`
-	Value string `xml:",chardata"`
+	TMDBColID string `xml:"tmdbcolid,attr"`
+	Name      string `xml:"name"`
+	Value     string `xml:",chardata"`
 }
 
 // nfoVideo is one video stream in streamdetails: the width, height, codec, and
@@ -144,7 +147,8 @@ func (s streamInfo) present() bool {
 }
 
 // movieMeta is what parseMovieNFO reads: the identity, the release, the provider
-// ids, the movie body, the item duration, and the file stream.
+// ids, the movie body, the item duration, the file stream, and the id of the
+// set the sidecar names, empty where it names none.
 type movieMeta struct {
 	Title       string
 	Year        int
@@ -153,6 +157,7 @@ type movieMeta struct {
 	Body        movieBody
 	Duration    int64
 	Stream      streamInfo
+	SetID       string
 }
 
 // parseMovieNFO reads movie.nfo into a movieMeta. The art and the provider-id
@@ -166,6 +171,7 @@ func parseMovieNFO(data []byte) (movieMeta, error) {
 	providers := collectProviders(raw.UniqueIDs, raw.IMDBID, raw.TMDBID, raw.TVDBID, raw.ID)
 	year, released := releaseFields(raw.Year, raw.Premiered)
 	stream := streamFrom(raw.FileInfo)
+	collection := collectionName(raw.Set)
 	return movieMeta{
 		Title:       strings.TrimSpace(raw.Title),
 		Year:        year,
@@ -179,13 +185,14 @@ func parseMovieNFO(data []byte) (movieMeta, error) {
 			Writers:       mergeDedup(raw.Writers, raw.Credits),
 			Studios:       trimAll(raw.Studios),
 			Genres:        trimAll(raw.Genres),
-			Collection:    collectionName(raw.Set),
+			Collection:    collection,
 			ProviderIDs:   providers,
 			Country:       strings.TrimSpace(raw.Country),
 			ContentRating: contentRating(raw.MPAA, raw.Certification),
 		},
 		Duration: itemDuration(stream, raw.Runtime),
 		Stream:   stream,
+		SetID:    setID(strings.TrimSpace(raw.Set.TMDBColID), collection),
 	}, nil
 }
 

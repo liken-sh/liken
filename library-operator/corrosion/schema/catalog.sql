@@ -14,8 +14,8 @@
 -- JSON document. So a new kind is a new item table, and never a new
 -- nullable column on a table that other kinds share.
 --
--- This file defines the item tables movies, series, and episodes, and
--- the shared files, file_items, and aliases tables. An item's id is
+-- This file defines the item tables movies, sets, series, and episodes,
+-- and the shared files, file_items, and aliases tables. An item's id is
 -- provider-scoped and derived from the sidecar, movie:tmdb:603, so a
 -- re-walk of an unchanged sidecar reads the same id. A folder with no
 -- provider id falls back to movie:path:<key>.
@@ -56,9 +56,15 @@ CREATE TABLE movies (
     duration INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL DEFAULT '{}',
     slug TEXT NOT NULL DEFAULT '',
+    set_id TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, id)
 );
 
+-- The movie item table adds one column after the header: set_id is the
+-- id of the set the movie belongs to, a row of the sets table, or empty
+-- where the sidecar names none. A join from set_id to a set must match
+-- the library as well, as every join between item tables does.
+--
 -- The three sorts a media browser offers over one library: by title,
 -- by release, and by the time of arrival. Each index leads with the
 -- library column, because every list a screen draws is for one
@@ -66,6 +72,35 @@ CREATE TABLE movies (
 CREATE INDEX movies_library_sort_key ON movies (library, sort_key);
 CREATE INDEX movies_library_released ON movies (library, released);
 CREATE INDEX movies_library_added ON movies (library, added);
+
+-- The one read a media browser makes of a set: every movie in it, in
+-- release order, for the strip on a movie's page.
+CREATE INDEX movies_library_set_id ON movies (library, set_id);
+
+-- The sets item table: the item header, and no body of its own. A set
+-- is the collection a movie sidecar names, such as a film and its
+-- sequels, and the scanner derives every row from the movies that name
+-- it. Its id is provider-scoped like a movie's, set:tmdb:<id> from the
+-- id the sidecar carries, or set:name:<slug> where it carries a name
+-- alone. Its released and art are its earliest member's, so a set sorts
+-- and draws by its first film. A set with no member leaves the catalog
+-- with the prune, because nothing else holds it.
+CREATE TABLE sets (
+    library TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    sort_key TEXT NOT NULL DEFAULT '',
+    released TEXT NOT NULL DEFAULT '',
+    added INTEGER NOT NULL DEFAULT 0,
+    art TEXT NOT NULL DEFAULT '',
+    duration INTEGER NOT NULL DEFAULT 0,
+    body TEXT NOT NULL DEFAULT '{}',
+    slug TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, id)
+);
+CREATE INDEX sets_library_sort_key ON sets (library, sort_key);
 
 -- The series item table: the same item header as movies, with the series body.
 CREATE TABLE series (

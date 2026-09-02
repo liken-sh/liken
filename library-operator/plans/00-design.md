@@ -51,13 +51,15 @@ library, a photo library. Every relation between libraries and the
 things that read them is many-to-many. A screen may browse several
 libraries, and a library may appear on every screen in its namespace.
 
-A kind is a plugin. It defines how to walk a root, how to read the
-sidecars that kind's ecosystem writes, and what structure a media
-browser draws. Movies are one flat list. Series are series, then seasons,
-then episodes. Each kind runs as its own scanner image, so a photo
-scanner never contains an `.nfo` parser. A new kind is a new image and a
-new typed settings block in the `Library` schema. The kinds are movies,
-series, music, photos, audiobooks, books, and games.
+A kind is a plugin in the scanner and a screen design in the media
+browser. In the scanner it defines how to walk a root and how to read
+the sidecars that kind's ecosystem writes. Each kind runs as its own
+scanner image, so a photo scanner never contains an `.nfo` parser. A new
+kind is a new image and a new typed settings block in the `Library`
+schema. In the media browser each kind gets screens designed for it,
+composed from shared drawing primitives, so a movie, a series, and an
+album each look like what they are. The kinds are movies, series,
+music, photos, audiobooks, books, and games.
 
 Each kind uses the format its ecosystem uses. Movies and series use the
 `.nfo`, artwork, and thumbnail sidecars that Jellyfin, Kodi, and the

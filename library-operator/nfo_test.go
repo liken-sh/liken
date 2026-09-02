@@ -245,3 +245,53 @@ func TestParseMovieNFODerivesYearFromPremiered(t *testing.T) {
 		t.Errorf("year = %d, want 2001 from the premiered date", meta.Year)
 	}
 }
+
+// The set element comes in three shapes: the collection id Jellyfin writes
+// on it, the nested name Kodi writes, and the bare name an older sidecar
+// carries. The id scopes the set where there is one, and the name is the
+// set's title in every shape.
+func TestParseMovieNFOReadsTheSet(t *testing.T) {
+	cases := []struct {
+		name           string
+		element        string
+		wantID         string
+		wantCollection string
+	}{
+		{
+			name:           "a collection id scopes the set",
+			element:        `<set tmdbcolid="1570"><name>Quiet Harbor Collection</name><overview>A harbor town.</overview></set>`,
+			wantID:         "set:tmdb:1570",
+			wantCollection: "Quiet Harbor Collection",
+		},
+		{
+			name:           "a nested name with no id falls back to the slug",
+			element:        `<set><name>Quiet Harbor Collection</name></set>`,
+			wantID:         "set:name:quiet-harbor-collection",
+			wantCollection: "Quiet Harbor Collection",
+		},
+		{
+			name:           "a bare name reads the same way",
+			element:        `<set>Quiet Harbor Collection</set>`,
+			wantID:         "set:name:quiet-harbor-collection",
+			wantCollection: "Quiet Harbor Collection",
+		},
+		{
+			name:    "a sidecar with no set names none",
+			element: "",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			meta, err := parseMovieNFO([]byte(`<movie><title>Quiet Harbor</title><year>1998</year>` + testCase.element + `</movie>`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.SetID != testCase.wantID {
+				t.Errorf("setID = %q, want %q", meta.SetID, testCase.wantID)
+			}
+			if meta.Body.Collection != testCase.wantCollection {
+				t.Errorf("collection = %q, want %q", meta.Body.Collection, testCase.wantCollection)
+			}
+		})
+	}
+}

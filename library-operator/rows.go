@@ -89,7 +89,8 @@ type episodeBody struct {
 }
 
 // movieRow is one row of the movies item table: the header columns every
-// kind sorts on, and the movie body.
+// kind sorts on, the movie body, and the id of the set the movie belongs
+// to, empty where the sidecar names no set.
 type movieRow struct {
 	Id       string
 	Library  string
@@ -103,6 +104,7 @@ type movieRow struct {
 	Art      string
 	Duration int64
 	Body     movieBody
+	SetID    string
 }
 
 // seriesRow is one row of the series item table, the same header as a

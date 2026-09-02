@@ -42,7 +42,10 @@ func aliasRowsForItem(library, kind string, providerIDs map[string]string, folde
 // file rows and their item links, the alias rows, and the two counts the report
 // carries.
 type walkResult struct {
-	movies       []movieRow
+	movies []movieRow
+	// No folder produces a set row. The full walk fills sets after its last
+	// folder, from the fold over every movie it read.
+	sets         []setRow
 	series       []seriesRow
 	episodes     []episodeRow
 	files        []fileRow

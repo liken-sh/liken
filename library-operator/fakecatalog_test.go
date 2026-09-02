@@ -17,14 +17,16 @@ import (
 	"testing"
 )
 
-// fakeRow is one catalog row, holding the two columns the prune reads:
-// the library the row belongs to, and its path. Every table the fake
+// fakeRow is one catalog row, holding the columns the prune and the set
+// reads name: the library the row belongs to, its path, and, on a movie,
+// the set it belongs to. Every table the fake
 // holds is keyed the way the schema keys it, by the library and the
 // row's own key joined with a NUL, so the same id under two libraries
 // is two rows here, as it is in the database.
 type fakeRow struct {
 	library string
 	path    string
+	set     string
 }
 
 // fakeKey renders that composite map key from its parts.
@@ -35,6 +37,7 @@ func fakeKey(parts ...string) string {
 type fakeCatalog struct {
 	mu         sync.Mutex
 	movies     map[string]fakeRow
+	sets       map[string]fakeRow
 	series     map[string]fakeRow
 	episodes   map[string]fakeRow
 	files      map[string]fakeRow
@@ -69,6 +72,7 @@ func newFakeCatalog(t *testing.T) (*Catalog, *fakeCatalog) {
 	t.Helper()
 	fake := &fakeCatalog{
 		movies:    map[string]fakeRow{},
+		sets:      map[string]fakeRow{},
 		series:    map[string]fakeRow{},
 		episodes:  map[string]fakeRow{},
 		files:     map[string]fakeRow{},
@@ -121,13 +125,15 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 	p := s.params
 	switch {
 	case strings.HasPrefix(s.sql, "INSERT INTO movies"):
-		f.movies[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[3])}
+		f.movies[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[3]), set: str(p[12])}
+	case strings.HasPrefix(s.sql, "INSERT INTO sets"):
+		f.sets[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[3])}
 	case strings.HasPrefix(s.sql, "INSERT INTO series"):
-		f.series[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[3])}
+		f.series[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[3])}
 	case strings.HasPrefix(s.sql, "INSERT INTO episodes"):
-		f.episodes[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[3])}
+		f.episodes[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[3])}
 	case strings.HasPrefix(s.sql, "INSERT INTO files"):
-		f.files[fakeKey(str(p[0]), str(p[1]))] = fakeRow{str(p[0]), str(p[1])}
+		f.files[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[1])}
 	case strings.HasPrefix(s.sql, "INSERT INTO file_items"):
 		f.fileItems[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = true
 	case strings.HasPrefix(s.sql, "INSERT INTO aliases"):
@@ -136,6 +142,8 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		f.seen[str(p[0])] = num(p[1])
 	case strings.HasPrefix(s.sql, "DELETE FROM movies"):
 		delete(f.movies, fakeKey(str(p[0]), str(p[1])))
+	case strings.HasPrefix(s.sql, "DELETE FROM sets"):
+		delete(f.sets, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "DELETE FROM series"):
 		delete(f.series, fakeKey(str(p[0]), str(p[1])))
 	case strings.HasPrefix(s.sql, "DELETE FROM episodes"):
@@ -206,6 +214,8 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 		lib := str(p[0])
 		count := f.countIn(f.movies, lib) + f.countIn(f.series, lib) + f.countIn(f.episodes, lib)
 		return []any{float64(count)}
+	case strings.Contains(sql, "SELECT set_id FROM movies"):
+		return f.setIDsUnder(p)
 	case strings.Contains(sql, "FROM file_items"):
 		return f.unmarkedLinks(sql, p)
 	case strings.Contains(sql, "FROM aliases"):
@@ -219,7 +229,7 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 // row for, the way the real UNION read does.
 func (f *fakeCatalog) libraryKeys() []any {
 	held := map[string]bool{}
-	for _, table := range []map[string]fakeRow{f.movies, f.series, f.episodes, f.files} {
+	for _, table := range []map[string]fakeRow{f.movies, f.sets, f.series, f.episodes, f.files} {
 		for key := range table {
 			library, _, _ := strings.Cut(key, "\x00")
 			held[library] = true
@@ -274,6 +284,25 @@ func (f *fakeCatalog) unmarkedLinks(sql string, p []any) []any {
 		keys = append(keys, path+linkKeySeparator+item)
 	}
 	return keys
+}
+
+// setIDsUnder answers the sets the movies of one title folder name, the
+// read a rescan makes before it writes the folder again.
+func (f *fakeCatalog) setIDsUnder(p []any) []any {
+	library, folder := str(p[0]), str(p[1])
+	held := map[string]bool{}
+	var ids []any
+	for _, row := range f.movies {
+		if row.library != library || row.set == "" || !inScope(row.path, folder) {
+			continue
+		}
+		if held[row.set] {
+			continue
+		}
+		held[row.set] = true
+		ids = append(ids, row.set)
+	}
+	return ids
 }
 
 // countMarks reports how many ids this epoch marked, the read the prune
@@ -379,6 +408,8 @@ func (f *fakeCatalog) tableOf(sql string) map[string]fakeRow {
 	switch {
 	case strings.Contains(sql, "FROM movies"):
 		return f.movies
+	case strings.Contains(sql, "FROM sets"):
+		return f.sets
 	case strings.Contains(sql, "FROM series"):
 		return f.series
 	case strings.Contains(sql, "FROM episodes"):

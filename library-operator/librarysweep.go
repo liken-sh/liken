@@ -1,7 +1,7 @@
 package main
 
 // This file is the sweep the cleanup pod runs: every row one library
-// holds, out of all six replicated tables, through the local agent.
+// holds, out of all seven replicated tables, through the local agent.
 //
 // The sweep reads bounded batches of keys and deletes by key, the
 // shape pruneLibrary already uses, and not one bare DELETE per
@@ -53,6 +53,9 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		}},
 		{librarySweepSQL("movies", "id"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteMovies(ctx, library, keys)
+		}},
+		{librarySweepSQL("sets", "id"), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteSets(ctx, library, keys)
 		}},
 		{librarySweepSQL("series", "id"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteSeries(ctx, library, keys)

@@ -4,6 +4,9 @@
 // loop and the graphics setup toward the coverage floor. The test fails when
 // cage is missing; a skip would let a run pass under the floor.
 
+mod flags;
+mod screens;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -236,258 +239,44 @@ fn fixture(dir: &Path) -> (PathBuf, PathBuf) {
         .expect("apply the schema");
     connection
         .execute(
-            "INSERT INTO movies (library, id, kind, title, sort_key, released, art) \
+            "INSERT INTO movies (library, id, kind, title, sort_key, released, art, \
+             duration, body) \
              VALUES ('drill/films', 'movie:path:one', 'movies', 'Vespera Coppice', \
-             'vespera coppice', '1994', 'poster.jpg')",
+             'vespera coppice', '1994', 'poster.jpg', 5400, \
+             '{\"plot\":\"A plot.\",\"contentRating\":\"PG\"}')",
             (),
         )
         .expect("insert the fixture movie");
+
+    // The page reads its backdrop and its logo off the files table by
+    // role, so the fixture holds one of each beside the poster.
+    for (path, role) in [("backdrop.jpg", "backdrop"), ("logo.png", "logo")] {
+        connection
+            .execute(
+                "INSERT INTO files (library, path, type, role) VALUES ('drill/films', ?, 'image', ?)",
+                (path, role),
+            )
+            .expect("insert the fixture art file");
+        connection
+            .execute(
+                "INSERT INTO file_items (library, path, item) \
+                 VALUES ('drill/films', ?, 'movie:path:one')",
+                (path,),
+            )
+            .expect("link the fixture art file");
+    }
 
     let volume = dir.join("volume");
     std::fs::create_dir_all(&volume).expect("the volume needs a directory");
     image::RgbImage::from_pixel(200, 300, image::Rgb([210, 140, 30]))
         .save(volume.join("poster.jpg"))
         .expect("write the fixture poster");
+    image::RgbImage::from_pixel(640, 360, image::Rgb([40, 90, 160]))
+        .save(volume.join("backdrop.jpg"))
+        .expect("write the fixture backdrop");
+    image::RgbImage::from_pixel(320, 90, image::Rgb([230, 230, 210]))
+        .save(volume.join("logo.png"))
+        .expect("write the fixture logo");
 
     (database, volume)
-}
-
-#[test]
-fn a_catalog_run_draws_the_poster_the_volume_holds() {
-    let dir = workspace("catalog");
-    let frames = dir.join("frames");
-    let (database, volume) = fixture(&dir);
-
-    // No agent answers on port 1, so this run reads the file alone
-    // and its update streams find nothing.
-    let run = headless(
-        &dir,
-        &[
-            "--catalog",
-            &text(&database),
-            "--updates",
-            "http://127.0.0.1:1",
-            "--library-root",
-            &format!("drill/films={}", text(&volume)),
-            "--script",
-            "0.5:enter",
-            "--capture",
-            &text(&frames),
-            "--capture-at",
-            "2.0",
-            "--size",
-            "1920x1080",
-            "--quit-after",
-            "25",
-        ],
-    );
-
-    assert_eq!(run.exit, "0", "{}", run.log);
-    drawn(&frames.join("002.00.png"), &run);
-}
-
-#[test]
-fn the_scripted_quit_key_ends_the_run() {
-    let dir = workspace("quit");
-    let stats = dir.join("stats.json");
-
-    let run = headless(
-        &dir,
-        &[
-            "--script",
-            "0.5:down,2.0:q",
-            "--stats",
-            &text(&stats),
-            "--size",
-            "1920x1080",
-            "--quit-after",
-            "25",
-        ],
-    );
-
-    assert_eq!(run.exit, "0", "{}", run.log);
-    assert!(
-        run.seconds < 20.0,
-        "the q at 2.0 s ended the run, not the deadline at 25 s: {} s\n{}",
-        run.seconds,
-        run.log
-    );
-
-    let measured = measurements(&stats, &run);
-    assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
-}
-
-// A run whose claim named an app-id asks the compositor for a window
-// under that name, and the armed watchdog stops when the window arrives:
-// the run ends on its own key at 0, not at the watchdog's 7.
-#[test]
-fn a_claimed_screen_names_the_window_and_stops_the_watchdog() {
-    let dir = workspace("app-id");
-
-    let run = headless_with(
-        &dir,
-        &[
-            ("DISPLAY_APP_ID", "media-den-tv"),
-            ("WINDOW_GRACE_SECONDS", "15"),
-        ],
-        &[
-            "--script",
-            "0.5:q",
-            "--size",
-            "1920x1080",
-            "--quit-after",
-            "25",
-        ],
-    );
-
-    assert_eq!(run.exit, "0", "{}", run.log);
-    assert!(
-        run.seconds < 20.0,
-        "the q at 0.5 s ended the run: {} s\n{}",
-        run.seconds,
-        run.log
-    );
-}
-
-#[test]
-fn a_descent_draws_the_wall() {
-    let dir = workspace("wall");
-    let frames = dir.join("frames");
-
-    let run = headless(
-        &dir,
-        &[
-            "--script",
-            "0.5:enter,0.8:right,1.1:down",
-            "--capture",
-            &text(&frames),
-            "--capture-at",
-            "1.6",
-            "--size",
-            "1920x1080",
-            "--quit-after",
-            "25",
-        ],
-    );
-
-    assert_eq!(run.exit, "0", "{}", run.log);
-
-    let frame = frames.join("001.60.png");
-    assert_eq!(
-        image::image_dimensions(&frame).ok(),
-        Some((1920, 1080)),
-        "{}\n{}",
-        frame.display(),
-        run.log
-    );
-    drawn(&frame, &run);
-}
-
-#[test]
-fn a_capture_run_writes_its_frames_and_ends_after_the_last_one() {
-    let dir = workspace("capture");
-    let frames = dir.join("frames");
-    let stats = dir.join("stats.json");
-
-    let run = headless(
-        &dir,
-        &[
-            "--capture",
-            &text(&frames),
-            "--capture-at",
-            "2.0,3.0",
-            "--stats",
-            &text(&stats),
-            "--size",
-            "1920x1080",
-            "--quit-after",
-            "25",
-        ],
-    );
-
-    assert_eq!(run.exit, "0", "{}", run.log);
-    assert!(
-        run.seconds < 20.0,
-        "the last capture ended the run, not the deadline at 25 s: {} s\n{}",
-        run.seconds,
-        run.log
-    );
-
-    for name in ["002.00.png", "003.00.png"] {
-        let frame = frames.join(name);
-        assert_eq!(
-            image::image_dimensions(&frame).ok(),
-            Some((1920, 1080)),
-            "{}\n{}",
-            frame.display(),
-            run.log
-        );
-        drawn(&frame, &run);
-    }
-
-    let measured = measurements(&stats, &run);
-    assert_eq!(measured["width"], serde_json::json!(1920));
-    assert_eq!(measured["height"], serde_json::json!(1080));
-    assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
-}
-
-// A browser wired to a broker that answers nothing still draws the
-// wall and takes its own keys. The variables are what the operator sets
-// from the Player's status, and a broker that is down must not hold a
-// screen dark.
-#[test]
-fn a_browser_wired_to_a_broker_that_is_down_still_draws() {
-    let dir = workspace("bus");
-    let frames = dir.join("frames");
-
-    let run = headless_with(
-        &dir,
-        &[
-            // A port on loopback that nothing listens on, so every
-            // session the reader opens fails and it waits to try again.
-            ("MEDIA_BUS_ADDRESS", "127.0.0.1:1"),
-            ("MEDIA_PLAYER_NAME", "den-tv"),
-            (
-                "MEDIA_PLAYER_STATUS_TOPIC",
-                "liken/media/players/house/den-tv/status",
-            ),
-            (
-                "MEDIA_PLAYER_COMMANDS_TOPIC",
-                "liken/media/players/house/den-tv/commands",
-            ),
-            (
-                "MEDIA_PLAYER_PANEL_TOPIC",
-                "liken/media/players/house/den-tv/panel",
-            ),
-            (
-                "MEDIA_REMOTE_EVENTS_TOPICS",
-                "liken/media/remotes/house/sofa/events",
-            ),
-            (
-                "MEDIA_REMOTE_FOCUS_TOPICS",
-                "liken/media/remotes/house/sofa/focus",
-            ),
-            ("IDLE_FADE_AFTER_SECONDS", "600"),
-            ("IDLE_OFF_AFTER_SECONDS", "1800"),
-            (
-                "LIBRARY_PLAY_TOPIC",
-                "liken/library/players/house/den-tv/play",
-            ),
-        ],
-        &[
-            "--script",
-            "0.5:enter",
-            "--capture",
-            &text(&frames),
-            "--capture-at",
-            "1.2",
-            "--size",
-            "1920x1080",
-            "--quit-after",
-            "25",
-        ],
-    );
-
-    assert_eq!(run.exit, "0", "{}", run.log);
-    drawn(&frames.join("001.20.png"), &run);
 }

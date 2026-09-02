@@ -125,9 +125,10 @@ func (c *Catalog) post(ctx context.Context, statements []statement) (int, error)
 }
 
 // plainItemUpsert is the upsert for an item table that carries only the shared
-// header and the slug, which movies and series do. table is a constant this
-// package names and never input, so naming it in the SQL text carries no
-// injection.
+// header and the slug, which series and sets do. Movies and episodes each
+// carry a column beyond the header and have an upsert of their own. table is
+// a constant this package names and never input, so naming it in the SQL text
+// carries no injection.
 //
 // The conflict target is the whole primary key, (library, id), and the
 // update names no primary-key column, because cr-sqlite reads a change
@@ -154,12 +155,33 @@ func itemParams(library, id, kind, path, title, sortKey, released string, added 
 }
 
 // UpsertMovies writes movie rows in place, so a re-walk updates a title rather
-// than dropping and recreating it.
+// than dropping and recreating it. The movies table adds set_id after the
+// header, so this upsert names its own columns.
 func (c *Catalog) UpsertMovies(ctx context.Context, rows []movieRow) (int, error) {
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
 		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
-		statements[i] = plainItemUpsert("movies", params)
+		statements[i] = statement{
+			sql: `INSERT INTO movies (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, set_id) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+				`ON CONFLICT (library, id) DO UPDATE SET ` +
+				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
+				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
+				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
+				`set_id = excluded.set_id`,
+			params: append(params, row.SetID),
+		}
+	}
+	return c.apply(ctx, statements)
+}
+
+// UpsertSets writes the derived set rows in place, so a walk that reads a new
+// member updates the set rather than dropping and recreating it.
+func (c *Catalog) UpsertSets(ctx context.Context, rows []setRow) (int, error) {
+	statements := make([]statement, len(rows))
+	for i, row := range rows {
+		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
+		statements[i] = plainItemUpsert("sets", params)
 	}
 	return c.apply(ctx, statements)
 }
@@ -269,6 +291,11 @@ func (c *Catalog) DeleteMovies(ctx context.Context, library string, ids []string
 	return c.apply(ctx, deleteByKey("movies", "id", library, ids))
 }
 
+// DeleteSets removes set rows whose last member left the library.
+func (c *Catalog) DeleteSets(ctx context.Context, library string, ids []string) (int, error) {
+	return c.apply(ctx, deleteByKey("sets", "id", library, ids))
+}
+
 // DeleteSeries removes series rows whose titles left the volume.
 func (c *Catalog) DeleteSeries(ctx context.Context, library string, ids []string) (int, error) {
 	return c.apply(ctx, deleteByKey("series", "id", library, ids))
@@ -289,10 +316,10 @@ func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []s
 	return c.apply(ctx, deleteByKey("aliases", "alias", library, aliases))
 }
 
-// The six replicated tables of the schema: the set a whole-library
+// The seven replicated tables of the schema: the set a whole-library
 // read and a whole-library sweep both cover. A table added to the
 // schema is one entry here, and both reach it.
-var catalogTables = []string{"aliases", "movies", "series", "episodes", "file_items", "files"}
+var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files"}
 
 // DeleteFileItems names all three columns of the link row, because all
 // three are the primary key. A delete by fewer would take every other

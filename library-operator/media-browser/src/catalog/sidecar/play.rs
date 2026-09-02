@@ -8,13 +8,20 @@ use rusqlite::Connection;
 use super::collect;
 use crate::catalog::{PlayItem, Presentation};
 
-// The join from an item to its main file. A title with a second
-// encoding holds more than one primary video file, so MIN(path) picks
+// The join from an item to one of its video files. A title with a
+// second encoding holds more than one file in a role, so MIN(path) picks
 // one, and the bare trickplay column comes from that same row, which
 // is SQLite's rule for a bare column beside a single min or max.
-const MAIN_FILE: &str = "JOIN file_items ON file_items.library = item.library AND file_items.item = item.id \
-     JOIN files ON files.library = file_items.library AND files.path = file_items.path \
-     AND files.type = 'video' AND files.role = 'primary'";
+//
+// The role is a literal in this file and never a caller's word, so no
+// string from outside reaches the query text.
+fn video(role: &'static str) -> String {
+    format!(
+        "JOIN file_items ON file_items.library = item.library AND file_items.item = item.id \
+         JOIN files ON files.library = file_items.library AND files.path = file_items.path \
+         AND files.type = 'video' AND files.role = '{role}'"
+    )
+}
 
 /// One movie's play list: the one item it resolves to, or nothing when
 /// the movie holds no main file.
@@ -22,8 +29,9 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
     let sql = format!(
         "SELECT item.title, item.released, item.art, MIN(files.path), files.trickplay, \
                 item.slug \
-         FROM movies item {MAIN_FILE} \
-         WHERE item.library = ? AND item.id = ? GROUP BY item.id"
+         FROM movies item {} \
+         WHERE item.library = ? AND item.id = ? GROUP BY item.id",
+        video("primary")
     );
     collect(connection, &sql, &[&library, &id], |row| {
         let released: String = row.get(1)?;
@@ -37,6 +45,37 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
                 year: year(&released),
                 art: row.get(2)?,
                 trickplay: row.get(4)?,
+                ..Presentation::default()
+            },
+        })
+    })
+}
+
+/// One movie's trailer: the trailer file's path, the movie's own
+/// presentation, and no trickplay, because a trailer has none. The
+/// film's display then shows the movie the person was looking at.
+pub fn trailer(
+    connection: &Connection,
+    library: &str,
+    id: &str,
+) -> rusqlite::Result<Vec<PlayItem>> {
+    let sql = format!(
+        "SELECT item.title, item.released, item.art, MIN(files.path), item.slug \
+         FROM movies item {} \
+         WHERE item.library = ? AND item.id = ? GROUP BY item.id",
+        video("trailer")
+    );
+    collect(connection, &sql, &[&library, &id], |row| {
+        let released: String = row.get(1)?;
+        Ok(PlayItem {
+            path: row.get(3)?,
+            slug: row.get(4)?,
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: "movie".into(),
+                title: row.get(0)?,
+                year: year(&released),
+                art: row.get(2)?,
                 ..Presentation::default()
             },
         })
@@ -57,10 +96,11 @@ pub fn episodes(
     let sql = format!(
         "SELECT item.episode, item.title, item.released, item.art, IFNULL(parent.title, ''), \
                 MIN(files.path), files.trickplay, item.slug \
-         FROM episodes item {MAIN_FILE} \
+         FROM episodes item {} \
          LEFT JOIN series parent ON parent.library = item.library AND parent.id = item.series \
          WHERE item.library = ? AND item.series = ? AND item.season = ? AND item.episode >= ? \
-         GROUP BY item.id ORDER BY item.episode"
+         GROUP BY item.id ORDER BY item.episode",
+        video("primary")
     );
     let found = collect(
         connection,

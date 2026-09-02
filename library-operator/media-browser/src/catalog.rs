@@ -24,7 +24,7 @@ pub struct LibraryEntry {
 }
 
 /// One title in a kind's top list: a movie, or a series.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Title {
     /// The item's provider-scoped id, unique inside its library.
     pub id: String,
@@ -35,6 +35,75 @@ pub struct Title {
     /// The path of the primary art, relative to the library root, or empty
     /// where the item has none.
     pub art: String,
+    /// The item's running time in seconds, zero where the catalog holds
+    /// none.
+    pub duration: i64,
+    /// The content rating from the body, empty where the sidecar named
+    /// none.
+    pub rating: String,
+}
+
+/// One credited person and the part they played, from the body's cast.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Credit {
+    /// The person's name.
+    pub name: String,
+    /// The part they played, empty where the sidecar named none.
+    pub role: String,
+}
+
+/// What a movie's page draws: the item's own columns, the fields of its
+/// body, and the three files the page reads by role.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MovieDetails {
+    /// The name a person reads.
+    pub title: String,
+    /// The year or the date of release, as the catalog stores it.
+    pub released: String,
+    /// The running time in seconds, zero where the catalog holds none.
+    pub duration: i64,
+    /// The content rating, empty where the sidecar named none.
+    pub rating: String,
+    /// The genres, in the order the sidecar named them.
+    pub genres: Vec<String>,
+    /// The one-line tagline, empty where the sidecar named none.
+    pub tagline: String,
+    /// The plot. The page cuts it to four lines.
+    pub plot: String,
+    /// The directors, in the order the sidecar named them.
+    pub directors: Vec<String>,
+    /// The writers, in the order the sidecar named them.
+    pub writers: Vec<String>,
+    /// The cast, in the order the sidecar named them.
+    pub cast: Vec<Credit>,
+    /// The id of the set the movie belongs to, empty where it belongs to
+    /// none.
+    pub set_id: String,
+    /// The path of the backdrop file, relative to the library root, or
+    /// empty where the item has none.
+    pub backdrop: String,
+    /// The path of the logo file, relative to the library root, or empty
+    /// where the item has none.
+    pub logo: String,
+    /// The path of the trailer file, relative to the library root, or
+    /// empty where the item has none.
+    pub trailer: String,
+}
+
+/// One set and every movie in it, in release order, as the strip on a
+/// movie's page draws them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MovieSet {
+    /// The set's own title. The strip draws it as its heading.
+    pub title: String,
+    /// The movies in the set, in release order.
+    pub members: Vec<Title>,
+}
+
+/// The name half of a `library` column, `namespace/name`, which is the
+/// half a screen draws.
+pub fn library_name(library: &str) -> &str {
+    library.split_once('/').map_or(library, |(_, name)| name)
 }
 
 /// One episode under a season.
@@ -78,6 +147,14 @@ pub trait Source {
     /// One season's episodes, in order.
     fn episodes(&mut self, library: &str, series: &str, season: i64) -> Vec<EpisodeRow>;
 
+    /// One movie's details, or nothing where the library holds no movie
+    /// under that id.
+    fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails>;
+
+    /// One set and its members in release order, or nothing where the
+    /// library holds no set under that id.
+    fn set(&mut self, library: &str, id: &str) -> Option<MovieSet>;
+
     /// The play list one choice resolves to. A movie is one item or
     /// none. An episode is itself and every later episode of its season,
     /// in episode order. A choice whose own main file is missing
@@ -93,14 +170,19 @@ pub trait Source {
     fn wake_by(&mut self, wake: Waker);
 }
 
-/// What a person chose on the wall, as the two things that resolve to a
-/// play list: a movie by its id, and an episode by its series, season,
-/// and aired number. The library is not in here because every read
+/// What a person chose, as the three things that resolve to a play
+/// list: a movie by its id, a movie's trailer by the movie's id, and an
+/// episode by its series, season, and aired number. The library is not in here because every read
 /// takes it beside the choice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     /// One movie, named by its provider-scoped id.
     Movie {
+        /// The movie's id inside its library.
+        id: String,
+    },
+    /// One movie's trailer, named by the movie's own id.
+    Trailer {
         /// The movie's id inside its library.
         id: String,
     },
@@ -121,6 +203,7 @@ impl Selection {
     pub fn named(&self) -> String {
         match self {
             Self::Movie { id } => id.clone(),
+            Self::Trailer { id } => format!("{id} trailer"),
             Self::Episode {
                 series,
                 season,
@@ -173,4 +256,42 @@ pub struct Presentation {
     pub art: String,
     /// The trickplay path, relative to the library root.
     pub trickplay: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_library_names_itself_after_its_namespace() {
+        assert_eq!(library_name("screening/features"), "features");
+        assert_eq!(library_name("features"), "features");
+    }
+
+    #[test]
+    fn every_choice_names_itself_for_the_log() {
+        assert_eq!(
+            Selection::Movie {
+                id: "movie:tmdb:603".into()
+            }
+            .named(),
+            "movie:tmdb:603"
+        );
+        assert_eq!(
+            Selection::Trailer {
+                id: "movie:tmdb:603".into()
+            }
+            .named(),
+            "movie:tmdb:603 trailer"
+        );
+        assert_eq!(
+            Selection::Episode {
+                series: "series:tvdb:1".into(),
+                season: 2,
+                episode: 4,
+            }
+            .named(),
+            "series:tvdb:1 S2E4"
+        );
+    }
 }

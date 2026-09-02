@@ -6,9 +6,9 @@ it grows draws the unit's parts the way `media-operator`'s idle screen
 does. A remote and a gamepad run on batteries, and neither screen
 shows a level today.
 
-The read is `bluetooth-operator`'s open problem, battery levels are not
-reported, and the field is `media-operator`'s: a level per component on
-the retained `Player` status, beside `connected`. When both exist, the
+The read is `bluetooth-operator`'s plan 06, which puts the level on
+the `Peripheral`, and `media-operator` folds it onto the retained
+`Player` status as `battery` per component, beside `connected`. The
 browser draws the level beside the part's name in its idle view, from
 the same status the stock idle screen reads, and adds no read of its
-own.
+own. What remains is the drawing.

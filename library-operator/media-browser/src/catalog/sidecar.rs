@@ -8,9 +8,12 @@ use std::sync::atomic::Ordering;
 
 use rusqlite::{Connection, OpenFlags, Row};
 
-use crate::catalog::{EpisodeRow, LibraryEntry, PlayItem, Selection, Source, Title};
+use crate::catalog::{
+    EpisodeRow, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection, Source, Title,
+};
 use crate::harness::Waker;
 
+mod details;
 mod play;
 mod updates;
 
@@ -126,18 +129,22 @@ impl Source for SidecarSource {
             return Vec::new();
         };
         let sql = format!(
-            "SELECT id, title, released, art FROM {table} WHERE library = ? ORDER BY sort_key"
+            "SELECT {} FROM {table} WHERE library = ? ORDER BY sort_key",
+            details::COLUMNS
         );
-        self.read(|connection| {
-            collect(connection, &sql, &[&library], |row| {
-                Ok(Title {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    released: row.get(2)?,
-                    art: row.get(3)?,
-                })
-            })
-        })
+        self.read(|connection| collect(connection, &sql, &[&library], details::title))
+    }
+
+    fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails> {
+        self.read(|connection| details::movie(connection, library, id))
+            .into_iter()
+            .next()
+    }
+
+    fn set(&mut self, library: &str, id: &str) -> Option<MovieSet> {
+        self.read(|connection| details::set(connection, library, id))
+            .into_iter()
+            .next()
     }
 
     fn seasons(&mut self, library: &str, series: &str) -> Vec<i64> {
@@ -165,6 +172,9 @@ impl Source for SidecarSource {
     fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem> {
         match selection {
             Selection::Movie { id } => self.read(|connection| play::movie(connection, library, id)),
+            Selection::Trailer { id } => {
+                self.read(|connection| play::trailer(connection, library, id))
+            }
             Selection::Episode {
                 series,
                 season,

@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<movie>
+  <title>Quiet Harbor</title>
+  <year>1998</year>
+  <premiered>1998-06-12</premiered>
+  <runtime>104</runtime>
+  <set tmdbcolid="1570"><name>Quiet Harbor Collection</name><overview>A harbor town and the years after.</overview></set>
+  <uniqueid type="tmdb">900001</uniqueid>
+</movie>

@@ -18,12 +18,19 @@ use crate::views::wall;
 // decoded posters inside the 115 MB the whole client used.
 pub const CACHED_POSTERS: usize = 96;
 
-/// The cache bound in bytes for a wall this wide: the head-to-head's
-/// poster count at the size this wall draws one slot, four bytes to
-/// the pixel.
-pub fn budget(width: u32) -> usize {
-    let cells = wall::cells(width as f32);
+/// How many page-size backdrops the cache holds beside the posters. A
+/// backdrop at 1920x1080 is 8.3 MB decoded, so three of them cost 24.9
+/// MB. Plan 22's proof measures what that costs on the box.
+pub const CACHED_BACKDROPS: usize = 3;
+
+/// The cache bound in bytes for a window this size: the head-to-head's
+/// poster count at the size this wall draws one slot, and the backdrops
+/// a page draws at the size of the window, four bytes to the pixel.
+pub fn budget(size: (u32, u32)) -> usize {
+    let (width, height) = size;
+    let cells = wall::cells(width as f32, wall::POSTER);
     CACHED_POSTERS * cells.poster_width as usize * cells.poster_height as usize * 4
+        + CACHED_BACKDROPS * width as usize * height as usize * 4
 }
 
 /// The poster store as the views see it: the library roots, the decode
@@ -197,10 +204,11 @@ mod tests {
     }
 
     #[test]
-    fn the_budget_holds_the_head_to_heads_posters() {
-        let cells = wall::cells(1920.0);
+    fn the_budget_holds_the_head_to_heads_posters_and_a_few_backdrops() {
+        let cells = wall::cells(1920.0, wall::POSTER);
         let one = cells.poster_width as usize * cells.poster_height as usize * 4;
-        assert_eq!(budget(1920), CACHED_POSTERS * one);
-        assert!(budget(1280) < budget(1920));
+        let backdrops = CACHED_BACKDROPS * 1920 * 1080 * 4;
+        assert_eq!(budget((1920, 1080)), CACHED_POSTERS * one + backdrops);
+        assert!(budget((1280, 720)) < budget((1920, 1080)));
     }
 }

@@ -32,6 +32,19 @@ pub fn wall(index: usize, count: usize, columns: usize, key: &str) -> usize {
     }
 }
 
+/// The next focus on a row of buttons, controls, or strip posters; only
+/// left and right move, clamped inside the count.
+pub fn row(index: usize, count: usize, key: &str) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    match key {
+        "left" => index.saturating_sub(1),
+        "right" => (index + 1).min(count - 1),
+        _ => index,
+    }
+}
+
 /// The next focus on a list; only up and down move, clamped inside
 /// the count.
 pub fn list(index: usize, count: usize, key: &str) -> usize {
@@ -83,6 +96,25 @@ mod tests {
     #[test]
     fn an_unknown_key_moves_nothing_on_the_wall() {
         assert_eq!(wall(4, 10, 3, "x"), 4);
+    }
+
+    #[test]
+    fn a_row_moves_left_and_right_and_clamps() {
+        assert_eq!(row(0, 3, "right"), 1);
+        assert_eq!(row(2, 3, "right"), 2);
+        assert_eq!(row(1, 3, "left"), 0);
+        assert_eq!(row(0, 3, "left"), 0);
+    }
+
+    #[test]
+    fn a_row_ignores_up_and_down() {
+        assert_eq!(row(1, 3, "up"), 1);
+        assert_eq!(row(1, 3, "down"), 1);
+    }
+
+    #[test]
+    fn an_empty_row_holds_focus_at_zero() {
+        assert_eq!(row(0, 0, "right"), 0);
     }
 
     #[test]
