@@ -120,10 +120,15 @@ rules:
   # with the list. The delete verb covers three deletes: the schedule of
   # a Library that no longer stands one, a cleanup Job that failed and
   # is stood again on a backoff, and the retirement of a cleanup Job
-  # when its library is released.
+  # when its library is released. A CronJob is also updated, because a
+  # changed schedule or a new image rewrites it in place. A Job is
+  # never updated: it runs once as it was created.
   - apiGroups: [batch]
-    resources: [jobs, cronjobs]
+    resources: [jobs]
     verbs: [get, list, watch, create, delete]
+  - apiGroups: [batch]
+    resources: [cronjobs]
+    verbs: [get, list, watch, create, update, delete]
   # The headless catalog Service of each namespace that holds a
   # Catalog, read by name. The grant is cluster-wide because a Catalog
   # can be in any namespace, and the operator is one Deployment for the
