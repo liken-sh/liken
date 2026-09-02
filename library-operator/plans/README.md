@@ -35,9 +35,6 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [08, Playback from the media
-  browser](08-playback-from-the-media-browser.md). From a chosen title
-  to a `Play` on the same `Player`, and back.
 * [09, The end-to-end drill](09-the-end-to-end-drill.md). The proof on
   `liken-1`, with the numbers written down.
 * [10, The documentation site](10-the-documentation-site.md). The manual
@@ -106,6 +103,14 @@ for a later agent to shape.
   the shade moments draw black and draw again, back at the libraries
   asks for the shade, and a `Play`'s end re-presents the browser where
   it was. The browser measured 92 MiB resident on the box.
+* [08, Playback from the media
+  browser](completed/08-playback-from-the-media-browser.md). Built,
+  released in 2026.09.01-005, and drilled on `liken-1` on 2026-09-01
+  and 2026-09-02. Select on a cover publishes the resolved list on the
+  bus, and the operator creates the `Play` with `claim://` references
+  and names it after the chosen title. A film and an episode played
+  from the X6, and from 2026.09.02-002 the browser is back the instant
+  a film ends.
 * [15, The namespace catalog](completed/15-the-namespace-catalog.md).
   Built out of sequence during plan 04, and rolled to `liken-1` through
   release 2026.08.30-011. The `Catalog` CRD, one per namespace, that owns

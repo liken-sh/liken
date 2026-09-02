@@ -134,11 +134,14 @@ were played this way. Each `Play` carried a `claim://` reference on the
 library's claim and a presentation with the type, the hint, the title,
 the year, the art, and the trickplay path.
 
-Two checks are still open, because the drill ended before them: the
-episode pick, which should queue the rest of the season and advance
-`status.item`, and the thumbnails on the scrub bar, which nobody
-confirmed by eye. The next drill covers both.
+An episode played on 2026-09-01 from the X6 and its season followed
+it. The `status.item` advance and the scrub bar's thumbnails were not
+confirmed by eye.
 
-The slug in the `Play` name is built and waits for the same drill:
-`kubectl get plays` names each run after the chosen title, and a long
-title is cut at a hyphen and not inside a word.
+Released again as 2026.09.02-002 on the `media-screen` crate, with the
+slug in the `Play` name and the watchdog guard, and drilled on
+`lab-portable` on 2026-09-02: a film played from a chosen cover, and
+on its end the browser was back at once at the focus it held, where
+the old path took five to fifteen seconds and a restart. The wait left
+is the start of a film, one to five seconds from select to the `Play`
+running, which is the playback pod's own start.
