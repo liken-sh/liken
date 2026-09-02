@@ -172,26 +172,31 @@ one is from memory, because its documentation refused the fetch.
 
 ## Execution
 
-One standing pod per namespace holds the durable catalog, and every
-worker is a `Job` that holds no copy. Plan 28 builds it. In short: the
-`Catalog` resource owns one pod with a Corrosion agent on the one
-durable claim, with the agent's HTTP API on a `Service` in the
-namespace. Scan `Job`s write rows through it. Enricher `Job`s read
-their gaps through it and write only the volume. Screens keep their
-own gossip copies and never touch it.
+One standing pod per namespace holds the durable catalog and reports
+what it holds, and every worker is a `Job` with a Corrosion agent of
+its own on a claim of its own. Plan 28 builds it. No agent answers on
+the network: Corrosion's API stays on loopback, and a `Job` writes
+through its own sidecar. A scan `Job` runs on its `Library`'s claim,
+and an enricher `Job` runs on one claim per concern per namespace, so
+each run syncs a delta and `ReadWriteOnce` serializes each worker. A
+`Job` writes a row to the `runs` table last and exits only when the
+standing pod's report on the bus echoes it, because a Corrosion agent
+drops unsent broadcasts on `SIGTERM`. Screens keep their own gossip
+copies.
 
-The operator holds a subscription on the catalog pod and creates
-`Job`s from what it sees: a scan `Job` for a folder on a webhook, and
-an enricher `Job` for a concern when a gap opens. It batches gaps by
-folder, runs at most one `Job` per concern per library at a time, and
-holds the rate limiter per provider key, because twenty `Job`s on one
-key with no coordination end in a ban. Full walks are `CronJob`s.
+The standing pod's reporter publishes counts, runs, and gaps over the
+bus, and the operator creates `Job`s from what it hears: a scan `Job`
+for a folder on a webhook, and an enricher `Job` for a concern when a
+gap opens. The operator batches gaps by folder and holds the rate
+limiter per provider key, because twenty `Job`s on one key with no
+coordination end in a ban. Full walks are `CronJob`s.
 
 ## The plans
 
 1. [Plan 28, the catalog pod](28-the-catalog-pod.md). The standing
-   pod, the `Service`, scan `Job`s, the `CronJob`, and the webhook
-   that creates a `Job`.
+   pod and its reporter, the `runs` table and the echo a `Job` waits
+   for, scan `Job`s, the `CronJob`, and the webhook that creates a
+   `Job`.
 2. [Plan 29, identification](29-identification.md). `MetadataProvider`,
    the `probe` concern, `identity.yaml`, the gap loop, the write
    package and its test, and the counts in `Library` status.

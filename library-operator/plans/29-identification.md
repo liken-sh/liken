@@ -32,9 +32,11 @@ downstream.
   list with scores in `identity.yaml`, and the concern stops there.
   A person confirms by moving the chosen candidate to `id:`. The next
   scan reads it, and the `aliases` table gains the id.
-- **The gap loop.** The operator's subscription on the catalog pod,
-  the batch by folder, one `Job` per concern per library at a time,
-  and the attempts file per concern. The rate limiter per provider
+- **The gap loop.** The standing pod's reporter publishes gaps on
+  the bus, the operator batches them by folder and creates the `Job`,
+  the `Job` runs on the concern's claim and ends with its `runs` row
+  and the echo from plan 28, and the attempts file per concern
+  records what it tried. The rate limiter per provider
   key is in the operator, and a `Job` takes a slot before each call.
 - **The write package.** Create, temporary-and-rename, and the one
   remove for a `.liken-tmp-` name, with the test that fails the build
