@@ -14,3 +14,6 @@
 
 # State the local harness writes: catalogs, agent logs, and captures.
 /local/state/
+
+# Agent worktrees this session tool keeps beside the checkout.
+/.claude/
