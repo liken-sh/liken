@@ -1,5 +1,10 @@
 # Ingest memory and the restart that returns it
 
+[Plan 32](../32-a-screen-keeps-its-catalog.md) answers the screen half
+of this with a `PersistentVolumeClaim` per screen, so a screen pays the
+first sync once per claim and not once per pod start. The catalog pod's
+own peak is still open. The note stays until that plan is built.
+
 A Corrosion agent that ingests a large catalog for the first time peaks
 high and stays there. The proof of concept measured a fresh node syncing
 105,000 rows at 294 to 354 MB resident after the sync, and the same

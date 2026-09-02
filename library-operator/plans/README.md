@@ -79,6 +79,13 @@ they share, and plans 28 to 31 build them in order.
   universe in story order, resolved across the namespace by provider
   id.
 
+Plan 32 stands apart from the enrichment work.
+
+* [32, A screen keeps its catalog](32-a-screen-keeps-its-catalog.md).
+  Each screen's Corrosion agent on a `PersistentVolumeClaim` the
+  `Catalog` sizes and classes, so a restart syncs a delta and the
+  browser draws the wall at once.
+
 ## Completed
 
 * [01, The repository and its
