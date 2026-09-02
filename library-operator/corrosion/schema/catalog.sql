@@ -246,3 +246,17 @@ CREATE TABLE runs (
     removed INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (library, worker)
 );
+
+-- One row per library, item, and concern: the last attempt an enricher
+-- made and how it ended. The scanner lifts these from the attempts files
+-- in each folder's .liken/ directory, so a gap query can exclude an item
+-- that was tried, and a lost catalog gets them back from the volume. For
+-- a file concern the item column holds the file's path.
+CREATE TABLE attempts (
+    library TEXT NOT NULL DEFAULT '',
+    item TEXT NOT NULL DEFAULT '',
+    concern TEXT NOT NULL DEFAULT '',
+    at INTEGER NOT NULL DEFAULT 0,
+    result TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, item, concern)
+);

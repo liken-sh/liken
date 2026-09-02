@@ -321,7 +321,7 @@ func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []s
 // entry here. The runs table is one of them, so a library that has lost
 // every item row but whose last Job wrote a run is still a library the
 // reporter reports on.
-var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files", "runs"}
+var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files", "runs", "attempts"}
 
 // DeleteFileItems names all three columns of the link row, because all
 // three are the primary key. A delete by fewer would take every other
