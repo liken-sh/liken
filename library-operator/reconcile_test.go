@@ -431,6 +431,12 @@ func TestReconcileStartsTheFirstWalk(t *testing.T) {
 	}
 }
 
+// failedJobCondition is the condition the Job controller writes onto a
+// Job that has given up.
+func failedJobCondition() JobCondition {
+	return JobCondition{Type: jobFailed, Status: ConditionTrue, Reason: "BackoffLimitExceeded"}
+}
+
 // scanRunReport is the report of a library that has already had one
 // full walk.
 func scanRunReport() *libraryReport {
@@ -440,7 +446,9 @@ func scanRunReport() *libraryReport {
 }
 
 // Two states start no first walk: a report that carries a scan run,
-// and a scan Job whose pod is active. Every other state starts one.
+// and a scan Job the controller has not marked Complete or Failed,
+// which covers a Job between the pods of its backoff. Every other
+// state starts one.
 func TestReconcileStartsNoWalkWhenAScanHasRun(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -458,6 +466,12 @@ func TestReconcileStartsNoWalkWhenAScanHasRun(t *testing.T) {
 		},
 		{name: "a report carrying a scan run", report: scanRunReport()},
 		{name: "a scan is running", jobs: []Job{walkJob(JobStatus{Active: 1})}},
+		{name: "a scan between its pods", jobs: []Job{walkJob(JobStatus{Failed: 1})}},
+		{
+			name:    "a scan the controller marked failed",
+			jobs:    []Job{walkJob(JobStatus{Failed: 3, Conditions: []JobCondition{failedJobCondition()}})},
+			started: true,
+		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

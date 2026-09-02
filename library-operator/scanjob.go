@@ -183,6 +183,18 @@ func fullWalkRunning(jobs []Job, namespace, library string) bool {
 	return false
 }
 
+// scanUnfinished is whether any scan Job of this Library is still
+// open: one the controller has marked neither Complete nor Failed. A
+// Job between the pods of its backoff counts.
+func scanUnfinished(jobs []Job, namespace, library string) bool {
+	for _, job := range jobsOf(jobs, namespace, library, workerScan) {
+		if !job.finished() {
+			return true
+		}
+	}
+	return false
+}
+
 // Whether any scan of this Library has a pod running, which is
 // what a departure waits out before it sweeps the rows a scan would
 // write again.

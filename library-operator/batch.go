@@ -52,14 +52,48 @@ type JobSpec struct {
 
 // The counts the Job controller keeps: pods running now, pods
 // that exited zero, and pods that failed.
+//
+// JobStatus is what the Job controller reports: the counts of pods in
+// each state, and the conditions, which are its verdict on the whole
+// Job. The counts alone cannot say whether a Job is over. A Job
+// between the pods of its backoff counts no active pod and is not over.
 type JobStatus struct {
-	Active    int `json:"active,omitempty"`
-	Succeeded int `json:"succeeded,omitempty"`
-	Failed    int `json:"failed,omitempty"`
+	Active     int            `json:"active,omitempty"`
+	Succeeded  int            `json:"succeeded,omitempty"`
+	Failed     int            `json:"failed,omitempty"`
+	Conditions []JobCondition `json:"conditions,omitempty"`
 }
+
+// JobCondition is one verdict of the Job controller, in the shape
+// batch/v1 writes it.
+type JobCondition struct {
+	Type   string          `json:"type"`
+	Status ConditionStatus `json:"status"`
+	Reason string          `json:"reason,omitempty"`
+}
+
+// The two condition types that end a Job, one for each way it ends.
+const (
+	jobComplete = "Complete"
+	jobFailed   = "Failed"
+)
 
 // A Job is still doing its work while it has a pod running.
 func (j *Job) active() bool { return j.Status.Active > 0 }
+
+// finished is true when the controller has ended the Job, and not
+// before. A Job that waits out its backoff with no pod is unfinished.
+func (j *Job) finished() bool {
+	for _, condition := range j.Status.Conditions {
+		if condition.Status != ConditionTrue {
+			continue
+		}
+		if condition.Type == jobComplete || condition.Type == jobFailed {
+			return true
+		}
+	}
+	return false
+}
 
 // The pod one Job or CronJob creates, as the metadata and spec
 // the controller stamps onto it.

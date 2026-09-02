@@ -218,6 +218,11 @@ that took a hearing-impaired flag for Hindi.
   volume](open-problems/writing-ids-back-to-the-volume.md). The
   sidecar-less fifth rest their id on a path a move breaks. Plan 29's
   `identity.yaml` answers it.
+* [A fresh agent's first version arrives
+  late](open-problems/a-fresh-agents-first-version-arrives-late.md).
+  A `Job` on a fresh claim pays one echo timeout on its first run,
+  because its first write reaches the catalog pod minutes after the
+  rest.
 * [Richer file facts](open-problems/richer-file-facts.md). A future
   enhancement reads a file's container metadata for a measured duration,
   the bitrate, the HDR format, and the encode's quality. Plan 29's

@@ -87,14 +87,15 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 }
 
 // holdFirstWalk gives a new Library its first full walk. A Library the
-// reporter carries no scan run for, and that has no scan Job with a
-// pod, holds the empty path, which is the full walk, so serveHeldPaths
+// reporter carries no scan run for, and that has no unfinished scan Job,
+// holds the empty path, which is the full walk, so serveHeldPaths
 // creates the Job on this same pass. Without this the library would
 // hold no rows until the CronJob's first turn, up to an hour later.
 //
-// The rule fires once. A Job's active count covers its pending pod, so
-// the next pass reads the walk as running and holds nothing. After
-// that, the walk's started runs row reaches the report, and the report
+// The rule fires once. The Job the pass created is unfinished until
+// the controller marks it Complete or Failed, which covers the pod it
+// has not created yet and the backoff between its pods. By then the
+// walk's started runs row has reached the report, and the report
 // carries a scan run for the rest of the Library's life.
 func (o *operator) holdFirstWalk(library *Library, report *libraryReport, jobs []Job) {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
@@ -103,7 +104,7 @@ func (o *operator) holdFirstWalk(library *Library, report *libraryReport, jobs [
 			return
 		}
 	}
-	if scanRunning(jobs, namespace, name) {
+	if scanUnfinished(jobs, namespace, name) {
 		return
 	}
 	o.paths.hold(namespace, name, "")

@@ -273,6 +273,49 @@ func TestScanRunningReadsOneLibraryOfOneNamespace(t *testing.T) {
 	}
 }
 
+// A scan is unfinished until the Job controller marks it Complete or
+// Failed with status True. The counts a Job carries between its pods
+// say nothing here, and a condition of any other type or status says
+// nothing either.
+func TestScanUnfinishedReadsTheControllersVerdict(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     JobStatus
+		unfinished bool
+	}{
+		{name: "a pod is running", status: JobStatus{Active: 1}, unfinished: true},
+		{name: "between the pods of a backoff", status: JobStatus{Failed: 1}, unfinished: true},
+		{
+			name:   "the controller marked it complete",
+			status: JobStatus{Succeeded: 1, Conditions: []JobCondition{{Type: jobComplete, Status: ConditionTrue}}},
+		},
+		{
+			name:   "the controller marked it failed",
+			status: JobStatus{Failed: 3, Conditions: []JobCondition{failedJobCondition()}},
+		},
+		{
+			name:       "a terminal type that is not true",
+			status:     JobStatus{Failed: 1, Conditions: []JobCondition{{Type: jobFailed, Status: ConditionFalse}}},
+			unfinished: true,
+		},
+		{
+			name:       "a condition of another type",
+			status:     JobStatus{Active: 1, Conditions: []JobCondition{{Type: "Suspended", Status: ConditionTrue}}},
+			unfinished: true,
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if got := scanUnfinished([]Job{walkJob(one.status)}, "house", "movies"); got != one.unfinished {
+				t.Errorf("scanUnfinished = %v, want %v", got, one.unfinished)
+			}
+		})
+	}
+	if scanUnfinished(nil, "house", "movies") {
+		t.Error("a library with no jobs reads as unfinished")
+	}
+}
+
 // a create another writer got to first is success, and any other
 // failure ends the pass so the next one tries again.
 func TestServeHeldPathsAcceptsAConflict(t *testing.T) {
