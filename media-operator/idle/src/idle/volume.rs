@@ -6,7 +6,7 @@
 //! sidecar owns every change to them.
 
 use iced_widget::canvas::{LineJoin, Path, Stroke, Style};
-use iced_winit::core::{Color, Point, Rectangle, Size};
+use iced_winit::core::{Color, Point, Rectangle};
 
 use super::{Frame, Layout};
 use crate::look;
@@ -168,17 +168,6 @@ fn row(layout: &Layout) -> Row {
     }
 }
 
-/// One rounded rectangle. A radius wider than half the shape has no meaning, so
-/// a bar with a few pixels of fill rounds by what it has.
-fn rounded(shape: Rectangle, radius: f32) -> Path {
-    let radius = radius.min(shape.width / 2.0).min(shape.height / 2.0);
-    Path::rounded_rectangle(
-        Point::new(shape.x, shape.y),
-        Size::new(shape.width, shape.height),
-        radius.into(),
-    )
-}
-
 /// One closed polygon in the glyph's own box, placed at `at`.
 fn polygon(points: &[(f32, f32)], at: Point) -> Path {
     Path::new(|path| {
@@ -213,18 +202,18 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
     let shaded = |color, alpha| look::under(look::faded(color, alpha), light);
 
     frame.fill(
-        &rounded(row.surface, SURFACE_RADIUS),
+        &look::rounded(row.surface, SURFACE_RADIUS),
         shaded(Color::BLACK, look::SURFACE * fade),
     );
     frame.fill(
-        &rounded(row.bar, BAR_RADIUS),
+        &look::rounded(row.bar, BAR_RADIUS),
         shaded(look::track(), look::TRACK_OPACITY * fade),
     );
 
     let filled = filled(unit.volume.level);
     if filled >= 1.0 {
         frame.fill(
-            &rounded(
+            &look::rounded(
                 Rectangle {
                     width: filled,
                     ..row.bar
@@ -267,6 +256,7 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced_winit::core::Size;
     use media_screen::Moment;
     use media_screen::volume::Volume;
 

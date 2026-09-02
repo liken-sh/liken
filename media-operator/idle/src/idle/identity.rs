@@ -8,9 +8,11 @@
 //! built-in speakers, draws at full brightness always, because a part that
 //! cannot be absent must not read as present-for-now.
 //!
-//! A part that reports a battery level draws it beside the name, in the same
-//! run of text and at the same size, so a person reads the charge of a
-//! controller without another element on the screen.
+//! A part that reports a battery level draws it as a small bar in the
+//! left margin, on the part's own line. The bar carries no number and no
+//! charging state. Every bar ends on one column, left of the focus
+//! marker's place, so the names keep their flush-left column and a person
+//! reads the charges of two controllers against each other.
 //!
 //! The block also shows focus. The status marks at most one part focused, the
 //! controller whose presses drive this unit, and that line takes a small
@@ -22,7 +24,7 @@
 //! harmless.
 
 use iced_widget::canvas::Path;
-use iced_winit::core::{Color, Point};
+use iced_winit::core::{Color, Point, Rectangle};
 
 use super::{Frame, Layout};
 use crate::look;
@@ -72,6 +74,30 @@ const MARKER_GAP: f32 = 18.0;
 /// line box.
 const MARKER_RISE: f32 = 0.42 * ITEM_BOX;
 
+/// The gap between the bar's right end and the marker's place. The bar
+/// draws left of every marker, drawn or not, so the two never touch and
+/// the bars of two parts end on one column whichever of them holds the
+/// focus.
+const BAR_GAP: f32 = 12.0;
+
+/// The column every bar ends on, which is the marker's place less the
+/// gap.
+const BAR_RIGHT: f32 = LEFT - MARKER_GAP - MARKER_R - BAR_GAP;
+
+/// The bar is two characters long and an eighth of a line box tall. It
+/// reads as a measure beside the name and not as a second line of the
+/// list.
+const BAR_LENGTH: f32 = 2.0 * ITEM_SIZE;
+const BAR_HEIGHT: f32 = ITEM_BOX / 8.0;
+
+/// Half the height rounds the ends to semicircles, which is the widest
+/// radius `look::rounded` holds for a shape this thin.
+const BAR_RADIUS: f32 = BAR_HEIGHT / 2.0;
+
+/// The charge the bar fills at, the top of the range a `Peripheral`
+/// reports.
+const FULL_CHARGE: f32 = 100.0;
+
 /// The time one part takes to move between dim and full.
 const DIM_SECONDS: f64 = 0.4;
 
@@ -108,10 +134,25 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
         text(
             frame,
             y,
-            &label(part),
+            &part.name,
             ITEM_SIZE,
             look::under(drawn.color, light),
         );
+        if let Some(bar) = bar(part, y, at) {
+            // The track reads as the room the charge has left, so it draws in the
+            // line's own colour at the track opacity rather than in the volume
+            // row's darker green.
+            frame.fill(
+                &look::rounded(bar.track, BAR_RADIUS),
+                look::under(bar.color, look::TRACK_OPACITY * light),
+            );
+            if bar.fill.width >= 1.0 {
+                frame.fill(
+                    &look::rounded(bar.fill, BAR_RADIUS),
+                    look::under(bar.color, light),
+                );
+            }
+        }
         if let Some(marker) = drawn.marker {
             hexagon(
                 frame,
@@ -129,17 +170,6 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
         HEADER_SIZE,
         look::under(look::text(), light),
     );
-}
-
-/// The text one part's line draws: its name, and the charge it reports after
-/// the name. The charge is part of the same run rather than a run of its own,
-/// because a canvas run reports no width, so a second run would need a
-/// measurement this block does not take. Two spaces are the gap.
-fn label(part: &Part) -> String {
-    match part.battery {
-        Some(level) => format!("{}  {level}%", part.name),
-        None => part.name.clone(),
-    }
 }
 
 /// One part's line at one moment: the color its name draws in, and its marker
@@ -176,6 +206,45 @@ fn line(part: &Part, y: f32, at: f64) -> Line {
             color: look::faded(lit(flash.max(focus)), marker_opacity(level, focus)),
         }),
     }
+}
+
+/// The charge bar of one line: the track that carries the whole length,
+/// the fill the charge covers, and the colour both draw in. Every part
+/// that reports a charge draws one, and a part that reports none draws
+/// nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Bar {
+    track: Rectangle,
+    fill: Rectangle,
+    color: Color,
+}
+
+/// One part's charge bar, from the part and the clock alone. It takes the
+/// colour of the line, so the bar of a controller that is away dims with
+/// its name and the bar of one that returns flashes with it.
+fn bar(part: &Part, y: f32, at: f64) -> Option<Bar> {
+    let level = part.battery?;
+    let track = Rectangle {
+        x: BAR_RIGHT - BAR_LENGTH,
+        y: y - MARKER_RISE - BAR_HEIGHT / 2.0,
+        width: BAR_LENGTH,
+        height: BAR_HEIGHT,
+    };
+
+    Some(Bar {
+        track,
+        fill: Rectangle {
+            width: filled(level),
+            ..track
+        },
+        color: line(part, y, at).color,
+    })
+}
+
+/// How much of the bar one charge fills, in canvas pixels. A reading
+/// outside 0 to 100 fills to one end and no further.
+fn filled(level: i64) -> f32 {
+    BAR_LENGTH * (level as f32 / FULL_CHARGE).clamp(0.0, 1.0)
 }
 
 /// One run of text, anchored at its bottom left.
@@ -408,14 +477,110 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_part_that_reports_a_charge_draws_it_after_the_name() {
-        let charged = Part {
-            battery: Some(62),
+    /// A part that reports `level`, for the bar the charge draws.
+    fn charged(level: i64) -> Part {
+        Part {
+            battery: Some(level),
             ..part(Some(true))
+        }
+    }
+
+    #[test]
+    fn a_charge_fills_that_fraction_of_the_bar() {
+        assert_eq!(
+            bar(&charged(50), 990.0, 10.0).expect("no bar").fill.width,
+            BAR_LENGTH / 2.0
+        );
+        assert_eq!(
+            bar(&charged(0), 990.0, 10.0).expect("no bar").fill.width,
+            0.0
+        );
+        assert_eq!(
+            bar(&charged(100), 990.0, 10.0).expect("no bar").fill.width,
+            BAR_LENGTH
+        );
+    }
+
+    #[test]
+    fn a_charge_outside_the_range_fills_the_bar_no_further_than_its_ends() {
+        assert_eq!(
+            bar(&charged(140), 990.0, 10.0).expect("no bar").fill.width,
+            BAR_LENGTH
+        );
+        assert_eq!(
+            bar(&charged(-5), 990.0, 10.0).expect("no bar").fill.width,
+            0.0
+        );
+    }
+
+    #[test]
+    fn a_part_that_reports_no_charge_draws_no_bar() {
+        assert_eq!(bar(&part(Some(true)), 990.0, 10.0), None);
+    }
+
+    #[test]
+    fn the_track_carries_the_whole_bar_and_the_fill_starts_where_it_starts() {
+        let drawn = bar(&charged(50), 990.0, 10.0).expect("no bar");
+
+        assert_eq!(drawn.track.width, BAR_LENGTH);
+        assert_eq!(drawn.fill.x, drawn.track.x);
+        assert_eq!(drawn.fill.y, drawn.track.y);
+        assert_eq!(drawn.fill.height, drawn.track.height);
+    }
+
+    #[test]
+    fn every_bar_ends_on_one_column_clear_of_the_marker_and_inside_the_margin() {
+        let drawn = bar(&charged(50), 990.0, 10.0).expect("no bar");
+        let right = drawn.track.x + drawn.track.width;
+        // `vertices` puts the marker's left vertices this far left of its
+        // centre, and the centre stands `MARKER_GAP` inside `LEFT`.
+        let marker_left = LEFT - MARKER_GAP - 0.866_025_4 * MARKER_R;
+
+        assert_eq!(right, LEFT - MARKER_GAP - MARKER_R - BAR_GAP);
+        assert!(right < marker_left, "{right} touches the marker");
+        assert!(drawn.track.x > 0.0, "{} is off the screen", drawn.track.x);
+        assert_eq!(
+            bar(&charged(100), 924.0, 10.0).expect("no bar").track.x,
+            drawn.track.x
+        );
+    }
+
+    #[test]
+    fn the_bar_centres_on_the_rise_the_marker_takes() {
+        let drawn = bar(&charged(50), 990.0, 10.0).expect("no bar");
+
+        assert_close(
+            drawn.track.y + drawn.track.height / 2.0,
+            990.0 - MARKER_RISE,
+            0.001,
+        );
+    }
+
+    #[test]
+    fn the_bar_draws_in_the_colour_of_the_line_it_stands_on() {
+        let away = Part {
+            battery: Some(50),
+            ..part(Some(false))
         };
-        assert_eq!(label(&charged), "A remote  62%");
-        assert_eq!(label(&part(Some(true))), "A remote");
+
+        assert_eq!(
+            bar(&charged(50), 990.0, 10.0).expect("no bar").color,
+            line(&charged(50), 990.0, 10.0).color
+        );
+        assert!(
+            bar(&away, 990.0, 10.0).expect("no bar").color.a
+                < bar(&charged(50), 990.0, 10.0).expect("no bar").color.a
+        );
+    }
+
+    #[test]
+    fn a_returning_parts_bar_flashes_white_with_its_name() {
+        let returning = Part {
+            returned: Some(10.0),
+            ..charged(50)
+        };
+
+        assert_eq!(bar(&returning, 990.0, 10.12).expect("no bar").color.r, 1.0);
     }
 
     #[test]
@@ -436,6 +601,10 @@ mod tests {
         assert_close(ITEM_SIZE, 22.0, 0.1);
         assert_close(MARKER_R, 6.0, 0.1);
         assert_close(MARKER_RISE, 12.6, 0.1);
+        // The charge bar is two of those 22 pixel characters long and an
+        // eighth of the line box tall.
+        assert_close(BAR_LENGTH, 44.0, 0.2);
+        assert_close(BAR_HEIGHT, 3.75, 0.01);
     }
 
     #[test]

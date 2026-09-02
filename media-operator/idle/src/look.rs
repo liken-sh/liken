@@ -6,10 +6,10 @@
 // and margins for a screen a person reads from a couch, which no stylesheet
 // for a page states.
 
-use iced_widget::canvas::Text;
+use iced_widget::canvas::{Path, Text};
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::{Alignment, LineHeight};
-use iced_winit::core::{Color, Font, Pixels, Point};
+use iced_winit::core::{Color, Font, Pixels, Point, Rectangle, Size};
 use liken_iced::palette;
 
 /// The ground the client fills. It is the clear color of every frame and every
@@ -157,6 +157,20 @@ pub fn line(content: String, at: Point, anchor: Anchor, size: f32, color: Color)
         },
         ..Text::default()
     }
+}
+
+/// One rounded rectangle. A radius wider than half the shape has no meaning, so
+/// a bar with a few pixels of fill rounds by what it has.
+///
+/// Two elements draw bars, the volume row and the charge beside a part
+/// in the identity block, and both round their ends this way.
+pub fn rounded(shape: Rectangle, radius: f32) -> Path {
+    let radius = radius.min(shape.width / 2.0).min(shape.height / 2.0);
+    Path::rounded_rectangle(
+        Point::new(shape.x, shape.y),
+        Size::new(shape.width, shape.height),
+        radius.into(),
+    )
 }
 
 /// One colour under the shade. `light` runs from 1 at full brightness to 0 on

@@ -29,8 +29,8 @@ pub struct Part {
     /// state, which draws at full brightness always.
     pub connected: Option<bool>,
     /// The charge the part reports, from 0 to 100. The identity block draws
-    /// it beside the name. `None` is a part that reports none, and its line
-    /// carries the name alone.
+    /// it as a bar in the left margin. `None` is a part that reports none, and
+    /// its line carries the name alone.
     pub battery: Option<i64>,
     /// Whether the focus mark names this part. The seed carries no focus, so no
     /// marker draws before the first status.
