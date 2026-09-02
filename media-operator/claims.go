@@ -42,16 +42,19 @@ func remoteRequestName(remote string) string {
 	return remoteRequestPrefix + remote
 }
 
-// tolerateForever has no tolerationSeconds, so the toleration never
-// expires, and no effect, so it matches every effect the taint
-// carries. A controller sleeps whenever a person puts it down. The
-// missing effect is what lets the claim allocate while it sleeps,
-// so a film starts without it, and the missing seconds are what
-// keep a sleeping controller from evicting the film later.
+// tolerateForever names the taint's effect, NoExecute, and has no
+// tolerationSeconds. The effect must be stated: the device taint
+// eviction controller applies a toleration only when the toleration's
+// own effect is NoExecute, and a toleration with no effect tolerates
+// the taint for scheduling alone, so the pod schedules and is evicted
+// at once. The missing seconds are what keep a sleeping controller
+// from evicting the pod later, because a controller sleeps whenever a
+// person puts it down and the reader must wait for it.
 func tolerateForever(taint string) []DeviceToleration {
 	return []DeviceToleration{{
 		Key:      taint,
 		Operator: "Exists",
+		Effect:   "NoExecute",
 	}}
 }
 

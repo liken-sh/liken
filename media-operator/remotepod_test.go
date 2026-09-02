@@ -60,7 +60,7 @@ func TestBuildRemoteClaimHoldsTheControllerForever(t *testing.T) {
 		t.Errorf("selectors = %+v, want %+v", request.Exactly.Selectors, selectors)
 	}
 
-	forever := []DeviceToleration{{Key: "bluetooth.liken.sh/disconnected", Operator: "Exists"}}
+	forever := []DeviceToleration{{Key: "bluetooth.liken.sh/disconnected", Operator: "Exists", Effect: "NoExecute"}}
 	if !reflect.DeepEqual(request.Exactly.Tolerations, forever) {
 		t.Errorf("tolerations = %+v, want %+v", request.Exactly.Tolerations, forever)
 	}
