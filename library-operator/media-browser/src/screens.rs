@@ -30,10 +30,8 @@ pub enum Screen {
     /// One movie's page. It is boxed because it is much the largest
     /// variant, and every stack entry would otherwise carry its size.
     Movie(Box<movie::Movie>),
-    /// One series' seasons, until the series page replaces this list.
-    Seasons(series::Seasons),
-    /// One season's episodes, until the series page replaces this list.
-    Episodes(series::Episodes),
+    /// One series' page, boxed for the reason a movie's page is.
+    Series(Box<series::Series>),
 }
 
 /// What a press asks the browser to do. A screen reads the catalog and
@@ -64,8 +62,7 @@ impl Screen {
             Self::Libraries(screen) => screen.key(key, source),
             Self::Wall(screen) => screen.key(key, source),
             Self::Movie(screen) => screen.key(key, source),
-            Self::Seasons(screen) => screen.key(key, source),
-            Self::Episodes(screen) => screen.key(key, source),
+            Self::Series(screen) => screen.key(key, source),
         }
     }
 
@@ -77,8 +74,7 @@ impl Screen {
             Self::Libraries(screen) => screen.reread(source),
             Self::Wall(screen) => screen.reread(source),
             Self::Movie(screen) => screen.reread(source),
-            Self::Seasons(screen) => screen.reread(source),
-            Self::Episodes(screen) => screen.reread(source),
+            Self::Series(screen) => screen.reread(source),
         }
     }
 
@@ -112,8 +108,7 @@ impl Screen {
             Self::Libraries(screen) => screen.view(posters),
             Self::Wall(screen) => screen.view(posters),
             Self::Movie(screen) => screen.view(posters),
-            Self::Seasons(screen) => screen.view(posters),
-            Self::Episodes(screen) => screen.view(posters),
+            Self::Series(screen) => screen.view(posters),
         }
     }
 }
@@ -123,12 +118,12 @@ impl Screen {
 pub struct Item {
     /// The item's provider-scoped id, which a descent carries.
     pub id: String,
-    /// The name a person reads.
+    /// The name a person reads, which is the caption under every slot.
     pub name: String,
     /// The line under the focused slot: the title, the year, the
     /// runtime, and the content rating, each only where the row carries
     /// it.
-    pub line: String,
+    pub line: facts::Line,
     /// The art path the poster store resolves, empty where the item has
     /// none.
     pub art: String,
@@ -138,7 +133,7 @@ impl Item {
     /// One title as a slot. The line is built once here, at the read,
     /// and not on every frame.
     pub fn of(title: Title) -> Self {
-        let line = facts::joined(&[
+        let line = facts::Line::of(&[
             &title.title,
             facts::year(&title.released),
             &facts::runtime(title.duration),
@@ -162,8 +157,8 @@ impl Card for Item {
         &self.name
     }
 
-    fn line(&self) -> &str {
-        &self.line
+    fn line_fitting(&self, chars: usize) -> &str {
+        self.line.fitting(chars)
     }
 }
 
@@ -181,9 +176,29 @@ mod tests {
             duration: 5_820,
             rating: "PG-13".into(),
         });
-        assert_eq!(item.line, "Specimen 0001 · 1987 · 1h 37m · PG-13");
+        assert_eq!(item.line.words(), "Specimen 0001 · 1987 · 1h 37m · PG-13");
         assert_eq!(item.name, "Specimen 0001");
         assert_eq!(item.art, "posters/1.jpg");
+    }
+
+    #[test]
+    fn a_narrow_band_drops_a_slot_s_facts_from_the_end() {
+        let item = Item::of(Title {
+            id: "movie:sample:1".into(),
+            title: "Specimen 0001".into(),
+            released: "1987-04-02".into(),
+            art: "posters/1.jpg".into(),
+            duration: 5_820,
+            rating: "PG-13".into(),
+        });
+        assert_eq!(
+            item.line_fitting(37),
+            "Specimen 0001 · 1987 · 1h 37m · PG-13"
+        );
+        assert_eq!(item.line_fitting(36), "Specimen 0001 · 1987 · 1h 37m");
+        assert_eq!(item.line_fitting(24), "Specimen 0001 · 1987");
+        assert_eq!(item.line_fitting(19), "Specimen 0001");
+        assert_eq!(item.line_fitting(4), "Specimen 0001");
     }
 
     #[test]
@@ -193,6 +208,7 @@ mod tests {
             title: "Specimen 0002".into(),
             ..Title::default()
         });
-        assert_eq!(item.line, "Specimen 0002");
+        assert_eq!(item.line.words(), "Specimen 0002");
+        assert_eq!(item.line_fitting(4), "Specimen 0002");
     }
 }

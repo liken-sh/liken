@@ -10,13 +10,13 @@ use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
-use iced_widget::canvas;
-use iced_winit::core::{Element, Length, Theme};
+use iced_winit::core::{Element, Theme};
 
 use super::{Item, Screen, Step, facts};
-use crate::catalog::{Credit, MovieDetails, MovieSet, Selection, Source};
+use crate::catalog::{MovieDetails, MovieSet, Selection, Source};
 use crate::focus;
 use crate::posters::Posters;
+use crate::views::layers;
 
 /// Where focus is on the page. The credits take no focus, because they
 /// are text until plan 14 gives a person a page of their own.
@@ -107,7 +107,7 @@ impl Movie {
             plot: details.plot.clone(),
             directed: credited("Directed by", &details.directors),
             written: credited("Written by", &details.writers),
-            cast: cast_of(&details.cast),
+            cast: facts::cast(&details.cast),
             set,
             focus: Focus::Buttons(0),
         })
@@ -143,18 +143,22 @@ impl Movie {
         }
     }
 
-    /// The view, one canvas of the whole page.
+    /// The view: the backdrop, the scrim over it, and the page over both.
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
     ) -> Element<'a, Infallible, Theme, Renderer> {
-        canvas(page::Page {
-            movie: self,
+        layers::Page {
+            library: &self.library,
+            art: &self.backdrop,
             posters,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+            ground: layers::Ground::None,
+            front: page::Page {
+                movie: self,
+                posters,
+            },
+        }
+        .view()
     }
 
     fn on_button(&mut self, index: usize, key: &str) -> Step {
@@ -256,16 +260,6 @@ fn credited(what: &str, people: &[String]) -> String {
         return String::new();
     }
     format!("{what} {}", people.join(", "))
-}
-
-fn cast_of(cast: &[Credit]) -> String {
-    cast.iter()
-        .map(|credit| match credit.role.is_empty() {
-            true => credit.name.clone(),
-            false => format!("{} as {}", credit.name, credit.role),
-        })
-        .collect::<Vec<String>>()
-        .join(", ")
 }
 
 #[cfg(test)]

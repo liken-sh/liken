@@ -1,6 +1,5 @@
-// The ground a page draws over: the item's backdrop full bleed, and one
-// gradient over it that darkens toward the lower left, where the text
-// sits. An item with no backdrop draws over the ground color alone.
+// What a page draws at its head: the item's logo where the volume holds
+// one, and the item's title in large text where it does not.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -8,43 +7,9 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
-use super::{extent, label, text};
+use super::{Tone, label, paint, text};
 use crate::look;
 use crate::posters::Posters;
-
-// The point on the gradient where the dim gives the art back.
-const CLEARS_AT: f32 = 0.62;
-
-/// Draw the backdrop and its dim over the whole frame. The store is asked
-/// at the frame's own size, which is the size the prefetch asked for
-/// while the wall held focus, so the page finds the decode in the cache.
-pub fn backdrop<P: Posters>(
-    frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
-    library: &str,
-    art: &str,
-    bounds: Rectangle,
-) {
-    if !art.is_empty()
-        && let Some(image) = posters.poster(library, art, bounds.width as u32, bounds.height as u32)
-    {
-        frame.draw_image(bounds, canvas::Image::new(image));
-    } else {
-        frame.fill_rectangle(bounds.position(), extent(bounds), look::BACKGROUND);
-    }
-
-    frame.fill_rectangle(
-        bounds.position(),
-        extent(bounds),
-        canvas::gradient::Linear::new(
-            Point::new(bounds.x, bounds.y + bounds.height),
-            Point::new(bounds.x + bounds.width, bounds.y),
-        )
-        .add_stop(0.0, look::shade())
-        .add_stop(CLEARS_AT, look::scrim())
-        .add_stop(1.0, look::CLEAR),
-    );
-}
 
 /// What a page draws at its head: the item's logo where the volume holds
 /// one, and the item's title in large text where it does not.
@@ -61,6 +26,8 @@ pub struct Title<'a> {
     pub logo_box: (f32, f32),
     /// The width the title text wraps in.
     pub width: f32,
+    /// The size the title draws at where the item has no logo.
+    pub size: f32,
 }
 
 /// Draw the head. The answer is the height it took, so the caller stacks
@@ -72,33 +39,38 @@ pub fn title<P: Posters>(
 ) -> f32 {
     let (logo_width, logo_height) = head.logo_box;
     if !head.logo.is_empty()
-        && let Some(image) = posters.poster(
+        && let Some(image) = posters.fitted(
             head.library,
             head.logo,
             logo_width as u32,
             logo_height as u32,
         )
     {
-        frame.draw_image(
+        // The logo keeps its own ratio, so it takes the height the fit
+        // landed at and not the height of the box.
+        let (width, height) = image.size();
+        paint(
+            frame,
+            &image,
             Rectangle {
                 x: head.at.x,
                 y: head.at.y,
-                width: logo_width,
-                height: logo_height,
+                width: width as f32,
+                height: height as f32,
             },
-            canvas::Image::new(image),
+            Tone::Full,
         );
-        return logo_height;
+        return height as f32;
     }
 
     frame.fill_text(label(
         head.name,
         head.at,
-        look::TITLE,
+        head.size,
         look::text(),
         Alignment::Left,
         Vertical::Top,
         head.width,
     ));
-    text::height(text::lines(head.name, look::TITLE, head.width), look::TITLE)
+    text::height(text::lines(head.name, head.size, head.width), head.size)
 }

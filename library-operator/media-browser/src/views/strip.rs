@@ -1,6 +1,6 @@
 // The strip: one row of posters under a heading, with one of them marked
-// as the item the page is about. The rest draw dimmed, so the strip reads
-// as a place inside a set and not as another wall.
+// as the item the page is about. The rest draw at a lower opacity, so the
+// strip reads as a place inside a set and not as another wall.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -8,7 +8,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
-use super::{Card, area, artwork, dim, label, mark, scroll, wall};
+use super::{Card, Tone, area, artwork, label, mark, scroll, underline, wall};
 use crate::look;
 use crate::posters::Posters;
 
@@ -22,7 +22,7 @@ pub const HEIGHT: f32 = HEADING + POSTER;
 const HEADING: f32 = 46.0;
 
 // The gap between two posters.
-const GAP: f32 = 20.0;
+const GAP: f32 = 26.0;
 
 /// The width of one poster: the height at the wall's own ratio.
 pub fn poster_width() -> f32 {
@@ -90,13 +90,23 @@ pub fn draw<T: Card, P: Posters>(
             member.art(),
             slot,
             member.name(),
+            tone(strip, index),
         );
-        if index != strip.current && strip.focus != Some(index) {
-            dim(frame, slot);
+        if index == strip.current {
+            underline(frame, slot);
         }
-        if held == index {
+        if strip.focus == Some(index) {
             mark(frame, slot);
         }
+    }
+}
+
+/// How bright one member of the strip draws: the film the page is about
+/// and the one that holds focus at full, and every sibling under it.
+pub fn tone<T>(strip: &Strip<'_, T>, index: usize) -> Tone {
+    match index == strip.current || strip.focus == Some(index) {
+        true => Tone::Full,
+        false => Tone::Dimmed,
     }
 }
 
@@ -113,5 +123,32 @@ mod tests {
     fn the_heading_sits_over_the_posters() {
         assert_eq!(HEIGHT, HEADING + POSTER);
         assert!(pitch() > poster_width());
+    }
+
+    #[test]
+    fn a_poster_has_room_beside_it_for_the_mark() {
+        const { assert!(GAP / 2.0 > super::super::REACH) };
+    }
+
+    #[test]
+    fn the_current_film_and_the_focused_one_draw_over_their_siblings() {
+        struct Member;
+        impl Card for Member {
+            fn name(&self) -> &str {
+                "Film one"
+            }
+        }
+        let members = [Member, Member, Member];
+        let strip = Strip {
+            members: &members,
+            current: 1,
+            focus: Some(2),
+            heading: "The Set",
+            library: "screening/films",
+            region: area(0.0, 0.0, 1000.0, HEIGHT),
+        };
+        assert_eq!(tone(&strip, 0), Tone::Dimmed);
+        assert_eq!(tone(&strip, 1), Tone::Full);
+        assert_eq!(tone(&strip, 2), Tone::Full);
     }
 }

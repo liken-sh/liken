@@ -37,17 +37,41 @@ pub fn slot() -> Color {
     palette::dark().page
 }
 
-/// The scrim over art that is drawn but not chosen, such as the siblings
-/// in a set strip. The veils are black and not the brand's page color,
-/// for the reason the ground is: they sit over art.
-pub fn scrim() -> Color {
-    Color::from_rgba(0.0, 0.0, 0.0, 0.62)
-}
-
-/// The darkest end of the gradient over a page's backdrop, at the corner
-/// the text sits in.
+/// The darkest end of the scrim panel, at the left edge where the text
+/// column starts.
 pub fn shade() -> Color {
     Color::from_rgba(0.0, 0.0, 0.0, 0.94)
+}
+
+/// The opacity art draws at where a screen drew it but the person did not
+/// choose it, such as the siblings in a set strip. The dim is the image's
+/// own opacity and not a veil over it, because a veil is a fill and a fill
+/// draws under every image of its layer.
+pub const DIM: f32 = 0.42;
+
+/// The width of the stroke that marks focus, in logical pixels, thick
+/// enough to read from a couch.
+pub const MARK: f32 = 6.0;
+
+/// The space between the art and the inner edge of the focus stroke, so
+/// the stroke frames the art and does not touch it.
+pub const MARK_GAP: f32 = 2.0;
+
+/// The color of the focus stroke and of the underline that marks the
+/// current member of a strip: the accent, a little translucent, so the
+/// art shows through it.
+pub fn mark() -> Color {
+    Color {
+        a: 0.75,
+        ..accent()
+    }
+}
+
+/// The ground under a page's own art, such as the episode wall of a
+/// series. It is nearly opaque, so the stills sit on near-black and the
+/// backdrop shows through only as a trace.
+pub fn ground() -> Color {
+    Color::from_rgba(0.0, 0.0, 0.0, 0.9)
 }
 
 /// The far end of every gradient over art. It leaves the art as it is.
@@ -55,35 +79,42 @@ pub const CLEAR: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.0);
 
 /// The size of the focused title's name under its poster, in logical
 /// pixels, large enough to read from a couch.
-pub const NAME: f32 = 34.0;
+pub const NAME: f32 = 23.0;
+
+/// The size of the one line under every slot of a wall.
+pub const CAPTION: f32 = 18.0;
 
 /// The size of a page's title, where the item has no logo.
-pub const TITLE: f32 = 76.0;
+pub const TITLE: f32 = 53.0;
+
+/// The size of a title inside a header of a fixed height, where the item
+/// has no logo.
+pub const HEAD_TITLE: f32 = 38.0;
 
 /// The size of a page's facts line.
-pub const FACTS: f32 = 30.0;
+pub const FACTS: f32 = 21.0;
 
 /// The size of a page's tagline.
-pub const TAGLINE: f32 = 34.0;
+pub const TAGLINE: f32 = 23.0;
 
 /// The size of a page's plot.
-pub const PLOT: f32 = 28.0;
+pub const PLOT: f32 = 20.0;
 
 /// The size of the word in a button.
-pub const BUTTON: f32 = 30.0;
+pub const BUTTON: f32 = 21.0;
 
 /// The size of the heading over a strip, and of the controls in a wall's
 /// band.
-pub const HEADING: f32 = 26.0;
+pub const HEADING: f32 = 18.0;
 
 /// The size of the credits and the cast on a page.
-pub const CREDITS: f32 = 26.0;
+pub const CREDITS: f32 = 18.0;
 
 /// The size of a list row's name.
-pub const ROW_NAME: f32 = 40.0;
+pub const ROW_NAME: f32 = 28.0;
 
 /// The size of secondary text: details and placeholder titles.
-pub const DETAIL: f32 = 28.0;
+pub const DETAIL: f32 = 20.0;
 
 /// The one family the whole display draws in. The image installs the face, and
 /// the toolkit resolves it by name. With no installed match the toolkit falls
@@ -112,10 +143,17 @@ mod tests {
     }
 
     #[test]
-    fn the_veils_over_art_are_black_and_only_the_alpha_differs() {
-        assert_eq!(scrim().r, 0.0);
+    fn the_veil_over_art_is_black_and_only_the_alpha_differs() {
         assert_eq!(shade().r, 0.0);
-        assert!(shade().a > scrim().a);
+        assert_eq!(shade().g, 0.0);
+        assert_eq!(shade().b, 0.0);
+        assert!(shade().a > CLEAR.a);
         assert_eq!(CLEAR.a, 0.0);
+    }
+
+    #[test]
+    fn art_the_person_did_not_choose_draws_under_full_brightness() {
+        const { assert!(DIM > 0.0) };
+        const { assert!(DIM < 1.0) };
     }
 }

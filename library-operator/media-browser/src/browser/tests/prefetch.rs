@@ -65,11 +65,21 @@ fn the_band_schedules_no_rest() {
 }
 
 #[test]
-fn a_series_wall_schedules_no_rest() {
+fn a_series_wall_rests_on_the_backdrop_of_the_page_it_opens() {
     let mut browser = browser(3);
+    browser.tick(0.0);
     browser.key("down");
     browser.key("enter");
-    assert!(browser.next_frame(1.0).is_none());
+    assert_eq!(browser.next_frame(0.0), Some(REST));
+
+    browser.tick(REST);
+
+    assert!(browser.posters.get_mut().asked.contains(&(
+        "screening/serials".into(),
+        "series:1.backdrop.jpg".into(),
+        1920,
+        1080
+    )));
 }
 
 #[test]

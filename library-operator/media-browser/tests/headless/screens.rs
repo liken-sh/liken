@@ -159,3 +159,31 @@ fn a_catalog_page_draws_the_backdrop_and_the_logo() {
     assert_eq!(run.exit, "0", "{}", run.log);
     drawn(&frames.join("002.50.png"), &run);
 }
+
+// A select on a series opens its page, and three presses down cross the
+// first season's divider into the second. The header stands still at the
+// top of the frame and the wall of stills scrolls in the region under it.
+#[test]
+fn a_series_page_scrolls_into_its_second_season() {
+    let dir = workspace("series");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.5:down,0.9:enter,1.3:enter,1.7:down,2.0:down,2.3:down",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "2.7",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    drawn(&frames.join("002.70.png"), &run);
+}

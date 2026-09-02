@@ -2,7 +2,7 @@
 // body, and where a press takes focus.
 
 use super::*;
-use crate::catalog::{EpisodeRow, LibraryEntry, PlayItem, Title};
+use crate::catalog::{Credit, Episode, LibraryEntry, PlayItem, SeriesDetails, Title};
 use crate::harness::Waker;
 
 // A catalog of one set of three films, so a page has siblings to move
@@ -57,11 +57,11 @@ impl Source for Films {
         Vec::new()
     }
 
-    fn seasons(&mut self, _library: &str, _series: &str) -> Vec<i64> {
-        Vec::new()
+    fn series(&mut self, _library: &str, _id: &str) -> Option<SeriesDetails> {
+        None
     }
 
-    fn episodes(&mut self, _library: &str, _series: &str, _season: i64) -> Vec<EpisodeRow> {
+    fn episodes(&mut self, _library: &str, _series: &str) -> Vec<Episode> {
         Vec::new()
     }
 

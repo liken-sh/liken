@@ -1,15 +1,25 @@
 // The drawing layer: the primitives a screen composes, and the culling
 // math they share. The primitives are a wall of art slots, a list of
-// rows, a band across the top of a wall, a backdrop under a page, a
-// block of text, a row of buttons, and a strip of posters with one
-// marked. A screen chooses which of them it draws and where. No
-// primitive reads a kind.
+// rows, a band across the top of a wall, a block of text, a row of
+// buttons, a strip of posters with one marked, a divider between two runs
+// of a wall, and the scrolled stack a page is. A screen chooses which of
+// them it draws and where. No primitive reads a kind.
+//
+// A page draws in the layers the `layers` module stacks, because inside
+// one layer the renderer draws every mesh, then every image, then every
+// text, whatever order the canvas drew them in. That one fact decides
+// three rules here: a focus mark strokes outside the slot it marks, art
+// the person did not choose dims by the image's own opacity, and a
+// backdrop is a layer of its own under everything a screen draws.
 
 pub mod band;
 pub mod buttons;
+pub mod divider;
 pub mod header;
+pub mod layers;
 pub mod list;
 pub mod scroll;
+pub mod stack;
 pub mod strip;
 pub mod text;
 pub mod wall;
@@ -21,7 +31,7 @@ use iced_winit::core::text::{Alignment, LineHeight, Shaping};
 use iced_winit::core::{Color, Font, Pixels, Point, Rectangle, Size};
 
 use crate::look;
-use crate::posters::Posters;
+use crate::posters::{Art, Posters};
 
 /// What a primitive reads off one of a screen's items. A screen
 /// implements it for the rows it holds, so a wall, a list, and a strip
@@ -42,9 +52,37 @@ pub trait Card {
         ""
     }
 
-    /// The line under the focused slot of a wall.
-    fn line(&self) -> &str {
+    /// The one line under every slot of a wall, drawn muted.
+    fn caption(&self) -> &str {
         self.name()
+    }
+
+    /// The line under the focused slot of a wall, drawn bright: the whole
+    /// facts of the row that fit in this many characters.
+    fn line_fitting(&self, _chars: usize) -> &str {
+        self.caption()
+    }
+}
+
+/// How bright a slot's art draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    /// The art as it is.
+    Full,
+    /// The art of a slot the screen drew but the person did not choose,
+    /// such as a sibling in a set strip.
+    Dimmed,
+}
+
+impl Tone {
+    // The opacity the renderer draws the image at. The veil is the image's
+    // own opacity and not a fill over it, because every fill of a layer
+    // draws under every image of that layer.
+    fn opacity(self) -> f32 {
+        match self {
+            Self::Full => 1.0,
+            Self::Dimmed => look::DIM,
+        }
     }
 }
 
@@ -60,11 +98,17 @@ fn artwork<P: Posters>(
     art: &str,
     slot: Rectangle,
     name: &str,
+    tone: Tone,
 ) {
     if !art.is_empty()
         && let Some(poster) = posters.poster(library, art, slot.width as u32, slot.height as u32)
     {
-        frame.draw_image(slot, canvas::Image::new(poster));
+        // The ground under a dimmed slot is the black one, so a sibling
+        // darkens by the same amount whatever art lies behind the slot.
+        if tone == Tone::Dimmed {
+            frame.fill_rectangle(slot.position(), slot.size(), look::BACKGROUND);
+        }
+        paint(frame, &poster, slot, tone);
         return;
     }
 
@@ -82,21 +126,66 @@ fn artwork<P: Posters>(
     }
 }
 
+// Art draws band by band, each band into its share of the rectangle,
+// because the renderer uploads an image of two megabytes or more on a
+// later frame, and this client draws no later frame until an event.
+fn paint(frame: &mut canvas::Frame<Renderer>, art: &Art, into: Rectangle, tone: Tone) {
+    for (band, handle) in art.bands(into) {
+        frame.draw_image(band, canvas::Image::new(handle).opacity(tone.opacity()));
+    }
+}
+
+/// How far the focus mark reaches past the edge of the slot it marks: the
+/// stroke's outer edge.
+pub const REACH: f32 = look::MARK_GAP + look::MARK;
+
+// How far the center line of the focus stroke sits outside the slot: the
+// gap, then half of the stroke, so the stroke's inner edge is the gap
+// away from the art.
+const OUTSET: f32 = look::MARK_GAP + look::MARK / 2.0;
+
+/// The rectangle the focus stroke follows, outside the slot's own edge. A
+/// stroke is a mesh, and every mesh of a layer draws under every image of
+/// that layer, so a stroke on the edge would lose its inner half.
+pub fn marked(slot: Rectangle) -> Rectangle {
+    area(
+        slot.x - OUTSET,
+        slot.y - OUTSET,
+        slot.width + 2.0 * OUTSET,
+        slot.height + 2.0 * OUTSET,
+    )
+}
+
+/// The bar that marks the current member of a strip: the bottom edge of
+/// the focus rectangle alone, so it reads as a place and not as focus.
+pub fn underlined(slot: Rectangle) -> Rectangle {
+    let around = marked(slot);
+    area(
+        around.x - look::MARK / 2.0,
+        around.y + around.height - look::MARK / 2.0,
+        around.width + look::MARK,
+        look::MARK,
+    )
+}
+
 // The one mark focus takes everywhere on this screen: a stroke of the
-// accent around the chosen slot.
+// accent outside the chosen slot.
 fn mark(frame: &mut canvas::Frame<Renderer>, slot: Rectangle) {
+    let around = marked(slot);
     frame.stroke_rectangle(
-        slot.position(),
-        slot.size(),
+        around.position(),
+        extent(around),
         canvas::Stroke::default()
-            .with_color(look::accent())
-            .with_width(4.0),
+            .with_color(look::mark())
+            .with_width(look::MARK),
     );
 }
 
-// The veil over art a screen draws but has not chosen.
-fn dim(frame: &mut canvas::Frame<Renderer>, slot: Rectangle) {
-    frame.fill_rectangle(slot.position(), slot.size(), look::scrim());
+// The underline that marks the current member of a strip, in the same
+// color as the focus stroke, so one word of the look says "here".
+fn underline(frame: &mut canvas::Frame<Renderer>, slot: Rectangle) {
+    let bar = underlined(slot);
+    frame.fill_rectangle(bar.position(), extent(bar), look::mark());
 }
 
 // One canvas text with the display's font and shaping, so every line
@@ -141,4 +230,38 @@ pub(crate) fn area(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
 // The size of a rectangle, for the fills that take one.
 pub(crate) fn extent(area: Rectangle) -> Size {
     Size::new(area.width, area.height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot() -> Rectangle {
+        area(100.0, 200.0, 300.0, 450.0)
+    }
+
+    #[test]
+    fn the_mark_lies_outside_the_slot_it_marks() {
+        let slot = slot();
+        let around = marked(slot);
+        let inner = look::MARK / 2.0;
+        assert!(around.x + inner < slot.x);
+        assert!(around.y + inner < slot.y);
+        assert!(around.x + around.width - inner > slot.x + slot.width);
+        assert!(around.y + around.height - inner > slot.y + slot.height);
+    }
+
+    #[test]
+    fn the_mark_reaches_no_further_than_its_reach() {
+        let slot = slot();
+        let around = marked(slot);
+        assert_eq!(slot.y - (around.y - look::MARK / 2.0), REACH);
+        assert_eq!(around.center_x(), slot.center_x());
+    }
+
+    #[test]
+    fn art_the_person_chose_draws_at_full_opacity() {
+        assert_eq!(Tone::Full.opacity(), 1.0);
+        assert_eq!(Tone::Dimmed.opacity(), look::DIM);
+    }
 }

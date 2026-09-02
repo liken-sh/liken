@@ -2,6 +2,10 @@
 // release, the runtime out of a duration, and the one line those join
 // into. Every function here is pure over the columns, so a screen builds
 // its lines once at a read, and the tests need no window.
+// The cast line is one of those words, built the same way for a movie's
+// page and a series' page.
+
+use crate::catalog::Credit;
 
 // The separator between two facts on one line.
 const BETWEEN: &str = " · ";
@@ -33,19 +37,92 @@ pub fn runtime(seconds: i64) -> String {
 /// The facts that are present, joined into one line. A fact the row does
 /// not carry leaves no gap and no separator behind.
 pub fn joined(parts: &[&str]) -> String {
-    let mut line = String::new();
-    for part in parts.iter().filter(|part| !part.is_empty()) {
-        if !line.is_empty() {
-            line.push_str(BETWEEN);
+    Line::of(parts).words
+}
+
+/// One line of facts, with the end of each whole fact recorded, so a band
+/// that cannot hold the whole line draws whole facts and never a dangling
+/// separator.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Line {
+    words: String,
+    cuts: Vec<Cut>,
+}
+
+// Where one run of whole facts ends: the bytes it takes, and the
+// characters the width estimate counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Cut {
+    bytes: usize,
+    chars: usize,
+}
+
+impl Line {
+    /// The facts that are present, joined, with a cut after each one.
+    pub fn of(parts: &[&str]) -> Self {
+        let mut words = String::new();
+        let mut cuts = Vec::new();
+        for part in parts.iter().filter(|part| !part.is_empty()) {
+            if !words.is_empty() {
+                words.push_str(BETWEEN);
+            }
+            words.push_str(part);
+            cuts.push(Cut {
+                bytes: words.len(),
+                chars: words.chars().count(),
+            });
         }
-        line.push_str(part);
+        Self { words, cuts }
     }
-    line
+
+    /// The whole line, every fact it holds.
+    pub fn words(&self) -> &str {
+        &self.words
+    }
+
+    /// The longest run of whole facts that this many characters hold,
+    /// dropping facts from the end. The first fact is the floor, and the
+    /// band clips it where even that is longer.
+    pub fn fitting(&self, chars: usize) -> &str {
+        let cut = self.cuts.iter().rev().find(|cut| cut.chars <= chars);
+        match cut.or(self.cuts.first()) {
+            Some(cut) => &self.words[..cut.bytes],
+            None => "",
+        }
+    }
+}
+
+/// The cast as one line: every name, with the part it played where the
+/// sidecar named one.
+pub fn cast(cast: &[Credit]) -> String {
+    cast.iter()
+        .map(|credit| match credit.role.is_empty() {
+            true => credit.name.clone(),
+            false => format!("{} as {}", credit.name, credit.role),
+        })
+        .collect::<Vec<String>>()
+        .join(", ")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cast_names_every_player_and_the_part_it_played() {
+        let cast = cast(&[
+            Credit {
+                name: "A Player".into(),
+                role: "The Part".into(),
+            },
+            Credit {
+                name: "Another".into(),
+                role: String::new(),
+            },
+        ]);
+        assert_eq!(cast, "A Player as The Part, Another");
+        assert_eq!(super::cast(&[]), "");
+    }
 
     #[test]
     fn a_year_and_a_date_both_give_the_year() {
@@ -72,6 +149,12 @@ mod tests {
         assert_eq!(runtime(0), "");
         assert_eq!(runtime(-1), "");
         assert_eq!(runtime(59), "");
+    }
+
+    #[test]
+    fn a_line_that_carries_no_facts_is_empty_at_any_width() {
+        assert_eq!(Line::of(&["", ""]).words(), "");
+        assert_eq!(Line::of(&["", ""]).fitting(40), "");
     }
 
     #[test]

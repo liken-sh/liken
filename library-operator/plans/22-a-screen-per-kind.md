@@ -41,9 +41,17 @@ three controls at the right for sort, filter, and search. Up from the
 first row of posters reaches the band, and left and right move across
 the three controls. The controls draw dimmed, and select on any of them
 does nothing, because none of the three exists yet. The band is the
-reserved place for them, the same place on every wall. The line under
-the focused poster grows: the title, the year, the runtime, and the
-content rating, where the row carries them.
+reserved place for them, the same place on every wall. Every poster
+carries a one-line caption under it, muted. The focused poster's
+caption is bright and carries the facts: the title, the year, the
+runtime, and the content rating, where the row carries them.
+
+**Focus is an outline.** The focused slot does not grow. It carries a
+thick stroke of the accent outside its edge and a bright caption. A
+grown slot needs a second decode at a second size, and the flash while
+that decode lands is what a person sees. One decode per slot size
+draws with no flash, and a later plan can add motion over the same
+decoded image.
 
 **Select on a movie opens its page.** The page draws the movie's
 backdrop full bleed, dimmed toward the lower left where the text sits.
@@ -73,6 +81,22 @@ new one, so back from any film in the set returns to the wall. The
 strip is a way to move inside a set, the way a season divider is a way
 to move inside a series, and not a screen of its own.
 
+**Pages scroll with focus.** A page is one stack of blocks over a fixed
+backdrop, and the stack scrolls so the row that holds focus and the
+blocks under it are in view. On the movie page, focus on the buttons
+shows the page from its top, and focus on the strip brings the strip
+and the credits under it into view. On the series page the episode
+wall scrolls under the fixed header by the same rule. No block a focus
+row can reach is ever cut at the bottom of the frame.
+
+**Text sits on a scrim, and art never sits on art.** Every page draws a
+scrim behind its text column, dark at the left edge and clear by about
+six tenths of the width, over any backdrop. Posters and stills draw on
+the ground and never over a backdrop. The renderer draws a canvas's
+fills, then its images, then its text, whatever order the code drew
+them in, so a page is a stack of canvases in depth order: the backdrop,
+the scrim, then everything else.
+
 **Sets in the catalog.** The scanner writes a `sets` table with the same
 header columns the other item tables carry, and a `set_id` column on
 `movies` that names the set's id, indexed. The id is provider scoped
@@ -86,19 +110,19 @@ browser's set strip is then one indexed read and not a scan of the body
 column.
 
 **Select on a series opens its page.** The page is one screen and not
-three. The header band draws the series' backdrop, its logo or title,
-the facts line with the year, the season count, and the content rating,
-the tagline, two lines of plot, and the cast. Under it, a wall of
-episode stills at 16:9, four across, with the episode number and name
-under each still, in aired order. A season divider is one line before
-each season's first still: the season's name at the left and its year
-at the right, the year of its first aired episode. The season poster
-does not appear. Left and right move inside a season's row, and up and
-down cross the dividers, so a divider is visual and not a stop. The
-header scrolls away as focus moves down, and the wall gets the whole
-screen. When an episode has focus, the header shows that episode's
-plot and runtime in place of the series' plot. Select plays the episode
-and the rest of its season, as plan 08 defined.
+three. The header draws the series' backdrop, its logo or title, the
+facts line with the year, the season count, and the content rating,
+the tagline, and the cast. Focus is always on an episode, and the
+header shows that episode's numbers, name, runtime, and plot. Under the
+header, on the ground and not on the backdrop, a wall of episode stills
+at 16:9 with a caption under each still, in aired order. A season
+divider is one line before each season's first row: the season's name
+at the left and its year at the right, the year of its first aired
+episode. The season poster does not appear. Left and right move inside
+a season, and up and down cross the dividers, so a divider is visual
+and not a stop. The header stays fixed, because the focused episode's
+facts are in it, and the wall scrolls under it. Select plays the
+episode and the rest of its season, as plan 08 defined.
 
 **Art by role.** The pages read an item's backdrop, logo, and trailer
 from the `files` table through `file_items`, by role. An item with no
@@ -173,3 +197,22 @@ sibling in the set strip opens its page and back from it returns to
 the wall, a series opens to its page and a held down crosses the season
 dividers, and select on an episode plays it. The resident memory on the
 box during the same walk is written beside plan 07's 92 MiB.
+
+Drilled on this workstation on 2026-09-02, from the local catalog and
+the real roots, with headless captures at 1920x1080 of every screen.
+The drill found six defects, all fixed the same day. A raster over 2
+MiB never drew, because the renderer hands it to a worker thread and
+the browser draws no later frame; large art now draws as bands under
+the cap. Logos drew cropped, because the decoder covered every box;
+logos now fit. Every frame re-uploaded every poster, because each frame
+built a new handle; a cached decode now keeps its handles. Fills drawn
+over the backdrop vanished, because a layer draws fills, then images,
+then text; a page is now a stack of three canvases. The focused line
+overlapped the row below, and a crowded page cut its credits off at the
+foot of the frame; captions on every slot and the scroll rule replaced
+both. Resident memory had risen to 435 MiB on a wall where focus rests
+at every step, against plan 07's 131 MiB, and the cause was decode
+transients held in the allocator's arenas and not the cache. With the
+allocator thresholds pinned and one page-size decode in flight at a
+time, the same walk peaks at 186 MiB and rests at 153, and a walk
+through ten movie pages peaks at 156. The `liken-1` drill is owed.

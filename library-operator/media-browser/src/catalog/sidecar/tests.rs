@@ -1,6 +1,7 @@
 mod lists;
 mod pages;
 mod plays;
+mod series;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +11,7 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Credit, LibraryEntry, MovieDetails, PlayItem, Presentation, Selection, Source,
+    Credit, LibraryEntry, MovieDetails, PlayItem, Presentation, Selection, SeriesDetails, Source,
 };
 
 // The tests build their fixture from the schema every agent loads, the
@@ -181,6 +182,60 @@ const BODY: &str = r#"{"plot":"A plot.","tagline":"One line.","contentRating":"P
     "genres":["Drama","Mystery"],"directors":["A Director"],
     "writers":["A Writer","Another"],
     "cast":[{"name":"A Player","role":"The Part"}]}"#;
+
+// One series with everything its page reads: the release, the body in the
+// shape the scanner writes, and the title a person reads.
+fn insert_series_page(path: &Path, library: &str, id: &str, released: &str, body: &str) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO series (library, id, kind, title, sort_key, released, art, body) \
+             VALUES (?, ?, 'series', ?, ?, ?, ?, ?)",
+            (
+                library,
+                id,
+                format!("Serial {id}"),
+                format!("serial {id}"),
+                released,
+                format!("{id}.jpg"),
+                body,
+            ),
+        )
+        .unwrap();
+}
+
+// One episode with the columns and the body its still and the header
+// read.
+fn insert_episode_page(
+    path: &Path,
+    library: &str,
+    id: &str,
+    series: &str,
+    numbers: (i64, i64),
+    released: &str,
+    body: &str,
+) {
+    let (season, episode) = numbers;
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO episodes (library, id, kind, title, series, season, episode, \
+             released, art, duration, body) \
+             VALUES (?, ?, 'series', ?, ?, ?, ?, ?, ?, 2760, ?)",
+            (
+                library,
+                id,
+                format!("Segment {episode}"),
+                series,
+                season,
+                episode,
+                released,
+                format!("{id}.jpg"),
+                body,
+            ),
+        )
+        .unwrap();
+}
 
 fn insert_set(path: &Path, library: &str, id: &str, title: &str) {
     let connection = Connection::open(path).unwrap();

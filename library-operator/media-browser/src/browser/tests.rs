@@ -13,12 +13,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use iced_widget::image::Handle;
-
 use super::*;
 use crate::catalog::{
-    Credit, EpisodeRow, LibraryEntry, MovieDetails, MovieSet, PlayItem, Presentation, Title,
+    Credit, Episode, LibraryEntry, MovieDetails, MovieSet, PlayItem, Presentation, SeriesDetails,
+    Title,
 };
+use crate::posters::Art;
 use crate::screens::movie::Focus;
 use crate::screens::wall::Wall;
 use crate::views::{band, wall};
@@ -40,7 +40,7 @@ struct Fake {
     // to resolve.
     items: Vec<PlayItem>,
     chosen: Option<(String, Selection)>,
-    // Whether the series library holds any season at all. A library the
+    // Whether the series library holds any episode at all. A library the
     // scanner has not reached looks like that.
     empty: bool,
     // Whether the movies carry a trailer file, and whether they carry a
@@ -101,26 +101,40 @@ impl Source for Fake {
             .collect()
     }
 
-    fn seasons(&mut self, _library: &str, _series: &str) -> Vec<i64> {
-        self.calls.push("seasons");
-        if self.empty {
-            return Vec::new();
+    fn series(&mut self, _library: &str, id: &str) -> Option<SeriesDetails> {
+        self.calls.push("series");
+        if !id.starts_with("series:") {
+            return None;
         }
-        vec![1, 2]
+        Some(SeriesDetails {
+            title: "The Serial".into(),
+            released: "1980".into(),
+            rating: "TV-14".into(),
+            plot: "A plot.".into(),
+            seasons: 2,
+            backdrop: format!("{id}.backdrop.jpg"),
+            ..SeriesDetails::default()
+        })
     }
 
-    fn episodes(&mut self, _library: &str, _series: &str, season: i64) -> Vec<EpisodeRow> {
+    fn episodes(&mut self, _library: &str, _series: &str) -> Vec<Episode> {
         self.calls.push("episodes");
         if self.empty {
             return Vec::new();
         }
-        vec![EpisodeRow {
-            id: "e1".into(),
-            title: "Segment 1".into(),
-            season,
-            episode: 4,
-            art: String::new(),
-        }]
+        (1..=2)
+            .flat_map(|season| {
+                (1..=4).map(move |episode| Episode {
+                    season,
+                    episode,
+                    title: format!("Segment {episode}"),
+                    released: format!("{}", 1979 + season),
+                    duration: 2_760,
+                    plot: format!("The plot of S{season} E{episode}."),
+                    art: format!("s{season}e{episode}.jpg"),
+                })
+            })
+            .collect()
     }
 
     fn movie(&mut self, _library: &str, id: &str) -> Option<MovieDetails> {
@@ -191,7 +205,7 @@ struct NoPosters {
 }
 
 impl Posters for NoPosters {
-    fn poster(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Handle> {
+    fn poster(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Art> {
         self.asked
             .push((library.to_string(), art.to_string(), width, height));
         None
@@ -225,6 +239,14 @@ fn showing_page(browser: &Browser<Fake, NoPosters>) -> &screens::movie::Movie {
     match browser.top() {
         screens::Screen::Movie(page) => page,
         _ => panic!("the browser is not showing a page"),
+    }
+}
+
+// The series page the browser is showing.
+fn showing_series(browser: &Browser<Fake, NoPosters>) -> &screens::series::Series {
+    match browser.top() {
+        screens::Screen::Series(page) => page,
+        _ => panic!("the browser is not showing a series page"),
     }
 }
 // A browser on a wall with sets, after the frame the first press asked

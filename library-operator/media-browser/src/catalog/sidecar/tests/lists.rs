@@ -1,5 +1,5 @@
 // The lists the first screens read: the libraries, one library's titles,
-// and a series' seasons and episodes.
+// and every episode of a series.
 
 use super::*;
 
@@ -118,13 +118,13 @@ fn titles_refuse_a_kind_that_names_no_item_table() {
 }
 
 #[test]
-fn seasons_come_back_distinct_and_ordered() {
+fn episodes_come_back_by_season_and_then_by_episode() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     let series = "series:tvdb:73739";
     insert_episode(&path, "default/shows", "episode:tvdb:2", series, 2, 1);
-    insert_episode(&path, "default/shows", "episode:tvdb:1a", series, 1, 1);
     insert_episode(&path, "default/shows", "episode:tvdb:1b", series, 1, 2);
+    insert_episode(&path, "default/shows", "episode:tvdb:1a", series, 1, 1);
     insert_episode(
         &path,
         "default/shows",
@@ -135,26 +135,15 @@ fn seasons_come_back_distinct_and_ordered() {
     );
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    assert_eq!(source.seasons("default/shows", series), vec![1, 2]);
-    assert!(source.seasons("default/empty", series).is_empty());
-}
-
-#[test]
-fn episodes_come_back_in_episode_order_for_one_season() {
-    let dir = TempDir::new().unwrap();
-    let path = fixture(&dir);
-    let series = "series:tvdb:73739";
-    insert_episode(&path, "default/shows", "episode:tvdb:1b", series, 1, 2);
-    insert_episode(&path, "default/shows", "episode:tvdb:1a", series, 1, 1);
-    insert_episode(&path, "default/shows", "episode:tvdb:2", series, 2, 1);
-
-    let mut source = SidecarSource::new(&path, NO_AGENT);
-    let episodes = source.episodes("default/shows", series, 1);
-    let ids: Vec<&str> = episodes.iter().map(|episode| episode.id.as_str()).collect();
-    assert_eq!(ids, ["episode:tvdb:1a", "episode:tvdb:1b"]);
-    assert_eq!(episodes[0].season, 1);
-    assert_eq!(episodes[0].episode, 1);
+    let episodes = source.episodes("default/shows", series);
+    let numbers: Vec<(i64, i64)> = episodes
+        .iter()
+        .map(|episode| (episode.season, episode.episode))
+        .collect();
+    assert_eq!(numbers, [(1, 1), (1, 2), (2, 1)]);
     assert_eq!(episodes[0].title, "Episode 1");
+    assert_eq!(episodes[0].art, "episode:tvdb:1a.jpg");
+    assert!(source.episodes("default/empty", series).is_empty());
 }
 
 #[test]
@@ -167,13 +156,13 @@ fn a_missing_file_reads_as_empty_until_the_sidecar_writes_it() {
     assert!(source.titles("default/films", "movies").is_empty());
     assert!(
         source
-            .seasons("default/shows", "series:tvdb:73739")
+            .episodes("default/shows", "series:tvdb:73739")
             .is_empty()
     );
     assert!(
         source
-            .episodes("default/shows", "series:tvdb:73739", 1)
-            .is_empty()
+            .series("default/shows", "series:tvdb:73739")
+            .is_none()
     );
 
     assert!(source.play("default/films", &movie_chosen()).is_empty());

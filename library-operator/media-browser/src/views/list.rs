@@ -9,7 +9,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle, Size, Theme, mouse};
 
-use super::{Card, artwork, label, scroll};
+use super::{Card, Tone, artwork, label, scroll};
 use crate::look;
 use crate::posters::Posters;
 
@@ -92,6 +92,7 @@ impl<Message, T: Card, P: Posters> canvas::Program<Message, Theme, Renderer> for
                 row.art(),
                 thumb,
                 "",
+                Tone::Full,
             );
 
             frame.fill_text(label(

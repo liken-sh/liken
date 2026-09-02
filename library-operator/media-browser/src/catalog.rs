@@ -106,25 +106,62 @@ pub fn library_name(library: &str) -> &str {
     library.split_once('/').map_or(library, |(_, name)| name)
 }
 
-/// One episode under a season.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EpisodeRow {
-    /// The episode's provider-scoped id, unique inside its library.
-    pub id: String,
+/// What a series' page draws: the item's own columns, the fields of its
+/// body, the two files it reads by role, and how many seasons its
+/// episodes fall into.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SeriesDetails {
     /// The name a person reads.
     pub title: String,
+    /// The year or the date of release, as the catalog stores it.
+    pub released: String,
+    /// The running time in seconds, zero where the catalog holds none.
+    pub duration: i64,
+    /// The content rating, empty where the sidecar named none.
+    pub rating: String,
+    /// The genres, in the order the sidecar named them.
+    pub genres: Vec<String>,
+    /// The one-line tagline, empty where the sidecar named none.
+    pub tagline: String,
+    /// The plot. The page cuts it to two lines.
+    pub plot: String,
+    /// The creators, in the order the sidecar named them.
+    pub creators: Vec<String>,
+    /// The cast, in the order the sidecar named them.
+    pub cast: Vec<Credit>,
+    /// The path of the backdrop file, relative to the library root, or
+    /// empty where the item has none.
+    pub backdrop: String,
+    /// The path of the logo file, relative to the library root, or empty
+    /// where the item has none.
+    pub logo: String,
+    /// How many seasons the series' episodes fall into.
+    pub seasons: i64,
+}
+
+/// One episode of a series, as one still of the series page's wall.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Episode {
     /// The aired season number that places the episode.
     pub season: i64,
     /// The aired episode number inside the season.
     pub episode: i64,
-    /// The path of the episode's art, relative to the library root, or
+    /// The name a person reads.
+    pub title: String,
+    /// The year or the date the episode aired, as the catalog stores it.
+    pub released: String,
+    /// The running time in seconds, zero where the catalog holds none.
+    pub duration: i64,
+    /// The plot, empty where the sidecar named none.
+    pub plot: String,
+    /// The path of the episode's still, relative to the library root, or
     /// empty where it has none.
     pub art: String,
 }
 
 /// What the views read. Every list comes back in the order the views draw
 /// it, so the views sort nothing: titles by the scanner's sort key, and
-/// seasons and episodes by their aired numbers.
+/// episodes by their aired numbers.
 ///
 /// Every method reads local state and returns at once; no call waits on a
 /// network. [`Source::changed`] carries the freshness contract from plan
@@ -141,15 +178,17 @@ pub trait Source {
     /// kind `movies`, its series for the kind `series`.
     fn titles(&mut self, library: &str, kind: &str) -> Vec<Title>;
 
-    /// The seasons one series has episodes for, in order.
-    fn seasons(&mut self, library: &str, series: &str) -> Vec<i64>;
-
-    /// One season's episodes, in order.
-    fn episodes(&mut self, library: &str, series: &str, season: i64) -> Vec<EpisodeRow>;
-
     /// One movie's details, or nothing where the library holds no movie
     /// under that id.
     fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails>;
+
+    /// One series' details, or nothing where the library holds no series
+    /// under that id.
+    fn series(&mut self, library: &str, id: &str) -> Option<SeriesDetails>;
+
+    /// Every episode of one series, in aired order: by season, and by
+    /// episode inside a season.
+    fn episodes(&mut self, library: &str, series: &str) -> Vec<Episode>;
 
     /// One set and its members in release order, or nothing where the
     /// library holds no set under that id.

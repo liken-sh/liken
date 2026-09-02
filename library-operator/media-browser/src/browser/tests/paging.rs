@@ -34,22 +34,33 @@ fn a_select_on_a_movie_opens_its_page() {
 }
 
 #[test]
-fn a_series_library_still_walks_its_two_lists() {
+fn a_select_on_a_series_opens_its_page() {
     let mut browser = browser(3);
     browser.key("down");
     browser.key("enter");
     browser.key("enter");
-    let screens::Screen::Seasons(seasons) = browser.top() else {
-        panic!("a series descends into its seasons");
-    };
-    assert_eq!(seasons.rows[0].name, "Season 1");
+
+    let page = showing_series(&browser);
+    assert_eq!(browser.stack.len(), 2);
+    assert_eq!(page.id, "series:1");
+    assert_eq!(page.facts, "1980 · 2 seasons · TV-14");
+    assert_eq!(page.seasons.len(), 2);
+    assert_eq!(page.stills.len(), 8);
+    assert_eq!(page.stills[0].caption, "E1 · Segment 1");
+}
+
+#[test]
+fn a_press_on_a_series_page_crosses_its_dividers() {
+    let mut browser = browser(3);
     browser.key("down");
     browser.key("enter");
-    let screens::Screen::Episodes(episodes) = browser.top() else {
-        panic!("a season descends into its episodes");
-    };
-    assert_eq!(episodes.rows[0].detail, "S2 E4");
-    assert_eq!(browser.stack.len(), 3);
+    browser.key("enter");
+
+    browser.key("down");
+
+    assert_eq!(showing_series(&browser).focus, 4);
+    browser.key("up");
+    assert_eq!(showing_series(&browser).focus, 0);
 }
 
 #[test]
@@ -184,7 +195,10 @@ fn up_from_a_later_row_stays_on_the_wall() {
 fn the_focused_line_carries_the_facts_the_row_holds() {
     let mut browser = browser(3);
     browser.key("enter");
-    assert_eq!(showing_wall(&browser).items[0].line, "Entry 1 · 1980");
+    assert_eq!(
+        showing_wall(&browser).items[0].line.words(),
+        "Entry 1 · 1980"
+    );
 }
 
 #[test]
@@ -274,12 +288,12 @@ fn the_view_builds_for_every_screen() {
     let _ = serials.view();
     serials.key("enter");
     let _ = serials.view();
-    serials.key("enter");
+    serials.key("down");
     let _ = serials.view();
 }
 
 #[test]
-fn a_change_rereads_the_series_lists_that_are_shown() {
+fn a_change_rereads_the_series_page_that_is_shown() {
     let mut browser = browser(3);
     browser.key("down");
     browser.key("enter");
@@ -287,37 +301,46 @@ fn a_change_rereads_the_series_lists_that_are_shown() {
 
     browser.source.changed = true;
     assert!(browser.pump(1.0));
-    assert_eq!(browser.source.calls.last(), Some(&"seasons"));
-
-    browser.key("enter");
-    browser.source.changed = true;
-    assert!(browser.pump(2.0));
     assert_eq!(browser.source.calls.last(), Some(&"episodes"));
+    assert_eq!(showing_series(&browser).stills.len(), 8);
 }
 
 #[test]
-fn a_series_library_with_no_seasons_selects_nothing() {
+fn a_series_with_no_episodes_plays_nothing() {
     let mut browser = browser(3);
     browser.source.empty = true;
     browser.key("down");
     browser.key("enter");
     browser.key("enter");
     assert_eq!(browser.stack.len(), 2);
-
-    browser.key("enter");
-    assert_eq!(browser.stack.len(), 2);
-
-    browser.source.empty = false;
-    browser.source.changed = true;
-    browser.pump(1.0);
-    browser.key("enter");
-    browser.source.empty = true;
-    browser.source.changed = true;
-    browser.pump(2.0);
+    assert!(showing_series(&browser).stills.is_empty());
 
     browser.key("enter");
 
     assert_eq!(browser.source.chosen, None);
+}
+
+#[test]
+fn a_select_on_a_still_asks_for_the_episode_and_its_season() {
+    let mut browser = browser(3);
+    browser.key("down");
+    browser.key("enter");
+    browser.key("enter");
+    browser.key("right");
+
+    browser.key("enter");
+
+    assert_eq!(
+        browser.source.chosen,
+        Some((
+            "screening/serials".into(),
+            Selection::Episode {
+                series: "series:1".into(),
+                season: 1,
+                episode: 2,
+            }
+        ))
+    );
 }
 
 #[test]

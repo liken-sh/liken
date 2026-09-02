@@ -4,12 +4,13 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 
 use super::cache::{Cache, Decoded};
-use super::decode::decode_cover;
+use super::decode::decode_art;
 use super::queue::RequestQueue;
+use super::{Art, Fit};
 use crate::harness::Waker;
 
 // The pixel buffer is shared. A hit on every frame clones a pointer,
@@ -19,6 +20,21 @@ pub struct Poster {
     pub width: u32,
     pub height: u32,
     pub rgba: Arc<[u8]>,
+    // The handles over these pixels, built on the first ask and held with
+    // the cache entry. The renderer keys its uploads by handle id, so a
+    // frame that draws the same handles draws uploads it already holds.
+    pub art: Arc<OnceLock<Art>>,
+}
+
+impl Poster {
+    pub(crate) fn new(width: u32, height: u32, rgba: Arc<[u8]>) -> Self {
+        Self {
+            width,
+            height,
+            rgba,
+            art: Arc::new(OnceLock::new()),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -27,7 +43,13 @@ struct Key {
     art: String,
     width: u32,
     height: u32,
+    fit: Fit,
 }
+
+// A decode of more than this many pixels takes the page lane. A poster
+// slot is about 0.1 megapixels and a backdrop at 1920x1080 is 2.07, so
+// one megapixel separates the two with room either way.
+const PAGE_PIXELS: u64 = 1_000_000;
 
 struct Shared {
     cache: Cache<Key>,
@@ -84,18 +106,27 @@ impl ArtStore {
 
     // An item with no art, and a library the store holds no root for,
     // can never produce a poster, so neither reaches the queue.
-    pub fn poster(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Poster> {
+    pub fn poster(
+        &mut self,
+        library: &str,
+        art: &str,
+        width: u32,
+        height: u32,
+        fit: Fit,
+    ) -> Option<Poster> {
         if art.is_empty() || width == 0 || height == 0 {
             return None;
         }
         if !self.roots.contains_key(library) {
             return None;
         }
+        let page = u64::from(width) * u64::from(height) > PAGE_PIXELS;
         let key = Key {
             library: library.to_owned(),
             art: art.to_owned(),
             width,
             height,
+            fit,
         };
         let (lock, signal) = &*self.shared;
         let mut shared = lock.lock().expect("the store mutex is never poisoned");
@@ -104,7 +135,7 @@ impl ArtStore {
             Some(Decoded::Failed) => return None,
             None => {}
         }
-        if shared.queue.request(key) {
+        if shared.queue.request(key, page) {
             signal.notify_one();
         }
         None
@@ -157,7 +188,7 @@ fn spawn_worker(
                 }
             };
             let path = roots[&key.library].join(&key.art);
-            let value = match decode_cover(&path, key.width, key.height) {
+            let value = match decode_art(&path, key.width, key.height, key.fit) {
                 Some(poster) => Decoded::Ready(poster),
                 None => Decoded::Failed,
             };

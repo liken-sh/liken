@@ -7,10 +7,9 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use iced_widget::core::Bytes;
-use iced_widget::image::Handle;
 
-use super::Posters;
 use super::store::ArtStore;
+use super::{Art, Fit, Posters};
 use crate::harness::Waker;
 use crate::views::wall;
 
@@ -28,7 +27,7 @@ pub const CACHED_BACKDROPS: usize = 3;
 /// a page draws at the size of the window, four bytes to the pixel.
 pub fn budget(size: (u32, u32)) -> usize {
     let (width, height) = size;
-    let cells = wall::cells(width as f32, wall::POSTER);
+    let cells = wall::cells(width as f32, wall::POSTER, wall::COLUMNS);
     CACHED_POSTERS * cells.poster_width as usize * cells.poster_height as usize * 4
         + CACHED_BACKDROPS * width as usize * height as usize * 4
 }
@@ -63,6 +62,32 @@ impl Volumes {
             wake,
         }
     }
+
+    // The handles borrow the same pixels the cache holds, so the frame
+    // copies none of them. A cached decode builds its handles once and
+    // holds them beside its pixels, so a redraw hands the renderer the
+    // ids it already uploaded and uploads nothing again.
+    fn decoded(
+        &mut self,
+        library: &str,
+        art: &str,
+        width: u32,
+        height: u32,
+        fit: Fit,
+    ) -> Option<Art> {
+        if !contained(art) {
+            return None;
+        }
+        let poster = self.store.poster(library, art, width, height, fit)?;
+        let built = poster.art.get_or_init(|| {
+            Art::new(
+                poster.width,
+                poster.height,
+                Bytes::from_owner(poster.rgba.clone()),
+            )
+        });
+        Some(built.clone())
+    }
 }
 
 // The catalog's art path is data from a volume this client does not
@@ -76,18 +101,12 @@ fn contained(art: &str) -> bool {
 }
 
 impl Posters for Volumes {
-    fn poster(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Handle> {
-        if !contained(art) {
-            return None;
-        }
-        let poster = self.store.poster(library, art, width, height)?;
-        // The handle borrows the same pixels the cache holds, so the
-        // frame copies none of them.
-        Some(Handle::from_rgba(
-            poster.width,
-            poster.height,
-            Bytes::from_owner(poster.rgba),
-        ))
+    fn poster(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Art> {
+        self.decoded(library, art, width, height, Fit::Cover)
+    }
+
+    fn fitted(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Art> {
+        self.decoded(library, art, width, height, Fit::Contain)
     }
 
     fn delivered(&mut self) -> bool {
@@ -104,12 +123,30 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use iced_widget::core::Rectangle;
+    use iced_widget::image::Handle;
     use image::{Rgb, RgbImage};
     use tempfile::TempDir;
 
     use super::*;
 
     const DEADLINE: Duration = Duration::from_secs(10);
+
+    fn handles(art: &Art) -> Vec<Handle> {
+        let (width, height) = art.size();
+        art.bands(Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: height as f32,
+        })
+        .map(|(_, handle)| handle)
+        .collect()
+    }
+
+    fn ids(art: &Art) -> Vec<iced_widget::core::image::Id> {
+        handles(art).iter().map(Handle::id).collect()
+    }
 
     fn volume(dir: &TempDir) -> Volumes {
         let art = RgbImage::from_pixel(120, 180, Rgb([40, 90, 160]));
@@ -134,20 +171,70 @@ mod tests {
         );
         receiver.recv_timeout(DEADLINE).unwrap();
 
-        let handle = volumes
+        let art = volumes
             .poster("local/movies", "poster.jpg", 40, 60)
             .expect("the decode landed");
+        assert_eq!(art.size(), (40, 60));
+        let drawn = handles(&art);
+        assert_eq!(drawn.len(), 1);
         let Handle::Rgba {
             width,
             height,
             pixels,
             ..
-        } = handle
+        } = &drawn[0]
         else {
             panic!("a decoded poster is an Rgba handle");
         };
-        assert_eq!((width, height), (40, 60));
+        assert_eq!((*width, *height), (40, 60));
         assert_eq!(pixels.len(), 40 * 60 * 4);
+    }
+
+    #[test]
+    fn two_asks_for_one_decode_answer_the_same_handles() {
+        let dir = TempDir::new().unwrap();
+        let mut volumes = volume(&dir);
+        let (sender, receiver) = mpsc::channel();
+        volumes.wake_by(Arc::new(move || {
+            let _ = sender.send(());
+        }));
+
+        assert!(
+            volumes
+                .poster("local/movies", "poster.jpg", 40, 60)
+                .is_none()
+        );
+        receiver.recv_timeout(DEADLINE).unwrap();
+
+        let first = volumes
+            .poster("local/movies", "poster.jpg", 40, 60)
+            .unwrap();
+        let again = volumes
+            .poster("local/movies", "poster.jpg", 40, 60)
+            .unwrap();
+        assert_eq!(ids(&first), ids(&again));
+    }
+
+    #[test]
+    fn a_fitted_ask_keeps_the_whole_image_inside_its_box() {
+        let dir = TempDir::new().unwrap();
+        let mut volumes = volume(&dir);
+        let wide = RgbImage::from_pixel(120, 40, Rgb([200, 200, 200]));
+        wide.save(dir.path().join("logo.png")).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        volumes.wake_by(Arc::new(move || {
+            let _ = sender.send(());
+        }));
+
+        assert!(volumes.fitted("local/movies", "logo.png", 60, 60).is_none());
+        receiver.recv_timeout(DEADLINE).unwrap();
+        let fitted = volumes.fitted("local/movies", "logo.png", 60, 60).unwrap();
+        assert_eq!(fitted.size(), (60, 20));
+
+        assert!(volumes.poster("local/movies", "logo.png", 60, 60).is_none());
+        receiver.recv_timeout(DEADLINE).unwrap();
+        let covered = volumes.poster("local/movies", "logo.png", 60, 60).unwrap();
+        assert_eq!(covered.size(), (60, 60));
     }
 
     #[test]
@@ -184,6 +271,11 @@ mod tests {
                 .poster("local/movies", "../poster.jpg", 40, 60)
                 .is_none()
         );
+        assert!(
+            volumes
+                .fitted("local/movies", "../poster.jpg", 40, 60)
+                .is_none()
+        );
     }
 
     #[test]
@@ -205,7 +297,7 @@ mod tests {
 
     #[test]
     fn the_budget_holds_the_head_to_heads_posters_and_a_few_backdrops() {
-        let cells = wall::cells(1920.0, wall::POSTER);
+        let cells = wall::cells(1920.0, wall::POSTER, wall::COLUMNS);
         let one = cells.poster_width as usize * cells.poster_height as usize * 4;
         let backdrops = CACHED_BACKDROPS * 1920 * 1080 * 4;
         assert_eq!(budget((1920, 1080)), CACHED_POSTERS * one + backdrops);

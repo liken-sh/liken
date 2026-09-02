@@ -47,6 +47,10 @@ image = { version = "=0.25.10", default-features = false, features = [
     "jpeg",
     "png",
 ] }
+# libc is here for glibc's mallopt, which main.rs calls to pin the
+# allocator's mmap and trim thresholds. Without the pin, image decodes
+# dirty heap arenas the process never returns.
+libc = "=0.2.189"
 # serde_json writes the measurements file.
 serde_json = "=1.0.151"
 # rusqlite reads the sidecar's file; bundled compiles its own SQLite so

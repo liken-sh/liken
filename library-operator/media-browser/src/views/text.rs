@@ -1,6 +1,5 @@
-// The text primitive: one line, or a block cut to a number of lines with
-// a fade over the cut. Both answer the height they took, so a page stacks
-// its blocks.
+// The text primitive: one line, or a block cut to a number of lines. Both
+// answer the height they took, so a page stacks its blocks.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -8,8 +7,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point};
 
-use super::{area, extent, label};
-use crate::look;
+use super::{area, label};
 
 /// The height of one line as a share of its size. Every block of text on
 /// a page is measured in it.
@@ -19,6 +17,13 @@ pub const LEADING: f32 = 1.32;
 // whether a block is longer than its cap.
 const ADVANCE: f32 = 0.5;
 
+/// How many characters of this size a width holds. It is an estimate from
+/// the average advance, because the shaper runs on the draw path and a
+/// caller decides its geometry before it draws.
+pub fn fits(size: f32, width: f32) -> usize {
+    (width / (size * ADVANCE)).max(0.0) as usize
+}
+
 /// How many lines this content takes at this size and width. The count
 /// is an estimate from the number of characters, because the shaper runs
 /// on the draw path and the page decides its geometry before it draws.
@@ -26,8 +31,7 @@ pub fn lines(content: &str, size: f32, width: f32) -> usize {
     if content.is_empty() {
         return 0;
     }
-    let per_line = (width / (size * ADVANCE)).max(1.0);
-    (content.chars().count() as f32 / per_line).ceil() as usize
+    content.chars().count().div_ceil(fits(size, width).max(1))
 }
 
 /// The height a number of lines takes at this size.
@@ -62,9 +66,8 @@ pub fn line(
     height(lines(content, size, width), size)
 }
 
-/// A block of text cut to `cap` lines, with a fade over the last line
-/// where the content is longer than the cut. The answer is the height the
-/// block took, so the caller stacks the next block under it.
+/// A block of text cut to `cap` lines. The answer is the height the block
+/// took, so the caller stacks the next block under it.
 pub fn block(
     frame: &mut canvas::Frame<Renderer>,
     content: &str,
@@ -78,7 +81,6 @@ pub fn block(
     if taken == 0 {
         return 0.0;
     }
-    let leading = size * LEADING;
     let height = height(taken.min(cap), size);
     let block = area(at.x, at.y, width, height);
 
@@ -95,20 +97,6 @@ pub fn block(
             width,
         ));
     });
-
-    if taken > cap {
-        let fade = area(at.x, at.y + height - leading, width, leading);
-        frame.fill_rectangle(
-            fade.position(),
-            extent(fade),
-            canvas::gradient::Linear::new(
-                Point::new(fade.x, fade.y),
-                Point::new(fade.x, fade.y + fade.height),
-            )
-            .add_stop(0.0, look::CLEAR)
-            .add_stop(1.0, look::BACKGROUND),
-        );
-    }
 
     height
 }
@@ -138,6 +126,13 @@ mod tests {
     fn a_narrow_block_holds_fewer_characters() {
         let plot = "word ".repeat(20);
         assert!(lines(&plot, 28.0, 120.0) > lines(&plot, 28.0, 1800.0));
+    }
+
+    #[test]
+    fn a_band_holds_the_characters_its_width_allows() {
+        assert_eq!(fits(26.0, 320.0), 24);
+        assert_eq!(fits(26.0, 640.0), 49);
+        assert_eq!(fits(26.0, 0.0), 0);
     }
 
     #[test]

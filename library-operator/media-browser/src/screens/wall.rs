@@ -22,9 +22,9 @@ use crate::views::{area, band, wall};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Opens {
     /// A movie's page.
-    Page,
-    /// A series' seasons, until the series page replaces them.
-    Seasons,
+    Movie,
+    /// A series' page.
+    Series,
 }
 
 /// The wall screen: the library it draws, its titles, and where focus is.
@@ -56,8 +56,8 @@ impl Wall {
             library: library.to_string(),
             kind: kind.to_string(),
             opens: match kind {
-                "series" => Opens::Seasons,
-                _ => Opens::Page,
+                "series" => Opens::Series,
+                _ => Opens::Movie,
             },
             heading: heading(library, items.len()),
             items,
@@ -101,9 +101,10 @@ impl Wall {
     }
 
     /// Whether a rest of focus on this wall is worth a prefetch. It is
-    /// while the posters hold focus and a select opens a page.
+    /// while the posters hold focus, because a select on either kind
+    /// opens a page over a backdrop.
     pub fn prefetches(&self) -> bool {
-        self.opens == Opens::Page && self.control.is_none()
+        self.control.is_none()
     }
 
     /// The library and the backdrop the focused title's page draws over.
@@ -114,11 +115,14 @@ impl Wall {
             return None;
         }
         let item = self.items.get(self.focus)?;
-        let details = source.movie(&self.library, &item.id)?;
-        if details.backdrop.is_empty() {
+        let backdrop = match self.opens {
+            Opens::Movie => source.movie(&self.library, &item.id)?.backdrop,
+            Opens::Series => source.series(&self.library, &item.id)?.backdrop,
+        };
+        if backdrop.is_empty() {
             return None;
         }
-        Some((self.library.clone(), details.backdrop))
+        Some((self.library.clone(), backdrop))
     }
 
     /// The view: the band, and the wall of posters under it.
@@ -140,15 +144,14 @@ impl Wall {
             return Step::Stay;
         };
         match self.opens {
-            Opens::Page => match movie::Movie::open(&self.library, &item.id, source) {
+            Opens::Movie => match movie::Movie::open(&self.library, &item.id, source) {
                 Some(page) => Step::Open(Screen::Movie(Box::new(page))),
                 None => Step::Stay,
             },
-            Opens::Seasons => Step::Open(Screen::Seasons(series::Seasons::open(
-                &self.library,
-                &item.id,
-                source,
-            ))),
+            Opens::Series => match series::Series::open(&self.library, &item.id, source) {
+                Some(page) => Step::Open(Screen::Series(Box::new(page))),
+                None => Step::Stay,
+            },
         }
     }
 }
@@ -189,21 +192,33 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
             &self.wall.heading,
             self.wall.control,
         );
+        // The head keeps the mark of a focused slot in the first row off
+        // the band above it.
+        let region = area(
+            0.0,
+            band::HEIGHT + wall::HEAD,
+            bounds.width,
+            bounds.height - band::HEIGHT - wall::HEAD,
+        );
+        let cells = wall::cells(region.width, wall::POSTER, wall::COLUMNS);
         wall::draw(
             &mut frame,
             &mut *self.posters.borrow_mut(),
             &wall::Grid {
                 items: &self.wall.items,
-                focus: self.wall.focus,
+                focus: Some(self.wall.focus),
                 marked: self.wall.control.is_none(),
                 library: &self.wall.library,
                 ratio: wall::POSTER,
-                region: area(
-                    0.0,
-                    band::HEIGHT,
-                    bounds.width,
-                    bounds.height - band::HEIGHT,
+                columns: wall::COLUMNS,
+                offset: wall::scrolled(
+                    self.wall.focus,
+                    self.wall.items.len(),
+                    wall::COLUMNS,
+                    &cells,
+                    region.height,
                 ),
+                region,
             },
         );
         vec![frame.into_geometry()]

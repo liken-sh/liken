@@ -2,13 +2,12 @@
 // before the sidecar source lands. Every name here is synthesized; nothing
 // resembles a real library.
 
-use iced_widget::image::Handle;
-
 use crate::catalog::{
-    Credit, EpisodeRow, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection, Source, Title,
+    Credit, Episode, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection, SeriesDetails,
+    Source, Title,
 };
 use crate::harness::Waker;
-use crate::posters::Posters;
+use crate::posters::{Art, Posters};
 
 // Enough movies to exercise the wall's culling, near the
 // head-to-head's five thousand.
@@ -61,21 +60,55 @@ impl Source for Catalog {
         }
     }
 
-    fn seasons(&mut self, _library: &str, series: &str) -> Vec<i64> {
-        (1..=2 + trailing(series) % 3).collect()
+    // The invented details of one series, so a run with no catalog opens
+    // a series page with a header, dividers, and stills.
+    fn series(&mut self, _library: &str, id: &str) -> Option<SeriesDetails> {
+        let number = trailing(id);
+        if !(1..=SERIALS).contains(&number) {
+            return None;
+        }
+        Some(SeriesDetails {
+            title: format!("Serial {number:02}"),
+            released: (1960 + number * 5).to_string(),
+            duration: 0,
+            rating: "TV-14".into(),
+            genres: vec!["Drama".into(), "Mystery".into()],
+            tagline: format!("Serial {number:02}, in its own seasons."),
+            plot: PLOT.repeat(2),
+            creators: vec![format!("Creator {number:02}")],
+            cast: (1..=6)
+                .map(|part| Credit {
+                    name: format!("Player {number:02}-{part}"),
+                    role: format!("Part {part}"),
+                })
+                .collect(),
+            backdrop: format!("backdrops/serial-{number:02}.jpg"),
+            logo: String::new(),
+            seasons: seasons(number),
+        })
     }
 
-    fn episodes(&mut self, _library: &str, series: &str, season: i64) -> Vec<EpisodeRow> {
-        (1..=6 + (trailing(series) + season) % 5)
-            .map(|episode| EpisodeRow {
-                id: format!(
-                    "episode:sample:{:02}:{season:02}:{episode:02}",
-                    trailing(series)
-                ),
-                title: format!("Segment {episode:02}"),
-                season,
-                episode,
-                art: String::new(),
+    fn episodes(&mut self, _library: &str, id: &str) -> Vec<Episode> {
+        let number = trailing(id);
+        if !(1..=SERIALS).contains(&number) {
+            return Vec::new();
+        }
+        (1..=seasons(number))
+            .flat_map(|season| {
+                (1..=6 + (number + season) % 5).map(move |episode| Episode {
+                    season,
+                    episode,
+                    title: format!("Segment {episode:02}"),
+                    released: format!(
+                        "{}-{:02}-{:02}",
+                        1960 + number * 5 + season - 1,
+                        1 + episode % 12,
+                        1 + episode % 28
+                    ),
+                    duration: 2_400 + (episode % 7) * 60,
+                    plot: format!("Segment {episode:02} of season {season}. {PLOT}"),
+                    art: format!("stills/serial-{number:02}-s{season:02}e{episode:02}.jpg"),
+                })
             })
             .collect()
     }
@@ -142,8 +175,7 @@ impl Source for Catalog {
     fn wake_by(&mut self, _wake: Waker) {}
 }
 
-// The invented plot, long enough that the page cuts it and draws the
-// fade.
+// The invented plot, long enough that a page cuts it at its last line.
 const PLOT: &str = "A survey party reaches the coppice at dusk and finds the ground already \
      turned. What they take for a season of quiet work becomes a study of the \
      people who left the marks, and of the reason the marks were left at all. ";
@@ -158,6 +190,11 @@ fn movie(number: i64) -> Title {
         duration: 4_800 + (number % 47) * 60,
         rating: "PG-13".into(),
     }
+}
+
+// How many seasons an invented serial holds.
+fn seasons(number: i64) -> i64 {
+    2 + number % 3
 }
 
 // The set a movie belongs to. The first movies fall into sets of three,
@@ -185,7 +222,7 @@ fn trailing(id: &str) -> i64 {
 pub struct NoArt;
 
 impl Posters for NoArt {
-    fn poster(&mut self, _library: &str, _art: &str, _width: u32, _height: u32) -> Option<Handle> {
+    fn poster(&mut self, _library: &str, _art: &str, _width: u32, _height: u32) -> Option<Art> {
         None
     }
 }
@@ -212,8 +249,8 @@ mod tests {
             catalog.titles("sample/features", "movies")
         );
         assert_eq!(
-            catalog.episodes("sample/serials", "series:sample:03", 2),
-            catalog.episodes("sample/serials", "series:sample:03", 2)
+            catalog.episodes("sample/serials", "series:sample:03"),
+            catalog.episodes("sample/serials", "series:sample:03")
         );
     }
 
@@ -237,12 +274,28 @@ mod tests {
     #[test]
     fn every_serial_has_seasons_with_episodes() {
         let mut catalog = Catalog;
-        let seasons = catalog.seasons("sample/serials", "series:sample:07");
-        assert_eq!(seasons, vec![1, 2, 3]);
-        let episodes = catalog.episodes("sample/serials", "series:sample:07", 1);
-        assert_eq!(episodes.len(), 9);
+        let details = catalog
+            .series("sample/serials", "series:sample:07")
+            .expect("the sample holds this serial");
+        assert_eq!(details.seasons, 3);
+        assert!(!details.backdrop.is_empty());
+        assert_eq!(details.cast.len(), 6);
+
+        let episodes = catalog.episodes("sample/serials", "series:sample:07");
+        assert_eq!(episodes.len(), 9 + 10 + 6);
         assert_eq!(episodes[0].season, 1);
         assert_eq!(episodes[0].episode, 1);
+        assert_eq!(episodes[9].season, 2);
+        assert!(!episodes[0].art.is_empty());
+        assert!(!episodes[0].plot.is_empty());
+        assert_eq!(episodes[0].released, "1995-02-02");
+    }
+
+    #[test]
+    fn a_serial_the_sample_never_invented_has_no_page() {
+        let mut catalog = Catalog;
+        assert_eq!(catalog.series("sample/serials", "series:sample:99"), None);
+        assert!(catalog.episodes("sample/serials", "nonsense").is_empty());
     }
 
     #[test]

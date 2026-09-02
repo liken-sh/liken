@@ -16,7 +16,40 @@ use media_browser::sample;
 // prefixes on a machine where both run.
 const CLIENT_PREFIX: &str = "media-browser";
 
+// The two glibc allocator thresholds, in bytes. A block above the mmap
+// threshold comes from mmap and returns to the kernel when it is freed,
+// so a page-size decode does not dirty an arena the process keeps. The
+// trim threshold returns the top of an arena as soon as that much is
+// free. Without the pin, the browser held up to 300 MiB of decode dirt
+// on the workstation and gave none of it back.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+const MMAP_THRESHOLD: libc::c_int = 128 * 1024;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+const TRIM_THRESHOLD: libc::c_int = 128 * 1024;
+
+// glibc raises both thresholds on its own as the program frees large
+// blocks. Pinning them holds the decode buffers on mmap for the whole
+// run.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn pin_allocator_thresholds() {
+    // mallopt takes two integers and no pointer. A failure leaves the
+    // defaults in place, and there is nothing this binary can do about
+    // it, so the result is dropped.
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, MMAP_THRESHOLD);
+        libc::mallopt(libc::M_TRIM_THRESHOLD, TRIM_THRESHOLD);
+    }
+}
+
+// A build against another libc has no mallopt to call.
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn pin_allocator_thresholds() {}
+
 fn main() {
+    // This runs before the flags are parsed, so every allocation after
+    // it sees the pinned thresholds.
+    pin_allocator_thresholds();
+
     // The bus wiring is read once here, beside the flags. The crate
     // reads the broker, the Player's name, and every topic. The
     // browser's own read takes the app-id, the window grace, and the

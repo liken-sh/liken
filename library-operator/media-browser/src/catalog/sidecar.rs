@@ -9,12 +9,15 @@ use std::sync::atomic::Ordering;
 use rusqlite::{Connection, OpenFlags, Row};
 
 use crate::catalog::{
-    EpisodeRow, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection, Source, Title,
+    Episode, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection, SeriesDetails, Source,
+    Title,
 };
 use crate::harness::Waker;
 
 mod details;
+mod item;
 mod play;
+mod series;
 mod updates;
 
 // The file opens read-only because only scanners write, through their
@@ -130,9 +133,9 @@ impl Source for SidecarSource {
         };
         let sql = format!(
             "SELECT {} FROM {table} WHERE library = ? ORDER BY sort_key",
-            details::COLUMNS
+            item::COLUMNS
         );
-        self.read(|connection| collect(connection, &sql, &[&library], details::title))
+        self.read(|connection| collect(connection, &sql, &[&library], item::title))
     }
 
     fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails> {
@@ -147,26 +150,14 @@ impl Source for SidecarSource {
             .next()
     }
 
-    fn seasons(&mut self, library: &str, series: &str) -> Vec<i64> {
-        let sql = "SELECT DISTINCT season FROM episodes \
-                   WHERE library = ? AND series = ? ORDER BY season";
-        self.read(|connection| collect(connection, sql, &[&library, &series], |row| row.get(0)))
+    fn series(&mut self, library: &str, id: &str) -> Option<SeriesDetails> {
+        self.read(|connection| series::series(connection, library, id))
+            .into_iter()
+            .next()
     }
 
-    fn episodes(&mut self, library: &str, series: &str, season: i64) -> Vec<EpisodeRow> {
-        let sql = "SELECT id, title, season, episode, art FROM episodes \
-                   WHERE library = ? AND series = ? AND season = ? ORDER BY episode";
-        self.read(|connection| {
-            collect(connection, sql, &[&library, &series, &season], |row| {
-                Ok(EpisodeRow {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    season: row.get(2)?,
-                    episode: row.get(3)?,
-                    art: row.get(4)?,
-                })
-            })
-        })
+    fn episodes(&mut self, library: &str, id: &str) -> Vec<Episode> {
+        self.read(|connection| series::episodes(connection, library, id))
     }
 
     fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem> {

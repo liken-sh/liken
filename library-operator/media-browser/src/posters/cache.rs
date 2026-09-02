@@ -87,11 +87,7 @@ mod tests {
     use super::{Cache, Decoded};
 
     fn poster(bytes: usize) -> Decoded {
-        Decoded::Ready(Poster {
-            width: 1,
-            height: 1,
-            rgba: vec![0u8; bytes].into(),
-        })
+        Decoded::Ready(Poster::new(1, 1, vec![0u8; bytes].into()))
     }
 
     fn is_ready(entry: Option<&Decoded>) -> bool {
