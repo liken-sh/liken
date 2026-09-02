@@ -8,13 +8,13 @@ package main
 //
 // The standing pod outlives every sleep of the controller. The claim
 // tolerates the disconnected taint with no limit, so a controller a
-// person puts down keeps its allocation and the pod keeps running. A
-// sleeping controller closes its event nodes, and a waking controller
-// opens them again, so the reader runs an outer loop: wait for the
-// nodes, publish until they vanish, then wait again. Only the kubelet's
-// SIGTERM ends the process. This differs from the old playback-pod
-// reader, which exited on a sleep and let the kubelet restart it,
-// because that reader held no standing claim to lose.
+// person puts down keeps its allocation and the pod keeps running. The
+// node the claim delivers survives a sleep, so a person's press reaches
+// the bus with no pod restart. A node can still end, on a pod restart or
+// an unprepare, so the reader runs an outer loop: wait for the nodes,
+// publish until they vanish, then wait again. Only the kubelet's SIGTERM
+// ends the process. The pod publishes no link state, because the
+// Peripheral the bluetooth-operator writes is the record of the link.
 //
 // The pod also publishes what its controller declares, on the retained
 // codes topic, at every node open, and the operator reports the codes
@@ -45,27 +45,18 @@ import (
 var inputNodePattern = "/dev/input/event*"
 
 // nodePollDelay is how long the reader waits between two scans of
-// /dev/input while the controller is asleep. A sleeping controller has
-// no nodes at all, so an empty directory is ordinary and the reader
-// scans again every two seconds until the nodes appear.
+// /dev/input while no node is there to read. A pod that starts before its
+// claim is prepared finds an empty directory, which is ordinary, so the
+// reader scans again every two seconds until the nodes appear.
 var nodePollDelay = 2 * time.Second
 
-// remotePresence is the whole of what the standing pod says about its
-// controller: whether the controller's event nodes are open right now. The
-// Remote it belongs to is named by the topic, not by the body, the way a
-// Play's report is.
-type remotePresence struct {
-	Connected bool `json:"connected"`
-}
-
-// reader holds the standing pod's bus client, the three topics it
-// publishes, and the presence it last published. The bus calls onConnect
-// on its own goroutine and the node loop publishes on the pod's, so a
-// mutex guards the flag the two share.
+// reader holds the standing pod's bus client, the topics it publishes,
+// and the declared codes it last published. The bus calls onConnect on its
+// own goroutine and the node loop publishes on the pod's, so a mutex
+// guards the document the two share.
 type reader struct {
 	bus               *Bus
 	eventsTopic       string
-	presenceTopic     string
 	availabilityTopic string
 	codesTopic        string
 
@@ -90,12 +81,11 @@ type reader struct {
 	log io.Writer
 
 	// The verdict lines the last scan logged. The reader scans every
-	// two seconds while a controller sleeps, so it logs only a changed
+	// two seconds while it waits for a node, so it logs only a changed
 	// picture. Only the node loop touches this field.
 	verdicts []string
 
-	mutex     sync.Mutex
-	connected bool
+	mutex sync.Mutex
 	// The declared-codes document last published, so a reconnect
 	// republishes it. A nil document is the cleared value.
 	codes []byte
@@ -129,7 +119,6 @@ func runReader() {
 
 	r := &reader{
 		eventsTopic:       remoteEventsTopic(base, namespace, name),
-		presenceTopic:     remotePresenceTopic(base, namespace, name),
 		availabilityTopic: remoteAvailabilityTopic(base, namespace, name),
 		codesTopic:        remoteCodesTopic(base, namespace, name),
 		keysTopic:         remoteKeysTopic(base, namespace, name),
@@ -148,8 +137,8 @@ func runReader() {
 	// names a Last Will on its availability topic, the pattern the
 	// playback sidecar uses: the broker publishes offline on any
 	// disconnect this pod does not make cleanly, so a pod the kubelet
-	// killed leaves no retained presence that reads as a connected
-	// controller. The Bus manages its own connection and reconnects with
+	// killed leaves no retained document that reads as a live one. The
+	// Bus manages its own connection and reconnects with
 	// backoff, so a broker restart costs a gap in events and not the
 	// reader.
 	r.bus = newBus(busAddress, "remote-"+namespace+"-"+name,
@@ -176,32 +165,14 @@ func (r *reader) handle(topic string, payload []byte) {
 // onConnect refills the broker the moment a session reaches a CONNACK. The
 // Bus remembers subscriptions across a reconnect but not publishes, and a
 // fresh broker session holds none of the retained state this pod owns, so
-// the availability and the current presence both go out again here.
+// the availability and the declared codes both go out again here. A pod
+// holding no nodes republishes the cleared value.
 func (r *reader) onConnect(bus *Bus) {
 	bus.Publish(r.availabilityTopic, []byte(availabilityOnline), true)
 	r.mutex.Lock()
-	connected := r.connected
 	codes := r.codes
 	r.mutex.Unlock()
-	r.publishPresence(connected)
-	// The declared codes are retained state this pod owns, so they go
-	// out again beside the presence. A pod holding no nodes republishes
-	// the cleared value.
 	bus.Publish(r.codesTopic, codes, true)
-}
-
-// publishPresence writes the controller's connected flag to the retained
-// presence topic and records it, so a later reconnect republishes the same
-// value. A pod that has not yet found its controller's nodes publishes
-// false, which is the truth: the pod runs and the controller is away.
-func (r *reader) publishPresence(connected bool) {
-	r.mutex.Lock()
-	r.connected = connected
-	r.mutex.Unlock()
-	// A struct of one bool marshals unconditionally, so the error is
-	// dropped.
-	payload, _ := json.Marshal(remotePresence{Connected: connected})
-	r.bus.Publish(r.presenceTopic, payload, true)
 }
 
 // publishCodes writes what the nodes declare to the retained codes
@@ -230,15 +201,10 @@ func (r *reader) clearCodes() {
 
 // publishEvents is the standing pod's outer loop. It waits for the
 // controller's nodes, publishes every bindable event until the nodes
-// vanish, then waits again. The nodes vanish when the controller sleeps
-// and return when it wakes, and the pod keeps running across both, so
-// only ctx ending stops this loop.
-//
-// The two edges of that loop are the controller's presence: nodes that
-// open are a controller that connected, and a node batch that ends is a
-// controller that disconnected. Each edge publishes the retained presence,
-// so the operator folds a live flag into the Player status the idle screen
-// draws.
+// vanish, then waits again. The nodes can end on an unprepare or when
+// the claim's device changes, and the pod keeps running across that, so
+// only ctx ending stops this loop. Each batch of nodes publishes the
+// codes it declares and clears them when it ends.
 func (r *reader) publishEvents(ctx context.Context) {
 	for ctx.Err() == nil {
 		nodes, err := r.awaitNodes(ctx)
@@ -246,17 +212,14 @@ func (r *reader) publishEvents(ctx context.Context) {
 			return
 		}
 		r.publishCodes(declaredCodes(nodes))
-		r.publishPresence(true)
 		r.readAndPublish(ctx, nodes)
-		r.publishPresence(false)
 		r.clearCodes()
 	}
 }
 
-// awaitNodes polls for a node the mode keeps. The nodes appear when
-// the controller connects, which can be minutes after this pod
-// schedules, so an empty directory is ordinary and only ctx ends the
-// wait.
+// awaitNodes polls for a node the mode keeps. The nodes appear when the
+// claim is prepared, which can be minutes after this pod schedules, so an
+// empty directory is ordinary and only ctx ends the wait.
 func (r *reader) awaitNodes(ctx context.Context) ([]openNode, error) {
 	for {
 		nodes := r.matchingNodes()
@@ -309,7 +272,7 @@ func (r *reader) matchingNodes() []openNode {
 }
 
 // logVerdicts writes one line per node, and only when the picture
-// changed, because the two-second scan of a sleeping controller would
+// changed, because the two-second scan of an empty directory would
 // otherwise repeat the same report forever.
 func (r *reader) logVerdicts(verdicts []string) {
 	if slices.Equal(verdicts, r.verdicts) {
@@ -352,14 +315,14 @@ func closeNodes(nodes []openNode) {
 }
 
 // readAndPublish reads the controller's nodes and publishes each
-// bindable event to the events topic. It returns when the nodes vanish,
-// which is the controller going to sleep, so the outer loop waits for
-// the next connect. The process keeps running.
+// bindable event to the events topic. It returns when the nodes vanish, so
+// the outer loop waits for the ones that come back. The process keeps
+// running.
 func (r *reader) readAndPublish(ctx context.Context, nodes []openNode) {
 	defer closeNodes(nodes)
 	// Every repeat this batch of nodes starts runs under the run's
-	// context, and the nodes vanishing ends them all: a controller that
-	// slept mid-hold sends no release.
+	// context, and the nodes vanishing ends them all: a node that ends
+	// mid-hold sends no release.
 	r.repeatCtx = ctx
 	defer r.stopAllRepeats()
 
@@ -413,8 +376,8 @@ func publishable(event inputEvent) bool {
 
 // readNodes starts one reader per matched node and merges their events
 // into one channel. The first reader to end cancels the whole batch,
-// because a vanished node means the controller slept and the outer loop
-// must wait for the nodes the next connect brings.
+// because a vanished node means the claim's nodes changed and the outer
+// loop must wait for the ones that come back.
 func readNodes(ctx context.Context, nodes []openNode, ended context.CancelFunc) <-chan nodeEvent {
 	events := make(chan nodeEvent, 64)
 	var reading sync.WaitGroup
@@ -434,9 +397,8 @@ func readNodes(ctx context.Context, nodes []openNode, ended context.CancelFunc) 
 }
 
 // readNode delivers one node's events until the node ends. A read error
-// is not retried and the node is not reopened, because the error means
-// the controller disconnected and its nodes are gone; the outer loop
-// finds the new ones on the next connect.
+// is not retried and the node is not reopened, because the error means the
+// node is gone; the outer loop finds the new ones when they appear.
 func readNode(ctx context.Context, node openNode, events chan<- nodeEvent) {
 	label := node.label()
 	buffer := make([]byte, inputEventSize*64)

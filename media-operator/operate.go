@@ -126,10 +126,13 @@ type operator struct {
 	// that arbitrates it.
 	focus *focusDesk
 
-	// presence is the desk for each controller's connected flag, built on
-	// the same wake: a controller that connects or disconnects wakes the
-	// pass that republishes the Player status the idle screen reads.
-	presence *presenceDesk
+	// peripherals is the desk for the bluetooth-operator's Peripherals and
+	// for the Peripheral each Remote's claim allocated. The pass fills it
+	// from the API and reads it when it builds a Player's bus status. The
+	// peripherals watch is the wake, so a controller that connects,
+	// disconnects, or reports a new charge reaches the pass that
+	// republishes that status.
+	peripherals *peripheralDesk
 
 	// codes is the desk for each controller's declared code set, built
 	// on the same wake: a code set that changed wakes the pass that
@@ -254,7 +257,6 @@ func operate() {
 	wake := make(chan struct{}, 1)
 	desk := newReports(wake)
 	focusDesk := newFocusDesk(wake)
-	presenceDesk := newPresenceDesk(wake)
 	codesDesk := newCodesDesk(wake)
 	panels := newPanelDesk(wake)
 	media := &operator{
@@ -267,7 +269,7 @@ func operate() {
 		idleDisplayClass:      idleDisplayClass,
 		reports:               desk,
 		focus:                 focusDesk,
-		presence:              presenceDesk,
+		peripherals:           newPeripheralDesk(),
 		codes:                 codesDesk,
 		panels:                panels,
 		panelOverrides:        map[string]panelOverride{},
@@ -297,7 +299,6 @@ func operate() {
 	media.bus.Subscribe(playAvailabilityFilter(topicBase))
 	media.bus.Subscribe(remoteFocusFilter(topicBase))
 	media.bus.Subscribe(remoteFocusCycleFilter(topicBase))
-	media.bus.Subscribe(remotePresenceFilter(topicBase))
 	media.bus.Subscribe(remoteAvailabilityFilter(topicBase))
 	media.bus.Subscribe(remoteCodesFilter(topicBase))
 	media.bus.Subscribe(playerPanelFilter(topicBase))
@@ -337,6 +338,15 @@ func operate() {
 		fmt.Fprintf(os.Stderr, "listing playback pods: %v\n", err)
 		os.Exit(1)
 	}
+	// The Peripherals are listed on the same terms as the other
+	// collections. A cluster whose bluetooth-operator serves no Peripheral
+	// answers an error here, and the operator ends rather than run with no
+	// record of any controller's link.
+	peripherals, err := ListPeripherals(client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing peripherals: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("media.liken.sh: operating %d plays and %d remotes over %s\n",
 		len(plays.Items), len(remotes.Items), busAddress)
 	go watchPlays(client, plays.Metadata.ResourceVersion, wake)
@@ -345,6 +355,7 @@ func operate() {
 	go watchKeymaps(client, keymaps.Metadata.ResourceVersion, wake)
 	go watchMediaPreferences(client, prefs.Metadata.ResourceVersion, wake)
 	go watchPods(client, pods.Metadata.ResourceVersion, wake)
+	go watchPeripherals(client, peripherals.Metadata.ResourceVersion, wake)
 
 	ticker := time.NewTicker(backstopInterval)
 	for {
@@ -408,6 +419,19 @@ func (o *operator) pass() {
 		}
 	}
 	o.reclaimPlays(live)
+	// The Remotes are listed once for the whole pass. The Peripherals are
+	// folded in here, before any Player status is written, because a
+	// unit's bus status carries each controller's link and charge. The same
+	// list reconciles the standing pods at the end of the pass. A list that
+	// fails skips both, so no desk shrinks to a collection the operator
+	// could not read.
+	remotes, remotesErr := ListAllRemotes(o.client)
+	var remoteClaims map[string]claimRead
+	if remotesErr != nil {
+		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", remotesErr)
+	} else {
+		remoteClaims = o.observePeripherals(remotes.Items)
+	}
 	players, err := ListPlayers(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
@@ -430,10 +454,12 @@ func (o *operator) pass() {
 		o.reconcileFocus(players.Items)
 		o.reconcilePlayers(players.Items, list.Items, zone, defaultIdle)
 	}
-	// The Keymaps are read first, because each Remote's table is its
-	// Keymap folded over the base, and the pass compiles one table per
-	// Remote.
-	o.reconcileRemotes(o.loadKeymaps())
+	if remotesErr == nil {
+		// The Keymaps are read first, because each Remote's table is its
+		// Keymap folded over the base, and the pass compiles one table per
+		// Remote.
+		o.reconcileRemotes(remotes.Items, remoteClaims, o.loadKeymaps())
+	}
 }
 
 // handleBusMessage folds one bus message into the report desk or the
@@ -467,30 +493,16 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.focus.requestCycle(controllerKey(namespace, name))
 		return
 	}
-	// A presence or an availability with an empty payload is a cleared
-	// retained value and not a live signal, so it is ignored the way an
-	// empty plays message is. Folding a clear as offline would dim a
-	// controller that is in a person's hand.
-	if namespace, name, ok := parseRemotePresenceTopic(o.topicBase, topic); ok {
-		if len(payload) == 0 {
-			return
-		}
-		var presence remotePresence
-		if err := json.Unmarshal(payload, &presence); err != nil {
-			return
-		}
-		o.presence.setConnected(controllerKey(namespace, name), presence.Connected)
-		return
-	}
+	// An availability with an empty payload is a cleared retained value and
+	// not a live signal, so it is ignored the way an empty plays message
+	// is. The signal gates the declared codes, because a retained document
+	// outlives the pod that wrote it.
 	if namespace, name, ok := parseRemoteAvailabilityTopic(o.topicBase, topic); ok {
 		if len(payload) == 0 {
 			return
 		}
-		online := string(payload) == availabilityOnline
-		o.presence.setAvailability(controllerKey(namespace, name), online)
-		// The same signal gates the declared codes, because a retained
-		// document outlives the pod that wrote it.
-		o.codes.setAvailability(controllerKey(namespace, name), online)
+		o.codes.setAvailability(controllerKey(namespace, name),
+			string(payload) == availabilityOnline)
 		return
 	}
 	// An empty payload on the codes topic is the pod's own clear,
@@ -797,7 +809,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		}
 	}
 	// The panel desk shrinks to the units something draws, the way
-	// the presence desk shrinks to its Remotes.
+	// the codes desk shrinks to its Remotes.
 	o.panels.retain(drawn)
 	// The overrides shrink the same way, and a unit dropped
 	// while its panel was dark takes a lift on the way out.
@@ -826,7 +838,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 // backstop tick off the bus while a unit sits idle.
 func (o *operator) publishPlayerStatus(player *Player, desired PlayerStatus, plays []Play) string {
 	topic := playerStatusTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name)
-	payload, err := json.Marshal(derivePlayerBusStatus(player, desired, plays, o.presence, o.focus))
+	payload, err := json.Marshal(derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshaling player %s/%s bus status: %v\n",
 			player.Metadata.Namespace, player.Metadata.Name, err)
@@ -912,22 +924,17 @@ func (o *operator) publishRePresent(namespace, name string) {
 
 // reconcileRemotes reconciles a standing pod for every Remote in the
 // cluster and writes each Remote's status. A Remote's pod runs whether or
-// not anything plays, so this pass is its own read of the whole collection
-// and not derived from the Plays. It runs after reconcileFocus on the same
-// pass, so the status reports the mark this pass settled.
-func (o *operator) reconcileRemotes(keymaps map[string]*Keymap) {
-	list, err := ListAllRemotes(o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
-		return
-	}
-	live := make(map[string]bool, len(list.Items))
-	present := make(map[string]bool, len(list.Items))
-	for index := range list.Items {
-		remote := &list.Items[index]
+// not anything plays, so the pass reads the whole collection and hands it
+// here rather than deriving it from the Plays. It runs after reconcileFocus
+// on the same pass, so the status reports the mark this pass settled.
+func (o *operator) reconcileRemotes(remotes []Remote, claims map[string]claimRead, keymaps map[string]*Keymap) {
+	live := make(map[string]bool, len(remotes))
+	present := make(map[string]bool, len(remotes))
+	for index := range remotes {
+		remote := &remotes[index]
 		key := controllerKey(remote.Metadata.Namespace, remote.Metadata.Name)
 		live[key] = true
-		if err := o.reconcileRemote(remote); err != nil {
+		if err := o.reconcileRemote(remote, claims[key]); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling remote %s/%s: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
@@ -935,7 +942,10 @@ func (o *operator) reconcileRemotes(keymaps map[string]*Keymap) {
 		// The one status this pass builds carries the mark and the gap
 		// together, because two writers of one status would alternate
 		// and each write wakes the watch.
-		desired := RemoteStatus{Player: o.focus.markFor(key)}
+		desired := RemoteStatus{
+			Player:     o.focus.markFor(key),
+			Peripheral: o.peripherals.peripheralFor(key),
+		}
 		// A table that did not compile reports no gap, because the gap is
 		// what the live table leaves unbound, and this pass has no live
 		// table to subtract.
@@ -947,11 +957,8 @@ func (o *operator) reconcileRemotes(keymaps map[string]*Keymap) {
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
 	}
-	// The presence desk holds a key per controller it has heard from, so it
-	// shrinks to the Remotes the cluster still holds. The pass reads the
-	// whole collection here already, so this is the one place that reads
-	// which controllers remain.
-	o.presence.retain(live)
+	// The codes desk holds a key per controller it has heard from, so it
+	// shrinks to the Remotes the cluster still holds.
 	o.codes.retain(live)
 	// A Remote that is gone leaves its retained table behind, so the
 	// pass clears the topic with an empty payload. The map is the record

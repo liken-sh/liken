@@ -46,17 +46,15 @@ const (
 	playAvailabilityKind = "availability"
 )
 
-// The kinds at the end of the three remotes topics the operator reads
-// for a controller. They are separate constants from the plays kinds
-// above, because the two trees carry different payloads under the same
-// words.
+// The kinds at the end of the remotes topics the operator reads for a
+// controller. They are separate constants from the plays kinds above,
+// because the two trees carry different payloads under the same words.
 const (
-	remotePresenceKind     = "presence"
 	remoteAvailabilityKind = "availability"
-	// The third retained remotes kind, the codes one controller
+	// The second retained remotes kind, the codes one controller
 	// declares.
 	remoteCodesKind = "codes"
-	// The fourth retained remotes kind, the compiled key table the
+	// The third retained remotes kind, the compiled key table the
 	// operator writes and the standing pod reads.
 	remoteKeysKind = "keys"
 )
@@ -112,22 +110,11 @@ func remoteFocusCycleFilter(base string) string {
 	return base + "/remotes/+/+/focus/cycle"
 }
 
-// remotePresenceTopic carries whether one controller is connected right
-// now, as {"connected": true} or false. The standing remote pod publishes
-// it retained, because presence is a state and not an event, so the
-// operator reads the current value the instant it subscribes. The pod
-// senses the controller first-hand: its evdev nodes open when the
-// controller connects and vanish when it disconnects, so the signal
-// starts where it is read and no Kubernetes watch carries it.
-func remotePresenceTopic(base, namespace, name string) string {
-	return base + "/remotes/" + namespace + "/" + name + "/" + remotePresenceKind
-}
-
 // remoteAvailabilityTopic carries online or offline for the standing
 // remote pod itself, the same two words the plays availability uses. The
 // pod names this topic as its MQTT Last Will, so a pod the kubelet killed
-// reads offline and the retained presence it left behind does not stand as
-// a connected controller.
+// reads offline and the retained codes it left behind do not read as a
+// live declaration.
 func remoteAvailabilityTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/" + remoteAvailabilityKind
 }
@@ -153,23 +140,10 @@ func parseRemoteCodesTopic(base, topic string) (namespace, name string, ok bool)
 	return parseRemoteTopic(base, topic, remoteCodesKind)
 }
 
-// remotePresenceFilter is the operator's subscription that reaches every
-// controller's presence. The operator folds each message into the Player
-// status it publishes, so the idle pod reads one topic and no more.
-func remotePresenceFilter(base string) string {
-	return base + "/remotes/+/+/" + remotePresenceKind
-}
-
 // remoteAvailabilityFilter is the operator's subscription that reaches
 // every standing remote pod's availability signal.
 func remoteAvailabilityFilter(base string) string {
 	return base + "/remotes/+/+/" + remoteAvailabilityKind
-}
-
-// parseRemotePresenceTopic maps a presence topic back to the controller it
-// names.
-func parseRemotePresenceTopic(base, topic string) (namespace, name string, ok bool) {
-	return parseRemoteTopic(base, topic, remotePresenceKind)
 }
 
 // parseRemoteAvailabilityTopic maps an availability topic back to the
@@ -255,8 +229,8 @@ func playerCommandsTopic(base, namespace, name string) string {
 }
 
 // playerStatusTopic carries one unit's presentable state: its friendly
-// name, what it is doing, the Play it runs, and its parts with the
-// presence of each. The operator is the only writer, and the topic is
+// name, what it is doing, the Play it runs, and its parts with the link
+// and charge of each. The operator is the only writer, and the topic is
 // retained, so an idle pod that just started paints the live state the
 // broker already holds and asks for nothing. It stays off the plays tree
 // because it describes the equipment, which stands whether or not a Play

@@ -1,6 +1,6 @@
 package main
 
-// These tests cover the five collection watchers other than the Play
+// These tests cover the six collection watchers other than the Play
 // watch: each one watches its own collection, and each one recovers from a
 // stream that ended and from a list that failed.
 
@@ -28,6 +28,7 @@ var collectionWatchers = []collectionWatcher{
 	{name: "keymaps", watch: watchKeymaps, watchPath: keymapsPath, listPath: keymapsPath},
 	{name: "media preferences", watch: watchMediaPreferences, watchPath: mediaPrefsPath, listPath: mediaPrefsPath},
 	{name: "playback pods", watch: watchPods, watchPath: podsAllPath, listPath: podsAllPath},
+	{name: "peripherals", watch: watchPeripherals, watchPath: peripheralsPath, listPath: peripheralsPath},
 }
 
 // The server outlives the test for the reason startWatch names: a

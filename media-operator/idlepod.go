@@ -396,7 +396,7 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 			screen.pod = buildIdlePod(player, claim, o.busAddress, o.topicBase, timeZone, idle, remotes)
 		}
 	}
-	if err := o.reconcileStanding(screen); err != nil {
+	if err := o.reconcileStanding(screen, claimRead{}); err != nil {
 		return err
 	}
 	// The pod an older release stood. This pass wants none under that
@@ -405,5 +405,5 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 	return o.reconcileStanding(standing{
 		namespace: namespace,
 		podName:   idlePodName(name) + retiredIdleCommandPodSuffix,
-	})
+	}, claimRead{})
 }

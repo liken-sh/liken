@@ -49,11 +49,12 @@ The controller itself, selected out of the devices the hardware operators publis
 
 ## status
 
-What the operator reports about this controller: the unit its presses reach now, and the declared codes its Keymap leaves unbound.
+What the operator reports about this controller: the unit its presses reach now, the bonded device its claim holds, and the declared codes its Keymap leaves unbound.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--player"></span>`player` | string | no | The Player this Remote's focus mark names now: the unit its presses reach, idle or playing. It is empty while no Player lists this Remote. |
+| <span id="status--peripheral"></span>`peripheral` | string | no | The Peripheral for the device this Remote's claim allocated. The name is the device's address in lowercase with dashes. Read that object for the link and the battery level. The field is empty while the claim carries no allocation, and for a controller another driver publishes. |
 | <span id="status--unbound"></span>`unbound` | [\[\]object](#statusunbound) | no | The gap, never the census: every code this controller declares that its Keymap does not bind. A controller whose Keymap binds every declared code reports nothing here, and the field is absent while no standing pod has reported. The list shrinks as the Keymap grows, so it measures a mapping's progress during discovery and stands as a completeness check after. |
 
 ### status.unbound[]
@@ -85,14 +86,18 @@ the controller first connects, then keeps running through every later sleep.
 
 ## Status
 
-The operator writes two facts on a `Remote`. `status.player` is the
-`Player` its focus mark names now. `status.unbound` is the gap: every
+The operator writes three facts on a `Remote`. `status.player` is the
+`Player` its focus mark names now. `status.peripheral` names the
+`Peripheral` for the device the `Remote`'s claim allocated, which is
+where a person reads the controller's link and its battery level.
+`status.unbound` is the gap: every
 declared control that the base table and the `Keymap` together map to
 nothing, or map to `none`. A declared `KEY_*` code passes as itself,
 so it is never unbound, and a keyboard remote starts with an empty
 list. `kubectl get remotes` shows each controller's `Keymap`, the unit
-it drives, and its age. A `Keymap` that does not compile is logged by
-the operator, and the `Remote` keeps its last good table.
+it drives, its `Peripheral`, and its age. A `Keymap` that does not
+compile is logged by the operator, and the `Remote` keeps its last
+good table.
 
 ## On the bus
 
@@ -104,7 +109,6 @@ base.
 |----------------|--------------|----------|-------------------------------|
 | `events`       | the `Remote`'s pod | no       | one key event                 |
 | `keys`         | operator     | yes      | the controller's key table    |
-| `presence`     | the `Remote`'s pod | yes      | `{"connected": true}`         |
 | `codes`        | the `Remote`'s pod | yes      | the declared code set         |
 | `availability` | the `Remote`'s pod | yes      | `online` or `offline`         |
 | `focus`        | operator     | yes      | the name of the `Player` it drives |
@@ -142,19 +146,6 @@ reaches it with no pod restart. The operator republishes only when the
 table changes, and it clears the topic with an empty payload when the
 `Remote` is deleted.
 
-### presence
-
-Whether the controller's event nodes are open right now:
-
-    {"connected": true}
-
-The `Remote`'s pod reads the controller's evdev nodes directly:
-they open when the controller connects and vanish when it sleeps,
-so presence comes straight from the device. The topic is retained, so the
-operator reads the current value the instant it subscribes, and it
-folds the flag into the [`Player` status](/docs/reference/players/)
-it publishes.
-
 ### codes
 
 The codes the controller declares, read from its nodes' capability
@@ -174,8 +165,7 @@ the folded table from the set and reports the gap as
 The `Remote`'s pod names this topic as its MQTT Last Will, with
 `offline` as the payload, and publishes `online` once it connects.
 When the pod dies, the broker writes `offline`, so the retained
-presence a dead pod left behind does not read as a connected
-controller.
+codes a dead pod left behind do not read as a live declaration.
 
 ### focus and focus/cycle
 

@@ -3,11 +3,10 @@ package main
 // A controller declares every code it can report in its nodes'
 // capability bitmaps, readable the moment a node opens and complete
 // with no button pressed. The standing pod publishes that declared set
-// retained, this desk folds it in beside the presence desk, and the
-// reconcile pass reports the gap, the declared controls the compiled
-// table maps to nothing, on the Remote's status. The gap is derived on
-// every pass and never accumulated, so erasing the status loses
-// nothing.
+// retained, this desk folds it in, and the reconcile pass reports the
+// gap, the declared controls the compiled table maps to nothing, on the
+// Remote's status. The gap is derived on every pass and never
+// accumulated, so erasing the status loses nothing.
 
 import (
 	"slices"
@@ -24,7 +23,7 @@ type remoteCodes struct {
 }
 
 // codesDesk is the boundary between the codes topic and the reconcile
-// loop, shaped like the presence desk beside it: the bus thread folds
+// loop, shaped like the report desk beside it: the bus thread folds
 // messages in, and the pass reads one answer out.
 type codesDesk struct {
 	mutex    sync.Mutex
@@ -68,8 +67,8 @@ func (c *codesDesk) clear(key string) {
 }
 
 // setAvailability records whether the standing pod that reports one
-// controller is up, from the same availability signal the presence
-// desk reads.
+// controller is up, from the availability topic the pod names as its
+// Last Will.
 func (c *codesDesk) setAvailability(key string, online bool) {
 	c.mutex.Lock()
 	previous, had := c.online[key]

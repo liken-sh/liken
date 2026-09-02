@@ -4,10 +4,24 @@ package main
 // pod's declared-codes document and the reconcile pass, and the gap
 // the pass reports.
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func testDeclared() remoteCodes {
 	return remoteCodes{Keys: []uint16{0x130, 0x131}, Axes: []uint16{0x10}}
+}
+
+// woke reports whether the desk poked the loop, under a short deadline so
+// a desk that wakes nothing fails fast.
+func woke(wake <-chan struct{}) bool {
+	select {
+	case <-wake:
+		return true
+	case <-time.After(50 * time.Millisecond):
+		return false
+	}
 }
 
 // A fresh document is a status the pass must rewrite, so it wakes the

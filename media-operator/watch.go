@@ -111,6 +111,34 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// watchPeripherals wakes the loop on a Peripheral change, the way the
+// other watchers wake it on theirs. A controller that connects,
+// disconnects, or reports a new charge changes its Peripheral, and the
+// pass that wake triggers republishes the Player status the idle screen
+// draws. The recovery is the same as the others: list the collection,
+// wake the loop, and resume from the list's version.
+func watchPeripherals(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := peripheralsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListPeripherals(c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing peripherals to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // watchKeymaps wakes the loop on a Keymap change, so the pass it
 // triggers recompiles and republishes every Remote's table, and an edit reaches
 // a running standing pod within one pass rather than one backstop tick.

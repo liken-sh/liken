@@ -28,6 +28,10 @@ pub struct Part {
     /// The presence of a part that has any. `None` is a part with no live
     /// state, which draws at full brightness always.
     pub connected: Option<bool>,
+    /// The charge the part reports, from 0 to 100. The identity block draws
+    /// it beside the name. `None` is a part that reports none, and its line
+    /// carries the name alone.
+    pub battery: Option<i64>,
     /// Whether the focus mark names this part. The seed carries no focus, so no
     /// marker draws before the first status.
     pub focused: bool,
@@ -279,6 +283,7 @@ fn part(component: Component, was: Option<&Part>, at: f64) -> Part {
         name: component.name,
         kind: component.kind,
         connected: component.connected,
+        battery: component.battery,
         focused: component.focused == Some(true),
         returned: came_back
             .then_some(at)
@@ -310,6 +315,7 @@ mod tests {
             name: name.into(),
             kind: kind.into(),
             connected,
+            battery: None,
             focused: None,
         }
     }
@@ -738,6 +744,26 @@ mod tests {
         let before = unit.clone();
         unit.fold(Moment::Focus { remote: 4 }, 3.0);
         assert_eq!(unit, before);
+    }
+
+    #[test]
+    fn a_part_carries_the_charge_the_status_reports() {
+        let mut unit = seeded();
+        unit.fold(
+            Moment::Status(status(vec![Component {
+                battery: Some(62),
+                ..component("A remote", "remote", Some(true))
+            }])),
+            1.0,
+        );
+        assert_eq!(unit.parts[0].battery, Some(62));
+
+        // The device stops reporting a level, so the line drops it.
+        unit.fold(
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
+            2.0,
+        );
+        assert_eq!(unit.parts[0].battery, None);
     }
 
     #[test]

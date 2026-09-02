@@ -14,7 +14,8 @@ rules every topic follows.
 ### `status`
 
 What a screen would show about one unit: its name, what it is
-doing, the `Play` it runs, and its parts with the presence of each.
+doing, the `Play` it runs, and its parts with the link and the
+battery level of each.
 The operator is the only writer, so an idle pod that just started
 draws the live state the broker already holds, with no request to
 the operator.
@@ -26,7 +27,8 @@ the operator.
       "components": [
         {"name": "Portable Screen", "kind": "display"},
         {"name": "Built-in Speakers", "kind": "sink"},
-        {"name": "Studio Controller", "kind": "remote", "connected": true, "focused": true}
+        {"name": "Studio Controller", "kind": "remote", "connected": true,
+         "battery": 62, "focused": true}
       ]
     }
 
@@ -34,8 +36,10 @@ the operator.
 present while a run starts or plays: `name` is the object a person
 finds with `kubectl`, and `title` is the one line a screen draws. A
 component's `kind` is `display`, `sink`, or `remote`, and only a
-remote carries `connected`, because a wired screen reports no
-presence. `focused` appears on the one remote whose
+remote carries `connected`, because a wired screen has no link that
+can go down. `battery` is the charge the controller's `Peripheral`
+reports, from 0 to 100, and a device that reports none omits the key.
+`focused` appears on the one remote whose
 [focus mark](/docs/reference/remotes/) names this `Player`, and the
 idle screen draws a small hexagon beside that controller in its
 parts list. Every other component omits the key.

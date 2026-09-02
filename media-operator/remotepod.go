@@ -132,8 +132,8 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 // recover. A guard that held the roll while a person watched a film would
 // trade those seconds for a pod of unpredictable age, so the pass rolls
 // the pod whenever the template changes.
-func (o *operator) reconcileRemote(remote *Remote) error {
+func (o *operator) reconcileRemote(remote *Remote, known claimRead) error {
 	claim := buildRemoteClaim(remote)
 	pod := buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase)
-	return o.reconcileStanding(standingPair(claim, pod))
+	return o.reconcileStanding(standingPair(claim, pod), known)
 }

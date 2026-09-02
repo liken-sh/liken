@@ -175,17 +175,18 @@ func drain(body io.ReadCloser) {
 // namespace and read back per namespace, and the two Kubernetes
 // kinds this operator writes live under their own groups' paths.
 const (
-	playsPath      = "/apis/" + mediaAPIVersion + "/plays"
-	playersPath    = "/apis/" + mediaAPIVersion + "/players"
-	remotesAllPath = "/apis/" + mediaAPIVersion + "/remotes"
-	keymapsPath    = "/apis/" + mediaAPIVersion + "/keymaps"
-	mediaPrefsPath = "/apis/" + mediaAPIVersion + "/mediapreferences"
-	mediaPrefix    = "/apis/" + mediaAPIVersion + "/namespaces/"
-	claimPrefix    = "/apis/" + claimAPIVersion + "/namespaces/"
-	slicesPath     = "/apis/" + claimAPIVersion + "/resourceslices"
-	displaysPath   = "/apis/" + displayAPIVersion + "/displays"
-	podPrefix      = "/api/v1/namespaces/"
-	podsAllPath    = "/api/v1/pods"
+	playsPath       = "/apis/" + mediaAPIVersion + "/plays"
+	playersPath     = "/apis/" + mediaAPIVersion + "/players"
+	remotesAllPath  = "/apis/" + mediaAPIVersion + "/remotes"
+	keymapsPath     = "/apis/" + mediaAPIVersion + "/keymaps"
+	mediaPrefsPath  = "/apis/" + mediaAPIVersion + "/mediapreferences"
+	mediaPrefix     = "/apis/" + mediaAPIVersion + "/namespaces/"
+	claimPrefix     = "/apis/" + claimAPIVersion + "/namespaces/"
+	slicesPath      = "/apis/" + claimAPIVersion + "/resourceslices"
+	displaysPath    = "/apis/" + displayAPIVersion + "/displays"
+	peripheralsPath = "/apis/" + peripheralAPIVersion + "/peripherals"
+	podPrefix       = "/api/v1/namespaces/"
+	podsAllPath     = "/api/v1/pods"
 )
 
 // playbackPodsQuery narrows a pod list or a pod watch to the operator's own
@@ -464,6 +465,18 @@ func GetDisplay(c *Client, name string) (*Display, error) {
 		return nil, err
 	}
 	return display, nil
+}
+
+// ListPeripherals reads every bonded device the bluetooth-operator
+// publishes. A Peripheral is cluster-scoped, so the path carries no
+// namespace, and the list's resourceVersion is where the peripherals
+// watch resumes from.
+func ListPeripherals(c *Client) (*PeripheralList, error) {
+	list := &PeripheralList{}
+	if err := c.RequestJSON(http.MethodGet, peripheralsPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
 }
 
 // ApplyDisplayOverride writes spec.override and nothing else,

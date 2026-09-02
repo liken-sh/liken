@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -66,7 +65,6 @@ func testReader(t *testing.T) (*reader, *fakeBroker) {
 	return &reader{
 		bus:               bus,
 		eventsTopic:       remoteEventsTopic(defaultTopicBase, "house", "sofa"),
-		presenceTopic:     remotePresenceTopic(defaultTopicBase, "house", "sofa"),
 		availabilityTopic: remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"),
 		codesTopic:        remoteCodesTopic(defaultTopicBase, "house", "sofa"),
 		keysTopic:         remoteKeysTopic(defaultTopicBase, "house", "sofa"),
@@ -75,39 +73,12 @@ func testReader(t *testing.T) (*reader, *fakeBroker) {
 	}, brokers[0]
 }
 
-// The controller's nodes opening and vanishing are the two edges of
-// presence, and each publishes the retained flag the operator folds.
-func TestTheReaderPublishesEachPresenceEdgeRetained(t *testing.T) {
-	cases := []struct {
-		name      string
-		connected bool
-	}{
-		{name: "the controller's nodes open", connected: true},
-		{name: "the node batch ends", connected: false},
-	}
-	for _, each := range cases {
-		t.Run(each.name, func(t *testing.T) {
-			r, broker := testReader(t)
-
-			r.publishPresence(each.connected)
-
-			published := waitForPublish(t, broker.pubs)
-			mustMatch(t, published.topic, remotePresenceTopic(defaultTopicBase, "house", "sofa"))
-			mustMatch(t, published.retained, true)
-			var presence remotePresence
-			mustSucceed(t, json.Unmarshal(published.payload, &presence))
-			mustMatch(t, presence.Connected, each.connected)
-		})
-	}
-}
-
 // The Bus remembers subscriptions across a reconnect but not publishes, so
-// a fresh session republishes the availability and the presence the pod
-// last held. A pod whose controller is connected says so again, and the
-// operator's fold survives a broker restart.
+// a fresh session republishes the availability and the declared codes the
+// pod last held. The operator's gap report survives a broker restart.
 func TestTheReaderRepublishesItsRetainedStateOnConnect(t *testing.T) {
 	r, broker := testReader(t)
-	r.publishPresence(true)
+	r.publishCodes(remoteCodes{Keys: []uint16{0x130}})
 	waitForPublish(t, broker.pubs)
 
 	r.onConnect(r.bus)
@@ -117,9 +88,10 @@ func TestTheReaderRepublishesItsRetainedStateOnConnect(t *testing.T) {
 	mustMatch(t, string(availability.payload), availabilityOnline)
 	mustMatch(t, availability.retained, true)
 
-	presence := waitForPublish(t, broker.pubs)
-	mustMatch(t, presence.topic, remotePresenceTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(presence.payload), `{"connected":true}`)
+	codes := waitForPublish(t, broker.pubs)
+	mustMatch(t, codes.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, string(codes.payload), `{"keys":[304]}`)
+	mustMatch(t, codes.retained, true)
 }
 
 // The declared codes are the union over the kept nodes, in code order
@@ -172,7 +144,6 @@ func TestTheReaderPublishesTheDeclaredCodesRetained(t *testing.T) {
 	mustMatch(t, string(published.payload), `{"keys":[304],"axes":[16]}`)
 
 	r.onConnect(r.bus)
-	waitForPublish(t, broker.pubs)
 	waitForPublish(t, broker.pubs)
 	again := waitForPublish(t, broker.pubs)
 	mustMatch(t, again.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))

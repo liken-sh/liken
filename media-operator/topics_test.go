@@ -16,9 +16,7 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "remote events", got: remoteEventsTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/events"},
 		{name: "remote focus", got: remoteFocusTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/focus"},
 		{name: "remote focus cycle", got: remoteFocusCycleTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/focus/cycle"},
-		{name: "remote presence", got: remotePresenceTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/presence"},
 		{name: "remote availability", got: remoteAvailabilityTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/availability"},
-		{name: "remote presence filter", got: remotePresenceFilter(base), want: "liken/media/remotes/+/+/presence"},
 		{name: "remote availability filter", got: remoteAvailabilityFilter(base), want: "liken/media/remotes/+/+/availability"},
 		{name: "remote codes filter", got: remoteCodesFilter(base), want: "liken/media/remotes/+/+/codes"},
 		{name: "player status", got: playerStatusTopic(base, "house", "theater"), want: "liken/media/players/house/theater/status"},
@@ -123,13 +121,13 @@ func TestTheFocusParsersDoNotCrossMatch(t *testing.T) {
 	}
 }
 
-// The presence parser matches only a presence topic and the availability
-// parser only an availability topic. Each of the four remotes parsers keys
-// on its own kind, so the operator folds each message down one path.
-func TestThePresenceParsersMatchTheirOwnTopicAlone(t *testing.T) {
+// The availability parser matches only an availability topic, and the
+// codes parser only a codes topic. Each of the remotes parsers keys on its
+// own kind, so the operator folds each message down one path.
+func TestTheRemoteParsersMatchTheirOwnTopicAlone(t *testing.T) {
 	base := defaultTopicBase
-	presence := remotePresenceTopic(base, "house", "sofa")
 	availability := remoteAvailabilityTopic(base, "house", "sofa")
+	codes := remoteCodesTopic(base, "house", "sofa")
 
 	cases := []struct {
 		name      string
@@ -139,15 +137,15 @@ func TestThePresenceParsersMatchTheirOwnTopicAlone(t *testing.T) {
 		remote    string
 		ok        bool
 	}{
-		{name: "presence", parse: parseRemotePresenceTopic, topic: presence, namespace: "house", remote: "sofa", ok: true},
-		{name: "presence against availability", parse: parseRemotePresenceTopic, topic: availability},
-		{name: "presence against focus", parse: parseRemotePresenceTopic, topic: remoteFocusTopic(base, "house", "sofa")},
-		{name: "presence against the cycle topic", parse: parseRemotePresenceTopic, topic: remoteFocusCycleTopic(base, "house", "sofa")},
 		{name: "availability", parse: parseRemoteAvailabilityTopic, topic: availability, namespace: "house", remote: "sofa", ok: true},
-		{name: "availability against presence", parse: parseRemoteAvailabilityTopic, topic: presence},
+		{name: "availability against codes", parse: parseRemoteAvailabilityTopic, topic: codes},
+		{name: "availability against focus", parse: parseRemoteAvailabilityTopic, topic: remoteFocusTopic(base, "house", "sofa")},
+		{name: "availability against the cycle topic", parse: parseRemoteAvailabilityTopic, topic: remoteFocusCycleTopic(base, "house", "sofa")},
 		{name: "availability against a play", parse: parseRemoteAvailabilityTopic, topic: playAvailabilityTopic(base, "house", "movie")},
 		{name: "availability under another base", parse: parseRemoteAvailabilityTopic, topic: "other/remotes/house/sofa/availability"},
-		{name: "an empty remote name", parse: parseRemotePresenceTopic, topic: base + "/remotes/house//presence"},
+		{name: "codes", parse: parseRemoteCodesTopic, topic: codes, namespace: "house", remote: "sofa", ok: true},
+		{name: "codes against availability", parse: parseRemoteCodesTopic, topic: availability},
+		{name: "an empty remote name", parse: parseRemoteCodesTopic, topic: base + "/remotes/house//codes"},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -180,7 +178,7 @@ func TestParsePlayerPanelTopicNamesThePlayer(t *testing.T) {
 		{name: "the status topic", topic: playerStatusTopic(base, "house", "theater")},
 		{name: "the commands topic", topic: playerCommandsTopic(base, "house", "theater")},
 		{name: "the volume topic", topic: playerVolumeTopic(base, "house", "theater")},
-		{name: "another tree", topic: remotePresenceTopic(base, "house", "sofa")},
+		{name: "another tree", topic: remoteCodesTopic(base, "house", "sofa")},
 		{name: "an empty namespace", topic: base + "/players//theater/panel"},
 		{name: "an empty player name", topic: base + "/players/house//panel"},
 		{name: "a segment too many", topic: base + "/players/house/theater/panel/state"},

@@ -83,6 +83,11 @@ pub struct Component {
     /// as present-for-now.
     #[serde(default)]
     pub connected: Option<bool>,
+    /// The charge the part reports, from 0 to 100. A part that runs on no
+    /// battery, and one whose device reports no level, carries no key, and the
+    /// screen draws the name alone.
+    #[serde(default)]
+    pub battery: Option<i64>,
     /// True on the one controller whose focus mark names this unit. It appears
     /// nowhere else, so exactly one unit draws the marker for a controller that
     /// several units list.
@@ -115,7 +120,8 @@ mod tests {
                  "play":{"name":"den-tv-1","title":"A Film"},
                  "components":[
                    {"name":"The screen","kind":"display"},
-                   {"name":"A remote","kind":"remote","connected":true,"focused":true}]}"#,
+                   {"name":"A remote","kind":"remote","connected":true,
+                    "battery":62,"focused":true}]}"#,
         )
         .expect("the status decodes");
 
@@ -128,6 +134,8 @@ mod tests {
         assert_eq!(status.components[0].kind, "display");
         assert_eq!(status.components[0].connected, None);
         assert_eq!(status.components[1].connected, Some(true));
+        assert_eq!(status.components[0].battery, None);
+        assert_eq!(status.components[1].battery, Some(62));
         assert_eq!(status.components[1].focused, Some(true));
     }
 

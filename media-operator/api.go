@@ -551,9 +551,18 @@ type Remote struct {
 // Unbound is the gap: every code the controller declares that its
 // Keymap does not bind. It is empty when the Keymap binds every
 // declared code, and absent while no standing pod has reported.
+//
+// Peripheral names the bluetooth-operator's Peripheral for the device
+// this Remote's standing claim allocated. The name is the device's
+// address in the lowercase dashed form, which is the device name the
+// allocation result carries. It is empty while the claim carries no
+// allocation, and for a controller some other driver publishes. The
+// Peripheral is where a person reads the controller's link and its
+// charge.
 type RemoteStatus struct {
-	Player  string        `json:"player,omitempty"`
-	Unbound []UnboundCode `json:"unbound,omitempty"`
+	Player     string        `json:"player,omitempty"`
+	Peripheral string        `json:"peripheral,omitempty"`
+	Unbound    []UnboundCode `json:"unbound,omitempty"`
 }
 
 // UnboundCode is one code the controller declares and the Keymap

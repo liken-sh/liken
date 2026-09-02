@@ -93,6 +93,30 @@ func standingPair(claim *ResourceClaim, pod *Pod) standing {
 // carries for a pod. This operator acts on that kind of holder alone.
 const podsResource = "pods"
 
+// claimRead is what the pass already read about one standing claim.
+// read says whether the pass read at all, and claim is what that read
+// found. A read that found nothing carries read true and a nil claim,
+// because an absent claim is a state and not a failure. The zero value
+// is no read, which sends the reconcile to make its own.
+type claimRead struct {
+	claim *ResourceClaim
+	read  bool
+}
+
+// readClaim reads one standing claim by name. An absent claim is not an
+// error here: it is the state the create answers, so it returns a read
+// that found nothing.
+func (o *operator) readClaim(namespace, name string) (claimRead, error) {
+	claim, err := GetResourceClaim(o.client, namespace, name)
+	if errors.Is(err, ErrNotFound) {
+		return claimRead{read: true}, nil
+	}
+	if err != nil {
+		return claimRead{}, err
+	}
+	return claimRead{claim: claim, read: true}, nil
+}
+
 // reconcileStanding brings one standing pair into line with the claim and
 // the pod this pass would build. It stamps both with their template
 // hashes, reads what the cluster holds, and replaces whichever object no
@@ -113,7 +137,13 @@ const podsResource = "pods"
 //
 // A 409 on either create means another pass, or another copy of this
 // operator, created the object first, which is success.
-func (o *operator) reconcileStanding(want standing) error {
+//
+// known is the claim the pass already read for this object, and it
+// saves the read here. The pass reads every Remote's standing claim
+// once, to resolve the controller's Peripheral, and hands that same
+// read down. A zero known is a caller with no read of its own, and the
+// rule reads the claim itself.
+func (o *operator) reconcileStanding(want standing, known claimRead) error {
 	if want.claim != nil {
 		if err := stampTemplateHash(&want.claim.Metadata, want.claim.Spec); err != nil {
 			return err
@@ -129,11 +159,13 @@ func (o *operator) reconcileStanding(want standing) error {
 	var liveClaim *ResourceClaim
 	claimStands := false
 	if want.claimName != "" {
-		held, err := GetResourceClaim(o.client, namespace, want.claimName)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return err
+		if !known.read {
+			var err error
+			if known, err = o.readClaim(namespace, want.claimName); err != nil {
+				return err
+			}
 		}
-		liveClaim, claimStands = held, err == nil
+		liveClaim, claimStands = known.claim, known.claim != nil
 	}
 
 	livePod, err := GetPod(o.client, namespace, want.podName)

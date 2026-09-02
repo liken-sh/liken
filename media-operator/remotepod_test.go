@@ -207,7 +207,7 @@ func TestReconcileRemoteCreatesTheClaimAndThePodOnce(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	remote := standingRemote()
 
-	if err := media.reconcileRemote(remote); err != nil {
+	if err := media.reconcileRemote(remote, claimRead{}); err != nil {
 		t.Fatalf("first reconcile: %v", err)
 	}
 
@@ -223,7 +223,7 @@ func TestReconcileRemoteCreatesTheClaimAndThePodOnce(t *testing.T) {
 	}
 
 	created := len(cluster.requests)
-	if err := media.reconcileRemote(remote); err != nil {
+	if err := media.reconcileRemote(remote, claimRead{}); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
 	posts := 0

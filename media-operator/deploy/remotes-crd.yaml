@@ -28,7 +28,9 @@ spec:
       subresources:
         status: {}
       # The Player column answers which unit this controller drives now,
-      # so kubectl get remotes reads it without a read of the bus.
+      # so kubectl get remotes reads it without a read of the bus. The
+      # Peripheral column names the bonded device, which is where a
+      # person reads the link and the charge.
       additionalPrinterColumns:
         - name: Keymap
           type: string
@@ -36,6 +38,9 @@ spec:
         - name: Player
           type: string
           jsonPath: .status.player
+        - name: Peripheral
+          type: string
+          jsonPath: .status.peripheral
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -105,8 +110,8 @@ spec:
               type: object
               description: >-
                 What the operator reports about this controller: the
-                unit its presses reach now, and the declared codes
-                its Keymap leaves unbound.
+                unit its presses reach now, the bonded device its claim
+                holds, and the declared codes its Keymap leaves unbound.
               properties:
                 player:
                   type: string
@@ -114,6 +119,15 @@ spec:
                     The Player this Remote's focus mark names now:
                     the unit its presses reach, idle or playing. It
                     is empty while no Player lists this Remote.
+                peripheral:
+                  type: string
+                  description: >-
+                    The Peripheral for the device this Remote's claim
+                    allocated. The name is the device's address in
+                    lowercase with dashes. Read that object for the
+                    link and the battery level. The field is empty
+                    while the claim carries no allocation, and for a
+                    controller another driver publishes.
                 # The map is keyed on code and type together, because
                 # one number can name both a key and an axis: KEY_Q and
                 # ABS_HAT0X are both 16. The list carries no maxItems,

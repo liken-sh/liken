@@ -145,20 +145,30 @@ func theaterWithParts() *Player {
 	}
 }
 
-// connectedTo builds a desk that has heard one presence message, so a test
-// states the fold in one line.
-func connectedTo(key string, connected bool) *presenceDesk {
-	desk := newPresenceDesk(nil)
-	desk.setConnected(key, connected)
+// holding builds a desk that names one controller's device and holds that
+// device's Peripheral, so a test states the fold in one line.
+func holding(key string, peripheral Peripheral) *peripheralDesk {
+	desk := newPeripheralDesk()
+	desk.hold([]Peripheral{peripheral},
+		map[string]string{key: peripheral.Metadata.Name})
 	return desk
+}
+
+// linked builds a desk whose one controller is connected or away.
+func linked(key string, connected bool) *peripheralDesk {
+	status := "False"
+	if connected {
+		status = conditionTrue
+	}
+	return holding(key, bonded("aa-bb-cc-dd-ee-ff", status))
 }
 
 // The bus status carries the unit's name, its activity, and its parts in
 // the order the screen shows them: the display, then each sink, then each
-// remote. Only the remote carries presence, and it reads the flag the desk
-// folded.
+// remote. Only the remote carries the link, and it reads the condition its
+// Peripheral carries.
 func TestDerivePlayerBusStatusListsThePartsInScreenOrder(t *testing.T) {
-	desk := connectedTo(controllerKey("house", "sofa"), true)
+	desk := linked(controllerKey("house", "sofa"), true)
 	connected := true
 
 	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, desk, newFocusDesk(nil))
@@ -190,7 +200,7 @@ func TestDerivePlayerBusStatusFallsBackToTheClassAndTheName(t *testing.T) {
 		},
 	}
 
-	got := derivePlayerBusStatus(player, PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil), newFocusDesk(nil))
+	got := derivePlayerBusStatus(player, PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), newFocusDesk(nil))
 
 	mustMatch(t, got.DisplayName, "theater")
 	mustMatchAll(t, componentNames(got), []string{"display-output", "audio-sink", "sofa"})
@@ -222,7 +232,7 @@ func TestDerivePlayerBusStatusMarksTheFocusedRemote(t *testing.T) {
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			got := derivePlayerBusStatus(theaterWithParts(),
-				PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil), each.focus)
+				PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), each.focus)
 			remote := got.Components[len(got.Components)-1]
 			mustMatch(t, remote.Focused != nil, each.held)
 			mustMatch(t, remote.Focused != nil && *remote.Focused, each.want)
@@ -234,7 +244,7 @@ func TestDerivePlayerBusStatusMarksTheFocusedRemote(t *testing.T) {
 // not a controller's to hold.
 func TestDerivePlayerBusStatusMarksNoDisplayOrSinkFocused(t *testing.T) {
 	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
-		nil, newPresenceDesk(nil), focusedOn(controllerKey("house", "sofa"), "theater"))
+		nil, newPeripheralDesk(), focusedOn(controllerKey("house", "sofa"), "theater"))
 
 	mustMatch(t, got.Components[0].Focused == nil, true)
 	mustMatch(t, got.Components[1].Focused == nil, true)
@@ -244,7 +254,7 @@ func TestDerivePlayerBusStatusMarksNoDisplayOrSinkFocused(t *testing.T) {
 // its JSON and not only by its Go field.
 func TestPlayerBusStatusCarriesTheFocusedKey(t *testing.T) {
 	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
-		nil, newPresenceDesk(nil), focusedOn(controllerKey("house", "sofa"), "theater"))
+		nil, newPeripheralDesk(), focusedOn(controllerKey("house", "sofa"), "theater"))
 
 	payload, err := json.Marshal(got)
 	mustSucceed(t, err)
@@ -261,28 +271,25 @@ func componentNames(status playerBusStatus) []string {
 	return names
 }
 
-// The presence fold: a controller the desk heard connected reads true, one
-// it heard disconnected reads false, one whose pod went offline folds to
-// false whatever its last presence said, and one the desk never heard from
-// carries no connected key at all.
-func TestDerivePlayerBusStatusFoldsThePresence(t *testing.T) {
+// The link fold: a controller whose Peripheral reports the link up reads
+// true, one whose Peripheral reports it down reads false, and a controller
+// with no Peripheral to read carries no connected key at all.
+func TestDerivePlayerBusStatusFoldsTheLink(t *testing.T) {
 	key := controllerKey("house", "sofa")
-	offlinePod := connectedTo(key, true)
-	offlinePod.setAvailability(key, false)
-	onlinePod := connectedTo(key, true)
-	onlinePod.setAvailability(key, true)
+	// A controller whose claim named a device the cluster no longer holds.
+	gone := newPeripheralDesk()
+	gone.hold(nil, map[string]string{key: "aa-bb-cc-dd-ee-ff"})
 
 	cases := []struct {
 		name string
-		desk *presenceDesk
+		desk *peripheralDesk
 		want bool
 		held bool
 	}{
-		{name: "a connected controller", desk: connectedTo(key, true), want: true, held: true},
-		{name: "a disconnected controller", desk: connectedTo(key, false), held: true},
-		{name: "a controller whose pod is offline", desk: offlinePod, held: true},
-		{name: "a controller whose pod is online", desk: onlinePod, want: true, held: true},
-		{name: "a controller never heard from", desk: newPresenceDesk(nil)},
+		{name: "a connected controller", desk: linked(key, true), want: true, held: true},
+		{name: "a controller that is away", desk: linked(key, false), held: true},
+		{name: "a controller whose peripheral is gone", desk: gone},
+		{name: "a controller whose claim named none", desk: newPeripheralDesk()},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -294,10 +301,33 @@ func TestDerivePlayerBusStatusFoldsThePresence(t *testing.T) {
 	}
 }
 
+// The charge is beside the link on the same part. A device that reports
+// no level carries no battery key, so the screen draws the name alone.
+func TestDerivePlayerBusStatusCarriesTheCharge(t *testing.T) {
+	key := controllerKey("house", "sofa")
+	charged := bonded("aa-bb-cc-dd-ee-ff", conditionTrue)
+	charged.Status.Battery = &PeripheralBattery{Percentage: 62}
+
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
+		nil, holding(key, charged), newFocusDesk(nil))
+
+	remote := got.Components[len(got.Components)-1]
+	mustMatch(t, remote.Battery != nil, true)
+	mustMatch(t, *remote.Battery, 62)
+
+	payload, err := json.Marshal(got)
+	mustSucceed(t, err)
+	mustMatch(t, strings.Contains(string(payload), `"battery":62`), true)
+
+	flat := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle},
+		nil, linked(key, true), newFocusDesk(nil))
+	mustMatch(t, flat.Components[len(flat.Components)-1].Battery == nil, true)
+}
+
 // An idle unit names no Play, so the payload carries no play block and the
 // screen draws the clock alone.
 func TestDerivePlayerBusStatusCarriesNoPlayWhileIdle(t *testing.T) {
-	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, newPresenceDesk(nil), newFocusDesk(nil))
+	got := derivePlayerBusStatus(theaterWithParts(), PlayerStatus{Activity: playerIdle}, nil, newPeripheralDesk(), newFocusDesk(nil))
 
 	mustMatch(t, got.Play == nil, true)
 }
@@ -309,7 +339,7 @@ func TestDerivePlayerBusStatusNamesTheStartingPlay(t *testing.T) {
 	play.Spec.Items = []PlayItem{{URI: "https://nas/sailing.mkv", Presentation: &Presentation{Title: "Sailing"}}}
 
 	got := derivePlayerBusStatus(theaterWithParts(),
-		PlayerStatus{Activity: playerStarting, Play: "sailing"}, []Play{play}, newPresenceDesk(nil), newFocusDesk(nil))
+		PlayerStatus{Activity: playerStarting, Play: "sailing"}, []Play{play}, newPeripheralDesk(), newFocusDesk(nil))
 
 	mustMatch(t, got.Activity, playerStarting)
 	mustMatch(t, got.Play.Name, "sailing")

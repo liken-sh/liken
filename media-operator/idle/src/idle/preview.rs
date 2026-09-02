@@ -22,6 +22,10 @@ use media_screen::volume::{MIN_LEVEL, UNITY_LEVEL, Volume};
 /// both and the last part alone carries the presence the `d` key toggles.
 const SINK: &str = "sink";
 
+/// The charge the preview's controller reports, so the identity block draws
+/// a level beside the name the way a bonded device makes it draw one.
+const PREVIEW_BATTERY: i64 = 62;
+
 /// The `Play` the preview names while one starts or runs. The operator
 /// publishes the object's name and the one line the screen draws, so the
 /// preview states both.
@@ -147,6 +151,7 @@ impl Keys {
                         name: name.clone(),
                         kind: Component::REMOTE.to_string(),
                         connected: Some(self.connected),
+                        battery: Some(PREVIEW_BATTERY),
                         focused: self.focused.then_some(true),
                     }
                 } else {
@@ -154,6 +159,7 @@ impl Keys {
                         name: name.clone(),
                         kind: SINK.to_string(),
                         connected: None,
+                        battery: None,
                         focused: None,
                     }
                 }

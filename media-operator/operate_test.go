@@ -35,10 +35,19 @@ type fakeCluster struct {
 	slices   []ResourceSlice
 	applies  []displayApplied
 
+	// The bonded devices the bluetooth-operator publishes, one per
+	// controller, keyed by the device's address in its lowercase dashed
+	// form.
+	peripherals map[string]*Peripheral
+
 	// applyFails is a Display the API server refuses to write,
 	// the failure a pass answers by leaving the panel where it stands
 	// and trying again.
 	applyFails bool
+
+	// The collection paths this server refuses, so a test proves what a
+	// pass does with a read it cannot make.
+	fails map[string]bool
 }
 
 // One apply the operator made: the Display it named, the block
@@ -59,12 +68,19 @@ func newFakeCluster() *fakeCluster {
 		claims:     map[string]*ResourceClaim{},
 		pods:       map[string]*Pod{},
 		displays:   map[string]*Display{},
+
+		peripherals: map[string]*Peripheral{},
+		fails:       map[string]bool{},
 	}
 }
 
 func (f *fakeCluster) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+		if f.fails[r.URL.Path] {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		name := path.Base(r.URL.Path)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == playsPath:
@@ -121,6 +137,12 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodGet && r.URL.Path == slicesPath:
 			_ = json.NewEncoder(w).Encode(ResourceSliceList{
 				Metadata: ListMeta{ResourceVersion: "1"}, Items: f.slices})
+		case r.Method == http.MethodGet && r.URL.Path == peripheralsPath:
+			list := PeripheralList{Metadata: ListMeta{ResourceVersion: "1"}}
+			for _, key := range sortedNames(f.peripherals) {
+				list.Items = append(list.Items, *f.peripherals[key])
+			}
+			_ = json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/displays/"):
 			answer(w, f.displays[name])
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/displays/"):
@@ -218,7 +240,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		bus:                   newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
 		reports:               newReports(wake),
 		focus:                 newFocusDesk(wake),
-		presence:              newPresenceDesk(wake),
+		peripherals:           newPeripheralDesk(),
 		codes:                 newCodesDesk(wake),
 		panels:                newPanelDesk(wake),
 		panelOverrides:        map[string]panelOverride{},
@@ -414,7 +436,8 @@ func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 
 	want := "GET " + playsPath +
 		",GET " + mediaPrefsPath + "/" + mediaPreferencesName +
-		",GET " + playersPath + ",GET " + keymapsPath + ",GET " + remotesAllPath
+		",GET " + remotesAllPath + ",GET " + peripheralsPath +
+		",GET " + playersPath + ",GET " + keymapsPath
 	if strings.Join(cluster.requests, ",") != want {
 		t.Errorf("requests = %v, want the collection lists and the default MediaPreferences", cluster.requests)
 	}
@@ -818,6 +841,150 @@ func TestAPassWritesTheFocusedPlayerOntoTheRemote(t *testing.T) {
 	media.pass()
 
 	mustMatch(t, cluster.remotes["sofa"].Status.Player, "theater")
+}
+
+// A pass writes the Peripheral of the device the Remote's standing claim
+// allocated, so kubectl reaches the record of the controller's link from
+// the Remote. A controller whose claim carries no allocation names none,
+// and one allocated from another driver names none either.
+func TestAPassNamesTheRemotesPeripheral(t *testing.T) {
+	cases := []struct {
+		name    string
+		results []DeviceRequestAllocationResult
+		want    string
+	}{
+		{
+			name: "a bonded controller",
+			results: []DeviceRequestAllocationResult{
+				{Driver: bluetoothDriver, Pool: "node-1", Device: "aa-bb-cc-dd-ee-ff"},
+			},
+			want: "aa-bb-cc-dd-ee-ff",
+		},
+		{
+			name: "a controller from another driver",
+			results: []DeviceRequestAllocationResult{
+				{Driver: "input.liken.sh", Pool: "node-1", Device: "event3"},
+			},
+		},
+		{name: "a claim the scheduler has not allocated"},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			cluster.players["theater"] = housePlayerWithRemote()
+			cluster.remotes["sofa"] = houseRemote("gamepad")
+			cluster.keymaps["gamepad"] = testKeymap()
+			claim := buildRemoteClaim(houseRemote("gamepad"))
+			if each.results != nil {
+				claim.Status = &ResourceClaimStatus{
+					Allocation: &DeviceAllocationResult{
+						Devices: DeviceAllocationDevices{Results: each.results},
+					},
+				}
+			}
+			cluster.claims[claim.Metadata.Name] = claim
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+
+			media.pass()
+
+			mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, each.want)
+		})
+	}
+}
+
+// bondedRemote is the cluster a bonded controller makes: a unit that
+// lists it, the Remote, its allocated claim, and the device's Peripheral.
+func bondedRemote(t *testing.T) *fakeCluster {
+	t.Helper()
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	claim := buildRemoteClaim(houseRemote("gamepad"))
+	claim.Status = &ResourceClaimStatus{
+		Allocation: &DeviceAllocationResult{
+			Devices: DeviceAllocationDevices{Results: []DeviceRequestAllocationResult{
+				{Driver: bluetoothDriver, Pool: "node-1", Device: "aa-bb-cc-dd-ee-ff"},
+			}},
+		},
+	}
+	cluster.claims[claim.Metadata.Name] = claim
+	peripheral := bonded("aa-bb-cc-dd-ee-ff", conditionTrue)
+	cluster.peripherals[peripheral.Metadata.Name] = &peripheral
+	return cluster
+}
+
+// A pass reads a Remote's standing claim once. The read that resolves the
+// controller's Peripheral is the read the standing reconcile uses, so a
+// controller costs the API server one claim read a pass however many
+// things need the claim.
+func TestAPassReadsARemotesClaimOnce(t *testing.T) {
+	cluster := bondedRemote(t)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	read := "GET " + claimsPath("house") + "/" + remoteClaimName("sofa")
+	reads := 0
+	for _, request := range cluster.requests {
+		if request == read {
+			reads++
+		}
+	}
+	mustMatch(t, reads, 1)
+}
+
+// A claim read that fails carries no entry, so the standing reconcile
+// makes its own read rather than acting on a claim nothing read. The
+// controller names no Peripheral on that pass.
+func TestAPassReadsAClaimItselfWhenTheFirstReadFailed(t *testing.T) {
+	cluster := bondedRemote(t)
+	read := claimsPath("house") + "/" + remoteClaimName("sofa")
+	cluster.fails[read] = true
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	reads := 0
+	for _, request := range cluster.requests {
+		if request == "GET "+read {
+			reads++
+		}
+	}
+	mustMatch(t, reads, 2)
+	mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, "")
+}
+
+// A peripherals list that fails leaves the desk holding what the last
+// pass read, so one failed read does not blank every controller on the
+// idle screen.
+func TestAPassKeepsThePeripheralsItHeldWhenTheListFails(t *testing.T) {
+	cluster := bondedRemote(t)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.pass()
+
+	cluster.fails[peripheralsPath] = true
+	media.pass()
+
+	connected, held := media.peripherals.connectedFor("aa-bb-cc-dd-ee-ff")
+	mustMatch(t, held, true)
+	mustMatch(t, connected, true)
+}
+
+// A remotes list that fails skips the whole Remote half of the pass, so
+// no desk shrinks to a collection the operator could not read.
+func TestAPassSkipsTheRemotesWhenTheirListFails(t *testing.T) {
+	cluster := bondedRemote(t)
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.pass()
+	mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, "aa-bb-cc-dd-ee-ff")
+
+	cluster.fails[remotesAllPath] = true
+	media.pass()
+
+	mustMatch(t, media.peripherals.peripheralFor(controllerKey("house", "sofa")),
+		"aa-bb-cc-dd-ee-ff")
+	mustMatch(t, len(media.keysPublished), 1)
 }
 
 // A status that already reads the current Player is not written
@@ -1551,7 +1718,7 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 		bus:                   bus,
 		reports:               newReports(nil),
 		focus:                 newFocusDesk(nil),
-		presence:              newPresenceDesk(nil),
+		peripherals:           newPeripheralDesk(),
 		codes:                 newCodesDesk(nil),
 		panels:                newPanelDesk(nil),
 		volumes:               newVolumeDesk(),
@@ -1716,16 +1883,19 @@ func TestThePlayerStatusRepublishesOnlyOnChange(t *testing.T) {
 	mustMatch(t, changed.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
 }
 
-// A controller that connects reaches the operator on the presence topic,
-// and the next pass folds it into the unit's status, so the screen reads
-// the flag with no watch and no Kubernetes object between the two.
-func TestABusPresenceReachesThePublishedPlayerStatus(t *testing.T) {
+// A controller's Peripheral reaches the unit's status on the bus: the
+// link it reports and the charge it reports, on the one remote part. The
+// device that sleeps reads away on the next pass, so the screen dims the
+// name it drew.
+func TestAPeripheralReachesThePublishedPlayerStatus(t *testing.T) {
 	cluster := newFakeCluster()
 	media, broker := playersOperator(t, cluster)
-	media.presence = newPresenceDesk(nil)
+	key := controllerKey("house", "sofa")
+	charged := bonded("aa-bb-cc-dd-ee-ff", conditionTrue)
+	charged.Status.Battery = &PeripheralBattery{Percentage: 62}
+	media.peripherals = holding(key, charged)
 	player := settledPlayer(housePlayerWithRemote())
 
-	media.handleBusMessage(remotePresenceTopic(defaultTopicBase, "house", "sofa"), []byte(`{"connected":true}`))
 	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	var status playerBusStatus
@@ -1733,10 +1903,9 @@ func TestABusPresenceReachesThePublishedPlayerStatus(t *testing.T) {
 	remote := status.Components[len(status.Components)-1]
 	mustMatch(t, remote.Kind, remoteComponent)
 	mustMatch(t, remote.Connected != nil && *remote.Connected, true)
+	mustMatch(t, remote.Battery != nil && *remote.Battery == 62, true)
 
-	// The pod that reported the controller dies, so its Last Will marks the
-	// topic offline and the fold reads the controller as away.
-	media.handleBusMessage(remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"), []byte(availabilityOffline))
+	media.peripherals = holding(key, bonded("aa-bb-cc-dd-ee-ff", "False"))
 	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	mustSucceed(t, json.Unmarshal(waitForPublish(t, broker.pubs).payload, &status))

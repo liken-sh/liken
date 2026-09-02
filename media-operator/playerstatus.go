@@ -140,16 +140,19 @@ type playerBusPlay struct {
 }
 
 // playerBusComponent is one part of the unit: its friendly name, its kind,
-// its presence when the part has any, and, for a remote, whether the focus
-// mark names this unit. Connected is a pointer so a part with no live
-// state carries no key at all, and the display draws it at full brightness
-// always. Focused is a pointer for the same reason: it appears only on the
-// remote whose mark names this Player, so exactly one unit draws the
-// marker for a controller that several units list.
+// its link when the part has one, the charge it reports when it runs on a
+// battery, and, for a remote, whether the focus mark names this unit.
+// Connected is a pointer so a part with no live state carries no key at
+// all, and the display draws it at full brightness always. Focused is a
+// pointer for the same reason: it appears only on the remote whose mark
+// names this Player, so exactly one unit draws the marker for a controller
+// that several units list. Battery is a pointer because a device that
+// reports no level must not read as an empty one.
 type playerBusComponent struct {
 	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	Connected *bool  `json:"connected,omitempty"`
+	Battery   *int   `json:"battery,omitempty"`
 	Focused   *bool  `json:"focused,omitempty"`
 }
 
@@ -162,14 +165,17 @@ const (
 	remoteComponent  = "remote"
 )
 
-// derivePlayerBusStatus builds the message the idle screen reads from the
-// Player, the activity the same pass derived, the presence the desk
-// folded, and the marks the focus desk holds. The parts come from the spec
-// in the order the screen shows them: the display first, then each sink,
-// then each remote. Only a remote carries presence and focus, because a
-// wired screen and its speakers report neither, and a controller a person
-// carries comes and goes and drives one unit at a time.
-func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, presence *presenceDesk, focus *focusDesk) playerBusStatus {
+// derivePlayerBusStatus builds the message the idle screen reads from
+// the Player, the activity the same pass derived, the Peripherals the
+// desk holds, and the marks the focus desk holds. The parts come from
+// the spec in the order the screen shows them: the display first, then
+// each sink, then each remote. Only a remote carries a link, a charge,
+// and focus, because a wired screen and its speakers report none of
+// them, and a controller a person carries comes and goes and drives one
+// unit at a time. A remote whose standing claim named no Peripheral
+// carries neither a link nor a charge, and its focus is unchanged,
+// because the mark comes from the focus desk.
+func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, peripherals *peripheralDesk, focus *focusDesk) playerBusStatus {
 	status := playerBusStatus{
 		DisplayName: idlePlayerName(player),
 		Activity:    activity.Activity,
@@ -195,8 +201,11 @@ func derivePlayerBusStatus(player *Player, activity PlayerStatus, plays []Play, 
 			Name: remoteDisplayName(remote),
 			Kind: remoteComponent,
 		}
-		if connected, held := presence.presenceFor(key); held {
-			component.Connected = &connected
+		if name := peripherals.peripheralFor(key); name != "" {
+			if connected, held := peripherals.connectedFor(name); held {
+				component.Connected = &connected
+			}
+			component.Battery = peripherals.batteryFor(name)
 		}
 		if focus.markFor(key) == player.Metadata.Name {
 			focused := true

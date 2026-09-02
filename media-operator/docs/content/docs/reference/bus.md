@@ -50,7 +50,7 @@ resource's page gives the topics, the payloads, and who writes each.
 |---|---|---|
 | `plays/{namespace}/{name}/...` | one run's commands, report, and availability | [Plays](/docs/reference/plays/) |
 | `players/{namespace}/{name}/...` | one unit's activity, volume, panel, and commands | [Players](/docs/reference/players/) |
-| `remotes/{namespace}/{name}/...` | one controller's key events, presence, focus, and key table | [Remotes](/docs/reference/remotes/) |
+| `remotes/{namespace}/{name}/...` | one controller's key events, declared codes, focus, and key table | [Remotes](/docs/reference/remotes/) |
 
 ## Availability
 

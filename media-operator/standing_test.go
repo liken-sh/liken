@@ -114,7 +114,7 @@ func TestReconcileStandingKeepsAMatchingPair(t *testing.T) {
 	seedStanding(t, cluster, claim,
 		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase))
 
-	mustSucceed(t, media.reconcileRemote(remote))
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 	mustMatch(t, countRequests(cluster, http.MethodDelete, "pods"), 0)
 	mustMatch(t, countRequests(cluster, http.MethodDelete, "resourceclaims"), 0)
@@ -134,7 +134,7 @@ func TestReconcileStandingReplacesThePodAlone(t *testing.T) {
 		buildRemotePod(remote, claim, "registry.example/sidecar:old", media.busAddress, media.topicBase))
 	stamped := claim.Metadata.Annotations[templateHashAnnotation]
 
-	mustSucceed(t, media.reconcileRemote(remote))
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 	if _, stands := cluster.pods["sofa-remote"]; stands {
 		t.Errorf("the stale pod stands: %v", cluster.requests)
@@ -146,7 +146,7 @@ func TestReconcileStandingReplacesThePodAlone(t *testing.T) {
 	mustMatch(t, held.Metadata.Annotations[templateHashAnnotation], stamped)
 	mustMatch(t, countRequests(cluster, http.MethodDelete, "resourceclaims"), 0)
 
-	mustSucceed(t, media.reconcileRemote(remote))
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 	replacement, stands := cluster.pods["sofa-remote"]
 	if !stands {
@@ -167,7 +167,7 @@ func TestReconcileStandingReplacesBothWhenTheClaimDiverges(t *testing.T) {
 		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase))
 
 	remote.Spec.Device.Selector = `device.attributes["bluetooth.liken.sh"].address == "7C:66"`
-	mustSucceed(t, media.reconcileRemote(remote))
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 	if _, stands := cluster.pods["sofa-remote"]; stands {
 		t.Errorf("the pod stands over a stale claim: %v", cluster.requests)
@@ -176,7 +176,7 @@ func TestReconcileStandingReplacesBothWhenTheClaimDiverges(t *testing.T) {
 		t.Errorf("the stale claim stands: %v", cluster.requests)
 	}
 
-	mustSucceed(t, media.reconcileRemote(remote))
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 	rebuilt, stands := cluster.claims["sofa-remote-devices"]
 	if !stands {
@@ -208,7 +208,7 @@ func TestReconcileStandingRollsAnUnstampedObject(t *testing.T) {
 			seedStanding(t, cluster, claim, pod)
 			one.strip(claim, pod)
 
-			mustSucceed(t, media.reconcileRemote(remote))
+			mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 			if _, stands := cluster.pods["sofa-remote"]; stands {
 				t.Errorf("the unstamped pair kept its pod: %v", cluster.requests)
@@ -240,7 +240,7 @@ func TestReconcileStandingLeavesATerminatingPairAlone(t *testing.T) {
 			seedStanding(t, cluster, claim, stale)
 			one.mark(claim, stale)
 
-			mustSucceed(t, media.reconcileRemote(remote))
+			mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 			mustMatch(t, countRequests(cluster, http.MethodDelete, "pods"), 0)
 			mustMatch(t, countRequests(cluster, http.MethodDelete, "resourceclaims"), 0)

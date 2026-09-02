@@ -95,6 +95,15 @@ rules:
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
     verbs: [list]
+  # The bluetooth-operator's bonded devices, cluster-scoped. The
+  # operator lists them each pass to read whether a controller's link is
+  # up and what charge it reports, and folds both into the unit's status
+  # on the bus. The watch is the wake signal, so a controller that
+  # connects or disconnects reaches the screen within one pass.
+  # Read-only, because the bluetooth-operator writes them.
+  - apiGroups: [bluetooth.liken.sh]
+    resources: [peripherals]
+    verbs: [get, list, watch]
   # The display-operator's panels. The operator reads a screen's
   # Display to fold what the panel last showed into the Player status,
   # and patches spec.override under its own field manager when the idle

@@ -8,6 +8,10 @@
 //! built-in speakers, draws at full brightness always, because a part that
 //! cannot be absent must not read as present-for-now.
 //!
+//! A part that reports a battery level draws it beside the name, in the same
+//! run of text and at the same size, so a person reads the charge of a
+//! controller without another element on the screen.
+//!
 //! The block also shows focus. The status marks at most one part focused, the
 //! controller whose presses drive this unit, and that line takes a small
 //! hexagon in the left margin. The seed carries no focus, so no marker draws
@@ -104,7 +108,7 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
         text(
             frame,
             y,
-            &part.name,
+            &label(part),
             ITEM_SIZE,
             look::under(drawn.color, light),
         );
@@ -125,6 +129,17 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
         HEADER_SIZE,
         look::under(look::text(), light),
     );
+}
+
+/// The text one part's line draws: its name, and the charge it reports after
+/// the name. The charge is part of the same run rather than a run of its own,
+/// because a canvas run reports no width, so a second run would need a
+/// measurement this block does not take. Two spaces are the gap.
+fn label(part: &Part) -> String {
+    match part.battery {
+        Some(level) => format!("{}  {level}%", part.name),
+        None => part.name.clone(),
+    }
 }
 
 /// One part's line at one moment: the color its name draws in, and its marker
@@ -391,6 +406,16 @@ mod tests {
             (measured - expected).abs() < tolerance,
             "{measured} is not {expected}"
         );
+    }
+
+    #[test]
+    fn a_part_that_reports_a_charge_draws_it_after_the_name() {
+        let charged = Part {
+            battery: Some(62),
+            ..part(Some(true))
+        };
+        assert_eq!(label(&charged), "A remote  62%");
+        assert_eq!(label(&part(Some(true))), "A remote");
     }
 
     #[test]
