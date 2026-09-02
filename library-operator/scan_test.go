@@ -62,6 +62,17 @@ func scanEnvironment(t *testing.T, address string) {
 	t.Setenv(echoTimeoutVariable, "")
 }
 
+// mustScanner builds the scanner of the environment the test set, and
+// a refusal is the test's own failure.
+func mustScanner(t *testing.T, log io.Writer) *scanner {
+	t.Helper()
+	scan, err := newScanner(time.Now().UTC(), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scan
+}
+
 func waitForBroker(t *testing.T, accepted <-chan *fakeBroker) *fakeBroker {
 	t.Helper()
 	select {
@@ -101,7 +112,7 @@ func TestNewScannerReadsTheJobItRuns(t *testing.T) {
 	t.Setenv(scanPathVariable, "/movies/The Thing (1982)")
 	t.Setenv(echoTimeoutVariable, "90s")
 
-	scan := newScanner(time.Now().UTC(), io.Discard)
+	scan := mustScanner(t, io.Discard)
 
 	if scan.job != "movies-scan-29128191" {
 		t.Errorf("job = %q, want the Job the environment names", scan.job)
@@ -117,6 +128,26 @@ func TestNewScannerReadsTheJobItRuns(t *testing.T) {
 	}
 }
 
+// A scanner with no broker address starts no walk. It names the
+// variable in the pod log and fails the Job before it writes the
+// catalog.
+func TestNewScannerRefusesWithNoBus(t *testing.T) {
+	scanEnvironment(t, "")
+	var logged bytes.Buffer
+
+	scan, err := newScanner(time.Now().UTC(), &logged)
+
+	if err == nil {
+		t.Fatal("err = nil, want the refusal of a job with no bus")
+	}
+	if scan != nil {
+		t.Errorf("scanner = %+v, want none", scan)
+	}
+	if !strings.Contains(logged.String(), busAddressVariable) {
+		t.Errorf("log = %q, want the variable it names", logged.String())
+	}
+}
+
 // The one log line names the Library, its kind, and the path inside
 // the mount, so the pod's log shows the wiring the Library declares.
 func TestTheScannerLogsWhatItWasGiven(t *testing.T) {
@@ -124,7 +155,7 @@ func TestTheScannerLogsWhatItWasGiven(t *testing.T) {
 	scanEnvironment(t, address)
 	var logged bytes.Buffer
 
-	newScanner(time.Now().UTC(), &logged)
+	mustScanner(t, &logged)
 
 	line := logged.String()
 	if !strings.Contains(line, "house/movies") || !strings.Contains(line, "/library/movies") {
@@ -143,7 +174,7 @@ func TestTheScannerFallsBackToTheMountRootAndTheDefaultBase(t *testing.T) {
 	t.Setenv(libraryRootVariable, "")
 	var logged bytes.Buffer
 
-	scan := newScanner(time.Now().UTC(), &logged)
+	scan := mustScanner(t, &logged)
 
 	if !strings.Contains(logged.String(), "at /library\n") {
 		t.Errorf("log = %q, want the mount root", logged.String())
@@ -160,7 +191,7 @@ func TestNewScannerReadsTheIgnoreList(t *testing.T) {
 	scanEnvironment(t, address)
 	t.Setenv(libraryIgnoreVariable, `["#recycle",".incoming"]`)
 
-	scan := newScanner(time.Now().UTC(), io.Discard)
+	scan := mustScanner(t, io.Discard)
 
 	if !scan.ignore.skips("#recycle") || !scan.ignore.skips(".incoming") {
 		t.Errorf("ignore = %v, want both declared folders", scan.ignore)

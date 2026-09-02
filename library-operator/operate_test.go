@@ -633,6 +633,9 @@ func TestPassServesTheHeldWebhookPaths(t *testing.T) {
 	operator := testOperator(t, cluster)
 	operator.paths.hold("house", "movies", "/library/movies/Arrival (2016)")
 	operator.paths.hold("house", "gone", "/library/movies/Dune (2021)")
+	// The report carries a scan run, so the pass starts no first walk
+	// of its own, and the one Job it creates is the webhook's.
+	operator.reports.fold("house", "movies", *scanRunReport())
 
 	operator.pass()
 

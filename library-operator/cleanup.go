@@ -51,7 +51,11 @@ func runCleanup() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	sweep := newSweeper(os.Stdout)
+	sweep, err := newSweeper(os.Stdout)
+	if err != nil {
+		stop()
+		os.Exit(1)
+	}
 	if err := sweep.runJob(stopped); err != nil {
 		fmt.Fprintf(sweep.log, "library.liken.sh: the cleanup job failed: %v\n", err)
 		stop()
@@ -62,7 +66,14 @@ func runCleanup() {
 // newSweeper reads the library to sweep from the environment, the
 // only place a container with no API credential can learn it, and
 // says so in the pod log before the first sweep.
-func newSweeper(log io.Writer) *sweeper {
+//
+// It refuses to build a sweeper when the environment names no broker,
+// before anything is written.
+func newSweeper(log io.Writer) (*sweeper, error) {
+	address, err := echoBusAddress(log)
+	if err != nil {
+		return nil, err
+	}
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
 	base := os.Getenv(topicBaseVariable)
@@ -84,9 +95,8 @@ func newSweeper(log io.Writer) *sweeper {
 		log:         log,
 	}
 	sweep.echo = newEchoWaiter(libraryStatusTopic(base, namespace, name), workerCleanup, sweep.job)
-	sweep.bus = newBus(os.Getenv(busAddressVariable), "cleanup-"+namespace+"-"+name,
-		nil, nil, sweep.echo.note)
-	return sweep
+	sweep.bus = newBus(address, "cleanup-"+namespace+"-"+name, nil, nil, sweep.echo.note)
+	return sweep, nil
 }
 
 // The whole of a cleanup Job: take every row the library holds,

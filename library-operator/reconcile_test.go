@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // conditionOf reads one condition out of a status, so a test says
@@ -391,5 +392,89 @@ func TestReconcileReportsAFailedFolderScan(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
+	}
+}
+
+// A Library with no reported scan run gets one full walk on its first
+// pass, and no second one on the pass after it while that Job's pod is
+// active.
+func TestReconcileStartsTheFirstWalk(t *testing.T) {
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	operator := testOperator(t, cluster)
+
+	if err := operator.reconcile(t.Context(), library, standingCatalog(), nil, testNow); err != nil {
+		t.Fatal(err)
+	}
+
+	jobs := cluster.heldJobs()
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %+v, want the one full walk", jobs)
+	}
+	environment := containerEnvironment(jobs[0].Spec.Template.Spec.Containers[0])
+	if path := environment[scanPathVariable]; path != "" {
+		t.Errorf("%s = %q, want the full walk's empty path", scanPathVariable, path)
+	}
+	if len(operator.paths.held("house", "movies")) != 0 {
+		t.Error("the path is still held after the walk's job was created")
+	}
+
+	walking := jobs[0]
+	walking.Status = JobStatus{Active: 1}
+	if err := operator.reconcile(t.Context(), cluster.heldLibrary("movies"), standingCatalog(),
+		[]Job{walking}, testNow.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(cluster.heldJobs()); got != 1 {
+		t.Errorf("jobs = %d, want no second walk while the first one runs", got)
+	}
+}
+
+// scanRunReport is the report of a library that has already had one
+// full walk.
+func scanRunReport() *libraryReport {
+	return &libraryReport{Runs: []libraryRun{
+		{Worker: workerScan, Job: "movies-scan-29380000", Started: testNow, Finished: testNow},
+	}}
+}
+
+// Two states start no first walk: a report that carries a scan run,
+// and a scan Job whose pod is active. Every other state starts one.
+func TestReconcileStartsNoWalkWhenAScanHasRun(t *testing.T) {
+	cases := []struct {
+		name    string
+		report  *libraryReport
+		jobs    []Job
+		started bool
+	}{
+		{name: "no report yet", started: true},
+		{
+			name: "a report with another worker's run",
+			report: &libraryReport{Runs: []libraryRun{
+				{Worker: workerCleanup, Job: "movies-cleanup", Started: testNow},
+			}},
+			started: true,
+		},
+		{name: "a report carrying a scan run", report: scanRunReport()},
+		{name: "a scan is running", jobs: []Job{walkJob(JobStatus{Active: 1})}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library := boundHouse(cluster)
+			operator := testOperator(t, cluster)
+			if one.report != nil {
+				operator.reports.fold("house", "movies", *one.report)
+			}
+
+			if err := operator.reconcile(t.Context(), library, standingCatalog(), one.jobs, testNow); err != nil {
+				t.Fatal(err)
+			}
+
+			if started := len(cluster.heldJobs()) == 1; started != one.started {
+				t.Errorf("a walk was started: %v, want %v", started, one.started)
+			}
+		})
 	}
 }

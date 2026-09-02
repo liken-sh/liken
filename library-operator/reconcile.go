@@ -4,6 +4,10 @@ package main
 // the schedule its full walk runs on, create a Job for every webhook
 // path it holds, and write what all of it says into its status.
 //
+// The pass also creates the Job of the first full walk, for a Library
+// that no scan has run against yet, so a new Library has rows before
+// its CronJob's first turn.
+//
 // The order is the order of the conditions. A Library that names a
 // claim nothing has bound has no volume to mount, so it gets no
 // schedule, and the Bound condition alone says why. Only a bound
@@ -49,6 +53,9 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		return err
 	}
 
+	namespace, name := library.Metadata.Namespace, library.Metadata.Name
+	report := o.reports.latestFor(namespace, name)
+
 	// A Library with no volume, or in a namespace with no single
 	// Catalog, gets no schedule. There would be nothing to mount, or no
 	// cluster to join, and the Ready condition says which.
@@ -61,6 +68,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		if err != nil {
 			return err
 		}
+		o.holdFirstWalk(library, report, jobs)
 		if err := o.serveHeldPaths(ctx, library, jobs, now); err != nil {
 			return err
 		}
@@ -68,15 +76,37 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		return err
 	}
 
-	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	return writeLibraryStatus(ctx, o.client, library, deriveLibraryStatus(library, libraryObservation{
 		bound:             bound,
 		choice:            choice,
 		cronJob:           cronJob,
-		report:            o.reports.latestFor(namespace, name),
+		report:            report,
 		online:            o.reporters.onlineFor(namespace),
 		operatorNamespace: o.namespace,
 	}, now))
+}
+
+// holdFirstWalk gives a new Library its first full walk. A Library the
+// reporter carries no scan run for, and that has no scan Job with a
+// pod, holds the empty path, which is the full walk, so serveHeldPaths
+// creates the Job on this same pass. Without this the library would
+// hold no rows until the CronJob's first turn, up to an hour later.
+//
+// The rule fires once. A Job's active count covers its pending pod, so
+// the next pass reads the walk as running and holds nothing. After
+// that, the walk's started runs row reaches the report, and the report
+// carries a scan run for the rest of the Library's life.
+func (o *operator) holdFirstWalk(library *Library, report *libraryReport, jobs []Job) {
+	namespace, name := library.Metadata.Namespace, library.Metadata.Name
+	if report != nil {
+		if _, ran := runOf(report.Runs, workerScan); ran {
+			return
+		}
+	}
+	if scanRunning(jobs, namespace, name) {
+		return
+	}
+	o.paths.hold(namespace, name, "")
 }
 
 // HoldLibrary puts the finalizer on a Library that does not carry

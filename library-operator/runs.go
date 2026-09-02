@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -74,6 +76,21 @@ func echoTimeout(raw string) time.Duration {
 		return defaultEchoTimeout
 	}
 	return timeout
+}
+
+// echoBusAddress reads the broker address every Job role needs. A Job
+// with no broker can never hear the echo that ends its wait, so a role
+// refuses to start on an empty address, rather than write the catalog
+// and hold the claim for the whole timeout. The one log line names the
+// variable the pod is missing.
+func echoBusAddress(log io.Writer) (string, error) {
+	address := os.Getenv(busAddressVariable)
+	if address == "" {
+		fmt.Fprintf(log, "library.liken.sh: %s is empty, and a job with no broker cannot hear its echo\n",
+			busAddressVariable)
+		return "", fmt.Errorf("%s names no broker", busAddressVariable)
+	}
+	return address, nil
 }
 
 // The read of the whole runs table. It needs no LIMIT, because the

@@ -18,13 +18,17 @@ import (
 func TestNewSweeperReadsItsLibraryFromTheEnvironment(t *testing.T) {
 	t.Setenv(libraryNamespaceVariable, "house")
 	t.Setenv(libraryNameVariable, "movies")
+	t.Setenv(busAddressVariable, testBusAddress)
 	t.Setenv(catalogAPIVariable, "")
 	t.Setenv(topicBaseVariable, "")
 	t.Setenv(jobNameVariable, "movies-cleanup-1")
 	t.Setenv(echoTimeoutVariable, "90s")
 	var logged bytes.Buffer
 
-	sweep := newSweeper(&logged)
+	sweep, err := newSweeper(&logged)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if sweep.library != "house/movies" {
 		t.Errorf("library = %q, want house/movies", sweep.library)
@@ -50,12 +54,38 @@ func TestNewSweeperReadsItsLibraryFromTheEnvironment(t *testing.T) {
 func TestNewSweeperTakesTheCatalogAddressItIsGiven(t *testing.T) {
 	t.Setenv(libraryNamespaceVariable, "house")
 	t.Setenv(libraryNameVariable, "movies")
+	t.Setenv(busAddressVariable, testBusAddress)
 	t.Setenv(catalogAPIVariable, "http://127.0.0.1:9999")
 
-	sweep := newSweeper(&bytes.Buffer{})
+	sweep, err := newSweeper(&bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if sweep.catalog.base != "http://127.0.0.1:9999" {
 		t.Errorf("catalog = %q, want the address the environment named", sweep.catalog.base)
+	}
+}
+
+// A cleanup container with no broker address starts no sweep. It names
+// the variable in the pod log and fails the Job before it writes the
+// catalog.
+func TestNewSweeperRefusesWithNoBus(t *testing.T) {
+	t.Setenv(libraryNamespaceVariable, "house")
+	t.Setenv(libraryNameVariable, "movies")
+	t.Setenv(busAddressVariable, "")
+	var logged bytes.Buffer
+
+	sweep, err := newSweeper(&logged)
+
+	if err == nil {
+		t.Fatal("err = nil, want the refusal of a job with no bus")
+	}
+	if sweep != nil {
+		t.Errorf("sweeper = %+v, want none", sweep)
+	}
+	if !strings.Contains(logged.String(), busAddressVariable) {
+		t.Errorf("log = %q, want the variable it names", logged.String())
 	}
 }
 

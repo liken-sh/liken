@@ -262,6 +262,30 @@ func TestDepartStandsTheCleanupJob(t *testing.T) {
 	}
 }
 
+// The cleanup container carries the broker address and the topic base
+// the operator was given, because the report it waits for arrives on
+// the bus.
+func TestTheCleanupJobCarriesTheBus(t *testing.T) {
+	cluster := newFakeCluster()
+	library := departingMovies(cluster)
+
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	job := cluster.heldJob("house", "movies-cleanup")
+	if job == nil {
+		t.Fatal("the pass stood no cleanup job")
+	}
+	environment := containerEnvironment(job.Spec.Template.Spec.Containers[0])
+	if got := environment[busAddressVariable]; got != testBusAddress {
+		t.Errorf("%s = %q, want %q", busAddressVariable, got, testBusAddress)
+	}
+	if got := environment[topicBaseVariable]; got != defaultTopicBase {
+		t.Errorf("%s = %q, want %q", topicBaseVariable, got, defaultTopicBase)
+	}
+}
+
 // a Job that exited zero is not the end of it: the rows leave the
 // library's own claim only when the standing catalog holds them, and
 // the reporter's echo is what says so.

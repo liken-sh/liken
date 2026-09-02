@@ -145,7 +145,11 @@ func runScan() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	scan := newScanner(time.Now().UTC(), os.Stdout)
+	scan, err := newScanner(time.Now().UTC(), os.Stdout)
+	if err != nil {
+		stop()
+		os.Exit(1)
+	}
 	if err := scan.runJob(stopped); err != nil {
 		scan.logf("the scan job failed: %v", err)
 		stop()
@@ -156,7 +160,14 @@ func runScan() {
 // NewScanner reads the container's environment and builds the
 // client that speaks for this Library. started is the time the walk's own
 // record carries before it reads anything.
-func newScanner(started time.Time, log io.Writer) *scanner {
+//
+// It refuses to build a scanner when the environment names no broker,
+// before anything is written.
+func newScanner(started time.Time, log io.Writer) (*scanner, error) {
+	address, err := echoBusAddress(log)
+	if err != nil {
+		return nil, err
+	}
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
 	kind := os.Getenv(libraryKindVariable)
@@ -197,9 +208,8 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 	// The Job holds no will and publishes nothing. Its one use of
 	// the bus is the subscription that carries the reporter's echo back.
 	scan.echo = newEchoWaiter(scan.statusTopic, scan.worker(), scan.job)
-	scan.bus = newBus(os.Getenv(busAddressVariable), "scan-"+namespace+"-"+name,
-		nil, nil, scan.echo.note)
-	return scan
+	scan.bus = newBus(address, "scan-"+namespace+"-"+name, nil, nil, scan.echo.note)
+	return scan, nil
 }
 
 // The whole of a scan Job: write the run with no finish, walk,

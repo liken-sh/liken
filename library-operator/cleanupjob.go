@@ -23,7 +23,7 @@ func cleanupJobName(library string) string {
 
 // The Job that sweeps one library's rows, built from the Library
 // and the operator's own settings alone.
-func buildCleanupJob(library *Library, scannerImage, corrosionImage string) *Job {
+func buildCleanupJob(library *Library, scannerImage, corrosionImage, busAddress, topicBase string) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	return &Job{
 		APIVersion: batchAPIVersion,
@@ -38,7 +38,7 @@ func buildCleanupJob(library *Library, scannerImage, corrosionImage string) *Job
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
 			Template: workerPodTemplate(library, workerCleanup,
-				cleanupSidecar(library, scannerImage), corrosionImage),
+				cleanupSidecar(library, scannerImage, busAddress, topicBase), corrosionImage),
 		},
 	}
 }
@@ -47,7 +47,10 @@ func buildCleanupJob(library *Library, scannerImage, corrosionImage string) *Job
 // its environment alone, it reads the catalog API at the same loopback
 // address the scanner reads, and the Job's own name reaches it through
 // the downward API, because it writes that name into the runs row.
-func cleanupSidecar(library *Library, image string) Container {
+//
+// It carries the broker address and the topic base as well, because it
+// waits on the bus for the reporter to publish its run back.
+func cleanupSidecar(library *Library, image, busAddress, topicBase string) Container {
 	return Container{
 		Name:    cleanupContainer,
 		Image:   image,
@@ -55,6 +58,8 @@ func cleanupSidecar(library *Library, image string) Container {
 		Env: []EnvVar{
 			{Name: libraryNamespaceVariable, Value: library.Metadata.Namespace},
 			{Name: libraryNameVariable, Value: library.Metadata.Name},
+			{Name: busAddressVariable, Value: busAddress},
+			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
 				FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
@@ -81,7 +86,7 @@ func (o *operator) standCleanupJob(ctx context.Context, library *Library, jobs [
 		if !o.mayStandCleanup(libraryKey(namespace, name)) {
 			return nil, nil
 		}
-		created, err := CreateJob(ctx, o.client, buildCleanupJob(library, o.scannerImage, o.corrosionImage))
+		created, err := CreateJob(ctx, o.client, buildCleanupJob(library, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase))
 		if errors.Is(err, ErrConflict) {
 			// Another writer created it first, which is the state this
 			// create was for; the next pass reads it.
