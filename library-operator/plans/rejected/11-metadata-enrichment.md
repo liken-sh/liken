@@ -1,3 +1,5 @@
+Superseded on 2026-09-02 by [plan 27](../27-enrichment.md), which keeps the provider resource and the rule that the enricher never writes the catalog, and replaces the pod per provider with a `Job` per concern. The text below is the plan as it stood.
+
 # Metadata enrichment
 
 Plan 11. A stub for a later agent to shape. It builds the third

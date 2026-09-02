@@ -4,15 +4,16 @@ Plan 25. A stub for a later agent to shape. It makes the credited people
 of a library, the cast and the crew, something a person can follow from
 one title to the next.
 
-## Blocked on plan 11
+## Blocked on plan 30
 
-This plan waits for the enricher of plan 11. A sidecar names a person
-by name alone: Jellyfin's NFO writer puts a name, a role, a type, a
-sort order, and a thumb path inside `<actor>`, and no provider id, and
-the thumb path points into Jellyfin's own metadata directory and not
-the volume. So a people table built from the sidecars alone would key
-every person on a name, and would hold no headshots. The enricher gives
-a person a provider id and a headshot, and this plan starts after it.
+This plan waits for [plan 30](30-facts-art-and-contributors.md). A
+sidecar names a person by name alone: Jellyfin's NFO writer puts a
+name, a role, a type, a sort order, and a thumb path inside `<actor>`,
+and no provider id, and the thumb path points into Jellyfin's own
+metadata directory and not the volume. Plan 30 writes each person to
+`.contributors/` with ids under every scheme and a headshot, links
+each credit to that entry in `credits.yaml`, and derives the
+`contributors` and `credits` tables. This plan draws those tables.
 
 ## The problem
 
@@ -30,18 +31,13 @@ person, the one holding the remote, and this plan does not touch that.
   headshot where the volume holds one, and every title in the
   namespace's libraries the person is credited in, as a wall with the
   role under each slot.
-- The scanner derives a people table from the bodies it already reads,
-  the way plan 22 derives sets from the movies that name them, and a
-  credits table that joins a person to a title and a role. A person is
-  identified by name until enrichment gives a provider id, and the row
-  says which.
-- Headshots come from Kodi's `.actors` folder beside a title where a
-  tool wrote one, and from the enricher of plan 11 where none did.
+- The page reads the `contributors` and `credits` tables plan 30
+  derives from `.contributors/` and `credits.yaml`, and joins one
+  person across the namespace's libraries by any shared id.
+- Headshots come from `headshot.jpg` in the person's entry.
 
 ## What is not decided
 
-How two people with one name are told apart before enrichment, and
-whether a wrong merge is worse than a split. Whether a person's page
-shows episodes one by one or the series they appear in. Whether the
-people table is worth its size on a one-gigabyte screen for a library
-with tens of thousands of credits.
+Whether a person's page shows episodes one by one or the series they
+appear in. Whether the people table is worth its size on a one-gigabyte
+screen for a library with tens of thousands of credits.

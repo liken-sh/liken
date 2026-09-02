@@ -1,5 +1,9 @@
 # Writing ids back to the volume
 
+[Plan 29](../29-identification.md) answers this with `identity.yaml`
+in the title's `.liken/` directory, the separate file this note
+proposes. The note stays until that plan is built.
+
 The scanner derives an item's id from the provider id in its `.nfo`,
 scoped by kind, such as `movie:tmdb:603`. That id is durable, because
 the scanner reads it off the volume on every walk and the public

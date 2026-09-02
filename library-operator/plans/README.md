@@ -45,8 +45,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 These plans are named so the design accounts for them. Each is a stub
 for a later agent to shape.
 
-* [11, Metadata enrichment](11-metadata-enrichment.md). Providers, the
-  enricher pod, and the sidecars it writes.
 * [12, The organizer](12-the-organizer.md). Renaming and moving files to
   a library's naming convention.
 * [13, More kinds](13-more-kinds.md). Music, photos, audiobooks, books,
@@ -55,13 +53,31 @@ for a later agent to shape.
   history, and who was watching.
 * [23, Motion](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
-* [24, Franchises](24-franchises.md). A whole universe of films and
-  series in one order, as a resource the cluster owner writes.
 * [25, People on the screen](25-people-on-the-screen.md). Cast and crew
-  as pages of their own, derived from the bodies the scanner reads.
-  Blocked on plan 11, because a sidecar names a person by name alone.
+  as pages of their own, from the tables plan 30 derives. Blocked on
+  plan 30.
 * [26, The home page](26-the-home-page.md). A first screen of rows that
   blends every kind, in place of the list of libraries.
+
+Enrichment is one design in five plans. Plan 27 states the contracts
+they share, and plans 28 to 31 build them in order.
+
+* [27, Enrichment](27-enrichment.md). The volume holds every fact and
+  the catalog is derived from it alone: ecosystem files first, a
+  `.liken/` directory for what they cannot say, `.contributors/` for
+  people, concerns as the unit of work, `MetadataProvider`, and the
+  write rules.
+* [28, The catalog pod](28-the-catalog-pod.md). One standing pod per
+  namespace holds the durable catalog, and every scan is a `Job`.
+* [29, Identification](29-identification.md). `MetadataProvider`, the
+  `probe` concern, `identity.yaml`, the gap loop, and the write
+  package with its test.
+* [30, Facts, art, and contributors](30-facts-art-and-contributors.md).
+  The `.nfo` and its write record, the art concerns, `credits.yaml`,
+  `.contributors/`, and trickplay.
+* [31, Franchises](31-franchises.md). A library kind whose files hold a
+  universe in story order, resolved across the namespace by provider
+  id.
 
 ## Completed
 
@@ -200,14 +216,20 @@ that took a hearing-impaired flag for Hindi.
   laptops have no path to the catalog.
 * [Writing ids back to the
   volume](open-problems/writing-ids-back-to-the-volume.md). The
-  sidecar-less fifth rest their id on a path a move breaks; a minted id
-  written back would fix it.
+  sidecar-less fifth rest their id on a path a move breaks. Plan 29's
+  `identity.yaml` answers it.
 * [Richer file facts](open-problems/richer-file-facts.md). A future
   enhancement reads a file's container metadata for a measured duration,
-  the bitrate, the HDR format, and the encode's quality.
+  the bitrate, the HDR format, and the encode's quality. Plan 29's
+  `probe` concern answers it.
 
 ## Rejected
 
+* [11, Metadata enrichment](rejected/11-metadata-enrichment.md).
+  Superseded by plan 27, which replaces the pod per provider with a
+  `Job` per concern.
+* [24, Franchises](rejected/24-franchises.md). Superseded by plan 31,
+  which puts a franchise on the volume instead of in a resource.
 * [Litestream as the catalog
   transport](rejected/litestream-as-the-catalog-transport.md). Built and
   measured. Polled reads, a compaction race, and a Go runtime inside the

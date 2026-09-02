@@ -146,16 +146,25 @@ found are in [`open-problems/`](open-problems/).
 
 ## Enrichment
 
-A `MetadataSource` names one provider, with the same
-discriminator-and-block shape as `Library`: one typed block per
-provider, with its `Secret` reference and its settings. Each provider
-serves fixed kinds. A `Library` lists its sources in order.
+The volume holds every fact, and the catalog is derived from the volume
+alone. An enricher writes the ecosystem's formats first, the `.nfo` and
+the art files under Kodi's names, and a `.liken/` directory for what
+those formats cannot say: provider ids, the link from a credit to a
+person, and a record of every attempt. People have a store of their
+own, `.contributors/` at a library's root. A franchise is a library
+kind of its own, because it crosses libraries.
 
-An enricher runs per provider, in its own pod, because it holds keys and
-is the only part of the operator that connects to the internet. It
-writes sidecars in the ecosystem's formats: `.nfo`, art files, and
-WebVTT thumbnail sprites. The scanner detects the new files and updates
-the catalog. The enricher never writes the catalog.
+A `MetadataProvider` names one provider, with the same
+discriminator-and-block shape as `Library`: one typed block per
+provider, with its `Secret` reference and the concerns it serves. A
+`Library` lists its providers in order and may narrow one to some
+concerns.
+
+The unit of enrichment is a concern: one gap in the catalog, filled by
+a `Job` that reads the gap through the catalog pod and writes only the
+volume. The enricher never writes the catalog, and it never removes or
+overwrites a file it did not write. [Plan 27](27-enrichment.md) holds
+the contracts, and plans 28 to 31 build them.
 
 One program writes sidecars into a folder. A library that another tool
 enriches, such as Jellyfin, has no enricher of its own until that tool's
