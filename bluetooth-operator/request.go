@@ -155,23 +155,23 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 	// The bond now exists, so the device's state differs from the
 	// snapshot this pass read.
 	device.Paired, device.Trusted = true, true
-	pairing, err := i.createPairing(adapter, device, name)
+	peripheral, err := i.createPeripheral(adapter, device, name)
 	if err != nil {
 		status.Message = fmt.Sprintf("recording the pairing with %s: %v", address, err)
 		fmt.Fprintf(os.Stderr, "request %s: %s\n", name, status.Message)
 		pass.ok = false
 		return
 	}
-	i.writePairingStatus(pairing, adapter, address, device, true)
+	i.writePeripheralStatus(peripheral, adapter, address, device, true)
 	pass.owners[address] = OwnerReference{
 		APIVersion: pairingAPI,
-		Kind:       pairingKind,
-		Name:       pairing.Metadata.Name,
-		UID:        pairing.Metadata.UID,
+		Kind:       peripheralKind,
+		Name:       peripheral.Metadata.Name,
+		UID:        peripheral.Metadata.UID,
 	}
 
 	status.Phase = phasePaired
-	status.Pairing = pairing.Metadata.Name
+	status.Peripheral = peripheral.Metadata.Name
 	status.FinishedAt = timestamp(i.now())
 	status.Message = ""
 }
@@ -187,8 +187,8 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 // string attribute.
 //
 // A device the radio already holds a bond with is left out. It has a
-// Pairing of its own, and the list exists to name the devices that do
-// not.
+// Peripheral of its own, and the list exists to name the devices that
+// do not.
 func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) []SeenDevice {
 	first := make(map[string]string, len(seen))
 	for _, device := range seen {
@@ -220,7 +220,7 @@ func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) []See
 
 // collectRequest deletes a finished request once its time is up. A
 // finished request stays long enough to read the next morning. The
-// Pairing's status records which request produced it, so that record
+// Peripheral's status records which request produced it, so that record
 // outlasts the deletion.
 func (i *inventory) collectRequest(request *PairingRequest, pass *inventoryPass) {
 	ttl := request.Spec.ttl()
@@ -299,7 +299,7 @@ func (i *inventory) writeRequestStatus(request *PairingRequest, status PairingRe
 func sameRequestStatus(current, next PairingRequestStatus) bool {
 	if current.Phase != next.Phase ||
 		current.WindowClosesAt != next.WindowClosesAt ||
-		current.Pairing != next.Pairing ||
+		current.Peripheral != next.Peripheral ||
 		current.FinishedAt != next.FinishedAt ||
 		current.Message != next.Message ||
 		len(current.Seen) != len(next.Seen) {

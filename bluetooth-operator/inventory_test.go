@@ -71,7 +71,7 @@ func (f *apiFixture) handler(t *testing.T) http.Handler {
 // more path than the objects themselves are under.
 var collections = map[string]string{
 	pairingBase + "/adapters":        adapterKind,
-	pairingBase + "/pairings":        pairingKind,
+	pairingBase + "/peripherals":     peripheralKind,
 	pairingBase + "/pairingrequests": pairingRequestKind,
 }
 
@@ -300,7 +300,7 @@ func writeJSON(t *testing.T, w http.ResponseWriter, object any) {
 func testInventory(t *testing.T, fixture *apiFixture, radio *fakeRadio) *inventory {
 	t.Helper()
 	cdiTempDir(t)
-	i := newInventory(testClient(t, fixture.handler(t)), radio, "liken-1", "liken-system")
+	i := newInventory(testClient(t, fixture.handler(t)), radio, relaysFor(t), "liken-1", "liken-system")
 	i.now = func() time.Time { return testNow }
 	return i
 }

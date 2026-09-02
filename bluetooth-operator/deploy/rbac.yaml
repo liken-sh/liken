@@ -52,25 +52,25 @@ rules:
     resources: [nodes]
     verbs: [get]
   # The pairing API (crd.go). The operator owns all three objects: it
-  # creates an Adapter for the radio it holds and a Pairing for each
+  # creates an Adapter for the radio it holds and a Peripheral for each
   # bond, it reads the PairingRequests a person creates, and it deletes
   # a finished request when its TTL is up. patch is for the finalizer
   # lists alone, which are edited as a merge patch so that a person's
   # own fields on the object survive the write.
   #
-  # This is a ClusterRole and not a Role. Adapters and Pairings are
+  # This is a ClusterRole and not a Role. Adapters and Peripherals are
   # cluster-scoped, and a PairingRequest may be created in any
   # namespace, which is the grant the whole design exists to make
   # possible: a person who may create requests in their own namespace
   # needs no exec into liken-system.
   - apiGroups: [bluetooth.liken.sh]
-    resources: [adapters, pairings, pairingrequests]
+    resources: [adapters, peripherals, pairingrequests]
     verbs: [get, list, create, update, patch, delete]
   # The status halves, which the operator writes through the status
   # subresource so that a status write can never overwrite a spec a
   # person edited in the same moment.
   - apiGroups: [bluetooth.liken.sh]
-    resources: [adapters/status, pairings/status, pairingrequests/status]
+    resources: [adapters/status, peripherals/status, pairingrequests/status]
     verbs: [get, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -92,8 +92,8 @@ subjects:
 # each one at its pairing and updates it whenever the keys change, so
 # the verbs are get, list, create, and update.
 #
-# No delete. A bond's Secret is owned by that bond's Pairing, so
-# deleting the Pairing collects the Secret through ordinary garbage
+# No delete. A bond's Secret is owned by that bond's Peripheral, so
+# deleting the Peripheral collects the Secret through ordinary garbage
 # collection, and the operator never removes one itself.
 #
 # A Role and not a ClusterRole, because these Secrets are in the

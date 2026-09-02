@@ -18,7 +18,7 @@ package main
 // device that is switched off, and the reconcile loop is one
 // goroutine that also publishes the slice and writes the bonds.
 //
-// A failure reaches the log and not the API. A Pairing status field
+// A failure reaches the log and not the API. A Peripheral status field
 // for the last connect error is the natural next step.
 
 import (
@@ -118,7 +118,7 @@ func (c *connector) attempt(device deviceState, pass *inventoryPass) {
 		return
 	}
 	c.inFlight[device.Address] = true
-	fmt.Printf("pairing: connecting %s (%s)\n", deviceDisplayName(device), device.Address)
+	fmt.Printf("peripheral: connecting %s (%s)\n", deviceDisplayName(device), device.Address)
 	c.attempts.Add(1)
 	go c.connect(device)
 }
@@ -131,12 +131,12 @@ func (c *connector) connect(device deviceState) {
 	err := c.radio.Connect(device.Address)
 	if err == nil {
 		c.succeeded(device.Address)
-		fmt.Printf("pairing: %s (%s) is connected\n", deviceDisplayName(device), device.Address)
+		fmt.Printf("peripheral: %s (%s) is connected\n", deviceDisplayName(device), device.Address)
 		c.wake()
 		return
 	}
 	next := c.failed(device.Address)
-	fmt.Printf("pairing: %s (%s) did not connect: %v; next try in %s\n",
+	fmt.Printf("peripheral: %s (%s) did not connect: %v; next try in %s\n",
 		deviceDisplayName(device), device.Address, err, next)
 	c.wake()
 }

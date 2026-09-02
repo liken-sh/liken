@@ -62,15 +62,18 @@ const maxSliceDevices = 64
 // radio may be silent first. A consumer tolerates this one, because a
 // controller that drops for a moment is not a loss.
 //
-// noInputNodeTaint says the controller registers no evdev node, so a
-// claim on it would deliver nothing and NodePrepareResources would
-// fail. The effect is NoSchedule, and no consumer should ever tolerate
-// it. It parks a claim that arrives ahead of a connect, instead of
-// looping it. With only the NoExecute taint, a consumer that tolerated
-// it would be scheduled onto a controller that is switched off. It
-// would fail in prepare, get evicted when the toleration ran out, and
-// be scheduled again. An untolerated NoSchedule taint holds the pod
-// Unschedulable until the controller is really there.
+// noInputNodeTaint says the operator holds no virtual input device for
+// the controller, so a claim on it would deliver nothing and
+// NodePrepareResources would fail. That is the state of a bond that has
+// never connected since it was made: the relay reads a controller's
+// capabilities from its real evdev node, and it has never had one to
+// read. The effect is NoSchedule, and no consumer should ever tolerate
+// it. It parks such a claim instead of looping it. With only the
+// NoExecute taint, a consumer that tolerated it would be scheduled onto
+// a controller the operator cannot deliver. It would fail in prepare,
+// get evicted when the toleration ran out, and be scheduled again. An
+// untolerated NoSchedule taint holds the pod Unschedulable until the
+// controller has connected once.
 const (
 	disconnectedTaint = DriverName + "/disconnected"
 	noInputNodeTaint  = DriverName + "/no-input-node"
@@ -170,14 +173,16 @@ func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
 // no slice, with no bound on the retry. A device leaves
 // the slice only when it is unpaired.
 //
+// nodes are the virtual input nodes each controller's relay delivers,
+// keyed by the controller's address. A controller that is off the air
+// still has them, because the relay holds them open.
+//
 // The `connected` attribute and the `disconnected` taint report the
 // same fact. The taint is present exactly when bluetoothd reports the
 // device is not connected. The `no-input-node` taint reports a
-// stricter fact the `connected` attribute does not carry: whether an
-// input claim would deliver anything. A controller can be connected
-// and still have no input node. This happens in two moments: between
-// the connection and the HID device's registration, and when a
-// controller connects without its HID driver bound.
+// different fact the `connected` attribute does not carry: whether an
+// input claim would deliver anything. The two part company for a bond
+// that has never connected, which has no relay and no virtual node.
 func sliceDevices(controllers map[string]controller, nodes map[string][]string) []SliceDevice {
 	devices := make([]SliceDevice, 0, len(controllers))
 	for mac, c := range controllers {

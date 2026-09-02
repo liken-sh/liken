@@ -9,12 +9,12 @@ package main
 // goes, so a bond that never reaches the API is a controller somebody
 // pairs again.
 //
-// One Secret holds one bond. Its owner is that bond's Pairing, so
-// deleting the Pairing collects the keys, and the label on it names the
-// adapter, so the init container can gather one radio's bonds without
-// a list of paired devices. A bond with no Pairing yet is not
-// written: an owner reference cannot be added to a Secret that has
-// none, and the Pairing is created on the same pass or the next one.
+// One Secret holds one bond. Its owner is that bond's Peripheral, so
+// deleting the Peripheral collects the keys, and the label on it names
+// the adapter, so the init container can gather one radio's bonds
+// without a list of paired devices. A bond with no Peripheral yet is
+// not written: an owner reference cannot be added to a Secret that has
+// none, and the Peripheral is created on the same pass or the next one.
 //
 // The trigger is the same signal set the slice reconcile runs on, and
 // the same settle window (see bluez.go and main.go). Nothing here reads
@@ -52,6 +52,7 @@ package main
 // pairs a controller again.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,6 +97,12 @@ type bondStore struct {
 	namespace string
 	root      string
 
+	// relays is the input relay. The store reads each controller's
+	// evdev capability snapshot out of the relay and writes it into
+	// that bond's Secret, and restore hands the stored snapshots back
+	// to the relay when this pod starts.
+	relays *relays
+
 	// adapter is the radio this pod's bondfetch restored. It is read
 	// from bluetoothd the first time bluetoothd answers, and then it is
 	// fixed for the life of the process. A pod serves one adapter, and
@@ -114,9 +121,9 @@ type bondStore struct {
 // two differ. It reports whether the pass left every bond stored, so
 // that the caller can run a failure again shortly.
 //
-// owners names the Pairing that owns each bond's Secret, and unpairing
-// names the bonds a teardown is working through. Both come from the
-// inventory pass, which runs first.
+// owners names the Peripheral that owns each bond's Secret, and
+// unpairing names the bonds a teardown is working through. Both come
+// from the inventory pass, which runs first.
 func (s *bondStore) persist(readAdapter adapterAddressReader, owners map[bonds.Address]OwnerReference, unpairing map[bonds.Address]bool) bool {
 	if s.adapter.IsZero() {
 		address, err := readAdapter()
@@ -147,7 +154,7 @@ func (s *bondStore) persist(readAdapter adapterAddressReader, owners map[bonds.A
 		}
 		owner, owned := owners[device]
 		if !owned {
-			// The bond has no Pairing yet, which is the state between
+			// The bond has no Peripheral yet, which is the state between
 			// bluetoothd writing the keys and the inventory pass adopting
 			// them. A Secret written now would have no owner, and nothing
 			// would ever collect it.
@@ -161,31 +168,69 @@ func (s *bondStore) persist(readAdapter adapterAddressReader, owners map[bonds.A
 	return stored
 }
 
+// restore hands every stored evdev capability snapshot to the input
+// relay, so that each bonded controller has its virtual node before
+// the first pass publishes the slice. It runs once, at startup.
+//
+// The snapshots come from the API and not from the tree bondfetch
+// restored, because the snapshot is this operator's own document and
+// BlueZ owns that tree. A failure here costs nothing permanent: the
+// controller's next connect reads its capabilities from the real node
+// again.
+func (s *bondStore) restore(readAdapter adapterAddressReader) {
+	if s.adapter.IsZero() {
+		address, err := readAdapter()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reading the adapter's address for the relays: %v\n", err)
+			return
+		}
+		s.adapter = address
+	}
+	list, err := get[bonds.SecretList](s.client, byAdapter(bonds.SecretsPath(s.namespace), s.adapter.Key()))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing the stored bonds for the relays: %v\n", err)
+		return
+	}
+	for _, secret := range list.Items {
+		for device, snapshot := range secret.Snapshots() {
+			s.relays.restore(macFromDeviceName(device.Key()), snapshot)
+		}
+	}
+}
+
 // persistBond writes one bond's Secret when it differs from the bond on
-// disk.
+// disk, or when the controller's evdev capabilities differ from the
+// snapshot the Secret holds.
+//
+// The snapshot is written on the pass after the controller first
+// connects, because the relay reads a controller's capabilities from
+// its real evdev node and that node exists only while the controller
+// is on the air. Until then the key is absent, and the no-input-node
+// taint parks a claim on that controller.
 func (s *bondStore) persistBond(device bonds.Address, files bonds.Files, owner OwnerReference) bool {
 	name := bonds.BondSecretName(device)
 	path := bonds.BondSecretPath(s.namespace, device)
+	snapshot := s.relays.snapshot(macFromDeviceName(device.Key()))
 	current, err := get[bonds.Secret](s.client, path)
 	if errors.Is(err, ErrNotFound) {
-		return s.create(device, files, owner)
+		return s.create(device, files, snapshot, owner)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading %s: %v\n", name, err)
 		return false
 	}
-	if current.Tree()[device].Equal(files) {
+	if current.Tree()[device].Equal(files) && bytes.Equal(current.Snapshot(device), snapshot) {
 		return true
 	}
-	return s.update(current, device, files, owner)
+	return s.update(current, device, files, snapshot, owner)
 }
 
 // create puts one bond in the API for the first time. A create names
 // the collection, which is the API's rule for every resource, where
 // every other call here names the object.
-func (s *bondStore) create(device bonds.Address, files bonds.Files, owner OwnerReference) bool {
+func (s *bondStore) create(device bonds.Address, files bonds.Files, snapshot []byte, owner OwnerReference) bool {
 	name := bonds.BondSecretName(device)
-	secret := bonds.NewBondSecret(s.namespace, s.adapter, device, files, bondOwner(owner))
+	secret := bonds.NewBondSecret(s.namespace, s.adapter, device, files, snapshot, bondOwner(owner))
 	body, err := json.Marshal(secret)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", name, err)
@@ -204,9 +249,9 @@ func (s *bondStore) create(device bonds.Address, files bonds.Files, owner OwnerR
 // The write includes the resourceVersion from the read, so a second
 // writer gets ErrConflict instead of losing the first writer's bond,
 // and the next pass reads again and writes again.
-func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bonds.Files, owner OwnerReference) bool {
+func (s *bondStore) update(current *bonds.Secret, device bonds.Address, files bonds.Files, snapshot []byte, owner OwnerReference) bool {
 	name := bonds.BondSecretName(device)
-	secret := bonds.NewBondSecret(s.namespace, s.adapter, device, files, bondOwner(owner))
+	secret := bonds.NewBondSecret(s.namespace, s.adapter, device, files, snapshot, bondOwner(owner))
 	secret.Metadata.ResourceVersion = current.Metadata.ResourceVersion
 	body, err := json.Marshal(secret)
 	if err != nil {
@@ -245,7 +290,7 @@ func (s *bondStore) reportLegacySecret() {
 		"delete it once the per-bond Secrets have restored a controller\n", bonds.SecretName(s.adapter))
 }
 
-// bondOwner turns the Pairing this operator holds into the owner
+// bondOwner turns the Peripheral this operator holds into the owner
 // reference a Secret needs. The two structs hold the same fields, and
 // the bonds package has its own because it cannot import this one.
 func bondOwner(owner OwnerReference) bonds.Owner {

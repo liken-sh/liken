@@ -134,9 +134,9 @@ Whichever path you take, the manifests contain:
   own claim names. Your consumer class, such as `bluetooth-input`
   above, is not in the manifests: you create it.
 * The three `CustomResourceDefinitions` of the pairing API:
-  `Adapter`, `Pairing`, and `PairingRequest`. The operator records
-  every bond as a `Pairing` and stores its keys in a `Secret` that
-  the `Pairing` owns, so install the CRDs with the workload.
+  `Adapter`, `Peripheral`, and `PairingRequest`. The operator records
+  every bond as a `Peripheral` and stores its keys in a `Secret` that
+  the `Peripheral` owns, so install the CRDs with the workload.
 * The operator's `ServiceAccount` and its RBAC.
 * A `DaemonSet` and the `ResourceClaimTemplate` its pods claim the
   adapter through.

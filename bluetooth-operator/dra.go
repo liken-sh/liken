@@ -15,18 +15,23 @@ package main
 //
 // The prepare protocol tells the driver almost nothing: a claim's
 // namespace, name, and UID. What was allocated is on the claim's
-// status in the API server, so the driver reads that back, walks
-// sysfs again, and hands the claim what the named device grants: the
-// evdev nodes a controller registers now, or the bus mount and its
-// address variable. A call signals that something happened, and the
-// driver acts on the durable record instead of on data carried in the
-// call.
+// status in the API server, so the driver reads that back and hands
+// the claim what the named device grants: the virtual input nodes the
+// controller's relay holds open, or the bus mount and its address
+// variable. A call signals that something happened, and the driver
+// acts on the durable record instead of on data carried in the call.
+//
+// A controller's node never moves, because the relay holds the uinput
+// fd open for the life of the process and the kernel keeps the node
+// while it does. So a spec file this driver wrote is correct for the
+// whole boot, and a pod that starts while the controller sleeps gets a
+// node that reads nothing until the next press.
 //
 // Failures are per-claim strings inside the response, not gRPC
 // errors. The kubelet holds the affected pod in ContainerCreating and
-// retries, which is the correct behavior for a controller that is
-// paired and switched off: the pod waits, visibly, and a describe of
-// the pod says why.
+// retries, which is the correct behavior for a bond that has never
+// connected: the pod waits, visibly, and a describe of the pod says
+// why.
 
 import (
 	"context"
@@ -40,8 +45,6 @@ import (
 	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
-
-	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
 // The kubelet's plugin directories. The registry is where the kubelet
@@ -53,16 +56,13 @@ var (
 	draPluginDir   = "/var/lib/kubelet/plugins/" + DriverName
 )
 
-// draSysfsRoot is the sysfs mount this driver reads. The pod runs in
-// the host's network namespace and reads the host's own sysfs.
-var draSysfsRoot = "/sys"
-
-// draPlugin answers the kubelet's DRA calls. The API client is its
-// only state, and it derives everything else again on each call, from
-// the claim and from sysfs.
+// draPlugin answers the kubelet's DRA calls. It reads the claim from
+// the API server on each call, and takes the nodes it delivers from
+// the relay the reconcile loop keeps.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client *Client
+	relays *relays
 }
 
 // draRegistrar answers the kubelet's plugin-watcher handshake.
@@ -97,7 +97,7 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 // registration. The function removes stale sockets from a previous
 // pod first, because a bind to an orphaned socket file fails even
 // when nothing is listening on it.
-func serveDRAPlugin(ctx context.Context, client *Client) error {
+func serveDRAPlugin(ctx context.Context, client *Client, held *relays) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func serveDRAPlugin(ctx context.Context, client *Client) error {
 		return fmt.Errorf("the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
-	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client})
+	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, relays: held})
 	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")
@@ -167,15 +167,6 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		return fail("the claim has no allocation yet")
 	}
 
-	// One walk answers every result in the claim, and it is the same
-	// walk that publishes the slice, so the two always report the same
-	// nodes for a controller. The walk runs with no
-	// adapter filter. The plugin holds no D-Bus connection and cannot
-	// read the adapter address, and it does not need to: the claim names
-	// controllers that this operator's own slice already published, and
-	// the publish half scoped that slice to this adapter.
-	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot, bonds.Address{}))
-
 	var specDevices []cdiDevice
 	var devices []*drav1.Device
 	for _, result := range allocated.Status.Allocation.Devices.Results {
@@ -188,19 +179,20 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		// -media suffix is the whole distinction between the media bus
 		// and a paired controller. The bus grants a mount and a
 		// variable, it registers no evdev node, and it is ready
-		// whenever bluetoothd serves, so the sysfs walk above does not
-		// apply to it.
+		// whenever bluetoothd serves, so no relay stands behind it.
 		var edits cdiEdits
 		if isMediaBusName(result.Device) {
 			edits = busEdits()
 		} else {
 			mac := macFromDeviceName(result.Device)
-			current := nodes[mac]
+			current := p.relays.virtualNodes(mac)
 			if len(current) == 0 {
-				// The controller is paired and off the air. The pod waits in
-				// ContainerCreating, and the scheduler and the eviction
-				// controller act on the device's NoExecute taint.
-				return fail("controller %s registers no input node right now", publishedMAC(mac))
+				// The bond has never connected, so the relay has never read
+				// the controller's capabilities and holds no virtual device
+				// for it. The pod waits in ContainerCreating, and the
+				// device's NoSchedule taint holds the next one back until
+				// somebody switches the controller on once.
+				return fail("controller %s has no input relay yet; it has not connected since it was paired", publishedMAC(mac))
 			}
 			edits = cdiEdits{DeviceNodes: deviceNodes(current)}
 		}
@@ -226,8 +218,9 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 
 // NodeUnprepareResources removes each claim's CDI spec. As with
 // prepare, every claim gets an answer and failures stay specific to
-// each claim. Nothing else has to be given back: a controller's
-// nodes belong to the kernel, and the next claim reads them again.
+// each claim. Nothing else has to be given back: the relay holds a
+// controller's virtual node whether or not a claim names it, and the
+// next claim delivers the same node.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {

@@ -7,7 +7,7 @@ weight: 20
 
 The reference describes what the operator publishes and the API
 that drives it. [Adapters](/docs/reference/adapters/),
-[Pairings](/docs/reference/pairings/), and
+[Peripherals](/docs/reference/peripherals/), and
 [PairingRequests](/docs/reference/pairingrequests/) are the pairing
 API, one page per resource with every field.
 [Devices](/docs/reference/devices/) describes the device classes,

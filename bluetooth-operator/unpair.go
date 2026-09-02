@@ -1,25 +1,25 @@
 package main
 
-// Deleting a Pairing is the unpair API, and an unpair has an order.
+// Deleting a Peripheral is the unpair API, and an unpair has an order.
 //
 // The rule every device operator here follows is that a device a claim
 // still names never leaves the published inventory. So the teardown
 // works from the consumer inwards, one step for each pass, and each
 // step is checked before the next one runs:
 //
-//  1. Disconnect the device. The session ends, the controller
-//     registers no evdev node, and the ordinary reconcile puts both
-//     taints on the slice device. The eviction controller acts on the
-//     NoExecute taint, and the consumer's own tolerationSeconds sets
-//     how long that takes.
+//  1. Disconnect the device. The session ends, and the ordinary
+//     reconcile puts the disconnected taint on the slice device. The
+//     eviction controller acts on that NoExecute taint, and the
+//     consumer's own tolerationSeconds sets how long that takes.
 //  2. Wait until no prepared claim holds the controller. The kubelet's
 //     unprepare call ends the claim's hold, and it runs after the
 //     consumer's container is gone.
-//  3. Retire the device from the ResourceSlice, so no new claim can
-//     be allocated to a bond that is about to go.
+//  3. Retire the device from the ResourceSlice and stop its input
+//     relay, so no new claim can be allocated to a bond that is about
+//     to go and no virtual node outlives it.
 //  4. Remove the bond from bluetoothd, and release the finalizer.
-//     The Secret that holds the keys is owned by the Pairing, so garbage
-//     collection takes it in the same act.
+//     The Secret that holds the keys is owned by the Peripheral, so
+//     garbage collection takes it in the same act.
 //
 // Steps 3 and 4 are separated by a pass on purpose. The publisher
 // writes the slice after this runs, so the device is out of the
@@ -32,16 +32,16 @@ import (
 	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
-// unpair advances one Pairing's teardown by at most one step.
-func (i *inventory) unpair(pairing *Pairing, address bonds.Address, device deviceState, present bool, pass *inventoryPass) {
-	name := pairing.Metadata.Name
-	if !pairing.Metadata.holds(pairingFinalizer) {
+// unpair advances one Peripheral's teardown by at most one step.
+func (i *inventory) unpair(peripheral *Peripheral, address bonds.Address, device deviceState, present bool, pass *inventoryPass) {
+	name := peripheral.Metadata.Name
+	if !peripheral.Metadata.holds(peripheralFinalizer) {
 		// Nothing holds the object. The API server removes it as soon as
 		// the last finalizer is gone, so there is no teardown to run.
 		return
 	}
 	// The bond is being removed, so its Secret is not rewritten while
-	// the teardown runs. The Secret itself stays until the Pairing that
+	// the teardown runs. The Secret itself stays until the Peripheral that
 	// owns it is collected.
 	pass.unpairing[address] = true
 	pass.runAgainIn(followUpDelay)
@@ -78,7 +78,14 @@ func (i *inventory) unpair(pairing *Pairing, address bonds.Address, device devic
 		// The claim is released, so the device leaves the published
 		// inventory. The publisher runs after this pass, and the next
 		// pass removes the bond.
+		//
+		// The relay stops in the same step, because its virtual node is what a
+		// claim on this controller delivered and no claim holds it now. The
+		// publisher builds its relays from the devices it publishes, and this
+		// device is out of that set from this pass onwards, so nothing creates
+		// the relay again.
 		fmt.Printf("unpair %s: retiring it from the slice\n", name)
+		i.relays.stop(macFromDeviceName(address.Key()))
 		i.retire(address, pass)
 		return
 	}
@@ -88,8 +95,8 @@ func (i *inventory) unpair(pairing *Pairing, address bonds.Address, device devic
 		pass.ok = false
 		return
 	}
-	if _, err := patchFinalizers(i.client, pairingPath(name), pairing.Metadata.ResourceVersion,
-		pairing.Metadata.without(pairingFinalizer)); err != nil {
+	if _, err := patchFinalizers(i.client, peripheralPath(name), peripheral.Metadata.ResourceVersion,
+		peripheral.Metadata.without(peripheralFinalizer)); err != nil {
 		fmt.Fprintf(os.Stderr, "unpair %s: releasing the object: %v\n", name, err)
 		pass.ok = false
 		return

@@ -45,7 +45,12 @@ func reconcileFixture(t *testing.T, sysfs string, devices ...fakeHID) (*publishe
 
 	fixture := &slicePublishFixture{}
 	client := testClient(t, fixture.handler(t))
-	return &publisher{client: client, nodeName: "liken-1", owner: testOwner()}, fixture
+	return &publisher{
+		client:   client,
+		nodeName: "liken-1",
+		owner:    testOwner(),
+		relays:   relaysFor(t, devices...),
+	}, fixture
 }
 
 // testBus is the media bus device of the adapter these tests run
@@ -208,16 +213,16 @@ func TestReconcileNeverDeletesWhenTheAdapterIsGone(t *testing.T) {
 		t.Fatal("a departed adapter left the slice saying the controller is connected")
 	}
 
-	// Every published controller is out of reach, so every one of them
-	// has both taints: NoExecute ends the sessions that are
-	// running, and NoSchedule keeps the next claim parked.
+	// Every published controller is out of reach, so the NoExecute taint
+	// ends the sessions that are running and holds the next allocation
+	// back. The no-input-node taint is absent: the relay holds the
+	// controller's virtual node whether the radio is there or not, so a
+	// consumer that tolerates the NoExecute taint keeps a node that
+	// works when the radio returns.
 	device := deviceNamed(t, fixture.updated, "a0-ab-51-33-b7-12")
-	keys := map[string]string{}
-	for _, taint := range device.Taints {
-		keys[taint.Key] = taint.Effect
-	}
-	if keys[disconnectedTaint] != "NoExecute" || keys[noInputNodeTaint] != "NoSchedule" {
-		t.Errorf("device %s taints = %+v", device.Name, device.Taints)
+	wantTaints := []DeviceTaint{{Key: disconnectedTaint, Effect: "NoExecute"}}
+	if !reflect.DeepEqual(device.Taints, wantTaints) {
+		t.Errorf("device %s taints = %+v, want %+v", device.Name, device.Taints, wantTaints)
 	}
 	if *device.Attributes["connected"].Bool {
 		t.Errorf("device %s still says it is connected", device.Name)
@@ -360,4 +365,52 @@ func failingAPI(t *testing.T) http.Handler {
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, `{"message":"resourceslices is forbidden"}`)
 	})
+}
+
+// A bond that has never connected has no relay, so a claim on it would
+// deliver nothing. That is the whole meaning of the no-input-node
+// taint, and it is what holds a claim back until somebody switches the
+// controller on once.
+func TestReconcileTaintsABondThatHasNeverConnected(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "")
+
+	if !publish.reconcile(pairedSet(map[string]controller{"a0:ab:51:33:b7:12": {}}), adapterIs(t), nil) {
+		t.Fatal("the pass reported a failure")
+	}
+
+	device := deviceNamed(t, fixture.created, "a0-ab-51-33-b7-12")
+	want := []DeviceTaint{
+		{Key: disconnectedTaint, Effect: "NoExecute"},
+		{Key: noInputNodeTaint, Effect: "NoSchedule"},
+	}
+	if !reflect.DeepEqual(device.Taints, want) {
+		t.Errorf("taints = %+v, want %+v", device.Taints, want)
+	}
+}
+
+// A controller that connected once and then went to sleep keeps the
+// virtual node its relay holds open, so the no-input-node taint goes
+// away and stays away. This is the state a Low Energy remote rests in
+// between presses.
+func TestReconcileKeepsTheNodeOfAControllerThatWentToSleep(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "",
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
+
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), nil) {
+		t.Fatal("the first pass reported a failure")
+	}
+	fixture.existing = fixture.created
+
+	// The controller slept, so the kernel took its evdev node away and
+	// the walk finds nothing under it.
+	draSysfsRoot = fakeSysfs(t)
+	if !publish.reconcile(pairedSet(map[string]controller{"a0:ab:51:33:b7:12": {}}), adapterIs(t), nil) {
+		t.Fatal("the second pass reported a failure")
+	}
+
+	device := deviceNamed(t, fixture.updated, "a0-ab-51-33-b7-12")
+	want := []DeviceTaint{{Key: disconnectedTaint, Effect: "NoExecute"}}
+	if !reflect.DeepEqual(device.Taints, want) {
+		t.Errorf("taints = %+v, want %+v", device.Taints, want)
+	}
 }

@@ -77,8 +77,8 @@ func TestRequestNeverPairsWithoutAnApproval(t *testing.T) {
 	if radio.called("Pair") {
 		t.Fatalf("an empty spec.device paired something: %v", radio.calls)
 	}
-	if _, found := fixture.objects[testPairingPath()]; found {
-		t.Fatal("an empty spec.device created a Pairing")
+	if _, found := fixture.objects[testPeripheralPath()]; found {
+		t.Fatal("an empty spec.device created a Peripheral")
 	}
 }
 
@@ -99,22 +99,22 @@ func TestRequestPairsTheDeviceAPersonApproved(t *testing.T) {
 		t.Errorf("the device was not trusted: %v", radio.calls)
 	}
 	request := read[PairingRequest](t, fixture, testRequestPath())
-	if request.Status.Phase != phasePaired || request.Status.Pairing != "a0-ab-51-33-b7-12" {
+	if request.Status.Phase != phasePaired || request.Status.Peripheral != "a0-ab-51-33-b7-12" {
 		t.Errorf("status = %+v", request.Status)
 	}
 	if request.Status.FinishedAt != timestamp(testNow) {
 		t.Errorf("status.finishedAt = %q", request.Status.FinishedAt)
 	}
-	// The Pairing records the request that produced it, so that record
+	// The Peripheral records the request that produced it, so that record
 	// outlasts the request's collection.
-	pairing := read[Pairing](t, fixture, testPairingPath())
-	if pairing.Status.Request != "liken-system/"+testRequestName {
-		t.Errorf("the Pairing does not name the request: %+v", pairing.Status)
+	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
+	if peripheral.Status.Bond.Request != "liken-system/"+testRequestName {
+		t.Errorf("the Peripheral does not name the request: %+v", peripheral.Status)
 	}
-	if pairing.Spec.Trusted == nil || !*pairing.Spec.Trusted {
-		t.Errorf("spec.trusted = %v, want true", pairing.Spec.Trusted)
+	if peripheral.Spec.Trusted == nil || !*peripheral.Spec.Trusted {
+		t.Errorf("spec.trusted = %v, want true", peripheral.Spec.Trusted)
 	}
-	// The bond's Secret follows on the same pass, because the Pairing
+	// The bond's Secret follows on the same pass, because the Peripheral
 	// that owns it exists now.
 	if _, owned := pass.owners[testAddress(t, testDevice)]; !owned {
 		t.Errorf("owners = %+v, want the new bond", pass.owners)
@@ -148,7 +148,7 @@ func TestRequestWaitsForAnApprovedDeviceToAnswer(t *testing.T) {
 // A pairing bluetoothd refused is reported and left for the window to
 // try again, because the controller's own pairing mode may still be
 // running.
-func TestRequestReportsAPairingTheRadioRefused(t *testing.T) {
+func TestRequestReportsAPeripheralTheRadioRefused(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(testDevice))
 	radio := testRadio(t, seenDevice(t, testDevice, "DualSense Wireless Controller"))
@@ -164,8 +164,8 @@ func TestRequestReportsAPairingTheRadioRefused(t *testing.T) {
 	if request.Status.Message == "" {
 		t.Error("nothing in the status reports why the pairing did not happen")
 	}
-	if _, found := fixture.objects[testPairingPath()]; found {
-		t.Error("a failed pairing recorded a Pairing")
+	if _, found := fixture.objects[testPeripheralPath()]; found {
+		t.Error("a failed pairing recorded a Peripheral")
 	}
 }
 
@@ -221,7 +221,7 @@ func TestFinishedRequestIsCollectedAfterItsTTL(t *testing.T) {
 	request := openRequest(testDevice)
 	request.Status = PairingRequestStatus{
 		Phase:      phasePaired,
-		Pairing:    "a0-ab-51-33-b7-12",
+		Peripheral: "a0-ab-51-33-b7-12",
 		FinishedAt: timestamp(testNow.Add(-25 * time.Hour)),
 	}
 	fixture.put(t, testRequestPath(), request)
@@ -310,7 +310,7 @@ func TestSeenListKeepsTheFirstSighting(t *testing.T) {
 	}
 }
 
-// A device the radio already holds a bond with has a Pairing of its
+// A device the radio already holds a bond with has a Peripheral of its
 // own, and the list exists to name the devices that do not.
 func TestSeenListLeavesOutTheDevicesAlreadyPaired(t *testing.T) {
 	snapshot := radioSnapshot{Devices: []deviceState{pairedDevice(t, testDevice)}}

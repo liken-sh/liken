@@ -5,6 +5,6 @@ into `spec.device`. An empty `spec.device` never pairs anything.
 The resource is namespaced, so RBAC can grant the right to pair in
 one namespace without a shell on any node. A finished request
 reports `Paired` or `Expired` and is collected after its TTL, and
-the [Pairing](/docs/reference/pairings/) it produced records the
-request's name. [Pair a controller](/docs/guides/pair-a-controller/)
+the [Peripheral](/docs/reference/peripherals/) it produced records
+the request's name. [Pair a controller](/docs/guides/pair-a-controller/)
 gives the steps.

@@ -1,10 +1,10 @@
 package main
 
 // These tests run one prepare call end to end: a claim read from a
-// test API server, a fake sysfs tree, and the CDI spec file that the
-// container runtime would read. The spec file states which device
-// nodes a consumer's container receives, so it is the thing worth
-// asserting on.
+// test API server, a relay over a fake kernel, and the CDI spec file
+// that the container runtime would read. The spec file states which
+// device nodes a consumer's container receives, so it is the thing
+// worth asserting on.
 
 import (
 	"encoding/json"
@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
@@ -38,15 +40,40 @@ func allocatedClaim(t *testing.T, results ...AllocatedDevice) http.Handler {
 	})
 }
 
-// preparePlugin wires a plugin to a test API server, with sysfs and
-// the CDI directory pointed at directories the test owns.
+// preparePlugin wires a plugin to a test API server, with the CDI
+// directory pointed at one the test owns and one relay running for
+// each controller these HID devices name. A controller that is not
+// named here has no relay, which is the state of a bond that has never
+// connected.
 func preparePlugin(t *testing.T, claims http.Handler, devices ...fakeHID) *draPlugin {
 	t.Helper()
 	cdiTempDir(t)
-	previous := draSysfsRoot
-	draSysfsRoot = fakeSysfs(t, devices...)
-	t.Cleanup(func() { draSysfsRoot = previous })
-	return &draPlugin{client: testClient(t, claims)}
+	held := relaysFor(t, devices...)
+	for _, device := range devices {
+		held.ensure(device.Uevent["HID_UNIQ"], realNodes(device))
+	}
+	return &draPlugin{client: testClient(t, claims), relays: held}
+}
+
+// controllerAllocation is one paired controller as the scheduler
+// allocates it.
+func controllerAllocation() AllocatedDevice {
+	return AllocatedDevice{
+		Request: "controller",
+		Driver:  DriverName,
+		Pool:    "liken-1",
+		Device:  "a0-ab-51-33-b7-12",
+	}
+}
+
+// deliveredNodes are the device nodes one prepared claim's spec grants.
+func deliveredNodes(t *testing.T, spec cdiSpec, device int) []string {
+	t.Helper()
+	var paths []string
+	for _, node := range spec.Devices[device].ContainerEdits.DeviceNodes {
+		paths = append(paths, node.Path)
+	}
+	return paths
 }
 
 func testClaim() *drav1.Claim {
@@ -57,12 +84,7 @@ func TestPrepareClaimDeliversOneControllersInputNodes(t *testing.T) {
 	// Two controllers are connected. The claim allocated one of them,
 	// and the container must receive that one's nodes and no others.
 	plugin := preparePlugin(t,
-		allocatedClaim(t, AllocatedDevice{
-			Request: "controller",
-			Driver:  DriverName,
-			Pool:    "liken-1",
-			Device:  "a0-ab-51-33-b7-12",
-		}),
+		allocatedClaim(t, controllerAllocation()),
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5", "input/js0"),
 		dualSense("0002", "a0:ab:51:33:b7:12", "input/event6"),
 		dualSense("0003", "b4:8c:9d:11:22:33", "input/event7"),
@@ -91,22 +113,56 @@ func TestPrepareClaimDeliversOneControllersInputNodes(t *testing.T) {
 	if len(spec.Devices) != 1 {
 		t.Fatalf("spec devices = %+v", spec.Devices)
 	}
-	var paths []string
-	for _, node := range spec.Devices[0].ContainerEdits.DeviceNodes {
-		paths = append(paths, node.Path)
+	// Both of the allocated controller's HID devices contribute a
+	// virtual node, and the other controller contributes nothing.
+	paths := deliveredNodes(t, spec, 0)
+	want := plugin.relays.virtualNodes("a0:ab:51:33:b7:12")
+	if len(want) != 2 {
+		t.Fatalf("the relay holds %v, want two nodes", want)
 	}
-	// Both of the allocated controller's HID devices contribute, the
-	// other controller contributes nothing, and joydev's node stays
-	// out.
-	want := []string{"/dev/input/event5", "/dev/input/event6"}
-	if len(paths) != len(want) {
+	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("nodes = %v, want %v", paths, want)
 	}
-	for i, path := range want {
-		if paths[i] != path {
-			t.Fatalf("nodes = %v, want %v", paths, want)
+	for _, other := range plugin.relays.virtualNodes("b4:8c:9d:11:22:33") {
+		if slices.Contains(paths, other) {
+			t.Errorf("the claim received %s, which belongs to another controller", other)
 		}
 	}
+}
+
+// A claim on a controller that is asleep is prepared from the
+// capability snapshot its bond's Secret holds. This is why the relay
+// exists: a standing pod for a remote that reconnects on the next
+// press starts before anybody presses anything.
+func TestPrepareClaimDeliversAControllerThatIsAsleep(t *testing.T) {
+	plugin := preparePlugin(t, allocatedClaim(t, controllerAllocation()))
+	// The controller registers no real node anywhere. Its capabilities
+	// come from the Secret, written the last time it was connected.
+	plugin.relays.restore("a0:ab:51:33:b7:12", storedCapabilities(t))
+
+	resp := plugin.prepareClaim(testClaim())
+	if resp.Error != "" {
+		t.Fatalf("prepare failed: %s", resp.Error)
+	}
+	paths := deliveredNodes(t, readSpec(t, cdiSpecPath(testClaimUID)), 0)
+	want := plugin.relays.virtualNodes("a0:ab:51:33:b7:12")
+	if len(want) != 1 || !reflect.DeepEqual(paths, want) {
+		t.Fatalf("nodes = %v, want %v", paths, want)
+	}
+}
+
+// storedCapabilities is one controller's evdev snapshot as its bond's
+// Secret holds it.
+func storedCapabilities(t *testing.T) []byte {
+	t.Helper()
+	stored, err := json.Marshal(evdevSnapshot{
+		Version: snapshotVersion,
+		Nodes:   []evdevCapabilities{testCapabilities()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stored
 }
 
 // busAllocation is the media bus as the scheduler allocates it.
@@ -161,15 +217,7 @@ func TestPrepareClaimDeliversTheMediaBus(t *testing.T) {
 // each entry in the one spec file carries its own kind of edit.
 func TestPrepareClaimDeliversAControllerAndTheBusTogether(t *testing.T) {
 	plugin := preparePlugin(t,
-		allocatedClaim(t,
-			AllocatedDevice{
-				Request: "controller",
-				Driver:  DriverName,
-				Pool:    "liken-1",
-				Device:  "a0-ab-51-33-b7-12",
-			},
-			busAllocation(),
-		),
+		allocatedClaim(t, controllerAllocation(), busAllocation()),
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
 	)
 
@@ -187,8 +235,9 @@ func TestPrepareClaimDeliversAControllerAndTheBusTogether(t *testing.T) {
 		edits[device.Name] = device.ContainerEdits
 	}
 	controller := edits[testClaimUID+"-a0-ab-51-33-b7-12"]
-	if len(controller.DeviceNodes) != 1 || controller.DeviceNodes[0].Path != "/dev/input/event5" {
-		t.Errorf("the controller's edits = %+v", controller)
+	relayed := plugin.relays.virtualNodes("a0:ab:51:33:b7:12")
+	if len(controller.DeviceNodes) != 1 || controller.DeviceNodes[0].Path != relayed[0] {
+		t.Errorf("the controller's edits = %+v, want %v", controller, relayed)
 	}
 	if len(controller.Env) != 0 || len(controller.Mounts) != 0 {
 		t.Errorf("the controller received the bus edits: %+v", controller)
@@ -225,22 +274,22 @@ func TestPrepareClaimLeavesAnotherDriversAllocationAlone(t *testing.T) {
 	}
 }
 
-func TestPrepareClaimWaitsForAControllerThatIsOffTheAir(t *testing.T) {
-	// The controller is paired and switched off, so it registers no
-	// node. Failing per claim holds the pod in ContainerCreating with
-	// a reason a describe of the pod shows, which is the correct
-	// outcome while the device's NoSchedule taint keeps the next pod
-	// parked.
-	plugin := preparePlugin(t, allocatedClaim(t, AllocatedDevice{
-		Request: "controller",
-		Driver:  DriverName,
-		Pool:    "liken-1",
-		Device:  "a0-ab-51-33-b7-12",
-	}))
+func TestPrepareClaimWaitsForABondThatHasNeverConnected(t *testing.T) {
+	// The bond was made and the controller has never connected since,
+	// so no snapshot exists and the relay holds no virtual device.
+	// Failing per claim holds the pod in ContainerCreating with a
+	// reason a describe of the pod shows, which is the correct outcome
+	// while the device's NoSchedule taint keeps the next pod parked.
+	plugin := preparePlugin(t, allocatedClaim(t, controllerAllocation()))
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error == "" {
-		t.Fatal("prepare succeeded for a controller with no input node")
+		t.Fatal("prepare succeeded for a controller with no relay")
+	}
+	// The message names the controller, so a person reading the pod's
+	// events knows which one to switch on.
+	if !strings.Contains(resp.Error, "A0:AB:51:33:B7:12") {
+		t.Errorf("the failure does not name the controller: %s", resp.Error)
 	}
 	if _, err := os.Stat(cdiSpecPath(testClaimUID)); !os.IsNotExist(err) {
 		t.Fatal("a failed prepare wrote a spec file")
@@ -264,12 +313,7 @@ func TestPrepareClaimRefusesARecreatedClaim(t *testing.T) {
 
 func TestUnprepareRemovesTheSpecAndRepeats(t *testing.T) {
 	plugin := preparePlugin(t,
-		allocatedClaim(t, AllocatedDevice{
-			Request: "controller",
-			Driver:  DriverName,
-			Pool:    "liken-1",
-			Device:  "a0-ab-51-33-b7-12",
-		}),
+		allocatedClaim(t, controllerAllocation()),
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
 	)
 	if resp := plugin.prepareClaim(testClaim()); resp.Error != "" {

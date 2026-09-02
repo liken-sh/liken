@@ -92,6 +92,47 @@ func TestSnapshotReadsTheAdapterAndItsDevices(t *testing.T) {
 // A tree with no adapter in it occurs in two cases: bluetoothd has
 // not published its object tree yet, and the radio has gone away.
 // Neither case reports anything about which devices are paired.
+// The level and the icon arrive in the same managed-objects read as
+// everything else, because BlueZ publishes org.bluez.Battery1 beside
+// org.bluez.Device1 on the device object.
+func TestSnapshotReadsTheBatteryTheIconAndTheAddressType(t *testing.T) {
+	objects := managedObjects{}.
+		adapter("/org/bluez/hci0").
+		device("/org/bluez/hci0/dev_A0_AB_51_33_B7_12", map[string]any{
+			"Address":     "A0:AB:51:33:B7:12",
+			"Icon":        "input-gaming",
+			"AddressType": "random",
+			"Paired":      true,
+		}).
+		battery("/org/bluez/hci0/dev_A0_AB_51_33_B7_12", 62, "HID").
+		device("/org/bluez/hci0/dev_CC_CC_CC_CC_CC_CC", map[string]any{
+			"Address": "CC:CC:CC:CC:CC:CC",
+			"Paired":  true,
+		})
+
+	snapshot, err := snapshotFrom(objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	charged, _ := snapshot.device(testAddress(t, "A0:AB:51:33:B7:12"))
+	if charged.Icon != "input-gaming" || charged.AddressType != "random" {
+		t.Errorf("device = %+v", charged)
+	}
+	if charged.Battery == nil {
+		t.Fatalf("the device reports a level and the snapshot holds none: %+v", charged)
+	}
+	if charged.Battery.Percentage != 62 || charged.Battery.Source != "HID" {
+		t.Errorf("battery = %+v", charged.Battery)
+	}
+	// A device with no battery has no Battery1 interface at all, which is
+	// the ordinary case.
+	flat, _ := snapshot.device(testAddress(t, "CC:CC:CC:CC:CC:CC"))
+	if flat.Battery != nil {
+		t.Errorf("battery = %+v, want none", flat.Battery)
+	}
+}
+
 func TestSnapshotReportsNoAdapter(t *testing.T) {
 	if _, err := snapshotFrom(nil); err != ErrNoAdapter {
 		t.Fatalf("an empty tree gave %v, want ErrNoAdapter", err)

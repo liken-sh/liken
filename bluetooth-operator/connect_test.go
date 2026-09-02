@@ -50,7 +50,7 @@ func untrustedSpeaker(t *testing.T) deviceState {
 }
 
 // seenSpeaker is the same hardware with no bond, which is what a
-// pairing window reports before anybody approves it.
+// peripheral window reports before anybody approves it.
 func seenSpeaker(t *testing.T) deviceState {
 	t.Helper()
 	device := bondedSpeaker(t)
@@ -116,12 +116,12 @@ func TestConnectPagesOnlyABondedTrustedAudioSink(t *testing.T) {
 
 // A teardown disconnects the device and removes the bond, so a page
 // in the middle of it would work against the unpair.
-func TestConnectSkipsADeletingPairing(t *testing.T) {
+func TestConnectSkipsADeletingPeripheral(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, connectedSpeaker(t))
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
-	deleteSpeakerPairing(t, fixture)
+	deleteSpeakerPeripheral(t, fixture)
 	// The teardown's first step disconnects the speaker, which is the
 	// state a page would answer.
 	inventory.reconcile()
@@ -135,15 +135,15 @@ func TestConnectSkipsADeletingPairing(t *testing.T) {
 	}
 }
 
-// deleteSpeakerPairing marks the Pairing the way a kubectl delete
+// deleteSpeakerPeripheral marks the Peripheral the way a kubectl delete
 // does: the API server stamps a deletionTimestamp and keeps the
 // object, because the operator's finalizer is on it.
-func deleteSpeakerPairing(t *testing.T, fixture *apiFixture) {
+func deleteSpeakerPeripheral(t *testing.T, fixture *apiFixture) {
 	t.Helper()
-	path := pairingPath(speakerAddress(t).Key())
-	pairing := read[Pairing](t, fixture, path)
-	pairing.Metadata.DeletionTimestamp = timestamp(testNow)
-	fixture.put(t, path, pairing)
+	path := peripheralPath(speakerAddress(t).Key())
+	peripheral := read[Peripheral](t, fixture, path)
+	peripheral.Metadata.DeletionTimestamp = timestamp(testNow)
+	fixture.put(t, path, peripheral)
 }
 
 // A speaker that is switched off fails every page, and each page

@@ -55,7 +55,7 @@ func TestOneBondReadsTheLayoutFromTheName(t *testing.T) {
 
 func TestNewBondSecretHoldsTheDevicesFiles(t *testing.T) {
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
-		files(testInfo, testCache), testOwner)
+		files(testInfo, testCache), nil, testOwner)
 
 	if secret.Metadata.Name != "bluetooth-bond-7c-66-ef-22-e7-80" {
 		t.Errorf("name = %q", secret.Metadata.Name)
@@ -73,8 +73,8 @@ func TestNewBondSecretHoldsTheDevicesFiles(t *testing.T) {
 	if !reflect.DeepEqual(secret.Metadata.Labels, want) {
 		t.Errorf("labels = %v, want %v", secret.Metadata.Labels, want)
 	}
-	// The Pairing owns the Secret, so deleting the Pairing collects the
-	// keys and no bond outlives the object that names it.
+	// The Peripheral owns the Secret, so deleting the Peripheral collects
+	// the keys and no bond outlives the object that names it.
 	if !reflect.DeepEqual(secret.Metadata.OwnerReferences, []Owner{testOwner}) {
 		t.Errorf("ownerReferences = %+v", secret.Metadata.OwnerReferences)
 	}
@@ -94,7 +94,7 @@ func TestNewBondSecretHoldsTheDevicesFiles(t *testing.T) {
 // empty cache file, which is not the same as no cache file.
 func TestNewBondSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
-		files(testInfo, ""), testOwner)
+		files(testInfo, ""), nil, testOwner)
 
 	if _, found := secret.Data["7c-66-ef-22-e7-80.cache"]; found {
 		t.Errorf("data = %v, want no cache key", secret.Data)
@@ -105,7 +105,7 @@ func TestNewBondSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
 // []byte, so an info file with any byte in it survives the round trip.
 func TestSecretDataIsBase64OnTheWire(t *testing.T) {
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
-		files(testInfo, testCache), testOwner)
+		files(testInfo, testCache), nil, testOwner)
 
 	body, err := json.Marshal(secret)
 	if err != nil {
@@ -230,7 +230,7 @@ func TestSecretTreeReturnsWhatNewBondSecretStored(t *testing.T) {
 	tree := Tree{address(t, testDevice): files(testInfo, testCache)}
 
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
-		tree[address(t, testDevice)], testOwner)
+		tree[address(t, testDevice)], nil, testOwner)
 	if again := secret.Tree(); !equalTrees(tree, again) {
 		t.Fatalf("the tree changed on the way through a Secret: %v, want %v", again, tree)
 	}
@@ -249,10 +249,47 @@ func TestMergeGathersEveryBond(t *testing.T) {
 	}
 }
 
-// testOwner is the Pairing that owns a bond's Secret.
+// testOwner is the Peripheral that owns a bond's Secret.
 var testOwner = Owner{
 	APIVersion: "bluetooth.liken.sh/v1alpha1",
-	Kind:       "Pairing",
+	Kind:       "Peripheral",
 	Name:       "7c-66-ef-22-e7-80",
 	UID:        "8f0f0b32-0000-4000-8000-000000000001",
+}
+
+// The snapshot travels in the same Secret as the bond, under its own
+// key. The tree the init container writes ignores it: it is this
+// operator's own document, not one of BlueZ's files, and BlueZ owns
+// the tree.
+func TestNewBondSecretHoldsTheEvdevSnapshot(t *testing.T) {
+	snapshot := []byte(`{"version":1,"nodes":[{"name":"Wireless Controller"}]}`)
+	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
+		files(testInfo, testCache), snapshot, testOwner)
+
+	if got := string(secret.Data["7c-66-ef-22-e7-80.evdev"]); got != string(snapshot) {
+		t.Errorf("data[7c-66-ef-22-e7-80.evdev] = %q", got)
+	}
+	if got := string(secret.Snapshot(address(t, testDevice))); got != string(snapshot) {
+		t.Errorf("Snapshot = %q", got)
+	}
+	if got := string(secret.Snapshots()[address(t, testDevice)]); got != string(snapshot) {
+		t.Errorf("Snapshots = %q", got)
+	}
+	if got := secret.Tree()[address(t, testDevice)]; !got.Equal(files(testInfo, testCache)) {
+		t.Errorf("the tree read back %+v", got)
+	}
+}
+
+// A controller that has never connected has no snapshot, and the key
+// is absent rather than empty, so the two states stay apart.
+func TestNewBondSecretWritesNoEvdevKeyWithoutASnapshot(t *testing.T) {
+	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
+		files(testInfo, testCache), nil, testOwner)
+
+	if _, found := secret.Data["7c-66-ef-22-e7-80.evdev"]; found {
+		t.Errorf("data = %v, want no evdev key", secret.Data)
+	}
+	if len(secret.Snapshots()) != 0 {
+		t.Errorf("Snapshots = %v, want none", secret.Snapshots())
+	}
 }

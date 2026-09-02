@@ -14,7 +14,7 @@ REFERENCE := content/docs/reference
 
 GENERATED := \
 	$(REFERENCE)/adapters.md \
-	$(REFERENCE)/pairings.md \
+	$(REFERENCE)/peripherals.md \
 	$(REFERENCE)/pairingrequests.md
 
 .PHONY: build
@@ -30,8 +30,8 @@ test:
 $(REFERENCE)/adapters.md: ../deploy/crds.yaml crdref/adapter-preamble.md go.mod
 	$(CRDREF) -kind Adapter -weight 10 $< $@ crdref/adapter-preamble.md
 
-$(REFERENCE)/pairings.md: ../deploy/crds.yaml crdref/pairing-preamble.md go.mod
-	$(CRDREF) -kind Pairing -weight 15 $< $@ crdref/pairing-preamble.md
+$(REFERENCE)/peripherals.md: ../deploy/crds.yaml crdref/peripheral-preamble.md go.mod
+	$(CRDREF) -kind Peripheral -weight 15 $< $@ crdref/peripheral-preamble.md
 
 $(REFERENCE)/pairingrequests.md: ../deploy/crds.yaml crdref/pairingrequest-preamble.md go.mod
 	$(CRDREF) -kind PairingRequest -weight 20 $< $@ crdref/pairingrequest-preamble.md

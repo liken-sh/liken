@@ -35,6 +35,15 @@ func (m managedObjects) device(path string, properties map[string]any) managedOb
 	return m
 }
 
+// battery adds the Battery1 interface to a device already in the tree.
+func (m managedObjects) battery(path string, percentage byte, source string) managedObjects {
+	m[dbus.ObjectPath(path)][batteryInterface] = map[string]dbus.Variant{
+		"Percentage": dbus.MakeVariant(percentage),
+		"Source":     dbus.MakeVariant(source),
+	}
+	return m
+}
+
 func TestControllersFromKeepsThePairedSet(t *testing.T) {
 	objects := managedObjects{}.
 		adapter("/org/bluez/hci0").
@@ -148,7 +157,7 @@ func TestControllersFromLeavesAnAbsentPropertyZero(t *testing.T) {
 	}
 }
 
-func TestControllersFromWithAnAdapterAndNoPairings(t *testing.T) {
+func TestControllersFromWithAnAdapterAndNoPeripherals(t *testing.T) {
 	// An adapter with nothing paired is an authoritative empty set,
 	// and unpairing is the one sanctioned removal.
 	controllers, err := controllersFrom(managedObjects{}.adapter("/org/bluez/hci0"))

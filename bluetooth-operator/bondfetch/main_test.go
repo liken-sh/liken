@@ -43,7 +43,7 @@ func storedBonds(t *testing.T, tree bonds.Tree) http.Handler {
 	t.Helper()
 	list := bonds.SecretList{}
 	for device, files := range tree {
-		list.Items = append(list.Items, *bonds.NewBondSecret("bluetooth", testAddress, device, files, bonds.Owner{}))
+		list.Items = append(list.Items, *bonds.NewBondSecret("bluetooth", testAddress, device, files, nil, bonds.Owner{}))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/namespaces/bluetooth/secrets" {
@@ -198,7 +198,7 @@ func TestMaterializeReadsBothLayoutsAndPrefersThePerBondSecret(t *testing.T) {
 	}
 	stale := bonds.Files{Info: []byte("[LinkKey]\nKey=OLD\n")}
 	list := bonds.SecretList{Items: []bonds.Secret{
-		*bonds.NewBondSecret("bluetooth", testAddress, device, testFiles, bonds.Owner{}),
+		*bonds.NewBondSecret("bluetooth", testAddress, device, testFiles, nil, bonds.Owner{}),
 		{
 			Metadata: bonds.SecretMeta{Name: bonds.SecretName(testAddress)},
 			Data:     map[string][]byte{"7c-66-ef-22-e7-80.info": stale.Info},

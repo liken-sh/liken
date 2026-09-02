@@ -56,7 +56,7 @@ Approval is a write to the request's spec:
       --type merge -p '{"spec":{"device":"A0:AB:51:33:B7:12"}}'
 
 The operator pairs that device, trusts it, records the bond as a
-`Pairing`, and closes the window. Trust lets a later connection run
+`Peripheral`, and closes the window. Trust lets a later connection run
 with no agent registered; it does not make the device connect. Who
 connects depends on the device. A controller connects when you press
 its own button. A speaker is connected by the operator itself,
@@ -75,8 +75,9 @@ approval in advance.
 
 ## 4. See the published device
 
-The bond is now a `Pairing`, its keys are in a `Secret` the `Pairing`
-owns, and the controller is a device in this node's `ResourceSlice`:
+The bond is now a `Peripheral`, its keys are in a `Secret` the
+`Peripheral` owns, and the controller is a device in this node's
+`ResourceSlice`:
 
     $ kubectl get resourceslice liken-1-bluetooth.liken.sh -o yaml
     spec:
@@ -169,11 +170,11 @@ needs a new allocation, which the taints block.
 
 ## Unpair
 
-Deleting the `Pairing` is the unpair:
+Deleting the `Peripheral` is the unpair:
 
-    kubectl delete pairing a0-ab-51-33-b7-12
+    kubectl delete peripheral a0-ab-51-33-b7-12
 
 The operator disconnects the controller, waits for any claim on it to
 release, retires the device from the slice, and removes the bond. The
-`Secret` with the keys is owned by the `Pairing`, so it is collected
-with the object.
+`Secret` with the keys is owned by the `Peripheral`, so it is
+collected with the object.

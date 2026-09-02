@@ -158,9 +158,9 @@ func TestReconcileLeavesADownedAdapterAlone(t *testing.T) {
 	}
 }
 
-// A delete against live hardware would cascade to every Pairing under
-// this Adapter and to every bond Secret under those, which is a mass
-// unpair of controllers that are working.
+// A delete against live hardware would cascade to every Peripheral
+// under this Adapter and to every bond Secret under those, which is a
+// mass unpair of controllers that are working.
 func TestReconcileRefusesToDeleteAnAdapterWhoseRadioIsPresent(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testAdapterObjectPath(), &Adapter{
@@ -187,7 +187,7 @@ func TestReconcileRefusesToDeleteAnAdapterWhoseRadioIsPresent(t *testing.T) {
 }
 
 // The radio is gone, which is the cleanup path: the Adapter's deletion
-// runs, and the cascade takes its Pairings and their Secrets.
+// runs, and the cascade takes its Peripherals and their Secrets.
 func TestReconcileReleasesAnAdapterWhoseRadioIsGone(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testAdapterObjectPath(), &Adapter{

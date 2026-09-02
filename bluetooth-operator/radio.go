@@ -36,6 +36,7 @@ import (
 
 const (
 	agentManagerInterface = "org.bluez.AgentManager1"
+	batteryInterface      = "org.bluez.Battery1"
 	agentInterface        = "org.bluez.Agent1"
 	propertiesInterface   = "org.freedesktop.DBus.Properties"
 
@@ -106,14 +107,32 @@ type adapterState struct {
 // UUIDs are the profile UUIDs from the SDP browse. classify.go decodes
 // them, so the pass tells an audio sink from an input device out of
 // the same snapshot it reads everything else from.
+//
+// AddressType is public or random, the one field that separates a Low
+// Energy device from a classic one. Battery is nil for a device that
+// reports no level, which is every device with no battery and every
+// battery device that is not connected.
 type deviceState struct {
-	Address   bonds.Address
-	Name      string
-	Alias     string
-	Paired    bool
-	Connected bool
-	Trusted   bool
-	UUIDs     []string
+	Address     bonds.Address
+	Name        string
+	Alias       string
+	Icon        string
+	AddressType string
+	Paired      bool
+	Connected   bool
+	Trusted     bool
+	UUIDs       []string
+	Battery     *deviceBattery
+}
+
+// deviceBattery is one device's org.bluez.Battery1 interface.
+//
+// BlueZ fills Percentage from the GATT Battery Service on a Low Energy
+// device, from a HID battery report, and from any battery provider a
+// sound server registers. Source names which of those it read.
+type deviceBattery struct {
+	Percentage int
+	Source     string
 }
 
 // radioSnapshot is one read of bluetoothd's whole object tree. Every
@@ -264,21 +283,46 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 		}
 		name, _ := properties["Name"].Value().(string)
 		alias, _ := properties["Alias"].Value().(string)
+		icon, _ := properties["Icon"].Value().(string)
+		addressType, _ := properties["AddressType"].Value().(string)
 		paired, _ := properties["Paired"].Value().(bool)
 		connected, _ := properties["Connected"].Value().(bool)
 		trusted, _ := properties["Trusted"].Value().(bool)
 		uuids, _ := properties["UUIDs"].Value().([]string)
 		snapshot.Devices = append(snapshot.Devices, deviceState{
-			Address:   parsed,
-			Name:      name,
-			Alias:     alias,
-			Paired:    paired,
-			Connected: connected,
-			Trusted:   trusted,
-			UUIDs:     uuids,
+			Address:     parsed,
+			Name:        name,
+			Alias:       alias,
+			Icon:        icon,
+			AddressType: addressType,
+			Paired:      paired,
+			Connected:   connected,
+			Trusted:     trusted,
+			UUIDs:       uuids,
+			Battery:     batteryFrom(interfaces),
 		})
 	}
 	return snapshot, nil
+}
+
+// batteryFrom reads one device's charge out of the interfaces the same
+// managed-objects call returned.
+//
+// The level costs no second call, because BlueZ publishes Battery1
+// beside Device1 on the device object. A device with no battery has no
+// Battery1 interface at all, and neither does a battery device that is
+// not connected, so an absent interface is the ordinary case.
+func batteryFrom(interfaces map[string]map[string]dbus.Variant) *deviceBattery {
+	properties, ok := interfaces[batteryInterface]
+	if !ok {
+		return nil
+	}
+	percentage, ok := properties["Percentage"].Value().(byte)
+	if !ok {
+		return nil
+	}
+	source, _ := properties["Source"].Value().(string)
+	return &deviceBattery{Percentage: int(percentage), Source: source}
 }
 
 // adapterPath and devicePath find the object paths this operator calls

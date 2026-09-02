@@ -19,7 +19,7 @@ package main
 // Adoption also repairs a forced deletion. Somebody who patches the
 // finalizer off a live radio's Adapter loses the objects to the
 // cascade. The next pass creates the Adapter again, adopts every bond
-// bluetoothd still holds as a Pairing, and writes each bond's Secret
+// bluetoothd still holds as a Peripheral, and writes each bond's Secret
 // from the tree on disk. bluetoothd keeps the keys on its own disk, so
 // no change to these objects can lose them.
 
@@ -31,7 +31,7 @@ import (
 )
 
 // ensureAdapter makes the Adapter object agree with the radio this pod
-// holds, and returns the object that owns every Pairing.
+// holds, and returns the object that owns every Peripheral.
 func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 	name := state.Address.Key()
 	adapter, err := get[Adapter](i.client, adapterPath(name))
@@ -44,7 +44,7 @@ func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 
 	if adapter.Metadata.deleting() {
 		// The radio is here, so the delete is refused. A cascade would
-		// take every Pairing under this Adapter and every bond Secret
+		// take every Peripheral under this Adapter and every bond Secret
 		// under those, which is a mass unpair of hardware that is
 		// working. The object stays, with the reason in its status, until
 		// the radio is gone.
@@ -111,7 +111,7 @@ func (i *inventory) createAdapter(state adapterState) (*Adapter, error) {
 // A deletionTimestamp cannot be removed from an object, so the
 // operator cannot reverse the delete; it can only report the refusal.
 // The object stays in Terminating, its status names the radio that
-// blocks the delete, and the Pairings and Secrets under it are
+// blocks the delete, and the Peripherals and Secrets under it are
 // untouched. A person who really means to retire the radio unplugs
 // it, and the next pass lets the deletion through.
 func (i *inventory) refuseDeletion(adapter *Adapter, state adapterState) error {
@@ -166,7 +166,7 @@ func (i *inventory) releaseDepartedAdapters(present bonds.Address) {
 			fmt.Fprintf(os.Stderr, "releasing %s for deletion: %v\n", adapter.Metadata.Name, err)
 			continue
 		}
-		fmt.Printf("adapter: released %s, whose radio is no longer on %s; its Pairings and their Secrets go with it\n",
+		fmt.Printf("adapter: released %s, whose radio is no longer on %s; its Peripherals and their Secrets go with it\n",
 			adapter.Metadata.Name, i.nodeName)
 	}
 }

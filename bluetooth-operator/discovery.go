@@ -42,6 +42,13 @@ import (
 	"github.com/liken-sh/bluetooth-operator/bonds"
 )
 
+// draSysfsRoot is the sysfs mount this driver reads: this walk reads
+// it for a controller's real nodes, and uinput.go reads it for the
+// node the kernel gave a virtual device. The pod runs in the host's
+// network namespace and reads the host's own sysfs. It is a variable
+// so the tests can point it at a tree they built.
+var draSysfsRoot = "/sys"
+
 // busBluetooth is BUS_BLUETOOTH from the kernel's input.h, as the
 // first field of HID_ID spells it.
 const busBluetooth = "0005"

@@ -24,20 +24,18 @@ package main
 // the same name is a different grant, and its file must not collide
 // with a stale one.
 //
-// A file also has to stay correct for the whole boot. The kubelet
-// prepares a claim once and reuses the answer for every later pod
-// that names it, and an evdev node moves under it: the kernel numbers
-// input devices in the order they appear, so a controller that
-// reconnects usually comes back as a different eventN. The reconcile
-// pass rewrites every prepared claim's file from the same sysfs walk
-// that publishes the slice.
+// A file stays correct for the whole boot, and nothing rewrites one.
+// The kubelet prepares a claim once and reuses the answer for every
+// later pod that names it. What a controller's claim delivers is the
+// virtual node its relay holds open, and the kernel keeps that node's
+// number for as long as the operator holds the uinput fd, so a
+// controller that reconnects on a different eventN changes nothing
+// here.
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 )
@@ -121,8 +119,7 @@ type cdiMount struct {
 // reason to create anything in this directory.
 //
 // The edits are the same on every pass, because the socket's path is
-// fixed. Only a controller's evdev nodes move, so only they need the
-// refresh.
+// fixed.
 func busEdits() cdiEdits {
 	return cdiEdits{
 		Env: []string{busVariable + "=" + busAddress},
@@ -202,90 +199,4 @@ func claimUIDFromSpecName(name string) (string, bool) {
 		return "", false
 	}
 	return strings.CutSuffix(uid, ".json")
-}
-
-// refreshCDISpecs rewrites each prepared claim's spec with the nodes
-// its controller registers now. It resolves each device the same way
-// prepare does, from one sysfs walk, so a spec written by a refresh
-// and a spec written by a prepare always agree.
-//
-// This cannot repair a container that already runs. The runtime
-// injects the nodes when it creates the container, and a node that
-// moves under a running container stays wrong until the pod restarts.
-// What it prevents is a stale file that every later pod would
-// receive. A controller that reconnects as event6 while the spec
-// still says event5 would give the next pod a node that does not
-// exist, and the runtime fails a container creation on a node it
-// cannot stat.
-func refreshCDISpecs(nodes map[string][]string) {
-	entries, err := os.ReadDir(cdiDir)
-	if err != nil {
-		// No directory means no claim has been prepared on this boot.
-		return
-	}
-	for _, entry := range entries {
-		claimUID, ok := claimUIDFromSpecName(entry.Name())
-		if !ok {
-			continue
-		}
-		if err := refreshCDISpec(claimUID, nodes); err != nil {
-			fmt.Fprintf(os.Stderr, "refreshing the spec for claim %s: %v\n", claimUID, err)
-		}
-	}
-}
-
-// refreshCDISpec rewrites one claim's spec, and writes nothing when
-// every device still delivers what the file says.
-//
-// A controller that is disconnected registers no evdev node, and the
-// spec keeps the nodes it had. An empty edit list would start the
-// next pod with no device and no error. The taint on the device holds
-// that pod back until the controller returns.
-func refreshCDISpec(claimUID string, nodes map[string][]string) error {
-	cdiWrites.Lock()
-	defer cdiWrites.Unlock()
-
-	raw, err := os.ReadFile(cdiSpecPath(claimUID))
-	if os.IsNotExist(err) {
-		// Unprepare removed the claim between the directory listing
-		// and this read.
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var spec cdiSpec
-	if err := json.Unmarshal(raw, &spec); err != nil {
-		return err
-	}
-	changed := false
-	for i, device := range spec.Devices {
-		// prepare names each CDI device for the claim and the allocated
-		// device together, so the allocated name is in the file and the
-		// refresh needs no call to the API server.
-		allocated, ok := strings.CutPrefix(device.Name, claimUID+"-")
-		if !ok {
-			continue
-		}
-		// A media bus entry stays as prepare wrote it: its delivery
-		// names a fixed path. Its name is not a MAC either, so the
-		// lookup below would derive a key that names nothing.
-		if isMediaBusName(allocated) {
-			continue
-		}
-		current, ok := nodes[macFromDeviceName(allocated)]
-		if !ok || len(current) == 0 {
-			continue
-		}
-		edits := deviceNodes(current)
-		if slices.Equal(edits, device.ContainerEdits.DeviceNodes) {
-			continue
-		}
-		spec.Devices[i].ContainerEdits.DeviceNodes = edits
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return writeSpecFile(claimUID, spec.Devices)
 }

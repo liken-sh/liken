@@ -19,7 +19,7 @@
 // Bluetooth stack on that radio.
 //
 // The operator also keeps the pairing API: an Adapter for the radio it
-// holds, a Pairing for each bond, and the PairingRequests a person
+// holds, a Peripheral for each bond, and the PairingRequests a person
 // creates to open a pairing window. Those objects are the reason a
 // person never needs a shell in this pod.
 //
@@ -145,15 +145,6 @@ func main() {
 		fatal("waiting for bluetoothd: %v", err)
 	}
 
-	// The plugin registers with the kubelet only after bluetoothd is
-	// up, so the driver appears when it can actually answer a prepare
-	// call.
-	go func() {
-		if err := serveDRAPlugin(ctx, client); err != nil {
-			fatal("the DRA plugin is not serving: %v", err)
-		}
-	}()
-
 	uevents, err := listenForUevents(ctx)
 	if err != nil {
 		fatal("watching for kernel events: %v", err)
@@ -180,9 +171,10 @@ func main() {
 	// starts with controllers already paired and possibly already
 	// connected, and a restart must republish what the previous pod
 	// published.
-	publish := &publisher{client: client, nodeName: nodeName, owner: owner}
-	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot()}
-	objects := newInventory(client, newBlueZRadio(conn), nodeName, namespace)
+	held := newRelays(linuxInput{})
+	publish := &publisher{client: client, nodeName: nodeName, owner: owner, relays: held}
+	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot(), relays: held}
+	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace)
 	readPairedSet := func() (map[string]controller, error) { return pairedControllers(conn) }
 	readAdapter := func() (bonds.Address, error) { return adapterAddress(conn) }
 	wake := func() {
@@ -200,7 +192,7 @@ func main() {
 	pass := func() {
 		// The three parts of a pass run in order and all of them run. The
 		// object reconcile runs first, because a bond's Secret is owned by
-		// that bond's Pairing and a device under teardown must leave the
+		// that bond's Peripheral and a device under teardown must leave the
 		// slice before its bond is removed. A pairing that the slice
 		// write failed to publish is still a key that must reach the
 		// API, and a slice that the bonds could not be written for is
@@ -226,6 +218,20 @@ func main() {
 		retryScheduled = true
 		wakeSoon(retryDelay)
 	}
+	// Each bonded controller's virtual input devices come back before
+	// anything else runs, so a claim on a controller that is asleep is
+	// prepared with the node the previous pod published.
+	keep.restore(readAdapter)
+
+	// The plugin registers with the kubelet only after bluetoothd is up
+	// and the relays are restored, so the driver appears when it can
+	// actually answer a prepare call.
+	go func() {
+		if err := serveDRAPlugin(ctx, client, held); err != nil {
+			fatal("the DRA plugin is not serving: %v", err)
+		}
+	}()
+
 	pass()
 
 	for {

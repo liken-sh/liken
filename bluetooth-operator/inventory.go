@@ -1,18 +1,18 @@
 package main
 
-// The pass that makes the pairing objects agree with the radio.
+// The pass that makes the operator's objects agree with the radio.
 //
 // It runs beside the slice publish and the bond persist, on the same
 // wakes and through the same settle window, and it takes one read of
 // bluetoothd's object tree for the whole pass. The three parts run in
 // order, because each one depends on what the one before it wrote: the
-// Adapter is the owner every Pairing needs, a Pairing is the owner
-// every bond Secret needs, and a PairingRequest that pairs a device
-// creates a Pairing under the same Adapter.
+// Adapter is the owner every Peripheral needs, a Peripheral is the
+// owner every bond Secret needs, and a PairingRequest that pairs a
+// device creates a Peripheral under the same Adapter.
 //
 // Nothing here holds a cache of the objects between passes. Every pass
-// reads the Adapter, lists the Pairings for this radio, and lists the
-// PairingRequests, and acts on what it read. The one piece of state
+// reads the Adapter, lists the Peripherals for this radio, and lists
+// the PairingRequests, and acts on what it read. The one piece of state
 // that does survive a pass is which devices the publisher has already
 // dropped from the slice, because that is a fact about a write this
 // program made and cannot read back from the objects.
@@ -37,7 +37,7 @@ import (
 // pass asks for exactly one follow-up.
 const followUpDelay = 2 * time.Second
 
-// inventory reconciles the Adapter, its Pairings, and the
+// inventory reconciles the Adapter, its Peripherals, and the
 // PairingRequests aimed at it.
 type inventory struct {
 	client    *Client
@@ -65,6 +65,11 @@ type inventory struct {
 	// and holds the backoff each device carries between passes.
 	connects *connector
 
+	// relays holds each bonded controller's virtual input devices. A
+	// teardown stops one, in the step that takes the device out of the
+	// published inventory.
+	relays *relays
+
 	// windowOpen records that this operator has the radio discoverable
 	// and pairable for a request. The radio's own report of that state
 	// lags a pass, because the pass reads the tree before it opens
@@ -72,10 +77,11 @@ type inventory struct {
 	windowOpen bool
 }
 
-func newInventory(client *Client, radio radio, nodeName, namespace string) *inventory {
+func newInventory(client *Client, radio radio, held *relays, nodeName, namespace string) *inventory {
 	i := &inventory{
 		client:    client,
 		radio:     radio,
+		relays:    held,
 		nodeName:  nodeName,
 		namespace: namespace,
 		now:       time.Now,
@@ -97,14 +103,14 @@ type inventoryPass struct {
 	// allocated to it in the moment between the two.
 	keepOut map[string]bool
 
-	// owners names each bond's Pairing, which is the owner reference on
-	// its Secret. A bond with no Pairing yet gets no Secret this
+	// owners names each bond's Peripheral, which is the owner reference on
+	// its Secret. A bond with no Peripheral yet gets no Secret this
 	// pass, and the next pass writes it.
 	owners map[bonds.Address]OwnerReference
 
 	// unpairing names the bonds a teardown is working through. Their
 	// Secrets are not rewritten, because the teardown removes each bond
-	// and garbage collection takes each Secret with its Pairing.
+	// and garbage collection takes each Secret with its Peripheral.
 	unpairing map[bonds.Address]bool
 
 	// again is how long until the loop must run this pass again, and
@@ -166,8 +172,8 @@ func (i *inventory) reconcile() inventoryPass {
 		return pass
 	}
 
-	i.reconcilePairings(adapter, snapshot, &pass)
-	// The connects run after the Pairings, because the Pairing pass
+	i.reconcilePeripherals(adapter, snapshot, &pass)
+	// The connects run after the Peripherals, because the Peripheral pass
 	// marks the bonds a teardown works through, and a device under
 	// teardown must not be paged.
 	i.connects.reconcile(snapshot, &pass)

@@ -50,7 +50,7 @@ follows the paired set, whether or not each controller is connected.
 A paired controller that is switched off still publishes, so a pod
 can claim it and start when somebody turns it on.
 A controller leaves the slice only when it is unpaired, which is a
-`kubectl delete pairing`.
+`kubectl delete peripheral`.
 
 The media bus publishes as soon as `bluetoothd` names the adapter, so
 the slice exists on a machine with a radio and nothing paired to it.
@@ -140,8 +140,8 @@ answer two different questions:
 
 | Taint | Effect | When |
 |---|---|---|
-| `bluetooth.liken.sh/disconnected` | `NoExecute` | bluetoothd reports the controller disconnected, or it registers no evdev node, or the adapter itself has departed |
-| `bluetooth.liken.sh/no-input-node` | `NoSchedule` | the controller registers no evdev node, or the adapter itself has departed |
+| `bluetooth.liken.sh/disconnected` | `NoExecute` | `bluetoothd` reports the controller disconnected, or the adapter itself has departed |
+| `bluetooth.liken.sh/no-input-node` | `NoSchedule` | the operator holds no virtual input node for the controller, which is a bond that has never connected since it was made |
 
 The media bus takes one taint, and only when the adapter has
 departed:
@@ -159,12 +159,12 @@ running holder alone.
 **Tolerate `/disconnected` only.** The `NoExecute` taint evicts a
 claim holder after its `tolerationSeconds`, so tolerating it sets how
 long a radio may be silent before the pod ends. The `NoSchedule`
-taint must stay untolerated, because it parks a claim on a
-switched-off controller as `Unschedulable`. Tolerate both and the
-scheduler allocates a controller with no evdev node,
+taint must stay untolerated, because it parks a claim on a controller
+that has never connected as `Unschedulable`. Tolerate both and the
+scheduler allocates a controller the operator has no node for,
 `NodePrepareResources` fails, and the pod churns between
-`ContainerCreating` and eviction for as long as the controller stays
-off.
+`ContainerCreating` and eviction until somebody switches the
+controller on.
 
 ## The media bus
 
@@ -263,8 +263,8 @@ arrive the same way, through the Container Device Interface (CDI) at
 container creation, and neither delivers any privilege.
 
 A claim on a controller delivers device nodes, and nothing else:
-`/dev/input/event*` for the one controller the claim allocated. No
-host mount, no environment variable. The container's
+`/dev/input/event*`, one for each evdev node the controller
+registers. No host mount, no environment variable. The container's
 user must be able to open the nodes. A claim on the media bus
 delivers the mount and the variable that [The media
 bus](#the-media-bus) lists, and no device node.
@@ -273,12 +273,24 @@ The legacy `/dev/input/jsN` interface stays out. `liken`'s kernel may
 not enable `CONFIG_INPUT_JOYDEV` at all, and joydev publishes a
 DualSense's motion sensors as a wrong second `jsN` device.
 
-A running pod's device set never changes. The runtime injects the
-nodes when it creates the container, so the pod is one session, and
-the `NoExecute` taint ends it. A controller that reconnects
-usually returns as a different `eventN`, and the operator rewrites
-the claim's CDI file so the next pod receives the node that exists
-now.
+The nodes a claim delivers are not the kernel's own nodes for the
+controller. The operator creates one virtual input device for each
+node the controller registers, with the kernel's `uinput` interface,
+and moves the controller's events into it whenever the controller is
+on the air. A virtual node keeps its number for as long as the
+operator holds it open, so a controller that sleeps and returns as a
+different `eventN` changes nothing a pod holds. A pod that tolerates
+`/disconnected` and starts while the controller sleeps gets a node
+that reads nothing until the next press.
+
+The operator reads a controller's capabilities from its real node the
+first time it connects, and stores them in that bond's `Secret`. On a
+later start it creates the virtual devices from the stored snapshot,
+before anything connects. So a controller has to connect once after
+it is paired, and its claims stop parking from then on.
+
+Events go one way. A gamepad's rumble is a write into the real node,
+and the relay does not carry it back.
 
 ## Lifecycle
 
@@ -296,9 +308,13 @@ now.
   Unpairing the last controller empties the paired set, not the
   slice: the media bus stays in it.
 * **The operator's pod can restart under a live claim.** The prepared
-  CDI files survive on the host, so a running consumer keeps its
-  device across the restart. The bus socket's directory is a host
-  path for the same reason: a claim prepared against it names the
+  CDI files survive on the host, so a running consumer keeps the
+  device node it was given. The replacement pod creates each virtual
+  device again, from the snapshot in the bond's `Secret`, and the
+  kernel numbers it from the free minors, which are the ones the old
+  pod just released. A consumer whose node is not among them reads
+  nothing until it restarts. The bus socket's directory is a host
+  path for a related reason: a claim prepared against it names the
   same directory after the restart, where an emptyDir's host path is
   under `/var/lib/kubelet/pods/`, keyed by the pod's UID, and changes
   with the replacement pod.
@@ -308,10 +324,10 @@ now.
 Three `CustomResourceDefinitions`, group `bluetooth.liken.sh/v1alpha1`,
 each with its own reference page: an
 [Adapter](/docs/reference/adapters/) is one radio, a
-[Pairing](/docs/reference/pairings/) is one bond, and a
-[PairingRequest](/docs/reference/pairingrequests/) is one pairing
-window. A person creates a `PairingRequest`, edits a `Pairing`'s
-spec, and deletes a `Pairing` to unpair; the operator creates and
+[Peripheral](/docs/reference/peripherals/) is one bonded device, and
+a [PairingRequest](/docs/reference/pairingrequests/) is one pairing
+window. A person creates a `PairingRequest`, edits a `Peripheral`'s
+spec, and deletes a `Peripheral` to unpair; the operator creates and
 reconciles everything else.
 
 ## Where the bonds are stored

@@ -1,11 +1,10 @@
 package main
 
-// These tests cover the bond store's outcomes against a test API
-// server and a BlueZ storage tree on disk: create a bond's Secret at
-// the first pairing, update it when the bond changes, write nothing
-// when the two already agree, write nothing for a bond that has no
-// Pairing to own its Secret, and leave a bond alone while its teardown
-// runs.
+// These tests cover the bond store's outcomes against a test API server
+// and a BlueZ storage tree on disk: create a bond's Secret at the first
+// pairing, update it when the bond changes, write nothing when the two
+// already agree, write nothing for a bond that has no Peripheral to own
+// its Secret, and leave a bond alone while its teardown runs.
 
 import (
 	"encoding/json"
@@ -89,7 +88,7 @@ func (f *bondSecretFixture) handler(t *testing.T) http.Handler {
 func storedBond(t *testing.T, device string, files bonds.Files) map[string]*bonds.Secret {
 	t.Helper()
 	address := testAddress(t, device)
-	secret := bonds.NewBondSecret("liken-system", testAdapterAddress(t), address, files, bondOwner(testPairingOwner()))
+	secret := bonds.NewBondSecret("liken-system", testAdapterAddress(t), address, files, nil, bondOwner(testPeripheralOwner()))
 	secret.Metadata.ResourceVersion = "7"
 	return map[string]*bonds.Secret{bonds.BondSecretPath("liken-system", address): secret}
 }
@@ -128,27 +127,29 @@ func testBondStore(t *testing.T, fixture *bondSecretFixture, root string) *bondS
 		client:         testClient(t, fixture.handler(t)),
 		namespace:      "liken-system",
 		root:           root,
+		relays:         relaysFor(t),
 		reportedLegacy: true,
 	}
 }
 
-// testPairingOwner is the Pairing that owns the test device's Secret.
-func testPairingOwner() OwnerReference {
+// testPeripheralOwner is the Peripheral that owns the test device's
+// Secret.
+func testPeripheralOwner() OwnerReference {
 	return OwnerReference{
 		APIVersion: pairingAPI,
-		Kind:       pairingKind,
+		Kind:       peripheralKind,
 		Name:       "a0-ab-51-33-b7-12",
 		UID:        "9c1a2f10-0000-4000-8000-000000000002",
 	}
 }
 
-// ownedBy names the Pairing for each of these devices, which is what
+// ownedBy names the Peripheral for each of these devices, which is what
 // the inventory pass hands the store.
 func ownedBy(t *testing.T, devices ...string) map[bonds.Address]OwnerReference {
 	t.Helper()
 	owners := map[bonds.Address]OwnerReference{}
 	for _, device := range devices {
-		owner := testPairingOwner()
+		owner := testPeripheralOwner()
 		owner.Name = strings.ReplaceAll(strings.ToLower(device), ":", "-")
 		owners[testAddress(t, device)] = owner
 	}
@@ -177,7 +178,7 @@ var oneBond = bonds.Files{
 // name, so a device holds a bond before it holds SDP records.
 var playerTwo = bonds.Files{Info: []byte("[General]\nName=Player Two\nAddressType=random\n")}
 
-func TestPersistCreatesTheSecretAtTheFirstPairing(t *testing.T) {
+func TestPersistCreatesTheSecretAtTheFirstPeripheral(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
@@ -195,13 +196,13 @@ func TestPersistCreatesTheSecretAtTheFirstPairing(t *testing.T) {
 		t.Errorf("type = %q", secret.Type)
 	}
 	// The label names the radio, which the init container lists by. The
-	// owner is the Pairing, so deleting it collects the keys when
+	// owner is the Peripheral, so deleting it collects the keys when
 	// somebody unpairs the controller.
 	if secret.Metadata.Labels[bonds.AdapterLabel] != "14-b4-57-91-2f-c8" {
 		t.Errorf("labels = %+v", secret.Metadata.Labels)
 	}
 	if len(secret.Metadata.OwnerReferences) != 1 ||
-		secret.Metadata.OwnerReferences[0].Kind != pairingKind ||
+		secret.Metadata.OwnerReferences[0].Kind != peripheralKind ||
 		secret.Metadata.OwnerReferences[0].Name != "a0-ab-51-33-b7-12" {
 		t.Errorf("ownerReferences = %+v", secret.Metadata.OwnerReferences)
 	}
@@ -240,7 +241,7 @@ func TestPersistCreatesNothingForAnAdapterThatPairedNothing(t *testing.T) {
 // The second file has to reach the Secret on its own: a BR/EDR HID
 // device restored from an info file alone connects and drops again,
 // because the input profile finds no HID SDP record.
-func TestPersistCarriesACacheEntryThatLandsAfterThePairing(t *testing.T) {
+func TestPersistCarriesACacheEntryThatLandsAfterThePeripheral(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBond(t, testDevice, bonds.Files{Info: oneBond.Info})}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
@@ -301,23 +302,23 @@ func TestPersistWritesNothingWhenTheBondMatchesTheSecret(t *testing.T) {
 	}
 }
 
-// A bond whose Pairing has not been created yet gets no Secret. An
+// A bond whose Peripheral has not been created yet gets no Secret. An
 // owner reference cannot be added to a Secret that has none, so a
 // Secret written now would be one nothing ever collects.
-func TestPersistWaitsForTheBondToHaveAPairing(t *testing.T) {
+func TestPersistWaitsForTheBondToHaveAPeripheral(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
 	if store.persist(adapterIs(t), nil, nil) {
-		t.Fatal("a bond with no Pairing reported the bond stored")
+		t.Fatal("a bond with no Peripheral reported the bond stored")
 	}
 	if len(fixture.requests) != 0 {
-		t.Fatalf("a bond with no Pairing reached the API: %v", fixture.requests)
+		t.Fatalf("a bond with no Peripheral reached the API: %v", fixture.requests)
 	}
 }
 
 // A bond under teardown is on its way out. Its Secret is not rewritten,
-// and it is collected with the Pairing that owns it.
+// and it is collected with the Peripheral that owns it.
 func TestPersistLeavesABondUnderTeardownAlone(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
@@ -332,8 +333,8 @@ func TestPersistLeavesABondUnderTeardownAlone(t *testing.T) {
 }
 
 // An unpaired device's Secret is not emptied and not deleted here.
-// Deleting a Pairing removes a bond, and the Secret goes with the
-// Pairing through its owner reference.
+// Deleting a Peripheral removes a bond, and the Secret goes with the
+// Peripheral through its owner reference.
 func TestPersistWritesNothingForABondThatLeftTheTree(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBond(t, testDevice, oneBond)}
 	store := testBondStore(t, fixture, bondTree(t, nil))
@@ -451,5 +452,80 @@ func TestPersistReportsTheOlderPerAdapterSecretAndKeepsIt(t *testing.T) {
 		if strings.HasSuffix(request, testLegacyPath) {
 			t.Errorf("the older Secret was read again: %v", fixture.requests)
 		}
+	}
+}
+
+// The snapshot travels with the bond. It is written on the pass after
+// the controller first connects, and the next pod creates the same
+// virtual nodes from it before the controller connects again.
+func TestPersistWritesTheEvdevSnapshot(t *testing.T) {
+	fixture := &bondSecretFixture{}
+	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
+	store.relays.restore("a0:ab:51:33:b7:12", storedCapabilities(t))
+
+	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
+		t.Fatal("the pass reported the bond unstored")
+	}
+
+	stored := fixture.created.Snapshot(testAddress(t, testDevice))
+	var document evdevSnapshot
+	if err := json.Unmarshal(stored, &document); err != nil {
+		t.Fatalf("the Secret holds %q: %v", stored, err)
+	}
+	if len(document.Nodes) != 1 || document.Nodes[0].Name != "Wireless Controller" {
+		t.Errorf("the stored snapshot = %+v", document)
+	}
+}
+
+// A bond whose files and snapshot both agree with the Secret is not
+// written again. The loop wakes on every uevent, and a rewrite on each
+// one would be a write for every press.
+func TestPersistWritesNothingWhenTheSnapshotAlreadyAgrees(t *testing.T) {
+	snapshot := storedCapabilities(t)
+	address := testAddress(t, testDevice)
+	secret := bonds.NewBondSecret("liken-system", testAdapterAddress(t), address, oneBond, snapshot,
+		bondOwner(testPeripheralOwner()))
+	secret.Metadata.ResourceVersion = "7"
+	fixture := &bondSecretFixture{
+		existing: map[string]*bonds.Secret{bonds.BondSecretPath("liken-system", address): secret},
+	}
+	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
+	store.relays.restore("a0:ab:51:33:b7:12", snapshot)
+
+	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
+		t.Fatal("the pass reported the bond unstored")
+	}
+	if fixture.created != nil || fixture.updated != nil {
+		t.Errorf("a bond that already agrees was written again: %+v %+v", fixture.created, fixture.updated)
+	}
+}
+
+// At startup the stored snapshots create every bonded controller's
+// virtual devices, so a claim is prepared before anything connects.
+func TestRestoreCreatesTheVirtualDevicesFromTheStoredSnapshots(t *testing.T) {
+	list := bonds.SecretList{Items: []bonds.Secret{
+		*bonds.NewBondSecret("liken-system", testAdapterAddress(t), testAddress(t, testDevice),
+			oneBond, storedCapabilities(t), bondOwner(testPeripheralOwner())),
+	}}
+	asked := ""
+	store := &bondStore{
+		client: testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			asked = r.URL.Path + "?" + r.URL.RawQuery
+			writeJSON(t, w, list)
+		})),
+		namespace: "liken-system",
+		relays:    relaysFor(t),
+	}
+
+	store.restore(adapterIs(t))
+
+	if nodes := store.relays.virtualNodes("a0:ab:51:33:b7:12"); len(nodes) != 1 {
+		t.Fatalf("virtual nodes = %v, want one", nodes)
+	}
+	// The list is scoped by the label every bond Secret carries, so a
+	// second radio's bonds are not restored into this pod's relays.
+	want := testSecretsPath + "?labelSelector=bluetooth.liken.sh%2Fadapter%3D14-b4-57-91-2f-c8"
+	if asked != want {
+		t.Errorf("listed %q, want %q", asked, want)
 	}
 }

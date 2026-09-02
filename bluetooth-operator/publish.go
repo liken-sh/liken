@@ -4,9 +4,9 @@ package main
 //
 // The publisher is the half of the loop that reports what this node
 // can deliver right now. It re-reads bluetoothd's paired set,
-// re-walks sysfs for the evdev nodes each controller registers, keeps
-// every prepared claim's CDI spec current, and writes the
-// ResourceSlice when any of that moved.
+// re-walks sysfs for the evdev nodes each controller registers, moves
+// each controller's relay onto the nodes it registers now, and writes
+// the ResourceSlice when any of that moved.
 //
 // Nothing here treats a device as gone. Membership in the slice is
 // the paired set, plus the media bus once bluetoothd has named the
@@ -41,6 +41,12 @@ type publisher struct {
 	owner    OwnerReference
 	known    map[string]controller
 
+	// relays holds one virtual input device for each evdev node each
+	// bonded controller registers. The claim delivers the virtual node,
+	// so the publisher derives the no-input-node taint from the relay
+	// and not from the sysfs walk.
+	relays *relays
+
 	// adapter is the radio this pod serves. It scopes discovery to the
 	// controllers on this operator's own adapter, and it names the
 	// media bus device the slice publishes. It is read from
@@ -50,21 +56,22 @@ type publisher struct {
 	adapter bonds.Address
 }
 
-// reconcile makes the published slice and every prepared CDI spec
+// reconcile makes the published slice and every controller's relay
 // agree with what bluetoothd and sysfs report right now. It reports
 // whether the pass left the node's state correct, so that the caller
 // can run a failure again shortly.
 //
-// keepOut names the controllers a teardown has retired. A Pairing that
-// is being deleted takes its device out of the published inventory
+// keepOut names the controllers a teardown has retired. A Peripheral
+// that is being deleted takes its device out of the published inventory
 // before the bond is removed, so that no new claim can be allocated to
-// a controller whose bond is about to be removed. The bond is still
-// in bluetoothd when this runs, which is why the exclusion comes from
-// the caller and not from the paired set.
+// a controller whose bond is about to be removed. The bond is still in
+// bluetoothd when this runs, which is why the exclusion comes from the
+// caller and not from the paired set.
 //
-// The order matters. The CDI refresh runs first, so that a controller
-// which came back on a different evdev node has a correct spec before
-// the slice reports the controller as usable again.
+// The order matters. Each controller's relay moves onto the nodes the
+// controller registers now before the slice is built, so the slice
+// reports a controller as usable in the same pass that gives it a
+// virtual node.
 func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapterAddressReader, keepOut map[string]bool) bool {
 	// The adapter address scopes discovery to this operator's own radio.
 	// Until bluetoothd replies, the address stays zero and discovery
@@ -77,7 +84,6 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 		}
 	}
 	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot, p.adapter))
-	refreshCDISpecs(nodes)
 
 	// busReachable is false only when the adapter has departed: the bus
 	// socket still exists, but the radio behind it is gone.
@@ -99,11 +105,12 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 		// The adapter departed, by an unplug or a USB reset. Every
 		// controller it held is out of reach, and the slice must report
 		// that rather than report nothing: the devices stay, so no
-		// allocation is stranded, and both taints go on, so the
-		// eviction controller ends the sessions that are already
-		// running and the next claim parks instead of failing in
-		// prepare. Passing no nodes derives both taints, which is the
-		// same rule a single controller going quiet takes.
+		// allocation is stranded, and the disconnected taint goes on, so
+		// the eviction controller ends the sessions that are already
+		// running and no new claim is allocated while the radio is
+		// away. The relays keep their virtual nodes, so a consumer that
+		// tolerates the taint holds a node that works again when the
+		// radio returns.
 		fmt.Fprintf(os.Stderr, "the adapter is gone; tainting the media bus and all %d published controllers\n", len(p.known))
 		controllers, nodes, busReachable = unreachable(p.known), nil, false
 
@@ -115,7 +122,8 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 		p.known = controllers
 	}
 
-	devices := sliceDevices(without(controllers, keepOut), nodes)
+	published := without(controllers, keepOut)
+	devices := sliceDevices(published, p.relay(published, nodes))
 	// The media bus joins every slice this pass publishes, as soon as
 	// bluetoothd has named the adapter. It goes at the front of the
 	// list so the overflow truncation below can only drop controllers:
@@ -142,6 +150,22 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 	// unfinished triggers one quick retry, which catches an adapter
 	// that comes back from a USB reset a second later.
 	return !errors.Is(err, ErrNoAdapter)
+}
+
+// relay makes each published controller's virtual input devices agree
+// with the evdev nodes the controller registers now, and answers with
+// the nodes a claim on each controller delivers.
+//
+// A controller a teardown has retired is not in this set, so its relay
+// is neither started again nor asked for a node. unpair.go stops that
+// relay in the same step that takes the device out of the slice.
+func (p *publisher) relay(controllers map[string]controller, nodes map[string][]string) map[string][]string {
+	virtual := make(map[string][]string, len(controllers))
+	for mac := range controllers {
+		p.relays.ensure(mac, nodes[mac])
+		virtual[mac] = p.relays.virtualNodes(mac)
+	}
+	return virtual
 }
 
 // without copies the paired set with the retired controllers left out.

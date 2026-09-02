@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 )
 
@@ -83,117 +82,5 @@ func TestClaimUIDFromSpecName(t *testing.T) {
 		if ok != c.ok || (ok && uid != c.uid) {
 			t.Errorf("claimUIDFromSpecName(%q) = %q, %v; want %q, %v", c.name, uid, ok, c.uid, c.ok)
 		}
-	}
-}
-
-func TestRefreshCDISpecsFollowsAMovedNode(t *testing.T) {
-	dir := cdiTempDir(t)
-	const uid = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
-	name := uid + "-a0-ab-51-33-b7-12"
-
-	if err := writeCDISpec(uid, []cdiDevice{{
-		Name:           name,
-		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event5"})},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	// liken's spec for another claim is in the same directory. The
-	// refresh must not read or rewrite it.
-	likenSpec := filepath.Join(dir, "liken.sh-"+uid+".json")
-	if err := os.WriteFile(likenSpec, []byte(`{"cdiVersion":"0.6.0"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// The controller reconnected on a different event number.
-	refreshCDISpecs(map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event9"}})
-
-	spec := readSpec(t, filepath.Join(dir, "bluetooth.liken.sh-"+uid+".json"))
-	if spec.Devices[0].ContainerEdits.DeviceNodes[0].Path != "/dev/input/event9" {
-		t.Errorf("node = %+v", spec.Devices[0].ContainerEdits.DeviceNodes)
-	}
-	raw, err := os.ReadFile(likenSpec)
-	if err != nil || string(raw) != `{"cdiVersion":"0.6.0"}` {
-		t.Errorf("liken's spec changed: %q, %v", raw, err)
-	}
-}
-
-// The bus delivers a fixed socket path, so nothing about it can move
-// and the refresh must leave it exactly as prepare wrote it. Its name
-// is not a MAC either, so a refresh that read it would look up a key
-// that names nothing.
-func TestRefreshCDISpecsLeavesTheMediaBusAlone(t *testing.T) {
-	cdiTempDir(t)
-	const uid = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
-
-	if err := writeCDISpec(uid, []cdiDevice{{
-		Name:           uid + "-" + testBus,
-		ContainerEdits: busEdits(),
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(cdiSpecPath(uid))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// A controller reconnected on a different event number, which is the
-	// pass that rewrites a controller's spec.
-	refreshCDISpecs(map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event9"}})
-
-	after, err := os.ReadFile(cdiSpecPath(uid))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(after) != string(before) {
-		t.Fatalf("the spec changed:\n%s\n%s", before, after)
-	}
-}
-
-// A moved controller in a mixed spec rewrites the file, and the bus
-// entry beside it comes through the rewrite unchanged.
-func TestRefreshCDISpecsKeepsTheBusThroughAControllersMove(t *testing.T) {
-	cdiTempDir(t)
-	const uid = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
-
-	if err := writeCDISpec(uid, []cdiDevice{
-		{
-			Name:           uid + "-a0-ab-51-33-b7-12",
-			ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event5"})},
-		},
-		{Name: uid + "-" + testBus, ContainerEdits: busEdits()},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	refreshCDISpecs(map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event9"}})
-
-	spec := readSpec(t, cdiSpecPath(uid))
-	if spec.Devices[0].ContainerEdits.DeviceNodes[0].Path != "/dev/input/event9" {
-		t.Errorf("the controller's node = %+v", spec.Devices[0].ContainerEdits.DeviceNodes)
-	}
-	if !reflect.DeepEqual(spec.Devices[1].ContainerEdits, busEdits()) {
-		t.Errorf("the bus's edits = %+v", spec.Devices[1].ContainerEdits)
-	}
-}
-
-func TestRefreshCDISpecsKeepsNodesOfAControllerThatLeft(t *testing.T) {
-	cdiTempDir(t)
-	const uid = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
-
-	if err := writeCDISpec(uid, []cdiDevice{{
-		Name:           uid + "-a0-ab-51-33-b7-12",
-		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event5"})},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-
-	// The controller is off the air, so it registers no node at all.
-	// An empty edit list would start the next pod with no device and
-	// no error.
-	refreshCDISpecs(map[string][]string{})
-
-	spec := readSpec(t, cdiSpecPath(uid))
-	if spec.Devices[0].ContainerEdits.DeviceNodes[0].Path != "/dev/input/event5" {
-		t.Errorf("node = %+v", spec.Devices[0].ContainerEdits.DeviceNodes)
 	}
 }

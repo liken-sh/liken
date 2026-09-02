@@ -5,11 +5,11 @@ package main
 //
 // One rule sets what becomes an object and what stays status. A
 // spec is desired state, a status is observed state, and a radio
-// session is never an object. So the Adapter and the Pairing are the
+// session is never an object. So the Adapter and the Peripheral are the
 // durable inventory, the PairingRequest is the act of pairing, and
 // everything the radio reports about them goes in status.
 //
-// Adapter and Pairing are cluster-scoped, because a radio and a bond
+// Adapter and Peripheral are cluster-scoped, because a radio and a bond
 // belong to a machine's hardware and not to a tenant, and because the
 // ResourceSlice that publishes the same controllers is cluster-scoped
 // for the same reason. PairingRequest is namespaced, so that RBAC can
@@ -46,24 +46,24 @@ const (
 	pairingBase    = "/apis/" + pairingGroup + "/" + pairingVersion
 
 	adapterKind        = "Adapter"
-	pairingKind        = "Pairing"
+	peripheralKind     = "Peripheral"
 	pairingRequestKind = "PairingRequest"
 )
 
 const (
-	// adapterFinalizer holds an Adapter object while the radio it names
-	// is present. Deleting an Adapter cascades to every Pairing under it
+	// adapterFinalizer holds an Adapter object while the radio it names is
+	// present. Deleting an Adapter cascades to every Peripheral under it
 	// and to every bond Secret under those, so a delete against live
 	// hardware would be a mass unpair. With the finalizer, the delete
 	// stays pending instead, and the reason goes into the status.
 	adapterFinalizer = DriverName + "/radio-present"
 
-	// pairingFinalizer holds a Pairing while its teardown runs. Deleting
-	// a Pairing is the unpair API, and an unpair has an order: end the
-	// session, let the claim that holds the controller release it,
-	// retire the device from the slice, and only then remove the bond
-	// from bluetoothd.
-	pairingFinalizer = DriverName + "/unpair"
+	// peripheralFinalizer holds a Peripheral while its teardown runs.
+	// Deleting a Peripheral is the unpair API, and an unpair has an order:
+	// end the session, let the claim that holds the controller release it,
+	// retire the device from the slice, and only then remove the bond from
+	// bluetoothd.
+	peripheralFinalizer = DriverName + "/unpair"
 )
 
 // The phases a PairingRequest reports. A request is Open while its
@@ -85,7 +85,7 @@ const (
 
 	// defaultTTLSeconds is how long a finished request stays before the
 	// operator deletes it. One day is the Job convention, and it is long
-	// enough to read the request the next morning. The Pairing records
+	// enough to read the request the next morning. The Peripheral records
 	// which request produced it, so that record outlasts the deletion.
 	defaultTTLSeconds = 86400
 
@@ -156,11 +156,11 @@ func (m ObjectMeta) without(finalizer string) []string {
 // creates it for the radio its pod claimed, and names it for that
 // radio's address in the form a Kubernetes name accepts.
 //
-// The Adapter is the root of the ownership tree: Pairings belong to
-// it, and each Pairing owns its bond Secret. Nothing in that tree names
-// a machine, so a dongle carried to another machine keeps its Adapter,
-// its Pairings, and their Secrets. The radio's current location is
-// reported in status.
+// The Adapter is the root of the ownership tree: Peripherals belong to
+// it, and each Peripheral owns its bond Secret. Nothing in that tree
+// names a machine, so a dongle carried to another machine keeps its
+// Adapter, its Peripherals, and their Secrets. The radio's current
+// location is reported in status.
 type Adapter struct {
 	APIVersion string        `json:"apiVersion,omitempty"`
 	Kind       string        `json:"kind,omitempty"`
@@ -185,24 +185,24 @@ type AdapterStatus struct {
 	DeletionRefused string `json:"deletionRefused,omitempty"`
 }
 
-// Pairing is the durable fact that one device holds a bond with one
+// Peripheral is the durable fact that one device holds a bond with one
 // adapter. The operator creates it when a pairing succeeds and when it
 // adopts a bond that bluetoothd already held, and it owns the Secret
 // that holds that one bond.
 //
-// Deleting a Pairing is the unpair API. Nothing else deletes one: a
-// Pairing whose bond disappeared from bluetoothd keeps its object and
-// reports the gap in status, because deletion means unpair and a
+// Deleting a Peripheral is the unpair API. Nothing else deletes one: a
+// Peripheral whose bond disappeared from bluetoothd keeps its object
+// and reports the gap in status, because deletion means unpair and a
 // person decides that.
-type Pairing struct {
-	APIVersion string        `json:"apiVersion,omitempty"`
-	Kind       string        `json:"kind,omitempty"`
-	Metadata   ObjectMeta    `json:"metadata"`
-	Spec       PairingSpec   `json:"spec"`
-	Status     PairingStatus `json:"status,omitempty"`
+type Peripheral struct {
+	APIVersion string           `json:"apiVersion,omitempty"`
+	Kind       string           `json:"kind,omitempty"`
+	Metadata   ObjectMeta       `json:"metadata"`
+	Spec       PeripheralSpec   `json:"spec"`
+	Status     PeripheralStatus `json:"status,omitempty"`
 }
 
-type PairingSpec struct {
+type PeripheralSpec struct {
 	// Alias reconciles into Device1.Alias. bluetoothd stores the alias
 	// in the bond's own info file, so the name is stored in the Secret
 	// with the keys.
@@ -215,21 +215,62 @@ type PairingSpec struct {
 	Trusted *bool `json:"trusted,omitempty"`
 }
 
-type PairingStatus struct {
-	Address    string `json:"address,omitempty"`
-	DeviceName string `json:"deviceName,omitempty"`
-	Adapter    string `json:"adapter,omitempty"`
-	Node       string `json:"node,omitempty"`
-	Connected  bool   `json:"connected"`
+type PeripheralStatus struct {
+	Address string `json:"address,omitempty"`
 
-	// Bonded reports whether bluetoothd still holds the bond. It is
-	// false for a Pairing whose bond is gone from the daemon. The
-	// operator reports that gap and never acts on it.
-	Bonded bool `json:"bonded"`
+	// Name is the name the device reports for itself, and Icon is the
+	// freedesktop icon name BlueZ derives for it. Both are empty for a
+	// device bluetoothd holds no object for.
+	Name string `json:"name,omitempty"`
+	Icon string `json:"icon,omitempty"`
+
+	Adapter string `json:"adapter,omitempty"`
+	Node    string `json:"node,omitempty"`
+
+	Bond BondStatus `json:"bond,omitempty"`
+
+	// Battery is nil when the device reports no level. Most controllers
+	// have no battery, and one that has a battery reports a level only
+	// while it is connected.
+	Battery *BatteryStatus `json:"battery,omitempty"`
+
+	Conditions []Condition `json:"conditions,omitempty"`
+}
+
+// BondStatus is what the operator observes about the bond itself.
+type BondStatus struct {
+	// Held reports whether bluetoothd still holds the bond. It is false
+	// for a Peripheral whose bond is gone from the daemon. The operator
+	// reports that gap and never acts on it.
+	Held bool `json:"held"`
 
 	Secret   string `json:"secret,omitempty"`
 	PairedAt string `json:"pairedAt,omitempty"`
 	Request  string `json:"request,omitempty"`
+}
+
+// BatteryStatus is the charge the device reports, from BlueZ's
+// org.bluez.Battery1 interface.
+//
+// Source names where BlueZ read the level, such as HID or a GATT
+// service. It is empty when BlueZ states none.
+type BatteryStatus struct {
+	Percentage int    `json:"percentage"`
+	Source     string `json:"source,omitempty"`
+}
+
+// Condition is the standard Kubernetes condition shape.
+//
+// The shape is the standard one, so a reader treats these the way it
+// treats a Pod's conditions. LastTransitionTime marks when Status last
+// changed, not when the operator last wrote the object, so a reader
+// measures from it how long a controller has been asleep.
+type Condition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason,omitempty"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
 }
 
 // PairingRequest is the act of pairing, and it also runs the
@@ -281,7 +322,7 @@ type PairingRequestStatus struct {
 	Phase          string       `json:"phase,omitempty"`
 	WindowClosesAt string       `json:"windowClosesAt,omitempty"`
 	Seen           []SeenDevice `json:"seen,omitempty"`
-	Pairing        string       `json:"pairing,omitempty"`
+	Peripheral     string       `json:"peripheral,omitempty"`
 
 	// FinishedAt is when the request reached Paired or Expired, and the
 	// TTL counts from it. Job has the same field for the same reason: a
@@ -315,8 +356,8 @@ type (
 	AdapterList struct {
 		Items []Adapter `json:"items"`
 	}
-	PairingList struct {
-		Items []Pairing `json:"items"`
+	PeripheralList struct {
+		Items []Peripheral `json:"items"`
 	}
 	PairingRequestList struct {
 		Items []PairingRequest `json:"items"`
@@ -330,9 +371,9 @@ func adaptersPath() string { return pairingBase + "/adapters" }
 
 func adapterPath(name string) string { return adaptersPath() + "/" + name }
 
-func pairingsPath() string { return pairingBase + "/pairings" }
+func peripheralsPath() string { return pairingBase + "/peripherals" }
 
-func pairingPath(name string) string { return pairingsPath() + "/" + name }
+func peripheralPath(name string) string { return peripheralsPath() + "/" + name }
 
 func pairingRequestsPath() string { return pairingBase + "/pairingrequests" }
 
@@ -345,9 +386,9 @@ func pairingRequestPath(namespace, name string) string {
 // cannot overwrite a spec a person edited in the same moment.
 func statusPath(path string) string { return path + "/status" }
 
-// byAdapter narrows a list to the objects that belong to one radio.
-// The Pairings and the bond Secrets both have the adapter's address as
-// a label, because a label is selectable and a name is not, and this
+// byAdapter narrows a list to the objects that belong to one radio. The
+// Peripherals and the bond Secrets both have the adapter's address as a
+// label, because a label is selectable and a name is not, and this
 // operator must never write another radio's objects.
 func byAdapter(path, adapterKey string) string {
 	query := url.Values{}

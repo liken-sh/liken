@@ -1,6 +1,6 @@
 package main
 
-// These tests cover the ordered teardown a deleted Pairing runs. The
+// These tests cover the ordered teardown a deleted Peripheral runs. The
 // order matters: a device a claim still names never leaves the
 // published inventory, and the bond is removed only after the device
 // leaves the slice.
@@ -12,14 +12,14 @@ import (
 	"testing"
 )
 
-// deletePairing marks the Pairing the way a kubectl delete does: the
-// API server stamps a deletionTimestamp and keeps the object, because
-// the operator's finalizer is on it.
-func deletePairing(t *testing.T, fixture *apiFixture) {
+// deletePeripheral marks the Peripheral the way a kubectl delete does:
+// the API server stamps a deletionTimestamp and keeps the object,
+// because the operator's finalizer is on it.
+func deletePeripheral(t *testing.T, fixture *apiFixture) {
 	t.Helper()
-	pairing := read[Pairing](t, fixture, testPairingPath())
-	pairing.Metadata.DeletionTimestamp = timestamp(testNow)
-	fixture.put(t, testPairingPath(), pairing)
+	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
+	peripheral.Metadata.DeletionTimestamp = timestamp(testNow)
+	fixture.put(t, testPeripheralPath(), peripheral)
 }
 
 // prepareClaim writes the CDI spec file the DRA plugin writes when the
@@ -49,7 +49,7 @@ func TestUnpairDisconnectsBeforeAnythingElse(t *testing.T) {
 	radio := testRadio(t, pairedDevice(t, testDevice))
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
-	deletePairing(t, fixture)
+	deletePeripheral(t, fixture)
 
 	radio.calls = nil
 	pass := inventory.reconcile()
@@ -80,7 +80,7 @@ func TestUnpairKeepsTheDeviceInTheSliceWhileAClaimHoldsIt(t *testing.T) {
 	radio := testRadio(t, device)
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
-	deletePairing(t, fixture)
+	deletePeripheral(t, fixture)
 	prepareClaim(t, "a0-ab-51-33-b7-12")
 
 	radio.calls = nil
@@ -92,8 +92,8 @@ func TestUnpairKeepsTheDeviceInTheSliceWhileAClaimHoldsIt(t *testing.T) {
 	if radio.called("Remove") {
 		t.Errorf("the bond went while a claim held the controller: %v", radio.calls)
 	}
-	if _, found := fixture.objects[testPairingPath()]; !found {
-		t.Error("the Pairing was released while a claim held the controller")
+	if _, found := fixture.objects[testPeripheralPath()]; !found {
+		t.Error("the Peripheral was released while a claim held the controller")
 	}
 }
 
@@ -107,7 +107,7 @@ func TestUnpairRetiresTheDeviceThenRemovesTheBond(t *testing.T) {
 	radio := testRadio(t, device)
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
-	deletePairing(t, fixture)
+	deletePeripheral(t, fixture)
 
 	retire := inventory.reconcile()
 	if !retire.keepOut["a0:ab:51:33:b7:12"] {
@@ -124,8 +124,8 @@ func TestUnpairRetiresTheDeviceThenRemovesTheBond(t *testing.T) {
 	if !radio.called("Remove a0-ab-51-33-b7-12") {
 		t.Fatalf("the bond was never removed: %v", radio.calls)
 	}
-	if _, found := fixture.objects[testPairingPath()]; found {
-		t.Error("the Pairing kept its finalizer after the bond was gone")
+	if _, found := fixture.objects[testPeripheralPath()]; found {
+		t.Error("the Peripheral kept its finalizer after the bond was gone")
 	}
 }
 
@@ -138,7 +138,7 @@ func TestUnpairWaitsForTheSliceWriteBeforeRemovingTheBond(t *testing.T) {
 	radio := testRadio(t, device)
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
-	deletePairing(t, fixture)
+	deletePeripheral(t, fixture)
 
 	inventory.reconcile()
 	// published() is not called, which models a slice write that
@@ -154,14 +154,14 @@ func TestUnpairWaitsForTheSliceWriteBeforeRemovingTheBond(t *testing.T) {
 }
 
 // The bond's Secret is not rewritten while the teardown runs. It is
-// collected with the Pairing that owns it.
+// collected with the Peripheral that owns it.
 func TestUnpairLeavesTheSecretToTheOwnerReference(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
 	device.Connected = false
 	inventory := testInventory(t, fixture, testRadio(t, device))
 	inventory.reconcile()
-	deletePairing(t, fixture)
+	deletePeripheral(t, fixture)
 
 	pass := inventory.reconcile()
 
@@ -170,5 +170,30 @@ func TestUnpairLeavesTheSecretToTheOwnerReference(t *testing.T) {
 	}
 	if _, owned := pass.owners[testAddress(t, testDevice)]; owned {
 		t.Errorf("owners = %v, want no owner for a bond under teardown", pass.owners)
+	}
+}
+
+// The relay stops in the step that takes the device out of the slice.
+// The claim was released one step earlier, so no consumer loses a node
+// under it, and no virtual node outlives the bond it stands for.
+func TestUnpairStopsTheRelayWhenTheDeviceLeavesTheSlice(t *testing.T) {
+	fixture := newAPIFixture()
+	device := pairedDevice(t, testDevice)
+	device.Connected = false
+	inventory := testInventory(t, fixture, testRadio(t, device))
+	inventory.relays.restore("a0:ab:51:33:b7:12", storedCapabilities(t))
+	inventory.reconcile()
+	deletePeripheral(t, fixture)
+
+	if len(inventory.relays.virtualNodes("a0:ab:51:33:b7:12")) != 1 {
+		t.Fatal("the controller had no virtual node before the teardown")
+	}
+	retire := inventory.reconcile()
+
+	if !retire.keepOut["a0:ab:51:33:b7:12"] {
+		t.Fatalf("keepOut = %v, want the device retired", retire.keepOut)
+	}
+	if nodes := inventory.relays.virtualNodes("a0:ab:51:33:b7:12"); len(nodes) != 0 {
+		t.Errorf("the relay still holds %v", nodes)
 	}
 }

@@ -216,12 +216,13 @@ spec:
               value: unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
           securityContext:
             # No capabilities at all. The operator reads bluetoothd
-            # over D-Bus, walks sysfs, writes CDI files, and serves a
-            # socket to the kubelet, and none of that is privileged.
-            # Its uevent socket is not either: the kernel creates the
-            # uevent netlink socket with NL_CFG_F_NONROOT_RECV, so
-            # binding group 1 needs no capability, only the initial
-            # user namespace that hostUsers gives it.
+            # over D-Bus, walks sysfs, writes CDI files, relays input
+            # events through /dev/uinput, and serves a socket to the
+            # kubelet, and none of that is privileged. Its uevent
+            # socket is not either: the kernel creates the uevent
+            # netlink socket with NL_CFG_F_NONROOT_RECV, so binding
+            # group 1 needs no capability, only the initial user
+            # namespace that hostUsers gives it.
             capabilities:
               drop: ["ALL"]
             privileged: false
@@ -232,6 +233,15 @@ spec:
               memory: 32Mi
             limits:
               memory: 64Mi
+            # The same adapter the bluetoothd container claims. The
+            # operator names it for what the claim delivers beside the
+            # radio: /dev/uinput, where the input relay creates one
+            # virtual device for each evdev node a controller
+            # registers, and /dev/input/event0 through event31, so a
+            # virtual device has a node in this container the moment
+            # the kernel registers it.
+            claims:
+              - name: adapter
           volumeMounts:
             # The two mounts every DRA driver takes. The registry
             # directory is where the kubelet discovers plugins, and

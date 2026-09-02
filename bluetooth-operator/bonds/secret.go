@@ -2,11 +2,13 @@ package bonds
 
 // The Secret that carries a bond between pods.
 //
-// One Secret holds one bond: the two files that one paired device has.
+// One Secret holds one bond: the two files that one paired device has,
+// and the evdev capability snapshot the input relay creates that
+// device's virtual nodes from.
 // Its name states the device's address, it has a label naming the
-// adapter the bond belongs to, and it lists that device's Pairing as
+// adapter the bond belongs to, and it lists that device's Peripheral as
 // its owner. So the keys follow the radio and not the machine, and
-// deleting the Pairing collects the Secret through ordinary garbage
+// deleting the Peripheral collects the Secret through ordinary garbage
 // collection.
 //
 // An older layout put every one of an adapter's bonds in one Secret
@@ -69,6 +71,15 @@ const (
 	// the layout differently.
 	infoSuffix  = ".info"
 	cacheSuffix = ".cache"
+
+	// evdevSuffix ends the key that holds one device's evdev
+	// capability snapshot, which is the operator's own document and
+	// not one of BlueZ's files. The restore leaves it where it is: it
+	// writes the two BlueZ files into the daemon's tree, and the
+	// operator reads this key back from the API instead. The
+	// snapshot travels with the bond because it describes the same
+	// device, and a bond that is removed must take it along.
+	evdevSuffix = ".evdev"
 )
 
 // secretKey names one of a device's files inside the Secret.
@@ -107,10 +118,9 @@ type Secret struct {
 }
 
 // SecretMeta holds the identity, the resourceVersion, and the owner.
-// The version goes with every write, so a second writer gets a
-// conflict instead of losing the first writer's bonds. The owner is
-// the bond's Pairing, so deleting the Pairing collects the keys with
-// it.
+// The version goes with every write, so a second writer gets a conflict
+// instead of losing the first writer's bonds. The owner is the bond's
+// Peripheral, so deleting the Peripheral collects the keys with it.
 type SecretMeta struct {
 	Name            string            `json:"name"`
 	Namespace       string            `json:"namespace,omitempty"`
@@ -120,7 +130,7 @@ type SecretMeta struct {
 }
 
 // Owner ties a Secret's lifetime to the object that owns it. The UID
-// matters: a reference names one instance, so a Pairing that is
+// matters: a reference names one instance, so a Peripheral that is
 // deleted and created again does not inherit the old one's Secret.
 type Owner struct {
 	APIVersion string `json:"apiVersion"`
@@ -189,14 +199,43 @@ func AdapterSelector(adapter Address) string {
 	return AdapterLabel + "=" + adapter.Key()
 }
 
+// Snapshots answers with each device's stored evdev capability
+// snapshot. The operator creates a controller's virtual input devices
+// from it before the controller connects, so a claim can be prepared
+// on a controller that is asleep.
+func (s *Secret) Snapshots() map[Address][]byte {
+	snapshots := map[Address][]byte{}
+	for key, snapshot := range s.Data {
+		device, named := deviceOf(key, evdevSuffix)
+		if !named || len(snapshot) == 0 {
+			continue
+		}
+		snapshots[device] = snapshot
+	}
+	return snapshots
+}
+
+// Snapshot answers with one device's stored snapshot, and with nothing
+// for a device that has never connected.
+func (s *Secret) Snapshot(device Address) []byte {
+	return s.Data[secretKey(device, evdevSuffix)]
+}
+
 // NewBondSecret builds the object the operator writes for one bond.
-func NewBondSecret(namespace string, adapter, device Address, stored Files, owner Owner) *Secret {
+// snapshot is the device's evdev capabilities, which is empty until
+// the controller has connected once.
+func NewBondSecret(namespace string, adapter, device Address, stored Files, snapshot []byte, owner Owner) *Secret {
 	data := map[string][]byte{secretKey(device, infoSuffix): stored.Info}
 	// A device with no cache entry gets no cache key, so that the
 	// restore writes no cache file for it. An empty value would restore
 	// an empty file, and that is a different fact.
 	if len(stored.Cache) > 0 {
 		data[secretKey(device, cacheSuffix)] = stored.Cache
+	}
+	// A controller that has never connected has no snapshot, and the
+	// key is absent rather than empty, so the two states stay apart.
+	if len(snapshot) > 0 {
+		data[secretKey(device, evdevSuffix)] = snapshot
 	}
 	secret := &Secret{
 		APIVersion: "v1",
