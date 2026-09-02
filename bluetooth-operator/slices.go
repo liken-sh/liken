@@ -53,8 +53,8 @@ const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 // in practice.
 const maxSliceDevices = 64
 
-// The two taints this operator applies, which answer two different
-// questions.
+// The three taints this operator applies, which answer three
+// different questions.
 //
 // disconnectedTaint says the controller is off the air. The effect is
 // NoExecute, so the taint-eviction controller ends the pod that holds
@@ -74,9 +74,19 @@ const maxSliceDevices = 64
 // get evicted when the toleration ran out, and be scheduled again. An
 // untolerated NoSchedule taint holds the pod Unschedulable until the
 // controller has connected once.
+//
+// nodeMovedTaint says the consumer's container holds nodes that are
+// not the nodes the operator delivers for this controller now, which a
+// restart of this operator leaves behind. The effect is NoExecute and
+// no consumer tolerates it, because the container may be reading
+// another controller's device. The eviction is the repair: the kubelet
+// unprepares the claim, the consumer's operator creates the pod again,
+// and the new prepare delivers the current nodes. The taint lifts on
+// the pass after the stale file is gone.
 const (
 	disconnectedTaint = DriverName + "/disconnected"
 	noInputNodeTaint  = DriverName + "/no-input-node"
+	nodeMovedTaint    = DriverName + "/node-moved"
 )
 
 type ResourceSlice struct {
@@ -183,7 +193,11 @@ func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
 // different fact the `connected` attribute does not carry: whether an
 // input claim would deliver anything. The two part company for a bond
 // that has never connected, which has no relay and no virtual node.
-func sliceDevices(controllers map[string]controller, nodes map[string][]string) []SliceDevice {
+//
+// moved names the controllers whose prepared claims deliver nodes that
+// are not the relay's current nodes, and each of them carries the
+// node-moved taint.
+func sliceDevices(controllers map[string]controller, nodes map[string][]string, moved map[string]bool) []SliceDevice {
 	devices := make([]SliceDevice, 0, len(controllers))
 	for mac, c := range controllers {
 		device := SliceDevice{
@@ -241,6 +255,12 @@ func sliceDevices(controllers map[string]controller, nodes map[string][]string) 
 			device.Taints = append(device.Taints, DeviceTaint{
 				Key:    noInputNodeTaint,
 				Effect: "NoSchedule",
+			})
+		}
+		if moved[mac] {
+			device.Taints = append(device.Taints, DeviceTaint{
+				Key:    nodeMovedTaint,
+				Effect: "NoExecute",
 			})
 		}
 		devices = append(devices, device)

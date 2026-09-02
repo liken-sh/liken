@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -412,5 +413,161 @@ func TestReconcileKeepsTheNodeOfAControllerThatWentToSleep(t *testing.T) {
 	want := []DeviceTaint{{Key: disconnectedTaint, Effect: "NoExecute"}}
 	if !reflect.DeepEqual(device.Taints, want) {
 		t.Errorf("taints = %+v, want %+v", device.Taints, want)
+	}
+}
+
+// A consumer's CDI file is the record of what its container received.
+// When the relay delivers different nodes for the same controller, that
+// consumer holds the wrong devices, and only that controller takes the
+// node-moved taint.
+func TestReconcileTaintsAControllerWhoseDeliveredNodesMoved(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "",
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
+		dualSense("0002", "b4:8c:9d:11:22:33", "input/event6"))
+	paired := map[string]controller{
+		"a0:ab:51:33:b7:12": {Name: "Player One", Connected: true},
+		"b4:8c:9d:11:22:33": {Name: "Player Two", Connected: true},
+	}
+
+	// The first pass creates each controller's virtual devices, which
+	// is what the prepare calls below deliver.
+	if !publish.reconcile(pairedSet(paired), adapterIs(t), nil) {
+		t.Fatal("the first pass reported a failure")
+	}
+	fixture.existing = fixture.created
+
+	// One consumer holds a node the relay does not deliver, which is
+	// what an operator restart leaves behind. The other holds the nodes
+	// the relay delivers now.
+	prepareClaim(t, "0f1e2d3c-0000-4000-8000-000000000001", "a0-ab-51-33-b7-12", "/dev/input/event99")
+	prepareClaim(t, "0f1e2d3c-0000-4000-8000-000000000002", "b4-8c-9d-11-22-33",
+		publish.relays.virtualNodes("b4:8c:9d:11:22:33")...)
+
+	if !publish.reconcile(pairedSet(paired), adapterIs(t), nil) {
+		t.Fatal("the second pass reported a failure")
+	}
+
+	stale := deviceNamed(t, fixture.updated, "a0-ab-51-33-b7-12")
+	want := []DeviceTaint{{Key: nodeMovedTaint, Effect: "NoExecute"}}
+	if !reflect.DeepEqual(stale.Taints, want) {
+		t.Errorf("taints = %+v, want %+v", stale.Taints, want)
+	}
+	current := deviceNamed(t, fixture.updated, "b4-8c-9d-11-22-33")
+	if len(current.Taints) != 0 {
+		t.Errorf("the controller whose consumer holds the current nodes is tainted: %+v", current.Taints)
+	}
+	if bus := deviceNamed(t, fixture.updated, testBus); len(bus.Taints) != 0 {
+		t.Errorf("the media bus is tainted: %+v", bus.Taints)
+	}
+}
+
+// The mismatch ends when the CDI file is gone, which is what the
+// kubelet's unprepare does after the eviction, so the taint lifts on
+// the next pass and the replacement pod can be scheduled.
+func TestReconcileClearsTheMovedTaintWhenTheClaimIsUnprepared(t *testing.T) {
+	publish, fixture := reconcileFixture(t, "",
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
+	const claimUID = "0f1e2d3c-0000-4000-8000-000000000001"
+	prepareClaim(t, claimUID, "a0-ab-51-33-b7-12", "/dev/input/event99")
+
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), nil) {
+		t.Fatal("the first pass reported a failure")
+	}
+	if taints := deviceNamed(t, fixture.created, "a0-ab-51-33-b7-12").Taints; len(taints) != 1 {
+		t.Fatalf("taints = %+v, want the node-moved taint", taints)
+	}
+	fixture.existing = fixture.created
+
+	if err := removeCDISpec(claimUID); err != nil {
+		t.Fatal(err)
+	}
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), nil) {
+		t.Fatal("the second pass reported a failure")
+	}
+	if taints := deviceNamed(t, fixture.updated, "a0-ab-51-33-b7-12").Taints; len(taints) != 0 {
+		t.Errorf("taints = %+v, want none", taints)
+	}
+}
+
+// movedControllers reads the CDI files as sets of node paths, so order
+// carries no meaning, a missing node is a move, a controller with no
+// relay and a file with nodes is a move, and the media bus and a file
+// that names no address are never moves.
+func TestMovedControllers(t *testing.T) {
+	const mac = "a0:ab:51:33:b7:12"
+	cases := []struct {
+		name      string
+		device    string
+		delivered []string
+		virtual   []string
+		want      bool
+	}{
+		{
+			name:      "the same nodes",
+			device:    "a0-ab-51-33-b7-12",
+			delivered: []string{"/dev/input/event5", "/dev/input/event6"},
+			virtual:   []string{"/dev/input/event5", "/dev/input/event6"},
+		},
+		{
+			name:      "the same nodes in another order",
+			device:    "a0-ab-51-33-b7-12",
+			delivered: []string{"/dev/input/event6", "/dev/input/event5"},
+			virtual:   []string{"/dev/input/event5", "/dev/input/event6"},
+		},
+		{
+			name:      "the numbers moved",
+			device:    "a0-ab-51-33-b7-12",
+			delivered: []string{"/dev/input/event11", "/dev/input/event12"},
+			virtual:   []string{"/dev/input/event8", "/dev/input/event9"},
+			want:      true,
+		},
+		{
+			name:      "one node fewer than the file names",
+			device:    "a0-ab-51-33-b7-12",
+			delivered: []string{"/dev/input/event5", "/dev/input/event6"},
+			virtual:   []string{"/dev/input/event5"},
+			want:      true,
+		},
+		{
+			name:      "no relay at all",
+			device:    "a0-ab-51-33-b7-12",
+			delivered: []string{"/dev/input/event5"},
+			want:      true,
+		},
+		{
+			name:      "the media bus, which grants no node",
+			device:    "14-b4-57-91-2f-c8-media",
+			delivered: nil,
+		},
+		{
+			name:      "a device name that is no address",
+			device:    "some-other-drivers-device",
+			delivered: []string{"/dev/input/event5"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cdiTempDir(t)
+			prepareClaim(t, "0f1e2d3c-0000-4000-8000-000000000001", c.device, c.delivered...)
+			virtual := map[string][]string{}
+			if len(c.virtual) > 0 {
+				virtual[mac] = c.virtual
+			}
+			if got := movedControllers(virtual)[mac]; got != c.want {
+				t.Errorf("moved = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// A pass that cannot read the CDI directory has no record of what any
+// consumer holds, and it taints nothing rather than evict on a guess.
+func TestMovedControllersTaintsNothingWithoutTheCDIDirectory(t *testing.T) {
+	previous := cdiDir
+	cdiDir = filepath.Join(t.TempDir(), "absent")
+	t.Cleanup(func() { cdiDir = previous })
+
+	if moved := movedControllers(map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event5"}}); len(moved) != 0 {
+		t.Errorf("moved = %v, want none", moved)
 	}
 }

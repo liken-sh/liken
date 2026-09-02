@@ -158,12 +158,15 @@ link, and it should not: the Peripheral is the record of the link.
 * Force feedback across the relay.
 * The 32-device bound on the evdev delivery.
 * An operator restart closes every uinput fd and creates the virtual
-  devices again, in the order the bond Secrets list. The kernel hands
-  back the minors it just freed, and does not promise to, so a
-  consumer that holds a node at a minor the kernel did not reuse reads
-  nothing until its pod restarts. Recording the minor in the snapshot
-  and evicting a consumer whose node moved is the answer this waits
-  for.
+  devices again, and the kernel numbers them from the free minors,
+  which include the numbers the controllers' own nodes held. On the
+  testbed the X6's two devices moved from `event11` and `event12` to
+  `event8` and `event9`, and its pod found the DualSense's motion and
+  touchpad devices behind its old nodes. The `node-moved` taint is the
+  repair: a prepared claim whose CDI nodes are not the relay's current
+  nodes takes a `NoExecute` taint no consumer tolerates, the pod is
+  evicted, and the replacement is prepared with the current nodes. The
+  cost is one pod restart per consumer on every operator restart.
 * A controller whose capabilities change keeps its virtual device
   until the operator restarts, because rebuilding it takes the node
   away from a running container.

@@ -14,7 +14,7 @@ func TestSliceDevicesPublishesPairedControllers(t *testing.T) {
 	}
 	nodes := map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event5"}}
 
-	devices := sliceDevices(controllers, nodes)
+	devices := sliceDevices(controllers, nodes, nil)
 	if len(devices) != 2 {
 		t.Fatalf("got %d devices, want 2", len(devices))
 	}
@@ -37,16 +37,21 @@ func TestSliceDevicesPublishesPairedControllers(t *testing.T) {
 	}
 }
 
-// The two taints answer two questions. NoExecute ends a session that
-// a controller left. NoSchedule keeps a session from starting
+// The three taints answer three questions. NoExecute ends a session
+// that a controller left. NoSchedule keeps a session from starting
 // against a controller that is not there, and nobody tolerates it, so
 // a claim ahead of a connect parks instead of looping through
 // schedule, prepare-fail, and evict.
-func TestSliceDevicesDerivesTheTwoTaints(t *testing.T) {
+//
+// The third taint ends a session whose container holds nodes that are
+// not the ones delivered now. It goes on beside the other two, because
+// a controller off the air can still have a consumer with stale nodes.
+func TestSliceDevicesDerivesTheTaints(t *testing.T) {
 	cases := []struct {
 		name      string
 		connected bool
 		nodes     []string
+		moved     bool
 		want      []DeviceTaint
 	}{
 		{
@@ -70,6 +75,25 @@ func TestSliceDevicesDerivesTheTwoTaints(t *testing.T) {
 				{Key: "bluetooth.liken.sh/no-input-node", Effect: "NoSchedule"},
 			},
 		},
+		{
+			name:      "a consumer holds nodes that moved",
+			connected: true,
+			nodes:     []string{"/dev/input/event8"},
+			moved:     true,
+			want: []DeviceTaint{
+				{Key: "bluetooth.liken.sh/node-moved", Effect: "NoExecute"},
+			},
+		},
+		{
+			name:      "off the air with a consumer that holds nodes that moved",
+			connected: false,
+			nodes:     []string{"/dev/input/event8"},
+			moved:     true,
+			want: []DeviceTaint{
+				{Key: "bluetooth.liken.sh/disconnected", Effect: "NoExecute"},
+				{Key: "bluetooth.liken.sh/node-moved", Effect: "NoExecute"},
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -77,9 +101,11 @@ func TestSliceDevicesDerivesTheTwoTaints(t *testing.T) {
 			if len(c.nodes) > 0 {
 				nodes["a0:ab:51:33:b7:12"] = c.nodes
 			}
+			moved := map[string]bool{"a0:ab:51:33:b7:12": c.moved}
 			devices := sliceDevices(
 				map[string]controller{"a0:ab:51:33:b7:12": {Connected: c.connected}},
 				nodes,
+				moved,
 			)
 			if !reflect.DeepEqual(devices[0].Taints, c.want) {
 				t.Fatalf("taints = %+v, want %+v", devices[0].Taints, c.want)
@@ -123,7 +149,7 @@ func TestSliceDevicesPublishesTheClassAndProfileFacts(t *testing.T) {
 				fullUUID("110f"), fullUUID("1101"),
 			},
 		},
-	}, nil)
+	}, nil, nil)
 
 	want := map[string]any{
 		"address":          "E3:28:E9:23:21:6F",
@@ -162,7 +188,7 @@ func TestSliceDevicesPublishesAGamepad(t *testing.T) {
 			Class:     0x002508,
 			UUIDs:     []string{fullUUID("1812")},
 		},
-	}, map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event5"}})
+	}, map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event5"}}, nil)
 
 	want := map[string]any{
 		"address":       "A0:AB:51:33:B7:12",
@@ -184,6 +210,7 @@ func TestSliceDevicesPublishesNothingForAnUnreportedFact(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Connected: true}},
 		map[string][]string{"a0:ab:51:33:b7:12": {"/dev/input/event5"}},
+		nil,
 	)
 
 	want := map[string]any{
@@ -202,6 +229,7 @@ func TestSliceDevicesPublishesAppearance(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Appearance: 0x03C4}},
 		nil,
+		nil,
 	)
 	if got := *devices[0].Attributes["appearance"].Int; got != 0x03C4 {
 		t.Fatalf("appearance = %d, want %d", got, 0x03C4)
@@ -215,6 +243,7 @@ func TestSliceDevicesTruncatesALongModalias(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Modalias: strings.Repeat("x", 100)}},
 		nil,
+		nil,
 	)
 	if got := len(*devices[0].Attributes["modalias"].String); got != 64 {
 		t.Fatalf("modalias length = %d, want 64", got)
@@ -224,6 +253,7 @@ func TestSliceDevicesTruncatesALongModalias(t *testing.T) {
 func TestSliceDevicesTruncatesALongName(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Name: strings.Repeat("x", 100)}},
+		nil,
 		nil,
 	)
 	if got := len(*devices[0].Attributes["name"].String); got != 64 {

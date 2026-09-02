@@ -6,9 +6,6 @@ package main
 // leaves the slice.
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -20,25 +17,6 @@ func deletePeripheral(t *testing.T, fixture *apiFixture) {
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	peripheral.Metadata.DeletionTimestamp = timestamp(testNow)
 	fixture.put(t, testPeripheralPath(), peripheral)
-}
-
-// prepareClaim writes the CDI spec file the DRA plugin writes when the
-// kubelet prepares a claim on a controller. The file's presence
-// records that a consumer still holds the device.
-func prepareClaim(t *testing.T, device string) {
-	t.Helper()
-	claimUID := "0f1e2d3c-0000-4000-8000-000000000003"
-	spec := cdiSpec{Version: "0.6.0", Kind: cdiKind, Devices: []cdiDevice{{
-		Name:           claimUID + "-" + device,
-		ContainerEdits: cdiEdits{DeviceNodes: []cdiDeviceNode{{Path: "/dev/input/event5"}}},
-	}}}
-	raw, err := json.Marshal(&spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cdiDir, cdiPrefix+claimUID+".json"), raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // The first step ends the session. The controller then registers no
@@ -81,7 +59,7 @@ func TestUnpairKeepsTheDeviceInTheSliceWhileAClaimHoldsIt(t *testing.T) {
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
 	deletePeripheral(t, fixture)
-	prepareClaim(t, "a0-ab-51-33-b7-12")
+	prepareClaim(t, "0f1e2d3c-0000-4000-8000-000000000003", "a0-ab-51-33-b7-12", "/dev/input/event5")
 
 	radio.calls = nil
 	pass := inventory.reconcile()

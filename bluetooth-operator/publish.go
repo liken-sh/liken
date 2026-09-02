@@ -47,6 +47,11 @@ type publisher struct {
 	// and not from the sysfs walk.
 	relays *relays
 
+	// reported names the controllers the last pass found with moved nodes,
+	// so the line about a stuck consumer prints once and not on every
+	// pass until the eviction lands.
+	reported map[string]bool
+
 	// adapter is the radio this pod serves. It scopes discovery to the
 	// controllers on this operator's own adapter, and it names the
 	// media bus device the slice publishes. It is read from
@@ -123,7 +128,10 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 	}
 
 	published := without(controllers, keepOut)
-	devices := sliceDevices(published, p.relay(published, nodes))
+	virtual := p.relay(published, nodes)
+	moved := movedControllers(virtual)
+	p.reportMoved(moved)
+	devices := sliceDevices(published, virtual, moved)
 	// The media bus joins every slice this pass publishes, as soon as
 	// bluetoothd has named the adapter. It goes at the front of the
 	// list so the overflow truncation below can only drop controllers:
@@ -166,6 +174,17 @@ func (p *publisher) relay(controllers map[string]controller, nodes map[string][]
 		virtual[mac] = p.relays.virtualNodes(mac)
 	}
 	return virtual
+}
+
+// reportMoved prints one line for each controller that joins the moved
+// set, and remembers the set for the next pass.
+func (p *publisher) reportMoved(moved map[string]bool) {
+	for mac := range moved {
+		if !p.reported[mac] {
+			fmt.Printf("controller %s was delivered nodes that moved; evicting its consumer\n", publishedMAC(mac))
+		}
+	}
+	p.reported = moved
 }
 
 // without copies the paired set with the retired controllers left out.

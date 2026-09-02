@@ -16,6 +16,14 @@ package main
 // three nodes back to the same virtual one. Events go one way: a
 // gamepad's rumble is a write into the real node, and nothing here
 // carries it back.
+//
+// A restart of this operator closes every uinput fd, and restore
+// creates the virtual devices again from the stored snapshots. The
+// kernel numbers them from the free minors, which then include the
+// numbers the controllers' own nodes held, so a virtual device can
+// land on a number a consumer received for a different controller. The
+// node-moved taint in slices.go is the repair: it evicts the consumer
+// whose prepared claim names nodes the relay no longer delivers.
 
 import (
 	"encoding/json"

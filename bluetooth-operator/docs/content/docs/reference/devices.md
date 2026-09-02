@@ -135,13 +135,15 @@ on them. Outside that class, the media bus carries `address` and no
 
 ## The taints
 
-Two taints go on a controller that cannot serve a claim, and they
-answer two different questions:
+Three taints go on a controller, and they answer three different
+questions. The first two say the controller cannot serve a claim. The
+third says the claim it already serves holds the wrong nodes:
 
 | Taint | Effect | When |
 |---|---|---|
 | `bluetooth.liken.sh/disconnected` | `NoExecute` | `bluetoothd` reports the controller disconnected, or the adapter itself has departed |
 | `bluetooth.liken.sh/no-input-node` | `NoSchedule` | the operator holds no virtual input node for the controller, which is a bond that has never connected since it was made |
+| `bluetooth.liken.sh/node-moved` | `NoExecute` | a prepared claim delivered nodes that are not the nodes the operator delivers for this controller now, which an operator restart can leave behind |
 
 The media bus takes one taint, and only when the adapter has
 departed:
@@ -165,6 +167,11 @@ scheduler allocates a controller the operator has no node for,
 `NodePrepareResources` fails, and the pod churns between
 `ContainerCreating` and eviction until somebody switches the
 controller on.
+
+No consumer tolerates `/node-moved`. The pod holds device nodes that
+belong to another controller now, so its eviction is the repair: the
+kubelet unprepares the claim, and the container that replaces the
+evicted one is prepared with the nodes the operator delivers now.
 
 ## The media bus
 
@@ -311,9 +318,11 @@ and the relay does not carry it back.
   CDI files survive on the host, so a running consumer keeps the
   device node it was given. The replacement pod creates each virtual
   device again, from the snapshot in the bond's `Secret`, and the
-  kernel numbers it from the free minors, which are the ones the old
-  pod just released. A consumer whose node is not among them reads
-  nothing until it restarts. The bus socket's directory is a host
+  kernel numbers it from the free minors, which now include the
+  numbers the controllers' own nodes hold. A consumer whose nodes are
+  not the ones the operator delivers after that takes the
+  `/node-moved` taint, and its eviction is what repairs it. The bus
+  socket's directory is a host
   path for a related reason: a claim prepared against it names the
   same directory after the restart, where an emptyDir's host path is
   under `/var/lib/kubelet/pods/`, keyed by the pod's UID, and changes

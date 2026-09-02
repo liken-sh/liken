@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -232,10 +233,64 @@ func (pass *inventoryPass) runAgainIn(after time.Duration) {
 // reaching prepare afterwards.
 func claimedDevices() map[string]bool {
 	held := map[string]bool{}
+	eachDeliveredDevice(func(device string, _ []string) {
+		held[device] = true
+	})
+	return held
+}
+
+// movedControllers names the controllers whose consumers hold nodes
+// that are not the nodes the operator delivers now. The CDI spec file
+// of a prepared claim records what its container received, and
+// virtual is what the relay holds for each controller at this pass. A
+// restart of this operator creates every virtual device again, and the
+// kernel numbers them from the free minors, so a container prepared
+// before the restart can hold a node that now belongs to a different
+// controller. The media bus is skipped, because its delivery is a
+// mount and no node. A directory this pass cannot read names nothing,
+// so a read failure taints nothing.
+func movedControllers(virtual map[string][]string) map[string]bool {
+	moved := map[string]bool{}
+	eachDeliveredDevice(func(device string, delivered []string) {
+		if isMediaBusName(device) {
+			return
+		}
+		mac := macFromDeviceName(device)
+		if !validMAC(mac) {
+			return
+		}
+		if !sameNodes(delivered, virtual[mac]) {
+			moved[mac] = true
+		}
+	})
+	return moved
+}
+
+// sameNodes compares two lists of node paths as sets. The prepare
+// call and the relay list a controller's nodes in the order they
+// found them, and the order carries no meaning.
+func sameNodes(delivered, current []string) bool {
+	if len(delivered) != len(current) {
+		return false
+	}
+	a, b := slices.Clone(delivered), slices.Clone(current)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
+}
+
+// eachDeliveredDevice visits every device a prepared claim holds, with
+// the node paths its CDI spec delivered. The kubelet prepares a claim
+// before the consumer's container starts and unprepares it after the
+// container is gone, and prepare writes the file while unprepare
+// removes it, so a file that names a device is a claim that still
+// holds it. A file this cannot parse is skipped, and a claim the
+// kubelet unprepared between the listing and the read is gone by then.
+func eachDeliveredDevice(visit func(device string, nodes []string)) {
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
 		// No directory means no claim has been prepared on this boot.
-		return held
+		return
 	}
 	for _, entry := range entries {
 		claimUID, ok := claimUIDFromSpecName(entry.Name())
@@ -258,10 +313,13 @@ func claimedDevices() map[string]bool {
 			if !ok {
 				continue
 			}
-			held[allocated] = true
+			nodes := make([]string, 0, len(device.ContainerEdits.DeviceNodes))
+			for _, node := range device.ContainerEdits.DeviceNodes {
+				nodes = append(nodes, node.Path)
+			}
+			visit(allocated, nodes)
 		}
 	}
-	return held
 }
 
 // truncateRunes cuts a free-text value to a byte limit, moving the cut

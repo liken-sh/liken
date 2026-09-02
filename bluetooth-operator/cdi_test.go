@@ -30,6 +30,25 @@ func readSpec(t *testing.T, path string) cdiSpec {
 	return spec
 }
 
+// prepareClaim writes the CDI spec file the DRA plugin writes when the
+// kubelet prepares a claim on a device. The file's presence records
+// that a consumer still holds the device, and the paths in it record
+// which nodes that consumer received.
+func prepareClaim(t *testing.T, claimUID, device string, nodes ...string) {
+	t.Helper()
+	spec := cdiSpec{Version: "0.6.0", Kind: cdiKind, Devices: []cdiDevice{{
+		Name:           claimUID + "-" + device,
+		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes(nodes)},
+	}}}
+	raw, err := json.Marshal(&spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cdiDir, cdiPrefix+claimUID+".json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWriteAndRemoveCDISpec(t *testing.T) {
 	dir := cdiTempDir(t)
 	const uid = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
