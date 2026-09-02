@@ -59,6 +59,7 @@ for a later agent to shape.
   series in one order, as a resource the cluster owner writes.
 * [25, People on the screen](25-people-on-the-screen.md). Cast and crew
   as pages of their own, derived from the bodies the scanner reads.
+  Blocked on plan 11, because a sidecar names a person by name alone.
 * [26, The home page](26-the-home-page.md). A first screen of rows that
   blends every kind, in place of the list of libraries.
 

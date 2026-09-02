@@ -4,6 +4,16 @@ Plan 25. A stub for a later agent to shape. It makes the credited people
 of a library, the cast and the crew, something a person can follow from
 one title to the next.
 
+## Blocked on plan 11
+
+This plan waits for the enricher of plan 11. A sidecar names a person
+by name alone: Jellyfin's NFO writer puts a name, a role, a type, a
+sort order, and a thumb path inside `<actor>`, and no provider id, and
+the thumb path points into Jellyfin's own metadata directory and not
+the volume. So a people table built from the sidecars alone would key
+every person on a name, and would hold no headshots. The enricher gives
+a person a provider id and a headshot, and this plan starts after it.
+
 ## The problem
 
 Every movie and every episode carries its cast with roles, its
