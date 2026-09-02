@@ -115,6 +115,65 @@ func TestAScanRunThatHasNotFinishedIsAWalkInFlight(t *testing.T) {
 	}
 }
 
+// A rescan run stands beside the scan run and leaves the walk's own
+// numbers alone, so a folder scan never flips the phase to Scanning
+// and never overwrites what the last full walk read.
+func TestARescanRunLeavesTheWalksNumbersAlone(t *testing.T) {
+	report, catalog := seededReporter(t)
+	walked := time.Unix(1_700_000_000, 0).UTC()
+	if err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
+		Worker: workerScan, Job: "scan-1", Started: walked.Add(-time.Minute), Finished: walked,
+		Unidentified: 2, Removed: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.UpsertRun(t.Context(), "house/movies", libraryRun{
+		Worker: workerRescan, Job: "rescan-1", Started: walked.Add(time.Hour), Finished: walked.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	built, err := report.buildReport(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !built.LastWalk.Equal(walked) {
+		t.Errorf("lastWalk = %v, want the finish of the scan run %v", built.LastWalk, walked)
+	}
+	if built.Unidentified != 2 || built.RemovedLastSweep != 9 {
+		t.Errorf("report = %+v, want the numbers the scan run carries", built)
+	}
+	if built.Walking {
+		t.Error("the report says a walk is running while only a rescan ran")
+	}
+	if len(built.Runs) != 2 {
+		t.Fatalf("runs = %+v, want the scan run and the rescan run", built.Runs)
+	}
+	if run, held := runOf(built.Runs, workerRescan); !held || run.Job != "rescan-1" {
+		t.Errorf("runs = %+v, want the rescan run beside the scan run", built.Runs)
+	}
+}
+
+// A rescan that is still running leaves the phase alone, because the
+// reporter reads the walk in flight off the scan run alone.
+func TestARunningRescanIsNotAWalkInFlight(t *testing.T) {
+	report, catalog := seededReporter(t)
+	if err := catalog.UpsertRun(t.Context(), "house/movies",
+		libraryRun{Worker: workerRescan, Job: "rescan-2", Started: time.Unix(1_700_000_000, 0)}); err != nil {
+		t.Fatal(err)
+	}
+
+	built, err := report.buildReport(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if built.Walking {
+		t.Error("the report of a running rescan says a walk is in flight")
+	}
+}
+
 // A library with no run reports its counts and no walk, which is
 // the catalog a reporter reads before the first Job runs.
 func TestALibraryWithNoRunStillReportsItsCounts(t *testing.T) {
@@ -224,6 +283,9 @@ func servingReporter(t *testing.T, catalog *Catalog) (*reporter, <-chan *fakeBro
 	backoffWas := reportMinBackoff
 	t.Cleanup(func() { reportMinBackoff = backoffWas })
 	reportMinBackoff = 5 * time.Millisecond
+	debounceWas := reportDebounce
+	t.Cleanup(func() { reportDebounce = debounceWas })
+	reportDebounce = 5 * time.Millisecond
 
 	report := &reporter{
 		namespace:         "house",
@@ -315,6 +377,53 @@ func TestTheReporterRepublishesOnARun(t *testing.T) {
 	}
 }
 
+// Reads the broker's publishes until one on this topic carries a
+// report the test accepts, and fails when none does.
+func waitForReport(t *testing.T, broker *fakeBroker, topic string, accept func(libraryReport) bool) {
+	t.Helper()
+	deadline := time.After(scanTestTimeout)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("no report on %q carried what the test waited for", topic)
+			return
+		case published := <-broker.pubs:
+			if published.topic != topic {
+				continue
+			}
+			var held libraryReport
+			if err := json.Unmarshal(published.payload, &held); err != nil {
+				t.Fatal(err)
+			}
+			if accept(held) {
+				return
+			}
+		}
+	}
+}
+
+// Rows that land with no run behind them still republish the
+// library, because a Job's rows reach the catalog pod after the run row
+// it wrote last, and a report that counted the old rows would hold the
+// Library's status at a stale count.
+func TestTheReporterRepublishesWhileTheCountsMove(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedTwoLibrariesInEveryTable(t, catalog)
+	_, accepted, _ := servingReporter(t, catalog)
+	broker := waitForBroker(t, accepted)
+	topic := libraryStatusTopic(defaultTopicBase, "house", "movies")
+	waitForReport(t, broker, topic, func(held libraryReport) bool { return held.Items == 3 })
+
+	if err := upsertWalk(t.Context(), catalog,
+		walkOfOneTitle("house/movies", "movie:tmdb:9", "Nine (2009)", "movie:path:nine-2009")); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForReport(t, broker, topic, func(held libraryReport) bool {
+		return held.Items == 4 && held.Files == 3 && len(held.Runs) == 0
+	})
+}
+
 // The kubelet stops the pod with SIGTERM, and the reporter marks
 // itself offline before it returns, so a catalog pod that leaves is not
 // read as one that is still reporting.
@@ -358,6 +467,54 @@ func TestTheReporterOpensTheStreamAgain(t *testing.T) {
 		case <-time.After(scanTestTimeout):
 			t.Fatal("the reporter did not open the stream again")
 		}
+	}
+}
+
+// An update stream the agent refuses is opened again after the
+// backoff, so a reporter whose agent is down still follows every table
+// once it answers.
+func TestTheReporterOpensAnUpdateStreamAgain(t *testing.T) {
+	attempts := make(chan struct{}, 8)
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case attempts <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("the agent is unwell"))
+	}))
+	t.Cleanup(refusing.Close)
+	backoffWas := reportMinBackoff
+	t.Cleanup(func() { reportMinBackoff = backoffWas })
+	reportMinBackoff = 5 * time.Millisecond
+	logged := &syncLog{}
+	report := &reporter{catalog: NewCatalog(refusing.URL, refusing.Client()), log: logged}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	changed := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		report.followTable(ctx, "movies", changed)
+	}()
+	for range 2 {
+		select {
+		case <-attempts:
+		case <-time.After(scanTestTimeout):
+			cancel()
+			t.Fatal("the reporter did not open the update stream again")
+		}
+	}
+	cancel()
+	<-done
+
+	if !strings.Contains(logged.String(), "the update stream of movies ended") {
+		t.Errorf("log = %q, want the stream that ended named", logged.String())
+	}
+	select {
+	case <-changed:
+	default:
+		t.Error("a stream that ended marked no change, so the events it missed are never read")
 	}
 }
 

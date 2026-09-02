@@ -112,8 +112,8 @@ func TestNewScannerReadsTheJobItRuns(t *testing.T) {
 	if scan.echoTimeout != 90*time.Second {
 		t.Errorf("echoTimeout = %s, want the wait the environment names", scan.echoTimeout)
 	}
-	if scan.echo.job != "movies-scan-29128191" || scan.echo.worker != workerScan {
-		t.Errorf("the echo waits for %s/%s, want the scan run of this Job", scan.echo.worker, scan.echo.job)
+	if scan.echo.job != "movies-scan-29128191" || scan.echo.worker != workerRescan {
+		t.Errorf("the echo waits for %s/%s, want the rescan run of this Job", scan.echo.worker, scan.echo.job)
 	}
 }
 
@@ -403,7 +403,7 @@ func TestTitleFolderOfASeriesIsTheChildOfTheRoot(t *testing.T) {
 // One scan Job over a fixture root, wired to the test broker and a
 // recording catalog, so the run rows, the walk, and the echo all run with
 // no cluster.
-func scanJob(t *testing.T, root, kind string) (*scanner, *catalogRecorder, <-chan *fakeBroker) {
+func scanJob(t *testing.T, root, kind, scanPath string) (*scanner, *catalogRecorder, <-chan *fakeBroker) {
 	t.Helper()
 	address, accepted := testBroker(t)
 	shorterBackoff(t)
@@ -416,9 +416,10 @@ func scanJob(t *testing.T, root, kind string) (*scanner, *catalogRecorder, <-cha
 		catalog:     catalog,
 		log:         io.Discard,
 		job:         "scan-1",
+		scanPath:    scanPath,
 		echoTimeout: scanTestTimeout,
 	}
-	scan.echo = newEchoWaiter(scan.statusTopic, workerScan, scan.job)
+	scan.echo = newEchoWaiter(scan.statusTopic, scan.worker(), scan.job)
 	scan.bus = newBus(address, "scan-house-movies", nil, nil, scan.echo.note)
 	return scan, recorder, accepted
 }
@@ -437,6 +438,11 @@ func echoTheRun(t *testing.T, accepted <-chan *fakeBroker, wait *echoWaiter) {
 	}))
 }
 
+// The path a webhook reports for one title folder, in the form
+// the scanner maps onto the volume.
+const webhookFolderPath = "/media/movies/The.Thing.1982.1080p.BluRay.x264-GROUP/" +
+	"The.Thing.1982.1080p.BluRay.x264-GROUP.mkv"
+
 // Reads the runs the Job posted, in the order it posted them.
 func runsPosted(recorder *catalogRecorder) []capturedStatement {
 	var posted []capturedStatement
@@ -452,7 +458,7 @@ func runsPosted(recorder *catalogRecorder) []capturedStatement {
 // ends, and the second write is the last row it posts, so the echo of it
 // proves the standing pod holds everything the walk wrote.
 func TestTheScanJobWritesItsRunFirstAndLast(t *testing.T) {
-	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies, "")
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()
 
@@ -486,7 +492,7 @@ func TestTheScanJobWritesItsRunFirstAndLast(t *testing.T) {
 // The finished run carries what the walk read, so a person reads
 // the unidentified folders and the sweep off the Library's status.
 func TestTheFinishedRunCarriesWhatTheWalkRead(t *testing.T) {
-	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies, "")
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()
 
@@ -504,12 +510,163 @@ func TestTheFinishedRunCarriesWhatTheWalkRead(t *testing.T) {
 	}
 }
 
+// The Job waits for a report that carries the counts its own agent
+// holds, so a report that names the run while the item rows are still
+// in flight never ends the wait.
+func TestTheScanJobWaitsForTheCountsItWrote(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	if err := catalog.ensureSeen(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	scan, _, accepted := scanJob(t, "testdata/movies", libraryKindMovies, "")
+	scan.catalog = catalog
+	done := make(chan error, 1)
+	go func() { done <- scan.runJob(t.Context()) }()
+
+	broker := waitForBroker(t, accepted)
+	if got := waitForString(t, broker.subs); got != scan.echo.topic {
+		t.Fatalf("the Job subscribed to %q, want %q", got, scan.echo.topic)
+	}
+	run := libraryRun{Worker: workerScan, Job: "scan-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}
+	broker.push(scan.echo.topic, mustMarshal(t, libraryReport{Items: 1, Files: 1, Runs: []libraryRun{run}}))
+	select {
+	case err := <-done:
+		t.Fatalf("the job exited on a report short of its counts: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	items := agent.rowsFor(t, "movies", "house/movies")
+	files := agent.rowsFor(t, "files", "house/movies")
+	broker.push(scan.echo.topic, mustMarshal(t, libraryReport{Items: items, Files: files, Runs: []libraryRun{run}}))
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
+	case <-time.After(scanTestTimeout):
+		t.Fatal("the job never exited on the report that carried its counts")
+	}
+}
+
+// The worker a Job's runs row carries: a Job that names a folder is
+// the rescan worker, so its row stands beside the full walk's row and
+// never overwrites the counts that walk left.
+func TestTheWorkerAJobWrites(t *testing.T) {
+	cases := []struct {
+		name     string
+		scanPath string
+		want     string
+	}{
+		{name: "a full walk", want: workerScan},
+		{name: "a folder scan", scanPath: webhookFolderPath, want: workerRescan},
+		{name: "a folder scan that falls back to the root", scanPath: "/nothing/on/this/volume", want: workerRescan},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies, testCase.scanPath)
+			done := make(chan error, 1)
+			go func() { done <- scan.runJob(t.Context()) }()
+
+			echoTheRun(t, accepted, scan.echo)
+			if err := <-done; err != nil {
+				t.Fatalf("the job failed: %v", err)
+			}
+
+			runs := runsPosted(recorder)
+			if len(runs) != 2 {
+				t.Fatalf("the job posted %d runs, want the started one and the finished one", len(runs))
+			}
+			for _, run := range runs {
+				if run.params[1] != testCase.want {
+					t.Errorf("the run names the %v worker, want %v", run.params[1], testCase.want)
+				}
+			}
+			if scan.echo.worker != testCase.want {
+				t.Errorf("the echo waits for the %s worker, want %s", scan.echo.worker, testCase.want)
+			}
+		})
+	}
+}
+
+// A folder scan reads its counts after the rescan, because a rescan
+// moves them, and a Job that expected the counts from before it would
+// wait for a report that never comes.
+func TestTheFolderScanExpectsTheCountsTheRescanLeft(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	if err := catalog.ensureSeen(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	scan, _, accepted := scanJob(t, "testdata/movies", libraryKindMovies, webhookFolderPath)
+	scan.catalog = catalog
+	done := make(chan error, 1)
+	go func() { done <- scan.runJob(t.Context()) }()
+
+	broker := waitForBroker(t, accepted)
+	if got := waitForString(t, broker.subs); got != scan.echo.topic {
+		t.Fatalf("the Job subscribed to %q, want %q", got, scan.echo.topic)
+	}
+	items := agent.rowsFor(t, "movies", "house/movies")
+	files := agent.rowsFor(t, "files", "house/movies")
+	if items == 0 || files == 0 {
+		t.Fatalf("the rescan wrote %d items and %d files, want the folder's rows", items, files)
+	}
+	broker.push(scan.echo.topic, mustMarshal(t, libraryReport{
+		Items: items, Files: files,
+		Runs: []libraryRun{{Worker: workerRescan, Job: "scan-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}},
+	}))
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
+	case <-time.After(scanTestTimeout):
+		t.Fatal("the job never exited on the counts the rescan left")
+	}
+}
+
+// A rescan that cannot read the counts fails the Job, because a Job
+// with no counts to expect cannot prove its rows reached the standing
+// pod.
+func TestTheFolderScanFailsWhenItCannotCount(t *testing.T) {
+	cases := []struct {
+		name   string
+		refuse string
+	}{
+		{name: "the items", refuse: "count(*) FROM movies"},
+		{name: "the files", refuse: "count(*) FROM files"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			if err := catalog.ensureSeen(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			scan, _, accepted := scanJob(t, "testdata/movies", libraryKindMovies, webhookFolderPath)
+			scan.catalog = proxyCatalog(t, catalog, func(path string, body []byte) bool {
+				return bytes.Contains(body, []byte(testCase.refuse))
+			})
+			done := make(chan error, 1)
+			go func() { done <- scan.runJob(t.Context()) }()
+
+			echoTheRun(t, accepted, scan.echo)
+			err := <-done
+
+			if err == nil {
+				t.Fatal("the job returned no error, want the failed count")
+			}
+			if !strings.Contains(err.Error(), "count the catalog after a rescan") {
+				t.Errorf("error = %v, want the failed step named", err)
+			}
+		})
+	}
+}
+
 // A Job that names a folder rescans that folder alone, which is
 // what a webhook drives, and it never walks the whole root.
 func TestTheScanJobRescansTheFolderItIsGiven(t *testing.T) {
-	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
-	scan.scanPath = "/media/movies/The.Thing.1982.1080p.BluRay.x264-GROUP/" +
-		"The.Thing.1982.1080p.BluRay.x264-GROUP.mkv"
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies, webhookFolderPath)
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()
 
@@ -529,8 +686,7 @@ func TestTheScanJobRescansTheFolderItIsGiven(t *testing.T) {
 // A folder that maps onto nothing on the volume falls back to the
 // whole root, so a Job is never worse than a full walk.
 func TestTheScanJobFallsBackToTheWholeRoot(t *testing.T) {
-	scan, _, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
-	scan.scanPath = "/nothing/on/this/volume"
+	scan, _, accepted := scanJob(t, "testdata/movies", libraryKindMovies, "/nothing/on/this/volume")
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()
 
@@ -547,7 +703,7 @@ func TestTheScanJobFallsBackToTheWholeRoot(t *testing.T) {
 // An echo that never arrives fails the Job, so its rows stay on
 // its own claim and Kubernetes retries it.
 func TestTheScanJobFailsWithNoEcho(t *testing.T) {
-	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies, "")
 	scan.echoTimeout = 20 * time.Millisecond
 
 	err := scan.runJob(t.Context())
@@ -564,7 +720,7 @@ func TestTheScanJobFailsWithNoEcho(t *testing.T) {
 // for the echo, so the failure is visible in the run, and the Job then
 // fails.
 func TestAFailedWalkStillWritesItsRunAndWaits(t *testing.T) {
-	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies, "")
 	scan.root = filepath.Join(t.TempDir(), "gone")
 	done := make(chan error, 1)
 	go func() { done <- scan.runJob(t.Context()) }()
@@ -592,7 +748,7 @@ func TestTheScanJobFailsWhenItCannotWriteItsRun(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(unwell.Close)
-	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies, "")
 	scan.catalog = NewCatalog(unwell.URL, unwell.Client())
 
 	if err := scan.runJob(t.Context()); err == nil {
@@ -606,7 +762,7 @@ func TestTheScanJobFailsWhenItCannotWriteItsRun(t *testing.T) {
 func TestTheScanJobFailsWhenItCannotWriteItsFinishedRun(t *testing.T) {
 	catalog, _ := recordingCatalog(t)
 	writes := 0
-	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies, "")
 	scan.catalog = proxyCatalog(t, catalog, func(path string, body []byte) bool {
 		if !bytes.Contains(body, []byte("INSERT INTO runs")) {
 			return false

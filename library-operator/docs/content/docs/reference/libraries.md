@@ -121,7 +121,7 @@ The last run of each worker of this library, as the namespace's reporter publish
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan or cleanup. |
+| <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan, rescan, or cleanup. |
 | <span id="statusruns--job"></span>`job` | string | no | The name of the Job that ran, for kubectl describe and logs. |
 | <span id="statusruns--started"></span>`started` | string | no | When that Job started its work. |
 | <span id="statusruns--finished"></span>`finished` | string | no | When that Job wrote its last row, which is what a Job waits to see echoed before it exits. |

@@ -122,6 +122,27 @@ func (c *Catalog) countFiles(ctx context.Context, library string) (int, error) {
 	return c.queryInt(ctx, `SELECT count(*) FROM files WHERE library = ?`, []any{library})
 }
 
+// The two counts of one library, the pair a Job's echo compares
+// against the report the standing pod publishes.
+type libraryCounts struct {
+	items int
+	files int
+}
+
+// Reads both counts, and fails on the first read that fails,
+// because a Job that half read them has nothing to compare.
+func (c *Catalog) countsOf(ctx context.Context, library string) (libraryCounts, error) {
+	items, err := c.countItems(ctx, library)
+	if err != nil {
+		return libraryCounts{}, err
+	}
+	files, err := c.countFiles(ctx, library)
+	if err != nil {
+		return libraryCounts{}, err
+	}
+	return libraryCounts{items: items, files: files}, nil
+}
+
 // markKeys reads every id, file path, link, and alias a walk produced into one
 // deduplicated list, the set the walk marks with its epoch. Each key carries
 // the prefix of its own key space, so an alias that reads the same as an

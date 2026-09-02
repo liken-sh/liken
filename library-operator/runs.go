@@ -7,9 +7,12 @@ package main
 // the standing pod holds what the Job wrote. Every worker writes one
 // runs row per library as its last catalog write, the standing pod's
 // reporter publishes that row back in the library's report, and the
-// Job exits only once it reads its own name there. The last write is
-// the last row the agent has to broadcast, so the echo proves every
-// row before it arrived too.
+// Job exits only once it reads its own name there.
+//
+// The last write is not the last row to arrive, because the
+// agent applies a version as it arrives and fills the gaps behind it
+// by pulling from the source, so the report has to carry the Job's own
+// counts as well as its run.
 
 import (
 	"context"
@@ -23,8 +26,13 @@ import (
 
 // The workers that write a runs row today. The word is the row's
 // second key column, so one library holds one row per worker.
+//
+// A folder scan is its own worker, because it reads one folder
+// and its counts do not describe the whole volume, so its row must
+// never overwrite the full walk's row.
 const (
 	workerScan    = "scan"
+	workerRescan  = "rescan"
 	workerCleanup = "cleanup"
 )
 
@@ -201,18 +209,40 @@ type echoWaiter struct {
 	topic  string
 	worker string
 	job    string
+	// The counts the report has to carry beside the run, or nil
+	// where the Job could not read them and waits on the run alone.
+	counts *echoCounts
 
 	once   sync.Once
 	echoed chan struct{}
+}
+
+// What the Job's own agent held for this library after the Job's
+// last write, which the standing pod's report has to match.
+type echoCounts struct {
+	items int
+	files int
 }
 
 func newEchoWaiter(topic, worker, job string) *echoWaiter {
 	return &echoWaiter{topic: topic, worker: worker, job: job, echoed: make(chan struct{})}
 }
 
+// Sets the counts the echo has to carry. It is called before the
+// wait starts, which is before the bus handler can read them.
+func (w *echoWaiter) expect(items, files int) {
+	w.counts = &echoCounts{items: items, files: files}
+}
+
 // note is the bus handler. A report on this library's topic whose run
-// for this worker names this Job, with a finish time on it, ends the
-// wait. Every other message is ignored.
+// for this worker names this Job, with a finish time on it and the
+// counts the Job expects, ends the wait. Every other message is
+// ignored.
+//
+// The run row can reach the standing pod before the rows the Job
+// wrote before it, because the agent applies a version when it arrives
+// and fills the gaps behind it by pulling from the source. The counts
+// are what say the gaps are filled.
 func (w *echoWaiter) note(topic string, payload []byte) {
 	if topic != w.topic {
 		return
@@ -223,6 +253,9 @@ func (w *echoWaiter) note(topic string, payload []byte) {
 	}
 	run, held := runOf(report.Runs, w.worker)
 	if !held || run.Job != w.job || run.Finished.IsZero() {
+		return
+	}
+	if w.counts != nil && (report.Items != w.counts.items || report.Files != w.counts.files) {
 		return
 	}
 	w.once.Do(func() { close(w.echoed) })

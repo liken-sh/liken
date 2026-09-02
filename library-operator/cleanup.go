@@ -104,6 +104,10 @@ func (s *sweeper) runJob(ctx context.Context) error {
 		return fmt.Errorf("writing the run of %s: %w", s.library, err)
 	}
 
+	// The sweep left the library with no item and no file, so a
+	// report that still counts either is one whose deletes have not
+	// landed.
+	s.echo.expect(0, 0)
 	return s.echo.wait(ctx, s.bus, s.echoTimeout)
 }
 

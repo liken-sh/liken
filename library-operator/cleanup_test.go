@@ -148,6 +148,40 @@ func echoTheCleanup(t *testing.T, accepted <-chan *fakeBroker, wait *echoWaiter)
 	}))
 }
 
+// The cleanup waits for a report that counts no item and no file
+// for the library, because a report that still counts either is one
+// whose deletes have not reached the standing pod.
+func TestTheCleanupJobWaitsUntilTheLibraryIsEmpty(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedTwoLibrariesInEveryTable(t, catalog)
+	sweep, accepted := cleanupJob(t, catalog)
+	done := make(chan error, 1)
+	go func() { done <- sweep.runJob(t.Context()) }()
+
+	broker := waitForBroker(t, accepted)
+	if got := waitForString(t, broker.subs); got != sweep.echo.topic {
+		t.Fatalf("the Job subscribed to %q, want %q", got, sweep.echo.topic)
+	}
+	run := libraryRun{Worker: workerCleanup, Job: "cleanup-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}
+	broker.push(sweep.echo.topic, mustMarshal(t, libraryReport{Items: 3, Files: 2, Runs: []libraryRun{run}}))
+	select {
+	case err := <-done:
+		t.Fatalf("the job exited on a report that still counts the rows it deleted: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	broker.push(sweep.echo.topic, mustMarshal(t, libraryReport{Runs: []libraryRun{run}}))
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
+	case <-time.After(scanTestTimeout):
+		t.Fatal("the job never exited on the report of an empty library")
+	}
+}
+
 // An echo that never arrives fails the Job, so the rows stay on
 // its own claim and the retry carries them.
 func TestTheCleanupJobFailsWithNoEcho(t *testing.T) {

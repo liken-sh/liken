@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,9 +31,17 @@ const catalogSchemaPath = "corrosion/schema/catalog.sql"
 // prune runs here with no agent and no cr-sqlite.
 type sqliteAgent struct {
 	db *sql.DB
+
+	// The mutex covers what the endpoints share, because the agent
+	// serves the transaction, the query, the subscription, and the
+	// update streams at the same time.
+	mutex sync.Mutex
 	// the most statements one posted transaction carried, so a test reads the
 	// bound a chunked sweep keeps.
 	largestBatch int
+	// One entry per open update stream, each waiting on the
+	// writes that name its table.
+	watchers []tableWatcher
 }
 
 // newSQLiteCatalog opens a database with the shipped schema, serves it
@@ -72,6 +81,10 @@ func (a *sqliteAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasSuffix(r.URL.Path, subscriptionsPath) {
 		a.serveSubscription(w, r)
+		return
+	}
+	if at := strings.Index(r.URL.Path, updatesPath); at >= 0 {
+		a.serveUpdates(w, r, r.URL.Path[at+len(updatesPath):])
 		return
 	}
 	a.serveTransaction(w, r)
@@ -144,7 +157,10 @@ func (a *sqliteAgent) readAll(query string) ([]string, [][]any, error) {
 // result per statement, the shape the write client reads.
 func (a *sqliteAgent) serveTransaction(w http.ResponseWriter, r *http.Request) {
 	statements := parseStatements(readBody(r))
+	a.mutex.Lock()
 	a.largestBatch = max(a.largestBatch, len(statements))
+	a.mutex.Unlock()
+	defer a.notifyWatchers(statements)
 	results := make([]map[string]any, len(statements))
 	for i, s := range statements {
 		outcome, err := a.db.Exec(s.sql, s.params...)

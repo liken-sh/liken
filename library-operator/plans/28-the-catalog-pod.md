@@ -55,11 +55,17 @@ last write can leave those rows on its own claim until its next run.
   ```
 
 - **A `Job` exits when the standing pod holds its rows.** After its
-  last write, the `Job`'s main container subscribes to the reporter's
-  message on the bus and waits until the `runs` row for its worker
-  names its own `Job`. Then it exits, and the kubelet stops the
-  sidecar. The wait has a timeout, and a `Job` that times out fails,
-  so the rows stay on its claim and the next run carries them.
+  last write, the `Job`'s main container reads its own agent's item
+  and file counts for its library, subscribes to the reporter's
+  message on the bus, and waits until the `runs` row for its worker
+  names its own `Job` and the report's counts equal its own. The run
+  alone is not proof: Corrosion applies a version when it arrives and
+  fills the gaps behind it by pulling from the source, so the last row
+  can land while thousands before it are still in flight. Then it
+  exits, and the kubelet stops the sidecar. The wait has a timeout,
+  and a `Job` that times out fails, so the rows stay on its claim and
+  the next run carries them. A folder scan writes a `rescan` row, so
+  the full walk's numbers stand beside it.
 - **A scan is a `Job`.** It runs the scanner beside a Corrosion agent,
   as a native sidecar with the exec probe from plan 04, on the
   `Library`'s existing catalog claim. The claim keeps the agent's

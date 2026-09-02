@@ -367,6 +367,71 @@ func TestTheWaitStandsOnAReportThatIsNotItsOwn(t *testing.T) {
 	}
 }
 
+// One whole report, as the reporter publishes it.
+func mustMarshal(t *testing.T, report libraryReport) []byte {
+	t.Helper()
+	payload, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+// A Job that expects counts waits until the report carries them,
+// because the run row reaches the standing pod before the rows the Job
+// wrote ahead of it.
+func TestTheWaitStandsUntilTheCountsMatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		items int
+		files int
+		want  bool
+	}{
+		{name: "the counts the Job wrote", items: 1415, files: 2830, want: true},
+		{name: "fewer items than the Job wrote", items: 1149, files: 2830},
+		{name: "fewer files than the Job wrote", items: 1415, files: 2000},
+		{name: "an empty library", items: 0, files: 0},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			wait := newEchoWaiter(libraryStatusTopic(defaultTopicBase, "house", "movies"), workerScan, "scan-1")
+			wait.expect(1415, 2830)
+
+			wait.note(wait.topic, mustMarshal(t, libraryReport{
+				Items: testCase.items, Files: testCase.files,
+				Runs: []libraryRun{{Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0)}},
+			}))
+
+			echoed := false
+			select {
+			case <-wait.echoed:
+				echoed = true
+			default:
+			}
+			if echoed != testCase.want {
+				t.Errorf("the wait ended: %v, want %v", echoed, testCase.want)
+			}
+		})
+	}
+}
+
+// A Job that could not read its counts waits on the run alone, so a
+// walk that failed still holds its agent open until its rows land.
+func TestAWaitWithNoCountsEndsOnTheRunAlone(t *testing.T) {
+	wait := newEchoWaiter(libraryStatusTopic(defaultTopicBase, "house", "movies"), workerScan, "scan-1")
+
+	wait.note(wait.topic, mustMarshal(t, libraryReport{
+		Items: 1149, Files: 2000,
+		Runs: []libraryRun{{Worker: workerScan, Job: "scan-1", Finished: time.Unix(20, 0)}},
+	}))
+
+	select {
+	case <-wait.echoed:
+	default:
+		t.Error("the wait stands on a report that names the run, with no counts expected")
+	}
+}
+
 // An echo that never arrives fails the Job, so its rows stay on its
 // own claim and the retry carries them.
 func TestTheWaitFailsOnItsTimeout(t *testing.T) {

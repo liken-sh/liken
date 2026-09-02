@@ -3,7 +3,8 @@ package main
 // The reporter is the container beside the standing catalog agent. It
 // is the one process in the namespace that reads the catalog and
 // publishes what it holds: one retained report per library, rebuilt
-// whenever the runs table changes. It holds no Kubernetes credentials,
+// whenever the runs table changes and while any replicated table
+// keeps changing. It holds no Kubernetes credentials,
 // it answers on no port, and it never exits on its own, because every
 // Job in the namespace waits on this process to echo its run.
 
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -37,6 +39,12 @@ var (
 	reportMinBackoff = time.Second
 	reportMaxBackoff = 30 * time.Second
 )
+
+// How long a run of changes waits before the reporter
+// republishes again, so a walk that writes thousands of rows costs one
+// report a second and not one report a row. A variable, so a test
+// drives a republish in milliseconds.
+var reportDebounce = time.Second
 
 // How long the reporter holds the bus open after it publishes the
 // closing offline, so the writer goroutine sends it before the process
@@ -99,10 +107,10 @@ func newReporter(log io.Writer) *reporter {
 	return report
 }
 
-// serve holds the bus and the run stream open until the context ends,
-// then marks this reporter offline and returns. The bus runs on a
-// context of its own, so the closing publish has a live connection to
-// go out on.
+// Serve holds the bus, the run stream, and one update stream
+// per replicated table open until the context ends, then marks this
+// reporter offline and returns. The bus runs on a context of its own,
+// so the closing publish has a live connection to go out on.
 func (r *reporter) serve(stopped context.Context) {
 	running, stopBus := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -111,7 +119,26 @@ func (r *reporter) serve(stopped context.Context) {
 		r.bus.Run(running)
 	}()
 
+	// The runs stream carries the values a report needs. The update
+	// streams carry only the fact that a row moved, so they mark a
+	// change, and the republish reads the catalog.
+	changed := make(chan struct{}, 1)
+	var streams sync.WaitGroup
+	for _, table := range catalogTables {
+		streams.Add(1)
+		go func() {
+			defer streams.Done()
+			r.followTable(stopped, table, changed)
+		}()
+	}
+	streams.Add(1)
+	go func() {
+		defer streams.Done()
+		r.republishWhileChanging(stopped, changed)
+	}()
+
 	r.follow(stopped)
+	streams.Wait()
 
 	r.bus.Publish(r.availabilityTopic, []byte(availabilityOffline), true)
 	time.Sleep(reportFlushGrace)
@@ -146,6 +173,86 @@ func (r *reporter) follow(ctx context.Context) {
 		if !reached {
 			backoff = min(backoff*2, reportMaxBackoff)
 		}
+	}
+}
+
+// Follows one table's update stream and marks a change on every
+// event, opening the stream again after a backoff for as long as the
+// context runs. The stream's events name no library, so the mark says
+// only that something moved.
+func (r *reporter) followTable(ctx context.Context, table string, changed chan<- struct{}) {
+	backoff := reportMinBackoff
+	for ctx.Err() == nil {
+		opened := false
+		err := r.catalog.followUpdates(ctx, table,
+			func() { opened = true },
+			func() { markChanged(changed) })
+		if err != nil && ctx.Err() == nil {
+			r.logf("the update stream of %s ended: %v", table, err)
+		}
+		// The events between one stream and the next are gone, so
+		// a stream that ended marks a change and the republish reads what
+		// the catalog holds now.
+		markChanged(changed)
+		if opened {
+			backoff = reportMinBackoff
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if !opened {
+			backoff = min(backoff*2, reportMaxBackoff)
+		}
+	}
+}
+
+// Republishes every library the reporter knows on each marked
+// change, then holds off for the debounce, so a run of changes costs
+// one report per library per interval and one more after they stop.
+func (r *reporter) republishWhileChanging(ctx context.Context, changed <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-changed:
+		}
+
+		r.publishKnownLibraries(ctx)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(reportDebounce):
+		}
+	}
+}
+
+// The mark never blocks and never queues more than one, because
+// the republish that answers it reads every library whole.
+func markChanged(changed chan<- struct{}) {
+	select {
+	case changed <- struct{}{}:
+	default:
+	}
+}
+
+// Publishes a report for every library the reporter has already
+// published one for, which is every library the catalog held when the
+// reporter started and every library a run has named since.
+func (r *reporter) publishKnownLibraries(ctx context.Context) {
+	r.mutex.Lock()
+	libraries := make([]string, 0, len(r.published))
+	for library := range r.published {
+		libraries = append(libraries, library)
+	}
+	r.mutex.Unlock()
+
+	slices.Sort(libraries)
+	for _, library := range libraries {
+		r.publishLibrary(ctx, library)
 	}
 }
 

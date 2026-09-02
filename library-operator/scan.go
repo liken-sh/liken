@@ -124,6 +124,10 @@ type scanner struct {
 	// publishes.
 	mutex  sync.Mutex
 	report libraryReport
+	// What this Job's own agent held for the library when the
+	// walk ended, and whether the walk could read it.
+	counts     libraryCounts
+	countsRead bool
 
 	// One walk runs at a time, so the reconciliation reads a
 	// settled catalog whichever caller drives the walk.
@@ -192,7 +196,7 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 	}
 	// The Job holds no will and publishes nothing. Its one use of
 	// the bus is the subscription that carries the reporter's echo back.
-	scan.echo = newEchoWaiter(scan.statusTopic, workerScan, scan.job)
+	scan.echo = newEchoWaiter(scan.statusTopic, scan.worker(), scan.job)
 	scan.bus = newBus(os.Getenv(busAddressVariable), "scan-"+namespace+"-"+name,
 		nil, nil, scan.echo.note)
 	return scan
@@ -200,12 +204,14 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 
 // The whole of a scan Job: write the run with no finish, walk,
 // write the run again with what the walk left, and wait for the
-// namespace's reporter to publish that run back. The first write says a
-// walk is running, and the last write is the last row the agent has to
-// broadcast, so the echo proves the standing pod holds every row this
-// Job wrote.
+// namespace's reporter to publish that run back with the counts this
+// Job's own agent holds.
+//
+// The first write says a walk is running. The echo of the last
+// write, carrying the counts, is what proves the standing pod holds
+// every row this Job wrote.
 func (s *scanner) runJob(ctx context.Context) error {
-	run := libraryRun{Worker: workerScan, Job: s.job, Started: time.Now().UTC()}
+	run := libraryRun{Worker: s.worker(), Job: s.job, Started: time.Now().UTC()}
 	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", s.library, err)
 	}
@@ -216,15 +222,34 @@ func (s *scanner) runJob(ctx context.Context) error {
 	s.mutex.Lock()
 	run.Unidentified = s.report.Unidentified
 	run.Removed = s.report.RemovedLastSweep
+	counts, read := s.counts, s.countsRead
 	s.mutex.Unlock()
 	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
 		return fmt.Errorf("writing the finished run of %s: %w", s.library, err)
 	}
 
+	if read {
+		s.echo.expect(counts.items, counts.files)
+	}
 	if err := s.echo.wait(ctx, s.bus, s.echoTimeout); err != nil {
 		return err
 	}
 	return walked
+}
+
+// The worker whose runs row this Job writes and whose echo it
+// waits for. A Job that names a folder is the rescan worker, so its
+// row stands beside the full walk's row and never over it, and the
+// reporter reads the walk's own numbers off the scan row alone.
+//
+// A folder scan that falls back to the whole root keeps the
+// rescan worker, because the Job it runs is the one the webhook asked
+// for.
+func (s *scanner) worker() string {
+	if s.scanPath == "" {
+		return workerScan
+	}
+	return workerRescan
 }
 
 // The one walk this Job runs: the whole root, or the single folder
@@ -404,6 +429,10 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 	if countedFiles {
 		s.report.Files = files
 	}
+	if countedItems && countedFiles {
+		s.counts = libraryCounts{items: after, files: files}
+		s.countsRead = true
+	}
 	s.mutex.Unlock()
 
 	s.logWalkComplete(titles, unidentified, removed, unidentifiedNames, time.Since(started))
@@ -549,6 +578,18 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	if err := reconcileSets(ctx, s.catalog, s.library, affected); err != nil {
 		return s.walkFailed("write the sets of a rescan", err)
 	}
+
+	// A rescan moves the counts, so the Job's echo compares
+	// against what the agent holds after it and never against a full
+	// walk's counts.
+	counts, err := s.catalog.countsOf(ctx, s.library)
+	if err != nil {
+		return s.walkFailed("count the catalog after a rescan", err)
+	}
+	s.mutex.Lock()
+	s.counts = counts
+	s.countsRead = true
+	s.mutex.Unlock()
 
 	written := len(result.movies) + len(result.series) + len(result.episodes) + len(result.files)
 	if written == 0 && removed == 0 {

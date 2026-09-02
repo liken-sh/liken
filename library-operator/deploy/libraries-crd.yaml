@@ -342,7 +342,7 @@ spec:
                     properties:
                       worker:
                         type: string
-                        description: "Which worker ran: scan or cleanup."
+                        description: "Which worker ran: scan, rescan, or cleanup."
                       job:
                         type: string
                         description: "The name of the Job that ran, for kubectl describe and logs."
