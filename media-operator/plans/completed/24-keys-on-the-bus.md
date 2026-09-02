@@ -137,3 +137,16 @@ in keys mode, back, volume, and mute still work, and only the
 air-mouse click and the cycle key stop. The DualSense drives a film
 with its reduced `Keymap`. `status.unbound` on the X6 lists the
 shell's keyboard no longer, because every key passes.
+
+### The drill record
+
+Released as 2026.09.02-001 with the library layer's browser on the same
+tag, and rolled to `liken-1` on 2026-09-02 with the two cluster
+`Keymap`s rewritten in the same apply: the X6 down to two rows, the
+DualSense down to remaps with repeats. The retained key tables read
+back off the bus at eight rows for the X6 and fourteen for the pad,
+the base folded with each `Keymap`. Drilled on 2026-09-02 from the X6
+under plan 25's clients: the arrows, select, and back drove the
+browser from the kernel's key names, a film played from a chosen
+cover, and back returned to the browser. The DualSense in a film and
+`status.unbound` on the X6 were not checked by eye in this drill.

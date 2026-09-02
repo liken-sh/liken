@@ -104,3 +104,19 @@ window and lights on a press, a volume key steps the level once per
 press, the cycle key moves the mark, a film ends and the clock returns
 on a fresh surface, and the media browser on the same crate navigates,
 sleeps at its top level, and plays a film from the list.
+
+### The drill record
+
+Released as media-operator 2026.09.02-002 and library-operator
+2026.09.02-002, and rolled to `liken-1` together on 2026-09-02. The
+first pass deleted the two `-idle-command` pods an older release
+stood, and the idle screen and the browser came back on the new images
+with the whole contract in their environment. `status.idle` on the
+delegated unit carried both windows, both remotes, and the panel and
+volume topics. Drilled the same day from the X6: the browser navigated,
+a film played from a chosen cover, and on its end the browser was back
+at once, where the old path took five to fifteen seconds and a restart.
+The one wait left is the start of a film, one to five seconds from
+select to the `Play` running, which is the playback pod's own start.
+The fade, the off window, and the volume keys were not timed in this
+drill.

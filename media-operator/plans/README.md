@@ -25,16 +25,6 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
-* [24, Keys on the bus](24-keys-on-the-bus.md). The events topic
-  carries the kernel's key names, the remote pod normalises a device
-  under a compiled base, the `Keymap` shrinks to remaps and disables,
-  and every consumer binds keys itself.
-* [25, The screen client holds the rules](25-the-screen-client-holds-the-rules.md).
-  The idle command pod is gone. The `media-screen` crate holds its
-  timers, its gates, its shade, and its publishes inside each screen
-  client, and `status.idle` carries the whole contract a delegate's
-  client is wired from.
-
 ## Completed
 
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
@@ -237,6 +227,21 @@ These plans are designed. Each keeps its number and moves to
   left to go back to. The drill drove the library layer's browser from
   the X6, slept it from its top level, and watched a `Play` cover it
   and hand it back.
+* [24, Keys on the bus](completed/24-keys-on-the-bus.md). Built, and
+  drilled on `liken-1` on 2026-09-02 in release 2026.09.02-001. The
+  events topic carries the kernel's key names, the remote pod
+  normalises a device under a compiled base, the `Keymap` shrinks to
+  remaps and disables, and every consumer binds keys itself. The two
+  cluster `Keymap`s dropped to two rows and to remaps with repeats,
+  and the X6 drove the browser through them.
+* [25, The screen client holds the
+  rules](completed/25-the-screen-client-holds-the-rules.md). Built,
+  and drilled on `liken-1` on 2026-09-02 in release 2026.09.02-002.
+  The idle command pod is gone. The `media-screen` crate holds its
+  timers, its gates, its shade, and its publishes inside each screen
+  client, and `status.idle` carries the whole contract a delegate's
+  client is wired from. The drill watched the two old pods go and the
+  browser return the instant a film ended.
 
 ## Open problems
 
