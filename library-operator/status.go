@@ -29,6 +29,10 @@ type libraryObservation struct {
 	report            *libraryReport
 	online            bool
 	operatorNamespace string
+	// What the Library's ordered sources resolved to against the
+	// MetadataProviders this pass checked. An empty reason is a Library that
+	// names no source, and that Library carries no Sources condition.
+	sources sourcesVerdict
 }
 
 // deriveLibraryStatus builds the whole status of one Library from one
@@ -60,6 +64,12 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 		status.LastWalk = latest.LastWalk
 		status.LastChange = latest.LastChange
 		status.Runs = latest.Runs
+		// The gap counts and the two identity counts are the reporter's own,
+		// carried through as it published them, so the number the operator
+		// schedules on is the number a person reads.
+		status.Gaps = latest.Gaps
+		status.Waiting = latest.Waiting
+		status.Unresolved = latest.Unresolved
 	}
 
 	// The conditions are built on a copy of the ones the Library
@@ -72,17 +82,23 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 	ready := readyCondition(seen, generation)
 	conditions = SetCondition(conditions, boundCondition(seen.bound, generation), now)
 	conditions = SetCondition(conditions, ready, now)
+	// A Library that names no source carries no Sources condition at all,
+	// because there is nothing to report about a list it does not have.
+	if seen.sources.reason != "" {
+		conditions = SetCondition(conditions, sourcesCondition(seen.sources, generation), now)
+	}
 	status.Conditions = conditions
 	status.Phase = libraryPhase(ready, seen.report)
 	return status
 }
 
-// LibraryPhase says what the library is doing, in the word a
-// person reads in the status column. It reads the Ready condition this
-// same derivation built, so the column and the condition never
-// disagree. The phase is Offline when the reporter has left the bus,
-// Pending while any other step of the path is missing, Scanning while
-// the report says a walk runs, and Idle otherwise.
+// LibraryPhase says what the library is doing, in the word a person reads in
+// the status column. It reads the Ready condition this same derivation built,
+// so the column and the condition never disagree. The phase is Offline when
+// the reporter has left the bus, Pending while any other step of the path is
+// missing, Scanning while the report says a walk runs, Enriching while the
+// report carries an enrich run that has started and not finished, and Idle
+// otherwise.
 func libraryPhase(ready Condition, latest *libraryReport) string {
 	switch {
 	case ready.Reason == reasonOffline:
@@ -91,8 +107,35 @@ func libraryPhase(ready Condition, latest *libraryReport) string {
 		return phasePending
 	case latest != nil && latest.Walking:
 		return phaseScanning
+	case latest != nil && enrichInFlight(latest.Runs):
+		return phaseEnriching
 	default:
 		return phaseIdle
+	}
+}
+
+// Whether an enricher of this library is in flight, which the runs say: a row
+// for the enrich worker with a start and no finish. The reporter derives
+// Walking the same way from the scan row.
+func enrichInFlight(runs []libraryRun) bool {
+	run, held := runOf(runs, workerEnrich)
+	return held && !run.Started.IsZero() && run.Finished.IsZero()
+}
+
+// The Sources condition reports the providers a Library names: True when
+// every one exists and one of them serves the concerns this library needs,
+// and False with the reason that names what is wrong.
+func sourcesCondition(verdict sourcesVerdict, generation int64) Condition {
+	status := ConditionFalse
+	if verdict.reason == reasonSourcesReady {
+		status = ConditionTrue
+	}
+	return Condition{
+		Type:               conditionSources,
+		Status:             status,
+		ObservedGeneration: generation,
+		Reason:             verdict.reason,
+		Message:            verdict.message,
 	}
 }
 
@@ -239,7 +282,7 @@ func writeLibraryStatus(ctx context.Context, c *Client, library *Library, desire
 // sameStatus compares the marshaled form, because that is what the API
 // server stores and what each field's omitempty decides: two statuses
 // that marshal alike write alike.
-func sameStatus(current, desired LibraryStatus) (bool, error) {
+func sameStatus[T any](current, desired T) (bool, error) {
 	was, err := json.Marshal(current)
 	if err != nil {
 		return false, err

@@ -121,6 +121,33 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// This watcher wakes the loop on every MetadataProvider change, so a key a
+// person has just declared is checked without a backstop tick's delay. The
+// recovery is watchLibraries's. A list that fails leaves the resume point
+// where it was, which is what a cluster that has not applied the CRD answers
+// on every turn.
+func watchMetadataProviders(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := metadataProvidersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause)
+		list, err := ListMetadataProviders(watchContext(), c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing metadata providers to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // WatchPods wakes the loop on every change to a pod that holds a
 // catalog agent, and the label selector keeps the stream to those pods.
 // Every event earns a wake here, because a Library is Ready only while

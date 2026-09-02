@@ -9,8 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"strconv"
 	"time"
 )
 
@@ -37,16 +35,6 @@ const (
 // Library, so every pass names the same CronJob.
 func scanCronJobName(library string) string {
 	return library + "-scan"
-}
-
-// The Job one webhook becomes. The hash is of the path and the
-// time, so two webhooks for one folder are two Jobs and no create ever
-// collides with a Job that is still running.
-func folderScanJobName(library, path string, now time.Time) string {
-	sum := fnv.New64a()
-	_, _ = sum.Write([]byte(path))
-	_, _ = sum.Write([]byte(strconv.FormatInt(now.UnixNano(), 10)))
-	return scanCronJobName(library) + "-" + strconv.FormatUint(sum.Sum64(), 36)
 }
 
 // The schedule the Library's full walk runs on, built from the
@@ -76,16 +64,20 @@ func buildScanCronJob(library *Library, scannerImage, corrosionImage, busAddress
 	}
 }
 
-// The Job one held webhook path becomes, owned by the Library so
-// the garbage collector takes it with the Library.
+// The Job one held webhook path becomes, owned by the Library so the garbage
+// collector takes it with the Library. It opens a chain: it carries the chain
+// marks, and the enricher and the rescan of the same folder follow it under
+// the same chain.
 func buildFolderScanJob(library *Library, path string, now time.Time, scannerImage, corrosionImage, busAddress, topicBase string) *Job {
+	chain := newChain(path, now)
 	return &Job{
 		APIVersion: batchAPIVersion,
 		Kind:       "Job",
 		Metadata: ObjectMeta{
-			Name:            folderScanJobName(library.Metadata.Name, path, now),
+			Name:            chainJobName(library.Metadata.Name, chainStageScan, chain),
 			Namespace:       library.Metadata.Namespace,
 			Labels:          workerLabels(library.Metadata.Name, workerScan),
+			Annotations:     chainMarks(chain, path, chainStageScan),
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
 		Spec: scanJobSpec(library, path, scannerImage, corrosionImage, busAddress, topicBase),

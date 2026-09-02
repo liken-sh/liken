@@ -75,6 +75,9 @@ spec:
           type: integer
           jsonPath: .status.unidentified
           priority: 1
+        - name: Waiting
+          type: integer
+          jsonPath: .status.waiting
         - name: Status
           type: string
           jsonPath: .status.phase
@@ -211,12 +214,15 @@ spec:
                   x-kubernetes-list-type: atomic
                   maxItems: 10
                   description: >-
-                    The metadata providers to ask about a title, in
-                    the order they are asked: the first that answers
-                    supplies the title's metadata. Enrichment reads
-                    this list. Nothing acts on it yet, and a library
-                    that omits it takes what the files themselves
-                    carry.
+                    The MetadataProviders in this namespace to ask
+                    about a title, by name, in the order they are
+                    asked: for each concern, the first provider in the
+                    list that serves it and is Ready is the one asked.
+                    The Sources condition reports a name that resolves
+                    to no provider, or a list where none serves a
+                    concern this library needs. A library that omits
+                    the list runs only the concerns that need no
+                    provider.
                   items:
                     type: string
                     minLength: 1
@@ -284,7 +290,7 @@ spec:
                         this path and the title's own path under it.
                 phase:
                   type: string
-                  description: "What this library is doing. Scanning while a walk runs, Idle between walks, Pending while the storage, the catalog pod, or the schedule is not ready, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached."
+                  description: "What this library is doing. Scanning while a walk runs, Enriching while an enricher Job runs, Idle between them, Pending while the storage, the catalog pod, or the schedule is not ready, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached."
                 titles:
                   type: integer
                   minimum: 0
@@ -318,6 +324,21 @@ spec:
                     How many catalog rows the scanner's last full sweep
                     removed. A mass delete that a partial walk caused shows
                     here, without a shell.
+                gaps:
+                  type: object
+                  x-kubernetes-map-type: atomic
+                  description: "One count per concern of the rows that concern has left to fill, counted by the namespace's reporter. The operator creates the enricher Job while any count is above zero, and the count falls after the scan that follows the enricher."
+                  additionalProperties:
+                    type: integer
+                    minimum: 0
+                waiting:
+                  type: integer
+                  minimum: 0
+                  description: "How many titles the identity concern left as candidates for a person to choose from. The candidates are in the title's .liken/identity.yaml. A person puts the right uniqueid into the .nfo, and the next scan identifies the title."
+                unresolved:
+                  type: integer
+                  minimum: 0
+                  description: "How many titles no provider could name. A miss is a fact with a date, and the concern asks again after its retry interval."
                 lastWalk:
                   type: string
                   format: date-time
@@ -342,7 +363,7 @@ spec:
                     properties:
                       worker:
                         type: string
-                        description: "Which worker ran: scan, rescan, or cleanup."
+                        description: "Which worker ran: scan, rescan, enrich, or cleanup."
                       job:
                         type: string
                         description: "The name of the Job that ran, for kubectl describe and logs."
@@ -382,8 +403,14 @@ spec:
                     Departing reports the teardown of a deleted Library:
                     True for as long as the operator's finalizer holds
                     the object open, with the reason ScanRunning,
-                    Sweeping, AwaitingEcho, or Blocked, and a message
-                    that names what the teardown waits on.
+                    EnrichRunning, Sweeping, AwaitingEcho, or Blocked,
+                    and a message that names what the teardown waits
+                    on. Sources reports spec.sources: True when every
+                    name resolves to a MetadataProvider and one of them
+                    serves each concern this library needs, and False
+                    with the reason ProviderNotFound or
+                    ConcernNotServed. A library that names no source
+                    carries no Sources condition.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.

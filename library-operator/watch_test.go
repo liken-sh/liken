@@ -360,6 +360,27 @@ func TestThePlayerWatchListsAndWakes(t *testing.T) {
 	}
 }
 
+// A MetadataProvider change wakes the loop, so a key a person has just
+// declared is checked without a backstop tick's delay. The watcher
+// lists the providers to resume and wakes on the list.
+func TestTheMetadataProviderWatchListsAndWakes(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{})
+	api.answersLists(listTurn{version: "150"})
+
+	wake := startWatch(t, api, watchMetadataProviders, "42")
+
+	nextWatchRequest(t, api)
+	if got := nextListRequest(t, api); got != metadataProvidersPath {
+		t.Errorf("listed %q, want %q", got, metadataProvidersPath)
+	}
+	waitForWatchWake(t, wake)
+	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
+		t.Errorf("the second watch resumed from %q, want the list's 150", got)
+	}
+}
+
 // A cluster with no media-operator serves no Players, so the list
 // fails on every turn. The watcher reports it and tries again, and it
 // wakes the loop for nothing it could not read.

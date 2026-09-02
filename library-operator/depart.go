@@ -90,6 +90,19 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 		}, nil
 	}
 
+	// An enricher that is still running writes onto the volume, and it writes
+	// its own runs row into the catalog the sweep is emptying, so a sweep beside
+	// it leaves rows behind. The Job list and the reporter's runs are both read,
+	// because a Job between the pods of its backoff has no pod running, and a
+	// run in flight can outlive the list this pass read.
+	report := o.reports.latestFor(namespace, name)
+	if enrichUnfinished(jobs, namespace, name) || (report != nil && enrichInFlight(report.Runs)) {
+		return departure{
+			reason:  reasonEnrichRunning,
+			message: "an enricher job of this library is still running",
+		}, nil
+	}
+
 	blocker, err := o.standDepartureClaim(ctx, library, choice)
 	if err != nil {
 		return departure{}, err
@@ -105,7 +118,7 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 	if blocker := cleanupBlocker(job); blocker != "" {
 		return departure{reason: reasonBlocked, message: blocker}, nil
 	}
-	if cleanupComplete(job, o.reports.latestFor(namespace, name)) {
+	if cleanupComplete(job, report) {
 		return departure{clear: true}, nil
 	}
 	if job != nil && job.Status.Succeeded > 0 {
