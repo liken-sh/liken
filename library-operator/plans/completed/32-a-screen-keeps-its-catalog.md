@@ -6,7 +6,7 @@ the media browser draws the wall at once. The `Catalog` sizes the
 claim as it sizes every agent's and may name its `StorageClass`, and a
 screen that cannot keep its claim on its node gets a new one. This changes what plans 06 and 15 built, and it answers
 the screen half of the [ingest memory
-problem](open-problems/ingest-memory-and-restart.md).
+problem](../open-problems/ingest-memory-and-restart.md).
 
 ## The problem
 
@@ -73,7 +73,7 @@ comes back to the same node and the same volume.
   screen needs a resource of this operator's own that binds a screen to
   what it shows, and that resource is undesigned. It is the [open
   problem on which libraries a screen
-  shows](open-problems/which-libraries-a-screen-shows.md).
+  shows](../open-problems/which-libraries-a-screen-shows.md).
 - **The `Player` owns the claim.** The claim carries a controller
   `ownerReference` on the `Player`, as the screen pod does, so the
   garbage collector takes both when the `Player` goes. A screen's
@@ -252,6 +252,26 @@ elsewhere. Record the time from the pod becoming unschedulable to the
 wall drawing again, that exactly one claim was deleted, and that the
 new claim bound on the new node.
 
+### The drill, 2026-09-02
+
+Built in release 2026.09.02-009 and drilled on `liken-1` the same
+day, on the `lab-portable` `Player`, with 53,614 rows in the
+namespace's catalog. The drill measured the time to the full row
+count on the screen's agent against the catalog pod's, rather than
+the first draw, because nothing reads the screen from `vega`.
+
+| Screen restart | Before, on `emptyDir` | After, on the claim |
+|---|---|---|
+| Time to the full catalog | 157 s | 0 to 1 s, three times |
+| Sidecar memory after | 211 MiB | 11 MiB |
+| First start on a fresh claim | every start | once: 152 s, 209 MiB |
+
+The claim bound on `local-path` on `stick-1`, and the pod came back
+to that node on every restart. `Catalog.status.screens` listed the
+screen with its claim, node, and phase. The move drill did not run,
+because the testbed has one display, and the bytes used on the claim
+and the actor ids were not read. All three wait for the next drill.
+
 ## What is set aside
 
 Reusing `Catalog.spec.storage.storageClassName` for the screens. It
@@ -290,7 +310,7 @@ for a job the operator does without one.
 One volume shared by every screen, `ReadWriteMany` or `ReadOnlyMany`.
 Two agents cannot write one SQLite database, and a catalog read from a
 shared volume is the Litestream design in
-[`rejected/`](rejected/litestream-as-the-catalog-transport.md).
+[`rejected/`](../rejected/litestream-as-the-catalog-transport.md).
 
 Keeping plan 06's restart of the sidecar. It was never built, the peak
 fits under the limit, and with a claim it is paid once per claim.

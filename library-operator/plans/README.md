@@ -67,8 +67,6 @@ they share, and plans 28 to 31 build them in order.
   `.liken/` directory for what they cannot say, `.contributors/` for
   people, concerns as the unit of work, `MetadataProvider`, and the
   write rules.
-* [28, The catalog pod](28-the-catalog-pod.md). One standing pod per
-  namespace holds the durable catalog, and every scan is a `Job`.
 * [29, Identification](29-identification.md). `MetadataProvider`, the
   `probe` concern, `identity.yaml`, the gap loop, and the write
   package with its test.
@@ -81,10 +79,6 @@ they share, and plans 28 to 31 build them in order.
 
 Plan 32 stands apart from the enrichment work.
 
-* [32, A screen keeps its catalog](32-a-screen-keeps-its-catalog.md).
-  Each screen's Corrosion agent on a `PersistentVolumeClaim` the
-  `Catalog` sizes and classes, so a restart syncs a delta and the
-  browser draws the wall at once.
 
 ## Completed
 
@@ -184,6 +178,17 @@ that took a hearing-impaired flag for Hindi.
   versioned claim name, with a rescan, and 2026.08.31-003 returned
   the claim to its plain name after every scanner moved to a fresh
   database.
+* [28, The catalog pod](completed/28-the-catalog-pod.md). Built in
+  2026.09.02-004 to -008 and drilled on `liken-1` on 2026-09-02. One
+  standing pod per namespace holds the catalog and reports it, every
+  scan is a `Job` that exits on the reporter's echo of its run and its
+  counts, the webhook is on the operator, and departure is a `Job`.
+  The drill found four gaps, fixed the same day, and one open problem.
+* [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
+  Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
+  Every screen's agent runs on a claim of its own, so a restart holds
+  the full catalog in one second where it took 157 s on an `emptyDir`.
+  The move drill waits for a second display.
 * [22, A screen per kind](completed/22-a-screen-per-kind.md). Built in
   two waves, released in 2026.09.02-003, and drilled on `liken-1` on
   2026-09-02. A kind is a screen design in the browser: the movies wall

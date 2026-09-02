@@ -3,7 +3,7 @@
 Plan 28. One standing pod per namespace holds the durable catalog and
 reports what it holds, every scanner becomes a `Job` with an agent of
 its own, and a `Job` knows it is done when the standing pod says so.
-This is the first build of [plan 27](27-enrichment.md), and it changes
+This is the first build of [plan 27](../27-enrichment.md), and it changes
 what plans 02, 04, 15, 19, and 21 built.
 
 ## The problem
@@ -129,6 +129,38 @@ time from its last write to the echo, the time to the first full
 report against the number plan 04 recorded, the catalog pod's
 resident memory after the walk and after a restart, and what the
 killed walk left in the catalog and on the `Job`'s claim.
+
+### The drill, 2026-09-02
+
+Built in releases 2026.09.02-004 to -008 and drilled on `liken-1` the
+same day, against the movies and series libraries.
+
+- The roll: the catalog pod Ready on a fresh claim in 15 s, and both
+  libraries Ready. The old scanner pods were deleted by hand, because
+  the operator no longer lists them and they hold the claims.
+- Full walks as `Job`s: movies 12 to 19 s and series 24 to 28 s, the
+  same as plan 04's scanner. The echo came within one second of the
+  last write. The sidecar's exit added 8 to 35 s to every `Job`, which
+  is the slow-shutdown open problem.
+- The webhook: post to `Job` in one second, pod up in 13 s, rescan in
+  0.2 s, echo under a second.
+- The catalog pod killed mid-walk came back in 7 s, both `Job`s
+  completed, and every row was in place. The pod reads 171 MiB after
+  the ingest and 141 MiB after a restart, which took 22 s to Ready.
+- A departure released 27 s after the delete.
+
+The drill found four gaps, each fixed in the release named. The `runs`
+row alone did not prove the rows arrived: 266 of 1415 titles were
+still in flight when the echo came, so the echo now carries the
+counts (-005). RBAC granted no `update` on `CronJob`s, so every pass
+failed on the image bump (-006). A new `Library` got no walk until its
+`CronJob`'s hour, and the cleanup container had no bus address, so a
+departure cycled forever (-007). The first-walk rule read a `Job`'s
+pods and not its verdict, and started a second walk between a failed
+pod and its retry (-008). One finding stays open: a fresh agent's
+first version reaches the catalog pod minutes after the rest, the
+[open problem](../open-problems/a-fresh-agents-first-version-arrives-late.md)
+that costs a new `Library` one echo timeout on its first walk.
 
 ## What is set aside
 

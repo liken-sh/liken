@@ -193,7 +193,7 @@ coordination end in a ban. Full walks are `CronJob`s.
 
 ## The plans
 
-1. [Plan 28, the catalog pod](28-the-catalog-pod.md). The standing
+1. [Plan 28, the catalog pod](completed/28-the-catalog-pod.md). The standing
    pod and its reporter, the `runs` table and the echo a `Job` waits
    for, scan `Job`s, the `CronJob`, and the webhook that creates a
    `Job`.
