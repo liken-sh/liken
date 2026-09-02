@@ -308,7 +308,7 @@ fn a_capture_run_writes_its_frames_and_ends_after_the_last_one() {
 // The topics one Player stands on, the way media-operator builds them.
 const STATUS_TOPIC: &str = "media/players/den/tv/status";
 const VOLUME_TOPIC: &str = "media/players/den/tv/volume";
-const SCREEN_TOPIC: &str = "media/players/den/tv/screen";
+const COMMANDS_TOPIC: &str = "media/players/den/tv/commands";
 
 // A broker for one client, speaking as much MQTT 3.1.1 as this test needs: it
 // answers the CONNECT and then publishes. It acknowledges no subscription,
@@ -364,7 +364,8 @@ fn publish(topic: &str, payload: &str) -> Vec<u8> {
     packet
 }
 
-// What each payload means is a unit test in `bus` and in `unit`. What needs a
+// What each payload means is a unit test in `media-screen` and in `unit`. What
+// needs a
 // broker and a compositor is the path between them: the client connects,
 // subscribes, reads the messages off the socket, and draws what they say.
 //
@@ -389,8 +390,10 @@ fn the_client_reads_the_bus_and_maps_a_new_surface_on_a_present() {
         // gone well inside this run.
         publish(VOLUME_TOPIC, r#"{"level":40,"muted":false}"#),
         publish(VOLUME_TOPIC, r#"{"level":45,"muted":false}"#),
-        // A `Play` ended, so the client maps a new Wayland surface.
-        publish(SCREEN_TOPIC, r#"{"event":"present"}"#),
+        // A `Play` ended, so the operator asks the screen back and the client
+        // maps a new Wayland surface. The status above says the unit plays
+        // nothing, which is the gate the request reads.
+        publish(COMMANDS_TOPIC, r#"{"action":"re-present"}"#),
     ]);
 
     let run = wired(
@@ -407,7 +410,7 @@ fn the_client_reads_the_bus_and_maps_a_new_surface_on_a_present() {
             ("MEDIA_BUS_ADDRESS", format!("127.0.0.1:{port}")),
             ("MEDIA_PLAYER_STATUS_TOPIC", STATUS_TOPIC.into()),
             ("MEDIA_PLAYER_VOLUME_TOPIC", VOLUME_TOPIC.into()),
-            ("MEDIA_PLAYER_SCREEN_TOPIC", SCREEN_TOPIC.into()),
+            ("MEDIA_PLAYER_COMMANDS_TOPIC", COMMANDS_TOPIC.into()),
             ("IDLE_PLAYER_NAME", "The Den".into()),
             ("IDLE_PLAYER_COMPONENTS", "The screen\nThe speakers".into()),
             ("DISPLAY_APP_ID", "media-den-tv".into()),

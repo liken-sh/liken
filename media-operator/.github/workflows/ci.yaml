@@ -75,15 +75,12 @@ jobs:
   # so a release of a commit CI already built rebuilds nothing. A pull
   # request from a fork holds a read-only token, so it reads the cache
   # and writes none.
-  idle:
+  rust:
     # The headless tests run under cage, and the cage in Ubuntu 24.04
     # (0.1.5) dies on an assertion when wlr-randr changes the output
     # mode. Ubuntu 26.04 carries 0.2.1, which takes the change, and it
     # is the release the workstations run.
     runs-on: ubuntu-26.04
-    defaults:
-      run:
-        working-directory: idle
     env:
       # Incremental artifacts are large, and a fresh runner never
       # reuses them. Without this they would fill the cache and gain
@@ -113,18 +110,19 @@ jobs:
             cage wlr-randr mesa-vulkan-drivers libvulkan1 \
             libwayland-client0 libxkbcommon0
 
-      # idle/rust-toolchain.toml names the version and the
-      # components. rustup installs what the file names, so this
-      # workflow pins no version of its own.
+      # rust-toolchain.toml at the repository root names the version
+      # and the components. rustup installs what the file names, so
+      # this workflow pins no version of its own.
       - name: install the toolchain
         run: rustup show
 
       # The cache holds the cargo registry and target/, keyed on
-      # Cargo.lock. Almost all of the build is dependencies, and they
-      # change only when the lock file changes.
+      # Cargo.lock. The two crates are one workspace at the repository
+      # root, so one entry covers both. Almost all of the build is
+      # dependencies, and they change only when the lock file changes.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: idle
+          workspaces: .
           cache-on-failure: true
 
       # cargo-llvm-cov is a binary. The action fetches its release
@@ -135,9 +133,9 @@ jobs:
           tool: cargo-llvm-cov
 
       # The same target a workstation runs: the format, the lints,
-      # and the tests under the coverage gate. idle/Makefile
-      # holds the floor.
-      - run: make test
+      # and the tests under the coverage gates. idle/Makefile holds
+      # the two floors.
+      - run: make test-rust
 
   images:
     runs-on: ubuntu-latest

@@ -176,9 +176,8 @@ impl<Message> canvas::Program<Message, Theme, Renderer> for Idle<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::Message;
-    use crate::bus::screen;
-    use crate::bus::volume::Volume;
+    use media_screen::Moment;
+    use media_screen::volume::Volume;
 
     #[test]
     fn a_16_by_9_surface_gives_the_width_the_display_has_always_held() {
@@ -219,7 +218,7 @@ mod tests {
     #[test]
     fn an_element_in_motion_takes_the_screen_ahead_of_the_clock() {
         let mut unit = Unit::default();
-        unit.fold(Message::Screen(screen::Event::Sleep), 10.0);
+        unit.fold(Moment::Sleep, 10.0);
 
         // The shade eases for four seconds, and a second at or before `at`
         // asks the harness to draw now.
@@ -231,7 +230,7 @@ mod tests {
     fn the_volume_rows_hold_never_outruns_the_clock() {
         let mut unit = Unit::default();
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume: Volume {
                     level: 40,
                     muted: false,

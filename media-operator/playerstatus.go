@@ -57,24 +57,27 @@ func derivePlayerStatus(player *Player, plays []Play, desk *reports) PlayerStatu
 	return PlayerStatus{Activity: playerIdle}
 }
 
-// deriveIdleStatus reports what a delegate reads to draw this
-// unit's idle screen: the resolved controller, the standing claim in the
-// Player's namespace, and that claim's request names in claim order. A
-// delegate acts on the status and never on the spec, because the spec
-// may inherit its controller from MediaPreferences and only this
-// operator resolves the tiers.
+// deriveIdleStatus reports what a delegate wires its client from: the
+// resolved controller, the standing claim in the Player's namespace,
+// that claim's request names in claim order, the two resolved windows,
+// and the bus the client joins. A delegate acts on the status and never
+// on the spec, because the spec may inherit its controller from
+// MediaPreferences and only this operator resolves the tiers.
 //
 // A nil claim is a Player that drives no screen, or a cluster that
 // names no display-draw class, and such a unit reports no idle block at
 // all. Under media.liken.sh/none nothing draws and no claim stands, so
 // the block carries the controller alone.
 //
-// The bus block rides with the claim. The idle command pod stands
-// under every controller but media.liken.sh/none, and the broker and
-// the topic base are this operator's configuration, so the status is
-// where a delegate's client learns both.
+// The bus block goes with the claim, under every controller but
+// media.liken.sh/none. The broker and the topic base are this
+// operator's configuration, so the status is where a delegate's client
+// learns both. The remotes list is in spec.remotes order, because that
+// position is the index a focus moment carries and the order the status
+// topic lists the parts in.
 func deriveIdleStatus(
-	player *Player, controller, busAddress, topicBase string, claim *ResourceClaim,
+	player *Player, controller, busAddress, topicBase string,
+	claim *ResourceClaim, idle resolvedIdle, remotes []idleRemoteTopics,
 ) *PlayerIdleStatus {
 	if claim == nil {
 		return nil
@@ -84,15 +87,34 @@ func deriveIdleStatus(
 	}
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 	return &PlayerIdleStatus{
-		Controller: controller,
-		Claim:      claim.Metadata.Name,
-		Requests:   claimRequests(claim),
+		Controller:       controller,
+		Claim:            claim.Metadata.Name,
+		Requests:         claimRequests(claim),
+		FadeAfterSeconds: idle.FadeAfterSeconds,
+		OffAfterSeconds:  idle.OffAfterSeconds,
 		Bus: &PlayerIdleBus{
 			Address:       busAddress,
+			StatusTopic:   playerStatusTopic(topicBase, namespace, name),
+			VolumeTopic:   idleVolumeTopic(player, topicBase),
 			CommandsTopic: playerCommandsTopic(topicBase, namespace, name),
-			ScreenTopic:   playerScreenTopic(topicBase, namespace, name),
+			PanelTopic:    playerPanelTopic(topicBase, namespace, name),
+			Remotes:       idleBusRemotes(remotes),
 		},
 	}
+}
+
+// idleBusRemotes turns the topics the pod carries into the list the
+// status carries, one entry per controller, in the same spec.remotes
+// order. A unit with no controllers reports no list.
+func idleBusRemotes(remotes []idleRemoteTopics) []PlayerIdleRemote {
+	if len(remotes) == 0 {
+		return nil
+	}
+	list := make([]PlayerIdleRemote, len(remotes))
+	for index, remote := range remotes {
+		list[index] = PlayerIdleRemote{Events: remote.Events, Focus: remote.Focus}
+	}
+	return list
 }
 
 // playerBusStatus is the presentable state of one unit, the whole of what

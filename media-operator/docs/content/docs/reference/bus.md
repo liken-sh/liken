@@ -49,7 +49,7 @@ resource's page gives the topics, the payloads, and who writes each.
 | Tree | What it carries | Page |
 |---|---|---|
 | `plays/{namespace}/{name}/...` | one run's commands, report, and availability | [Plays](/docs/reference/plays/) |
-| `players/{namespace}/{name}/...` | one unit's activity, volume, panel, and screen | [Players](/docs/reference/players/) |
+| `players/{namespace}/{name}/...` | one unit's activity, volume, panel, and commands | [Players](/docs/reference/players/) |
 | `remotes/{namespace}/{name}/...` | one controller's key events, presence, focus, and key table | [Remotes](/docs/reference/remotes/) |
 
 ## Availability

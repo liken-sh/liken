@@ -199,7 +199,7 @@ idle screen.
 
 A press of `KEY_CYCLEWINDOWS` publishes on `focus/cycle`. Only the
 holder of focus publishes it, the playback pod's command sidecar
-during a film and the idle command pod between films. The operator
+during a film and the idle screen client between films. The operator
 reads the request and advances the mark to the next bound `Player`
 by name, wrapping the last back to the first. A controller bound to
 one unit wraps to the same `Player`, and the operator republishes the

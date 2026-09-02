@@ -33,8 +33,8 @@ Two names belong to the media operator:
 * `media.liken.sh/none` turns the unit's idle screen off. The operator
   holds no display claim and runs no idle pod for it.
 
-Any other name is a delegate. The operator keeps the display claim and
-the idle command pod, runs no client of its own, and writes what the
+Any other name is a delegate. The operator keeps the display claim,
+runs no client of its own, and writes what the
 delegate needs to the `Player` status. `spec.idle.image` has no effect
 under a delegate.
 
@@ -51,6 +51,17 @@ operator is what resolves the two tiers.
         controller: library.liken.sh/media-browser
         claim: den-idle-devices
         requests: [draw, render]
+        fadeAfterSeconds: 600
+        offAfterSeconds: 1800
+        bus:
+          address: bus.liken-system.svc:1883
+          statusTopic: liken/media/players/den/den/status
+          volumeTopic: liken/media/players/den/den/volume
+          commandsTopic: liken/media/players/den/den/commands
+          panelTopic: liken/media/players/den/den/panel
+          remotes:
+            - events: liken/media/remotes/den/den-gamepad/events
+              focus: liken/media/remotes/den/den-gamepad/focus
 
 * `controller` is the resolved name. Act when it is yours.
 * `claim` is the `ResourceClaim` in the `Player`'s namespace that
@@ -58,6 +69,12 @@ operator is what resolves the two tiers.
 * `requests` are the request names the claim carries. `draw` is the
   shared draw device on the unit's screen. `render` is the GPU render
   node, present when the `Player` has one.
+* `fadeAfterSeconds` and `offAfterSeconds` are the resolved quiet
+  windows, in seconds. Both are always written. Zero on the first means
+  the screen never fades on its own, and zero on the second means the
+  panel never goes dark on its own.
+* `bus` is the broker and every topic the client reads or writes. The
+  section on presses below covers each one.
 
 ## Build the pod
 
@@ -97,41 +114,56 @@ code whichever client the image runs.
 
 ## Read the presses
 
-The idle command pod reads key names off the `Remote`s' events
-topics and holds its own table of what each key means there, and it
-keeps the focus gate and the shade under a delegate, so your client
-holds none of them. It joins the bus with the three facts under
-`status.idle.bus` instead:
+The client that draws a screen also answers its controllers. It holds
+the focus gate, the shade, the fade and off windows, the volume step,
+the cycle request, and the panel desire, in its own process. The
+operator runs no pod between the bus and the client.
 
-    status:
-      idle:
-        bus:
-          address: bus.liken-system.svc:1883
-          commandsTopic: liken/media/players/den/den/commands
-          screenTopic: liken/media/players/den/den/screen
+There are two ways to hold that contract:
 
-* `address` is the broker, as `host:port`.
-* `commandsTopic` is where the presses arrive, as
-  `{"key": "KEY_UP", "value": 1}`, the same JSON the `Remote`'s
-  events topic carried. The keys are the four arrows, `KEY_ENTER` and
-  its synonyms `KEY_OK`, `KEY_SELECT`, and `KEY_KPENTER`, and
-  `KEY_BACK` and its synonyms `KEY_ESC` and `KEY_EXIT`. Only a press
-  from a controller whose mark names this `Player` arrives, only
-  while the unit plays nothing, and only while the screen is awake. A
-  press on a sleeping screen wakes it and reaches you as nothing. A
-  held control arrives again as value 2, and a release, value 0, is
-  never forwarded.
-* `screenTopic` is where the idle command pod states its moments:
-  `sleep` and `wake`, retained, and `focus` and `present`, not. Draw a
-  black frame on `sleep`, draw again on `wake`, and map a fresh
-  surface on `present`, because a surface a film covered stays hidden
-  on a seatless compositor until a new one is mapped.
+* Take the `media-screen` crate from this repository as a git
+  dependency pinned to a release tag. It reads the variables below,
+  runs every rule, and hands the client what it draws: a press, the
+  shade down or up, a focus, and a fresh surface.
+* Read the same topics yourself and hold the same gates. The
+  [bus reference](/docs/reference/bus/) describes each topic.
 
-Your client writes one message. When back is pressed with no level
-left to climb, publish `{"action": "sleep"}` on `commandsTopic`, and
-the idle command pod brings the shade down the way it does for its own
-client. The operator holds the broker and the topic base, so read the
-topics from the status and derive none.
+Set these variables on your container. Each value comes from
+`status.idle`:
+
+* `MEDIA_BUS_ADDRESS`, from `bus.address`.
+* `MEDIA_PLAYER_NAME`, the `Player`'s `metadata.name`. It is not the
+  friendly name. Every focus mark holds this value, so a client that
+  sets it wrong answers no press.
+* `MEDIA_PLAYER_STATUS_TOPIC`, from `bus.statusTopic`.
+* `MEDIA_PLAYER_VOLUME_TOPIC`, from `bus.volumeTopic`. It is empty for
+  a unit with no sinks. Set nothing then, and the client draws no level
+  and steps none.
+* `MEDIA_PLAYER_COMMANDS_TOPIC`, from `bus.commandsTopic`. The operator
+  publishes `{"action": "re-present"}` there when a `Play` ends, and
+  the client maps a fresh surface. Nothing else arrives, and the client
+  publishes nothing back.
+* `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
+  publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
+  The operator turns the desire into an override on the screen's
+  `Display`.
+* `MEDIA_REMOTE_EVENTS_TOPICS` and `MEDIA_REMOTE_FOCUS_TOPICS`, from
+  `bus.remotes`. Join each field with newlines, one line per entry, in
+  the order the status lists them, so the two lists stay aligned.
+* `IDLE_FADE_AFTER_SECONDS`, from `fadeAfterSeconds`.
+* `IDLE_OFF_AFTER_SECONDS`, from `offAfterSeconds`.
+
+A press arrives on a controller's events topic as
+`{"key": "KEY_UP", "value": 1}`, the same JSON the `Remote`'s events
+topic carries for every reader. A press acts only while the
+controller's focus mark names this `Player`, only while the unit plays
+nothing, and only while the screen is awake. A press on a sleeping
+screen wakes it and does nothing else. A held control arrives again as
+value 2, and a release, value 0, acts on nothing.
+
+The client brings its own shade down. The operator's client does it on
+back. A client with levels does it when back has no level left to
+climb.
 
 ## Expect the claim to change
 
@@ -153,11 +185,13 @@ replaces the claim.
 
 ## What stays with the operator
 
-The idle command pod keeps running under a delegate. It holds the fade
-window, the off window, the panel desire, and the press gate for the
-unit's controllers, and it publishes what it decides on the `Player`'s
-screen topic. A client that reads the bus follows the same topics the
-operator's own client reads, described in the
-[bus reference](/docs/reference/bus/). A client that reads no bus draws
-what it draws, and the operator still darkens the panel on its own
-schedule.
+The operator keeps the display claim. It writes the focus mark for
+each controller and answers the cycle request. It publishes the
+`Player` status and the bus status. It publishes `re-present` when a
+`Play` ends. It writes the override on the screen's `Display` from the
+panel desire your client publishes. A client that publishes no panel
+desire leaves the panel lit, because the operator writes no override
+without one.
+
+The fade window, the off window, the press gate, the shade, the volume
+step, and the panel desire are the client's.

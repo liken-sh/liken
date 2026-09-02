@@ -300,7 +300,7 @@ const defaultOffMode = offModeBacklight
 
 // The two controller names this operator answers to.
 // idleControllerOwn is the built-in default, and this operator stands
-// the claim, the idle client pod, and the idle command pod for it.
+// the claim and the idle client pod for it.
 // Under idleControllerNone nothing draws an idle screen on the unit:
 // this operator stands no claim and no pod, and it leaves the panel
 // alone. The precedent is kubernetes.io/no-provisioner. Every other

@@ -9,7 +9,6 @@ rules every topic follows.
 | `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
 | `players/{namespace}/{name}/volume` | the operator and the pods | yes | the listening level |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
-| `players/{namespace}/{name}/screen` | the idle pod | no | what the idle screen shows next |
 | `players/{namespace}/{name}/commands` | the operator | no | a command for the idle pod |
 
 ### `status`
@@ -56,73 +55,31 @@ applies a `Play`'s starting volume, and the pod that handles a
 `volume` or `mute` press writes the result back. A published level
 outside 0 to 100 is clamped to the range.
 
-### `panel`
-
-The desire the idle command pod states for the unit's screen:
-
-    {"desire": "off"}
-
-The two desires are `on` and `off`. The sidecar holds no API
-credentials and writes no hardware, so the operator reads this topic
-and applies or lifts `spec.override` on the screen's `Display`. What
-the panel actually shows comes back the other way, from the
-`Display`'s observed state into `status.panel`.
-
-### `screen`
-
-What the idle command pod decided for the unit's screen, one moment per
-message:
-
-    {"event": "focus", "remote": 1}
-
-The sidecar holds the quiet window and the focus gate, reads key
-names off the `Remote`s' events topics with its own table of what
-each key means there, and these four moments are what it decides.
-The idle client reads them and draws them, whichever client
-[`spec.idle.image`](#specidle--image) named.
-
-| `event` | What it says |
-|---|---|
-| `sleep` | The quiet window ran out, so the shade comes down. |
-| `wake` | A press or a starting `Play` came, so the shade goes up. |
-| `focus` | A live mark named this `Player`. `remote` is the controller's index in `spec.remotes` order. |
-| `present` | A `Play` ended, and the screen is the idle client's again. |
-
-Only `focus` carries `remote`. The shade events are state and travel
-retained, so a client that restarts reads the cover it should draw.
-The `focus` and `present` events are moments and do not, because a
-retained moment would replay a press to a client that restarted.
-
 The unit's own state stays on the retained topics above. A client
 reads `status` for the name, the activity, and the parts, and
 `volume` for the level. The first `volume` message of a session is
 the broker's retained catch-up, which sets the level and shows no
 indicator, and every message after it is a press.
 
+### `panel`
+
+The desire the idle screen client states for the unit's screen:
+
+    {"desire": "off"}
+
+The two desires are `on` and `off`. The client holds no API
+credentials and writes no hardware, so the operator reads this topic
+and applies or lifts `spec.override` on the screen's `Display`. What
+the panel actually shows comes back the other way, from the
+`Display`'s observed state into `status.panel`.
+
 ### `commands`
 
-The display commands around the `Player`'s idle screen. None is
-retained, because each is an event and not a state, and a controller
-sends none of them directly.
+The one display command around the `Player`'s idle screen. It is not
+retained, because it is an event and not a state, and a controller
+never sends it directly. The operator is the only writer, and a client
+publishes nothing here.
 
 | Message | Writer | What it says |
 |---|---|---|
-| `{"action": "re-present"}` | the operator | A `Play` ended. The idle command pod states the `present` moment on [`screen`](#screen), and the idle client maps a fresh surface. |
-| `{"key": "KEY_UP", "value": 1}` | the idle command pod | One navigation key, forwarded under a delegate controller for the delegate's client to answer. |
-| `{"action": "sleep"}` | a delegate's client | Back had no level left to climb. The idle command pod brings the shade down. |
-
-A forwarded key is the same JSON the `Remote`'s events topic carried,
-so a client reads the kernel's name for the control and holds its own
-table. The forwarded keys are the four arrows, `KEY_ENTER`, `KEY_OK`,
-`KEY_SELECT`, and `KEY_KPENTER`, and `KEY_BACK`, `KEY_ESC`, and
-`KEY_EXIT`. They are forwarded only under a delegate controller, and
-only through the gates every other press reads: the unit plays
-nothing, the remote's mark names this `Player`, and the screen is
-awake. A press arrives as value 1, and a held control arrives again as
-value 2. A release, value 0, is never forwarded. Under
-`media.liken.sh/idle-screen` no key is forwarded, and `KEY_BACK`,
-`KEY_ESC`, and `KEY_EXIT` bring the shade down.
-
-The `sleep` request acts while the unit plays nothing and the screen
-is awake, and it brings the shade down exactly as the operator's own
-back press does. It is the one message a delegate's client writes.
+| `{"action": "re-present"}` | the operator | A `Play` ended. The idle screen client maps a fresh surface. |

@@ -1,9 +1,8 @@
 // The `Player`'s retained status: one message that carries the whole of what
 // the operator says about a unit. The operator folds the Kubernetes objects
-// into it, so this client resolves nothing and reads one payload.
+// into it, so a client resolves nothing and reads one payload.
 //
-// `media-operator` writes it in `playerstatus.go`, and the idle command pod
-// follows the same topic.
+// `media-operator` writes it in `playerstatus.go`.
 
 use serde::Deserialize;
 
@@ -102,7 +101,7 @@ impl Component {
 /// status at all and changes nothing, because a half-read status on a screen is
 /// worse than the last good one.
 pub fn parse(payload: &[u8]) -> Option<Status> {
-    super::object(payload)
+    crate::object(payload)
 }
 
 #[cfg(test)]

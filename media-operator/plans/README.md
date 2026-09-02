@@ -29,6 +29,11 @@ These plans are designed. Each keeps its number and moves to
   carries the kernel's key names, the remote pod normalises a device
   under a compiled base, the `Keymap` shrinks to remaps and disables,
   and every consumer binds keys itself.
+* [25, The screen client holds the rules](25-the-screen-client-holds-the-rules.md).
+  The idle command pod is gone. The `media-screen` crate holds its
+  timers, its gates, its shade, and its publishes inside each screen
+  client, and `status.idle` carries the whole contract a delegate's
+  client is wired from.
 
 ## Completed
 

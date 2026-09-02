@@ -232,7 +232,7 @@ type panelOverride struct {
 }
 
 // reconcilePanel settles one unit's panel and answers the
-// state its status carries. The desire is the idle command pod's, the
+// state its status carries. The desire is the idle screen client's, the
 // override is this operator's write, and the observed state is the
 // display-operator's. A unit whose screen carries no Display keeps
 // its panel lit: there is no second writer to fall back to.

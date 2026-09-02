@@ -1,8 +1,8 @@
 package main
 
-// The operator owns three kinds of standing objects: a Player's idle claim
-// with its idle client pod, a Player's idle command pod, which holds no
-// claim, and a Remote's controller claim with its reader pod. Each one
+// The operator owns two kinds of standing objects: a Player's idle claim
+// with its idle client pod, and a Remote's controller claim with its
+// reader pod. Each one
 // stands whether or not anything plays, and each follows the template the
 // current pass would build. This file holds the hash that tells one
 // template from another, and the rule every standing reconcile runs.

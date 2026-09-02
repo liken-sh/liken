@@ -1,7 +1,7 @@
 package main
 
 // These tests cover the panel desk and the fold: the desire
-// the idle command pod published reaches the desk, and the Display's
+// the idle screen client published reaches the desk, and the Display's
 // observed values become the word the Player's status carries.
 
 import "testing"

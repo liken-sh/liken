@@ -42,18 +42,11 @@ const (
 
 // actionRePresent is display plumbing, not part of the media vocabulary
 // above. The operator publishes it to a Player's commands topic when a
-// Play ends. The idle command pod reads it and states the present
-// moment, and the idle client maps a fresh surface, so a seatless kiosk
-// shell shows the clock again. A controller never sends it, so commandFor
-// holds no case for it and it reaches no player program.
+// Play ends. The idle screen client reads it off that topic and maps a
+// fresh surface, so a seatless kiosk shell shows the clock again. A
+// controller never sends it, so commandFor holds no case for it and it
+// reaches no player program.
 const actionRePresent = "re-present"
-
-// actionSleep is display plumbing beside re-present. A delegate's
-// client publishes it on the Player's commands topic when back has no
-// level left to climb, and the idle command pod brings the shade down.
-// A controller never sends it, and the stock client never needs it,
-// because the command pod sleeps that client on back directly.
-const actionSleep = "sleep"
 
 // A compiledBinding is one row of a Remote's key table: an evdev
 // type, code, and value on the left, the kernel key name the pod

@@ -1,0 +1,28 @@
+# The Rust half of this repository is one cargo workspace with two
+# members: media-screen, the bus half every screen client shares, and
+# idle, the client this project ships. One workspace means one lock
+# file, one toolchain pin, and one target tree, so a build resolves one
+# set of versions and the image build caches one dependency layer.
+[workspace]
+resolver = "3"
+members = ["idle", "media-screen"]
+# liken-iced is a path dependency inside this directory, so cargo would
+# make it a member on its own. It is a submodule with its own gates and
+# its own lock file, so it is excluded and stays a plain dependency.
+exclude = ["docs/themes/brand/iced"]
+
+# The three crates both members take. The versions are exact and stated
+# once here, so the client and the library that reads the bus for it
+# resolve the same rumqttc and the same serde.
+#
+# rumqttc speaks plain TCP to the broker, so its default features are off and
+# no TLS stack enters either build.
+[workspace.dependencies]
+rumqttc = { version = "=0.25.1", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+
+# The measurements need optimized code with symbols the profile does not strip.
+[profile.release]
+opt-level = 3
+lto = "thin"

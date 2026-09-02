@@ -10,8 +10,9 @@ use iced_wgpu::Renderer;
 use iced_widget::Canvas;
 use iced_winit::core::{Color, Element, Length, Theme};
 
-use crate::bus::status::Activity;
-use crate::bus::{self, Message, Reader};
+use media_screen::status::Activity;
+use media_screen::{Bus, Moment, Reader, reader};
+
 use crate::harness::Screen;
 use crate::idle::Idle;
 use crate::idle::preview::Keys;
@@ -19,12 +20,21 @@ use crate::look;
 use crate::unit::Unit;
 use crate::wiring::Wiring;
 
+/// The name this client connects to the broker under, before the machine's
+/// own name is appended. A broker closes the older connection when two arrive
+/// under one identifier, so no two clients on one machine may share it.
+const CLIENT: &str = "idle-screen";
+
 #[derive(Debug)]
 pub struct Client {
     unit: Unit,
     /// The subscription, or nothing when the operator named no broker. A run on
     /// a workstation draws the seeds alone.
-    bus: Option<Reader>,
+    ///
+    /// It is the trait and not the reader itself, so a test folds real
+    /// moments and reads a real request for the shade with no socket
+    /// under it.
+    bus: Option<Box<dyn Bus>>,
     /// Whether a `present` asked for a fresh Wayland surface. The harness
     /// reads it on every wake of the loop.
     surface_due: bool,
@@ -42,13 +52,14 @@ impl Client {
     /// seeds name the unit before the broker answers, so the first frame is
     /// never blank.
     pub fn open(wiring: Wiring) -> Self {
-        let client_id = bus::client_id(&bus::hostname());
+        let client_id = reader::client_id(CLIENT, &reader::hostname());
         let keys = wiring
             .preview
             .then(|| Keys::seeded(wiring.player_name.clone(), wiring.components.clone()));
+        let bus = Reader::open(&wiring.screen, &client_id);
         Self {
             unit: Unit::seeded(wiring.player_name, wiring.components),
-            bus: Reader::open(&wiring.bus_address, &client_id, wiring.topics),
+            bus: bus.map(|reader| Box::new(reader) as Box<dyn Bus>),
             surface_due: false,
             keys,
             at: 0.0,
@@ -80,12 +91,22 @@ impl Client {
     /// loses the moment for good, and the catch-up status still says the
     /// screen is the client's again. The two usually drain in one wake, and
     /// the flag folds them into one map.
-    pub fn receive(&mut self, message: Message, at: f64) {
-        if message == Message::Screen(bus::screen::Event::Present) {
+    pub fn receive(&mut self, moment: Moment, at: f64) {
+        if moment == Moment::Present {
             self.surface_due = true;
         }
+        // The stock idle screen draws no list, so the arrows and select
+        // reach nothing, and back is the shade. The client decides this
+        // and not the crate, because a client with levels sleeps at its
+        // top level alone, and only the client reads its levels.
+        if let Moment::Press(key) = moment
+            && media_screen::screen::keys::back(key)
+            && let Some(bus) = &self.bus
+        {
+            bus.sleep();
+        }
         let was = self.unit.activity;
-        self.unit.fold(message, at);
+        self.unit.fold(moment, at);
         if self.unit.activity == Activity::Idle && was != Activity::Idle {
             self.surface_due = true;
         }
@@ -123,7 +144,7 @@ impl Screen for Client {
 
     /// Hand the loop's waker to the reader, so a press on a controller shows
     /// on the next frame rather than at the clock's next second.
-    fn wake_by(&mut self, wake: bus::Waker) {
+    fn wake_by(&mut self, wake: media_screen::Waker) {
         if let Some(bus) = &self.bus {
             bus.wake_on_delivery(wake);
         }
@@ -172,16 +193,56 @@ impl Screen for Client {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+
     use super::*;
-    use crate::bus::screen;
-    use crate::bus::status::{Activity, Status};
-    use crate::wiring::Topics;
+    use media_screen::status::{Activity, Status};
+
+    /// A bus over a plain channel, standing in for the reader's threads, so a
+    /// test folds real moments and reads the client's own request for the
+    /// shade with no broker under it. The count of those requests is shared,
+    /// because the client owns the bus once it takes it.
+    #[derive(Debug)]
+    struct Channel {
+        moments: mpsc::Receiver<Moment>,
+        slept: Arc<AtomicUsize>,
+    }
+
+    impl Bus for Channel {
+        fn drain(&self) -> Vec<Moment> {
+            self.moments.try_iter().collect()
+        }
+
+        fn sleep(&self) {
+            self.slept.fetch_add(1, Ordering::SeqCst);
+        }
+
+        // The idle screen has no topic of its own, so it publishes
+        // nothing and this stands in for a call no client of this crate
+        // makes here.
+        fn publish(&self, _topic: &str, _payload: Vec<u8>, _retained: bool) {}
+
+        fn wake_on_delivery(&self, _wake: media_screen::Waker) {}
+    }
+
+    /// A client whose bus is that channel, and the two ends a test reads: what
+    /// it sends the client, and how often the client asked for the shade.
+    fn on_a_channel(client: &mut Client) -> (mpsc::Sender<Moment>, Arc<AtomicUsize>) {
+        let (sender, moments) = mpsc::channel();
+        let slept = Arc::new(AtomicUsize::new(0));
+        client.bus = Some(Box::new(Channel {
+            moments,
+            slept: Arc::clone(&slept),
+        }));
+        (sender, slept)
+    }
 
     fn seeded() -> Client {
         Client::open(Wiring {
             player_name: "The Den".into(),
             components: vec!["The screen".into()],
-            topics: Topics::default(),
             ..Wiring::default()
         })
     }
@@ -214,18 +275,43 @@ mod tests {
 
     #[test]
     fn the_pump_folds_what_the_bus_delivered_and_says_so() {
-        let (sender, messages) = std::sync::mpsc::channel();
         let mut client = seeded();
-        client.bus = Some(Reader::from_channel(messages));
+        let (sender, _slept) = on_a_channel(&mut client);
 
         assert!(!client.pump(1.0));
 
-        sender
-            .send(Message::Screen(screen::Event::Present))
-            .expect("the channel is open");
+        sender.send(Moment::Present).expect("the channel is open");
 
         assert!(client.pump(2.0));
         assert!(client.surface_due());
+    }
+
+    #[test]
+    fn a_back_press_asks_the_bus_for_the_shade() {
+        let mut client = seeded();
+        let (_sender, slept) = on_a_channel(&mut client);
+
+        for key in media_screen::screen::keys::BACK {
+            client.receive(Moment::Press(key), 1.0);
+        }
+        // The arrows and select reach nothing, because this screen draws no
+        // list to move through.
+        client.receive(Moment::Press("KEY_UP"), 2.0);
+        client.receive(Moment::Press("KEY_ENTER"), 2.0);
+
+        assert_eq!(
+            slept.load(Ordering::SeqCst),
+            media_screen::screen::keys::BACK.len()
+        );
+    }
+
+    #[test]
+    fn a_client_with_no_bus_asks_no_one_for_the_shade() {
+        let mut client = seeded();
+
+        client.receive(Moment::Press("KEY_BACK"), 1.0);
+
+        assert!(client.bus.is_none());
     }
 
     #[test]
@@ -239,7 +325,7 @@ mod tests {
     fn a_status_reaches_the_unit() {
         let mut client = seeded();
         client.receive(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Playing,
                 ..Status::default()
             }),
@@ -252,7 +338,7 @@ mod tests {
     fn the_retained_status_heals_a_present_the_client_never_received() {
         let mut client = seeded();
         client.receive(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Playing,
                 ..Status::default()
             }),
@@ -261,7 +347,7 @@ mod tests {
         assert!(!client.surface_due());
 
         client.receive(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Idle,
                 ..Status::default()
             }),
@@ -275,7 +361,7 @@ mod tests {
         let mut client = seeded();
         assert!(!client.surface_due());
 
-        client.receive(Message::Screen(screen::Event::Present), 3.0);
+        client.receive(Moment::Present, 3.0);
 
         assert!(client.surface_due());
         assert!(!client.surface_due());
@@ -284,7 +370,7 @@ mod tests {
     #[test]
     fn the_unit_takes_the_second_the_new_surface_went_up() {
         let mut client = seeded();
-        client.receive(Message::Screen(screen::Event::Present), 3.0);
+        client.receive(Moment::Present, 3.0);
         assert_eq!(client.unit().presented, None);
 
         client.surfaced(3.2);
@@ -296,7 +382,6 @@ mod tests {
         Client::open(Wiring {
             player_name: "Studio Lab".into(),
             components: vec!["Portable Screen".into(), "Studio Dualsense".into()],
-            topics: Topics::default(),
             preview: true,
             ..Wiring::default()
         })

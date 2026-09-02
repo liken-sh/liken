@@ -370,21 +370,23 @@ func TestPlayTitleFallsBackForAPlayWithNoItems(t *testing.T) {
 }
 
 // testIdleBus is the bus block every unit in these tests carries: the
-// broker the operator holds and the two topics the command pod stands
-// on for the theater.
+// broker the operator holds and the topics the theater's client reads
+// and writes. The theater has no sinks, so it names no volume topic,
+// and no remotes, so it lists none.
 func testIdleBus() *PlayerIdleBus {
 	return &PlayerIdleBus{
 		Address:       testBusAddress,
+		StatusTopic:   playerStatusTopic(testTopicBase, "house", "theater"),
 		CommandsTopic: playerCommandsTopic(testTopicBase, "house", "theater"),
-		ScreenTopic:   playerScreenTopic(testTopicBase, "house", "theater"),
+		PanelTopic:    playerPanelTopic(testTopicBase, "house", "theater"),
 	}
 }
 
-// the idle block reports the resolved controller and, where a
+// The idle block reports the resolved controller and, where a
 // controller draws, the claim a delegate references, the requests it
-// carries, and the bus a delegate's client reads. A Player with no idle
-// claim reports no block, and under media.liken.sh/none the block
-// carries the controller alone.
+// carries, the two windows, and the bus a delegate's client reads. A
+// Player with no idle claim reports no block, and under
+// media.liken.sh/none the block carries the controller alone.
 func TestDeriveIdleStatus(t *testing.T) {
 	player := standingIdlePlayer()
 	drawOnly := standingIdlePlayer()
@@ -409,10 +411,11 @@ func TestDeriveIdleStatus(t *testing.T) {
 			controller: idleControllerOwn,
 			claim:      buildIdleClaim(player, "display-draw"),
 			want: &PlayerIdleStatus{
-				Controller: idleControllerOwn,
-				Claim:      "theater-idle-devices",
-				Requests:   []string{"draw", "render"},
-				Bus:        testIdleBus(),
+				Controller:       idleControllerOwn,
+				Claim:            "theater-idle-devices",
+				Requests:         []string{"draw", "render"},
+				FadeAfterSeconds: defaultFadeAfterSeconds,
+				Bus:              testIdleBus(),
 			},
 		},
 		{
@@ -421,10 +424,11 @@ func TestDeriveIdleStatus(t *testing.T) {
 			controller: "library.liken.sh/media-browser",
 			claim:      buildIdleClaim(player, "display-draw"),
 			want: &PlayerIdleStatus{
-				Controller: "library.liken.sh/media-browser",
-				Claim:      "theater-idle-devices",
-				Requests:   []string{"draw", "render"},
-				Bus:        testIdleBus(),
+				Controller:       "library.liken.sh/media-browser",
+				Claim:            "theater-idle-devices",
+				Requests:         []string{"draw", "render"},
+				FadeAfterSeconds: defaultFadeAfterSeconds,
+				Bus:              testIdleBus(),
 			},
 		},
 		{
@@ -433,10 +437,11 @@ func TestDeriveIdleStatus(t *testing.T) {
 			controller: "library.liken.sh/media-browser",
 			claim:      buildIdleClaim(drawOnly, "display-draw"),
 			want: &PlayerIdleStatus{
-				Controller: "library.liken.sh/media-browser",
-				Claim:      "theater-idle-devices",
-				Requests:   []string{"draw"},
-				Bus:        testIdleBus(),
+				Controller:       "library.liken.sh/media-browser",
+				Claim:            "theater-idle-devices",
+				Requests:         []string{"draw"},
+				FadeAfterSeconds: defaultFadeAfterSeconds,
+				Bus:              testIdleBus(),
 			},
 		},
 		{
@@ -449,7 +454,9 @@ func TestDeriveIdleStatus(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := deriveIdleStatus(one.player, one.controller, testBusAddress, testTopicBase, one.claim)
+			got := deriveIdleStatus(one.player, one.controller, testBusAddress, testTopicBase,
+				one.claim, resolveIdle(nil, nil, testIdleImage),
+				gatherIdleRemotes(one.player, testTopicBase))
 			if !reflect.DeepEqual(got, one.want) {
 				t.Errorf("idle = %+v, want %+v", got, one.want)
 			}
@@ -498,4 +505,35 @@ func TestReconcilePlayersWritesTheIdleBlock(t *testing.T) {
 	mustMatch(t, written.Controller, "library.liken.sh/media-browser")
 	mustMatch(t, written.Claim, "theater-idle-devices")
 	mustMatchAll(t, written.Requests, []string{"draw", "render"})
+	mustMatch(t, written.FadeAfterSeconds, defaultFadeAfterSeconds)
+	mustMatch(t, written.Bus.StatusTopic, playerStatusTopic(testTopicBase, "house", "theater"))
+	mustMatch(t, written.Bus.PanelTopic, playerPanelTopic(testTopicBase, "house", "theater"))
+}
+
+// A unit with sinks and controllers carries the level topic and one
+// entry per controller, in spec.remotes order, so a delegate's client
+// reads the whole contract from the status alone.
+func TestDeriveIdleStatusCarriesTheLevelAndTheRemotes(t *testing.T) {
+	player := standingIdlePlayer()
+	player.Spec.Sinks = []PlayerDevice{{Class: "audio-sink"}}
+	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
+
+	got := deriveIdleStatus(player, idleControllerOwn, testBusAddress, testTopicBase,
+		buildIdleClaim(player, "display-draw"), resolveIdle(nil, nil, testIdleImage),
+		gatherIdleRemotes(player, testTopicBase))
+
+	mustMatch(t, got.Bus.VolumeTopic, playerVolumeTopic(testTopicBase, "house", "theater"))
+	want := []PlayerIdleRemote{
+		{
+			Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
+			Focus:  remoteFocusTopic(testTopicBase, "house", "sofa"),
+		},
+		{
+			Events: remoteEventsTopic(testTopicBase, "house", "armchair"),
+			Focus:  remoteFocusTopic(testTopicBase, "house", "armchair"),
+		},
+	}
+	if !reflect.DeepEqual(got.Bus.Remotes, want) {
+		t.Errorf("remotes = %+v, want %+v", got.Bus.Remotes, want)
+	}
 }

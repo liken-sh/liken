@@ -12,8 +12,8 @@
 //! film's surface covers the idle surface and a frame drawn behind it is never
 //! seen. Anything else eases the energy back to 0.
 
-use crate::bus::status::Activity;
 use crate::unit::{Ramp, Unit};
+use media_screen::status::Activity;
 
 /// The ramp up is shorter than the ramp down, so the mark reaches full swing
 /// quickly when a `Play` starts, and returns to rest slowly when the film ends.
@@ -190,9 +190,8 @@ pub fn ramp(unit: &Unit, next: Activity, at: f64) -> Ramp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::Message;
-    use crate::bus::screen;
-    use crate::bus::status::Status;
+    use media_screen::Moment;
+    use media_screen::status::Status;
 
     /// Two readings of one curve. The expected numbers below are read off the
     /// curve itself, so a difference this small is the arithmetic and not the
@@ -210,7 +209,7 @@ mod tests {
     fn unit(activity: Activity, at: f64) -> Unit {
         let mut unit = Unit::default();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity,
                 ..Status::default()
             }),
@@ -239,7 +238,7 @@ mod tests {
     fn a_film_stops_the_mark_with_no_ease() {
         let mut unit = unit(Activity::Starting, 0.0);
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Playing,
                 ..Status::default()
             }),
@@ -252,7 +251,7 @@ mod tests {
     #[test]
     fn a_reversal_turns_around_from_where_the_mark_stands() {
         let mut unit = unit(Activity::Starting, 0.0);
-        unit.fold(Message::Status(Status::default()), 0.6);
+        unit.fold(Moment::Status(Status::default()), 0.6);
 
         assert_close(level(&unit, 0.6), 0.5);
         assert_close(level(&unit, 1.85), 0.25);
@@ -263,7 +262,7 @@ mod tests {
     fn a_repeated_status_does_not_stretch_the_ramp() {
         let mut unit = unit(Activity::Starting, 0.0);
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Starting,
                 ..Status::default()
             }),
@@ -275,7 +274,7 @@ mod tests {
     #[test]
     fn an_arrival_brings_the_mark_back_at_full_swing() {
         let mut unit = unit(Activity::Playing, 1.0);
-        unit.fold(Message::Status(Status::default()), 4.0);
+        unit.fold(Moment::Status(Status::default()), 4.0);
         unit.presented = Some(4.5);
 
         assert_eq!(level(&unit, 4.5), 1.0);
@@ -297,7 +296,7 @@ mod tests {
             ..Unit::default()
         };
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Starting,
                 ..Status::default()
             }),
@@ -321,7 +320,7 @@ mod tests {
     fn the_clock_stands_still_under_a_film() {
         let mut unit = unit(Activity::Starting, 0.0);
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Playing,
                 ..Status::default()
             }),
@@ -341,7 +340,7 @@ mod tests {
     fn the_clock_never_jumps_when_the_activity_changes() {
         let mut unit = unit(Activity::Starting, 0.0);
         let before = phase(&unit, 0.6);
-        unit.fold(Message::Status(Status::default()), 0.6);
+        unit.fold(Moment::Status(Status::default()), 0.6);
         assert_eq!(phase(&unit, 0.6), before);
     }
 
@@ -349,16 +348,16 @@ mod tests {
     fn the_clock_never_jumps_when_a_surface_arrives() {
         let mut unit = Unit::default();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Starting,
                 ..Status::default()
             }),
             0.0,
         );
-        unit.fold(Message::Status(Status::default()), 1.2);
+        unit.fold(Moment::Status(Status::default()), 1.2);
         let before = phase(&unit, 2.0);
 
-        unit.fold(Message::Screen(screen::Event::Present), 2.0);
+        unit.fold(Moment::Present, 2.0);
         unit.presented = Some(2.0);
         assert_eq!(phase(&unit, 2.0), before);
     }
@@ -476,7 +475,7 @@ mod tests {
     #[test]
     fn a_ramp_down_asks_for_a_frame_for_the_whole_2500_ms() {
         let mut unit = unit(Activity::Starting, 0.0);
-        unit.fold(Message::Status(Status::default()), 2.0);
+        unit.fold(Moment::Status(Status::default()), 2.0);
 
         assert_eq!(next_frame(&unit, 4.4), Some(4.4));
         assert_eq!(next_frame(&unit, 4.5), None);

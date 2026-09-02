@@ -53,15 +53,14 @@ func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
 	mustMatch(t, again.Metadata.Annotations[templateHashAnnotation], before)
 }
 
-// A release that changes either image the idle pod runs, and a
-// household that changes the zone the idle clock reads, each change the
-// pod hash, which is what rolls the standing pod.
+// A release that changes the image the idle pod runs, a household that
+// changes the zone the idle clock reads, an edit to the fade policy,
+// and an added controller each change the pod hash, which is what rolls
+// the standing pod.
 func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 	player := standingIdlePlayer()
 	claim := buildIdleClaim(player, "display-draw")
 	base, err := templateHash(plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York").Spec)
-	mustSucceed(t, err)
-	commandBase, err := templateHash(plainIdleCommandPod(player).Spec)
 	mustSucceed(t, err)
 
 	cases := []struct {
@@ -70,14 +69,12 @@ func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 		pod  *Pod
 	}{
 		{"the idle image", base, buildIdlePod(player, claim, testBusAddress,
-			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage+"-next"))},
+			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage+"-next"), nil)},
 		{"the timezone", base, plainIdlePod(player, claim, testBusAddress, testTopicBase, "Europe/Berlin")},
-		{"the sidecar image", commandBase, buildIdleCommandPod(player, testSidecarImage+"-next",
-			testBusAddress, testTopicBase, resolveIdle(nil, nil, testIdleImage), nil)},
-		{"the fade policy", commandBase, buildIdleCommandPod(player, testSidecarImage, testBusAddress,
-			testTopicBase, resolveIdle(fadeAfter(60), nil, testIdleImage), nil)},
-		{"a remote", commandBase, buildIdleCommandPod(player, testSidecarImage, testBusAddress,
-			testTopicBase, resolveIdle(nil, nil, testIdleImage),
+		{"the fade policy", base, buildIdlePod(player, claim, testBusAddress,
+			testTopicBase, "America/New_York", resolveIdle(fadeAfter(60), nil, testIdleImage), nil)},
+		{"a remote", base, buildIdlePod(player, claim, testBusAddress,
+			testTopicBase, "America/New_York", resolveIdle(nil, nil, testIdleImage),
 			[]idleRemoteTopics{{Events: remoteEventsTopic(testTopicBase, "house", "sofa")}})},
 	}
 	for _, one := range cases {

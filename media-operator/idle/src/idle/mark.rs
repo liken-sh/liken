@@ -41,9 +41,9 @@ pub fn next_frame(unit: &Unit, at: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::Message;
-    use crate::bus::status::{Activity, Status};
     use iced_winit::core::Size;
+    use media_screen::Moment;
+    use media_screen::status::{Activity, Status};
 
     fn layout() -> Layout {
         Layout::for_surface(Size::new(1920.0, 1080.0))
@@ -72,7 +72,7 @@ mod tests {
         assert_eq!(placed(&unit, 9.0).points, still.points);
 
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Starting,
                 ..Status::default()
             }),
@@ -85,7 +85,7 @@ mod tests {
     fn a_swinging_mark_asks_for_a_frame_now() {
         let mut unit = Unit::default();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Starting,
                 ..Status::default()
             }),

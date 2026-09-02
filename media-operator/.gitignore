@@ -12,6 +12,7 @@
 # run and reads it once; it never belongs to the tree.
 /coverage.out
 
-# The Rust build tree. cargo writes it under idle/ and rebuilds anything
-# it needs, so it never belongs to the tree.
-/idle/target/
+# The Rust build tree. The two crates are one cargo workspace, so cargo
+# writes one target tree at the root and rebuilds anything it needs. It
+# never belongs to the tree.
+/target/

@@ -71,13 +71,16 @@ liken-iced = { path = "../docs/themes/brand/iced" }
 image = { version = "=0.25.10", default-features = false, features = [
     "png",
 ], optional = true }
-# serde derives the readers for the three bus payloads, and serde_json writes
-# the measurements file and decodes those payloads.
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.151"
-# rumqttc is the client's connection to the broker. The bus speaks plain TCP,
-# so the default features are off and no TLS stack enters the build.
-rumqttc = { version = "=0.25.1", default-features = false }
+# media-screen is the bus half of this client: the timers, the focus
+# gate, the shade, the volume step, the cycle request, and the panel
+# desire. It is a crate of its own because the library layer's media
+# browser draws a different screen on the same rules, and takes this
+# crate from a release tag of this repository.
+media-screen = { path = "../media-screen" }
+# serde derives the readers this client holds of its own, and serde_json
+# writes the measurements file.
+serde = { workspace = true }
+serde_json = { workspace = true }
 # jiff reads the wall clock in the zone TZ names. Its tzdb-zoneinfo feature
 # reads the image's own /usr/share/zoneinfo, and the bundled databases stay
 # out of the binary, so the clock and the rest of the image name the same
@@ -87,8 +90,3 @@ jiff = { version = "=0.2.35", default-features = false, features = [
     "tz-system",
     "tzdb-zoneinfo",
 ] }
-
-# The measurements need optimized code with symbols the profile does not strip.
-[profile.release]
-opt-level = 3
-lto = "thin"

@@ -1,10 +1,10 @@
 # What never belongs in an image build context. All four images take the
 # repository root as their context, so one file covers them.
 #
-# cargo writes idle/target on a workstation, and it holds gigabytes that no
-# build inside an image reads: the image compiles the crate again on its own
-# pinned toolchain.
-idle/target/
+# cargo writes one target tree at the workspace root on a workstation,
+# and it holds gigabytes that no build inside an image reads: the image
+# compiles the crates again on its own pinned toolchain.
+target/
 
 # The documentation site and its theme. The idle image reads the crate and the
 # two brand files its Dockerfile names, and nothing in any image serves a page.

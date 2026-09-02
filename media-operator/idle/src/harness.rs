@@ -81,7 +81,7 @@ pub trait Screen {
     /// loop the moment it lands and [`Screen::pump`] folds it in
     /// milliseconds. Without the wake, a message waits for the next
     /// scheduled second, and a person's press shows up to a second late.
-    fn wake_by(&mut self, _wake: crate::bus::Waker) {}
+    fn wake_by(&mut self, _wake: media_screen::Waker) {}
 
     /// Move the screen's clock to `at` seconds since the first frame. Every
     /// animation reads that clock, so a frame is a pure function of it.

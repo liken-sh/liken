@@ -59,13 +59,12 @@ pub fn next_frame(unit: &Unit, at: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::Message;
-    use crate::bus::screen;
+    use media_screen::Moment;
 
     /// A unit that read one moment on the screen topic.
-    fn unit(event: screen::Event, at: f64) -> Unit {
+    fn unit(moment: Moment, at: f64) -> Unit {
         let mut unit = Unit::default();
-        unit.fold(Message::Screen(event), at);
+        unit.fold(moment, at);
         unit
     }
 
@@ -77,7 +76,7 @@ mod tests {
 
     #[test]
     fn the_screen_goes_dark_over_four_seconds() {
-        let unit = unit(screen::Event::Sleep, 10.0);
+        let unit = unit(Moment::Sleep, 10.0);
         assert_eq!(cover(&unit, 10.0), 0.0);
         assert_eq!(cover(&unit, 12.0), 0.5);
         assert_eq!(cover(&unit, 14.0), 1.0);
@@ -86,8 +85,8 @@ mod tests {
 
     #[test]
     fn a_press_brings_the_screen_back_in_under_half_a_second() {
-        let mut unit = unit(screen::Event::Sleep, 10.0);
-        unit.fold(Message::Screen(screen::Event::Wake), 20.0);
+        let mut unit = unit(Moment::Sleep, 10.0);
+        unit.fold(Moment::Wake, 20.0);
 
         let halfway = cover(&unit, 20.2);
         assert_eq!(cover(&unit, 20.0), 1.0);
@@ -97,7 +96,7 @@ mod tests {
 
     #[test]
     fn the_factor_every_element_draws_at_is_the_complement_of_the_cover() {
-        let unit = unit(screen::Event::Sleep, 10.0);
+        let unit = unit(Moment::Sleep, 10.0);
 
         assert_eq!(fade(&Unit::default(), 0.0), 1.0);
         assert_eq!(fade(&unit, 10.0), 1.0);
@@ -107,7 +106,7 @@ mod tests {
 
     #[test]
     fn the_fade_to_black_asks_for_a_frame_for_the_whole_four_seconds() {
-        let unit = unit(screen::Event::Sleep, 10.0);
+        let unit = unit(Moment::Sleep, 10.0);
         assert_eq!(next_frame(&unit, 10.0), Some(10.0));
         assert_eq!(next_frame(&unit, 13.9), Some(13.9));
         assert_eq!(next_frame(&unit, 14.0), None);
@@ -115,8 +114,8 @@ mod tests {
 
     #[test]
     fn the_return_asks_for_a_frame_for_400_ms() {
-        let mut unit = unit(screen::Event::Sleep, 10.0);
-        unit.fold(Message::Screen(screen::Event::Wake), 20.0);
+        let mut unit = unit(Moment::Sleep, 10.0);
+        unit.fold(Moment::Wake, 20.0);
 
         assert_eq!(next_frame(&unit, 20.39), Some(20.39));
         assert_eq!(next_frame(&unit, 20.41), None);
@@ -129,8 +128,8 @@ mod tests {
 
     #[test]
     fn a_press_during_the_fade_never_darkens_the_screen_first() {
-        let mut unit = unit(screen::Event::Sleep, 10.0);
-        unit.fold(Message::Screen(screen::Event::Wake), 12.0);
+        let mut unit = unit(Moment::Sleep, 10.0);
+        unit.fold(Moment::Wake, 12.0);
 
         assert_eq!(cover(&unit, 12.0), 0.5);
         assert!(cover(&unit, 12.1) < 0.5);

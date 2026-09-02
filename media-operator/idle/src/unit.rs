@@ -13,11 +13,10 @@
 // comes from the element that draws the curve, so one module states each ease
 // and this one states the moments.
 
-use crate::bus::Message;
-use crate::bus::screen;
-use crate::bus::status::{Activity, Component, Status};
-use crate::bus::volume::Volume;
 use crate::idle::{energy, identity, shade, volume};
+use media_screen::Moment;
+use media_screen::status::{Activity, Component, Status};
+use media_screen::volume::Volume;
 
 /// One part of the unit: a screen, a set of speakers, or a controller.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -133,25 +132,29 @@ impl Unit {
         }
     }
 
-    /// Fold one message in, at `at` seconds on the screen's clock. Every
-    /// message the unit holds arrives here, so one path carries what the broker
-    /// says.
-    pub fn fold(&mut self, message: Message, at: f64) {
-        match message {
-            Message::Status(status) => self.receive(status, at),
-            Message::Level { volume, pressed } => {
+    /// Fold one moment in, at `at` seconds on the screen's clock. Every moment
+    /// the unit holds arrives here, so one path carries what the broker says.
+    pub fn fold(&mut self, moment: Moment, at: f64) {
+        match moment {
+            Moment::Status(status) => self.receive(status, at),
+            Moment::Level { volume, pressed } => {
                 if pressed {
                     self.pressed_from = volume::fade(self, at);
                     self.pressed = Some(at);
                 }
                 self.volume = volume;
             }
-            Message::Screen(screen::Event::Sleep) => self.cover(true, at),
-            Message::Screen(screen::Event::Wake) => self.cover(false, at),
-            Message::Screen(screen::Event::Focus { remote }) => self.mark(remote, at),
+            Moment::Sleep => self.cover(true, at),
+            Moment::Wake => self.cover(false, at),
+            Moment::Focus { remote } => self.mark(remote, at),
             // A `present` asks for a new Wayland surface, which the harness
             // owns. `presented` records the second the new one came up.
-            Message::Screen(screen::Event::Present) => {}
+            Moment::Present => {}
+            // A press is the client's own to answer, and
+            // `Client::receive` reads it before this fold. The stock
+            // idle screen draws no list, so the unit changes for none
+            // of them.
+            Moment::Press(_) => {}
         }
     }
 
@@ -293,7 +296,7 @@ fn part(component: Component, was: Option<&Part>, at: f64) -> Part {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::status::Play;
+    use media_screen::status::Play;
 
     fn seeded() -> Unit {
         Unit::seeded(
@@ -334,7 +337,7 @@ mod tests {
     fn the_first_status_replaces_the_whole_block() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 display_name: "The Living Room".into(),
                 activity: Activity::Starting,
                 play: None,
@@ -353,7 +356,7 @@ mod tests {
     fn a_status_with_no_display_name_keeps_the_name_the_unit_has() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 display_name: String::new(),
                 ..status(Vec::new())
             }),
@@ -366,7 +369,7 @@ mod tests {
     fn a_part_with_no_name_draws_no_line() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![
+            Moment::Status(status(vec![
                 component("", "sink", None),
                 component("The speakers", "sink", None),
             ])),
@@ -380,20 +383,20 @@ mod tests {
     fn a_part_that_came_back_takes_the_second_it_returned() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             1.0,
         );
         assert_eq!(unit.parts[0].returned, None);
 
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             4.0,
         );
         assert_eq!(unit.parts[0].returned, Some(4.0));
 
         // A later status that changed nothing does not flash the part again.
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             9.0,
         );
         assert_eq!(unit.parts[0].returned, Some(4.0));
@@ -403,20 +406,20 @@ mod tests {
     fn a_part_that_went_away_takes_the_second_it_left() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
         );
         assert_eq!(unit.parts[0].left, None);
 
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             4.0,
         );
         assert_eq!(unit.parts[0].left, Some(4.0));
 
         // A later status that changed nothing does not start the fade again.
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             9.0,
         );
         assert_eq!(unit.parts[0].left, Some(4.0));
@@ -428,7 +431,7 @@ mod tests {
         assert_eq!(unit.parts[0].connected, None);
 
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             2.0,
         );
         assert_eq!(unit.parts[0].left, Some(2.0));
@@ -438,11 +441,11 @@ mod tests {
     fn a_part_that_came_back_mid_fade_records_the_level_it_stood_at() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
         );
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             4.0,
         );
         assert_eq!(unit.parts[0].brightness_from, 1.0);
@@ -450,7 +453,7 @@ mod tests {
         // The return lands 200 ms into the 400 ms fade, so the name
         // stands at half and the ease up leaves from there.
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             4.2,
         );
         assert_eq!(unit.parts[0].returned, Some(4.2));
@@ -461,15 +464,15 @@ mod tests {
     fn a_part_that_did_not_turn_keeps_the_level_it_already_recorded() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
         );
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             4.0,
         );
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             9.0,
         );
         assert_eq!(unit.parts[0].brightness_from, 1.0);
@@ -479,16 +482,16 @@ mod tests {
     fn a_focus_moment_inside_a_beat_records_the_level_the_marker_held() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
         );
 
-        unit.fold(Message::Screen(screen::Event::Focus { remote: 0 }), 3.0);
+        unit.fold(Moment::Focus { remote: 0 }, 3.0);
         assert_eq!(unit.parts[0].focus_from, 0.0);
 
         // The second moment lands 250 ms into the beat's 500 ms fall, so
         // the marker holds half and the next beat climbs from there.
-        unit.fold(Message::Screen(screen::Event::Focus { remote: 0 }), 3.37);
+        unit.fold(Moment::Focus { remote: 0 }, 3.37);
         assert_eq!(unit.parts[0].marked, Some(3.37));
         assert_eq!(unit.parts[0].focus_from, 0.5);
     }
@@ -497,7 +500,7 @@ mod tests {
     fn a_part_that_arrives_away_takes_no_second_to_fade_from() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(false))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             1.0,
         );
         assert_eq!(unit.parts[0].left, None);
@@ -507,7 +510,7 @@ mod tests {
     fn a_part_that_arrives_connected_never_flashed() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
         );
         assert_eq!(unit.parts[0].returned, None);
@@ -517,7 +520,7 @@ mod tests {
     fn the_title_comes_from_the_play_and_stays_after_it_ends() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Playing,
                 play: Some(Play {
                     name: "den-tv-1".into(),
@@ -529,7 +532,7 @@ mod tests {
         );
         assert_eq!(unit.title.as_deref(), Some("A Film"));
 
-        unit.fold(Message::Status(status(Vec::new())), 5.0);
+        unit.fold(Moment::Status(status(Vec::new())), 5.0);
         assert_eq!(unit.title.as_deref(), Some("A Film"));
         assert_eq!(unit.activity, Activity::Idle);
     }
@@ -538,7 +541,7 @@ mod tests {
     fn a_play_with_no_title_reads_its_object_name() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 play: Some(Play {
                     name: "den-tv-1".into(),
                     title: String::new(),
@@ -559,7 +562,7 @@ mod tests {
         };
 
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume,
                 pressed: false,
             },
@@ -569,7 +572,7 @@ mod tests {
         assert_eq!(unit.pressed, None);
 
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume: Volume {
                     level: 45,
                     muted: false,
@@ -587,7 +590,7 @@ mod tests {
         let mut unit = seeded();
         assert_eq!(unit.shade, None);
 
-        unit.fold(Message::Screen(screen::Event::Sleep), 30.0);
+        unit.fold(Moment::Sleep, 30.0);
         assert_eq!(
             unit.shade,
             Some(Shade {
@@ -599,7 +602,7 @@ mod tests {
 
         // The screen reached black at 34.0, four seconds after the sleep, so
         // the wake clears from a full cover.
-        unit.fold(Message::Screen(screen::Event::Wake), 41.5);
+        unit.fold(Moment::Wake, 41.5);
         assert_eq!(
             unit.shade,
             Some(Shade {
@@ -613,8 +616,8 @@ mod tests {
     #[test]
     fn a_press_during_the_fade_to_black_clears_from_the_grey_it_reached() {
         let mut unit = seeded();
-        unit.fold(Message::Screen(screen::Event::Sleep), 10.0);
-        unit.fold(Message::Screen(screen::Event::Wake), 12.0);
+        unit.fold(Moment::Sleep, 10.0);
+        unit.fold(Moment::Wake, 12.0);
 
         // Halfway through the four seconds the cover stands at half.
         assert_eq!(
@@ -630,9 +633,9 @@ mod tests {
     #[test]
     fn a_run_of_presses_holds_one_ease_rather_than_restarting_it() {
         let mut unit = seeded();
-        unit.fold(Message::Screen(screen::Event::Sleep), 10.0);
-        unit.fold(Message::Screen(screen::Event::Wake), 12.0);
-        unit.fold(Message::Screen(screen::Event::Wake), 12.2);
+        unit.fold(Moment::Sleep, 10.0);
+        unit.fold(Moment::Wake, 12.0);
+        unit.fold(Moment::Wake, 12.2);
 
         assert_eq!(unit.shade.map(|shade| shade.since), Some(12.0));
     }
@@ -640,7 +643,7 @@ mod tests {
     #[test]
     fn a_wake_on_a_clear_screen_starts_no_ease() {
         let mut unit = seeded();
-        unit.fold(Message::Screen(screen::Event::Wake), 3.0);
+        unit.fold(Moment::Wake, 3.0);
         assert_eq!(unit.shade, None);
     }
 
@@ -648,7 +651,7 @@ mod tests {
     fn the_ramp_starts_over_on_a_change_of_activity_and_not_on_a_repeat() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Starting,
                 ..status(Vec::new())
             }),
@@ -657,7 +660,7 @@ mod tests {
         assert_eq!(unit.ramp.since, 2.0);
 
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity: Activity::Starting,
                 ..status(Vec::new())
             }),
@@ -665,7 +668,7 @@ mod tests {
         );
         assert_eq!(unit.ramp.since, 2.0);
 
-        unit.fold(Message::Status(status(Vec::new())), 3.2);
+        unit.fold(Moment::Status(status(Vec::new())), 3.2);
         assert_eq!(unit.ramp.since, 3.2);
         assert_eq!(unit.ramp.from, 1.0);
     }
@@ -679,14 +682,14 @@ mod tests {
         };
 
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume,
                 pressed: false,
             },
             0.0,
         );
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume,
                 pressed: true,
             },
@@ -697,7 +700,7 @@ mod tests {
         // The row leaves four seconds after the press, over 600 ms, so at 5.3
         // seconds it stands halfway out.
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume,
                 pressed: true,
             },
@@ -715,7 +718,7 @@ mod tests {
     fn a_focus_moment_beats_the_controller_it_counted_to() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![
+            Moment::Status(status(vec![
                 component("The screen", "display", None),
                 component("A remote", "remote", Some(true)),
                 component("Another remote", "remote", Some(true)),
@@ -723,7 +726,7 @@ mod tests {
             1.0,
         );
 
-        unit.fold(Message::Screen(screen::Event::Focus { remote: 1 }), 3.0);
+        unit.fold(Moment::Focus { remote: 1 }, 3.0);
 
         assert_eq!(unit.parts[1].marked, None);
         assert_eq!(unit.parts[2].marked, Some(3.0));
@@ -733,7 +736,7 @@ mod tests {
     fn a_focus_moment_that_names_no_controller_changes_nothing() {
         let mut unit = seeded();
         let before = unit.clone();
-        unit.fold(Message::Screen(screen::Event::Focus { remote: 4 }), 3.0);
+        unit.fold(Moment::Focus { remote: 4 }, 3.0);
         assert_eq!(unit, before);
     }
 
@@ -741,13 +744,13 @@ mod tests {
     fn a_part_that_keeps_its_name_keeps_the_seconds_it_draws_from() {
         let mut unit = seeded();
         unit.fold(
-            Message::Status(status(vec![component("A remote", "remote", Some(true))])),
+            Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
         );
-        unit.fold(Message::Screen(screen::Event::Focus { remote: 0 }), 2.0);
+        unit.fold(Moment::Focus { remote: 0 }, 2.0);
 
         unit.fold(
-            Message::Status(status(vec![Component {
+            Moment::Status(status(vec![Component {
                 focused: Some(true),
                 ..component("A remote", "remote", Some(true))
             }])),
@@ -762,7 +765,7 @@ mod tests {
     fn a_present_leaves_the_unit_alone() {
         let mut unit = seeded();
         let before = unit.clone();
-        unit.fold(Message::Screen(screen::Event::Present), 3.0);
+        unit.fold(Moment::Present, 3.0);
         assert_eq!(unit, before);
     }
 }

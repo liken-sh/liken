@@ -19,7 +19,7 @@ type playRemote struct {
 // playRemoteMap pairs each remote's events topic with the focus topic
 // on the same line of the second list. The operator joins both lists
 // with newlines and keeps them aligned by position, the same shape the
-// idle command pod reads.
+// idle screen client reads.
 func playRemoteMap(events, focuses string) map[string]playRemote {
 	remotes := map[string]playRemote{}
 	focusList := splitTopicLines(focuses)
@@ -87,9 +87,14 @@ func (c *commander) key(topic string, remote playRemote, payload []byte) {
 	c.apply(command)
 }
 
+// focusCycleSuffix turns a remote's focus topic into its cycle topic, the
+// same path remoteFocusCycleTopic builds, so the sidecar needs no second
+// topic list.
+const focusCycleSuffix = "/cycle"
+
 // publishCycle sends the cycle request the operator arbitrates, on
 // the remote's own cycle topic, not retained, because a cycle is an
-// event and not a state. It is the same message the idle command pod
+// event and not a state. It is the same message the idle screen client
 // publishes between films.
 func (c *commander) publishCycle(remote playRemote) {
 	if remote.focus == "" {

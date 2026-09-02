@@ -2,18 +2,24 @@ package main
 
 // The panel desk is the boundary between the bus and the
 // reconcile loop for one unit's panel, the way the presence desk is
-// for a controller. The idle command pod holds no API credentials, so it
-// publishes its desire for the panel, and the pass turns the desk's
+// for a controller. The idle screen client holds no API credentials, so
+// it publishes its desire for the panel, and the pass turns the desk's
 // newest desire into an override on the screen's Display.
 
 import "sync"
 
-// The two desires a sidecar states. They are the values on the
-// panel topic, not the states the Player status carries.
+// The two desires an idle screen client states. They are the values on
+// the panel topic, not the states the Player status carries.
 const (
 	panelDesireOn  = "on"
 	panelDesireOff = "off"
 )
+
+// The retained panel topic carries a desire and not a report.
+// The unit it belongs to is named by the topic, not by the body.
+type panelDesire struct {
+	Desire string `json:"desire"`
+}
 
 // panelFromDisplay is the Player status word for what the
 // display-operator last observed on the panel. The power word is one

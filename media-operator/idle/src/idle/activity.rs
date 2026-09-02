@@ -11,9 +11,9 @@ use iced_winit::core::Point;
 
 use super::energy;
 use super::{Frame, Layout};
-use crate::bus::status::Activity;
 use crate::look;
 use crate::unit::Unit;
+use media_screen::status::Activity;
 
 /// How opaque the line draws, from 0 clear to 1 full.
 ///
@@ -61,14 +61,14 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::Message;
-    use crate::bus::status::{Play, Status};
+    use media_screen::Moment;
+    use media_screen::status::{Play, Status};
 
     /// A unit that read one status naming a `Play`.
     fn playing(activity: Activity, at: f64) -> Unit {
         let mut unit = Unit::default();
         unit.fold(
-            Message::Status(Status {
+            Moment::Status(Status {
                 activity,
                 play: Some(Play {
                     name: "den-tv-1".into(),
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn the_line_leaves_with_the_marks_motion() {
         let mut unit = playing(Activity::Starting, 0.0);
-        unit.fold(Message::Status(Status::default()), 1.2);
+        unit.fold(Moment::Status(Status::default()), 1.2);
 
         assert_eq!(opacity(&unit, 1.2), 1.0);
         assert!(opacity(&unit, 2.45) < 1.0);

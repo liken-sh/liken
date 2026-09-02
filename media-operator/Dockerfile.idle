@@ -7,28 +7,33 @@
 # none of.
 #
 # The build context is the repository root, the way every other image takes
-# it, so the build reaches both the crate and the brand submodule the crate
+# it, so the build reaches both crates and the brand submodule the client
 # reads its mark and its palette from.
 
 FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS build
-WORKDIR /src/idle
+WORKDIR /src
 
-# The manifest, the lock file, and the toolchain pin come first, so a source
-# edit reuses the cached dependency layer. liken-iced is a path dependency, so
-# cargo reads its manifest and its sources here too, and the two files it
-# parses arrive with it.
+# The two Rust crates are one cargo workspace, so the build copies the
+# workspace manifest, the lock file, and the toolchain pin, then both
+# member manifests. A source edit then reuses the cached dependency
+# layer. liken-iced is a path dependency, so cargo reads its manifest
+# and its sources here too, and the two files it parses arrive with it.
 #
 # The dependencies are almost all of the build, and they change only when the
 # lock file or the submodule pin changes.
-COPY idle/Cargo.toml idle/Cargo.lock idle/rust-toolchain.toml ./
-COPY docs/themes/brand/iced/ /src/docs/themes/brand/iced/
-COPY docs/themes/brand/liken.svg docs/themes/brand/liken.css /src/docs/themes/brand/
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY idle/Cargo.toml idle/
+COPY media-screen/Cargo.toml media-screen/
+COPY docs/themes/brand/iced/ docs/themes/brand/iced/
+COPY docs/themes/brand/liken.svg docs/themes/brand/liken.css docs/themes/brand/
 
-# A stub library and a stub binary give cargo something to compile the
-# dependencies against. That build is the layer the image cache keeps.
-RUN mkdir src \
-    && echo 'fn main() {}' > src/main.rs \
-    && : > src/lib.rs
+# A stub library and a stub binary for each member give cargo something to
+# compile the dependencies against. That build is the layer the image cache
+# keeps.
+RUN mkdir idle/src media-screen/src \
+    && echo 'fn main() {}' > idle/src/main.rs \
+    && : > idle/src/lib.rs \
+    && : > media-screen/src/lib.rs
 
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
@@ -45,16 +50,17 @@ RUN mkdir src \
 # ships is proven to start rather than assumed to.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked --no-default-features
+    cargo build --release --locked --no-default-features -p idle-screen
 
-COPY idle/src/ ./src/
+COPY media-screen/src/ media-screen/src/
+COPY idle/src/ idle/src/
 
-# The touch marks the crate's own sources newer than the stub build, so cargo
-# compiles this crate again and leaves the dependencies as they are.
+# The touch marks the two crates' own sources newer than the stub build, so
+# cargo compiles both again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    touch src/main.rs src/lib.rs \
-    && cargo build --release --locked --no-default-features
+    touch idle/src/main.rs idle/src/lib.rs media-screen/src/lib.rs \
+    && cargo build --release --locked --no-default-features -p idle-screen
 
 # A distribution base, unlike the operator's scratch, and for the reason the
 # player image gives: the toolkit opens a wide dynamic closure at run time, the
@@ -101,7 +107,7 @@ RUN apt-get update \
     && apt-get autoremove -y --purge \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /src/idle/target/release/idle-screen /idle-screen
+COPY --from=build /src/target/release/idle-screen /idle-screen
 
 # The binary runs here, in the image that ships it. --help opens no window
 # and reaches no compositor, and the toolkit opens its Wayland and Vulkan

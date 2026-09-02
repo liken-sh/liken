@@ -2,16 +2,16 @@
 # each one to the domain that owns it. `make test` runs every check CI
 # runs, in the same commands, so a change that passes here passes
 # there. The Go operator is the module at the root, so its checks are
-# here; the idle screen and the docs are their own domains with
+# here; the Rust crates and the docs are their own domains with
 # their own Makefiles.
 #
 # The coverage floors are the one number each gate enforces: the Go
-# floor is in .testcoverage.yml, and the Rust floor is in
+# floor is in .testcoverage.yml, and the two Rust floors are in
 # idle/Makefile. CI reads the same files, so a floor moves in one
 # place.
 
 .PHONY: test
-test: test-go test-idle test-docs
+test: test-go test-rust test-docs
 
 # keycodes.go is generated from the kernel header named here, and it is
 # committed, so a build needs the header only when the table is
@@ -45,8 +45,11 @@ test-go:
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
 
-.PHONY: test-idle
-test-idle:
+# The Rust half is a cargo workspace with two members, the media-screen
+# library and the idle screen that draws with it. idle/Makefile holds
+# both gates and runs cargo at the workspace root.
+.PHONY: test-rust
+test-rust:
 	$(MAKE) -C idle test
 
 .PHONY: test-docs

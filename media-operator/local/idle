@@ -10,7 +10,7 @@
 #
 # On a cluster the bus drives the screen. This script sets IDLE_PREVIEW=1
 # instead, and under that variable the client binds keys that build the same
-# messages the idle pod's sidecar publishes:
+# moments the media-screen crate hands the client on a cluster:
 #
 #   p   a Play starts. The mark ramps into motion and the activity line
 #       appears.
@@ -42,10 +42,11 @@
 #                                        harness's own flags
 set -euo pipefail
 
-# The crate is in the repository above this file, so its path resolves from
-# this script's own directory and needs no absolute path.
+# The crates are in the cargo workspace above this file, so the path
+# resolves from this script's own directory and needs no absolute path.
+# The run names the client's package, because the workspace holds two.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$here/../idle"
+cd "$here/.."
 
 # The unit is every argument before --, and the harness takes every argument
 # after it. The two lists need a separator, because a name and a part are both
@@ -77,6 +78,6 @@ exec env \
   IDLE_PLAYER_NAME="$name" \
   IDLE_PLAYER_COMPONENTS="$components" \
   IDLE_PREVIEW=1 \
-  cargo run --release --locked -- \
+  cargo run --release --locked -p idle-screen -- \
     --size 1280x720 \
     "$@"

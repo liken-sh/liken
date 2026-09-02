@@ -5,16 +5,12 @@
 // on the hardware operators' devices, the pods that perform the work,
 // and the statuses a person reads.
 //
-// One binary, six roles, the way the audio operator's one image runs
+// One binary, five roles, the way the audio operator's one image runs
 // in several roles. With no argument it is the operator: a Deployment
 // that watches Plays, Remotes, Players, and Keymaps, creates claims and
 // pods, publishes each Remote's key table, and writes every status. As
 // `player` it is the playback pod's entrypoint shim: it appends the
-// display's app-id flag and execs mpv. As `idle-command` it is the idle
-// pod's command sidecar: it follows the Player's topics and the unit's
-// controllers, and it states each moment the idle client draws on the
-// Player's screen topic, so a seatless kiosk shell shows the clock again
-// when a Play ends. As `remote` it is the standing
+// display's app-id flag and execs mpv. As `remote` it is the standing
 // remote pod: it reads a controller's input nodes, folds each event
 // through the table the operator publishes for that Remote, and
 // publishes the kernel's key name to the bus. As `command` it is the
@@ -39,11 +35,10 @@ import "os"
 // into a container's command, over the image's entrypoint. The operator
 // itself runs with no argument.
 const (
-	playerMode      = "player"
-	idleCommandMode = "idle-command"
-	remoteMode      = "remote"
-	commandMode     = "command"
-	artServeMode    = "serve-art"
+	playerMode   = "player"
+	remoteMode   = "remote"
+	commandMode  = "command"
+	artServeMode = "serve-art"
 )
 
 func main() {
@@ -51,9 +46,6 @@ func main() {
 		switch os.Args[1] {
 		case playerMode:
 			runPlayer(os.Args[2:])
-			return
-		case idleCommandMode:
-			runIdleCommand()
 			return
 		case remoteMode:
 			runReader()

@@ -4,7 +4,7 @@
 //! On a cluster the idle command pod publishes the `Player`'s status, its level,
 //! and the screen's moments, and the pod has no keyboard. On a workstation
 //! `local/idle` sets `IDLE_PREVIEW=1` and the keys below build the same
-//! [`Message`] values those topics carry. The client folds each one through
+//! [`Moment`] values those topics carry. The client folds each one through
 //! `Client::receive`, the call the bus reader's own messages take, so a person
 //! plays every ramp, every dim, and every beat against the real handlers and
 //! not against a second set written for a workstation.
@@ -12,10 +12,10 @@
 use iced_winit::core::Point;
 
 use super::{Frame, Layout};
-use crate::bus::status::{Activity, Component, Play, Status};
-use crate::bus::volume::{MIN_LEVEL, UNITY_LEVEL, Volume};
-use crate::bus::{Message, screen};
 use crate::look;
+use media_screen::Moment;
+use media_screen::status::{Activity, Component, Play, Status};
+use media_screen::volume::{MIN_LEVEL, UNITY_LEVEL, Volume};
 
 /// The kind the preview gives every part but the last. A screen and a set of
 /// speakers both draw at full brightness with no presence, so one word covers
@@ -84,16 +84,13 @@ impl Keys {
     /// The messages one key press stands for, in the order the bus would carry
     /// them. A key this module does not bind carries nothing, so the arrow keys
     /// the harness also delivers change nothing here.
-    pub fn press(&mut self, key: &str) -> Vec<Message> {
+    pub fn press(&mut self, key: &str) -> Vec<Moment> {
         match key {
             "p" => vec![self.doing(Activity::Starting)],
             "o" => vec![self.doing(Activity::Playing)],
             // The end of a film: the status returns to `Idle` and the sidecar
             // reports the idle surface back in view, in that order.
-            "i" => vec![
-                self.doing(Activity::Idle),
-                Message::Screen(screen::Event::Present),
-            ],
+            "i" => vec![self.doing(Activity::Idle), Moment::Present],
             "d" => {
                 self.connected = !self.connected;
                 vec![self.status()]
@@ -104,10 +101,7 @@ impl Keys {
             // is the cycle press that wraps onto the unit already focused.
             "f" => {
                 self.focused = true;
-                vec![
-                    self.status(),
-                    Message::Screen(screen::Event::Focus { remote: REMOTE }),
-                ]
+                vec![self.status(), Moment::Focus { remote: REMOTE }]
             }
             // The focus cycling away. The status stops marking the remote, the
             // marker goes, and nothing beats.
@@ -117,11 +111,10 @@ impl Keys {
             }
             "s" => {
                 self.asleep = !self.asleep;
-                vec![Message::Screen(if self.asleep {
-                    screen::Event::Sleep
-                } else {
-                    screen::Event::Wake
-                })]
+                vec![match self.asleep {
+                    true => Moment::Sleep,
+                    false => Moment::Wake,
+                }]
             }
             "9" => vec![self.step(-VOLUME_STEP)],
             "0" => vec![self.step(VOLUME_STEP)],
@@ -134,7 +127,7 @@ impl Keys {
     }
 
     /// Move the unit to one activity and state the whole status again.
-    fn doing(&mut self, activity: Activity) -> Message {
+    fn doing(&mut self, activity: Activity) -> Moment {
         self.activity = activity;
         self.status()
     }
@@ -142,7 +135,7 @@ impl Keys {
     /// The status as the operator would publish it now. The `Play` block
     /// appears only while a `Play` starts or runs, which is the rule the
     /// operator writes it under.
-    fn status(&self) -> Message {
+    fn status(&self) -> Moment {
         let last = self.parts.len().saturating_sub(1);
         let components = self
             .parts
@@ -167,7 +160,7 @@ impl Keys {
             })
             .collect();
 
-        Message::Status(Status {
+        Moment::Status(Status {
             display_name: self.name.clone(),
             activity: self.activity,
             play: (self.activity != Activity::Idle).then(|| Play {
@@ -180,7 +173,7 @@ impl Keys {
 
     /// Move the level by one step, held inside the range the operator holds it
     /// in, and state it.
-    fn step(&mut self, step: i64) -> Message {
+    fn step(&mut self, step: i64) -> Moment {
         self.volume.level = (self.volume.level + step).clamp(MIN_LEVEL, UNITY_LEVEL);
         self.level()
     }
@@ -189,8 +182,8 @@ impl Keys {
     /// retained catch-up, which a person did not press and which draws no
     /// indicator. A key is a press every time, so the indicator shows every
     /// time.
-    fn level(&self) -> Message {
-        Message::Level {
+    fn level(&self) -> Moment {
+        Moment::Level {
             volume: self.volume,
             pressed: true,
         }
@@ -258,8 +251,8 @@ mod tests {
         )
     }
 
-    fn status(message: &Message) -> &Status {
-        let Message::Status(status) = message else {
+    fn status(moment: &Moment) -> &Status {
+        let Moment::Status(status) = moment else {
             panic!("the press states a status");
         };
         status
@@ -330,7 +323,7 @@ mod tests {
 
         assert_eq!(pressed.len(), 2);
         assert_eq!(status(&pressed[0]).activity, Activity::Idle);
-        assert_eq!(pressed[1], Message::Screen(screen::Event::Present));
+        assert_eq!(pressed[1], Moment::Present);
     }
 
     #[test]
@@ -351,17 +344,11 @@ mod tests {
         let landed = keys.press("f");
         assert_eq!(landed.len(), 2);
         assert_eq!(status(&landed[0]).components[2].focused, Some(true));
-        assert_eq!(
-            landed[1],
-            Message::Screen(screen::Event::Focus { remote: 0 })
-        );
+        assert_eq!(landed[1], Moment::Focus { remote: 0 });
 
         // The cycle press that wraps onto the unit already focused beats it
         // again.
-        assert_eq!(
-            keys.press("f")[1],
-            Message::Screen(screen::Event::Focus { remote: 0 })
-        );
+        assert_eq!(keys.press("f")[1], Moment::Focus { remote: 0 });
     }
 
     #[test]
@@ -379,16 +366,8 @@ mod tests {
     fn the_sleep_key_plays_the_two_edges_of_the_fade_in_turn() {
         let mut keys = keys();
 
-        assert_eq!(
-            keys.press("s"),
-            [Message::Screen(screen::Event::Sleep)],
-            "the quiet window ran out"
-        );
-        assert_eq!(
-            keys.press("s"),
-            [Message::Screen(screen::Event::Wake)],
-            "a press woke the screen"
-        );
+        assert_eq!(keys.press("s"), [Moment::Sleep], "the quiet window ran out");
+        assert_eq!(keys.press("s"), [Moment::Wake], "a press woke the screen");
     }
 
     #[test]
@@ -397,7 +376,7 @@ mod tests {
 
         assert_eq!(
             keys.press("9"),
-            [Message::Level {
+            [Moment::Level {
                 volume: Volume {
                     level: UNITY_LEVEL - VOLUME_STEP,
                     muted: false,
@@ -407,7 +386,7 @@ mod tests {
         );
         assert_eq!(
             keys.press("0"),
-            [Message::Level {
+            [Moment::Level {
                 volume: Volume {
                     level: UNITY_LEVEL,
                     muted: false,
@@ -437,7 +416,7 @@ mod tests {
 
         assert_eq!(
             keys.press("m"),
-            [Message::Level {
+            [Moment::Level {
                 volume: Volume {
                     level: UNITY_LEVEL,
                     muted: true,
@@ -447,7 +426,7 @@ mod tests {
         );
         assert_eq!(
             keys.press("m"),
-            [Message::Level {
+            [Moment::Level {
                 volume: Volume {
                     level: UNITY_LEVEL,
                     muted: false,

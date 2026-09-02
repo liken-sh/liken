@@ -90,33 +90,62 @@ type PlayerStatus struct {
 	Idle *PlayerIdleStatus `json:"idle,omitempty"`
 }
 
-// PlayerIdleStatus is what a delegate reads to draw this unit's
-// idle screen. Controller is the resolved name, always set. Claim is the
+// PlayerIdleStatus is what a delegate wires its client from. Controller
+// is the resolved name, always set. Claim is the standing claim in the
+// Player's namespace, which the delegate's pod references by name.
+// Requests are the claim's request names in claim order, one per
+// resources.claims entry the delegate's container states.
+// FadeAfterSeconds and OffAfterSeconds are the resolved windows, always
+// written, because zero is a policy and an absent field is not one.
+// Under media.liken.sh/none the block carries the controller alone.
 // standing claim in the Player's namespace, which the delegate's pod
 // references by name. Requests are the claim's request names in claim
 // order, one per resources.claims entry the delegate's container states.
-// Under media.liken.sh/none the block carries the controller alone.
+// FadeAfterSeconds and OffAfterSeconds are the two resolved windows, and
+// both are always written, because zero is a policy and an absent field
+// is not one. Under media.liken.sh/none the block carries the controller
+// alone.
 type PlayerIdleStatus struct {
 	Controller string   `json:"controller"`
 	Claim      string   `json:"claim,omitempty"`
 	Requests   []string `json:"requests,omitempty"`
 
+	// The two windows the operator resolved, in seconds. Zero on the
+	// fade means the screen never fades on its own, and zero on the off
+	// window leaves the panel lit. Neither has omitempty, so a client
+	// reads a number for each.
+	FadeAfterSeconds int64 `json:"fadeAfterSeconds"`
+	OffAfterSeconds  int64 `json:"offAfterSeconds"`
+
 	// Bus is what a delegate's client reads to join the unit on the
-	// bus. It is present whenever the idle command pod stands, which is
-	// under every controller but media.liken.sh/none.
+	// bus. It is present under every controller but
+	// media.liken.sh/none.
 	Bus *PlayerIdleBus `json:"bus,omitempty"`
 }
 
-// PlayerIdleBus names the broker and the two topics a delegate's client
-// needs. The presses arrive on the commands topic and the client's one
-// request, a sleep, goes back on it. The idle command pod states its
-// moments on the screen topic. The broker and the topic base are this
-// operator's configuration, so the status carries the built topics and
-// a client derives none.
+// PlayerIdleBus names the broker and every topic a delegate's client
+// reads or writes. The broker and the topic base are this operator's
+// configuration, so the status carries the built topics and a client
+// derives none. VolumeTopic is empty for a unit with no sinks, which is
+// the speaker gate: the client subscribes to no level, draws none, and
+// publishes none. Remotes has one entry per spec.remotes entry, in spec
+// order, because that position is the index a focus moment carries.
 type PlayerIdleBus struct {
-	Address       string `json:"address"`
-	CommandsTopic string `json:"commandsTopic"`
-	ScreenTopic   string `json:"screenTopic"`
+	Address       string             `json:"address"`
+	StatusTopic   string             `json:"statusTopic"`
+	VolumeTopic   string             `json:"volumeTopic,omitempty"`
+	CommandsTopic string             `json:"commandsTopic"`
+	PanelTopic    string             `json:"panelTopic"`
+	Remotes       []PlayerIdleRemote `json:"remotes,omitempty"`
+}
+
+// PlayerIdleRemote is one of the unit's controllers as a client reads
+// it: the topic its presses arrive on and the topic its focus mark is
+// on. The client gates every press on the mark naming this Player, and
+// the cycle topic is the focus topic plus /cycle.
+type PlayerIdleRemote struct {
+	Events string `json:"events"`
+	Focus  string `json:"focus"`
 }
 
 // The three panel states, each folded from the Display's

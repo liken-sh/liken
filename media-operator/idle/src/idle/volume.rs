@@ -267,8 +267,8 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::Message;
-    use crate::bus::volume::Volume;
+    use media_screen::Moment;
+    use media_screen::volume::Volume;
 
     /// A unit that read a level and then a press of it.
     fn pressed(at: f64) -> Unit {
@@ -278,14 +278,14 @@ mod tests {
             muted: false,
         };
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume,
                 pressed: false,
             },
             0.0,
         );
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume,
                 pressed: true,
             },
@@ -298,7 +298,7 @@ mod tests {
     fn the_catch_up_shows_no_row() {
         let mut unit = Unit::default();
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume: Volume::default(),
                 pressed: false,
             },
@@ -357,7 +357,7 @@ mod tests {
         // The row is halfway out at 14.3 seconds, and the press lifts it from
         // there, so it reaches full in half of the 350 ms fade.
         unit.fold(
-            Message::Level {
+            Moment::Level {
                 volume: unit.volume,
                 pressed: true,
             },

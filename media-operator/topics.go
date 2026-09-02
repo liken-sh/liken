@@ -70,11 +70,6 @@ const playerPanelKind = "panel"
 // tree.
 const playerVolumeKind = "volume"
 
-// The last segment of the players topic that carries what the idle
-// sidecar decided for the screen, beside the panel, commands, status,
-// and volume kinds of the same tree.
-const playerScreenKind = "screen"
-
 // remoteEventsTopic carries one Remote's key events. The standing
 // remote pod publishes {"key": "KEY_UP", "value": 1} to it, not
 // retained, because a press is an event and not a state. The pod
@@ -94,7 +89,7 @@ func remoteFocusTopic(base, namespace, name string) string {
 
 // remoteFocusCycleTopic carries the cycle request a source press
 // publishes. Only the holder of focus publishes it, the playback pod's
-// command sidecar during a film and the idle command pod between
+// command sidecar during a film and the idle screen client between
 // films, and the operator reads it to advance the mark. It is not
 // retained, because a cycle is an event and not a state.
 func remoteFocusCycleTopic(base, namespace, name string) string {
@@ -249,13 +244,12 @@ func playCommandsTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/commands"
 }
 
-// playerCommandsTopic carries the display commands around one Player's
-// idle screen: the re-present the operator sends when a Play ends, the
-// navigation presses the idle command pod forwards under a delegate,
-// and the sleep a delegate's client asks for. It is not retained,
-// because each of them is an event and not a state. It stays off the
-// plays tree because it drives the standing idle screen, not a Play,
-// and a controller sends nothing on it directly.
+// playerCommandsTopic carries one message, the re-present the operator
+// sends when a Play ends. It is not retained, because a re-present is
+// an event and not a state. The operator is the only writer: a client
+// publishes nothing here, and no press is forwarded on it. It stays off
+// the plays tree because it drives the standing idle screen, not a
+// Play, and a controller sends nothing on it directly.
 func playerCommandsTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/commands"
 }
@@ -271,9 +265,9 @@ func playerStatusTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/status"
 }
 
-// playerPanelTopic carries the panel state one unit's idle command pod
+// playerPanelTopic carries the panel state one unit's idle screen client
 // publishes, retained, because the panel is a state and not an event.
-// The sidecar holds no API credentials, so the operator folds this
+// The client holds no API credentials, so the operator folds this
 // topic into the Player's status.
 func playerPanelTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerPanelKind
@@ -317,22 +311,6 @@ func parsePlayerTopic(base, topic, kind string) (namespace, name string, ok bool
 // the authority and no observer ever writes back what it saw.
 func playerVolumeTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerVolumeKind
-}
-
-// playerScreenTopic carries the four moments the idle command pod decides
-// for one unit's screen: the shade down, the shade up, a focus mark
-// that named this unit, and the surface the idle client presents again
-// when a Play ends. The sidecar is the only writer, and whichever
-// client the idle pod runs reads them here.
-//
-// The shade is the lasting state of the two, so the shade down
-// and the shade up are retained and a client that restarts reads the
-// shade it left rather than waking lit. The focus and the present are
-// moments, so they are not retained, and a restart replays no press. The
-// broker holds one retained message per topic, which is the last shade
-// either way.
-func playerScreenTopic(base, namespace, name string) string {
-	return base + "/players/" + namespace + "/" + name + "/" + playerScreenKind
 }
 
 // playerVolumeFilter is the operator's one subscription across

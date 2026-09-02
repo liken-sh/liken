@@ -113,20 +113,20 @@ spec:
                         which nothing draws an idle screen and no claim
                         stands. Any other name hands each screen to the
                         operator that answers to it, which reads a
-                        Player's status.idle for the claim to reference
-                        and the requests it carries.
+                        Player's status.idle for the claim to reference,
+                        the requests it carries, the two windows, and the
+                        bus it joins.
                     image:
                       type: string
                       description: >-
                         The container image that draws every idle
-                        screen. The image starts with its own
-                        entrypoint and reads each unit's state from the
-                        bus: the status topic, the volume topic where
-                        the unit has sinks, and the screen topic that
-                        carries the shade (sleep and wake), the focus
-                        marks, and the present moments. Unset, every screen the household does
-                        not override runs the idle client the media
-                        operator ships.
+                        screen. The image starts with its own entrypoint
+                        and reads each unit's state from the bus. It
+                        holds the fade and off windows, the focus gate,
+                        the shade, the volume step, and the panel desire
+                        in its own process. Unset, every screen the
+                        household does not override runs the idle client
+                        the media operator ships.
                     fadeAfterSeconds:
                       type: integer
                       format: int64

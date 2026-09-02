@@ -307,7 +307,8 @@ spec:
                         unit and no claim stands. Any other name hands
                         the screen to the operator that answers to it,
                         which reads status.idle for the claim to
-                        reference and the requests it carries; image has
+                        reference, the requests it carries, the two
+                        windows, and the bus it joins; image has
                         no effect under such a name, because that
                         operator brings its own pod. Omit it to inherit
                         the default MediaPreferences.
@@ -315,15 +316,14 @@ spec:
                       type: string
                       description: >-
                         The container image that draws this unit's idle
-                        screen. The image starts with its own
-                        entrypoint and reads the unit's state from the
-                        bus: the status topic, the volume topic where
-                        the unit has sinks, and the screen topic that
-                        carries the shade (sleep and wake), the focus
-                        marks, and the present moments. Omit it to inherit the default
-                        MediaPreferences. Where no tier names an image,
-                        the screen runs the idle client the media
-                        operator ships.
+                        screen. The image starts with its own entrypoint
+                        and reads the unit's state from the bus. It
+                        holds the fade and off windows, the focus gate,
+                        the shade, the volume step, and the panel desire
+                        in its own process. Omit it to inherit the
+                        default from MediaPreferences. Where no tier
+                        names an image, the screen runs the idle client
+                        the media operator ships.
                     fadeAfterSeconds:
                       type: integer
                       format: int64
@@ -382,14 +382,17 @@ spec:
                 idle:
                   type: object
                   description: >-
-                    What draws this unit's idle screen, and what
-                    the operator that draws it needs. It is absent for a
-                    Player that drives no screen and where the cluster
-                    names no display-draw class. An operator that draws a
-                    delegated screen reads this block and never the spec,
+                    What draws this unit's idle screen, and everything
+                    the operator that draws it needs. A delegate wires
+                    its client from this block alone, and it sets
+                    MEDIA_PLAYER_NAME on that client to the Player's
+                    metadata.name, the value every focus mark holds. The
+                    block is absent for a Player that drives no screen
+                    and where the cluster names no display-draw class. A
+                    delegate reads this block and never the spec,
                     because the spec may inherit its controller from the
-                    default MediaPreferences and only the media operator
-                    resolves the tiers.
+                    default MediaPreferences, and only the media
+                    operator resolves the tiers.
                   properties:
                     controller:
                       type: string
@@ -418,26 +421,95 @@ spec:
                         media.liken.sh/none.
                       items:
                         type: string
+                    fadeAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: |-
+                        The resolved seconds of quiet before the screen
+                        fades to black. Zero means the screen never
+                        fades on its own. The client that draws holds
+                        this timer, so the field is always written: zero
+                        is a policy, and an absent field is not one.
+                    offAfterSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: |-
+                        The resolved seconds of quiet before the panel
+                        goes dark, at least fadeAfterSeconds. Zero means
+                        the panel never goes dark on its own. It is
+                        always written, for the reason fadeAfterSeconds
+                        is.
                     bus:
                       type: object
                       description: |-
-                        The bus facts a delegate's client reads. The block is
-                        present whenever the idle command pod stands, which is
-                        under every controller but media.liken.sh/none.
+                        The bus facts a delegate's client reads. With
+                        the two windows above, this block is the whole
+                        contract a delegate wires its client from. It is
+                        present under every controller but
+                        media.liken.sh/none.
                       properties:
                         address:
                           type: string
                           description: |-
                             The broker, as host:port. It is the address the
                             operator itself connects to.
+                        statusTopic:
+                          type: string
+                          description: |-
+                            The retained topic that carries the unit's
+                            presentable state: its name, its activity,
+                            the Play it runs, and its parts. A client
+                            reads it on subscribe and asks for nothing.
+                        volumeTopic:
+                          type: string
+                          description: |-
+                            The retained topic that carries the unit's
+                            level and its muted flag. Empty means the
+                            unit has no sinks: the client subscribes to
+                            no level, draws none, and publishes none.
                         commandsTopic:
                           type: string
                           description: |-
-                            The topic the idle command pod forwards navigation
-                            presses on under a delegate, and the topic a client
-                            publishes its sleep request on.
-                        screenTopic:
+                            The topic the operator publishes re-present
+                            on when a Play ends. The client maps a fresh
+                            surface when it arrives. The operator is the
+                            only writer, and a client publishes nothing
+                            here.
+                        panelTopic:
                           type: string
                           description: |-
-                            The topic the idle command pod states its moments
-                            on: sleep, wake, focus, and present.
+                            The retained topic a client states its panel
+                            desire on, as on or off. The client holds no
+                            API credentials, so the operator reads the
+                            desire here and overrides the screen's
+                            Display.
+                        remotes:
+                          type: array
+                          x-kubernetes-list-type: atomic
+                          description: |-
+                            The unit's controllers, one entry each, in
+                            spec.remotes order. That position is the
+                            index a focus moment carries, and it is the
+                            order the status topic lists the parts in. A
+                            unit with no controllers lists none.
+                          items:
+                            type: object
+                            properties:
+                              events:
+                                type: string
+                                description: |-
+                                  The topic this controller's key events
+                                  arrive on, each under the kernel's
+                                  name for the key. The client gates
+                                  every press on the mark below.
+                              focus:
+                                type: string
+                                description: |-
+                                  The retained topic that carries this
+                                  controller's focus mark, the name of
+                                  the Player it drives now. The client
+                                  acts on a press only while the mark
+                                  names this Player. The cycle topic is
+                                  this one plus /cycle.

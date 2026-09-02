@@ -1,7 +1,13 @@
-// The variables the operator sets on the idle container, and what this client
-// reads from each one. `media-operator` names them in `wire.go` on the writing
+// The variables the operator sets on the idle container that this client
+// reads for itself. `media-operator` names them in `wire.go` on the writing
 // side, so the two files are one contract and a name here matches a name
 // there.
+//
+// Everything about the bus, the two windows, and the unit's controllers
+// is the `media-screen` crate's contract, and `media_screen::Wiring`
+// reads it from the same environment. What is left here is what this
+// client alone draws with: the seeds for the first frame, the app-id
+// its surface asks for, its window watchdog, and the preview keys.
 //
 // A pod cannot discover the broker in front of it, the topic base its cluster
 // chose, or the Wayland app-id its display claim delivered. The operator holds
@@ -9,22 +15,6 @@
 // environment and none is guessed.
 
 use std::time::Duration;
-
-/// The broker's address, written `host:port`.
-pub const BUS_ADDRESS: &str = "MEDIA_BUS_ADDRESS";
-
-/// The `Player`'s retained status topic. It carries the display name, the
-/// activity, the current `Play`, and the parts.
-pub const STATUS_TOPIC: &str = "MEDIA_PLAYER_STATUS_TOPIC";
-
-/// The `Player`'s retained volume topic. The operator sets it only for a unit
-/// that states sinks, so an empty value is the speaker gate: the client
-/// subscribes to no level and draws no volume row.
-pub const VOLUME_TOPIC: &str = "MEDIA_PLAYER_VOLUME_TOPIC";
-
-/// The `Player`'s screen topic, which carries the sidecar's own decisions.
-/// The shade travels retained, and the moments do not.
-pub const SCREEN_TOPIC: &str = "MEDIA_PLAYER_SCREEN_TOPIC";
 
 /// The unit's friendly name, and its parts joined with newlines. They seed the
 /// identity block, so the first frame is never blank and a workstation needs no
@@ -47,20 +37,12 @@ pub const WINDOW_GRACE: &str = "IDLE_WINDOW_GRACE_SECONDS";
 /// cluster's idle screen binds no key and draws no legend.
 pub const PREVIEW: &str = "IDLE_PREVIEW";
 
-/// The three topics the client subscribes to. An empty topic is one the
-/// operator did not set.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Topics {
-    pub status: String,
-    pub volume: String,
-    pub screen: String,
-}
-
 /// Everything the operator told this container.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Wiring {
-    pub bus_address: String,
-    pub topics: Topics,
+    /// The broker, the topics, the controllers, and the two windows, as the
+    /// `media-screen` crate reads them.
+    pub screen: media_screen::Wiring,
     pub player_name: String,
     pub components: Vec<String>,
     pub app_id: String,
@@ -83,12 +65,9 @@ impl Wiring {
         let read = |name| value(name).unwrap_or_default();
 
         Self {
-            bus_address: read(BUS_ADDRESS),
-            topics: Topics {
-                status: read(STATUS_TOPIC),
-                volume: read(VOLUME_TOPIC),
-                screen: read(SCREEN_TOPIC),
-            },
+            // The crate reads the same source, so one environment answers both
+            // halves and neither one names the other's variables.
+            screen: media_screen::Wiring::read(&value),
             player_name: read(PLAYER_NAME),
             components: split_lines(&read(PLAYER_COMPONENTS)),
             app_id: read(APP_ID),
@@ -145,26 +124,39 @@ mod tests {
     }
 
     #[test]
-    fn every_variable_lands_in_the_wiring() {
+    fn a_process_reads_its_own_environment() {
+        assert_eq!(Wiring::from_environment(), Wiring::default());
+    }
+
+    #[test]
+    fn every_variable_this_client_reads_lands_in_the_wiring() {
         let read = wiring(&[
-            (BUS_ADDRESS, "broker:1883"),
-            (STATUS_TOPIC, "media/players/den/tv/status"),
-            (VOLUME_TOPIC, "media/players/den/tv/volume"),
-            (SCREEN_TOPIC, "media/players/den/tv/screen"),
             (PLAYER_NAME, "The Den"),
             (PLAYER_COMPONENTS, "The screen\nThe speakers"),
             (APP_ID, "media-den-tv"),
             (WINDOW_GRACE, "30"),
         ]);
 
-        assert_eq!(read.bus_address, "broker:1883");
-        assert_eq!(read.topics.status, "media/players/den/tv/status");
-        assert_eq!(read.topics.volume, "media/players/den/tv/volume");
-        assert_eq!(read.topics.screen, "media/players/den/tv/screen");
         assert_eq!(read.player_name, "The Den");
         assert_eq!(read.components, ["The screen", "The speakers"]);
         assert_eq!(read.app_id, "media-den-tv");
         assert_eq!(read.window_grace, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn the_crates_own_variables_reach_the_crates_wiring() {
+        let read = wiring(&[
+            (media_screen::wiring::BUS_ADDRESS, "broker:1883"),
+            (
+                media_screen::wiring::STATUS_TOPIC,
+                "media/players/den/tv/status",
+            ),
+            (media_screen::wiring::FADE_AFTER_SECONDS, "600"),
+        ]);
+
+        assert_eq!(read.screen.bus_address, "broker:1883");
+        assert_eq!(read.screen.status_topic, "media/players/den/tv/status");
+        assert_eq!(read.screen.fade_after, Duration::from_secs(600));
     }
 
     #[test]
@@ -194,5 +186,12 @@ mod tests {
         assert_eq!(grace("-5"), None);
         assert_eq!(grace("soon"), None);
         assert_eq!(grace("inf"), None);
+    }
+
+    #[test]
+    fn one_exact_value_binds_the_preview_keys() {
+        assert!(wiring(&[(PREVIEW, "1")]).preview);
+        assert!(!wiring(&[(PREVIEW, "true")]).preview);
+        assert!(!wiring(&[]).preview);
     }
 }

@@ -52,7 +52,7 @@ const (
 	// playerNameVariable carries a Player's metadata.name, the value every
 	// focus mark holds. In a playback pod it is the Play's own unit,
 	// spec.players[0], and the command sidecar gates the mark against it.
-	// In an idle pod it is the idle Player itself, and the sidecar gates
+	// In an idle pod it is the idle Player itself, and the client gates
 	// the same way. It is the object name, never the friendly name
 	// IDLE_PLAYER_NAME carries, because the operator writes marks from
 	// metadata.name.
@@ -87,37 +87,17 @@ const (
 	idlePlayerNameVariable       = "IDLE_PLAYER_NAME"
 	idlePlayerComponentsVariable = "IDLE_PLAYER_COMPONENTS"
 
-	// The idle command pod's fade wiring. The first carries the resolved
-	// quiet window in seconds, where zero means the screen never fades
-	// on its own. The two topic lists are newline-joined and aligned by
-	// position, so each remote's events topic pairs with the focus topic
-	// that carries its mark. The pod gates every press on the mark
-	// naming this Player, and it builds the cycle topic from the focus
-	// topic.
-	idleFadeAfterSecondsVariable   = "IDLE_FADE_AFTER_SECONDS"
-	idleRemoteEventsTopicsVariable = "IDLE_REMOTE_EVENTS_TOPICS"
-	idleRemoteFocusTopicsVariable  = "IDLE_REMOTE_FOCUS_TOPICS"
+	// The fade window in seconds, on the idle client pod. Zero means
+	// the screen never fades on its own. The client holds the timer,
+	// through the media-screen crate, so the operator settles the
+	// policy and the client runs it.
+	idleFadeAfterSecondsVariable = "IDLE_FADE_AFTER_SECONDS"
 
-	// The off window in seconds, where zero leaves the panel lit. It
-	// is set on every pod the way the fade window is, because the
-	// operator settles it.
+	// The off window in seconds, on the idle client pod. Zero leaves
+	// the panel lit. It is set on every client for the reason the fade
+	// window is: the operator settles it, and an absent variable is not
+	// a policy a client can read.
 	idleOffAfterSecondsVariable = "IDLE_OFF_AFTER_SECONDS"
-
-	// The topic the sidecar states the panel desire on. The
-	// operator builds it whole, the way it builds the commands and
-	// status topics, so the sidecar parses no topic.
-	idlePanelTopicVariable = "IDLE_PANEL_TOPIC"
-
-	// The resolved controller name, on the idle command pod. The pod
-	// compares it to this operator's own name to learn whether a
-	// delegate's client is there to answer a navigation press.
-	idleControllerVariable = "IDLE_CONTROLLER"
-
-	// The topic the idle command pod publishes the screen's
-	// moments on, and the idle client reads them off. The operator sets
-	// it on the idle command pod and on every idle client pod, because
-	// the command pod decides those moments whichever client draws them.
-	playerScreenTopicVariable = "MEDIA_PLAYER_SCREEN_TOPIC"
 
 	// The command sidecar carries every item's presentation block, baked
 	// into the pod when the operator creates it. The sidecar swaps to the
@@ -150,27 +130,39 @@ const (
 	discoveryOn             = "true"
 
 	// The two lists the operator hands the playback pod's command
-	// sidecar, newline-joined and aligned by position: each controller's
-	// events topic and the focus topic that carries its mark. The sidecar
-	// builds the cycle topic from the focus topic. A Play on a Player
-	// with no Remotes carries neither variable.
+	// sidecar and the idle client pod, newline-joined and aligned by
+	// position: each controller's events topic and the focus topic that
+	// carries its mark. Each reader builds the cycle topic from the
+	// focus topic. The playback pod lists the Play's remotes by name.
+	// The idle client lists them in spec.remotes order, because that
+	// position is the index a focus moment carries. A Player with no
+	// Remotes carries neither variable.
 	remoteEventsTopicsVariable = "MEDIA_REMOTE_EVENTS_TOPICS"
 	remoteFocusTopicsVariable  = "MEDIA_REMOTE_FOCUS_TOPICS"
 
-	// The player-commands topic the operator hands the idle pod's command
-	// sidecar. The operator builds it from the Player's identity and passes
-	// it whole, the way it hands the playback pod its focus topics, so the
-	// sidecar subscribes to one exact topic and parses nothing.
+	// The player-commands topic, on the idle client pod. The operator
+	// builds it from the Player's identity and passes it whole, the way
+	// it hands the playback pod its focus topics, so the client
+	// subscribes to one exact topic and parses nothing. It carries the
+	// operator's re-present alone.
 	playerCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
 
-	// The player-status topic the same sidecar reads the unit's presentable
-	// state from, and the idle client draws it from. The operator builds it
-	// the same way and the topic is retained, so a freshly started idle pod
-	// reads the current state on subscribe and asks for nothing.
+	// The player-status topic the playback pod's command sidecar reads the
+	// unit's presentable state from, and the idle client draws it from. The
+	// operator builds it the same way and the topic is retained, so a
+	// freshly started idle pod reads the current state on subscribe and
+	// asks for nothing.
 	playerStatusTopicVariable = "MEDIA_PLAYER_STATUS_TOPIC"
 
-	// The unit's volume topic, on the playback pod's command sidecar, on
-	// the idle pod's sidecar, and on the idle client. It is the speaker
+	// The topic the idle client states the panel desire on. The
+	// operator builds it whole, the way it builds the commands and
+	// status topics, so the client parses no topic. The client holds no
+	// API credentials, so the operator reads the desire off the bus and
+	// overrides the screen's Display.
+	playerPanelTopicVariable = "MEDIA_PLAYER_PANEL_TOPIC"
+
+	// The unit's volume topic, on the playback pod's command sidecar and
+	// on the idle client. It is the speaker
 	// gate as well as the address: the operator sets it only for a Player
 	// that states sinks, so a container that reads nothing here
 	// subscribes to no level, draws none, and publishes none.

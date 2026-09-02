@@ -1,0 +1,23 @@
+# media-screen is the bus half of a screen client for one Player: the
+# timers, the focus gate, the shade, the volume step, the cycle request,
+# and the panel desire. Each screen client holds these rules in its own
+# process, and this crate is how two clients in two repositories hold
+# the same ones.
+#
+# The dependencies are the broker client and JSON, and nothing else. A
+# screen client draws with whatever toolkit it chose, so this crate must
+# compile for a program that draws with any of them, and it names no
+# window library.
+[package]
+name = "media-screen"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "media_screen"
+path = "src/lib.rs"
+
+[dependencies]
+rumqttc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
