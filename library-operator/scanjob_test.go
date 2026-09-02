@@ -103,18 +103,18 @@ func TestFolderScanJobCarriesItsPath(t *testing.T) {
 	}
 }
 
-// the name is a hash of the path and the time, so two webhooks for one
-// folder are two Jobs and no create collides with a Job that runs.
-func TestFolderScanJobNamesDifferByPathAndTime(t *testing.T) {
+// the chain is a hash of the path and the time, so two webhooks for one
+// folder are two chains and no create collides with a Job that runs.
+func TestFolderScanChainsDifferByPathAndTime(t *testing.T) {
 	later := testNow.Add(time.Second)
 
 	cases := []struct{ name, first, second string }{
 		{name: "another path",
-			first:  folderScanJobName("movies", "/one", testNow),
-			second: folderScanJobName("movies", "/two", testNow)},
+			first:  newChain("/one", testNow),
+			second: newChain("/two", testNow)},
 		{name: "another time",
-			first:  folderScanJobName("movies", "/one", testNow),
-			second: folderScanJobName("movies", "/one", later)},
+			first:  newChain("/one", testNow),
+			second: newChain("/one", later)},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestFolderScanJobNamesDifferByPathAndTime(t *testing.T) {
 			}
 		})
 	}
-	if folderScanJobName("movies", "/one", testNow) != folderScanJobName("movies", "/one", testNow) {
+	if newChain("/one", testNow) != newChain("/one", testNow) {
 		t.Error("one path at one time is named two ways")
 	}
 }

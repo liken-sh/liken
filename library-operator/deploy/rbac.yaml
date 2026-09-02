@@ -67,6 +67,23 @@ rules:
   - apiGroups: [library.liken.sh]
     resources: [catalogs/status]
     verbs: [update]
+  # The operator reads the MetadataProviders of every namespace and
+  # writes only their status: the verdict of the one reachability
+  # check it runs per pass. A person declares a provider, and the
+  # operator never edits one.
+  - apiGroups: [library.liken.sh]
+    resources: [metadataproviders]
+    verbs: [get, list, watch]
+  - apiGroups: [library.liken.sh]
+    resources: [metadataproviders/status]
+    verbs: [update]
+  # The operator reads a Secret only to run that check. The key
+  # reaches an enricher container through a secretKeyRef the kubelet
+  # resolves, and the operator never writes it into a status, a log,
+  # or the catalog.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
   # The Players, across every namespace, read-only. media-operator owns
   # them and writes them; this operator reads status.idle and writes no Player
   # at all. It stands a screen pod for a Player whose status.idle.controller

@@ -32,8 +32,12 @@ type fakeCluster struct {
 	// The Players media-operator would publish, which the operator reads
 	// and never writes.
 	players map[string]*Player
-	claims  map[string]*PersistentVolumeClaim
-	pods    map[string]*Pod
+	// The MetadataProviders the operator reads and writes the status of,
+	// and the Secrets it reads the keys out of.
+	providers map[string]*MetadataProvider
+	secrets   map[string]*Secret
+	claims    map[string]*PersistentVolumeClaim
+	pods      map[string]*Pod
 	// The catalog objects the operator writes, by namespace and name,
 	// because the operator stands one of each in every namespace that
 	// holds a Library.
@@ -75,6 +79,8 @@ func newFakeCluster() *fakeCluster {
 		libraries: map[string]*Library{},
 		catalogs:  map[string]*NamespaceCatalog{},
 		players:   map[string]*Player{},
+		providers: map[string]*MetadataProvider{},
+		secrets:   map[string]*Secret{},
 		claims:    map[string]*PersistentVolumeClaim{},
 		volumes:   map[string]string{},
 		pods:      map[string]*Pod{},
@@ -142,6 +148,19 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			list.Items = append(list.Items, *f.players[key])
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == metadataProvidersPath:
+		list := MetadataProviderList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.providers) {
+			list.Items = append(list.Items, *f.providers[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.Contains(r.URL.Path, "/metadataproviders/") && strings.HasSuffix(r.URL.Path, "/status"):
+		var written MetadataProvider
+		_ = json.NewDecoder(r.Body).Decode(&written)
+		f.providers[written.Metadata.Name] = &written
+		_ = json.NewEncoder(w).Encode(written)
+	case strings.Contains(r.URL.Path, "/secrets/"):
+		answer(w, f.secrets[name])
 	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/libraries/"):
 		f.patchLibrary(w, r, name)
 	case strings.Contains(r.URL.Path, "/catalogs/") && strings.HasSuffix(r.URL.Path, "/status"):
@@ -509,6 +528,14 @@ func (f *fakeCluster) heldCatalog(name string) *NamespaceCatalog {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	return f.catalogs[name]
+}
+
+// The MetadataProvider the cluster holds, so a test reads the status a
+// check wrote.
+func (f *fakeCluster) heldProvider(name string) *MetadataProvider {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.providers[name]
 }
 
 func (f *fakeCluster) heldClaim(name string) *PersistentVolumeClaim {

@@ -258,6 +258,13 @@ type LibraryStatus struct {
 	// One entry per worker, from the reporter: the Job that ran
 	// last for that worker and when it finished.
 	Runs []libraryRun `json:"runs,omitempty"`
+	// Gaps is one count per concern of the rows that concern has left to fill.
+	// Waiting is the titles whose identity ended in candidates for a person to
+	// choose from, and Unresolved the titles no provider could name. All three
+	// are the reporter's own numbers.
+	Gaps       map[string]int `json:"gaps,omitempty"`
+	Waiting    int            `json:"waiting"`
+	Unresolved int            `json:"unresolved"`
 	// Webhook is the URL of this Library's webhook endpoint on the
 	// operator, the address a person gives to Radarr, Sonarr, or
 	// Jellyfin.
@@ -449,6 +456,9 @@ const (
 	reasonSweeping     = "Sweeping"
 	reasonAwaitingEcho = "AwaitingEcho"
 	reasonBlocked      = "Blocked"
+	// An enricher Job of this library is still running. It writes onto the
+	// volume and into the catalog the sweep is emptying.
+	reasonEnrichRunning = "EnrichRunning"
 )
 
 // The values status.phase takes. libraryPhase in status.go derives
@@ -460,6 +470,7 @@ const (
 	phasePending   = "Pending"
 	phaseOffline   = "Offline"
 	phaseScanning  = "Scanning"
+	phaseEnriching = "Enriching"
 	phaseIdle      = "Idle"
 	phaseDeparting = "Departing"
 )

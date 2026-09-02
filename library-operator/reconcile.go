@@ -43,7 +43,8 @@ type binding struct {
 // schedule only when its storage is bound and its namespace holds
 // exactly one Catalog, because every scan Job's catalog agent joins the
 // cluster the Catalog stands and takes a volume the Catalog sizes.
-func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice, jobs []Job, now time.Time) error {
+func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice,
+	jobs []Job, providers providerSet, now time.Time) error {
 	if err := o.holdLibrary(ctx, library); err != nil {
 		return err
 	}
@@ -72,6 +73,9 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		if err := o.serveHeldPaths(ctx, library, jobs, now); err != nil {
 			return err
 		}
+		if err := o.enrich(ctx, library, choice.catalog, report, jobs, providers); err != nil {
+			return err
+		}
 	} else if err := o.stopScanCronJob(ctx, library); err != nil {
 		return err
 	}
@@ -81,6 +85,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		choice:            choice,
 		cronJob:           cronJob,
 		report:            report,
+		sources:           checkSources(library, providers),
 		online:            o.reporters.onlineFor(namespace),
 		operatorNamespace: o.namespace,
 	}, now))

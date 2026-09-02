@@ -69,7 +69,7 @@ func TestReconcileHoldsALibraryAgainstDeletion(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -90,7 +90,7 @@ func TestReconcileSwapsTheFormerFinalizer(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +110,7 @@ func TestReconcileDoesNotPatchAFinalizerItAlreadyHolds(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{libraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, testNow); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -213,6 +213,42 @@ func TestDepartWaitsForARunningScan(t *testing.T) {
 	}
 	if phase := cluster.heldLibrary("movies").Status.Phase; phase != phaseDeparting {
 		t.Errorf("phase = %q, want %s", phase, phaseDeparting)
+	}
+}
+
+// an enricher that is still running writes onto the volume and into
+// the catalog the sweep is emptying, so the departure waits it out as
+// it waits out a scan.
+func TestDepartWaitsForARunningEnricher(t *testing.T) {
+	cases := []struct {
+		name string
+		jobs []Job
+		runs []libraryRun
+	}{
+		{name: "an enricher Job the controller has not ended",
+			jobs: []Job{{Metadata: ObjectMeta{Name: "movies-enrich-1", Namespace: "house",
+				Labels: workerLabels("movies", workerEnrich)}}}},
+		{name: "an enrich run the reporter has not seen finish",
+			runs: []libraryRun{{Worker: workerEnrich, Job: "movies-enrich-1", Started: testNow}}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library := departingMovies(cluster)
+			operator := testOperator(t, cluster)
+			operator.reports.fold("house", "movies", libraryReport{Runs: one.runs})
+
+			if err := operator.depart(t.Context(), library, standingCatalog(), one.jobs); err != nil {
+				t.Fatal(err)
+			}
+
+			if cluster.heldJob("house", "movies-cleanup") != nil {
+				t.Error("the cleanup job stood while an enricher was still running")
+			}
+			if stage := departingCondition(t, cluster); stage.Reason != reasonEnrichRunning {
+				t.Errorf("Departing = %+v, want %s", stage, reasonEnrichRunning)
+			}
+		})
 	}
 }
 

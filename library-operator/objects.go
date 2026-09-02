@@ -330,11 +330,20 @@ type EnvVar struct {
 	ValueFrom *EnvVarSource `json:"valueFrom,omitempty"`
 }
 
-// An EnvVarSource reads the value from somewhere other than the pod
-// spec. A fieldRef is the downward API: the kubelet reads the field
-// off the pod it is starting and sets the variable from it.
+// An EnvVarSource reads the value from somewhere other than the pod spec. A
+// fieldRef is the downward API: the kubelet reads the field off the pod it is
+// starting and sets the variable from it. A secretKeyRef is one key of one
+// Secret in the pod's namespace, which is how a provider key reaches an
+// enricher container without passing through the operator.
 type EnvVarSource struct {
-	FieldRef *ObjectFieldSelector `json:"fieldRef,omitempty"`
+	FieldRef     *ObjectFieldSelector `json:"fieldRef,omitempty"`
+	SecretKeyRef *SecretKeySelector   `json:"secretKeyRef,omitempty"`
+}
+
+// One key of one Secret in the pod's own namespace.
+type SecretKeySelector struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
 }
 
 // The field to read, as a path into the pod, such as status.podIP.

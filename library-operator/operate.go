@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -64,6 +65,12 @@ type operator struct {
 	topicBase      string
 	bus            *Bus
 	reports        *reports
+
+	// The provider endpoint every reachability check calls and the client it
+	// calls through, as fields so a test points them at a server of its own and
+	// no test reaches the internet.
+	providerBase   string
+	providerClient *http.Client
 
 	// The namespace this operator runs in, which is what the
 	// webhook address it reports on every Library names, and the address
@@ -118,6 +125,8 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 		plays:          newPlayRequests(wake),
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
+		providerBase:   defaultProviderBase,
+		providerClient: &http.Client{Timeout: providerCheckTimeout},
 	}
 	// The operator names no will. Its one publish is the empty
 	// retained payload that drops a departed library's topics, and a
@@ -225,6 +234,14 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
 		players = &PlayerList{}
 	}
+	// The providers are read on the same terms as the Players: a cluster that
+	// has not applied the CRD serves no such collection, and its libraries are
+	// still scanned and still reported.
+	providers, err := ListMetadataProviders(startup, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
+		providers = &MetadataProviderList{}
+	}
 	fmt.Fprintf(report, "library.liken.sh: operating %d libraries over %s\n",
 		len(libraries.Items), o.busAddress)
 
@@ -232,6 +249,7 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	go watchCatalogs(o.client, catalogs.Metadata.ResourceVersion, o.wake)
 	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake)
 	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake)
+	go watchMetadataProviders(o.client, providers.Metadata.ResourceVersion, o.wake)
 
 	// The webhook endpoint runs for the life of the operator. A
 	// failure to listen ends the loop, because an operator that reports
@@ -307,8 +325,17 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing catalog member pods: %v\n", err)
 		return
 	}
+	// The providers of every namespace, read and checked once per pass. A
+	// cluster that has not applied the CRD serves no such collection, and its
+	// libraries are still scanned and still reported.
+	providers, err := ListMetadataProviders(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
+		providers = &MetadataProviderList{}
+	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
 	now := time.Now().UTC()
+	checked := o.checkProviders(ctx, providers.Items, now)
 
 	live := make(map[string]bool, len(libraries.Items))
 	for index := range libraries.Items {
@@ -329,7 +356,7 @@ func (o *operator) pass() {
 			continue
 		}
 
-		if err := o.reconcile(ctx, library, choice, jobs.Items, now); err != nil {
+		if err := o.reconcile(ctx, library, choice, jobs.Items, checked, now); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n", namespace, name, err)
 		}
 	}

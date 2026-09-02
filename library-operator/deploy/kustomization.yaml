@@ -11,6 +11,7 @@ namespace: liken-system
 resources:
   - libraries-crd.yaml
   - catalogs-crd.yaml
+  - metadataproviders-crd.yaml
   - rbac.yaml
   - operator.yaml
 

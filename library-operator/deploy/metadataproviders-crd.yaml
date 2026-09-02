@@ -1,0 +1,161 @@
+# A MetadataProvider is one account with one metadata provider, in the
+# namespace of the libraries that name it. It holds the Secret for its
+# key and states the concerns it may serve. A Library's spec.sources
+# orders the providers it asks. The operator checks each provider once
+# per pass with one cheap call and reports the answer in its status.
+# The key reaches an enricher container through a secretKeyRef, and
+# never through the catalog or a status.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: metadataproviders.library.liken.sh
+spec:
+  group: library.liken.sh
+  names:
+    kind: MetadataProvider
+    listKind: MetadataProviderList
+    plural: metadataproviders
+    singular: metadataprovider
+    categories: [media]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Secret
+          type: string
+          jsonPath: .spec.tmdb.secretRef.name
+          priority: 1
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Reason
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].reason
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "One account with one metadata provider, named by the Libraries of its namespace in spec.sources."
+          properties:
+            spec:
+              type: object
+              required: [tmdb, concerns]
+              description: "The provider this account is with, and the concerns it may serve."
+              # The block names the provider, the way a Library's kind
+              # names its settings block. A second provider is a second
+              # block here, with a rule that requires exactly one of
+              # them.
+              properties:
+                tmdb:
+                  type: object
+                  required: [secretRef]
+                  description: "The account is with The Movie Database, which serves movies, series, and people."
+                  properties:
+                    secretRef:
+                      type: object
+                      required: [name]
+                      description: "The Secret in this namespace that holds the read access token, and the key inside it."
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                          description: "The Secret's name, in this provider's own namespace."
+                        key:
+                          type: string
+                          minLength: 1
+                          default: token
+                          description: "The key inside that Secret. When omitted, token."
+                concerns:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  minItems: 1
+                  maxItems: 30
+                  description: "The concerns this account may serve, from the fixed vocabulary. A Library asks this provider only for a concern it lists."
+                  items:
+                    type: string
+                    # The concern vocabulary of the enrichment design.
+                    # A concern is one gap in the catalog, one container
+                    # that fills it, and one attempts file it writes.
+                    enum:
+                      - probe
+                      - trickplay
+                      - identity
+                      - facts
+                      - credits
+                      - poster
+                      - fanart
+                      - clearlogo
+                      - clearart
+                      - banner
+                      - landscape
+                      - discart
+                      - keyart
+                      - characterart
+                      - season-poster
+                      - episode-thumb
+                      - artist-thumb
+                      - artist-logo
+                      - album-cover
+                      - cdart
+                      - contributors
+            status:
+              type: object
+              description: "What the operator's own check found, written only by the library operator."
+              properties:
+                lastRefusal:
+                  type: string
+                  format: date-time
+                  description: "When the provider last refused the key. It stands after the key works again, so a person reads that it once failed."
+                conditions:
+                  type: array
+                  description: "Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret or Refused. A provider that did not answer at all keeps the verdict it carried."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check this entry reports, in CamelCase. It
+                          is the key of this list.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. True is the good verdict, and
+                          Unknown means the operator cannot tell yet.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition judged.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for why the condition holds
+                          this verdict, meant for a program to match on.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The same answer in a sentence a person reads.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the verdict last changed. It moves only
+                          when the status flips.
