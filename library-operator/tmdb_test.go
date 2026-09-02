@@ -11,23 +11,23 @@ import (
 	"time"
 )
 
-// PROSE: the fake provider every identity test runs against, keyed by the
-// request the client makes, so no test reaches the real TMDb.
+// The fake provider every identity test runs against, keyed by the request
+// the client makes, so no test reaches the real TMDb.
 type fakeTMDb struct {
 	mutex    sync.Mutex
 	answers  map[string]string
 	statuses map[string]int
 	served   map[string]int
-	// PROSE: the header a 429 answer carries, and how many of the first
-	// requests answer 429 at all.
+	// The header a 429 answer carries, and how many of the first requests answer
+	// 429 at all.
 	retryAfter  string
 	tooMany     int
 	cooldowns   []time.Duration
 	requestPath []string
 }
 
-// PROSE: the one key shape a test declares its answers under: the path, the
-// query, and the year the search narrowed to.
+// The one key shape a test declares its answers under: the path, the query,
+// and the year the search narrowed to.
 func tmdbKey(path, query, year string) string {
 	return path + "|" + query + "|" + year
 }
@@ -63,8 +63,8 @@ func (f *fakeTMDb) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, answer)
 }
 
-// PROSE: builds the fake and the client that reads it, and takes the real
-// cooldown out so no test sleeps.
+// newFakeTMDb builds the fake and the client that reads it, and takes the
+// real cooldown out so no test sleeps.
 func newFakeTMDb(t *testing.T, answers map[string]string) (*tmdbClient, *fakeTMDb) {
 	t.Helper()
 	fake := &fakeTMDb{answers: answers, statuses: map[string]int{}, served: map[string]int{}}
@@ -225,7 +225,8 @@ func TestAWaitEndsOnTheContext(t *testing.T) {
 	}
 }
 
-// PROSE: says why a search with no year sends no year parameter at all.
+// A search with no year sends no year parameter at all, because a year of 0
+// would match nothing.
 func TestASearchWithNoYearNarrowsToNone(t *testing.T) {
 	client, fake := newFakeTMDb(t, map[string]string{
 		tmdbKey("/3/search/movie", "Untitled", ""): `{"results":[{"id":7,"title":"Untitled"}]}`,
@@ -243,8 +244,8 @@ func TestASearchWithNoYearNarrowsToNone(t *testing.T) {
 	}
 }
 
-// PROSE: the id a test states in a fake answer, kept beside the answers it
-// belongs to so a case reads in one place.
+// The id a test states in a fake answer, kept beside the answers it belongs
+// to so a case reads in one place.
 func tmdbResultJSON(id int, title, date string) string {
 	return `{"id":` + strconv.Itoa(id) + `,"title":"` + title + `","original_title":"` + title + `","release_date":"` + date + `"}`
 }

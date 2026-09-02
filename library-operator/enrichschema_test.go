@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
-// PROSE: seeds one title, its file, its aliases, and one attempt per concern,
-// so a prune and a gap query both read the shape a real walk leaves.
+// walkWithAttempts seeds one title, its file, its aliases, and one attempt
+// per concern, so a prune and a gap query both read the shape a real walk
+// leaves.
 func walkWithAttempts(library, id, path, folderKey string, at time.Time) *walkResult {
 	walk := walkOfOneTitle(library, id, path, folderKey)
 	walk.attempts = []attemptRow{
@@ -175,8 +176,8 @@ func TestAnAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 			if gaps[concernIdentity] != test.want {
 				t.Errorf("identity gap = %d, want %d", gaps[concernIdentity], test.want)
 			}
-			if gaps[concernProbe] != 0 {
-				t.Errorf("probe gap = %d, want none, because a probe attempt has no window", gaps[concernProbe])
+			if gaps[concernProbe] != test.want {
+				t.Errorf("probe gap = %d, want %d", gaps[concernProbe], test.want)
 			}
 		})
 	}

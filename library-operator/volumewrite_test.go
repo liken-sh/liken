@@ -86,8 +86,8 @@ func TestOnlyANameWithTheTemporaryMarkIsRemoved(t *testing.T) {
 	}
 }
 
-// PROSE: the document under the edit tests, which carries elements no reader
-// in this repository knows, because those are the bytes an edit must not move.
+// The document under the edit tests. It carries elements no reader in this
+// repository knows, because those are the bytes an edit must not move.
 const nfoWithUnknownElements = `<?xml version="1.0" encoding="utf-8"?>
 <movie>
   <title>The Thing</title>
@@ -197,8 +197,8 @@ func TestAnEditRefusesADocumentItCannotRead(t *testing.T) {
 	}
 }
 
-// PROSE: the calls that would let an enricher lose a file on the volume, which
-// only the write package may make.
+// The calls that would let an enricher lose a file on the volume, which only
+// the write door may make.
 var forbiddenVolumeCalls = []string{"os.Remove(", "os.RemoveAll(", "os.Truncate(", "os.Rename("}
 
 func TestOnlyTheWritePackageRemovesRenamesOrTruncates(t *testing.T) {
@@ -207,8 +207,8 @@ func TestOnlyTheWritePackageRemovesRenamesOrTruncates(t *testing.T) {
 	}
 }
 
-// PROSE: reads every file the rule covers and names each forbidden call it
-// carries, so the test itself stays one assertion.
+// forbiddenCallsInPackage reads every file the rule covers and names each
+// forbidden call it carries, so the test itself stays one assertion.
 func forbiddenCallsInPackage(t *testing.T) []string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
@@ -234,8 +234,8 @@ func forbiddenCallsInPackage(t *testing.T) []string {
 	return found
 }
 
-// PROSE: the two read helpers the enrichment tests share, which fail the test
-// rather than hand back an error every case would have to answer.
+// The two read helpers the enrichment tests share. They fail the test instead
+// of handing back an error every case would have to answer.
 func readFileString(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

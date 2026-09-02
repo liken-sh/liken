@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// PROSE: builds one enricher over a temporary volume and a real catalog, the
-// way the container is built from its environment.
+// testEnricher builds one enricher over a temporary volume and a real
+// catalog, the way the container is built from its environment.
 func testEnricher(t *testing.T, kind, root string, catalog *Catalog) (*enricher, *bytes.Buffer) {
 	t.Helper()
 	log := &bytes.Buffer{}

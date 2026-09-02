@@ -1,8 +1,8 @@
 package main
 
-// PROSE: this file is the enricher Job's one regular container: it writes the
-// runs row and waits for the standing pod to echo it, which is what proves the
-// rows the init containers left have reached the catalog.
+// enrichrun.go is the enricher Job's one regular container. It writes the
+// runs row and waits for the standing pod to echo it, which is what proves
+// the rows the init containers left have reached the catalog.
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// PROSE: the container that closes an enricher Job: the enricher's own
-// environment, and the bus the echo arrives on.
+// The container that closes an enricher Job: the enricher's own environment,
+// and the bus the echo arrives on.
 type enrichRun struct {
 	*enricher
 	statusTopic string
@@ -24,8 +24,8 @@ type enrichRun struct {
 	echoTimeout time.Duration
 }
 
-// PROSE: the role's whole program. A Job that never hears its echo fails, so
-// its rows stay on its claim and the retry carries them.
+// The role's whole program. A Job that never hears its echo fails, so its
+// rows stay on its claim and the retry carries them.
 func runEnrich() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -42,8 +42,8 @@ func runEnrich() {
 	}
 }
 
-// PROSE: says why a container with no broker refuses to start, before it
-// writes anything.
+// A container with no broker refuses to start, before it writes anything,
+// because it could never hear its echo.
 func newEnrichRun(log io.Writer) (*enrichRun, error) {
 	address, err := echoBusAddress(log)
 	if err != nil {
@@ -66,9 +66,9 @@ func newEnrichRun(log io.Writer) (*enrichRun, error) {
 	return run, nil
 }
 
-// PROSE: says why the counts this container expects are the ones its own agent
-// holds now: an enricher Job writes to the volume and changes no item or file
-// row, so the numbers stand where the last scan left them.
+// The counts this container expects are the ones its own agent holds now. An
+// enricher Job writes to the volume and changes no item or file row, so the
+// numbers stand where the last scan left them.
 func (r *enrichRun) runJob(ctx context.Context) error {
 	counts, err := r.catalog.countsOf(ctx, r.library)
 	if err != nil {
@@ -89,8 +89,9 @@ func (r *enrichRun) runJob(ctx context.Context) error {
 	return r.echo.wait(ctx, r.bus, r.echoTimeout)
 }
 
-// PROSE: says why the start time comes off the row the probe container wrote,
-// and why a row that names another Job takes this container's own start.
+// The start time comes off the row the probe container wrote. A row that
+// names another Job is a run that never finished, and this container takes
+// its own start instead.
 func (r *enrichRun) startedAt(ctx context.Context) time.Time {
 	now := time.Now().UTC()
 	runs, err := r.catalog.Runs(ctx)

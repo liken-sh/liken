@@ -1,7 +1,10 @@
 package main
 
-// PROSE: this file is the whole of what the identity concern asks TMDb, and
-// why a 429 is a cooldown in the container rather than a rate limiter anywhere.
+// tmdb.go is the whole of what the identity concern asks TMDb: a search by
+// title and year, and the runtime of one result. A 429 is a cooldown inside
+// the container and nothing more. TMDb's limit is about 40 requests a second,
+// and one library's gaps never come near it, so no limiter lives anywhere
+// else.
 
 import (
 	"context"
@@ -15,22 +18,22 @@ import (
 	"time"
 )
 
-// PROSE: the provider's own address, which only a test replaces.
+// The provider's own address, which only a test replaces.
 const tmdbAPIBase = "https://api.themoviedb.org"
 
-// PROSE: the cooldown a 429 with no Retry-After header takes.
+// The cooldown a 429 with no Retry-After header takes.
 const tmdbCooldown = 10 * time.Second
 
-// PROSE: how many times one request goes out, so a provider that answers 429
-// forever fails the attempt rather than holding the container.
+// How many times one request goes out, so a provider that answers 429 without
+// end fails the attempt instead of holding the container.
 const tmdbAttempts = 3
 
-// PROSE: bounds one request, so a provider that stops answering cannot hold
-// the container open.
+// One request's bound, so a provider that stops answering cannot hold the
+// container open.
 var tmdbRequestTimeout = 30 * time.Second
 
-// PROSE: one account with TMDb, and the wait a cooldown takes, which a test
-// replaces so no test sleeps.
+// One account with TMDb, and the wait a cooldown takes, which a test replaces
+// so no test sleeps.
 type tmdbClient struct {
 	base  string
 	token string
@@ -47,7 +50,8 @@ func newTMDbClient(base, token string) *tmdbClient {
 	}
 }
 
-// PROSE: says why the wait ends on the context as well as on the clock.
+// The wait ends on the context as well as on the clock, so a container that
+// is told to stop does not sleep out its cooldown first.
 func waitFor(ctx context.Context, cooldown time.Duration) error {
 	timer := time.NewTimer(cooldown)
 	defer timer.Stop()
@@ -59,8 +63,8 @@ func waitFor(ctx context.Context, cooldown time.Duration) error {
 	}
 }
 
-// PROSE: one search result, with the movie fields and the series fields
-// together, because the two searches answer the same shape under two names.
+// One search result, with the movie fields and the series fields together,
+// because the two searches answer the same shape under two names.
 type tmdbResult struct {
 	ID            int    `json:"id"`
 	Title         string `json:"title"`
@@ -71,7 +75,8 @@ type tmdbResult struct {
 	FirstAirDate  string `json:"first_air_date"`
 }
 
-// PROSE: says why one accessor answers for both kinds.
+// One accessor answers for both kinds: a movie states title, and a series
+// states name.
 func (r tmdbResult) name() string {
 	if r.Title != "" {
 		return r.Title
@@ -86,8 +91,9 @@ func (r tmdbResult) originalName() string {
 	return r.OriginalName
 }
 
-// PROSE: says which date the year comes off, and that TMDb states the first
-// release anywhere.
+// The year comes off release_date for a movie and first_air_date for a
+// series. TMDb states the first release anywhere, which is why the ladder
+// also tries the years on either side.
 func (r tmdbResult) year() int {
 	if r.ReleaseDate != "" {
 		return leadingYear(r.ReleaseDate)
@@ -99,8 +105,9 @@ type tmdbSearchAnswer struct {
 	Results []tmdbResult `json:"results"`
 }
 
-// PROSE: says why a movie states one runtime and a series states a list of
-// them.
+// A movie states one runtime, and a series states a list of episode runtimes.
+// The ladder reads the first of the list, which is the usual length of an
+// episode.
 type tmdbDetailAnswer struct {
 	Runtime        int   `json:"runtime"`
 	EpisodeRuntime []int `json:"episode_run_time"`
@@ -114,8 +121,9 @@ func (a tmdbDetailAnswer) runtime() time.Duration {
 	return time.Duration(minutes) * time.Minute
 }
 
-// PROSE: says why the search is narrowed by the year the name carried, and why
-// a series takes its own year parameter.
+// The search is narrowed by the year the name carried, because a title alone
+// matches every remake. A series takes its own year parameter,
+// first_air_date_year, where a movie takes year.
 func (c *tmdbClient) search(ctx context.Context, kind, title string, year int) ([]tmdbResult, error) {
 	query := url.Values{"query": {title}}
 	path := "/3/search/movie"
@@ -134,8 +142,8 @@ func (c *tmdbClient) search(ctx context.Context, kind, title string, year int) (
 	return answer.Results, nil
 }
 
-// PROSE: says why the runtime is a second call, made only on the rung that
-// needs it.
+// The runtime is a second call, because a search result carries none. The
+// ladder makes it only on the rung that needs it.
 func (c *tmdbClient) runtime(ctx context.Context, kind string, id int) (time.Duration, error) {
 	path := "/3/movie/" + strconv.Itoa(id)
 	if kind == libraryKindSeries {
@@ -148,8 +156,8 @@ func (c *tmdbClient) runtime(ctx context.Context, kind string, id int) (time.Dur
 	return answer.runtime(), nil
 }
 
-// PROSE: the whole retry rule: a 429 waits the header's own cooldown, or ten
-// seconds where it names none, and the request goes out again.
+// The whole retry rule: a 429 waits the header's own cooldown, or ten seconds
+// where it names none, and the request goes out again.
 func (c *tmdbClient) get(ctx context.Context, path string, query url.Values, into any) error {
 	for attempt := 1; ; attempt++ {
 		status, cooldown, body, err := c.send(ctx, path, query)
@@ -169,8 +177,8 @@ func (c *tmdbClient) get(ctx context.Context, path string, query url.Values, int
 	}
 }
 
-// PROSE: says that the key travels as a bearer token, which is the form TMDb's
-// v4 tokens take.
+// The key travels as a bearer token, which is the form TMDb's v4 read access
+// tokens take.
 func (c *tmdbClient) send(ctx context.Context, path string, query url.Values) (int, time.Duration, []byte, error) {
 	address := c.base + path
 	if len(query) > 0 {
@@ -196,11 +204,11 @@ func (c *tmdbClient) send(ctx context.Context, path string, query url.Values) (i
 	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), body, nil
 }
 
-// PROSE: bounds one answer, so a provider that streams without end cannot grow
-// the container.
+// One answer's bound, so a provider that streams without end cannot grow the
+// container.
 const tmdbAnswerLimit = 1 << 20
 
-// PROSE: says why an unreadable or absent header takes the fixed cooldown.
+// An unreadable or absent header takes the fixed cooldown.
 func retryAfter(header string) time.Duration {
 	seconds, err := strconv.Atoi(strings.TrimSpace(header))
 	if err != nil || seconds <= 0 {

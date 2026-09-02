@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// PROSE: an agent that takes every write and refuses every read, so a test
-// drives a container whose gap read fails after its first write landed.
+// An agent that takes every write and refuses every read, so a test drives a
+// container whose gap read fails after its first write landed.
 func writeOnlyCatalog(t *testing.T) *Catalog {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,8 +28,8 @@ func writeOnlyCatalog(t *testing.T) *Catalog {
 	return NewCatalog(server.URL, server.Client())
 }
 
-// PROSE: an agent that answers the gap read once and refuses every read after
-// it, so a test drives a container whose per-item read fails mid-run.
+// An agent that answers the gap read once and refuses every read after it, so
+// a test drives a container whose per-item read fails mid-run.
 func oneGapThenRefuses(t *testing.T, id string) *Catalog {
 	t.Helper()
 	var mutex sync.Mutex
@@ -157,8 +157,8 @@ func TestAnElementTheDecoderCannotSkipFailsTheEdit(t *testing.T) {
 	}
 }
 
-// PROSE: an agent that answers one read and refuses every read after it, so a
-// test drives a reporter whose second count fails.
+// An agent that answers one read and refuses every read after it, so a test
+// drives a reporter whose second count fails.
 func oneCountThenRefuses(t *testing.T) *Catalog {
 	t.Helper()
 	var mutex sync.Mutex
@@ -283,8 +283,8 @@ func TestTheIdentityConcernStopsOnAShutdown(t *testing.T) {
 	}
 }
 
-// PROSE: ends the run as soon as the provider is asked once, so a test drives
-// the check a container makes between titles.
+// Ends the run as soon as the provider is asked once, so a test drives the
+// check a container makes between titles.
 type cancellingTransport struct {
 	cancel func()
 	inner  http.RoundTripper

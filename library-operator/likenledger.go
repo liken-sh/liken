@@ -1,7 +1,9 @@
 package main
 
-// PROSE: this file is the .liken/ directory: what each concern writes beside a
-// title, why one file per writer, and how an entry is keyed.
+// likenledger.go is the .liken/ directory beside a title: what each concern
+// writes there, and how an entry is keyed. One file per writer is what lets
+// several containers write beside one title on a network mount with no locks.
+// No two of them ever open the same file for write.
 
 import (
 	"errors"
@@ -16,19 +18,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PROSE: the directory beside a title that holds liken's own files, a dot name
-// so the walk and every ecosystem player skip it.
+// The directory beside a title that holds liken's own files. It is a dot
+// name, so the walk and every ecosystem player skip it.
 const likenDirectory = ".liken"
 
-// PROSE: the entry path that names the folder's own title, as against a file
-// under a season folder.
+// The entry path that names the folder's own title, as against a file under a
+// season folder.
 const likenSelfPath = "."
 
-// PROSE: says why the ids are a map of provider to id and never one column.
+// The ids are a map of provider to id and never one column, because a title
+// carries ids under several schemes and a later concern adds more.
 type providerIDs map[string]string
 
-// PROSE: says why a numeric id is written as a number, which is the shape the
-// plan's example and every provider's own documentation use.
+// A numeric id is written as a number, which is the shape the plan's example
+// and every provider's own documentation use.
 func (p providerIDs) MarshalYAML() (any, error) {
 	node := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle}
 	for _, provider := range sortedKeys(p) {
@@ -42,7 +45,8 @@ func (p providerIDs) MarshalYAML() (any, error) {
 	return node, nil
 }
 
-// PROSE: says why a number and a string both read back as one id.
+// A number and a string both read back as one id, so a person who quotes an
+// id by hand is read the same as the writer.
 func (p *providerIDs) UnmarshalYAML(node *yaml.Node) error {
 	var raw map[string]any
 	if err := node.Decode(&raw); err != nil {
@@ -69,15 +73,15 @@ func sortedKeys(ids providerIDs) []string {
 	return keys
 }
 
-// PROSE: one .liken/<concern>.yaml file: the ledger the identity concern
-// keeps, and the attempts every concern appends to.
+// One .liken/<concern>.yaml file: the ledger the identity concern keeps, and
+// the attempts every concern appends to.
 type likenLedger struct {
 	Items    []likenItem    `yaml:"items,omitempty"`
 	Attempts []likenAttempt `yaml:"attempts,omitempty"`
 }
 
-// PROSE: one item's answer, which is either an id with the reason it was
-// written or the candidates that wait for a person.
+// One item's answer: an id with the reason it was written, or the candidates
+// that wait for a person.
 type likenItem struct {
 	Path       string           `yaml:"path"`
 	ID         providerIDs      `yaml:"id,omitempty"`
@@ -86,8 +90,8 @@ type likenItem struct {
 	Candidates []likenCandidate `yaml:"candidates,omitempty"`
 }
 
-// PROSE: one candidate and its receipt, which says what matched and what did
-// not, so a person chooses without repeating the search.
+// One candidate and its receipt, which says what matched and what did not, so
+// a person chooses without repeating the search.
 type likenCandidate struct {
 	ID      providerIDs       `yaml:"id"`
 	Title   string            `yaml:"title"`
@@ -95,20 +99,21 @@ type likenCandidate struct {
 	Receipt map[string]string `yaml:"receipt,omitempty"`
 }
 
-// PROSE: one attempt: which item, when, and how it ended.
+// One attempt: which item, when, and how it ended.
 type likenAttempt struct {
 	Path   string    `yaml:"path"`
 	At     time.Time `yaml:"at"`
 	Result string    `yaml:"result"`
 }
 
-// PROSE: says why a concern's file is named for the concern itself.
+// A concern's file is named for the concern itself, so the one-file-per-
+// writer rule is the file name.
 func likenLedgerName(concern string) string {
 	return concern + ".yaml"
 }
 
-// PROSE: says why a folder with no .liken directory reads as an empty ledger
-// rather than an error.
+// A folder with no .liken directory reads as an empty ledger and not as an
+// error, because the first write to a folder starts from nothing.
 func readLikenLedger(folder, concern string) (likenLedger, error) {
 	data, err := os.ReadFile(filepath.Join(folder, likenDirectory, likenLedgerName(concern)))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -124,8 +129,9 @@ func readLikenLedger(folder, concern string) (likenLedger, error) {
 	return ledger, nil
 }
 
-// PROSE: says why the whole file is read, changed, and written again, and why
-// that is safe when one writer owns one file.
+// The whole file is read, changed, and written again through the write door.
+// That is safe because one writer owns one file, and the write is a temporary
+// and a rename, so a reader never sees half of it.
 func (w *volumeWriter) updateLikenLedger(folder, concern string, change func(*likenLedger)) error {
 	ledger, err := readLikenLedger(folder, concern)
 	if err != nil {
@@ -139,7 +145,7 @@ func (w *volumeWriter) updateLikenLedger(folder, concern string, change func(*li
 	return w.writeInto(filepath.Join(folder, likenDirectory), likenLedgerName(concern), data)
 }
 
-// PROSE: says why one path holds one attempt, so a file grows with the titles
+// One path holds one attempt, the latest, so a file grows with the titles
 // under a folder and never with the runs over them.
 func (l *likenLedger) noteAttempt(attempt likenAttempt) {
 	for at, held := range l.Attempts {
@@ -151,8 +157,9 @@ func (l *likenLedger) noteAttempt(attempt likenAttempt) {
 	l.Attempts = append(l.Attempts, attempt)
 }
 
-// PROSE: says why one path holds one answer, and why a later answer replaces
-// the one before it.
+// One path holds one answer. A later answer replaces the one before it,
+// because the ledger says what the concern last found and not how it got
+// there.
 func (l *likenLedger) noteItem(item likenItem) {
 	for at, held := range l.Items {
 		if held.Path == item.Path {

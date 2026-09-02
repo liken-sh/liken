@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// PROSE: the ffprobe answer these tests read, which carries a video stream, an
-// audio stream, a subtitle stream, and the container's own duration.
+// The ffprobe answer these tests read, which carries a video stream, an audio
+// stream, a subtitle stream, and the container's own duration.
 const ffprobeOfOneFile = `{
   "streams": [
     {"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"duration":"6540.000000"},
@@ -23,16 +23,16 @@ const ffprobeOfOneFile = `{
   "format": {"duration":"6540.000000"}
 }`
 
-// PROSE: the probe a test hands the container, which answers for every file and
-// never opens one.
+// The probe a test hands the container. It answers for every file and never
+// opens one.
 func answeringProbe(answer string) mediaProbe {
 	return func(context.Context, string) ([]byte, error) {
 		return []byte(answer), nil
 	}
 }
 
-// PROSE: seeds one movie title with one video file that carries no duration,
-// which is the shape of a probe gap.
+// seedProbeGap seeds one movie title with one video file that carries no
+// duration, which is the shape of a probe gap.
 func seedProbeGap(t *testing.T, catalog *Catalog, root, folder, file string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, folder, file), "video")
@@ -336,8 +336,8 @@ func TestASidecarTheEnricherCannotReadFailsTheEdit(t *testing.T) {
 	}
 }
 
-// PROSE: runs the real command against a stand-in on the path, so the one call
-// that starts a process is proved without shipping a media file.
+// Runs the real command against a stand-in on the path, so the one call that
+// starts a process is proved without a media file in the repository.
 func TestTheRealCommandRunsAndAnswers(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "ffprobe"), "#!/bin/sh\necho '{\"format\":{\"duration\":\"1.0\"}}'\n")

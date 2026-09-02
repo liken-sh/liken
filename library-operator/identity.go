@@ -38,9 +38,9 @@ func aliasRowsForItem(library, kind string, providerIDs map[string]string, folde
 	return rows
 }
 
-// PROSE: what one walk read off the volume: the item rows per kind, the file
-// rows and their item links, the alias rows, the attempts the .liken files
-// record, and the two counts the report carries.
+// walkResult is what one walk read off the volume: the item rows per kind,
+// the file rows and their item links, the alias rows, the attempts the .liken
+// files record, and the two counts the report carries.
 type walkResult struct {
 	movies []movieRow
 	// No folder produces a set row. The full walk fills sets after its last
@@ -50,8 +50,8 @@ type walkResult struct {
 	episodes []episodeRow
 	files    []fileRow
 	aliases  []aliasRow
-	// PROSE: says that the volume holds the attempts and the catalog only
-	// derives them, so a folder that left takes its attempts with it.
+	// The volume holds the attempts and the catalog only derives them, so a
+	// folder that left takes its attempts with it.
 	attempts     []attemptRow
 	titles       int
 	unidentified int

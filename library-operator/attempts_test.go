@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// PROSE: the ledger a folder carries in these tests, in the shape the identity
+// The ledger a folder carries in these tests, in the shape the identity
 // concern writes when no rung parted two results.
 const candidatesLedger = `items:
     - path: .

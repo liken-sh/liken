@@ -102,16 +102,19 @@ func topString(top map[string]json.RawMessage, key string) string {
 	return strings.TrimSpace(value)
 }
 
-// PROSE: maps a payload path onto the library root, and says why the scanner
-// and the enrichers both resolve a SCAN_PATH through the one function.
+// resolveWebhookPath maps a payload path onto the library root. The
+// scanner and the enrichers resolve a SCAN_PATH through the one function
+// below, so a folder the webhook named reads the same in every Job of
+// its chain.
 func (s *scanner) resolveWebhookPath(payloadPath string) string {
 	return resolveVolumePath(s.root, payloadPath)
 }
 
-// PROSE: a relative path joins the root; an absolute path is the media
-// server's own, whose prefix no container can know, so the resolver takes the
-// longest suffix of it that exists under the root. Say that a path which maps
-// to nothing returns empty, and that the caller then covers the whole library.
+// resolveVolumePath maps one path onto the root. A relative path joins the
+// root. An absolute path is the media server's own, whose prefix no
+// container can know, so the resolver takes the longest suffix of it that
+// exists under the root. A path that maps to nothing returns empty, and the
+// caller covers the whole library.
 func resolveVolumePath(root, payloadPath string) string {
 	payloadPath = strings.TrimSpace(payloadPath)
 	if payloadPath == "" {

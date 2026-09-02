@@ -62,12 +62,15 @@ const defaultRetryInterval = 30 * 24 * time.Hour
 // A probe gap is a present video file with no duration, which is what a
 // file with no streamdetails in its sidecar looks like in the catalog.
 // An identity gap is an item whose id is its folder key, so no provider
-// named it, with no attempt inside the window or an attempt that ended
-// in an error.
+// named it. Both exclude an item with an attempt inside the window,
+// unless that attempt ended in an error. A probe whose details landed
+// closes its gap through the duration on the next scan, and a probe whose
+// details landed nowhere the scanner reads is tried again after the
+// window.
 var gapQueries = map[string]string{
 	concernProbe: `SELECT path FROM files ` +
-		`WHERE library = ? AND ? >= 0 AND type = 'video' AND present = 1 AND duration_ms = 0 ` +
-		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND concern = 'probe' AND result != 'error')`,
+		`WHERE library = ? AND type = 'video' AND present = 1 AND duration_ms = 0 ` +
+		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND concern = 'probe' AND result != 'error' AND at >= ?)`,
 	concernIdentity: `SELECT id FROM (` +
 		`SELECT library, id FROM movies WHERE id LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id FROM series WHERE id LIKE 'series:path:%') AS items ` +

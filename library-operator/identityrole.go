@@ -1,6 +1,6 @@
 package main
 
-// PROSE: this file is the identity concern's container: what it reads out of
+// identityrole.go is the identity concern's container: what it reads out of
 // the catalog for one gap, and what it writes when the ladder answers.
 
 import (
@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// PROSE: the role's whole program. A container with no key fails before it
-// writes anything, so the Job says what the pod is missing.
+// The role's whole program. A container with no key fails before it writes
+// anything, so the Job says what the pod is missing.
 func runIdentity() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -34,9 +34,9 @@ func runIdentity() {
 	}
 }
 
-// PROSE: says why a catalog read that fails ends the container, and why a
-// provider that refuses one title records an error attempt and the run carries
-// on to the next.
+// A catalog read that fails ends the container, because the gap list is the
+// work. A provider that refuses one title records an error attempt, and the
+// run carries on to the next.
 func (e *enricher) identityGap(ctx context.Context, client *tmdbClient) error {
 	ids, err := e.gaps(ctx, concernIdentity, time.Now().UTC())
 	if err != nil {
@@ -61,8 +61,8 @@ func (e *enricher) identityGap(ctx context.Context, client *tmdbClient) error {
 	return nil
 }
 
-// PROSE: one title: climb the ladder, write the id into the sidecar where the
-// ladder is sure, and record the answer in the ledger either way.
+// One title: climb the ladder, write the id into the sidecar where the ladder
+// is sure, and record the answer in the ledger either way.
 func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item identityItem) {
 	folder := filepath.Join(e.root, item.path)
 	answer, err := climbIdentityLadder(ctx, client, identitySearch{
@@ -88,8 +88,9 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 	}
 }
 
-// PROSE: says why the id goes into the .nfo and the reason into the ledger: the
-// sidecar is what the next scan reads, and the ledger is never the truth.
+// The id goes into the .nfo and the reason into the ledger. The sidecar is
+// what the next scan reads, and what every ecosystem player reads. The ledger
+// is never the truth.
 func (e *enricher) writeIdentity(folder string, item identityItem, answer identityAnswer) {
 	id := strconv.Itoa(answer.id)
 	element := fmt.Appendf(nil, `<uniqueid type="tmdb" default="true">%s</uniqueid>`, id)
@@ -108,7 +109,8 @@ func (e *enricher) writeIdentity(folder string, item identityItem, answer identi
 	}, attemptFound)
 }
 
-// PROSE: says why the item entry and the attempt are one write of one file.
+// The item entry and the attempt are one write of one file, so a reader never
+// sees an answer without its attempt.
 func (e *enricher) recordIdentity(folder string, entry *likenItem, result string) {
 	err := e.writer.updateLikenLedger(folder, concernIdentity, func(ledger *likenLedger) {
 		if entry != nil {
@@ -121,7 +123,8 @@ func (e *enricher) recordIdentity(folder string, entry *likenItem, result string
 	}
 }
 
-// PROSE: says which sidecar carries a title's id.
+// Which sidecar carries a title's id: tvshow.nfo for a series, movie.nfo for
+// a movie.
 func identitySidecar(kind, folder string) (string, string) {
 	if kind == libraryKindSeries {
 		return filepath.Join(folder, seriesSidecarName), nfoRootSeries
@@ -129,8 +132,8 @@ func identitySidecar(kind, folder string) (string, string) {
 	return filepath.Join(folder, movieSidecarName), nfoRootMovie
 }
 
-// PROSE: says why the runtime comes off the sidecar where the catalog has none:
-// the probe container wrote it in this same Job, and no scan has read it yet.
+// The runtime comes off the sidecar where the catalog has none, because the
+// probe container wrote it in this same Job and no scan has read it yet.
 func (e *enricher) runtimeOf(item identityItem, folder string) time.Duration {
 	if item.duration > 0 {
 		return time.Duration(item.duration) * time.Second
@@ -149,7 +152,7 @@ func (e *enricher) runtimeOf(item identityItem, folder string) time.Duration {
 	return time.Duration(meta.Duration) * time.Second
 }
 
-// PROSE: what the identity concern reads for one gap: where the title sits, the
+// What the identity concern reads for one gap: where the title sits, the
 // clues its name gave, and the runtime the catalog holds.
 type identityItem struct {
 	id       string
@@ -159,8 +162,9 @@ type identityItem struct {
 	duration int64
 }
 
-// PROSE: says why the item table follows the id's own scope, and why a row that
-// left between the gap read and this one is skipped rather than an error.
+// The item table follows the id's own scope, movie or series. A row that left
+// between the gap read and this one is skipped and not an error, because a
+// folder may move while a Job runs.
 func (c *Catalog) identityItem(ctx context.Context, library, id string) (identityItem, bool, error) {
 	table := "movies"
 	if !isMovieID(id) {

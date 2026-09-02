@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// PROSE: the one time every ledger test writes, so the files a test compares
-// read the same on every run.
+// The one time every ledger test writes, so the files a test compares read
+// the same on every run.
 var ledgerTime = time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC)
 
 func TestAFolderWithNoLikenDirectoryReadsAsAnEmptyLedger(t *testing.T) {

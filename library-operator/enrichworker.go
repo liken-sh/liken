@@ -1,6 +1,6 @@
 package main
 
-// PROSE: this file is what the probe and identity containers share: the
+// enrichworker.go is what the probe and identity containers share: the
 // environment they read, the gap query they work from, and where each of them
 // records what it did.
 
@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-// PROSE: one enricher container: the Library it serves, the volume it writes,
-// and the catalog it reads its gap out of.
+// One enricher container: the Library it serves, the volume it writes, and
+// the catalog it reads its gap out of.
 type enricher struct {
 	library  string
 	kind     string
@@ -27,13 +27,13 @@ type enricher struct {
 	catalog  *Catalog
 	writer   *volumeWriter
 	log      io.Writer
-	// PROSE: the folder this Job was narrowed to, relative to the library
-	// root, and empty where the Job covers the whole library.
+	// The folder this Job was narrowed to, relative to the library root, and
+	// empty where the Job covers the whole library.
 	scope string
 }
 
-// PROSE: says why a container with no API credential learns everything from
-// its environment, as the scanner does.
+// A container with no API credential learns everything from its environment,
+// as the scanner does.
 func newEnricher(log io.Writer) *enricher {
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
@@ -62,8 +62,8 @@ func newEnricher(log io.Writer) *enricher {
 	return work
 }
 
-// PROSE: says why a Job that names a folder the volume does not hold covers
-// the whole library rather than nothing.
+// A Job that names a folder the volume does not hold covers the whole library
+// and not nothing, because a folder that moved still has gaps somewhere.
 func (e *enricher) narrowedScope() string {
 	if e.scanPath == "" {
 		return ""
@@ -76,7 +76,8 @@ func (e *enricher) narrowedScope() string {
 	return relativePath(e.root, absolute)
 }
 
-// PROSE: says how a narrowed Job tells a path it owns from one it does not.
+// How a narrowed Job tells a path it owns from one it does not: the path is
+// the scope or sits under it.
 func (e *enricher) inScope(relative string) bool {
 	if e.scope == "" || e.scope == "." {
 		return true
@@ -84,8 +85,8 @@ func (e *enricher) inScope(relative string) bool {
 	return relative == e.scope || strings.HasPrefix(relative, e.scope+string(filepath.Separator))
 }
 
-// PROSE: reads one concern's work list out of the local copy of the catalog,
-// which is the same query the reporter counts the gap with.
+// Reads one concern's work list out of the local copy of the catalog, with
+// the same query the reporter counts the gap with.
 func (e *enricher) gaps(ctx context.Context, concern string, now time.Time) ([]string, error) {
 	cutoff := now.Add(-defaultRetryInterval).Unix()
 	keys, err := e.catalog.queryStrings(ctx, gapQueries[concern], []any{e.library, cutoff})
@@ -95,9 +96,10 @@ func (e *enricher) gaps(ctx context.Context, concern string, now time.Time) ([]s
 	return keys, nil
 }
 
-// PROSE: says why the probe container writes the started mark for the whole
-// Job: it is the first container, and the operator reads a run in flight off a
-// start with no finish beside it.
+// The probe container writes the started mark for the whole Job. It is the
+// first container to run, and the operator reads a run in flight off a start
+// with no finish beside it. Only the last container would leave the Job
+// looking idle until the end.
 func (e *enricher) markRunStarted(ctx context.Context) error {
 	run := libraryRun{Worker: workerEnrich, Job: e.job, Started: time.Now().UTC()}
 	if err := e.catalog.UpsertRun(ctx, e.library, run); err != nil {
@@ -106,8 +108,10 @@ func (e *enricher) markRunStarted(ctx context.Context) error {
 	return nil
 }
 
-// PROSE: says why an attempt is recorded whatever the outcome, and why the
-// entry path is relative to the folder that holds the .liken directory.
+// An attempt is recorded whatever the outcome, so a miss is a fact with a
+// date and never a hole a concern falls into every run. The entry path is
+// relative to the folder that holds the .liken directory, which is how the
+// scanner keys it.
 func (e *enricher) recordAttempt(folder, concern, entryPath, result string, at time.Time) {
 	err := e.writer.updateLikenLedger(folder, concern, func(ledger *likenLedger) {
 		ledger.noteAttempt(likenAttempt{Path: entryPath, At: at, Result: result})
@@ -124,9 +128,9 @@ func (e *enricher) logf(format string, args ...any) {
 	fmt.Fprintf(e.log, "library.liken.sh: "+format+"\n", args...)
 }
 
-// PROSE: names the folder whose .liken directory records a file concern's
-// attempt: the folder the walk reads a sidecar from, which is the title folder
-// where the file sits in a movie's extras.
+// The folder whose .liken directory records a file concern's attempt: the
+// folder the walk reads a sidecar from, which is the title folder even where
+// the file sits in a movie's extras.
 func likenFolderFor(kind, absolute string) (string, string) {
 	dir := filepath.Dir(absolute)
 	if kind == libraryKindMovies && extrasFolderName(filepath.Base(dir)) != "" {

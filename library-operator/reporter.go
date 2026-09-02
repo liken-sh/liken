@@ -298,10 +298,13 @@ func (r *reporter) publishLibrary(ctx context.Context, library string) {
 	r.bus.Publish(libraryStatusTopic(r.topicBase, namespace, name), payload, true)
 }
 
-// PROSE: reads one library's counts, runs, and gaps. Say that the scan run is
-// what states the last walk, the unidentified count, the prune's own count,
-// and whether a walk runs now, and that the gaps come from the same queries
-// the enricher containers work from.
+// buildReport reads one library's counts, runs, and gaps. The scan run is
+// what says when the volume was last walked, how many folders the walk
+// could not identify, how many rows its prune took, and whether a walk
+// runs now, which is a scan run that started after it last finished. The
+// gaps come from the same queries the enricher containers work from, so
+// the count the operator schedules on is the count of rows a container
+// finds.
 func (r *reporter) buildReport(ctx context.Context, library string) (libraryReport, error) {
 	runs, err := r.catalog.Runs(ctx)
 	if err != nil {

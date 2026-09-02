@@ -135,11 +135,15 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	}
 }
 
-// PROSE: reads a folder's identity from movie.nfo where there is one, and from
-// the folder name where there is none. Say that a name is identified when it
-// yields a year or a provider id, that a name's provider ids fill what the
-// sidecar left out, and that a sidecar the scanner cannot read is an error
-// because falling through would mint a different id.
+// movieIdentity reads a folder's identity. A readable movie.nfo with a title
+// is the identity, and the folder is identified. A folder with no usable
+// sidecar falls back to the name parse, and it is identified only when the
+// name yields a year or a provider id, the signal that the parse read a real
+// release and not an arbitrary folder. A name's provider ids fill what the
+// sidecar left out, so a person confirms a candidate by naming the folder in
+// Jellyfin's form. A sidecar that is not there falls through to the name
+// parse. A sidecar the scanner cannot read is an error, because falling
+// through would mint a different id and sweep the title's own rows.
 func movieIdentity(dir, name string) (movieMeta, bool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "movie.nfo"))
 	switch {

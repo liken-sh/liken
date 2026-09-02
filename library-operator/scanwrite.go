@@ -24,8 +24,8 @@ func flushWalk(ctx context.Context, catalog *Catalog, result *walkResult, epoch 
 	return err
 }
 
-// PROSE: writes every row a walk produced: the items, the files and their item
-// links, the aliases, and the attempts read out of the .liken files.
+// upsertWalk writes every row a walk produced: the items, the files and their
+// item links, the aliases, and the attempts read out of the .liken files.
 func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) error {
 	steps := []func() (int, error){
 		func() (int, error) { return catalog.UpsertMovies(ctx, result.movies) },

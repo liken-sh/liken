@@ -64,8 +64,8 @@ const (
 	seenFile  = "file:"
 	seenAlias = "alias:"
 	seenLink  = "link:"
-	// PROSE: says why an attempt has a key space of its own, and that its key
-	// is the item and the concern joined.
+	// An attempt has a key space of its own, and its key is the item and the
+	// concern joined, so a mark on an attempt never touches an item.
 	seenAttempt = "attempt:"
 )
 
@@ -376,9 +376,9 @@ func pathScopeParams(folder string) []any {
 func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, epoch int64) (int, error) {
 	removed := 0
 
-	// PROSE: says why the alias and attempt sweeps run before the item
-	// sweeps: each of them scopes itself through the item it names, so those
-	// item rows must still stand when these sweeps read them.
+	// The alias and attempt sweeps run before the item sweeps. Each of them
+	// scopes itself through the item it names, so those item rows must still
+	// stand when these sweeps read them.
 	n, err := catalog.sweep(ctx, scopedAliasPruneSQL(), scopedAliasPruneParams(library, folder, epoch),
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteAliases(ctx, library, keys)

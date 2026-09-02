@@ -1,7 +1,9 @@
 package main
 
-// PROSE: this file is the probe concern: the one container that opens a video
-// file, and why the answer goes into the .nfo rather than the catalog alone.
+// probe.go is the probe concern: the one container that opens a video file.
+// The answer goes into the .nfo and not into the catalog alone, because the
+// volume holds the truth. A rebuilt catalog reads the sidecar and probes
+// nothing.
 
 import (
 	"context"
@@ -20,16 +22,16 @@ import (
 	"time"
 )
 
-// PROSE: bounds one file, so a file the kernel will not answer for cannot hold
-// the container open.
+// One file's bound, so a file the kernel will not answer for cannot hold the
+// container open.
 var ffprobeTimeout = time.Minute
 
-// PROSE: one read of one file's container, which a test replaces with an
-// answer of its own.
+// One read of one file's container, which a test replaces with an answer of
+// its own.
 type mediaProbe func(ctx context.Context, path string) ([]byte, error)
 
-// PROSE: the role's whole program. A failure is a non-zero exit, so the Job
-// fails and Kubernetes retries it.
+// The role's whole program. A failure is a non-zero exit, so the Job fails
+// and Kubernetes retries it.
 func runProbe() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -42,8 +44,9 @@ func runProbe() {
 	}
 }
 
-// PROSE: says why a catalog read that fails ends the container, and why a file
-// that will not open records an error attempt and the run carries on.
+// A catalog read that fails ends the container, because the gap list is the
+// work and there is nothing to do without it. A file that will not open
+// records an error attempt, and the run carries on to the next file.
 func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 	if err := e.markRunStarted(ctx); err != nil {
 		return err
@@ -67,8 +70,8 @@ func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 	return nil
 }
 
-// PROSE: one file: read it, write its stream details into the sidecar the
-// scanner reads them from, and record what happened either way.
+// One file: read it, write its stream details into the sidecar the scanner
+// reads them from, and record what happened either way.
 func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) {
 	absolute := filepath.Join(e.root, path)
 	result := attemptFound
@@ -80,8 +83,9 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 	e.recordAttempt(folder, concernProbe, entry, result, time.Now().UTC())
 }
 
-// PROSE: says why the answer is one surgical edit of the sidecar, and why a
-// file with no sidecar gets a minimal one.
+// The answer is one surgical edit of the sidecar, so every other element the
+// sidecar holds stays as it was. A file with no sidecar gets a minimal one,
+// and the later concerns edit that same file.
 func (e *enricher) writeStreamDetails(ctx context.Context, probe mediaProbe, absolute string) error {
 	output, err := probe(ctx, absolute)
 	if err != nil {
@@ -99,8 +103,8 @@ func (e *enricher) writeStreamDetails(ctx context.Context, probe mediaProbe, abs
 	return e.writer.editNFO(sidecar, rootElement, title, xmlElement{name: "fileinfo"}, element)
 }
 
-// PROSE: the sidecar names and the root elements the scanner reads a title's,
-// a series', and an episode's facts from.
+// The sidecar names and the root elements the scanner reads a title's, a
+// series', and an episode's facts from.
 const (
 	movieSidecarName  = "movie.nfo"
 	seriesSidecarName = "tvshow.nfo"
@@ -109,9 +113,10 @@ const (
 	nfoRootEpisode    = "episodedetails"
 )
 
-// PROSE: says which sidecar carries a file's stream details: the title's own
-// for the first video of a movie folder, and the file's own for every other
-// video, which is where the scanner reads each of them from.
+// Which sidecar carries a file's stream details: the title's own for the
+// first video of a movie folder, and the file's own for every other video.
+// That is where the scanner reads each of them from, so a trailer's details
+// never land in movie.nfo.
 func probeSidecar(kind, absolute string) (string, string, string) {
 	dir, name := filepath.Dir(absolute), filepath.Base(absolute)
 	rootElement := nfoRootEpisode
@@ -131,8 +136,8 @@ func sidecarBeside(absolute string) string {
 	return strings.TrimSuffix(absolute, filepath.Ext(absolute)) + metadataExtension
 }
 
-// PROSE: says why the smallest document a reader accepts is enough, and that
-// every later concern edits this same file.
+// The smallest document a reader accepts: the root element and a title. Every
+// later concern edits this same file.
 func minimalNFO(rootElement, title string) []byte {
 	var escaped strings.Builder
 	_ = xml.EscapeText(&escaped, []byte(title))
@@ -140,8 +145,8 @@ func minimalNFO(rootElement, title string) []byte {
 		rootElement, escaped.String(), rootElement)
 }
 
-// PROSE: the ffprobe answer this container reads, which is the container's own
-// facts and one entry per stream.
+// The ffprobe answer this container reads: the container's own facts and one
+// entry per stream.
 type ffprobeAnswer struct {
 	Streams []ffprobeStream `json:"streams"`
 	Format  ffprobeFormat   `json:"format"`
@@ -165,8 +170,8 @@ type ffprobeTags struct {
 	Language string `json:"language"`
 }
 
-// PROSE: the streamdetails block, in the shape nfo.go reads and Kodi and
-// Jellyfin both write.
+// The streamdetails block, in the shape nfo.go reads and Kodi and Jellyfin
+// both write.
 type nfoFileInfoElement struct {
 	XMLName       xml.Name             `xml:"fileinfo"`
 	StreamDetails nfoStreamDetailsBody `xml:"streamdetails"`
@@ -195,8 +200,10 @@ type nfoSubtitleElement struct {
 	Language string `xml:"language,omitempty"`
 }
 
-// PROSE: says why the container's duration wins over a stream's, and why every
-// video, audio, and subtitle stream is written and not the first of each.
+// The container's duration wins over a stream's, because it is the length of
+// the file as a player sees it. Every video, audio, and subtitle stream is
+// written, not the first of each, because a second audio track is a fact a
+// person looks for.
 func (a ffprobeAnswer) fileInfo() nfoFileInfoElement {
 	var details nfoStreamDetailsBody
 	seconds := probeSeconds(a.Format.Duration)
@@ -221,8 +228,8 @@ func (a ffprobeAnswer) fileInfo() nfoFileInfoElement {
 	return nfoFileInfoElement{StreamDetails: details}
 }
 
-// PROSE: says why a duration ffprobe states as a decimal string reads as whole
-// seconds, which is what the sidecar carries.
+// A duration ffprobe states as a decimal string reads as whole seconds, which
+// is what the sidecar carries.
 func probeSeconds(value string) int {
 	seconds, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
 	if err != nil || seconds <= 0 {
@@ -231,7 +238,8 @@ func probeSeconds(value string) int {
 	return int(seconds + 0.5)
 }
 
-// PROSE: the one call that opens a file, and why the timeout is per file.
+// The one call that opens a file. The timeout is per file, so one file that
+// hangs costs its own minute and no more.
 func ffprobeFile(ctx context.Context, path string) ([]byte, error) {
 	timed, cancel := context.WithTimeout(ctx, ffprobeTimeout)
 	defer cancel()
@@ -245,8 +253,10 @@ func ffprobeFile(ctx context.Context, path string) ([]byte, error) {
 	return output, nil
 }
 
-// PROSE: says why an absent sidecar becomes a minimal one rather than an
-// error, and why the edit never rewrites the document it read.
+// An absent sidecar becomes a minimal one and not an error, because the
+// sidecar-less title is the case this concern exists for. The edit never
+// rewrites the document it read. It replaces one element and keeps every
+// other byte.
 func (w *volumeWriter) editNFO(path, rootElement, title string, element xmlElement, replacement []byte) error {
 	document, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

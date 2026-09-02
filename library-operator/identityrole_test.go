@@ -9,7 +9,8 @@ import (
 	"time"
 )
 
-// PROSE: seeds one title with a path id, which is the shape of an identity gap.
+// seedIdentityGap seeds one title with a path id, which is the shape of an
+// identity gap.
 func seedIdentityGap(t *testing.T, catalog *Catalog, kind, folder, released string, duration int64) {
 	t.Helper()
 	seed := &walkResult{}

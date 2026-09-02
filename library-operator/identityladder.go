@@ -1,7 +1,9 @@
 package main
 
-// PROSE: this file is the identity ladder: the exact tests a title climbs
-// before liken writes an id, and why no rung carries a score.
+// identityladder.go is the identity ladder: the exact tests a title climbs
+// before liken writes an id. No rung carries a score. A score is a number
+// nobody can check, and a reason is a sentence a person reads in the ledger
+// next to the id.
 
 import (
 	"context"
@@ -11,27 +13,28 @@ import (
 	"time"
 )
 
-// PROSE: how far a provider's runtime may sit from the file's and still count
-// as the same work, which the plan leaves for the drill to settle.
+// How far a provider's runtime may sit from the file's and still count as the
+// same work. The plan leaves the number for the drill to settle.
 const runtimeMargin = 5 * time.Minute
 
-// PROSE: the reason an id was written, which the ledger records so a person
-// reads what the answer rested on.
+// The reason an id was written. The ledger records it, so a person reads what
+// the answer rested on.
 const (
 	reasonTitle            = "title"
 	reasonTitleAndYear     = "title and year"
 	reasonTitleAndNearYear = "title and a year on either side"
 )
 
-// PROSE: says why the runtime rung renames the reason it climbed from.
+// The runtime rung adds to the reason it climbed from, so the ledger says
+// every test the answer passed.
 var runtimeReasons = map[string]string{
 	reasonTitle:            "title and runtime",
 	reasonTitleAndYear:     "title, year, and runtime",
 	reasonTitleAndNearYear: "title, a year on either side, and runtime",
 }
 
-// PROSE: what the ladder is asked about: the kind, the clues the name gave,
-// and the runtime the probe measured, which is zero where none was read.
+// What the ladder is asked about: the kind, the clues the name gave, and the
+// runtime the probe measured, which is zero where none was read.
 type identitySearch struct {
 	kind     string
 	title    string
@@ -39,22 +42,25 @@ type identitySearch struct {
 	duration time.Duration
 }
 
-// PROSE: what the ladder answers: an id with the reason for it, or the
-// candidates a person chooses from.
+// What the ladder answers: an id with the reason for it, or the candidates a
+// person chooses from.
 type identityAnswer struct {
 	id         int
 	reason     string
 	candidates []likenCandidate
 }
 
-// PROSE: one result the title test kept, with the runtime where the ladder
-// read it.
+// One result the title test kept, with the runtime where the ladder read it.
 type identityMatch struct {
 	result  tmdbResult
 	runtime time.Duration
 }
 
-// PROSE: the ladder itself, rung by rung, with the reason each rung carries.
+// The ladder itself, rung by rung. A name with no year climbs on the title
+// alone, because such a folder is exactly the sidecar-less case the ladder
+// exists for. One survivor is written with its reason. Several survivors go
+// to the runtime rung when the probe measured one, and anything else is a
+// candidate list.
 func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identitySearch) (identityAnswer, error) {
 	matched, err := searchOnYear(ctx, client, search, search.year)
 	if err != nil {
@@ -87,8 +93,8 @@ func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identit
 	return identityAnswer{candidates: candidatesFrom(matched, search)}, nil
 }
 
-// PROSE: rung one: the title as the provider spells it, or as it was first
-// released, and the year the name carried.
+// Rung one: the title as the provider spells it, or as it was first released,
+// and the year the name carried.
 func searchOnYear(ctx context.Context, client *tmdbClient, search identitySearch, year int) ([]identityMatch, error) {
 	results, err := client.search(ctx, search.kind, search.title, year)
 	if err != nil {
@@ -108,8 +114,9 @@ func searchOnYear(ctx context.Context, client *tmdbClient, search identitySearch
 	return matched, nil
 }
 
-// PROSE: rung three, and why it exists: a December opening abroad carries a
-// different year from the one the release name states.
+// The year on either side, which exists because TMDb states the first release
+// anywhere. A December opening abroad carries a different year from the one
+// the release name states.
 func searchNeighbouringYears(ctx context.Context, client *tmdbClient, search identitySearch) ([]identityMatch, error) {
 	held := map[int]bool{}
 	var matched []identityMatch
@@ -129,8 +136,9 @@ func searchNeighbouringYears(ctx context.Context, client *tmdbClient, search ide
 	return matched, nil
 }
 
-// PROSE: rung four's one call per candidate, which is why the rung runs only
-// where the title and the year left several.
+// The runtime rung costs one call per candidate, because a search result
+// carries no runtime. So the rung runs only where the title and the year left
+// several.
 func readRuntimes(ctx context.Context, client *tmdbClient, kind string, matched []identityMatch) ([]identityMatch, error) {
 	for at, match := range matched {
 		runtime, err := client.runtime(ctx, kind, match.result.ID)
@@ -142,7 +150,8 @@ func readRuntimes(ctx context.Context, client *tmdbClient, kind string, matched 
 	return matched, nil
 }
 
-// PROSE: says why a provider that states no runtime is never kept by this rung.
+// A provider that states no runtime is never kept by this rung, because a
+// missing number is not a match.
 func withinRuntime(matched []identityMatch, duration time.Duration) []identityMatch {
 	var near []identityMatch
 	for _, match := range matched {
@@ -160,8 +169,8 @@ func absDuration(d time.Duration) time.Duration {
 	return d
 }
 
-// PROSE: the receipt on each candidate, which says what matched and what did
-// not, so a person chooses without running the search again.
+// The receipt on each candidate says what matched and what did not, so a
+// person chooses without running the search again.
 func candidatesFrom(matched []identityMatch, search identitySearch) []likenCandidate {
 	candidates := make([]likenCandidate, 0, len(matched))
 	for _, match := range matched {
@@ -197,7 +206,8 @@ func yearReceipt(match identityMatch, search identitySearch) string {
 	}
 }
 
-// PROSE: says why the receipt states the distance and never a score.
+// The receipt states the distance in minutes and never a score, so a person
+// can check it against the file.
 func runtimeReceipt(off time.Duration) string {
 	off = absDuration(off).Round(time.Minute)
 	if off == 0 {
@@ -206,18 +216,18 @@ func runtimeReceipt(off time.Duration) string {
 	return fmt.Sprintf("%d minutes off", int(off.Minutes()))
 }
 
-// PROSE: the articles the normalization drops, because a provider and a
-// release name disagree about them.
+// The articles the normalization drops, because a provider and a release name
+// disagree about them.
 var titleArticles = map[string]bool{"the": true, "a": true, "an": true}
 
-// PROSE: the roman numerals a sequel carries, and why the numeral one is not
-// among them.
+// The roman numerals a sequel carries. The numeral one is not among them,
+// because a title ending in I is a word more often than a number.
 var romanNumerals = map[string]int{
 	"ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7,
 	"viii": 8, "ix": 9, "x": 10, "xi": 11, "xii": 12, "xiii": 13,
 }
 
-// PROSE: the one normalization both sides of a title test run through: case,
+// The one normalization both sides of a title test run through: case,
 // accents, punctuation, the leading article, and the roman numerals.
 func normalizeTitle(title string) string {
 	var folded strings.Builder

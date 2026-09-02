@@ -95,8 +95,8 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 	// each of a season folder's files belongs to.
 	episodesByDirectory := map[string]map[string][]string{}
 	videosByDirectory := map[string]map[string]bool{}
-	// PROSE: says why a season folder's .liken entries key on the episode
-	// file's own name, which is the item's path relative to that folder.
+	// A season folder's .liken entries key on the episode file's own name, which
+	// is the item's path relative to that folder.
 	itemsByDirectory := map[string]map[string]string{}
 	episodeFiles, err := collectEpisodeFiles(dir, ignore)
 	result.noteReadError(err)
@@ -169,8 +169,11 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, epis
 	}
 }
 
-// PROSE: reads a series folder's identity, the same ladder movieIdentity
-// follows over tvshow.nfo and the folder name.
+// seriesIdentity reads a series folder's identity, the same ladder the movies
+// walk uses: a readable tvshow.nfo with a title, or the folder name,
+// identified when the name yields a year or a provider id. The sidecar read
+// answers the way movieIdentity's does: an absent sidecar falls through to
+// the name, and a sidecar the scanner cannot read is an error.
 func seriesIdentity(dir, name string) (seriesMeta, bool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "tvshow.nfo"))
 	switch {

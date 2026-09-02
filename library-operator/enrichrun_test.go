@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// PROSE: builds the enricher Job's closing container over the test broker and
-// one catalog, so the runs row and the echo both travel a real connection.
+// enrichJob builds the enricher Job's closing container over the test broker
+// and one catalog, so the runs row and the echo both travel a real
+// connection.
 func enrichJob(t *testing.T, catalog *Catalog) (*enrichRun, <-chan *fakeBroker) {
 	t.Helper()
 	address, accepted := testBroker(t)
@@ -125,7 +126,7 @@ func TestAnEnrichJobReadsItsTopicOutOfTheEnvironment(t *testing.T) {
 	}
 }
 
-// PROSE: reads the one runs row the catalog holds, so a test names the worker
+// oneRun reads the one runs row the catalog holds, so a test names the worker
 // and the Job without a query of its own.
 func oneRun(t *testing.T, agent *sqliteAgent) (string, string, int64) {
 	t.Helper()
