@@ -463,16 +463,15 @@ func TestReconcileIdleBuildsNothingWhenTheClassIsUnset(t *testing.T) {
 	}
 }
 
-// the idle command pod carries the resolved quiet window and the
-// two remote lists, one per line and aligned by position, so it pairs
-// each controller's presses with the keymap that names them.
+// The idle command pod carries the resolved quiet window and the two
+// remote lists, one per line and aligned by position, so it pairs each
+// controller's presses with the mark that gates them.
 func TestBuildIdleCommandPodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 	player := standingIdlePlayer()
 	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
 	remotes := []idleRemoteTopics{
 		{
 			Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
-			Keymap: keymapTopic(testTopicBase, "gamepad"),
 			Focus:  remoteFocusTopic(testTopicBase, "house", "sofa"),
 		},
 		{
@@ -487,7 +486,6 @@ func TestBuildIdleCommandPodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 	mustMatch(t, env[idleFadeAfterSecondsVariable], "60")
 	mustMatch(t, env[idleRemoteEventsTopicsVariable],
 		"liken/media/remotes/house/sofa/events\nliken/media/remotes/house/armchair/events")
-	mustMatch(t, env[idleRemoteKeymapTopicsVariable], "liken/media/keymaps/gamepad\n")
 	mustMatch(t, env[idleRemoteFocusTopicsVariable],
 		"liken/media/remotes/house/sofa/focus\nliken/media/remotes/house/armchair/focus")
 }
@@ -534,35 +532,26 @@ func TestBuildIdleCommandPodOmitsTheRemoteListsWithoutRemotes(t *testing.T) {
 	if _, carried := env[idleRemoteEventsTopicsVariable]; carried {
 		t.Errorf("%s = %q, want none", idleRemoteEventsTopicsVariable, env[idleRemoteEventsTopicsVariable])
 	}
-	if _, carried := env[idleRemoteKeymapTopicsVariable]; carried {
-		t.Errorf("%s = %q, want none", idleRemoteKeymapTopicsVariable, env[idleRemoteKeymapTopicsVariable])
-	}
 	if _, carried := env[idleRemoteFocusTopicsVariable]; carried {
 		t.Errorf("%s = %q, want none", idleRemoteFocusTopicsVariable, env[idleRemoteFocusTopicsVariable])
 	}
 }
 
-// The gather reads spec.remotes in spec order and resolves each keymap the
-// way a Play does: the Player entry's own override, or the Remote's base
-// keymap.
-func TestGatherIdleRemotesResolvesEachKeymap(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.remotes["sofa"] = houseRemote("gamepad")
-	media := testOperator(t, cluster, make(chan struct{}, 1))
+// The gather reads spec.remotes in spec order and builds each
+// controller's two topics, so the pod pairs them by position.
+func TestGatherIdleRemotesBuildsEachControllersTopics(t *testing.T) {
 	player := standingIdlePlayer()
-	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair", Keymap: "pad"}}
+	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
 
-	remotes := gatherIdleRemotes(media.client, player, testTopicBase)
+	remotes := gatherIdleRemotes(player, testTopicBase)
 
 	want := []idleRemoteTopics{
 		{
 			Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
-			Keymap: keymapTopic(testTopicBase, "gamepad"),
 			Focus:  remoteFocusTopic(testTopicBase, "house", "sofa"),
 		},
 		{
 			Events: remoteEventsTopic(testTopicBase, "house", "armchair"),
-			Keymap: keymapTopic(testTopicBase, "pad"),
 			Focus:  remoteFocusTopic(testTopicBase, "house", "armchair"),
 		},
 	}
@@ -571,20 +560,18 @@ func TestGatherIdleRemotesResolvesEachKeymap(t *testing.T) {
 	}
 }
 
-// A Remote a Player names that does not exist leaves that controller with
-// no keymap. Its presses still wake the screen, and they name no action, so
-// a missing object dims nothing and breaks nothing.
-func TestGatherIdleRemotesLeavesAMissingRemoteWithoutAKeymap(t *testing.T) {
-	cluster := newFakeCluster()
-	media := testOperator(t, cluster, make(chan struct{}, 1))
+// A Remote a Player names that does not exist still gets its topics, so
+// a missing object breaks nothing: the controller that is not there
+// publishes nothing on them.
+func TestGatherIdleRemotesBuildsTopicsForAMissingRemote(t *testing.T) {
 	player := standingIdlePlayer()
-	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}}
+	player.Spec.Remotes = []PlayerRemote{{Name: "ghost"}}
 
-	remotes := gatherIdleRemotes(media.client, player, testTopicBase)
+	remotes := gatherIdleRemotes(player, testTopicBase)
 
 	want := []idleRemoteTopics{{
-		Events: remoteEventsTopic(testTopicBase, "house", "sofa"),
-		Focus:  remoteFocusTopic(testTopicBase, "house", "sofa"),
+		Events: remoteEventsTopic(testTopicBase, "house", "ghost"),
+		Focus:  remoteFocusTopic(testTopicBase, "house", "ghost"),
 	}}
 	if !reflect.DeepEqual(remotes, want) {
 		t.Errorf("remotes = %+v, want %+v", remotes, want)

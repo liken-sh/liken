@@ -121,7 +121,6 @@ The controllers this unit owns, each naming a Remote in the same namespace. The 
 | --- | --- | --- | --- |
 | <span id="specremotes--name"></span>`name` | string | yes | The Remote this unit owns, by name, in this namespace. |
 | <span id="specremotes--displayname"></span>`displayName` | string | no | The human name of this controller, the one the idle screen shows in its parts list, such as Studio Dualsense Controller. Omit it, and the idle screen falls back to name. |
-| <span id="specremotes--keymap"></span>`keymap` | string | no | A per-unit Keymap override for this controller on this unit, by name. Set it, and this controller maps this way here and its Remote's own way elsewhere. Empty, the unit reads the Remote's own Keymap. |
 
 ### spec.idle
 
@@ -244,9 +243,10 @@ message:
 
     {"event": "focus", "remote": 1}
 
-The sidecar holds the quiet window, the keymaps, and the focus gate,
-and these four moments are what it decides. The idle client reads
-them and draws them, whichever client
+The sidecar holds the quiet window and the focus gate, reads key
+names off the `Remote`s' events topics with its own table of what
+each key means there, and these four moments are what it decides.
+The idle client reads them and draws them, whichever client
 [`spec.idle.image`](#specidle--image) named.
 
 | `event` | What it says |
@@ -273,21 +273,23 @@ The display commands around the `Player`'s idle screen. None is
 retained, because each is an event and not a state, and a controller
 sends none of them directly.
 
-| `action` | Writer | What it says |
+| Message | Writer | What it says |
 |---|---|---|
-| `re-present` | the operator | A `Play` ended. The idle command pod states the `present` moment on [`screen`](#screen), and the idle client maps a fresh surface. |
-| `up`, `down`, `left`, `right`, `select`, `back` | the idle command pod | One navigation press, forwarded under a delegate controller for the delegate's client to answer. |
-| `sleep` | a delegate's client | Back had no level left to climb. The idle command pod brings the shade down. |
+| `{"action": "re-present"}` | the operator | A `Play` ended. The idle command pod states the `present` moment on [`screen`](#screen), and the idle client maps a fresh surface. |
+| `{"key": "KEY_UP", "value": 1}` | the idle command pod | One navigation key, forwarded under a delegate controller for the delegate's client to answer. |
+| `{"action": "sleep"}` | a delegate's client | Back had no level left to climb. The idle command pod brings the shade down. |
 
-The presses arrive as `{"action": "up"}` and the like, the shape a
-[Play's commands topic](/docs/reference/plays/#commands) carries, so a
-client reads one vocabulary on both trees. They are forwarded only
-under a delegate controller, and only through the gates every other
-press reads: the unit plays nothing, the remote's mark names this
-`Player`, the press is a down edge, and the screen is awake. A binding
-whose `Keymap` repeats it is published again while the control is
-held. Under `media.liken.sh/idle-screen` no press is forwarded, and
-back is sleep.
+A forwarded key is the same JSON the `Remote`'s events topic carried,
+so a client reads the kernel's name for the control and holds its own
+table. The forwarded keys are the four arrows, `KEY_ENTER`, `KEY_OK`,
+`KEY_SELECT`, and `KEY_KPENTER`, and `KEY_BACK`, `KEY_ESC`, and
+`KEY_EXIT`. They are forwarded only under a delegate controller, and
+only through the gates every other press reads: the unit plays
+nothing, the remote's mark names this `Player`, and the screen is
+awake. A press arrives as value 1, and a held control arrives again as
+value 2. A release, value 0, is never forwarded. Under
+`media.liken.sh/idle-screen` no key is forwarded, and `KEY_BACK`,
+`KEY_ESC`, and `KEY_EXIT` bring the shade down.
 
 The `sleep` request acts while the unit plays nothing and the screen
 is awake, and it brings the shade down exactly as the operator's own

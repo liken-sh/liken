@@ -22,7 +22,7 @@ type panelPublish struct {
 type panelSetup struct {
 	fade    time.Duration
 	off     time.Duration
-	remotes map[string]string
+	remotes []string
 }
 
 // panelCommander builds one idle command pod with both windows in
@@ -73,10 +73,10 @@ func TestIdlePanelStatesTheOffDesireAtTheOffWindow(t *testing.T) {
 // A press states the on desire, and the operator lifts the override
 // the off desire put on the screen's Display.
 func TestIdlePanelStatesTheOnDesireOnAPress(t *testing.T) {
-	events, _ := fadeTopics()
+	events := fadeTopics()
 	ic, watch := panelCommander(t, panelSetup{
 		fade: 20 * time.Millisecond, off: 320 * time.Millisecond,
-		remotes: map[string]string{events: ""},
+		remotes: []string{events},
 	})
 
 	sendActivity(t, ic, playerIdle)
@@ -156,10 +156,10 @@ func TestIdlePanelWaitsForTheFade(t *testing.T) {
 // was 50ms from running out at the press, and the read allows twice
 // that.
 func TestIdlePanelAPressBeforeTheWindowKeepsThePanelLit(t *testing.T) {
-	events, _ := fadeTopics()
+	events := fadeTopics()
 	ic, watch := panelCommander(t, panelSetup{
 		fade: 20 * time.Millisecond, off: 220 * time.Millisecond,
-		remotes: map[string]string{events: ""},
+		remotes: []string{events},
 	})
 
 	sendActivity(t, ic, playerIdle)

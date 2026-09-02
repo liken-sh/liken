@@ -58,9 +58,10 @@ func TestIdleCommandARePresentStatesNothingWhileAPlayRuns(t *testing.T) {
 	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// The idle screen list arrives as one variable holding a line per entry.
-// An unset variable is no lines at all, not one empty line.
-func TestSplitIdleLines(t *testing.T) {
+// An unset variable is no lines at all, not one empty line, and a
+// blank line is kept, because the events list and the focus list stay
+// aligned by position.
+func TestTheIdlePodReadsItsTopicListsALinePerEntry(t *testing.T) {
 	cases := []struct {
 		name  string
 		value string
@@ -68,11 +69,12 @@ func TestSplitIdleLines(t *testing.T) {
 	}{
 		{name: "two lines", value: "first\nsecond", lines: []string{"first", "second"}},
 		{name: "one line", value: "first", lines: []string{"first"}},
+		{name: "a controller with no focus topic", value: "first\n", lines: []string{"first", ""}},
 		{name: "the variable is unset", lines: nil},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			mustMatchAll(t, splitIdleLines(each.value), each.lines)
+			mustMatchAll(t, splitTopicLines(each.value), each.lines)
 		})
 	}
 }

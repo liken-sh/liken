@@ -225,7 +225,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		panelFaults:           map[string]string{},
 		volumes:               newVolumeDesk(),
 		positionWrites:        map[string]time.Time{},
-		keymapPublished:       map[string]string{},
+		keysPublished:         map[string]string{},
 		playerStatusPublished: map[string]string{},
 		playReclaim:           map[string]time.Time{},
 		recreateBackoff:       map[string]backoffState{},
@@ -730,7 +730,7 @@ func housePlayerWithRemote() *Player {
 }
 
 // A bound Remote reconciles into its own standing pod, and the playback
-// pod's translator sidecar names the same events topic the standing pod
+// pod's command sidecar names the same events topic the standing pod
 // publishes to, so the two meet on the bus.
 func TestAPassWiresABoundRemote(t *testing.T) {
 	cluster := newFakeCluster()
@@ -755,23 +755,55 @@ func TestAPassWiresABoundRemote(t *testing.T) {
 		t.Errorf("no standing remote claim was created: %v", cluster.requests)
 	}
 
-	// The playback pod's translator sidecar carries the remote's events,
-	// keymap, and focus topics, so it subscribes to what the standing pod
-	// publishes and to the retained keymap.
+	// The playback pod's command sidecar carries the remote's events and
+	// focus topics, so it reads what the standing pod publishes and gates
+	// on the mark the operator writes.
 	playback, held := cluster.pods["movie-playback"]
 	if !held {
 		t.Fatalf("no playback pod was created: %v", cluster.requests)
 	}
-	translator := initContainer(t, playback, "translate-sofa")
-	if got, want := envValue(translator, remoteEventsVariable), remoteEventsTopic(defaultTopicBase, "house", "sofa"); got != want {
-		t.Errorf("events topic = %q, want %q", got, want)
-	}
-	if got, want := envValue(translator, keymapTopicVariable), keymapTopic(defaultTopicBase, "gamepad"); got != want {
-		t.Errorf("keymap topic = %q, want %q", got, want)
-	}
-	if got, want := envValue(translator, focusTopicVariable), remoteFocusTopic(defaultTopicBase, "house", "sofa"); got != want {
-		t.Errorf("focus topic = %q, want %q", got, want)
-	}
+	command := initContainer(t, playback, commandContainer)
+	mustMatch(t, envValue(command, remoteEventsTopicsVariable),
+		remoteEventsTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, envValue(command, remoteFocusTopicsVariable),
+		remoteFocusTopic(defaultTopicBase, "house", "sofa"))
+}
+
+// The operator publishes each Remote's compiled table on that Remote's
+// own keys topic, retained, so the standing pod reads it the instant it
+// connects.
+func TestAPassPublishesEachRemotesKeyTable(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	topic := remoteKeysTopic(defaultTopicBase, "house", "sofa")
+	published, held := media.keysPublished[topic]
+	mustMatch(t, held, true)
+	var table []compiledBinding
+	mustSucceed(t, json.Unmarshal([]byte(published), &table))
+	mustMatch(t, len(table), len(baseKeys)+2)
+	mustMatch(t, table[0], compiledBinding{EventType: evKey, Code: 0x130, Value: 1, Key: "KEY_PLAYPAUSE"})
+}
+
+// A Remote that is gone leaves no retained table behind: the pass
+// clears the topic it wrote.
+func TestAPassClearsTheKeyTableOfADepartedRemote(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.players["theater"] = housePlayerWithRemote()
+	cluster.remotes["sofa"] = houseRemote("gamepad")
+	cluster.keymaps["gamepad"] = testKeymap()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.pass()
+
+	delete(cluster.remotes, "sofa")
+	media.pass()
+
+	mustMatch(t, len(media.keysPublished), 0)
 }
 
 // A pass writes the focused Player onto the Remote's status, so
@@ -806,23 +838,25 @@ func TestAPassSkipsAnUnchangedRemoteStatus(t *testing.T) {
 	}
 }
 
-// The pass reports the gap on the Remote, which is the codes the
-// controller declares that its Keymap does not bind, and a status that
-// already reads the same gap is not written again.
+// The pass reports the gap against the compiled table on the Remote,
+// and a status that already reads the same gap is not written again.
 func TestAPassWritesTheUnboundCodesOntoTheRemote(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayerWithRemote()
 	cluster.remotes["sofa"] = houseRemote("gamepad")
-	cluster.keymaps["gamepad"] = testKeymap()
+	cluster.keymaps["gamepad"] = &Keymap{
+		Metadata: ObjectMeta{Name: "gamepad"},
+		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_EAST", Key: keyNone}}},
+	}
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.codes.setCodes(controllerKey("house", "sofa"), remoteCodes{
-		Keys: []uint16{0x0a4, 0x130},
+		Keys: []uint16{0x0a4, 0x130, 0x131},
 		Axes: []uint16{0x10, 0x11},
 	})
 
 	media.pass()
 
-	want := []UnboundCode{{Code: 0x0a4, Name: "KEY_PLAYPAUSE", Type: unboundKey}}
+	want := []UnboundCode{{Code: 0x131, Name: "BTN_EAST", Type: unboundKey}}
 	if !reflect.DeepEqual(cluster.remotes["sofa"].Status.Unbound, want) {
 		t.Errorf("unbound = %+v, want %+v", cluster.remotes["sofa"].Status.Unbound, want)
 	}
@@ -834,9 +868,10 @@ func TestAPassWritesTheUnboundCodesOntoTheRemote(t *testing.T) {
 	}
 }
 
-// A Remote with no Keymap is the state discovery serves, and every
-// code its controller declares is unbound.
-func TestARemoteWithNoKeymapReportsEveryDeclaredCode(t *testing.T) {
+// A Remote with no Keymap runs on the base, and the base leaves
+// nothing unbound: every key code passes as itself and the hats are
+// the arrows.
+func TestARemoteWithNoKeymapReportsNothingUnbound(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayerWithRemote()
 	cluster.remotes["sofa"] = houseRemote("")
@@ -848,12 +883,8 @@ func TestARemoteWithNoKeymapReportsEveryDeclaredCode(t *testing.T) {
 
 	media.pass()
 
-	want := []UnboundCode{
-		{Code: 0x130, Name: "BTN_SOUTH", Type: unboundKey},
-		{Code: 0x10, Name: "ABS_HAT0X", Type: unboundAxis},
-	}
-	if !reflect.DeepEqual(cluster.remotes["sofa"].Status.Unbound, want) {
-		t.Errorf("unbound = %+v, want %+v", cluster.remotes["sofa"].Status.Unbound, want)
+	if got := cluster.remotes["sofa"].Status.Unbound; got != nil {
+		t.Errorf("unbound = %+v, want none", got)
 	}
 }
 
@@ -888,7 +919,7 @@ func TestAKeymapEditAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 	media.pass()
 	cluster.pods["movie-playback"].Status.Phase = podRunning
 	edited := testKeymap()
-	edited.Spec.Buttons[0].Action = actionMute
+	edited.Spec.Buttons[0].Key = "KEY_MUTE"
 	cluster.keymaps["gamepad"] = edited
 	created := len(cluster.requests)
 	media.pass()
@@ -1072,9 +1103,7 @@ func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 
 	sofa := []boundRemote{{
 		Name:        "sofa",
-		Keymap:      "gamepad",
 		EventsTopic: remoteEventsTopic(defaultTopicBase, "house", "sofa"),
-		KeymapTopic: keymapTopic(defaultTopicBase, "gamepad"),
 		FocusTopic:  remoteFocusTopic(defaultTopicBase, "house", "sofa"),
 	}}
 	pod := buildPod(play, buildClaim(play, player),
@@ -1389,9 +1418,10 @@ func TestAnEmptyAvailabilityDoesNotMarkARunSeen(t *testing.T) {
 }
 
 // A fresh broker session holds none of the operator's retained state,
-// so a reconnect clears the record of published keymaps, which makes the next
-// reconcile write them again, and republishes each focus mark, so a
-// controller keeps the Player it drives across a broker restart.
+// so a reconnect clears the record of published key tables, which
+// makes the next pass write them again, and republishes each focus
+// mark, so a controller keeps the Player it drives across a broker
+// restart.
 func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
@@ -1401,16 +1431,16 @@ func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
 		topicBase: defaultTopicBase,
 		bus:       bus,
 		focus:     newFocusDesk(wake),
-		keymapPublished: map[string]string{
-			keymapTopic(defaultTopicBase, "gamepad"): "already-published",
+		keysPublished: map[string]string{
+			remoteKeysTopic(defaultTopicBase, "house", "sofa"): "already-published",
 		},
 	}
 	media.focus.setMark(controllerKey("den", "sofa"), "theater")
 
 	media.reestablishRetained()
 
-	if len(media.keymapPublished) != 0 {
-		t.Errorf("keymapPublished still holds %v, want it cleared for a rewrite", media.keymapPublished)
+	if len(media.keysPublished) != 0 {
+		t.Errorf("keysPublished still holds %v, want it cleared for a rewrite", media.keysPublished)
 	}
 	published := waitForPublish(t, broker.pubs)
 	if published.topic != remoteFocusTopic(defaultTopicBase, "den", "sofa") ||
@@ -1419,98 +1449,90 @@ func TestAReconnectReestablishesTheRetainedState(t *testing.T) {
 	}
 }
 
-// keymapOperator wires an operator with a bus to a fake broker, so a test
-// reads what the keymap reconcile publishes.
-func keymapOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
+// keysOperator wires an operator with a bus to a fake broker, so a
+// test reads what the pass publishes on a Remote's keys topic.
+func keysOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	return &operator{
-		client:          testAPIClient(t, cluster.handler(t)),
-		topicBase:       defaultTopicBase,
-		bus:             bus,
-		keymapPublished: map[string]string{},
+		client:        testAPIClient(t, cluster.handler(t)),
+		topicBase:     defaultTopicBase,
+		bus:           bus,
+		keysPublished: map[string]string{},
 	}, brokers[0]
 }
 
-// The keymap reconcile compiles each Keymap and publishes the table to
-// its topic, retained, so a translator reads the current keymap the
-// instant it connects. When the Keymap is deleted, the next reconcile
-// clears the retained value.
-func TestReconcileKeymapsPublishesAndClearsARetainedTable(t *testing.T) {
-	cluster := newFakeCluster()
+// keysRemote is the fixture the publish tests press: one Remote and
+// the Keymap it names, with the table already compiled.
+func keysRemote(cluster *fakeCluster) *Remote {
 	cluster.keymaps["gamepad"] = testKeymap()
-	media, broker := keymapOperator(t, cluster)
-
-	media.reconcileKeymaps()
-
-	published := waitForPublish(t, broker.pubs)
-	if published.topic != keymapTopic(defaultTopicBase, "gamepad") {
-		t.Errorf("topic = %q", published.topic)
-	}
-	if !published.retained {
-		t.Error("the compiled keymap was not retained")
-	}
-	var bindings []compiledBinding
-	if err := json.Unmarshal(published.payload, &bindings); err != nil {
-		t.Fatalf("payload does not decode: %v", err)
-	}
-	if len(bindings) != 7 {
-		t.Errorf("bindings = %+v, want the seven of the test keymap", bindings)
-	}
-
-	delete(cluster.keymaps, "gamepad")
-	media.reconcileKeymaps()
-
-	cleared := waitForPublish(t, broker.pubs)
-	if cleared.topic != keymapTopic(defaultTopicBase, "gamepad") || len(cleared.payload) != 0 || !cleared.retained {
-		t.Errorf("clear = %+v, want an empty retained publish", cleared)
-	}
+	remote := houseRemote("gamepad")
+	cluster.remotes["sofa"] = remote
+	return remote
 }
 
-// The keymap topic is retained, so an unchanged Keymap republishes
-// nothing on a later pass. The broker still holds the table, and a new
-// subscriber reads it from there, so a steady film does not churn the bus
-// with a table nobody edited. A change to the Keymap does publish.
-func TestReconcileKeymapsRepublishesOnlyOnChange(t *testing.T) {
+// The pass compiles a Remote's table and publishes it retained, so the
+// standing pod reads the current table the instant it connects.
+func TestPublishKeysPublishesARetainedTable(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.keymaps["gamepad"] = testKeymap()
-	media, broker := keymapOperator(t, cluster)
+	media, broker := keysOperator(t, cluster)
 
-	media.reconcileKeymaps()
+	media.publishKeys(keysRemote(cluster), media.loadKeymaps(), map[string]bool{})
+
+	published := waitForPublish(t, broker.pubs)
+	mustMatch(t, published.topic, remoteKeysTopic(defaultTopicBase, "house", "sofa"))
+	mustMatch(t, published.retained, true)
+	var table []compiledBinding
+	mustSucceed(t, json.Unmarshal(published.payload, &table))
+	mustMatch(t, len(table), len(baseKeys)+2)
+}
+
+// The keys topic is retained, so an unchanged table republishes nothing
+// on a later pass and the broker keeps serving the one it holds. A
+// changed Keymap does publish.
+func TestPublishKeysRepublishesOnlyOnChange(t *testing.T) {
+	cluster := newFakeCluster()
+	media, broker := keysOperator(t, cluster)
+	remote := keysRemote(cluster)
+
+	media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
 	waitForPublish(t, broker.pubs)
 
-	media.reconcileKeymaps()
+	media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
 	select {
 	case got := <-broker.pubs:
-		t.Fatalf("an unchanged keymap republished %+v", got)
+		t.Fatalf("an unchanged table republished %+v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
 
 	keymap := cluster.keymaps["gamepad"]
 	keymap.Spec.Buttons = keymap.Spec.Buttons[:1]
-	media.reconcileKeymaps()
+	media.publishKeys(remote, media.loadKeymaps(), map[string]bool{})
+
 	changed := waitForPublish(t, broker.pubs)
-	if changed.topic != keymapTopic(defaultTopicBase, "gamepad") {
-		t.Errorf("changed topic = %q, want the gamepad keymap", changed.topic)
-	}
+	mustMatch(t, changed.topic, remoteKeysTopic(defaultTopicBase, "house", "sofa"))
 }
 
-// A Keymap that will not compile publishes nothing, so the last-good
-// retained value stays in place.
-func TestReconcileKeymapsPublishesNothingForAKeymapThatWillNotCompile(t *testing.T) {
+// A Keymap that will not compile publishes nothing, so the last good
+// retained table stays in place and the controller keeps working.
+func TestPublishKeysPublishesNothingForAKeymapThatWillNotCompile(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.keymaps["broken"] = &Keymap{
 		Metadata: ObjectMeta{Name: "broken"},
-		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Action: actionPause}}},
+		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_NOPE", Key: "KEY_ENTER"}}},
 	}
-	media, broker := keymapOperator(t, cluster)
+	cluster.remotes["sofa"] = houseRemote("broken")
+	media, broker := keysOperator(t, cluster)
 
-	media.reconcileKeymaps()
+	table := media.publishKeys(cluster.remotes["sofa"], media.loadKeymaps(), map[string]bool{})
 
+	if table != nil {
+		t.Errorf("table = %+v, want none", table)
+	}
 	select {
 	case got := <-broker.pubs:
-		t.Fatalf("a keymap that will not compile published %+v", got)
+		t.Fatalf("a Keymap that will not compile published %+v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
 }

@@ -1,9 +1,9 @@
 package main
 
 // These tests cover what a Play becomes at run time: one pod that runs
-// mpv on the resolved list, holds the claim's every role, carries one
-// command sidecar that owns the mpv socket, and carries one translator
-// sidecar per bound remote.
+// mpv on the resolved list, holds the claim's every role, and carries
+// the command sidecar that owns the mpv socket and reads every
+// controller the unit owns.
 
 import (
 	"encoding/json"
@@ -252,7 +252,7 @@ func TestBuildPodWithNoRemotesCarriesOnlyTheCommandSidecar(t *testing.T) {
 // and the same media mounts the player holds, so it can open the source
 // art. It carries the play's identity, the bus, and the base.
 func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
-	pod := testPodWithRemotes(t)
+	pod := testPod(t)
 
 	command := initContainer(t, pod, commandContainer)
 	want := Container{
@@ -266,6 +266,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: topicBaseVariable, Value: testTopicBase},
 			{Name: presentationsVariable, Value: "[{}]"},
 			{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
+			{Name: playerNameVariable, Value: "theater"},
 			{Name: playerVolumeTopicVariable, Value: playerVolumeTopic(testTopicBase, "house", "theater")},
 		},
 		VolumeMounts: append([]VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
@@ -311,48 +312,33 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 	}
 }
 
-// One translator sidecar runs per bound remote. Each is the sidecar
-// image in its translate mode, holding no device claim, mounting no IPC
-// socket, and carrying the remote's name and its three topics.
-func TestBuildPodRunsOneTranslatorPerRemote(t *testing.T) {
+// The pod carries one sidecar, and it names every controller the unit
+// owns: their events topics and their focus topics, aligned.
+func TestBuildPodGivesTheCommandSidecarEveryRemote(t *testing.T) {
 	pod := testPodWithRemotes(t)
 
-	// The command sidecar first, then one translator per remote, in order.
 	names := []string{}
 	for _, container := range pod.Spec.InitContainers {
 		names = append(names, container.Name)
 	}
-	if !reflect.DeepEqual(names, []string{"command", "translate-armchair", "translate-sofa"}) {
-		t.Fatalf("init containers = %v, want the command sidecar and one translator per remote", names)
+	if !reflect.DeepEqual(names, []string{commandContainer}) {
+		t.Fatalf("init containers = %v, want the command sidecar alone", names)
 	}
 
-	sofa := initContainer(t, pod, "translate-sofa")
-	want := Container{
-		Name:    "translate-sofa",
-		Image:   testSidecarImage,
-		Command: []string{"/media-operator", "translate"},
-		Env: []EnvVar{
-			{Name: playNamespaceVariable, Value: "house"},
-			{Name: playNameVariable, Value: "movie"},
-			{Name: playerNameVariable, Value: "theater"},
-			{Name: busAddressVariable, Value: testBusAddress},
-			{Name: topicBaseVariable, Value: testTopicBase},
-			{Name: remoteNameVariable, Value: "sofa"},
-			{Name: remoteEventsVariable, Value: "liken/media/remotes/house/sofa/events"},
-			{Name: keymapTopicVariable, Value: "liken/media/keymaps/gamepad"},
-			{Name: focusTopicVariable, Value: "liken/media/remotes/house/sofa/focus"},
-		},
-		RestartPolicy: "Always",
-	}
-	if !reflect.DeepEqual(sofa, want) {
-		t.Errorf("translator = %+v, want %+v", sofa, want)
-	}
-	if mountsIPC(sofa) {
-		t.Error("the translator mounts the IPC socket, which only the command sidecar owns")
-	}
-	if len(sofa.Resources.Claims) != 0 {
-		t.Errorf("the translator holds a device claim: %+v", sofa.Resources.Claims)
-	}
+	command := initContainer(t, pod, commandContainer)
+	mustMatch(t, envValue(command, playerNameVariable), "theater")
+	mustMatch(t, envValue(command, remoteEventsTopicsVariable),
+		"liken/media/remotes/house/armchair/events\nliken/media/remotes/house/sofa/events")
+	mustMatch(t, envValue(command, remoteFocusTopicsVariable),
+		"liken/media/remotes/house/armchair/focus\nliken/media/remotes/house/sofa/focus")
+}
+
+// A Play on a Player that names no controller carries neither list, so
+// its sidecar subscribes to no controller at all.
+func TestBuildPodCarriesNoRemoteListsWithoutRemotes(t *testing.T) {
+	command := initContainer(t, testPod(t), commandContainer)
+	mustMatch(t, envValue(command, remoteEventsTopicsVariable), "")
+	mustMatch(t, envValue(command, remoteFocusTopicsVariable), "")
 }
 
 // The resolved preferences map to mpv flags. A flag rides only for a field that

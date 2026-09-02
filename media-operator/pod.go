@@ -30,14 +30,6 @@ const (
 	playbackLabelValue = "playback"
 )
 
-// translatorContainer names one controller's translator sidecar. The
-// name carries the Remote's name, so the container set changes when a
-// controller is added or removed, and the operator reads the set back to
-// tell whether a Player reshaped a running pod.
-func translatorContainer(remote string) string {
-	return "translate-" + remote
-}
-
 // An init container with restartPolicy Always is what Kubernetes calls a
 // native sidecar: the kubelet starts it before the player, keeps it
 // beside the player, and restarts it alone when it exits. An ordinary
@@ -125,15 +117,12 @@ func buildPod(
 	volumes = append(volumes, resolved.Volumes...)
 	volumes = append(volumes, artVolume(), Volume{Name: ipcVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
 
-	// The pod's sidecars are one command sidecar that owns the mpv socket
-	// and one translator per bound remote. The list is built in that
-	// order, and the operator reads the translator set back off it to tell
-	// whether a Player reshaped this pod.
-	initContainers := make([]Container, 0, len(remotes)+1)
-	initContainers = append(initContainers,
-		commandSidecar(play, claim, blocks, resolved.Mounts, sidecarImage, busAddress, topicBase))
-	for _, remote := range remotes {
-		initContainers = append(initContainers, translatorSidecar(play, sidecarImage, busAddress, topicBase, remote))
+	// The pod's one sidecar is the command sidecar. It owns the mpv
+	// socket and reads every controller the unit names, and the operator
+	// reads its events-topic list back off the pod to tell whether a
+	// Player reshaped this pod.
+	initContainers := []Container{
+		commandSidecar(play, claim, blocks, resolved.Mounts, sidecarImage, busAddress, topicBase, remotes),
 	}
 
 	return &Pod{
@@ -210,7 +199,7 @@ func mpvVolumeOptions(volume *PlayVolume) []string {
 // socket.
 func commandSidecar(
 	play *Play, claim *ResourceClaim, blocks string, mediaMounts []VolumeMount,
-	sidecarImage, busAddress, topicBase string,
+	sidecarImage, busAddress, topicBase string, remotes []boundRemote,
 ) Container {
 	interval := play.Spec.TrickplayInterval
 	if interval == "" {
@@ -223,6 +212,23 @@ func commandSidecar(
 		{Name: topicBaseVariable, Value: topicBase},
 		{Name: presentationsVariable, Value: blocks},
 		{Name: trickplayIntervalVariable, Value: interval},
+	}
+	// The Player this Play runs on, which is the value a focus mark must
+	// hold for a controller's press to reach this film, and the two
+	// index-aligned topic lists of the unit's controllers. A Play on a
+	// Player that names no Remote carries neither list, so its sidecar
+	// subscribes to no controller at all.
+	env = append(env, EnvVar{Name: playerNameVariable, Value: playerName(play)})
+	if len(remotes) > 0 {
+		events := make([]string, len(remotes))
+		focuses := make([]string, len(remotes))
+		for index, remote := range remotes {
+			events[index] = remote.EventsTopic
+			focuses[index] = remote.FocusTopic
+		}
+		env = append(env,
+			EnvVar{Name: remoteEventsTopicsVariable, Value: strings.Join(events, "\n")},
+			EnvVar{Name: remoteFocusTopicsVariable, Value: strings.Join(focuses, "\n")})
 	}
 	// The volume topic travels only for a unit that has speakers, and
 	// the claim answers that: it holds a sink request only for a
@@ -288,33 +294,6 @@ func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) stri
 	return string(array)
 }
 
-// translatorSidecar is one controller's translator: the sidecar image
-// in its translate mode, holding no device claim and no IPC mount. Its
-// environment carries the play identity, the Player the play runs on,
-// which is what the gate compares the mark against, and the three
-// topics it works between: the events topic it reads, the keymap topic
-// it reads the table from, and the focus topic it gates on. It builds
-// the cycle topic it publishes to from the same identity.
-func translatorSidecar(play *Play, sidecarImage, busAddress, topicBase string, remote boundRemote) Container {
-	return Container{
-		Name:    translatorContainer(remote.Name),
-		Image:   sidecarImage,
-		Command: []string{"/media-operator", translateMode},
-		Env: []EnvVar{
-			{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
-			{Name: playNameVariable, Value: play.Metadata.Name},
-			{Name: playerNameVariable, Value: playerName(play)},
-			{Name: busAddressVariable, Value: busAddress},
-			{Name: topicBaseVariable, Value: topicBase},
-			{Name: remoteNameVariable, Value: remote.Name},
-			{Name: remoteEventsVariable, Value: remote.EventsTopic},
-			{Name: keymapTopicVariable, Value: remote.KeymapTopic},
-			{Name: focusTopicVariable, Value: remote.FocusTopic},
-		},
-		RestartPolicy: sidecarRestartPolicy,
-	}
-}
-
 func ipcMount() VolumeMount {
 	return VolumeMount{Name: ipcVolumeName, MountPath: ipcMountPath}
 }
@@ -330,30 +309,28 @@ func artVolume() Volume {
 	return Volume{Name: artVolumeName, EmptyDir: &EmptyDirVolumeSource{SizeLimit: artSizeLimit}}
 }
 
-// sameRemoteSet reports whether two pods carry the same translator
-// sidecars, by the events topics they subscribe to. It reads no keymap,
-// so a Keymap edit is bus state and not a shape change and recreates no
-// pod. Only what the Player controls, the claim and the set of
-// controllers, reshapes a running film.
+// sameRemoteSet reports whether two pods carry the same controllers,
+// by the events topics the command sidecar subscribes to. It reads no
+// keymap, so a Keymap edit is bus state and not a shape change and
+// recreates no pod. Only what the Player controls, the claim and the
+// set of controllers, reshapes a running film.
 func sameRemoteSet(current, desired *Pod) bool {
 	return slices.Equal(podRemoteTopics(current), podRemoteTopics(desired))
 }
 
-// podRemoteTopics reads the events topics the translator sidecars
-// subscribe to, in order, from each translator container's environment.
-// Adding or removing a controller changes this set, and the recreate
-// follows.
+// podRemoteTopics reads the events topics the command sidecar
+// subscribes to, in order, off its environment. Adding or removing a
+// controller changes this list, and the recreate follows.
 func podRemoteTopics(pod *Pod) []string {
-	var topics []string
 	for _, container := range pod.Spec.InitContainers {
-		if !strings.HasPrefix(container.Name, translatorContainer("")) {
+		if container.Name != commandContainer {
 			continue
 		}
 		for _, variable := range container.Env {
-			if variable.Name == remoteEventsVariable {
-				topics = append(topics, variable.Value)
+			if variable.Name == remoteEventsTopicsVariable {
+				return splitTopicLines(variable.Value)
 			}
 		}
 	}
-	return topics
+	return nil
 }

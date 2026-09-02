@@ -5,6 +5,7 @@ package main
 // client requests.
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -12,83 +13,113 @@ import (
 // delegateCommander builds one idle command pod whose screen a delegate
 // draws, with a volume topic and no fade window, so nothing but the
 // test drives it.
-func delegateCommander(t *testing.T, remotes map[string]string) (*idleCommander, *idleWatch) {
+func delegateCommander(t *testing.T, remotes []string) (*idleCommander, *idleWatch) {
 	t.Helper()
 	ic, watch := volumeCommander(t, remotes)
 	ic.delegated = true
 	return ic, watch
 }
 
-// bindNavigation hands the sidecar a table that names three navigation
-// presses and one volume step, the way the operator publishes it on the
-// retained keymap topic.
-func bindNavigation(t *testing.T, ic *idleCommander, keymap string) {
+// sendKey presses one named key at one value, for the tests that name
+// the key they press rather than what it means.
+func sendKey(t *testing.T, ic *idleCommander, events, key string, value int32) {
 	t.Helper()
-	ic.handle(keymap, mustEncode(t, []compiledBinding{
-		{EventType: evKey, Code: buttonCodes["BTN_DPAD_UP"], Value: 1, Action: actionUp},
-		{EventType: evKey, Code: buttonCodes["BTN_SOUTH"], Value: 1, Action: actionSelect},
-		{EventType: evKey, Code: buttonCodes["BTN_EAST"], Value: 1, Action: actionBack},
-		{EventType: evKey, Code: buttonCodes["BTN_NORTH"], Value: 1, Action: actionVolume, Amount: 5},
-	}))
+	sendEvent(t, ic, events, keyEvent{Key: key, Value: value})
 }
 
-// Under a delegate every navigation press reaches the client on the
-// Player's commands topic, in the shape a translator publishes on a
-// Play's commands topic. It is not retained, because a press is an
+// Under a delegate every navigation key reaches the client on the
+// Player's commands topic, as the same JSON the events topic carried,
+// so the client reads the kernel's name and holds its own table. The
+// press and the repeat both travel, because a person holds an arrow to
+// run down a list. The topic is not retained, because a press is an
 // event and not a state.
-func TestADelegateForwardsTheNavigationPress(t *testing.T) {
+func TestADelegateForwardsEveryNavigationKey(t *testing.T) {
 	cases := []struct {
-		name   string
-		button string
-		action string
+		name  string
+		key   string
+		value int32
 	}{
-		{name: "an arrow", button: "BTN_DPAD_UP", action: actionUp},
-		{name: "select", button: "BTN_SOUTH", action: actionSelect},
-		{name: "back", button: "BTN_EAST", action: actionBack},
+		{name: "up", key: "KEY_UP", value: 1},
+		{name: "down", key: "KEY_DOWN", value: 1},
+		{name: "left", key: "KEY_LEFT", value: 1},
+		{name: "right", key: "KEY_RIGHT", value: 1},
+		{name: "enter", key: "KEY_ENTER", value: 1},
+		{name: "ok", key: "KEY_OK", value: 1},
+		{name: "select", key: "KEY_SELECT", value: 1},
+		{name: "the keypad's enter", key: "KEY_KPENTER", value: 1},
+		{name: "back", key: "KEY_BACK", value: 1},
+		{name: "escape", key: "KEY_ESC", value: 1},
+		{name: "exit", key: "KEY_EXIT", value: 1},
+		{name: "a held arrow repeating", key: "KEY_UP", value: 2},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			events, keymap := fadeTopics()
-			ic, watch := delegateCommander(t, map[string]string{events: keymap})
-			bindNavigation(t, ic, keymap)
+			events := fadeTopics()
+			ic, watch := delegateCommander(t, []string{events})
 			sendActivity(t, ic, playerIdle)
 
-			pressButton(t, ic, events, one.button)
+			sendKey(t, ic, events, one.key, one.value)
 
 			publish := nextPublish(t, watch)
 			mustMatch(t, publish.topic, ic.commandsTopic)
 			mustMatch(t, publish.retained, false)
-			mustMatch(t, string(publish.payload), `{"action":"`+one.action+`"}`)
+			mustMatch(t, string(publish.payload),
+				`{"key":"`+one.key+`","value":`+strconv.Itoa(int(one.value))+`}`)
 		})
 	}
+}
+
+// A release reaches no client. The client reads the press and the
+// repeat, and a release it answered would move the list a second time
+// on one act.
+func TestADelegateForwardsNoRelease(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := delegateCommander(t, []string{events})
+	sendActivity(t, ic, playerIdle)
+
+	sendKey(t, ic, events, "KEY_UP", 0)
+
+	noPublish(t, watch, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
+}
+
+// The pod forwards the navigation keys and nothing else, so a key it
+// holds no row for restarts the quiet window and reaches no client.
+func TestADelegateForwardsNothingForAKeyItHoldsNoRowFor(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := delegateCommander(t, []string{events})
+	sendActivity(t, ic, playerIdle)
+
+	sendPress(t, ic, events)
+
+	noPublish(t, watch, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // Back under a delegate leaves the shade up, because the client has
 // levels and only the client reads whether back has anywhere to go.
 func TestADelegateBackLeavesTheShadeUp(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := delegateCommander(t, map[string]string{events: keymap})
-	bindNavigation(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := delegateCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_EAST")
+	sendBack(t, ic, events)
 
-	mustMatch(t, string(nextPublish(t, watch).payload), `{"action":"back"}`)
+	mustMatch(t, string(nextPublish(t, watch).payload), `{"key":"KEY_BACK","value":1}`)
 	noMoment(t, watch, 100*time.Millisecond)
 }
 
 // A press on a sleeping screen is a wake and nothing more, so the first
 // press after the shade comes down reaches no client.
 func TestADelegatePressOnASleepingScreenOnlyWakesIt(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := delegateCommander(t, map[string]string{events: keymap})
-	bindNavigation(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := delegateCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 	ic.mu.Lock()
 	ic.asleep = true
 	ic.mu.Unlock()
 
-	pressButton(t, ic, events, "BTN_DPAD_UP")
+	sendKey(t, ic, events, "KEY_UP", 1)
 
 	mustMatch(t, nextMoment(t, watch).Event, screenWakeEvent)
 	noPublish(t, watch, 100*time.Millisecond)
@@ -98,54 +129,26 @@ func TestADelegatePressOnASleepingScreenOnlyWakesIt(t *testing.T) {
 // controller whose mark names another unit reaches this client with
 // nothing.
 func TestADelegateForwardsNothingFromAnUnfocusedRemote(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := delegateCommander(t, map[string]string{events: keymap})
-	bindNavigation(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := delegateCommander(t, []string{events})
 	sendMark(ic, sofaFocus(), "cinema")
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_DPAD_UP")
+	sendKey(t, ic, events, "KEY_UP", 1)
 
 	noPublish(t, watch, 100*time.Millisecond)
 	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// bindRepeatingArrow compiles a table whose arrow repeats, with a
-// repeat quick enough to land inside a test.
-func bindRepeatingArrow(t *testing.T, ic *idleCommander, keymap string) {
-	t.Helper()
-	ic.handle(keymap, mustEncode(t, []compiledBinding{{
-		EventType: evKey, Code: buttonCodes["BTN_DPAD_UP"], Value: 1,
-		Action: actionUp, RepeatDelay: 10, RepeatInterval: 10,
-	}}))
-}
-
-// A binding whose keymap repeats it publishes the same press again
-// while the control is held, on the clock the volume repeat runs on.
-func TestAHeldDelegateArrowRepeats(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := delegateCommander(t, map[string]string{events: keymap})
-	bindRepeatingArrow(t, ic, keymap)
-	sendActivity(t, ic, playerIdle)
-
-	pressButton(t, ic, events, "BTN_DPAD_UP")
-
-	for range 3 {
-		mustMatch(t, string(nextPublish(t, watch).payload), `{"action":"up"}`)
-	}
-	releaseButton(t, ic, events, "BTN_DPAD_UP")
-}
-
 // A volume press still steps the unit's level under a delegate, because
 // the level is the command pod's own and no client draws it.
 func TestADelegateVolumePressStillStepsTheLevel(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := delegateCommander(t, map[string]string{events: keymap})
-	bindNavigation(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := delegateCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 	ic.handle(ic.volumeTopic, []byte(`{"level":40,"muted":false}`))
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 
 	publish := nextPublish(t, watch)
 	mustMatch(t, publish.topic, ic.volumeTopic)
@@ -155,29 +158,40 @@ func TestADelegateVolumePressStillStepsTheLevel(t *testing.T) {
 // Under this operator's own controller a navigation press reaches no
 // one, because the stock client draws no list.
 func TestTheOwnControllerForwardsNoNavigationPress(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindNavigation(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_DPAD_UP")
+	sendKey(t, ic, events, "KEY_UP", 1)
 
 	noPublish(t, watch, 100*time.Millisecond)
 	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// Under this operator's own controller back is still sleep, so the
-// keymap that names the navigation actions changes nothing there.
-func TestTheOwnControllerBackStillSleepsTheScreen(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindNavigation(t, ic, keymap)
-	sendActivity(t, ic, playerIdle)
+// Under this operator's own client each of the three back keys brings
+// the shade down, because a shell sends whichever one it was built
+// with.
+func TestTheOwnControllerBackKeysSleepTheScreen(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{name: "back", key: "KEY_BACK"},
+		{name: "escape", key: "KEY_ESC"},
+		{name: "exit", key: "KEY_EXIT"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			events := fadeTopics()
+			ic, watch := volumeCommander(t, []string{events})
+			sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_EAST")
+			sendKey(t, ic, events, one.key, 1)
 
-	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
-	noPublish(t, watch, 100*time.Millisecond)
+			mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
+			noPublish(t, watch, 100*time.Millisecond)
+		})
+	}
 }
 
 // A client at its top level asks for sleep, and the shade comes down
@@ -229,32 +243,6 @@ func TestASleepRequestIsIgnored(t *testing.T) {
 			ic.handle(ic.commandsTopic, mustEncode(t, mediaCommand{Action: actionSleep}))
 
 			noMoment(t, watch, 100*time.Millisecond)
-		})
-	}
-}
-
-// The navigation actions are the six a delegate's client answers, and
-// nothing else on the commands topic is one of them.
-func TestIsNavigationAction(t *testing.T) {
-	cases := []struct {
-		name   string
-		action string
-		want   bool
-	}{
-		{name: "up", action: actionUp, want: true},
-		{name: "down", action: actionDown, want: true},
-		{name: "left", action: actionLeft, want: true},
-		{name: "right", action: actionRight, want: true},
-		{name: "select", action: actionSelect, want: true},
-		{name: "back", action: actionBack, want: true},
-		{name: "a volume step", action: actionVolume},
-		{name: "cycle-focus", action: actionCycleFocus},
-		{name: "a sleep request", action: actionSleep},
-		{name: "nothing at all", action: ""},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			mustMatch(t, isNavigationAction(one.action), one.want)
 		})
 	}
 }

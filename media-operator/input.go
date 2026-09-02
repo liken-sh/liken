@@ -1,29 +1,24 @@
 package main
 
-// The input contract across the operator, the standing remote pod, the
-// translator sidecar, and the command sidecar. The standing remote pod
-// reads a controller and publishes each raw evdev event to the Remote's
-// events topic. The operator compiles each Keymap into the bindings
-// below and publishes the table on the retained keymap topic. A
-// translator subscribes to both, matches events against the held table,
-// and publishes a named mediaCommand on the Play's commands topic. The
-// command sidecar subscribes to that topic and turns each named command
-// into an mpv command. The split keeps each vocabulary on its own side:
-// only the operator reads the Keymap resource, and only the command
-// sidecar turns a command into mpv's own words.
+// The input contract across the operator, the standing remote pod,
+// and the consumers. The operator compiles each Remote's table over
+// the base and publishes it retained on that Remote's keys topic. The
+// standing remote pod folds every raw evdev event through the table
+// and publishes kernel key names on the events topic. Each consumer
+// holds its own table from key names to what it does there. The split
+// keeps each vocabulary on its own side: only the operator reads the
+// Keymap resource, and only a consumer knows what a key means to it.
 
 import (
 	"encoding/json"
 	"io"
 )
 
-// The action vocabulary a Keymap's right side may use. These are named
-// for what a person means, not for what mpv runs, so a different player
-// program can implement them later. Most are media commands. The
-// navigation actions below drive the on-screen display, and cycle-focus
-// switches which unit a shared controller drives; neither reaches a
-// player program. Three of the media commands take an amount; the rest
-// are complete alone.
+// The action words. They are no longer an API vocabulary: no Keymap
+// and no controller payload carries one. They are the playback pod's
+// internal step between a key name and mpv's own words, and the two
+// display verbs, re-present and sleep, that travel on a Player's
+// commands topic. cycle-focus never reaches a player program.
 const (
 	actionPause      = "pause"
 	actionMute       = "mute"
@@ -35,9 +30,8 @@ const (
 	actionInfo       = "info"
 	actionCycleFocus = "cycle-focus"
 
-	// The navigation actions, named for what a person means, so a different
-	// player program can implement them later. A Keymap binds buttons to them
-	// the way it binds play-pause.
+	// The navigation words are what the playback pod sends the display
+	// script. The key table in keybindings.go is what reaches them.
 	actionUp     = "up"
 	actionDown   = "down"
 	actionLeft   = "left"
@@ -61,90 +55,44 @@ const actionRePresent = "re-present"
 // because the command pod sleeps that client on back directly.
 const actionSleep = "sleep"
 
-// navigationActions are the six actions a delegate's client answers.
-// The idle command pod forwards each one to the client under a
-// delegate and forwards none under this operator's own controller.
-var navigationActions = map[string]bool{
-	actionUp:     true,
-	actionDown:   true,
-	actionLeft:   true,
-	actionRight:  true,
-	actionSelect: true,
-	actionBack:   true,
-}
-
-// isNavigationAction reports whether an action is one of the six a
-// delegate's client answers, the way isVolumeAction names the two the
-// level reads.
-func isNavigationAction(action string) bool {
-	return navigationActions[action]
-}
-
-// amountActions are the actions that move by an amount: seconds for
-// seek, a step for volume and chapter. The sign is the direction, so
-// one action serves both bumpers.
-var amountActions = map[string]bool{
-	actionSeek:    true,
-	actionVolume:  true,
-	actionChapter: true,
-}
-
-// wordActions are the actions that are complete without an amount.
-var wordActions = map[string]bool{
-	actionPause:      true,
-	actionMute:       true,
-	actionSubtitles:  true,
-	actionAudio:      true,
-	actionInfo:       true,
-	actionCycleFocus: true,
-	actionUp:         true,
-	actionDown:       true,
-	actionLeft:       true,
-	actionRight:      true,
-	actionSelect:     true,
-	actionBack:       true,
-}
-
-// A compiledBinding is one row of the table a translator matches events
-// against: an evdev event type, code, and value on the left, an action
-// and its amount on the right. The operator compiles the Keymap's names
-// down to numbers so a translator never carries a name table, and it
-// publishes the whole table as JSON on the retained keymap topic.
+// A compiledBinding is one row of a Remote's key table: an evdev
+// type, code, and value on the left, the kernel key name the pod
+// publishes on the right. The names are the API and the numbers are
+// the wire, because the pod matches what the kernel gives it. The
+// operator compiles the durations to milliseconds so the pod parses
+// nothing.
 type compiledBinding struct {
 	EventType uint16 `json:"type"`
 	Code      uint16 `json:"code"`
 	Value     int32  `json:"value"`
-	Action    string `json:"action"`
-	Amount    int    `json:"amount,omitempty"`
+	Key       string `json:"key"`
 
-	// RepeatDelay and RepeatInterval are milliseconds. A RepeatInterval
-	// above zero makes the binding repeat while the control is held: the
-	// translator publishes the command on the press, waits RepeatDelay,
-	// then re-publishes every RepeatInterval until the release. Both are
-	// zero on a binding that fires once. The operator compiles the
-	// Keymap's durations to these milliseconds, so the translator parses
-	// nothing.
+	// RepeatDelay and RepeatInterval are milliseconds. An interval
+	// above zero makes the standing pod synthesise the value 2 stream
+	// while the control is held. A keyboard needs no row, because the
+	// kernel autorepeats for it.
 	RepeatDelay    int `json:"repeatDelay,omitempty"`
 	RepeatInterval int `json:"repeatInterval,omitempty"`
 }
 
-// remoteEvent is one controller event on the bus: the evdev type, code,
-// and value the standing remote pod read from the node. The standing pod
-// publishes it and a translator decodes it, so the keymap stays off the
-// wire and one Remote can feed two players that map it differently.
-type remoteEvent struct {
-	Type  uint16 `json:"type"`
-	Code  uint16 `json:"code"`
+// keyNone is the right side that drops a control. The base passes
+// every KEY_* code, so silencing one is a row and not an omission.
+const keyNone = "none"
+
+// keyEvent is what a Remote's events topic carries: the kernel's name
+// for the control and the kernel's value, 0 release, 1 press, 2
+// repeat. A consumer holds no table of numbers.
+type keyEvent struct {
+	Key   string `json:"key"`
 	Value int32  `json:"value"`
 }
 
-// mediaCommand is the JSON that travels on a Play's commands topic, and
-// the generic surface any program publishes to. Action names a word from
-// the vocabulary above, and Amount carries the step for the three
-// actions that move and is omitted for the rest. The command sidecar
-// turns it into an mpv command. A translator builds one from a matched
-// binding, but a phone that publishes {"action":"pause"} reaches mpv the
-// same way.
+// mediaCommand is the JSON that travels on a commands topic. On a
+// Play's topic it is the surface any program publishes to, a phone or
+// a Home Assistant integration alike, and the playback pod's own step
+// from a key name to mpv's words. On a Player's topic it is the
+// operator's re-present and a delegate client's sleep. No controller
+// payload carries one.
 type mediaCommand struct {
 	Action string `json:"action"`
 	Amount int    `json:"amount,omitempty"`
@@ -181,7 +129,7 @@ var keyCodeNames = namesByCode(keyCodes)
 
 // axisCodes are the hat axes a Keymap's axes may name. The analog
 // sticks are deliberately absent: a resting thumb reports at 250Hz,
-// and nothing in the action vocabulary wants an analog value.
+// and no key name carries an analog value.
 var axisCodes = map[string]uint16{
 	"ABS_HAT0X": 0x10,
 	"ABS_HAT0Y": 0x11,
@@ -239,20 +187,6 @@ const (
 	artMountPath  = "/art"
 	artSizeLimit  = "16Mi"
 )
-
-// matchBinding compares type, code, and value, all three exactly. The
-// exactness is the debounce: a key's autorepeat arrives as value 2 and
-// its release as 0, a hat's return to center as 0, and none of them
-// equals the 1, -1, or 1 a binding states, so a held button fires
-// once.
-func matchBinding(bindings []compiledBinding, event inputEvent) (compiledBinding, bool) {
-	for _, binding := range bindings {
-		if binding.EventType == event.Type && binding.Code == event.Code && binding.Value == event.Value {
-			return binding, true
-		}
-	}
-	return compiledBinding{}, false
-}
 
 // The mpv client name the display script registers under. It is the target of
 // every script-message-to that carries a navigation action to the display.

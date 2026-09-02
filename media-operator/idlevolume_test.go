@@ -6,35 +6,44 @@ package main
 // the whole path off.
 
 import (
-	"math"
 	"testing"
 	"time"
 )
 
 // volumeCommander builds one idle command pod that holds a volume topic, with
 // no fade window so nothing but the test drives it.
-func volumeCommander(t *testing.T, remotes map[string]string) (*idleCommander, *idleWatch) {
+func volumeCommander(t *testing.T, remotes []string) (*idleCommander, *idleWatch) {
 	t.Helper()
 	ic, watch := fadingCommander(t, 0, remotes)
 	ic.volumeTopic = playerVolumeTopic(defaultTopicBase, "house", "theater")
 	return ic, watch
 }
 
-// bindVolume hands the sidecar the compiled table that binds the north
-// button to a volume step and the south button to mute, the way the
-// operator publishes it on the retained keymap topic.
-func bindVolume(t *testing.T, ic *idleCommander, keymap string) {
+// sendVolumeUp presses the level up, under the kernel's name for the
+// control, the one every remote and keyboard reports.
+func sendVolumeUp(t *testing.T, ic *idleCommander, events string) {
 	t.Helper()
-	ic.handle(keymap, mustEncode(t, []compiledBinding{
-		{EventType: evKey, Code: buttonCodes["BTN_NORTH"], Value: 1, Action: actionVolume, Amount: 5},
-		{EventType: evKey, Code: buttonCodes["BTN_SOUTH"], Value: 1, Action: actionMute},
-	}))
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_VOLUMEUP", Value: 1})
 }
 
-// pressButton presses one named button down on the given events topic.
-func pressButton(t *testing.T, ic *idleCommander, events, button string) {
+// repeatVolumeUp is the same key held down. The standing remote pod
+// sends this value while a person holds the control, and this pod
+// synthesises none of its own.
+func repeatVolumeUp(t *testing.T, ic *idleCommander, events string) {
 	t.Helper()
-	sendEvent(t, ic, events, remoteEvent{Type: evKey, Code: buttonCodes[button], Value: 1})
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_VOLUMEUP", Value: 2})
+}
+
+// releaseVolumeUp lets the level key back up.
+func releaseVolumeUp(t *testing.T, ic *idleCommander, events string) {
+	t.Helper()
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_VOLUMEUP", Value: 0})
+}
+
+// sendMute presses mute.
+func sendMute(t *testing.T, ic *idleCommander, events string) {
+	t.Helper()
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_MUTE", Value: 1})
 }
 
 // The sidecar keeps the last level the topic delivered, because a
@@ -74,14 +83,13 @@ func TestTheIdleSidecarStepsFromUnityBeforeAnyMessage(t *testing.T) {
 // level off that topic. It steps from the last message the topic
 // delivered, so a person sets the room before they choose any media.
 func TestAnIdleVolumePressPublishesTheNextLevel(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindVolume(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 
 	ic.handle(ic.volumeTopic, []byte(`{"level":40,"muted":false}`))
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 
 	publish := nextPublish(t, watch)
 	mustMatch(t, publish.topic, ic.volumeTopic)
@@ -93,26 +101,38 @@ func TestAnIdleVolumePressPublishesTheNextLevel(t *testing.T) {
 // A mute press toggles the flag the same way, so the state survives
 // into the next Play and the indicator's glyph is what says so.
 func TestAnIdleMutePressPublishesTheToggledFlag(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindVolume(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_SOUTH")
+	sendMute(t, ic, events)
 
 	mustMatch(t, string(nextPublish(t, watch).payload), `{"level":100,"muted":true}`)
+}
+
+// Mute acts on the press alone, because a held mute that toggled on
+// every repeat would flip the flag back and forth under the hand.
+func TestAnIdleMuteRepeatTogglesNothing(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
+	sendActivity(t, ic, playerIdle)
+
+	sendMute(t, ic, events)
+	mustMatch(t, string(nextPublish(t, watch).payload), `{"level":100,"muted":true}`)
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_MUTE", Value: 2})
+
+	noPublish(t, watch, 100*time.Millisecond)
 }
 
 // A unit that is playing has the film's own pod answering its
 // presses, so the idle command pod publishes no level while a Play runs. Two
 // publishers on one press would race to the same value for no gain.
 func TestTheIdleSidecarPressesNoVolumeWhileAPlayRuns(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindVolume(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerPlaying)
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 
 	noPublish(t, watch, 100*time.Millisecond)
 }
@@ -120,15 +140,14 @@ func TestTheIdleSidecarPressesNoVolumeWhileAPlayRuns(t *testing.T) {
 // A press on a sleeping screen is a wake and nothing more, so the
 // press that brings the picture back does not also move the level.
 func TestAPressOnASleepingScreenOnlyWakesIt(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindVolume(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 	ic.mu.Lock()
 	ic.asleep = true
 	ic.mu.Unlock()
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 
 	mustMatch(t, nextMoment(t, watch).Event, screenWakeEvent)
 	noPublish(t, watch, 100*time.Millisecond)
@@ -138,107 +157,72 @@ func TestAPressOnASleepingScreenOnlyWakesIt(t *testing.T) {
 // That sidecar answers no press and applies no level, because a unit with
 // nothing to hear has no level to mean anything.
 func TestAnIdleSidecarWithNoSpeakersIgnoresTheVolume(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	ic.volumeTopic = ""
-	bindVolume(t, ic, keymap)
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 
 	noPublish(t, watch, 100*time.Millisecond)
 	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// bindRepeatingVolume compiles a table whose volume step repeats, the
-// way the dualsense keymap's volume bindings do, with a repeat quick
-// enough to land inside a test.
-func bindRepeatingVolume(t *testing.T, ic *idleCommander, keymap string) {
-	t.Helper()
-	ic.handle(keymap, mustEncode(t, []compiledBinding{
-		{EventType: evKey, Code: buttonCodes["BTN_NORTH"], Value: 1,
-			Action: actionVolume, Amount: 5, RepeatDelay: 10, RepeatInterval: 10},
-	}))
-}
-
-// releaseButton releases one named button on the given events topic.
-func releaseButton(t *testing.T, ic *idleCommander, events, button string) {
-	t.Helper()
-	sendEvent(t, ic, events, remoteEvent{Type: evKey, Code: buttonCodes[button], Value: 0})
-}
-
-// A held volume control steps again while it is held, on the same clock
-// the translator ticks during a film, so a hold feels the same on both
-// screens. The press publishes once and the repeat publishes more.
-func TestAHeldIdleVolumeControlRepeats(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindRepeatingVolume(t, ic, keymap)
+// The standing remote pod sends the repeat, and the level steps again
+// on each one, so a person ramps the level by holding the key.
+func TestAVolumeRepeatFromTheBusStepsTheLevelAgain(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 	ic.handle(ic.volumeTopic, []byte(`{"level":40,"muted":false}`))
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
+	mustMatch(t, string(nextPublish(t, watch).payload), `{"level":45,"muted":false}`)
+	ic.handle(ic.volumeTopic, []byte(`{"level":45,"muted":false}`))
+	repeatVolumeUp(t, ic, events)
 
-	for range 3 {
-		publish := nextPublish(t, watch)
-		mustMatch(t, string(publish.payload), `{"level":45,"muted":false}`)
-	}
-	releaseButton(t, ic, events, "BTN_NORTH")
+	mustMatch(t, string(nextPublish(t, watch).payload), `{"level":50,"muted":false}`)
 }
 
-// The release ends the repeat its press started, so the level stops
-// moving the moment the control comes up.
-func TestAReleaseStopsTheIdleVolumeRepeat(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindRepeatingVolume(t, ic, keymap)
+// The pod acts on the press and the repeat, and a release changes
+// nothing at all, so the level stops the moment the control comes up.
+func TestAVolumeReleaseStepsNothing(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 	nextPublish(t, watch)
-	releaseButton(t, ic, events, "BTN_NORTH")
+	releaseVolumeUp(t, ic, events)
 
-	drainPublishes(watch, 50*time.Millisecond)
 	noPublish(t, watch, 100*time.Millisecond)
+	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// A Play that starts mid-hold silences the repeat's ticks, because a
-// playing unit has the film's own pod answering its presses. The gate
-// reads again on every tick, not once at the press.
-func TestAPlayStartedMidHoldSilencesTheRepeat(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	bindRepeatingVolume(t, ic, keymap)
+// The gate reads every event the standing pod sends, so the repeats
+// that arrive after a Play starts step nothing.
+func TestAVolumeRepeatStepsNothingWhileAPlayRuns(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 	nextPublish(t, watch)
 	sendActivity(t, ic, playerPlaying)
+	repeatVolumeUp(t, ic, events)
 
-	drainPublishes(watch, 50*time.Millisecond)
 	noPublish(t, watch, 100*time.Millisecond)
-	releaseButton(t, ic, events, "BTN_NORTH")
 }
 
-// The idle command pod clamps a repeat the same way the translator
-// does, and the press proves it: a table off the bus that names an
-// interval no Duration holds would panic the ticker this press starts,
-// on a goroutine that takes the sidecar down with it.
-func TestAnIdleRepeatItCouldNotTickIsClamped(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := volumeCommander(t, map[string]string{events: keymap})
-	ic.handle(keymap, mustEncode(t, []compiledBinding{{
-		EventType: evKey, Code: buttonCodes["BTN_NORTH"], Value: 1,
-		Action: actionVolume, Amount: 5,
-		RepeatDelay: math.MaxInt, RepeatInterval: math.MaxInt,
-	}}))
+// The pod holds no clock of its own, so one press publishes one level
+// and the next level waits for the next event off the bus.
+func TestAVolumePressPublishesOneLevelAndRepeatsNothing(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := volumeCommander(t, []string{events})
 	sendActivity(t, ic, playerIdle)
 
-	pressButton(t, ic, events, "BTN_NORTH")
+	sendVolumeUp(t, ic, events)
 
 	nextPublish(t, watch)
-	ic.mu.Lock()
-	defer ic.mu.Unlock()
-	mustMatch(t, ic.tables[keymap][0].RepeatDelay, maxRepeatMillis)
-	mustMatch(t, ic.tables[keymap][0].RepeatInterval, maxRepeatMillis)
+	noPublish(t, watch, 200*time.Millisecond)
 }

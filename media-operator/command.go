@@ -8,12 +8,13 @@ package main
 // availability. It holds no API credentials and reaches the control
 // plane only through the operator's subscription to the bus.
 //
-// The commands topic is the whole of what drives mpv now. A translator
-// turns a controller's raw events into named commands on that topic,
-// and any other program on the bus publishes the same commands, so the
-// command sidecar answers a phone or a Home Assistant integration the
-// same way it answers a gamepad. The report carries no API object: the
-// Play it belongs to is named by the topic, not by the body.
+// The sidecar reads two kinds of input. It reads the events topic of
+// each controller the unit names, gated on the focus mark, and binds
+// the kernel's key names itself in keybindings.go. And it reads the
+// commands topic, which stays the surface any other program publishes
+// to, so it answers a phone or a Home Assistant integration the same
+// way it answers a gamepad. The report carries no API object: the Play
+// it belongs to is named by the topic, not by the body.
 
 import (
 	"context"
@@ -66,6 +67,19 @@ type commander struct {
 	// Empty is the speaker gate: the sidecar subscribes to no level,
 	// applies none, and answers no volume press.
 	volumeTopic string
+
+	// The unit's controllers, keyed by the events topic each one
+	// publishes on, and the Player this Play runs on, which is the value
+	// a mark must hold for a press to act. A pod for a Play whose Player
+	// names no Remote holds none of this and answers no press.
+	remotes    map[string]playRemote
+	playerName string
+
+	// The last mark each controller's focus topic delivered, keyed by
+	// that controller's events topic. It takes a lock of its own,
+	// because a press reads it while the bus reader writes it.
+	focusMu sync.Mutex
+	marks   map[string]string
 
 	bus *Bus
 
@@ -177,6 +191,11 @@ func runCommand() {
 		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
 		artDir:            artMountPath,
+		playerName:        os.Getenv(playerNameVariable),
+		remotes: playRemoteMap(
+			os.Getenv(remoteEventsTopicsVariable),
+			os.Getenv(remoteFocusTopicsVariable)),
+		marks: map[string]string{},
 	}
 
 	// The bus runs on its own context, not the signal context, so the
@@ -197,6 +216,8 @@ func runCommand() {
 	if cmd.volumeTopic != "" {
 		cmd.bus.Subscribe(cmd.volumeTopic)
 	}
+	// The controllers' own topics, two per Remote the unit names.
+	cmd.subscribeRemotes(cmd.bus)
 	go cmd.bus.Run(busCtx)
 
 	cmd.report(runCtx)
@@ -249,28 +270,36 @@ func (c *commander) marshalLastReport() ([]byte, bool) {
 	return payload, true
 }
 
-// handle turns one commands message into an mpv command. The topic is
-// fixed, so the payload alone matters: it decodes to a named command,
-// and commandFor turns that name into mpv's own words. A payload that
-// does not decode, or an action this build has no command for, writes
-// nothing, so a newer program's command degrades to no effect rather
-// than a crash.
+// handle sorts one inbound message by its topic. The volume topic and
+// the controllers' topics carry payloads that are not the command
+// vocabulary, so each is read before it. A payload that does not
+// decode, or an action this build has no command for, writes nothing,
+// so a newer program's command degrades to no effect rather than a
+// crash.
 func (c *commander) handle(topic string, payload []byte) {
-	// The two subscriptions carry different payloads, and the topic
-	// says which this is. The volume topic is read first, because its
-	// payload is a state and not a named command.
 	if c.volumeTopic != "" && topic == c.volumeTopic {
 		c.applyVolume(payload)
+		return
+	}
+	if c.handleRemote(topic, payload) {
 		return
 	}
 	var command mediaCommand
 	if err := json.Unmarshal(payload, &command); err != nil {
 		return
 	}
-	// A volume step and a mute press leave here without reaching mpv.
-	// They publish the unit's next state, and the subscription above
-	// applies it, so the pod that pressed and every pod that only
-	// listened run one apply path.
+	c.apply(command)
+}
+
+// apply is the one path from a command to mpv, for a press this pod
+// read off a controller and for a command another program published
+// alike. A volume step and a mute leave without reaching mpv: they
+// publish the unit's next state, and the subscription applies it, so
+// the pod that pressed and every pod that only listened run one apply
+// path. A seek and a chapter jump send a second command, because they
+// carry no-osd and the sidecar summons the display to draw the new
+// position.
+func (c *commander) apply(command mediaCommand) {
 	if isVolumeAction(command.Action) {
 		c.pressVolume(command)
 		return
@@ -280,10 +309,6 @@ func (c *commander) handle(topic string, payload []byte) {
 		return
 	}
 	c.command(mpv)
-	// A seek or a chapter jump carries no-osd, so the sidecar summons the
-	// display to draw the new position. mpv shows the feedback for every
-	// other command, so feedbackFor returns nil and the sidecar sends
-	// nothing more.
 	if feedback := feedbackFor(command); feedback != nil {
 		c.command(feedback)
 	}

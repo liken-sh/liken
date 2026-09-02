@@ -129,42 +129,27 @@ func idleComponents(player *Player) []string {
 }
 
 // idleRemoteTopics is one of the unit's controllers as the idle
-// command pod reads it: the topic its presses arrive on, the topic its
-// compiled keymap stands on, and the topic its focus mark stands on.
-// Keymap is empty for a controller with no keymap. The idle command pod
-// gates every press on the mark naming this Player, and it builds the
-// cycle topic from the focus topic.
+// command pod reads it: the topic its presses arrive on and the topic
+// its focus mark stands on. The pod gates every press on the mark
+// naming this Player, and it builds the cycle topic from the focus
+// topic.
 type idleRemoteTopics struct {
 	Events string
-	Keymap string
 	Focus  string
 }
 
-// gatherIdleRemotes reads the events and keymap topics of every
-// controller the Player names, in spec order. The keymap name is the
-// Player entry's override, or the Remote's own. A Remote the API does
-// not hold leaves its keymap blank rather than failing the idle pod,
-// so that controller's presses still wake the screen and none of them
-// is back.
-func gatherIdleRemotes(c *Client, player *Player, base string) []idleRemoteTopics {
+// gatherIdleRemotes builds the events and focus topics of every
+// controller the Player names, in spec order, because the position in
+// that order is the index the focus pulse carries. It reads no API
+// object: the table is the standing pod's business.
+func gatherIdleRemotes(player *Player, base string) []idleRemoteTopics {
 	namespace := player.Metadata.Namespace
 	remotes := make([]idleRemoteTopics, 0, len(player.Spec.Remotes))
 	for _, entry := range player.Spec.Remotes {
-		topics := idleRemoteTopics{
+		remotes = append(remotes, idleRemoteTopics{
 			Events: remoteEventsTopic(base, namespace, entry.Name),
 			Focus:  remoteFocusTopic(base, namespace, entry.Name),
-		}
-		name := entry.Keymap
-		if name == "" {
-			remote, err := GetRemote(c, namespace, entry.Name)
-			if err == nil {
-				name = remote.Spec.Keymap
-			}
-		}
-		if name != "" {
-			topics.Keymap = keymapTopic(base, name)
-		}
-		remotes = append(remotes, topics)
+		})
 	}
 	return remotes
 }
@@ -383,21 +368,16 @@ func buildIdleCommandPod(
 		container.Env = append(container.Env,
 			EnvVar{Name: playerVolumeTopicVariable, Value: topic})
 	}
-	// The three remote lists stay index-aligned, so the command pod pairs
-	// each events topic with the keymap that names its presses and the
-	// focus topic that carries its mark. A remote's position in them is
-	// its spec.remotes order, and the pod sends that index with the focus
-	// pulse. A Player with no remotes sends none of the variables, and the
-	// fade then runs on the timer alone.
+	// The two remote lists stay index-aligned, so the command pod pairs
+	// each events topic with the focus topic that carries its mark. A
+	// remote's position in them is its spec.remotes order, and the pod
+	// sends that index with the focus pulse. A Player with no remotes
+	// sends neither variable, and the fade then runs on the timer alone.
 	if len(remotes) > 0 {
 		container.Env = append(container.Env,
 			EnvVar{
 				Name:  idleRemoteEventsTopicsVariable,
 				Value: joinIdleRemotes(remotes, func(r idleRemoteTopics) string { return r.Events }),
-			},
-			EnvVar{
-				Name:  idleRemoteKeymapTopicsVariable,
-				Value: joinIdleRemotes(remotes, func(r idleRemoteTopics) string { return r.Keymap }),
 			},
 			EnvVar{
 				Name:  idleRemoteFocusTopicsVariable,
@@ -461,7 +441,7 @@ func (o *operator) reconcileIdle(player *Player, timeZone string, defaultIdle *I
 	command := standing{namespace: namespace, podName: idleCommandPodName(name)}
 	if idle.Controller != idleControllerNone {
 		screen.claim = claim
-		remotes := gatherIdleRemotes(o.client, player, o.topicBase)
+		remotes := gatherIdleRemotes(player, o.topicBase)
 		command.pod = buildIdleCommandPod(player, o.sidecarImage, o.busAddress, o.topicBase, idle, remotes)
 		if idle.Controller == idleControllerOwn {
 			screen.pod = buildIdlePod(player, claim, o.busAddress, o.topicBase, timeZone, idle)

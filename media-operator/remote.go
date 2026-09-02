@@ -1,10 +1,10 @@
 package main
 
-// The reader mode is the standing remote pod's whole process. It reads
-// the controller its claim delivered and publishes each raw evdev
-// event to the Remote's events topic. It holds no API credentials, and
-// the keymap stays off the wire, so one Remote can feed two players
-// that map it differently.
+// The reader mode is the standing remote pod's whole process. It
+// reads the controller its claim delivered, folds each event through
+// the table the operator publishes on this Remote's keys topic, and
+// publishes the kernel's name for the control on the events topic. It
+// holds no API credentials.
 //
 // The standing pod outlives every sleep of the controller. The claim
 // tolerates the disconnected taint with no limit, so a controller a
@@ -69,6 +69,16 @@ type reader struct {
 	availabilityTopic string
 	codesTopic        string
 
+	// The retained topic the operator publishes this Remote's compiled
+	// table on, and the fold state that reads it. The pod subscribes to
+	// its own table alone.
+	keysTopic string
+	keys      keyState
+
+	// The run's context, which every synthesised repeat runs under, so
+	// no repeat outlives the process.
+	repeatCtx context.Context
+
 	// The teaching mode the Remote's spec asks for. Discovery keeps
 	// every node the claim delivered and logs each event the way a
 	// Keymap names it, so a person reads an unknown controller's codes
@@ -122,27 +132,45 @@ func runReader() {
 		presenceTopic:     remotePresenceTopic(base, namespace, name),
 		availabilityTopic: remoteAvailabilityTopic(base, namespace, name),
 		codesTopic:        remoteCodesTopic(base, namespace, name),
+		keysTopic:         remoteKeysTopic(base, namespace, name),
 		// The operator sets the variable only where the Remote asks for
 		// discovery, so a pod that reads nothing here runs the ordinary
 		// selection rule.
 		discovery: os.Getenv(remoteDiscoveryVariable) == discoveryOn,
 		log:       os.Stdout,
+		// The pod starts on the base, the same rows compiled into this
+		// binary, so a controller behaves as an unmapped one from the first
+		// press. The retained table arrives moments later and replaces it,
+		// and a Keymap's rows take effect then.
+		keys: keyState{table: baseKeys},
 	}
-	// The reader reads nothing off the bus, so it names no inbound
-	// handler. It does name a Last Will on its availability topic, the
-	// pattern the playback sidecar uses: the broker publishes offline on
-	// any disconnect this pod does not make cleanly, so a pod the kubelet
+	// The reader reads one topic off the bus, its own key table. It also
+	// names a Last Will on its availability topic, the pattern the
+	// playback sidecar uses: the broker publishes offline on any
+	// disconnect this pod does not make cleanly, so a pod the kubelet
 	// killed leaves no retained presence that reads as a connected
 	// controller. The Bus manages its own connection and reconnects with
 	// backoff, so a broker restart costs a gap in events and not the
 	// reader.
 	r.bus = newBus(busAddress, "remote-"+namespace+"-"+name,
 		&busWill{Topic: r.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
-		r.onConnect, nil)
+		r.onConnect, r.handle)
+	// The table topic is retained, so the current table arrives the
+	// instant the pod connects, and the Bus re-sends the filter on every
+	// reconnect. The subscription is made once.
+	r.bus.Subscribe(r.keysTopic)
 	go r.bus.Run(ctx)
 
 	r.publishEvents(ctx)
 	os.Exit(0)
+}
+
+// handle folds one inbound message. The pod subscribes to one topic,
+// its own table, so the topic is the whole dispatch.
+func (r *reader) handle(topic string, payload []byte) {
+	if topic == r.keysTopic {
+		r.setTable(payload)
+	}
 }
 
 // onConnect refills the broker the moment a session reaches a CONNACK. The
@@ -192,7 +220,7 @@ func (r *reader) publishCodes(codes remoteCodes) {
 
 // clearCodes empties the retained codes topic when the nodes vanish.
 // The empty payload is the cleared retained value, the same clear the
-// operator writes on a keymap topic whose Keymap is gone.
+// operator writes on the keys topic of a Remote that is gone.
 func (r *reader) clearCodes() {
 	r.mutex.Lock()
 	r.codes = nil
@@ -329,6 +357,11 @@ func closeNodes(nodes []openNode) {
 // the next connect. The process keeps running.
 func (r *reader) readAndPublish(ctx context.Context, nodes []openNode) {
 	defer closeNodes(nodes)
+	// Every repeat this batch of nodes starts runs under the run's
+	// context, and the nodes vanishing ends them all: a controller that
+	// slept mid-hold sends no release.
+	r.repeatCtx = ctx
+	defer r.stopAllRepeats()
 
 	reading, stopReading := context.WithCancel(ctx)
 	defer stopReading()
@@ -348,32 +381,22 @@ func (r *reader) readAndPublish(ctx context.Context, nodes []openNode) {
 			if !publishable(event.event) {
 				continue
 			}
-			// Discovery logs each event a Keymap could carry, and the
-			// publish below is unchanged, so a controller in discovery
-			// still drives its unit and still wakes a faded screen.
+			// Discovery logs each raw event, and the fold below is
+			// unchanged, so a controller in discovery still drives its
+			// unit and still wakes a faded screen.
 			if r.discovery {
 				for _, line := range discoveryLines(event.node, event.event) {
 					fmt.Fprintf(r.log, "remote: %s\n", line)
 				}
 			}
-			// A slice of a type whose fields are integers marshals
-			// unconditionally, so the error is dropped.
-			payload, _ := json.Marshal(remoteEvent{
-				Type: event.event.Type, Code: event.event.Code, Value: event.event.Value})
-			// The events are not retained, because a press is an event
-			// and not a state, so a subscriber that joins later reads no
-			// stale press.
-			r.bus.Publish(r.eventsTopic, payload, false)
+			r.fold(event.event)
 		}
 	}
 }
 
-// publishable keeps the topic to the events a Keymap can bind. A button
-// arrives as EV_KEY and every EV_KEY code is bindable, so every key
-// event goes out. A d-pad arrives as an EV_ABS hat axis, and only the
-// two hat axes in axisCodes are bindable, so the analog sticks, which
-// report at 250Hz, stay off the wire. EV_SYN and EV_MSC carry no
-// binding and never publish.
+// publishable is the gate before the fold. Every EV_KEY event reaches
+// it. Of EV_ABS only the two hat axes do, because the analog sticks
+// report at 250Hz. EV_SYN and EV_MSC carry no control at all.
 func publishable(event inputEvent) bool {
 	switch event.Type {
 	case evKey:

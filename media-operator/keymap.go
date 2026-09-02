@@ -1,12 +1,11 @@
 package main
 
-// The compile step. A Keymap is written in names, evdev's on the
-// left and the action vocabulary's on the right, and the sidecar
-// matches numbers. This file turns the names into the numbered table
-// in input.go and gathers the Remotes bound to one Player. The
-// compile runs in the operator, before any object is created, so a
-// name that means nothing fails the Play with a message instead of
-// crash-looping a sidecar.
+// The compile step. A Keymap is written in names, evdev's on both
+// sides, and the standing pod matches numbers. This file turns one
+// Keymap's names into rows, and basekeys.go folds them over the base.
+// The compile runs in the operator, before any pod reads the table,
+// so a name that means nothing is logged instead of crash-looping a
+// pod.
 
 import (
 	"errors"
@@ -23,27 +22,23 @@ const (
 	defaultRepeatInterval = 300 * time.Millisecond
 )
 
-// A boundRemote is one Remote as the pod builders need it: the name that
-// names its translator sidecar, the resolved Keymap name, and the three
-// topics the translator subscribes to. The Keymap name is the Player
-// entry's per-unit override when it sets one, and the Remote's own Keymap
-// otherwise, so one controller can map two ways on two units. The gather
-// sets Name and Keymap; the operator fills the three topics in reconcile.
+// A boundRemote is one Remote as the pod builders need it: its name,
+// the events topic the command sidecar reads, and the focus topic it
+// gates on. The gather sets the name, and the operator fills the two
+// topics in reconcile, because the topic base lives with the
+// operator.
 type boundRemote struct {
 	Name        string
-	Keymap      string
 	EventsTopic string
-	KeymapTopic string
 	FocusTopic  string
 }
 
-// compileKeymap turns one Keymap into the sidecar's table. A button
-// compiles to EV_KEY with value 1, the press alone, so a held
-// button's autorepeat and its release match nothing. An axis
-// compiles to EV_ABS with the value the entry states, because a
-// hat's two directions arrive as -1 and 1 on one axis and are two
-// separate entries here.
-func compileKeymap(keymap *Keymap) ([]compiledBinding, error) {
+// compileRows turns one Keymap into its own rows, before the fold
+// over the base. A button compiles to EV_KEY with value 1, the press,
+// because the release and the autorepeat carry the same name. An axis
+// compiles to EV_ABS with the value the entry states, because a hat's
+// two directions arrive as -1 and 1 on one code.
+func compileRows(keymap *Keymap) ([]compiledBinding, error) {
 	name := keymap.Metadata.Name
 	var bindings []compiledBinding
 
@@ -54,15 +49,14 @@ func compileKeymap(keymap *Keymap) ([]compiledBinding, error) {
 				"the Keymap %s binds %s, which is not an evdev button name this operator knows",
 				name, button.Press)
 		}
-		if err := checkAction(name, button.Press, button.Action, button.Amount); err != nil {
+		if err := checkKey(name, button.Press, button.Key); err != nil {
 			return nil, err
 		}
 		binding := compiledBinding{
 			EventType: evKey,
 			Code:      code,
 			Value:     1,
-			Action:    button.Action,
-			Amount:    button.Amount,
+			Key:       button.Key,
 		}
 		if err := applyRepeat(&binding, name, button.Press, button.Repeat); err != nil {
 			return nil, err
@@ -78,15 +72,14 @@ func compileKeymap(keymap *Keymap) ([]compiledBinding, error) {
 				name, axis.Axis)
 		}
 		entry := fmt.Sprintf("%s %d", axis.Axis, axis.Value)
-		if err := checkAction(name, entry, axis.Action, axis.Amount); err != nil {
+		if err := checkKey(name, entry, axis.Key); err != nil {
 			return nil, err
 		}
 		binding := compiledBinding{
 			EventType: evAbs,
 			Code:      code,
 			Value:     int32(axis.Value),
-			Action:    axis.Action,
-			Amount:    axis.Amount,
+			Key:       axis.Key,
 		}
 		if err := applyRepeat(&binding, name, entry, axis.Repeat); err != nil {
 			return nil, err
@@ -100,35 +93,27 @@ func compileKeymap(keymap *Keymap) ([]compiledBinding, error) {
 	return bindings, nil
 }
 
-// checkAction holds the amount rule: the three actions that move
-// need an amount and the rest refuse one. The CRD states the same
-// rule in CEL, and the compile states it again, because a resource
-// can predate the rule or arrive through a server that never
-// validated it, and this is the last gate before a pod exists.
-func checkAction(keymap, entry, action string, amount int) error {
-	switch {
-	case amountActions[action]:
-		if amount == 0 {
-			return fmt.Errorf("the Keymap %s binds %s to %s with no amount, and %s needs one",
-				keymap, entry, action, action)
-		}
-	case wordActions[action]:
-		if amount != 0 {
-			return fmt.Errorf("the Keymap %s binds %s to %s with an amount, and %s takes none",
-				keymap, entry, action, action)
-		}
-	default:
-		return fmt.Errorf("the Keymap %s binds %s to %s, which is not an action this operator knows",
-			keymap, entry, action)
+// checkKey holds the right side to the kernel's own names, plus none,
+// which drops the control. The CRD pattern states the shape, and the
+// compile states the rule again, because a resource can predate the
+// rule or arrive through a server that never validated it, and this
+// is the last gate before a pod reads the table.
+func checkKey(keymap, entry, key string) error {
+	if key == keyNone {
+		return nil
+	}
+	if _, known := buttonCodes[key]; !known {
+		return fmt.Errorf("the Keymap %s maps %s to %s, which is not an evdev key name this operator knows",
+			keymap, entry, key)
 	}
 	return nil
 }
 
-// applyRepeat folds a Keymap's repeat block into the compiled binding. A
-// binding with no block fires once. A block turns repeat on, whatever the
-// action is, and an empty delay or interval takes the default. The
-// operator parses the durations here, so the translator carries
-// milliseconds and parses nothing.
+// applyRepeat folds a Keymap's repeat block into the row. A row with
+// no block reports only what the kernel reports. A block turns
+// synthesis on, and an empty delay or interval takes the default. The
+// operator parses the durations here, so the pod carries milliseconds
+// and parses nothing.
 func applyRepeat(binding *compiledBinding, keymap, entry string, repeat *KeymapRepeat) error {
 	if repeat == nil {
 		return nil
@@ -166,15 +151,13 @@ func repeatDuration(keymap, entry, field, value string, fallback time.Duration) 
 	return parsed, nil
 }
 
-// gatherRemotes reads every Remote a Player owns. It reads spec.remotes
-// in name order, because the result becomes a pod spec, and a pod spec
-// built twice from the same resources must be the same spec, container
-// for container. Each unit's keymap is the entry's own override when it
-// sets one, and the Remote's base keymap otherwise, so one controller can
-// map one way on one unit and another way on another. A named Remote that
-// does not exist fails the gather, and the message names it. The Keymap
-// itself is not read here: the operator compiles and publishes it in the
-// keymap reconcile, and the translator reads the table off the bus.
+// gatherRemotes reads every Remote a Player owns. It reads
+// spec.remotes in name order, because the result becomes a pod spec,
+// and a pod spec built twice from the same resources must be the same
+// spec. A named Remote that does not exist fails the gather, and the
+// message names it. The table is the standing pod's business,
+// published on the Remote's own keys topic, so nothing here reads a
+// Keymap.
 func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
 	namespace := player.Metadata.Namespace
 
@@ -192,14 +175,7 @@ func gatherRemotes(c *Client, player *Player) ([]boundRemote, error) {
 		if err != nil {
 			return nil, err
 		}
-		keymap := entry.Keymap
-		if keymap == "" {
-			keymap = remote.Spec.Keymap
-		}
-		bound = append(bound, boundRemote{
-			Name:   remote.Metadata.Name,
-			Keymap: keymap,
-		})
+		bound = append(bound, boundRemote{Name: remote.Metadata.Name})
 	}
 	return bound, nil
 }

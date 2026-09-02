@@ -62,9 +62,7 @@ func focusPlayer(name string, remotes ...string) Player {
 func boundSofa() []boundRemote {
 	return []boundRemote{{
 		Name:        "sofa",
-		Keymap:      "gamepad",
 		EventsTopic: remoteEventsTopic(defaultTopicBase, "house", "sofa"),
-		KeymapTopic: keymapTopic(defaultTopicBase, "gamepad"),
 		FocusTopic:  remoteFocusTopic(defaultTopicBase, "house", "sofa"),
 	}}
 }
@@ -250,8 +248,8 @@ func TestReconcileFocusLeavesTheMarkWhenAPlayFinishes(t *testing.T) {
 	}
 }
 
-// A Remote no Player names has an empty cycle set, so its mark is
-// cleared and no translator gates on a unit that dropped it.
+// The mark is cleared, so no consumer gates open on a unit that
+// dropped the controller.
 func TestReconcileFocusClearsAMarkWithNoBoundPlayer(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")

@@ -25,6 +25,10 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
+* [24, Keys on the bus](24-keys-on-the-bus.md). The events topic
+  carries the kernel's key names, the remote pod normalises a device
+  under a compiled base, the `Keymap` shrinks to remaps and disables,
+  and every consumer binds keys itself.
 
 ## Completed
 

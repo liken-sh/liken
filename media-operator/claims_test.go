@@ -228,20 +228,16 @@ func TestClaimRequestsReadsTheNamesInClaimOrder(t *testing.T) {
 }
 
 // Two remotes bound to the player, as the gather hands them to the pod
-// builder. The operator fills the three topics before it builds the
-// translator sidecars, so the fixture carries them too.
+// builder. The operator fills the two topics before it builds the
+// command sidecar, so the fixture carries them too.
 func testBoundRemotes() []boundRemote {
 	return []boundRemote{{
 		Name:        "armchair",
-		Keymap:      "gamepad",
 		EventsTopic: "liken/media/remotes/house/armchair/events",
-		KeymapTopic: "liken/media/keymaps/gamepad",
 		FocusTopic:  "liken/media/remotes/house/armchair/focus",
 	}, {
 		Name:        "sofa",
-		Keymap:      "gamepad",
 		EventsTopic: "liken/media/remotes/house/sofa/events",
-		KeymapTopic: "liken/media/keymaps/gamepad",
 		FocusTopic:  "liken/media/remotes/house/sofa/focus",
 	}}
 }

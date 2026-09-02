@@ -130,10 +130,12 @@ rules every topic follows.
 
 ### `commands`
 
-The topic any program publishes to drive the run. A
-translator sidecar, a phone, and a Home Assistant integration all
-reach the run the same way: publish one JSON command, and the
-playback pod applies it.
+The topic any program publishes to drive the run. A phone and a
+Home Assistant integration reach the run the same way: publish one
+JSON command, and the playback pod applies it. A controller does not
+reach this topic. The playback pod's command sidecar reads the
+`Remote`'s events topic itself and binds the key names there, so a
+press becomes one of these commands inside the pod.
 
     {"action": "seek", "amount": -30}
 
@@ -158,10 +160,9 @@ computes the unit's next state and publishes it on the
 [Player's volume topic](/docs/reference/players/#volume), and every
 pod for the unit applies what that topic delivers. An action this
 build has no case for does nothing, so a command from a newer
-program has no effect rather than a crash. `cycle-focus`, the one
-[Keymap](/docs/reference/keymaps/) action that never travels here,
-becomes a focus cycle request on the
-[Remote's tree](/docs/reference/remotes/) instead.
+program has no effect rather than a crash. A focus cycle never
+travels here: the key that asks for one, `KEY_CYCLEWINDOWS`, becomes
+a request on the [Remote's tree](/docs/reference/remotes/) instead.
 
 ### `status`
 

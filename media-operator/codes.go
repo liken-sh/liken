@@ -4,9 +4,10 @@ package main
 // capability bitmaps, readable the moment a node opens and complete
 // with no button pressed. The standing pod publishes that declared set
 // retained, this desk folds it in beside the presence desk, and the
-// reconcile pass reports the gap, the declared codes the Keymap does
-// not bind, on the Remote's status. The gap is derived on every pass
-// and never accumulated, so erasing the status loses nothing.
+// reconcile pass reports the gap, the declared controls the compiled
+// table maps to nothing, on the Remote's status. The gap is derived on
+// every pass and never accumulated, so erasing the status loses
+// nothing.
 
 import (
 	"slices"
@@ -123,28 +124,38 @@ const (
 	unboundAxis = "abs"
 )
 
-// unboundCodes is the gap the status reports: every declared code the
-// Keymap does not bind. The gap is by code, so a Keymap that binds one
-// direction of a hat binds the whole axis. The list empties as the
-// Keymap grows, and a Remote with no Keymap reports every code its
-// controller declares.
-func unboundCodes(declared remoteCodes, bindings []compiledBinding) []UnboundCode {
-	bound := map[uint16]map[uint16]bool{evKey: {}, evAbs: {}}
-	for _, binding := range bindings {
-		if codes, known := bound[binding.EventType]; known {
-			codes[binding.Code] = true
+// unboundCodes is the gap the status reports: every declared control
+// the table maps to nothing. A key code passes as itself, so it is
+// unbound only where a row drops it with none or the kernel gives it
+// no name at all. A hat axis is unbound where no row of it names a
+// key, which the base makes rare. The gap is by code, so a row on one
+// direction of a hat binds the whole axis. It is derived on every
+// pass, so it empties as the table grows.
+func unboundCodes(declared remoteCodes, table []compiledBinding) []UnboundCode {
+	dropped := map[uint16]bool{}
+	named := map[uint16]bool{}
+	for _, row := range table {
+		switch row.EventType {
+		case evKey:
+			if row.Key == keyNone {
+				dropped[row.Code] = true
+			}
+		case evAbs:
+			if row.Key != keyNone {
+				named[row.Code] = true
+			}
 		}
 	}
 	var unbound []UnboundCode
 	for _, code := range declared.Keys {
-		if bound[evKey][code] {
+		if !dropped[code] && keyCodeNames[code] != "" {
 			continue
 		}
 		unbound = append(unbound, UnboundCode{
 			Code: code, Name: keyCodeNames[code], Type: unboundKey})
 	}
 	for _, code := range declared.Axes {
-		if bound[evAbs][code] {
+		if named[code] {
 			continue
 		}
 		unbound = append(unbound, UnboundCode{

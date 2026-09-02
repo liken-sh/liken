@@ -112,8 +112,8 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 }
 
 // watchKeymaps wakes the loop on a Keymap change, so the pass it
-// triggers recompiles and republishes every Keymap, and an edit reaches
-// a running translator within one pass rather than one backstop tick.
+// triggers recompiles and republishes every Remote's table, and an edit reaches
+// a running standing pod within one pass rather than one backstop tick.
 // The recovery mirrors the other watchers: a dropped stream or a 410
 // Gone lists the collection, wakes the loop, and resumes the watch from
 // the list's version.

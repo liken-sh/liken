@@ -6,10 +6,7 @@ package main
 // person sleeps the screen with by hand.
 
 import (
-	"context"
 	"encoding/json"
-	"maps"
-	"slices"
 	"testing"
 	"time"
 )
@@ -90,49 +87,33 @@ func noPublish(t *testing.T, watch *idleWatch, window time.Duration) {
 	}
 }
 
-// drainPublishes empties the channel for the window a canceled repeat's
-// last ticks could still land in, so the quiet check that follows reads
-// only what came after.
-func drainPublishes(watch *idleWatch, window time.Duration) {
-	deadline := time.After(window)
-	for {
-		select {
-		case <-watch.published:
-		case <-deadline:
-			return
-		}
-	}
-}
-
-// fadeTopics builds the topics of one unit and the one controller
-// these tests press.
-func fadeTopics() (events, keymap string) {
-	return remoteEventsTopic(defaultTopicBase, "house", "sofa"),
-		keymapTopic(defaultTopicBase, "gamepad")
+// fadeTopics builds the events topic of the one controller these tests
+// press. The pod reads no other topic of that controller's on a press.
+func fadeTopics() string {
+	return remoteEventsTopic(defaultTopicBase, "house", "sofa")
 }
 
 // idleTestPlayer is the Player every idle command pod in these tests
 // stands for, the same name its commands and status topics carry.
 const idleTestPlayer = "theater"
 
-// focusedRemotes turns the events-to-keymap map a test states into the
+// focusedRemotes turns the list of events topics a test states into the
 // sidecar's own records, and marks every controller focused on this
 // Player with its mark already caught up. That is the state a running
 // pod holds once the retained marks arrive, so a test about the fade
 // presses a controller that points here and says nothing about focus.
-// The records take their index from the sorted events topics, so one
-// test reads the same index twice.
-func focusedRemotes(t *testing.T, remotes map[string]string) (map[string]idleRemote, map[string]focusMark) {
+// The list's own order is the index the focus pulse carries, the way
+// the operator's list is.
+func focusedRemotes(t *testing.T, remotes []string) (map[string]idleRemote, map[string]focusMark) {
 	t.Helper()
 	records := map[string]idleRemote{}
 	marks := map[string]focusMark{}
-	for index, events := range slices.Sorted(maps.Keys(remotes)) {
+	for index, events := range remotes {
 		namespace, name, ok := parseRemoteTopic(defaultTopicBase, events, "events")
 		mustMatch(t, ok, true)
 		records[events] = idleRemote{
-			keymap: remotes[events],
-			focus:  remoteFocusTopic(defaultTopicBase, namespace, name),
-			index:  index,
+			focus: remoteFocusTopic(defaultTopicBase, namespace, name),
+			index: index,
 		}
 		marks[events] = focusMark{player: idleTestPlayer, caughtUp: true}
 	}
@@ -147,23 +128,20 @@ func focusedRemotes(t *testing.T, remotes map[string]string) (map[string]idleRem
 // stops its timer in production and the test stops it here: a window
 // still armed when the test ends would otherwise state a moment into
 // the next test's watch.
-func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string) (*idleCommander, *idleWatch) {
+func fadingCommander(t *testing.T, fade time.Duration, remotes []string) (*idleCommander, *idleWatch) {
 	t.Helper()
 	records, marks := focusedRemotes(t, remotes)
 	ic := &idleCommander{
 		commandsTopic: playerCommandsTopic(defaultTopicBase, "house", idleTestPlayer),
 		statusTopic:   playerStatusTopic(defaultTopicBase, "house", idleTestPlayer),
 		screenTopic:   playerScreenTopic(defaultTopicBase, "house", idleTestPlayer),
-		runCtx:        context.Background(),
 		playerName:    idleTestPlayer,
 		remotes:       records,
 		marks:         marks,
 		fadeAfter:     fade,
-		tables:        map[string][]compiledBinding{},
 		// A pod that starts holds the on desire, the same value
 		// the sidecar starts with on the metal.
-		desire:  panelDesireOn,
-		repeats: map[uint16]context.CancelFunc{},
+		desire: panelDesireOn,
 	}
 	watch := &idleWatch{
 		moments:   make(chan brokerPublish, 32),
@@ -178,14 +156,6 @@ func fadingCommander(t *testing.T, fade time.Duration, remotes map[string]string
 		watch.published <- message
 	}
 	t.Cleanup(func() {
-		// A repeat still held when the test ends would tick into the
-		// next test's watch, so every cancel runs here.
-		ic.repeatMu.Lock()
-		for code, cancel := range ic.repeats {
-			cancel()
-			delete(ic.repeats, code)
-		}
-		ic.repeatMu.Unlock()
 		ic.mu.Lock()
 		defer ic.mu.Unlock()
 		ic.idle = false
@@ -203,40 +173,34 @@ func sendActivity(t *testing.T, ic *idleCommander, activity string) {
 
 // sendEvent publishes one controller event on the events topic, the
 // way the standing remote pod does.
-func sendEvent(t *testing.T, ic *idleCommander, events string, event remoteEvent) {
+func sendEvent(t *testing.T, ic *idleCommander, events string, event keyEvent) {
 	t.Helper()
 	payload, err := json.Marshal(event)
 	mustSucceed(t, err)
 	ic.handle(events, payload)
 }
 
-// sendPress presses the east button down.
+// sendPress presses play-pause, a key the idle command pod holds no
+// row for. The tests about the fade press this one because it wakes
+// the screen and restarts the quiet window and does nothing else, so a
+// test reads the fade alone.
 func sendPress(t *testing.T, ic *idleCommander, events string) {
 	t.Helper()
-	sendEvent(t, ic, events, remoteEvent{Type: evKey, Code: buttonCodes["BTN_EAST"], Value: 1})
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1})
 }
 
-// sendRelease lets the east button back up. The standing remote pod
-// publishes this edge too, so the fade reads it and must do nothing
-// with it.
-func sendRelease(t *testing.T, ic *idleCommander, events string) {
+// sendBack presses back, one of the three keys that bring the shade
+// down under this operator's own client.
+func sendBack(t *testing.T, ic *idleCommander, events string) {
 	t.Helper()
-	sendEvent(t, ic, events, remoteEvent{Type: evKey, Code: buttonCodes["BTN_EAST"], Value: 0})
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_BACK", Value: 1})
 }
 
-// bindBack hands the sidecar the compiled table that binds the east
-// button to back, the way the operator publishes it on the retained
-// keymap topic.
-func bindBack(t *testing.T, ic *idleCommander, keymap string) {
+// sendBackRelease lets back back up. The standing remote pod publishes
+// this edge too, so the pod reads it and must do nothing with it.
+func sendBackRelease(t *testing.T, ic *idleCommander, events string) {
 	t.Helper()
-	payload, err := json.Marshal([]compiledBinding{{
-		EventType: evKey,
-		Code:      buttonCodes["BTN_EAST"],
-		Value:     1,
-		Action:    actionBack,
-	}})
-	mustSucceed(t, err)
-	ic.handle(keymap, payload)
+	sendEvent(t, ic, events, keyEvent{Key: "KEY_BACK", Value: 0})
 }
 
 // A unit that plays nothing arms the quiet window, and the window running
@@ -272,8 +236,8 @@ func TestIdleFadeNeverArmsAtZero(t *testing.T) {
 // person touches keeps the whole window again rather than the remainder of
 // the last one.
 func TestIdleFadeAPressResetsTheWindow(t *testing.T) {
-	events, _ := fadeTopics()
-	ic, watch := fadingCommander(t, 100*time.Millisecond, map[string]string{events: ""})
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, 100*time.Millisecond, []string{events})
 
 	sendActivity(t, ic, playerIdle)
 	time.Sleep(60 * time.Millisecond)
@@ -326,15 +290,14 @@ func nextScreenPublish(t *testing.T, watch *idleWatch) screenPublish {
 // restarts reads the shade it left rather than waking lit. The focus and
 // the present are moments, so they do not, and a restart replays neither.
 func TestIdleScreenRetainsTheShadeAndNothingElse(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
-	bindBack(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, time.Hour, []string{events})
 	sendActivity(t, ic, playerIdle)
 
-	sendPress(t, ic, events)
+	sendBack(t, ic, events)
 	mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: screenSleepEvent, retained: true})
 
-	sendPress(t, ic, events)
+	sendBack(t, ic, events)
 	mustMatch(t, nextScreenPublish(t, watch), screenPublish{event: screenWakeEvent, retained: true})
 
 	sendMark(ic, sofaFocus(), idleTestPlayer)
@@ -372,12 +335,12 @@ func TestIdleScreenRestampsTheShadeOnEveryBusSession(t *testing.T) {
 	}
 }
 
-// A press on a sleeping screen states wake, whether or not the
-// controller has a keymap. The press is the person, so it is the wake
+// A press on a sleeping screen states wake, whether or not the pod
+// holds a row for that key. The press is the person, so it is the wake
 // signal.
 func TestIdleFadeAPressWakesASleepingScreen(t *testing.T) {
-	events, _ := fadeTopics()
-	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, 20*time.Millisecond, []string{events})
 
 	sendActivity(t, ic, playerIdle)
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
@@ -402,12 +365,11 @@ func TestIdleFadeAStatusThatLeavesIdleWakes(t *testing.T) {
 // A press named back, on a unit that plays nothing, states sleep at once
 // rather than waiting out the window.
 func TestIdleBackSleepsTheScreenAtOnce(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
-	bindBack(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, time.Hour, []string{events})
 
 	sendActivity(t, ic, playerIdle)
-	sendPress(t, ic, events)
+	sendBack(t, ic, events)
 
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
 }
@@ -415,14 +377,13 @@ func TestIdleBackSleepsTheScreenAtOnce(t *testing.T) {
 // The same back press states wake again, because any press wakes a
 // sleeping screen. So one button works the screen from either side.
 func TestIdleBackWakesTheScreenItSlept(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
-	bindBack(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, time.Hour, []string{events})
 
 	sendActivity(t, ic, playerIdle)
-	sendPress(t, ic, events)
+	sendBack(t, ic, events)
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
-	sendPress(t, ic, events)
+	sendBack(t, ic, events)
 
 	mustMatch(t, nextMoment(t, watch).Event, screenWakeEvent)
 }
@@ -430,49 +391,49 @@ func TestIdleBackWakesTheScreenItSlept(t *testing.T) {
 // Back sleeps nothing while a Play runs. The film owns the screen, and back
 // means what the display makes of it there.
 func TestIdleBackSleepsNothingWhileAPlayRuns(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: keymap})
-	bindBack(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, 20*time.Millisecond, []string{events})
 
 	sendActivity(t, ic, playerPlaying)
-	sendPress(t, ic, events)
+	sendBack(t, ic, events)
 
 	noMoment(t, watch, 100*time.Millisecond)
 }
 
-// A controller with no keymap names no action, so its presses reset the
-// window and never sleep the screen by hand.
-func TestIdleBackNeedsAKeymapToNameThePress(t *testing.T) {
-	events, _ := fadeTopics()
-	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: ""})
+// The pod holds one table for every controller, and a key with no row
+// in it restarts the quiet window and does nothing else.
+func TestIdleAKeyThePodHoldsNoRowForStatesNothing(t *testing.T) {
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, time.Hour, []string{events})
 
 	sendActivity(t, ic, playerIdle)
 	sendPress(t, ic, events)
 
 	noMoment(t, watch, 100*time.Millisecond)
+	noPublish(t, watch, 100*time.Millisecond)
 }
 
-// The three remote lists travel one per line and stay aligned by position, so
-// each events topic reads the keymap and the mark of its own controller, and
-// its line number is the index the focus pulse carries.
-func TestIdleRemoteMapPairsTheThreeLists(t *testing.T) {
+// The two remote lists travel one per line and stay aligned by
+// position, so each events topic reads the mark of its own controller,
+// and its line number is the index the focus pulse carries.
+func TestIdleRemoteMapPairsTheTwoLists(t *testing.T) {
 	remotes := idleRemoteMap(
 		"events/sofa\nevents/armchair",
-		"keymaps/gamepad\nkeymaps/pad",
 		"focus/sofa\nfocus/armchair")
 
 	mustMatch(t, len(remotes), 2)
-	mustMatch(t, remotes["events/sofa"], idleRemote{keymap: "keymaps/gamepad", focus: "focus/sofa", index: 0})
-	mustMatch(t, remotes["events/armchair"], idleRemote{keymap: "keymaps/pad", focus: "focus/armchair", index: 1})
+	mustMatch(t, remotes["events/sofa"], idleRemote{focus: "focus/sofa", index: 0})
+	mustMatch(t, remotes["events/armchair"], idleRemote{focus: "focus/armchair", index: 1})
 }
 
-// A blank line, and a keymap list shorter than the events list, leave that
-// controller with no keymap rather than shifting the pairing.
-func TestIdleRemoteMapLeavesAMissingKeymapBlank(t *testing.T) {
-	remotes := idleRemoteMap("events/sofa\nevents/armchair", "\nkeymaps/pad", "focus/sofa\nfocus/armchair")
+// A blank line, and a focus list shorter than the events list, leave
+// that controller with no focus topic rather than shifting the
+// pairing.
+func TestIdleRemoteMapLeavesAMissingFocusTopicBlank(t *testing.T) {
+	remotes := idleRemoteMap("events/sofa\nevents/armchair", "\nfocus/armchair")
 
-	mustMatch(t, remotes["events/sofa"].keymap, "")
-	mustMatch(t, remotes["events/armchair"].keymap, "keymaps/pad")
+	mustMatch(t, remotes["events/sofa"].focus, "")
+	mustMatch(t, remotes["events/armchair"].focus, "focus/armchair")
 }
 
 // An unset or unreadable quiet window fades nothing, because the operator
@@ -503,14 +464,13 @@ func TestIdleFadeAfterReadsTheSeconds(t *testing.T) {
 // the shade the press stated exactly where it is. Otherwise back sleeps the
 // screen and its own release wakes it a tenth of a second later.
 func TestIdleBackHoldsTheScreenAsleepThroughTheRelease(t *testing.T) {
-	events, keymap := fadeTopics()
-	ic, watch := fadingCommander(t, time.Hour, map[string]string{events: keymap})
-	bindBack(t, ic, keymap)
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, time.Hour, []string{events})
 
 	sendActivity(t, ic, playerIdle)
-	sendPress(t, ic, events)
+	sendBack(t, ic, events)
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
-	sendRelease(t, ic, events)
+	sendBackRelease(t, ic, events)
 
 	noMoment(t, watch, 100*time.Millisecond)
 }
@@ -518,12 +478,12 @@ func TestIdleBackHoldsTheScreenAsleepThroughTheRelease(t *testing.T) {
 // A release on a sleeping screen is a control coming back up, not a person
 // reaching for one, so the screen stays dark.
 func TestIdleFadeAReleaseDoesNotWakeASleepingScreen(t *testing.T) {
-	events, _ := fadeTopics()
-	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, 20*time.Millisecond, []string{events})
 
 	sendActivity(t, ic, playerIdle)
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
-	sendRelease(t, ic, events)
+	sendBackRelease(t, ic, events)
 
 	noMoment(t, watch, 100*time.Millisecond)
 }
@@ -533,45 +493,29 @@ func TestIdleFadeAReleaseDoesNotWakeASleepingScreen(t *testing.T) {
 // read allows 140ms, which the remaining 80ms fits and a restarted 200ms
 // window does not.
 func TestIdleFadeAReleaseDoesNotRestartTheWindow(t *testing.T) {
-	events, _ := fadeTopics()
-	ic, watch := fadingCommander(t, 200*time.Millisecond, map[string]string{events: ""})
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, 200*time.Millisecond, []string{events})
 
 	sendActivity(t, ic, playerIdle)
 	time.Sleep(120 * time.Millisecond)
-	sendRelease(t, ic, events)
+	sendBackRelease(t, ic, events)
 
 	mustMatch(t, momentWithin(t, watch, 140*time.Millisecond).Event, screenSleepEvent)
 }
 
-// A d-pad returning to center reads as value 0 on the hat axis, the same
-// shape as a button release, so it is not a press either.
-func TestIdleFadeAHatReturningToCenterDoesNotWake(t *testing.T) {
-	events, _ := fadeTopics()
-	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
-
-	sendActivity(t, ic, playerIdle)
-	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)
-	sendEvent(t, ic, events, remoteEvent{Type: evAbs, Code: axisCodes["ABS_HAT0X"], Value: 0})
-
-	noMoment(t, watch, 100*time.Millisecond)
-}
-
-// The down edge is the person. A button reports it as value 1, and a hat as
-// either of its two directions, while a release, a held button's
-// autorepeat, and a hat at rest are not presses.
-func TestIsPressEdgeReadsTheDownEdgeAlone(t *testing.T) {
+// The control held down is the person: the press and the repeat the
+// standing pod sends while a person holds a key. The release is
+// neither. The pod reads the value alone, because the standing pod
+// already named the key.
+func TestIsPressEdgeReadsThePressAndTheRepeat(t *testing.T) {
 	cases := []struct {
 		name  string
-		event remoteEvent
+		event keyEvent
 		want  bool
 	}{
-		{name: "a button down", event: remoteEvent{Type: evKey, Value: 1}, want: true},
-		{name: "a button up", event: remoteEvent{Type: evKey, Value: 0}},
-		{name: "a held button repeating", event: remoteEvent{Type: evKey, Value: 2}},
-		{name: "a hat one way", event: remoteEvent{Type: evAbs, Value: 1}, want: true},
-		{name: "a hat the other way", event: remoteEvent{Type: evAbs, Value: -1}, want: true},
-		{name: "a hat at rest", event: remoteEvent{Type: evAbs, Value: 0}},
-		{name: "an event of no bindable type", event: remoteEvent{Type: 0x04, Value: 1}},
+		{name: "a key down", event: keyEvent{Key: "KEY_UP", Value: 1}, want: true},
+		{name: "a held key repeating", event: keyEvent{Key: "KEY_UP", Value: 2}, want: true},
+		{name: "a key up", event: keyEvent{Key: "KEY_UP", Value: 0}},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -583,8 +527,8 @@ func TestIsPressEdgeReadsTheDownEdgeAlone(t *testing.T) {
 // A payload that does not decode is not a person, so it neither wakes the
 // screen nor restarts the quiet window.
 func TestIdleFadeIgnoresAnEventThatDoesNotDecode(t *testing.T) {
-	events, _ := fadeTopics()
-	ic, watch := fadingCommander(t, 20*time.Millisecond, map[string]string{events: ""})
+	events := fadeTopics()
+	ic, watch := fadingCommander(t, 20*time.Millisecond, []string{events})
 
 	sendActivity(t, ic, playerIdle)
 	mustMatch(t, nextMoment(t, watch).Event, screenSleepEvent)

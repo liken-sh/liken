@@ -50,11 +50,7 @@ resource's page gives the topics, the payloads, and who writes each.
 |---|---|---|
 | `plays/{namespace}/{name}/...` | one run's commands, report, and availability | [Plays](/docs/reference/plays/) |
 | `players/{namespace}/{name}/...` | one unit's activity, volume, panel, and screen | [Players](/docs/reference/players/) |
-| `remotes/{namespace}/{name}/...` | one controller's events, presence, and focus | [Remotes](/docs/reference/remotes/) |
-| `keymaps/{name}` | one Keymap's compiled binding table | [Keymaps](/docs/reference/keymaps/) |
-
-The `keymaps` tree has no namespace segment because a `Keymap` is
-cluster-scoped.
+| `remotes/{namespace}/{name}/...` | one controller's key events, presence, focus, and key table | [Remotes](/docs/reference/remotes/) |
 
 ## Availability
 

@@ -236,8 +236,9 @@ mp.register_script_message("liken-art", function(kind, path, w, h, stride)
   end
 end)
 
--- The six navigation actions the command bus carries. A Keymap binds a
--- controller's buttons to them.
+-- The six navigation words the command sidecar sends. It reads the
+-- arrows, the select keys, and the back keys off a controller and sends
+-- each as one of these script-messages.
 for _, action in ipairs({ "up", "down", "left", "right", "select", "back" }) do
   mp.register_script_message(action, function()
     focus.nav(action)

@@ -97,9 +97,11 @@ code whichever client the image runs.
 
 ## Read the presses
 
-The idle command pod keeps the unit's keymaps, the focus gate, and the
-shade under a delegate, so your client holds none of them. It joins
-the bus with the three facts under `status.idle.bus` instead:
+The idle command pod reads key names off the `Remote`s' events
+topics and holds its own table of what each key means there, and it
+keeps the focus gate and the shade under a delegate, so your client
+holds none of them. It joins the bus with the three facts under
+`status.idle.bus` instead:
 
     status:
       idle:
@@ -109,12 +111,16 @@ the bus with the three facts under `status.idle.bus` instead:
           screenTopic: liken/media/players/den/den/screen
 
 * `address` is the broker, as `host:port`.
-* `commandsTopic` is where the presses arrive, as `{"action": "up"}`
-  for `up`, `down`, `left`, `right`, `select`, and `back`. Only a press
-  from a controller whose mark names this `Player` arrives, only while
-  the unit plays nothing, and only while the screen is awake. A press
-  on a sleeping screen wakes it and reaches you as nothing. A held
-  control whose `Keymap` repeats it arrives again while it is held.
+* `commandsTopic` is where the presses arrive, as
+  `{"key": "KEY_UP", "value": 1}`, the same JSON the `Remote`'s
+  events topic carried. The keys are the four arrows, `KEY_ENTER` and
+  its synonyms `KEY_OK`, `KEY_SELECT`, and `KEY_KPENTER`, and
+  `KEY_BACK` and its synonyms `KEY_ESC` and `KEY_EXIT`. Only a press
+  from a controller whose mark names this `Player` arrives, only
+  while the unit plays nothing, and only while the screen is awake. A
+  press on a sleeping screen wakes it and reaches you as nothing. A
+  held control arrives again as value 2, and a release, value 0, is
+  never forwarded.
 * `screenTopic` is where the idle command pod states its moments:
   `sleep` and `wake`, retained, and `focus` and `present`, not. Draw a
   black frame on `sleep`, draw again on `wake`, and map a fresh

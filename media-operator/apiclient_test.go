@@ -190,7 +190,7 @@ func TestGetKeymapReadsOneClusterScopedObject(t *testing.T) {
 	api := &cannedAPI{answers: map[string]any{
 		"GET /apis/media.liken.sh/v1alpha1/keymaps/gamepad": Keymap{
 			Metadata: ObjectMeta{Name: "gamepad"},
-			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Action: actionPause}}},
+			Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Key: "KEY_PLAYPAUSE"}}},
 		},
 	}}
 

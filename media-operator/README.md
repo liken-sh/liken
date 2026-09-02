@@ -19,15 +19,18 @@ completion.
 Create it to start, delete it to stop, and `kubectl get plays`
 lists what plays right now. A
 `Remote` is one physical controller, bound to the players it
-drives. A `Keymap` maps one controller model's buttons to named
-media actions. A fifth resource, `MediaPreferences`, holds one
-cluster-wide default for audio and subtitle languages.
+drives. A `Keymap` renames one controller model's odd controls to
+the kernel key names they should report, and only a model that
+reports the wrong ones needs one. A fifth resource,
+`MediaPreferences`, holds one cluster-wide default for audio and
+subtitle languages.
 
 The operator reconciles a `Play` into one playback pod beside the
 hardware, running `mpv` under a thin supervisor, with every device
 claim, toleration, and socket built from the `Player` spec. Each
-`Remote` has its own pod, which publishes button events to a
-message bus, and the playback pod applies the bindings. Media
+`Remote` has its own pod, which publishes each press to a message
+bus under the kernel's name for it, and each consumer binds those
+names itself. Media
 arrives by URI: `https://` streams, `nfs://` mounts an export, and
 `claim://` mounts a `PersistentVolumeClaim` beside the `Play`. Media
 library management is a separate concern, and this project does

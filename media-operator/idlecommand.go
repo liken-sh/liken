@@ -1,7 +1,7 @@
 package main
 
-// The idle command pod holds the idle screen's timers, keymaps,
-// and focus gate. It states each moment the idle client draws on the
+// The idle command pod holds the idle screen's timers, its focus gate,
+// and its shade. It states each moment the idle client draws on the
 // Player's screen topic, as one JSON object each, and the client reads
 // them there. It runs in a pod of its own, one per unit whatever draws
 // that unit's screen, and it subscribes to the Player's commands and
@@ -71,16 +71,14 @@ type screenMessage struct {
 }
 
 // idleCommander holds the idle command pod's two inputs, the commands
-// and status topics it subscribes to, and the run context every held
-// control's repeat runs under.
+// and status topics it subscribes to.
 //
 // It also holds the fade: each remote's events topic paired with the
-// keymap topic that names its presses, the resolved quiet window, and
+// focus topic that carries its mark, the resolved quiet window, and
 // the shade's current state.
 type idleCommander struct {
 	commandsTopic string
 	statusTopic   string
-	runCtx        context.Context
 
 	// The topic the panel state stands on, and the publish half of the
 	// sidecar's own bus connection.
@@ -114,21 +112,13 @@ type idleCommander struct {
 	volume     volumeState
 	haveVolume bool
 
-	// repeats holds one cancel per held control that repeats, keyed by
-	// its evdev code, the same shape the translator holds during a
-	// film, so a held volume button steps continuously on the idle
-	// screen too and the release stops the repeat the press started.
-	repeatMu sync.Mutex
-	repeats  map[uint16]context.CancelFunc
-
 	// The off window, clamped to at least the fade. Zero leaves
 	// the desire on the panel topic at on forever.
 	offAfter time.Duration
 
 	// remotes maps each remote's events topic to the rest of its record:
-	// the keymap topic that names its presses, the focus topic that
-	// carries its mark, and its position in spec.remotes, which the focus
-	// pulse carries.
+	// the focus topic that carries its mark, and its position in
+	// spec.remotes, which the focus pulse carries.
 	remotes map[string]idleRemote
 
 	// The Player's own object name, the value a focus mark holds when it
@@ -150,9 +140,6 @@ type idleCommander struct {
 	// The fade state below is written by the bus reader and by the
 	// fired timer, so one lock covers all of it.
 	mu sync.Mutex
-	// tables holds the compiled table of each keymap topic, replaced
-	// whenever the retained topic delivers a new one.
-	tables map[string][]compiledBinding
 	// idle says whether the last status named the activity Idle, the
 	// only state the timer arms in.
 	idle bool
@@ -172,14 +159,12 @@ type idleCommander struct {
 	desire string
 }
 
-// idleRemote is one of the unit's controllers as the sidecar reads it: the
-// keymap topic that names its presses, blank for a remote with none, the
-// retained focus topic the sidecar gates on, and its position in
+// idleRemote is one of the unit's controllers as the pod reads it:
+// the retained focus topic it gates on, and its position in
 // spec.remotes.
 type idleRemote struct {
-	keymap string
-	focus  string
-	index  int
+	focus string
+	index int
 }
 
 // focusMark is one remote's mark and whether this bus session already
@@ -208,8 +193,7 @@ func runIdleCommand() {
 	statusTopic := os.Getenv(playerStatusTopicVariable)
 
 	// The idle command pod is its container's PID 1, so the signal
-	// context ends the run on the kubelet's SIGTERM. Every held control's
-	// repeat runs under it, so a repeat in progress ends when the run does.
+	// context ends the run on the kubelet's SIGTERM.
 	runCtx, stopRun := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stopRun()
 
@@ -217,7 +201,6 @@ func runIdleCommand() {
 	ic := &idleCommander{
 		commandsTopic: commandsTopic,
 		statusTopic:   statusTopic,
-		runCtx:        runCtx,
 		panelTopic:    os.Getenv(idlePanelTopicVariable),
 		// Every name but this operator's own is a delegate, the same
 		// comparison the operator makes. A pod under media.liken.sh/none
@@ -228,14 +211,11 @@ func runIdleCommand() {
 		playerName:  os.Getenv(playerNameVariable),
 		remotes: idleRemoteMap(
 			os.Getenv(idleRemoteEventsTopicsVariable),
-			os.Getenv(idleRemoteKeymapTopicsVariable),
 			os.Getenv(idleRemoteFocusTopicsVariable)),
 		marks:     map[string]focusMark{},
 		fadeAfter: fadeAfter,
 		offAfter:  idleOffAfter(os.Getenv(idleOffAfterSecondsVariable), fadeAfter),
-		tables:    map[string][]compiledBinding{},
 		desire:    panelDesireOn,
-		repeats:   map[uint16]context.CancelFunc{},
 	}
 	bus := newBus(busAddress, idleCommandClientID(commandsTopic), nil, ic.onBusConnect, ic.handle)
 	// The panel desire publishes on the same connection the sidecar
@@ -255,19 +235,12 @@ func runIdleCommand() {
 	if ic.volumeTopic != "" {
 		bus.Subscribe(ic.volumeTopic)
 	}
-	// A press on any of the unit's remotes reaches the fade, so the
-	// sidecar reads every events topic. The keymap topics are retained,
-	// so each table arrives on subscribe and a Keymap edit reaches the
-	// fade with no pod restart. Two remotes that share a Keymap
-	// subscribe once, because the Bus holds its filters in a set.
-	//
-	// The focus topic is retained too, so each mark arrives on subscribe
-	// and the gate stands before the first press.
+	// A press on any of the unit's remotes reaches the fade, so the pod
+	// reads every events topic. The focus topic is retained, so each
+	// mark arrives on subscribe and the gate stands before the first
+	// press.
 	for events, remote := range ic.remotes {
 		bus.Subscribe(events)
-		if remote.keymap != "" {
-			bus.Subscribe(remote.keymap)
-		}
 		if remote.focus != "" {
 			bus.Subscribe(remote.focus)
 		}
@@ -275,39 +248,23 @@ func runIdleCommand() {
 	bus.Run(runCtx)
 }
 
-// idleRemoteMap pairs each remote's events topic with the keymap topic
-// on the same line of the second list. A list shorter than the other,
-// or a blank line in it, leaves that remote with no keymap.
-//
-// The focus topic comes off the third list the same way, and the line
-// number is the remote's index, which the focus pulse carries.
-func idleRemoteMap(events, keymaps, focuses string) map[string]idleRemote {
+// idleRemoteMap pairs each remote's events topic with the focus topic
+// on the same line of the second list. The line number is the
+// remote's index, which the focus pulse carries.
+func idleRemoteMap(events, focuses string) map[string]idleRemote {
 	remotes := map[string]idleRemote{}
-	keymapList := splitIdleLines(keymaps)
-	focusList := splitIdleLines(focuses)
-	for index, topic := range splitIdleLines(events) {
+	focusList := splitTopicLines(focuses)
+	for index, topic := range splitTopicLines(events) {
 		if topic == "" {
 			continue
 		}
 		remote := idleRemote{index: index}
-		if index < len(keymapList) {
-			remote.keymap = keymapList[index]
-		}
 		if index < len(focusList) {
 			remote.focus = focusList[index]
 		}
 		remotes[topic] = remote
 	}
 	return remotes
-}
-
-// splitIdleLines splits a newline-joined variable, keeping blank lines
-// so the two remote lists stay aligned by position.
-func splitIdleLines(value string) []string {
-	if value == "" {
-		return nil
-	}
-	return strings.Split(value, "\n")
 }
 
 // idleFadeAfter reads the resolved quiet window. An unset or unreadable
@@ -373,9 +330,8 @@ func (ic *idleCommander) handle(topic string, payload []byte) {
 		ic.holdVolume(payload)
 		return
 	}
-	// A controller's presses reach the fade, and the keymap that names
-	// them arrives on its own retained topic. Both are checked before
-	// the commands topic, because neither carries the operator's
+	// A controller's presses reach the fade, and they are checked before
+	// the commands topic, because a key event is not the operator's
 	// command vocabulary.
 	if remote, ok := ic.remotes[topic]; ok {
 		ic.onRemoteEvent(topic, remote, payload)
@@ -385,10 +341,6 @@ func (ic *idleCommander) handle(topic string, payload []byte) {
 	// command vocabulary for the same reason the level is.
 	if events, remote, ok := ic.remoteForFocus(topic); ok {
 		ic.onFocus(events, remote, payload)
-		return
-	}
-	if ic.holdsKeymapTopic(topic) {
-		ic.setTable(topic, payload)
 		return
 	}
 	var command mediaCommand
@@ -447,60 +399,36 @@ func (ic *idleCommander) onStatus(payload []byte) {
 	ic.applyShadeLocked(moment)
 }
 
-// isPressEdge reports whether this event is a control pressed down. The
-// standing remote pod publishes both edges of every control: a button's
-// release arrives as value 0, a held key's autorepeat as value 2, and a
-// hat's return to center as value 0. Only the down edge is a person's
-// act, so only the down edge reaches the fade. A release that counted
-// would wake the screen its own press just put to sleep.
-func isPressEdge(event remoteEvent) bool {
-	switch event.Type {
-	case evKey:
-		return event.Value == 1
-	case evAbs:
-		return event.Value != 0
-	}
-	return false
+// isPressEdge reports whether this event is a control held down, the
+// press or the repeat. The release is excluded because only a down
+// edge is a person's act, and a release that counted would wake the
+// screen its own press just put to sleep.
+func isPressEdge(event keyEvent) bool {
+	return event.Value == 1 || event.Value == 2
 }
 
-// onRemoteEvent folds one press into the fade. A sleeping screen wakes
-// on any press, so a person gets the screen back with whatever control
-// they touched, and that press does nothing else. Under a delegate a
-// navigation press, while the unit plays nothing, is published on the
-// commands topic for the client to answer. Back is one of the six, so
-// back does not sleep the screen there; only the client knows whether
-// back has anywhere to go. Under this operator's own controller no
-// press is forwarded and back states sleep at once. A press named
-// volume or mute, while the unit plays nothing and the screen is awake,
-// publishes the unit's next level under either controller. The gates
-// are deliberate: a press on a sleeping screen is a wake and nothing
-// more, and a unit that plays has the film's own pod answering its
-// presses. A binding whose keymap repeats it publishes again while the
-// control is held, on the same clock the translator ticks during a
-// film. Every other press restarts the quiet window.
-//
-// An event that is not a down edge, or does not decode, changes
-// nothing: it neither wakes, nor sleeps, nor restarts the window.
+// onRemoteEvent folds one key event into the fade. A sleeping screen
+// wakes on any press, so a person gets the screen back with whatever
+// control they touched, and that press does nothing else. Under a
+// delegate a navigation key, while the unit plays nothing, is
+// forwarded to the client on the commands topic. Back is among them,
+// so back does not sleep the screen there; only the client knows
+// whether back has anywhere to go. Under this operator's own client no
+// key is forwarded and back brings the shade down at once. A level
+// key, while the unit plays nothing and the screen is awake, publishes
+// the unit's next level under either controller. The cycle key asks
+// the operator to move the mark and does nothing else. Every other
+// press restarts the quiet window.
 //
 // A press acts only while the remote's mark names this Player. A pad
-// pointed at another room touches nothing here, not the shade and not the
-// level. The release keeps its own path, focused or not, so a control held
-// as the mark moves away still stops its repeat.
-//
-// A press named cycle-focus asks the operator to move the mark and does
-// nothing else: no wake, no level, no shade. It acts only while the unit
-// plays nothing, because a Play's own translator publishes the cycle while
-// one runs.
+// pointed at another room touches nothing here, not the shade and not
+// the level. A release changes nothing at all: the standing pod holds
+// the repeat and stops it at the release, so this pod has nothing to
+// stop.
 func (ic *idleCommander) onRemoteEvent(topic string, remote idleRemote, payload []byte) {
-	var event remoteEvent
+	var event keyEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return
-	}
-	// A release stops the repeat its press started, the same first move
-	// the translator makes, so a held volume button and its release pair
-	// up whether or not anything else below acts.
-	if event.Value == 0 {
-		ic.stopRepeat(event.Code)
 	}
 	if !ic.holdsFocus(topic) {
 		return
@@ -508,30 +436,28 @@ func (ic *idleCommander) onRemoteEvent(topic string, remote idleRemote, payload 
 	if !isPressEdge(event) {
 		return
 	}
+	press := event.Value == 1
 	ic.mu.Lock()
-	binding, named := ic.bindingForLocked(topic, event)
 	moment := ""
-	press := mediaCommand{}
-	repeat := false
+	forward := false
+	volume := mediaCommand{}
 	cycle := false
 	switch {
-	case ic.idle && named && binding.Action == actionCycleFocus:
+	case ic.idle && press && event.Key == keyCycleWindows:
 		cycle = true
 	case ic.asleep:
 		ic.asleep = false
 		moment = screenWakeEvent
-	case ic.delegated && ic.idle && named && isNavigationAction(binding.Action):
+	case ic.delegated && ic.idle && idleNavigationKeys[event.Key]:
 		// The delegate's client draws the list, so the press reaches
 		// it and this pod decides nothing about it. Back is one of the
-		// six, so the sleep case below never runs under a delegate.
-		press = mediaCommand{Action: binding.Action}
-		repeat = binding.RepeatInterval > 0
-	case ic.idle && named && binding.Action == actionBack:
+		// keys, so the sleep case below never runs under a delegate.
+		forward = true
+	case ic.idle && press && idleBackKeys[event.Key]:
 		ic.asleep = true
 		moment = screenSleepEvent
-	case ic.idle && named && isVolumeAction(binding.Action):
-		press = mediaCommand{Action: binding.Action, Amount: binding.Amount}
-		repeat = binding.RepeatInterval > 0
+	case ic.idle:
+		volume, _ = idleVolumeFor(event)
 	}
 	ic.rearmLocked()
 	ic.applyShadeLocked(moment)
@@ -540,16 +466,17 @@ func (ic *idleCommander) onRemoteEvent(topic string, remote idleRemote, payload 
 		ic.publishCycle(remote)
 		return
 	}
-	ic.applyPress(press)
-	if repeat {
-		ic.startRepeat(event.Code, press, binding.RepeatDelay, binding.RepeatInterval)
+	if forward {
+		ic.forwardPress(event)
+		return
 	}
+	ic.pressVolume(volume)
 }
 
 // publishCycle sends the cycle request the operator arbitrates, on the
 // remote's own cycle topic, not retained, because a cycle is an event and
-// not a state. It is the same message the translator publishes from a
-// Play.
+// not a state. It is the same message the playback pod's command
+// sidecar publishes during a film.
 func (ic *idleCommander) publishCycle(remote idleRemote) {
 	if remote.focus == "" {
 		return
@@ -565,11 +492,10 @@ func (ic *idleCommander) publishCycle(remote idleRemote) {
 // else. A mark that names another Player, or a Play name left from an
 // older operator, gates closed and pulses nothing.
 //
-// A mark that does not name this Player also stops every repeat, the same
-// move the translator's setFocus makes, so a volume button held as focus
-// cycles away stops stepping this unit at once instead of at the release.
-// The repeats are keyed by the control's code and not by the controller,
-// so the stop covers all of them.
+// A mark that does not name this Player only closes the gate here.
+// The standing pod synthesises the repeat and stops it at the release,
+// so a control held as the mark moves away needs nothing stopped in
+// this pod.
 func (ic *idleCommander) onFocus(events string, remote idleRemote, payload []byte) {
 	mark := string(payload)
 	ic.focusMu.Lock()
@@ -577,7 +503,6 @@ func (ic *idleCommander) onFocus(events string, remote idleRemote, payload []byt
 	ic.marks[events] = focusMark{player: mark, caughtUp: true}
 	ic.focusMu.Unlock()
 	if !ic.namesThisPlayer(mark) {
-		ic.stopAllRepeats()
 		return
 	}
 	if !live {
@@ -610,9 +535,8 @@ func (ic *idleCommander) namesThisPlayer(mark string) bool {
 	return ic.playerName != "" && mark == ic.playerName
 }
 
-// remoteForFocus reports which remote a focus topic marks. The list is the
-// unit's own controllers, so the scan is the same shape holdsKeymapTopic
-// runs.
+// remoteForFocus reports which remote a focus topic marks, by a scan
+// over the unit's own controllers.
 func (ic *idleCommander) remoteForFocus(topic string) (string, idleRemote, bool) {
 	if topic == "" {
 		return "", idleRemote{}, false
@@ -660,20 +584,6 @@ func (ic *idleCommander) publishScreen(message screenMessage) {
 // published after it does not clear it.
 func screenRetains(event string) bool {
 	return event == screenSleepEvent || event == screenWakeEvent
-}
-
-// bindingForLocked reports what this press names on the remote that
-// published it. The match runs the translator's own matchBinding
-// against that remote's compiled table, so back and a volume step
-// mean here exactly what they mean during a film. A remote with no
-// keymap, or a press no binding matches, names nothing.
-func (ic *idleCommander) bindingForLocked(topic string, event remoteEvent) (compiledBinding, bool) {
-	keymap := ic.remotes[topic].keymap
-	if keymap == "" {
-		return compiledBinding{}, false
-	}
-	return matchBinding(ic.tables[keymap],
-		inputEvent{Type: event.Type, Code: event.Code, Value: event.Value})
 }
 
 // holdVolume folds one message off the volume topic. The sidecar draws
@@ -744,67 +654,6 @@ func (ic *idleCommander) pressVolume(command mediaCommand) {
 	ic.publish(ic.volumeTopic, payload, true)
 }
 
-// startRepeat runs one held control's repeat on the shared clock the
-// translator ticks on, so a hold feels the same on the idle screen as
-// during a film. A press of the same code while a repeat runs replaces
-// it, because a second press means the first release was missed or the
-// direction changed, and one control drives one repeat.
-func (ic *idleCommander) startRepeat(code uint16, press mediaCommand, delayMillis, intervalMillis int) {
-	ctx, cancel := context.WithCancel(ic.runCtx)
-	ic.repeatMu.Lock()
-	if previous, ok := ic.repeats[code]; ok {
-		previous()
-	}
-	ic.repeats[code] = cancel
-	ic.repeatMu.Unlock()
-	go runRepeat(ctx,
-		time.Duration(delayMillis)*time.Millisecond,
-		time.Duration(intervalMillis)*time.Millisecond,
-		func() { ic.repeatPress(press) })
-}
-
-// stopRepeat ends the repeat a release names. A release for a code with
-// no repeat is the ordinary case of a control that does not repeat, and
-// it does nothing.
-func (ic *idleCommander) stopRepeat(code uint16) {
-	ic.repeatMu.Lock()
-	if cancel, ok := ic.repeats[code]; ok {
-		cancel()
-		delete(ic.repeats, code)
-	}
-	ic.repeatMu.Unlock()
-}
-
-// stopAllRepeats cancels every held control's repeat at once, so no
-// repeat outlives the focus that started it. It is the same act the
-// translator makes when a mark moves off its Player.
-func (ic *idleCommander) stopAllRepeats() {
-	ic.repeatMu.Lock()
-	for code, cancel := range ic.repeats {
-		cancel()
-		delete(ic.repeats, code)
-	}
-	ic.repeatMu.Unlock()
-}
-
-// repeatPress is one tick of a held control, a volume step or a
-// forwarded arrow alike. It reads the two press gates again on every
-// tick, because a Play can start or the screen can sleep mid-hold, and
-// a tick in either state must publish nothing. A tick that acts
-// restarts the quiet window the way the press did, so a long hold never
-// fades the screen it is working.
-func (ic *idleCommander) repeatPress(press mediaCommand) {
-	ic.mu.Lock()
-	act := ic.idle && !ic.asleep
-	if act {
-		ic.rearmLocked()
-	}
-	ic.mu.Unlock()
-	if act {
-		ic.applyPress(press)
-	}
-}
-
 // heldVolume is the state the last message left, and unity before
 // any message arrives.
 func (ic *idleCommander) heldVolume() volumeState {
@@ -814,34 +663,6 @@ func (ic *idleCommander) heldVolume() volumeState {
 		return defaultVolumeState()
 	}
 	return ic.volume
-}
-
-// holdsKeymapTopic reports whether this topic is the keymap topic of
-// one of the unit's remotes.
-func (ic *idleCommander) holdsKeymapTopic(topic string) bool {
-	for _, remote := range ic.remotes {
-		if remote.keymap == topic {
-			return true
-		}
-	}
-	return false
-}
-
-// setTable replaces one keymap's held table. A payload that does not
-// decode leaves the last good table in place, the same way the
-// playback translator holds its own.
-//
-// The repeat milliseconds are clamped here, because a table off
-// the bus is not the operator's compile and a value that overflows a
-// Duration would panic the ticker a held control starts.
-func (ic *idleCommander) setTable(topic string, payload []byte) {
-	var table []compiledBinding
-	if err := json.Unmarshal(payload, &table); err != nil {
-		return
-	}
-	ic.mu.Lock()
-	ic.tables[topic] = clampRepeats(table)
-	ic.mu.Unlock()
 }
 
 // rearmLocked restarts the quiet window from now. The timer runs only

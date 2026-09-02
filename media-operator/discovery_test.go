@@ -3,10 +3,7 @@ package main
 // These tests cover the discovery mode's output: what one line reports
 // about an event, and the Keymap entry a person pastes out of it.
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestDiscoveryLinesTeachTheKeymapEntry(t *testing.T) {
 	cases := []struct {
@@ -97,15 +94,10 @@ func TestDiscoveryLinesTeachTheKeymapEntry(t *testing.T) {
 	}
 }
 
-// The fragment names the actions the Keymap schema accepts, so a
-// person pastes the entry and chooses one word out of the line under
-// it.
-func TestTheFragmentNamesTheActionVocabulary(t *testing.T) {
+// The fragment's right side is a key name, so a person pastes the
+// entry and writes the kernel name the control should report.
+func TestTheFragmentAsksForAKeyName(t *testing.T) {
 	lines := discoveryLines(`event3 "pad"`, inputEvent{Type: evKey, Code: 0x130, Value: 1})
 
-	action := lines[len(lines)-1]
-	for _, word := range []string{actionPause, actionSeek, actionCycleFocus, actionSelect} {
-		mustMatch(t, strings.Contains(action, word), true)
-	}
-	mustMatch(t, strings.Contains(action, actionRePresent), false)
+	mustMatch(t, lines[len(lines)-1], "    key: "+keymapKeyHint)
 }

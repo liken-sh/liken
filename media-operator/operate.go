@@ -170,13 +170,13 @@ type operator struct {
 	// positionWriteInterval. Only the pass goroutine touches it.
 	positionWrites map[string]time.Time
 
-	// keymapPublished maps each keymap topic to the compiled table the
-	// operator last published there. The topic is retained, so the broker
-	// serves the current table to any new subscriber, and the operator
-	// republishes only when the table changes. The map also lets a later
-	// pass find a topic whose Keymap no longer exists and clear its
+	// keysPublished maps each Remote's keys topic to the table the
+	// operator last published there. The topic is retained, so the
+	// broker serves the current table to any new subscriber, and the
+	// operator republishes only when the table changes. The map also
+	// lets a later pass find a topic whose Remote is gone and clear its
 	// retained value. Only the pass goroutine touches it.
-	keymapPublished map[string]string
+	keysPublished map[string]string
 
 	// playerStatusPublished maps each Player's status topic to the payload
 	// the operator last published there. It is the keymap pattern applied to
@@ -274,7 +274,7 @@ func operate() {
 		panelFaults:           map[string]string{},
 		volumes:               newVolumeDesk(),
 		positionWrites:        map[string]time.Time{},
-		keymapPublished:       map[string]string{},
+		keysPublished:         map[string]string{},
 		playerStatusPublished: map[string]string{},
 		playReclaim:           map[string]time.Time{},
 		recreateBackoff:       map[string]backoffState{},
@@ -430,9 +430,10 @@ func (o *operator) pass() {
 		o.reconcileFocus(players.Items)
 		o.reconcilePlayers(players.Items, list.Items, zone, defaultIdle)
 	}
-	// The keymaps compile first, because the Remote statuses report the
-	// codes the compiled tables leave unbound.
-	o.reconcileRemotes(o.reconcileKeymaps())
+	// The Keymaps are read first, because each Remote's table is its
+	// Keymap folded over the base, and the pass compiles one table per
+	// Remote.
+	o.reconcileRemotes(o.loadKeymaps())
 }
 
 // handleBusMessage folds one bus message into the report desk or the
@@ -546,7 +547,7 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 // the standing remote pod re-establish their own retained topics from
 // their own connect, so those need no help here.
 func (o *operator) reestablishRetained() {
-	o.keymapPublished = map[string]string{}
+	o.keysPublished = map[string]string{}
 	o.playerStatusPublished = map[string]string{}
 	// The levels are the one retained state this rewrite skips. The
 	// sidecars and the broker hold them, not the operator, so the pass
@@ -664,58 +665,51 @@ func (o *operator) reclaimPlays(live map[string]bool) {
 	}
 }
 
-// reconcileKeymaps compiles every Keymap and publishes it to its keymap
-// topic, retained, so a translator reads the current table the instant
-// it subscribes and a Keymap edit reaches a running film with no pod
-// restart. A Keymap that does not compile publishes nothing and leaves
-// the last-good retained value in place, so a broken edit does not empty
-// a running translation. A topic whose Keymap no longer exists has its
-// retained value cleared with an empty publish, so a deleted Keymap
-// leaves nothing behind on the bus.
-//
-// It returns the compiled tables by Keymap name, because the Remote
-// statuses this pass writes report the codes those tables leave
-// unbound, and the compile has already run here.
-func (o *operator) reconcileKeymaps() map[string][]compiledBinding {
-	compiled := map[string][]compiledBinding{}
+// loadKeymaps reads every Keymap once per pass and indexes it by
+// name. The pass holds them rather than compiling here, because a
+// table belongs to a Remote: it is the base folded with that Remote's
+// Keymap, and a Remote with no Keymap still needs the base.
+func (o *operator) loadKeymaps() map[string]*Keymap {
+	keymaps := map[string]*Keymap{}
 	list, err := ListKeymaps(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing keymaps: %v\n", err)
-		return compiled
+		return keymaps
 	}
-	present := make(map[string]bool, len(list.Items))
 	for index := range list.Items {
 		keymap := &list.Items[index]
-		topic := keymapTopic(o.topicBase, keymap.Metadata.Name)
-		bindings, err := compileKeymap(keymap)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "compiling keymap %s: %v\n", keymap.Metadata.Name, err)
-			continue
-		}
-		payload, err := json.Marshal(bindings)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "marshaling keymap %s: %v\n", keymap.Metadata.Name, err)
-			continue
-		}
-		compiled[keymap.Metadata.Name] = bindings
-		present[topic] = true
-		// The topic is retained, so republishing an unchanged table is
-		// churn a new subscriber does not need: it reads the current value
-		// from the broker. Publish only when the compiled table differs
-		// from the last one this operator wrote.
-		if o.keymapPublished[topic] == string(payload) {
-			continue
-		}
+		keymaps[keymap.Metadata.Name] = keymap
+	}
+	return keymaps
+}
+
+// publishKeys compiles one Remote's table and publishes it retained
+// on that Remote's keys topic. The topic is retained, so an unchanged
+// table is not republished and a new subscriber reads the current one
+// from the broker. A Keymap that does not compile publishes nothing
+// and leaves the last good table in place, so a broken edit does not
+// stop a controller. The table this returns is what the status
+// reports the gap against.
+func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, present map[string]bool) []compiledBinding {
+	topic := remoteKeysTopic(o.topicBase, remote.Metadata.Namespace, remote.Metadata.Name)
+	present[topic] = true
+	table, err := compileTable(keymaps[remote.Spec.Keymap])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "compiling the key table for remote %s/%s: %v\n",
+			remote.Metadata.Namespace, remote.Metadata.Name, err)
+		return nil
+	}
+	payload, err := json.Marshal(table)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshaling the key table for remote %s/%s: %v\n",
+			remote.Metadata.Namespace, remote.Metadata.Name, err)
+		return nil
+	}
+	if o.keysPublished[topic] != string(payload) {
 		o.bus.Publish(topic, payload, true)
-		o.keymapPublished[topic] = string(payload)
+		o.keysPublished[topic] = string(payload)
 	}
-	for topic := range o.keymapPublished {
-		if !present[topic] {
-			o.bus.Publish(topic, nil, true)
-			delete(o.keymapPublished, topic)
-		}
-	}
-	return compiled
+	return table
 }
 
 // reconcilePlayers writes every Player's status, publishes the same state
@@ -922,13 +916,14 @@ func (o *operator) publishRePresent(namespace, name string) {
 // not anything plays, so this pass is its own read of the whole collection
 // and not derived from the Plays. It runs after reconcileFocus on the same
 // pass, so the status reports the mark this pass settled.
-func (o *operator) reconcileRemotes(keymaps map[string][]compiledBinding) {
+func (o *operator) reconcileRemotes(keymaps map[string]*Keymap) {
 	list, err := ListAllRemotes(o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing remotes: %v\n", err)
 		return
 	}
 	live := make(map[string]bool, len(list.Items))
+	present := make(map[string]bool, len(list.Items))
 	for index := range list.Items {
 		remote := &list.Items[index]
 		key := controllerKey(remote.Metadata.Namespace, remote.Metadata.Name)
@@ -937,12 +932,16 @@ func (o *operator) reconcileRemotes(keymaps map[string][]compiledBinding) {
 			fmt.Fprintf(os.Stderr, "reconciling remote %s/%s: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
+		table := o.publishKeys(remote, keymaps, present)
 		// The one status this pass builds carries the mark and the gap
 		// together, because two writers of one status would alternate
 		// and each write wakes the watch.
 		desired := RemoteStatus{Player: o.focus.markFor(key)}
-		if declared, held := o.codes.codesFor(key); held {
-			desired.Unbound = unboundCodes(declared, keymaps[remote.Spec.Keymap])
+		// A table that did not compile reports no gap, because the gap is
+		// what the live table leaves unbound, and this pass has no live
+		// table to subtract.
+		if declared, held := o.codes.codesFor(key); held && table != nil {
+			desired.Unbound = unboundCodes(declared, table)
 		}
 		if err := writeRemoteStatus(o.client, remote, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing remote %s/%s status: %v\n",
@@ -955,6 +954,16 @@ func (o *operator) reconcileRemotes(keymaps map[string][]compiledBinding) {
 	// which controllers remain.
 	o.presence.retain(live)
 	o.codes.retain(live)
+	// A Remote that is gone leaves its retained table behind, so the
+	// pass clears the topic with an empty payload. The map is the record
+	// of what this operator wrote, so it is the one place that knows
+	// which topics to clear.
+	for topic := range o.keysPublished {
+		if !present[topic] {
+			o.bus.Publish(topic, nil, true)
+			delete(o.keysPublished, topic)
+		}
+	}
 }
 
 // writeRemoteStatus follows the same two rules as the Play's and the
@@ -1045,8 +1054,9 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	// Once the pod exists, its container set is fixed and no edit to the
 	// Player's remotes can reach this run, so a Remote deleted mid-film
 	// must not fail the film. A Keymap never reaches this gather: it is
-	// compiled and published on the bus by reconcileKeymaps, and a broken
-	// Keymap edit leaves the last-good table in place instead.
+	// compiled and published on the bus per Remote by reconcileRemotes,
+	// and a broken Keymap edit leaves the last good table in place
+	// instead.
 	remotes, remoteErr := gatherRemotes(o.client, player)
 	if remoteErr != nil {
 		_, err := GetPod(o.client, namespace, podName(name))
@@ -1058,14 +1068,11 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 		}
 		remotes = nil
 	}
-	// The operator fills each remote's three topics here, because the
-	// topic base lives with the operator and not the gather. The events
-	// and focus topics carry the Remote's namespace and name; the keymap
-	// topic carries the Keymap name alone, because a Keymap is
-	// cluster-scoped.
+	// The operator fills each remote's two topics here, because the
+	// topic base lives with the operator and not the gather. Both carry
+	// the Remote's namespace and name.
 	for index := range remotes {
 		remotes[index].EventsTopic = remoteEventsTopic(o.topicBase, namespace, remotes[index].Name)
-		remotes[index].KeymapTopic = keymapTopic(o.topicBase, remotes[index].Keymap)
 		remotes[index].FocusTopic = remoteFocusTopic(o.topicBase, namespace, remotes[index].Name)
 	}
 

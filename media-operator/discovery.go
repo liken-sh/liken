@@ -6,27 +6,12 @@ package main
 // the Keymap entry that would bind it, ready to paste. Where no entry
 // can bind it, the line states why instead.
 
-import (
-	"fmt"
-	"sort"
-	"strings"
-)
+import "fmt"
 
-// The action vocabulary in one sorted line, so the fragment a person
-// pastes carries the words the Keymap schema accepts.
-var keymapActions = actionVocabulary()
-
-func actionVocabulary() string {
-	actions := make([]string, 0, len(amountActions)+len(wordActions))
-	for action := range amountActions {
-		actions = append(actions, action)
-	}
-	for action := range wordActions {
-		actions = append(actions, action)
-	}
-	sort.Strings(actions)
-	return strings.Join(actions, ", ")
-}
+// The placeholder the pasted fragment carries on its right side. A
+// Keymap row names the kernel key the control should report, or none
+// to drop it, and most controls need no row at all.
+const keymapKeyHint = "<a KEY_* name, or none>"
 
 // discoveryLines renders one event: the fields on the first line, and
 // under them the Keymap entry that binds it, indented to paste under
@@ -58,7 +43,7 @@ func keyLines(node string, event inputEvent) []string {
 	return []string{
 		line,
 		fmt.Sprintf("  - press: %s   # code %d", name, event.Code),
-		fmt.Sprintf("    action: <one of %s>", keymapActions),
+		"    key: " + keymapKeyHint,
 	}
 }
 
@@ -79,7 +64,7 @@ func axisLines(node string, event inputEvent) []string {
 		line,
 		fmt.Sprintf("  - axis: %s   # code %d", name, event.Code),
 		fmt.Sprintf("    value: %d", event.Value),
-		fmt.Sprintf("    action: <one of %s>", keymapActions),
+		"    key: " + keymapKeyHint,
 	}
 }
 

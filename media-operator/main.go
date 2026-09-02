@@ -5,22 +5,22 @@
 // on the hardware operators' devices, the pods that perform the work,
 // and the statuses a person reads.
 //
-// One binary, seven roles, the way the audio operator's one image runs
+// One binary, six roles, the way the audio operator's one image runs
 // in several roles. With no argument it is the operator: a Deployment
 // that watches Plays, Remotes, Players, and Keymaps, creates claims and
-// pods, publishes the compiled keymaps, and writes every status. As
+// pods, publishes each Remote's key table, and writes every status. As
 // `player` it is the playback pod's entrypoint shim: it appends the
 // display's app-id flag and execs mpv. As `idle-command` it is the idle
 // pod's command sidecar: it follows the Player's topics and the unit's
 // controllers, and it states each moment the idle client draws on the
 // Player's screen topic, so a seatless kiosk shell shows the clock again
 // when a Play ends. As `remote` it is the standing
-// remote pod: it reads a controller's input nodes and publishes each
-// event to the bus. As `command` it is the playback pod's command
-// sidecar: it owns mpv's IPC socket, runs each named command from the
-// commands topic, and publishes the report. As `translate` it is a
-// per-controller sidecar: it turns a controller's evdev events into
-// named commands on the bus.
+// remote pod: it reads a controller's input nodes, folds each event
+// through the table the operator publishes for that Remote, and
+// publishes the kernel's key name to the bus. As `command` it is the
+// playback pod's command sidecar: it owns mpv's IPC socket, reads the
+// controllers' key events and the commands topic, and publishes the
+// report.
 //
 // As `serve-art` it is the command sidecar's decode side alone, run against a
 // plain mpv socket for local display work with no cluster and no bus. It runs
@@ -43,7 +43,6 @@ const (
 	idleCommandMode = "idle-command"
 	remoteMode      = "remote"
 	commandMode     = "command"
-	translateMode   = "translate"
 	artServeMode    = "serve-art"
 )
 
@@ -61,9 +60,6 @@ func main() {
 			return
 		case commandMode:
 			runCommand()
-			return
-		case translateMode:
-			runTranslator()
 			return
 		case artServeMode:
 			runArtServe()

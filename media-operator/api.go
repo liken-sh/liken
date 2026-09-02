@@ -147,10 +147,10 @@ type PlayerList struct {
 // unit plays through however many outputs it has. The CRD requires a
 // display or at least one sink.
 //
-// Remotes names the controllers the unit owns. Each entry names a Remote
-// in the same namespace, and the Play's pod runs one translator sidecar
-// for each, so a unit's controllers belong to its spec beside its
-// display and its sinks.
+// Remotes names the controllers the unit owns. Each entry names a
+// Remote in the same namespace, and the Play's command sidecar reads
+// the events topic of each one, so a unit's controllers belong to its
+// spec beside its display and its sinks.
 type PlayerSpec struct {
 	Zone string `json:"zone,omitempty"`
 
@@ -221,10 +221,8 @@ const (
 )
 
 // One controller the Player owns. Name is the Remote in the same
-// namespace. Keymap is a per-unit override of that Remote's own Keymap:
-// set it, and this controller maps one way on this unit and its base
-// keymap's way on another, so one gamepad's cross is play-pause on the
-// theater and something else on the gaming unit.
+// namespace. A controller maps one way on every unit, as a device
+// does under hwdb, so the entry carries no Keymap of its own.
 type PlayerRemote struct {
 	Name string `json:"name"`
 
@@ -232,8 +230,6 @@ type PlayerRemote struct {
 	// its parts list, such as Studio Dualsense Controller. Unset, the idle
 	// screen falls back to Name, the Remote this entry references.
 	DisplayName string `json:"displayName,omitempty"`
-
-	Keymap string `json:"keymap,omitempty"`
 }
 
 // One device selection. The three fields become a DeviceClass name,
@@ -505,9 +501,10 @@ type MediaPreferencesList struct {
 	Items    []MediaPreferences `json:"items"`
 }
 
-// A Remote is one physical controller: the device it is and the Keymap
-// for its model. The operator reads the spec to build the standing pod and
-// the translator sidecars, and writes the status to report which unit the
+// A Remote is one physical controller: the device it is and, where
+// its model needs one, the Keymap for its model. The operator reads the
+// spec to build the standing pod and to hand each Play's command
+// sidecar its topics, and writes the status to report which unit the
 // controller drives now.
 type Remote struct {
 	APIVersion string       `json:"apiVersion,omitempty"`
@@ -567,9 +564,10 @@ type RemoteList struct {
 	Items    []Remote `json:"items"`
 }
 
-// A Keymap is one controller model's table from buttons and axes to
-// named actions, written once per model and shared by every Remote
-// of that model.
+// A Keymap is one controller model's table from its odd controls to
+// the kernel key names they should report, written once per model and
+// shared by every Remote of that model. A model whose kernel names are
+// already right needs no Keymap at all.
 type Keymap struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`
@@ -593,35 +591,33 @@ type KeymapList struct {
 	Items    []Keymap `json:"items"`
 }
 
-// A KeymapRepeat makes a binding repeat while the control is held. The
-// player pod fires the action on the press, waits the delay, then
-// re-fires it every interval until the reader publishes the release. The
-// delay and the interval are durations, like 400ms or 1s, and each takes
-// a default when it is empty. A binding with no repeat block fires once
-// per press, whatever the action is.
+// A KeymapRepeat makes a row repeat while the control is held. The
+// standing remote pod publishes the press, waits the delay, then
+// publishes value 2 every interval until the release. The delay and
+// the interval are durations, like 400ms or 1s, and each takes a
+// default when it is empty. A control with no block reports only what
+// the kernel reports.
 type KeymapRepeat struct {
 	Delay    string `json:"delay,omitempty"`
 	Interval string `json:"interval,omitempty"`
 }
 
-// Press is an evdev key name out of buttonCodes, Action is a word
-// from the vocabulary in input.go, and Amount belongs only to the
-// three actions that move by one: seek, volume, and chapter.
+// Press is the control, an evdev key name out of buttonCodes. Key is
+// the KEY_* name the controller reports instead, or none to drop the
+// control. Both sides are the kernel's names, the way an hwdb entry is
+// written.
 type KeymapButton struct {
 	Press  string        `json:"press"`
-	Action string        `json:"action"`
-	Amount int           `json:"amount,omitempty"`
+	Key    string        `json:"key"`
 	Repeat *KeymapRepeat `json:"repeat,omitempty"`
 }
 
 // An axis entry adds the value, because a hat axis reports -1 and 1
-// as its two presses and 0 as the release: one axis is two bindable
-// directions.
+// as its two presses and 0 as the release: one axis is two rows.
 type KeymapAxis struct {
 	Axis   string        `json:"axis"`
 	Value  int           `json:"value"`
-	Action string        `json:"action"`
-	Amount int           `json:"amount,omitempty"`
+	Key    string        `json:"key"`
 	Repeat *KeymapRepeat `json:"repeat,omitempty"`
 }
 

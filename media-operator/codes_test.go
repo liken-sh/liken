@@ -81,48 +81,51 @@ func TestTheCodesDeskDropsAControllerTheClusterNoLongerHolds(t *testing.T) {
 	mustMatch(t, stillHeld, false)
 }
 
-// The status reports the gap, which is what the controller declares
-// minus what the Keymap binds, with each entry carrying the code, its
-// evdev name, and its event type.
-func TestTheGapIsWhatTheKeymapDoesNotBind(t *testing.T) {
+// The status reports the gap: every declared control the table maps to
+// nothing, each entry with the code, its evdev name, and its event
+// type.
+func TestTheGapIsWhatTheTableMapsToNothing(t *testing.T) {
 	cases := []struct {
 		name     string
 		declared remoteCodes
-		bindings []compiledBinding
+		table    []compiledBinding
 		want     []UnboundCode
 	}{
 		{
-			name:     "a controller with no Keymap at all",
+			name:     "a controller on the base alone",
 			declared: remoteCodes{Keys: []uint16{0x130}, Axes: []uint16{0x11}},
-			want: []UnboundCode{
-				{Code: 0x130, Name: "BTN_SOUTH", Type: unboundKey},
-				{Code: 0x11, Name: "ABS_HAT0Y", Type: unboundAxis},
-			},
+			table:    baseKeys,
+			want:     nil,
 		},
 		{
-			name:     "a Keymap that binds every code",
-			declared: remoteCodes{Keys: []uint16{0x130}, Axes: []uint16{0x11}},
-			bindings: []compiledBinding{
-				{EventType: evKey, Code: 0x130, Value: 1, Action: actionPause},
-				{EventType: evAbs, Code: 0x11, Value: -1, Action: actionUp},
+			name:     "a key the table drops with none",
+			declared: remoteCodes{Keys: []uint16{0x130, 0x131}},
+			table: []compiledBinding{
+				{EventType: evKey, Code: 0x131, Value: 1, Key: keyNone},
 			},
-			want: nil,
+			want: []UnboundCode{{Code: 0x131, Name: "BTN_EAST", Type: unboundKey}},
+		},
+		{
+			name:     "a key with no row at all passes as itself",
+			declared: remoteCodes{Keys: []uint16{0x0a4}},
+			want:     nil,
 		},
 		{
 			name:     "one direction of a hat binds the axis",
 			declared: remoteCodes{Axes: []uint16{0x10, 0x11}},
-			bindings: []compiledBinding{
-				{EventType: evAbs, Code: 0x11, Value: 1, Action: actionDown},
+			table: []compiledBinding{
+				{EventType: evAbs, Code: 0x11, Value: 1, Key: "KEY_DOWN"},
 			},
 			want: []UnboundCode{{Code: 0x10, Name: "ABS_HAT0X", Type: unboundAxis}},
 		},
 		{
-			name:     "a binding on a code the controller does not declare",
-			declared: remoteCodes{Keys: []uint16{0x130}},
-			bindings: []compiledBinding{
-				{EventType: evKey, Code: 0x131, Value: 1, Action: actionPause},
+			name:     "a hat both of whose directions the table drops",
+			declared: remoteCodes{Axes: []uint16{0x11}},
+			table: []compiledBinding{
+				{EventType: evAbs, Code: 0x11, Value: -1, Key: keyNone},
+				{EventType: evAbs, Code: 0x11, Value: 1, Key: keyNone},
 			},
-			want: []UnboundCode{{Code: 0x130, Name: "BTN_SOUTH", Type: unboundKey}},
+			want: []UnboundCode{{Code: 0x11, Name: "ABS_HAT0Y", Type: unboundAxis}},
 		},
 		{
 			name:     "a code the kernel names nothing",
@@ -138,7 +141,7 @@ func TestTheGapIsWhatTheKeymapDoesNotBind(t *testing.T) {
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			mustMatchAll(t, unboundCodes(each.declared, each.bindings), each.want)
+			mustMatchAll(t, unboundCodes(each.declared, each.table), each.want)
 		})
 	}
 }

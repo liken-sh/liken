@@ -6,8 +6,11 @@ toc: true
 
 <!-- Generated from deploy/remotes-crd.yaml by crdref. Do not edit. -->
 
-A `Remote` is one physical controller: the device it is and the
-[`Keymap`](/docs/reference/keymaps/) for its model. It names no
+A `Remote` is one physical controller: the device it is and, where
+its model needs one, the [`Keymap`](/docs/reference/keymaps/) for its
+model. The base table already gives a `Remote` with no `Keymap` the
+arrows, OK, back, and every `KEY_*` code the device emits, and a
+`Keymap` corrects a device the base gets wrong. It names no
 player. A `Player` names the `Remote`s it owns through
 `spec.remotes`, so the unit that owns a controller is the one that
 lists it, and one controller can drive several units.
@@ -23,17 +26,17 @@ lists it, and one controller can drive several units.
         selector: device.attributes["bluetooth.liken.sh"].address == "04:4A:5B:11:22:33"
       keymap: dualsense
 
-One physical controller, selected by its device and mapped by its Keymap. A Player names the Remotes it owns; the Remote names no player.
+One physical controller, selected by its device and mapped by the base table and, where its model needs one, by its Keymap. A Player names the Remotes it owns; the Remote names no player.
 
 ## spec
 
-The controller and the Keymap for its model.
+The controller, and the Keymap for its model where its model needs one.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--device"></span>`device` | [object](#specdevice) | yes | The controller itself, selected out of the devices the hardware operators publish. There are no parameters: nothing prepares an input device, and its nodes are read as they are. |
-| <span id="spec--keymap"></span>`keymap` | string | no | The Keymap for this controller's model, by name. A Keymap is cluster-scoped, so the name carries no namespace. A Player entry in spec.remotes may override it per unit, so one controller can map two ways on two units. The field is optional, because a person mapping unknown hardware has no Keymap yet: declare the Remote, run discovery, then write the Keymap the log teaches. |
-| <span id="spec--discovery"></span>`discovery` | boolean | no | The teaching mode for unknown hardware. The standing pod keeps every input node the claim delivered and logs each event the way a Keymap names it, so a person presses every button and reads the codes out of the pod log. Events still publish to the bus, so a controller in discovery still drives its unit. Turning the mode on or off replaces the standing pod, which drops controller input for a few seconds. |
+| <span id="spec--keymap"></span>`keymap` | string | no | The Keymap for this controller's model, by name. A Keymap is cluster-scoped, so the name carries no namespace. The field is optional and rarely needed: the base already passes every KEY_* code and turns the hats into the arrows, so a Keymap is for a device the kernel names wrongly. A device maps one way on every unit, as it does under hwdb. |
+| <span id="spec--discovery"></span>`discovery` | boolean | no | The teaching mode for unknown hardware. The standing pod keeps every input node the claim delivered and logs each event the way a Keymap names it, so a person presses every button and reads the codes out of the pod log. The pod folds and publishes keys in discovery exactly as it does outside it, so a controller a person maps still drives its unit. Turning the mode on or off replaces the standing pod, which drops controller input for a few seconds. |
 
 ### spec.device
 
@@ -67,8 +70,14 @@ The gap, never the census: every code this controller declares that its Keymap d
 
 The operator reconciles one pod for every `Remote` in the
 cluster, whether or not a `Player` names it. The pod holds the
-controller's claim, reads its evdev nodes directly, and publishes
-to the bus. The claim tolerates the `bluetooth.liken.sh/disconnected`
+controller's claim, reads its evdev nodes directly, folds the base
+table with the `Remote`'s `Keymap`, publishes each event under the
+kernel's key name, and synthesises the repeat stream for a control
+that does not autorepeat. That work runs beside the device because
+that is where hwdb runs on any Linux machine, and one pod then serves
+every consumer at once.
+
+The claim tolerates the `bluetooth.liken.sh/disconnected`
 taint with no time limit, so a controller that sleeps keeps its
 allocation and the pod keeps running. It does not tolerate
 `bluetooth.liken.sh/no-input-node`, so the pod stays `Pending` until
@@ -77,12 +86,13 @@ the controller first connects, then keeps running through every later sleep.
 ## Status
 
 The operator writes two facts on a `Remote`. `status.player` is the
-`Player` its focus mark names now. `status.unbound` is the gap:
-every code the controller declares that its `Keymap` does not bind,
-which empties as the `Keymap` grows. `kubectl get remotes` shows
-each controller's `Keymap`, the unit it drives, and its age. A
-`Remote` whose `Keymap` does not compile shows the failure on the
-`Play` that uses it.
+`Player` its focus mark names now. `status.unbound` is the gap: every
+declared control that the base table and the `Keymap` together map to
+nothing, or map to `none`. A declared `KEY_*` code passes as itself,
+so it is never unbound, and a keyboard remote starts with an empty
+list. `kubectl get remotes` shows each controller's `Keymap`, the unit
+it drives, and its age. A `Keymap` that does not compile is logged by
+the operator, and the `Remote` keeps its last good table.
 
 ## On the bus
 
@@ -92,7 +102,8 @@ base.
 
 | topic          | writer       | retained | carries                       |
 |----------------|--------------|----------|-------------------------------|
-| `events`       | the `Remote`'s pod | no       | one evdev event               |
+| `events`       | the `Remote`'s pod | no       | one key event                 |
+| `keys`         | operator     | yes      | the controller's key table    |
 | `presence`     | the `Remote`'s pod | yes      | `{"connected": true}`         |
 | `codes`        | the `Remote`'s pod | yes      | the declared code set         |
 | `availability` | the `Remote`'s pod | yes      | `online` or `offline`         |
@@ -101,18 +112,35 @@ base.
 
 ### events
 
-The `Remote`'s pod publishes each event as the controller's own evdev
-numbers, untranslated:
+The `Remote`'s pod publishes each event under the kernel's name for
+the control, after it folded the base table with the `Keymap`:
 
-    {"type": 1, "code": 304, "value": 1}
+    {"key": "KEY_UP", "value": 1}
 
-`type` 1 is `EV_KEY` and `type` 3 is `EV_ABS`. `code` 304 is
-`BTN_SOUTH`, and `value` 1 is the press, 0 the release. The pod
-publishes only the events a `Keymap` can bind: every key code, and
-the two hat axes. The keymap stays off this topic, so one `Remote`
-can feed two players that map it differently. A press is an event
-and not a state, so the topic is not retained and a subscriber that
-joins later reads no stale press.
+`value` is the kernel's: 0 is the release, 1 the press, and 2 the
+autorepeat. A keyboard's own autorepeat passes through, and the pod
+synthesises value 2 for a gamepad button or a hat with a `repeat`
+block. A control the folded table maps to nothing is not published. A
+press is an event and not a state, so the topic is not retained and a
+subscriber that joins later reads no stale press.
+
+### keys
+
+The controller's key table, as the operator compiled it: the base
+folded with the `Remote`'s `Keymap`, one row per control, with the
+evdev type, code, and value on the left and the key name on the
+right, and the repeat delay and interval in milliseconds where a row
+repeats:
+
+    [{"type": 1, "code": 304, "value": 1, "key": "KEY_ENTER"},
+     {"type": 3, "code": 17, "value": -1, "key": "KEY_UP",
+      "repeatDelay": 400, "repeatInterval": 250}]
+
+The operator is the only writer, and the topic is retained, so the pod
+reads the current table the instant it connects and a `Keymap` edit
+reaches it with no pod restart. The operator republishes only when the
+table changes, and it clears the topic with an empty payload when the
+`Remote` is deleted.
 
 ### presence
 
@@ -138,7 +166,7 @@ The set is complete with no button pressed, because the bitmaps
 state every code a node can report. The topic is retained, because
 a declared set is a state and not an event, and the pod clears it
 with an empty payload when the nodes vanish. The operator subtracts
-the `Keymap`'s bindings from the set and reports the gap as
+the folded table from the set and reports the gap as
 `status.unbound` on the `Remote`.
 
 ### availability
@@ -155,11 +183,11 @@ The focus mark is the plain name of the `Player` this controller
 drives now, as bytes, not JSON. The operator is the only writer,
 and the topic is retained, so a press reaches its unit even while
 the operator is down. Every reader of the controller's presses
-gates on the mark. A `Play`'s translator acts only when the mark
-names the `Player` its film runs on. An idle unit's sidecar acts
-only when the mark names that `Player` itself, and the idle screen
-draws a small hexagon beside the focused controller in its parts
-list.
+gates on the mark. The playback pod's command sidecar acts only when
+the mark names the `Player` its film runs on. An idle unit's sidecar
+acts only when the mark names that `Player` itself, and the idle
+screen draws a small hexagon beside the focused controller in its
+parts list.
 
 The operator moves the marks. When a `Play` starts on a `Player`,
 each of that unit's controllers is marked to it, so the controller
@@ -169,10 +197,10 @@ controller, moves to the first bound `Player` by name. A `Play`
 that finishes moves no mark: the unit stays focused and shows its
 idle screen.
 
-A press bound to `cycle-focus` publishes on `focus/cycle`. Only the
-holder of focus publishes it, the translator during a film and the
-idle command pod between films. The operator reads the request and
-advances the mark to the next bound `Player` by name, wrapping the
-last back to the first. A controller bound to one unit wraps to
-the same `Player`, and the operator republishes the mark, which
-the idle screen answers with a pulse of its hexagon.
+A press of `KEY_CYCLEWINDOWS` publishes on `focus/cycle`. Only the
+holder of focus publishes it, the playback pod's command sidecar
+during a film and the idle command pod between films. The operator
+reads the request and advances the mark to the next bound `Player`
+by name, wrapping the last back to the first. A controller bound to
+one unit wraps to the same `Player`, and the operator republishes the
+mark, which the idle screen answers with a pulse of its hexagon.

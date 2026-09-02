@@ -51,9 +51,9 @@ const (
 
 	// playerNameVariable carries a Player's metadata.name, the value every
 	// focus mark holds. In a playback pod it is the Play's own unit,
-	// spec.players[0], and the translator gates the mark against it. In an
-	// idle pod it is the idle Player itself, and the sidecar gates the
-	// same way. It is the object name, never the friendly name
+	// spec.players[0], and the command sidecar gates the mark against it.
+	// In an idle pod it is the idle Player itself, and the sidecar gates
+	// the same way. It is the object name, never the friendly name
 	// IDLE_PLAYER_NAME carries, because the operator writes marks from
 	// metadata.name.
 	playerNameVariable = "MEDIA_PLAYER_NAME"
@@ -89,16 +89,13 @@ const (
 
 	// The idle command pod's fade wiring. The first carries the resolved
 	// quiet window in seconds, where zero means the screen never fades
-	// on its own. The three topic lists are newline-joined and aligned by
-	// position, so each remote's events topic pairs with the keymap topic
-	// that names its presses and the focus topic that carries its mark. A
-	// blank keymap line is a remote with no keymap: its presses still wake
-	// the screen while it holds focus, and none of them is back. The
-	// sidecar gates every press on the mark naming this Player, and it
-	// builds the cycle topic from the focus topic.
+	// on its own. The two topic lists are newline-joined and aligned by
+	// position, so each remote's events topic pairs with the focus topic
+	// that carries its mark. The pod gates every press on the mark
+	// naming this Player, and it builds the cycle topic from the focus
+	// topic.
 	idleFadeAfterSecondsVariable   = "IDLE_FADE_AFTER_SECONDS"
 	idleRemoteEventsTopicsVariable = "IDLE_REMOTE_EVENTS_TOPICS"
-	idleRemoteKeymapTopicsVariable = "IDLE_REMOTE_KEYMAP_TOPICS"
 	idleRemoteFocusTopicsVariable  = "IDLE_REMOTE_FOCUS_TOPICS"
 
 	// The off window in seconds, where zero leaves the panel lit. It
@@ -152,18 +149,17 @@ const (
 	remoteDiscoveryVariable = "MEDIA_REMOTE_DISCOVERY"
 	discoveryOn             = "true"
 
-	// The three topics the operator hands each translator sidecar: the
-	// controller's events topic it reads, the retained keymap topic it
-	// reads the table from, and the focus topic it gates on. The translator
-	// builds the cycle topic from its identity, and reuses
-	// remoteNameVariable for its client id.
-	remoteEventsVariable = "MEDIA_REMOTE_EVENTS"
-	keymapTopicVariable  = "MEDIA_KEYMAP_TOPIC"
-	focusTopicVariable   = "MEDIA_FOCUS_TOPIC"
+	// The two lists the operator hands the playback pod's command
+	// sidecar, newline-joined and aligned by position: each controller's
+	// events topic and the focus topic that carries its mark. The sidecar
+	// builds the cycle topic from the focus topic. A Play on a Player
+	// with no Remotes carries neither variable.
+	remoteEventsTopicsVariable = "MEDIA_REMOTE_EVENTS_TOPICS"
+	remoteFocusTopicsVariable  = "MEDIA_REMOTE_FOCUS_TOPICS"
 
 	// The player-commands topic the operator hands the idle pod's command
 	// sidecar. The operator builds it from the Player's identity and passes
-	// it whole, the way it hands a translator its focus topic, so the
+	// it whole, the way it hands the playback pod its focus topics, so the
 	// sidecar subscribes to one exact topic and parses nothing.
 	playerCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
 

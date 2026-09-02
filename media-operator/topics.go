@@ -15,6 +15,16 @@ package main
 
 import "strings"
 
+// splitTopicLines splits one of the newline-joined topic lists the
+// operator sets on a pod. Blank lines are kept, because two lists stay
+// aligned by position.
+func splitTopicLines(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, "\n")
+}
+
 // defaultTopicBase is the base every topic extends when the operator
 // sets none. zigbee2mqtt uses one configurable base the same way.
 const defaultTopicBase = "liken/media"
@@ -46,6 +56,9 @@ const (
 	// The third retained remotes kind, the codes one controller
 	// declares.
 	remoteCodesKind = "codes"
+	// The fourth retained remotes kind, the compiled key table the
+	// operator writes and the standing pod reads.
+	remoteKeysKind = "keys"
 )
 
 // The last segment of the players topic that carries the panel
@@ -62,11 +75,10 @@ const playerVolumeKind = "volume"
 // and volume kinds of the same tree.
 const playerScreenKind = "screen"
 
-// remoteEventsTopic carries one Remote's raw button and axis events.
-// The standing remote pod publishes to it, not retained, because a
-// press is an event and not a state. The keymap stays off this topic,
-// so the events are the controller's own evdev codes and one Remote
-// can feed two players that map it differently.
+// remoteEventsTopic carries one Remote's key events. The standing
+// remote pod publishes {"key": "KEY_UP", "value": 1} to it, not
+// retained, because a press is an event and not a state. The pod
+// normalised the event, so every consumer reads one vocabulary.
 func remoteEventsTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/events"
 }
@@ -81,10 +93,10 @@ func remoteFocusTopic(base, namespace, name string) string {
 }
 
 // remoteFocusCycleTopic carries the cycle request a source press
-// publishes. Only the holder of focus publishes it, the translator during
-// a film and the idle command pod between films, and the operator reads it to
-// advance the mark. It is not retained, because a cycle is an event and
-// not a state.
+// publishes. Only the holder of focus publishes it, the playback pod's
+// command sidecar during a film and the idle command pod between
+// films, and the operator reads it to advance the mark. It is not
+// retained, because a cycle is an event and not a state.
 func remoteFocusCycleTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/focus/cycle"
 }
@@ -226,12 +238,13 @@ func parseRemoteFocusCycleTopic(base, topic string) (namespace, name string, ok 
 	return parts[0], parts[1], true
 }
 
-// playCommandsTopic carries the named media commands any program may
-// publish to drive one Play: play-pause, a seek, a volume step, and the
-// rest of the vocabulary in input.go. It is not retained, because a
-// command is an event and not a state. This is the one open surface a
-// program joins a Play on in media terms, so a translator, a phone, or a
-// Home Assistant integration all reach the Play the same way.
+// playCommandsTopic carries the commands any program on the bus may
+// publish to drive one Play: play-pause, a seek, a volume step, and
+// the rest of the vocabulary in input.go. It is not retained, because
+// a command is an event and not a state. This is the one open surface
+// a program joins a Play on in media terms, so a phone or a Home
+// Assistant integration reaches the Play the same way the playback
+// pod's own key table does.
 func playCommandsTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/commands"
 }
@@ -336,13 +349,14 @@ func parsePlayerVolumeTopic(base, topic string) (namespace, name string, ok bool
 	return parsePlayerTopic(base, topic, playerVolumeKind)
 }
 
-// keymapTopic carries one Keymap's compiled table. It drops the
-// namespace segment because a Keymap is cluster-scoped. The operator
-// publishes the table here retained, so a translator sidecar reads the
-// current table the instant it connects and a Keymap edit reaches every
-// translator with no pod restart.
-func keymapTopic(base, name string) string {
-	return base + "/keymaps/" + name
+// remoteKeysTopic carries one Remote's compiled table, the base
+// folded with its Keymap. It is per Remote and not per Keymap, because
+// the standing pod that reads that one controller is the only
+// subscriber, and a Remote with no Keymap still needs the base. It is
+// retained, so the pod reads the current table the instant it
+// connects, and an edit reaches it with no pod restart.
+func remoteKeysTopic(base, namespace, name string) string {
+	return base + "/remotes/" + namespace + "/" + name + "/" + remoteKeysKind
 }
 
 // playStatusTopic carries one Play's report: the paused flag, the

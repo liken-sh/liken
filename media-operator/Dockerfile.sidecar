@@ -1,6 +1,6 @@
 # The sidecar image: the same static Go binary the operator image
 # carries, and nothing else. Every sidecar container runs this binary in
-# one of its modes (idle-command, remote, command, translate), and no
+# one of its modes (idle-command, remote, command), and no
 # mode decodes a frame, so none of them needs the player image's mpv,
 # Mesa, or fonts. On a machine that pulls over wifi, that is the
 # difference between an 11 MB image and a 266 MB one.

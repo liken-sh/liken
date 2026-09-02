@@ -9,10 +9,9 @@ import (
 	"testing"
 )
 
-// The reader keeps the events a Keymap can bind off a busy topic. Every
-// EV_KEY event goes out, the two hat axes go out, and everything else,
-// the analog sticks and the EV_SYN and EV_MSC frames, stays off the
-// wire.
+// The gate stands before the fold. The reader folds every EV_KEY event
+// and the two hat axes, and everything else, the analog sticks and the
+// EV_SYN and EV_MSC frames, reaches the fold not at all.
 func TestPublishableKeepsOnlyBindableEvents(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -70,6 +69,9 @@ func testReader(t *testing.T) (*reader, *fakeBroker) {
 		presenceTopic:     remotePresenceTopic(defaultTopicBase, "house", "sofa"),
 		availabilityTopic: remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"),
 		codesTopic:        remoteCodesTopic(defaultTopicBase, "house", "sofa"),
+		keysTopic:         remoteKeysTopic(defaultTopicBase, "house", "sofa"),
+		repeatCtx:         context.Background(),
+		keys:              keyState{table: baseKeys},
 	}, brokers[0]
 }
 
@@ -183,9 +185,9 @@ func TestTheReaderPublishesTheDeclaredCodesRetained(t *testing.T) {
 	mustMatch(t, cleared.retained, true)
 }
 
-// A reader in discovery logs each event the way a Keymap names it and
-// publishes it all the same, so a controller a person maps still
-// drives the unit it holds.
+// A reader in discovery logs each raw event the way a Keymap names it
+// and folds it all the same, so a controller a person maps still drives
+// the unit it holds.
 func TestADiscoveringReaderLogsEachEventAndPublishesItAnyway(t *testing.T) {
 	r, broker := testReader(t)
 	r.discovery = true
@@ -204,12 +206,12 @@ func TestADiscoveringReaderLogsEachEventAndPublishesItAnyway(t *testing.T) {
 
 	published := waitForPublish(t, broker.pubs)
 	mustMatch(t, published.topic, remoteEventsTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(published.payload), `{"type":1,"code":304,"value":1}`)
+	mustMatch(t, string(published.payload), `{"key":"KEY_ENTER","value":1}`)
 
 	written := log.String()
 	for _, want := range []string{
 		`event3 "Wireless Controller"`, "EV_KEY (1)", "BTN_SOUTH (304)", "press (1)",
-		"- press: BTN_SOUTH", "action: <one of",
+		"- press: BTN_SOUTH", "key: " + keymapKeyHint,
 	} {
 		mustMatch(t, strings.Contains(written, want), true)
 	}

@@ -44,14 +44,16 @@ spec:
           type: object
           description: >-
             One physical controller, selected by its device and mapped
-            by its Keymap. A Player names the Remotes it owns; the
+            by the base table and, where its model needs one, by its
+            Keymap. A Player names the Remotes it owns; the
             Remote names no player.
           properties:
             spec:
               type: object
               required: [device]
               description: >-
-                The controller and the Keymap for its model.
+                The controller, and the Keymap for its model where its
+                model needs one.
               properties:
                 device:
                   type: object
@@ -81,12 +83,11 @@ spec:
                   description: >-
                     The Keymap for this controller's model, by name. A
                     Keymap is cluster-scoped, so the name carries no
-                    namespace. A Player entry in spec.remotes may
-                    override it per unit, so one controller can map
-                    two ways on two units. The field is optional,
-                    because a person mapping unknown hardware has no
-                    Keymap yet: declare the Remote, run discovery,
-                    then write the Keymap the log teaches.
+                    namespace. The field is optional and rarely needed:
+                    the base already passes every KEY_* code and turns
+                    the hats into the arrows, so a Keymap is for a device
+                    the kernel names wrongly. A device maps one way on
+                    every unit, as it does under hwdb.
                 discovery:
                   type: boolean
                   description: >-
@@ -94,9 +95,10 @@ spec:
                     standing pod keeps every input node the claim
                     delivered and logs each event the way a Keymap
                     names it, so a person presses every button and
-                    reads the codes out of the pod log. Events still
-                    publish to the bus, so a controller in discovery
-                    still drives its unit. Turning the mode on or off
+                    reads the codes out of the pod log. The pod folds and
+                    publishes keys in discovery exactly as it does
+                    outside it, so a controller a person maps still
+                    drives its unit. Turning the mode on or off
                     replaces the standing pod, which drops controller
                     input for a few seconds.
             status:

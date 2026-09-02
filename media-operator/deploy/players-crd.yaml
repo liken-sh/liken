@@ -262,14 +262,6 @@ spec:
                           the idle screen shows in its parts list,
                           such as Studio Dualsense Controller. Omit
                           it, and the idle screen falls back to name.
-                      keymap:
-                        type: string
-                        description: >-
-                          A per-unit Keymap override for this controller
-                          on this unit, by name. Set it, and this
-                          controller maps this way here and its Remote's
-                          own way elsewhere. Empty, the unit reads the
-                          Remote's own Keymap.
                 audioLanguages:
                   type: array
                   x-kubernetes-list-type: atomic
