@@ -86,12 +86,15 @@ Every enricher writes onto the library's volume, and on the lab that
 volume is the production copy. So the write rules are strict, and a
 test enforces them.
 
-- An enricher creates a file only where none exists. The exceptions
-  are files inside `.liken/`, which `liken` owns, and the `.nfo` when
-  `nfo.yaml` says the current one is ours.
+- An enricher creates a file only where none exists, with two
+  exceptions. Files inside `.liken/` are `liken`'s own. A `.nfo` may be
+  edited, whoever wrote it, because a title with no `uniqueid` is not
+  one a person kept by hand. The edit inserts or replaces one element
+  and leaves every other byte as it was, so nothing another tool wrote
+  is lost.
 - A write is a temporary file in the same directory, named with a
-  `.liken-tmp-<job>` suffix, and a rename onto a name that does not
-  exist. A crash leaves a stray temporary file and never a partial one.
+  `.liken-tmp-<job>` suffix, and a rename onto the target. A crash
+  leaves a stray temporary file and never a partial one.
 - The only remove in the enrichers takes a name that matches the
   temporary suffix, checked before the call. The scanner treats that
   suffix as a junk name, so a stray never becomes a row.
@@ -176,20 +179,23 @@ One standing pod per namespace holds the durable catalog and reports
 what it holds, and every worker is a `Job` with a Corrosion agent of
 its own on a claim of its own. Plan 28 builds it. No agent answers on
 the network: Corrosion's API stays on loopback, and a `Job` writes
-through its own sidecar. A scan `Job` runs on its `Library`'s claim,
-and an enricher `Job` runs on one claim per concern per namespace, so
-each run syncs a delta and `ReadWriteOnce` serializes each worker. A
-`Job` writes a row to the `runs` table last and exits only when the
-standing pod's report on the bus echoes it, because a Corrosion agent
-drops unsent broadcasts on `SIGTERM`. Screens keep their own gossip
-copies.
+through its own sidecar. A scan `Job` runs on its `Library`'s claim.
+An enricher `Job` runs on one claim per `Library`, and holds every
+concern as a container: the concerns that must run in order as init
+containers, and the rest as regular containers that run at once. So
+the sequence is in the pod, the catalog syncs once per run, and the
+two concerns that edit the `.nfo` never do so together. A `Job` writes
+a row to the `runs` table last and exits only when the standing pod's
+report on the bus echoes it, because a Corrosion agent drops unsent
+broadcasts on `SIGTERM`. Screens keep their own gossip copies.
 
-The standing pod's reporter publishes counts, runs, and gaps over the
-bus, and the operator creates `Job`s from what it hears: a scan `Job`
-for a folder on a webhook, and an enricher `Job` for a concern when a
-gap opens. The operator batches gaps by folder and holds the rate
-limiter per provider key, because twenty `Job`s on one key with no
-coordination end in a ban. Full walks are `CronJob`s.
+The standing pod's reporter publishes counts, runs, and one gap count
+per concern over the bus, and the operator is the only scheduler. It
+creates a scan `Job` for a folder on a webhook, and one enricher `Job`
+per `Library` when a gap is open, no run is in flight, and a scan has
+finished since the last enricher run. Full walks are `CronJob`s. There
+is no rate limiter: a `429` is a cooldown inside the container. Plan
+29 has the rules.
 
 ## The plans
 
@@ -198,8 +204,8 @@ coordination end in a ban. Full walks are `CronJob`s.
    for, scan `Job`s, the `CronJob`, and the webhook that creates a
    `Job`.
 2. [Plan 29, identification](29-identification.md). `MetadataProvider`,
-   the `probe` concern, `identity.yaml`, the gap loop, the write
-   package and its test, and the counts in `Library` status.
+   the enricher `Job`, the `probe` and `identity` concerns, the write
+   package and its test, the `.liken/` reader, and the gap loop.
 3. [Plan 30, facts, art, and contributors](30-facts-art-and-contributors.md).
    The `.nfo` and its write record, the Jellyfin handover, the art
    concerns, `credits.yaml`, `.contributors/`, and trickplay.
@@ -219,8 +225,8 @@ from the sidecars, release order, movies only.
   claim as the alternative. The manual says node-local storage is the
   safe choice for a SQLite file, because one on an NFS-backed claim
   can corrupt under a node loss.
-- How often the identity rule guesses wrong on a real library. Plan
-  29's drill measures it before the rule ships as a default.
+- How often the identity ladder guesses wrong on a real library. Plan
+  29's drill measures it before the ladder ships as a default.
 - The retry interval per concern. Thirty days for a miss is a guess.
 - Which row the screen shows when two libraries hold one film. The
   franchise join and the movies wall face the same question.

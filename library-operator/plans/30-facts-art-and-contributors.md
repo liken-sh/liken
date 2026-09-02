@@ -3,7 +3,11 @@
 Plan 30. The second enrichment build from [plan 27](27-enrichment.md).
 Once a title has an id, this plan fills everything else: the `.nfo`
 body, the art under Kodi's names, the credits with their people, and
-the people themselves in `.contributors/`.
+the people themselves in `.contributors/`. Every concern here is one
+more container in the enricher `Job` from plan 29. The `facts` and
+`credits` concerns edit the `.nfo`, so they are init containers after
+`identity`. The art and `contributors` concerns each write their own
+files, so they are regular containers that run at once.
 
 ## The problem
 

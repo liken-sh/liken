@@ -68,8 +68,9 @@ they share, and plans 28 to 31 build them in order.
   people, concerns as the unit of work, `MetadataProvider`, and the
   write rules.
 * [29, Identification](29-identification.md). `MetadataProvider`, the
-  `probe` concern, `identity.yaml`, the gap loop, and the write
-  package with its test.
+  enricher `Job` with its concerns as containers, the `probe` and
+  `identity` concerns, the write package with its test, and the gap
+  loop.
 * [30, Facts, art, and contributors](30-facts-art-and-contributors.md).
   The `.nfo` and its write record, the art concerns, `credits.yaml`,
   `.contributors/`, and trickplay.
