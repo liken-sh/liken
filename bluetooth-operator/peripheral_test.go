@@ -200,6 +200,58 @@ func TestPeripheralStatusReportsTheBatteryAndTheIcon(t *testing.T) {
 	}
 }
 
+// The kernel's entry wins wherever both sources report a level, because
+// it also carries the charging state.
+func TestPeripheralStatusPrefersTheKernelBattery(t *testing.T) {
+	fixture := newAPIFixture()
+	device := pairedDevice(t, testDevice)
+	device.Battery = &deviceBattery{Percentage: 88, Source: "GATT Battery Service"}
+	inventory := testInventory(t, fixture, testRadio(t, device))
+	sysfsFor(t, withBattery(
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"), "40", "Discharging"))
+
+	inventory.reconcile()
+
+	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
+	battery := peripheral.Status.Battery
+	if battery == nil {
+		t.Fatalf("status.battery is absent: %+v", peripheral.Status)
+	}
+	if battery.Percentage != 40 {
+		t.Errorf("status.battery.percentage = %d, want the kernel's 40", battery.Percentage)
+	}
+	if battery.Source != "ps-controller-battery-a0:ab:51:33:b7:12" {
+		t.Errorf("status.battery.source = %q", battery.Source)
+	}
+	if battery.Charging == nil || *battery.Charging {
+		t.Errorf("status.battery.charging = %v, want false", battery.Charging)
+	}
+}
+
+// BlueZ reads the level of a Low Energy device from its GATT battery
+// service, and the kernel registers no power supply for it, so Battery1
+// is the fallback.
+func TestPeripheralStatusFallsBackToBlueZ(t *testing.T) {
+	fixture := newAPIFixture()
+	device := pairedDevice(t, testDevice)
+	device.Battery = &deviceBattery{Percentage: 88, Source: "GATT Battery Service"}
+	inventory := testInventory(t, fixture, testRadio(t, device))
+	sysfsFor(t, dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
+
+	inventory.reconcile()
+
+	battery := read[Peripheral](t, fixture, testPeripheralPath()).Status.Battery
+	if battery == nil {
+		t.Fatalf("status.battery is absent for a device BlueZ reports a level for")
+	}
+	if battery.Percentage != 88 || battery.Source != "GATT Battery Service" {
+		t.Errorf("status.battery = %+v", battery)
+	}
+	if battery.Charging != nil {
+		t.Errorf("status.battery.charging = %v, want none", *battery.Charging)
+	}
+}
+
 // Most controllers report no level at all, and a block that said zero
 // for them would read as an empty battery.
 func TestPeripheralStatusOmitsTheBatteryWhenTheDeviceReportsNone(t *testing.T) {

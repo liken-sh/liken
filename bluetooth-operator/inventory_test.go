@@ -300,6 +300,7 @@ func writeJSON(t *testing.T, w http.ResponseWriter, object any) {
 func testInventory(t *testing.T, fixture *apiFixture, radio *fakeRadio) *inventory {
 	t.Helper()
 	cdiTempDir(t)
+	sysfsFor(t)
 	i := newInventory(testClient(t, fixture.handler(t)), radio, relaysFor(t), "liken-1", "liken-system")
 	i.now = func() time.Time { return testNow }
 	return i

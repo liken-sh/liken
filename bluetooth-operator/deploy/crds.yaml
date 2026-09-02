@@ -265,9 +265,11 @@ spec:
                 battery:
                   type: object
                   description: >-
-                    The charge the device reports, read from BlueZ's
-                    org.bluez.Battery1 interface. The block is absent
-                    when the device reports no level, which covers
+                    The charge the device reports. The operator reads
+                    the kernel's power supply class first, and BlueZ's
+                    org.bluez.Battery1 interface for a device the
+                    kernel registers no power supply for. The block is
+                    absent when neither reports a level, which covers
                     every device with no battery and every battery
                     device that is not connected.
                   properties:
@@ -279,9 +281,19 @@ spec:
                     source:
                       type: string
                       description: >-
-                        Where BlueZ read the level, such as HID or a
-                        GATT service. It is empty when BlueZ states
-                        none.
+                        Where the level came from. It is the power
+                        supply's own name for a reading from the
+                        kernel, such as
+                        ps-controller-battery-7c:66:ef:22:e7:80, and
+                        BlueZ's own word for a reading from BlueZ,
+                        such as HID or a GATT service.
+                    charging:
+                      type: boolean
+                      description: >-
+                        Whether the device is charging now. It is
+                        absent when the source is BlueZ, which reports
+                        a level and no direction, and when the kernel
+                        reports the status Unknown.
                 conditions:
                   type: array
                   maxItems: 8

@@ -43,7 +43,7 @@ What the operator observes about the device.
 | <span id="status--adapter"></span>`adapter` | string | no | The address of the adapter this bond belongs to. |
 | <span id="status--node"></span>`node` | string | no | The machine whose operator holds this bond now. The value changes when the adapter moves. |
 | <span id="status--bond"></span>`bond` | [object](#statusbond) | no | What the operator observes about the bond. |
-| <span id="status--battery"></span>`battery` | [object](#statusbattery) | no | The charge the device reports, read from BlueZ's org.bluez.Battery1 interface. The block is absent when the device reports no level, which covers every device with no battery and every battery device that is not connected. |
+| <span id="status--battery"></span>`battery` | [object](#statusbattery) | no | The charge the device reports. The operator reads the kernel's power supply class first, and BlueZ's org.bluez.Battery1 interface for a device the kernel registers no power supply for. The block is absent when neither reports a level, which covers every device with no battery and every battery device that is not connected. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the device holds a link now. Its reason is LinkUp when the link is up, Asleep for a Low Energy device that drops its link between presses and pages the radio again on the next one, NotConnected for a device that is switched off or out of range, and NotBonded when bluetoothd holds no object for the device, which means the bond was removed by another route. |
 
 ### status.bond
@@ -59,12 +59,13 @@ What the operator observes about the bond.
 
 ### status.battery
 
-The charge the device reports, read from BlueZ's org.bluez.Battery1 interface. The block is absent when the device reports no level, which covers every device with no battery and every battery device that is not connected.
+The charge the device reports. The operator reads the kernel's power supply class first, and BlueZ's org.bluez.Battery1 interface for a device the kernel registers no power supply for. The block is absent when neither reports a level, which covers every device with no battery and every battery device that is not connected.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusbattery--percentage"></span>`percentage` | integer | no | The charge left, from 0 to 100. |
-| <span id="statusbattery--source"></span>`source` | string | no | Where BlueZ read the level, such as HID or a GATT service. It is empty when BlueZ states none. |
+| <span id="statusbattery--source"></span>`source` | string | no | Where the level came from. It is the power supply's own name for a reading from the kernel, such as ps-controller-battery-7c:66:ef:22:e7:80, and BlueZ's own word for a reading from BlueZ, such as HID or a GATT service. |
+| <span id="statusbattery--charging"></span>`charging` | boolean | no | Whether the device is charging now. It is absent when the source is BlueZ, which reports a level and no direction, and when the kernel reports the status Unknown. |
 
 ### status.conditions[]
 

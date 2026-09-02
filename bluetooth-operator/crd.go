@@ -249,14 +249,21 @@ type BondStatus struct {
 	Request  string `json:"request,omitempty"`
 }
 
-// BatteryStatus is the charge the device reports, from BlueZ's
-// org.bluez.Battery1 interface.
+// BatteryStatus is the charge the device reports, read from the
+// kernel's power supply class where the kernel registers one, and
+// from BlueZ's org.bluez.Battery1 interface where it does not.
 //
-// Source names where BlueZ read the level, such as HID or a GATT
-// service. It is empty when BlueZ states none.
+// Source names where the level came from: the power supply's own name,
+// such as ps-controller-battery-<address>, for a kernel reading, and
+// BlueZ's own word, such as HID or a GATT service, for a BlueZ one.
+//
+// Charging is absent for a BlueZ reading, because Battery1 reports a
+// level and no direction, and for a kernel reading whose status is
+// Unknown.
 type BatteryStatus struct {
 	Percentage int    `json:"percentage"`
 	Source     string `json:"source,omitempty"`
+	Charging   *bool  `json:"charging,omitempty"`
 }
 
 // Condition is the standard Kubernetes condition shape.

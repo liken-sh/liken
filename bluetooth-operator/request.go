@@ -162,7 +162,9 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 		pass.ok = false
 		return
 	}
-	i.writePeripheralStatus(peripheral, adapter, address, device, true)
+	// The device paired moments ago, and the kernel registers a power
+	// supply only after it connects, so there is no kernel reading to pass.
+	i.writePeripheralStatus(peripheral, adapter, address, device, true, nil)
 	pass.owners[address] = OwnerReference{
 		APIVersion: pairingAPI,
 		Kind:       peripheralKind,

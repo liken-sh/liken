@@ -53,12 +53,14 @@ The status has these parts:
   blank name for a device nobody renamed.
 * `bond`, with `held`, `secret`, `pairedAt`, and `request`. The bond
   facts the Pairing held, as one block.
-* `battery`, with `percentage` and `source`. Read from BlueZ's
-  `org.bluez.Battery1` interface on the device object, in the same
-  managed-objects read the pass already makes. BlueZ fills it from the
-  GATT Battery Service on an LE device, from HID battery reports, and
-  from any battery provider a sound server registers. The block is
-  absent when the device reports no level.
+* `battery`, with `percentage`, `source`, and `charging`. The kernel
+  is read first: a classic HID controller's reports never reach BlueZ,
+  and its driver registers the battery in the power supply class
+  under the HID device, with the level and the charging status. BlueZ's
+  `org.bluez.Battery1` is the fallback, read in the same
+  managed-objects read the pass already makes, which is where a Low
+  Energy device's GATT Battery Service level arrives. The block is
+  absent when neither reports a level.
 * `conditions`, with `Connected`. The reason says why a device is not
   connected: `Asleep` for a bonded LE device between presses,
   `NotConnected` for a device that is switched off or out of range,

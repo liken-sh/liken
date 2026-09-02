@@ -24,6 +24,14 @@ package main
 // with no HID_PHYS, or one that does not parse, is kept, so a
 // single-adapter machine never regresses.
 //
+// The same walk reads a controller's battery. A HID device that states
+// its charge in its reports gets an entry in the kernel's power supply
+// class, under the HID device's own directory, and a driver such as
+// hid-playstation registers one for the controllers it knows. bluetoothd
+// forwards the HID reports to the kernel and does not decode them, so
+// BlueZ publishes no Battery1 for such a device, and this walk is the
+// one place the level can be read.
+//
 // The node paths come from DEVNAME, the same way liken's own delivery
 // walk reads them. DEVNAME for an evdev node is input/eventN, so the
 // node is /dev/input/eventN. joydev registers input/jsN through the
@@ -37,6 +45,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
@@ -57,10 +66,23 @@ const busBluetooth = "0005"
 // DevPath is the path below sysfs, the same string a uevent carries
 // as DEVPATH, so an add event and a walk name the same device the
 // same way.
+//
+// Battery is the level the kernel reports for this device, and nil
+// when the kernel registers no power supply under it.
 type hidDevice struct {
 	MAC     string
 	DevPath string
 	Nodes   []string
+	Battery *hidBattery
+}
+
+// hidBattery is one entry of the kernel's power supply class. Name is
+// the entry's own directory name, which the Peripheral reports as the
+// source. Charging is nil when the kernel reports the status Unknown.
+type hidBattery struct {
+	Name       string
+	Percentage int
+	Charging   *bool
 }
 
 // discoverHIDDevices lists the Bluetooth HID devices on the operator's
@@ -108,6 +130,7 @@ func discoverHIDDevices(sysRoot string, adapter bonds.Address) []hidDevice {
 			MAC:     mac,
 			DevPath: devPath(sysRoot, resolved),
 			Nodes:   evdevNodes(resolved),
+			Battery: powerSupply(resolved),
 		})
 	}
 	slices.SortFunc(devices, func(a, b hidDevice) int {
@@ -149,6 +172,72 @@ func nodesByMAC(devices []hidDevice) map[string][]string {
 		nodes[mac] = slices.Compact(nodes[mac])
 	}
 	return nodes
+}
+
+// kernelBatteries reads the level of every Bluetooth HID device on the
+// adapter, keyed by the peer address, so the Peripheral pass looks each
+// device up in one map.
+func kernelBatteries(sysRoot string, adapter bonds.Address) map[bonds.Address]*hidBattery {
+	batteries := map[bonds.Address]*hidBattery{}
+	for _, device := range discoverHIDDevices(sysRoot, adapter) {
+		if device.Battery == nil {
+			continue
+		}
+		address, err := bonds.ParseAddress(device.MAC)
+		if err != nil {
+			continue
+		}
+		batteries[address] = device.Battery
+	}
+	return batteries
+}
+
+// powerSupply reads the first power supply the kernel registered under
+// one HID device. A capacity that does not parse, or falls outside 0 to
+// 100, yields no battery, because the CRD bounds the field and the API
+// server would refuse the whole status write.
+func powerSupply(dir string) *hidBattery {
+	supplies := filepath.Join(dir, "power_supply")
+	entries, err := os.ReadDir(supplies)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		percentage, err := strconv.Atoi(readSysfsValue(filepath.Join(supplies, entry.Name(), "capacity")))
+		if err != nil || percentage < 0 || percentage > 100 {
+			continue
+		}
+		return &hidBattery{
+			Name:       entry.Name(),
+			Percentage: percentage,
+			Charging:   chargingFrom(readSysfsValue(filepath.Join(supplies, entry.Name(), "status"))),
+		}
+	}
+	return nil
+}
+
+// chargingFrom reads the power supply class's status word. Charging and
+// Full mean the device draws power now, Discharging and Not charging
+// mean it does not, and Unknown means the kernel cannot say.
+func chargingFrom(status string) *bool {
+	charging, discharging := true, false
+	switch status {
+	case "Charging", "Full":
+		return &charging
+	case "Discharging", "Not charging":
+		return &discharging
+	}
+	return nil
+}
+
+// readSysfsValue reads one single-value sysfs file. A missing file
+// reads as empty, which every caller treats as no value.
+func readSysfsValue(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 // evdevNodes walks one HID device's subtree and returns the evdev

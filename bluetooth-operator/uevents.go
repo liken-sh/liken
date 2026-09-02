@@ -1,12 +1,16 @@
 package main
 
-// Listening for the kernel's HID events.
+// Listening for the kernel's uevents.
 //
 // The kernel broadcasts every device add and remove on a netlink
 // socket, NETLINK_KOBJECT_UEVENT. Each datagram is "action@devpath"
 // followed by KEY=VALUE pairs, each part ending in a NUL byte. A HID
 // add tells this program that a controller's evdev nodes exist,
 // moments before bluetoothd reports the connection over D-Bus.
+//
+// A power supply change tells the loop that a controller's battery
+// reported a new level or a new charging status, so the Peripheral
+// that reports it is rewritten on the pass that follows.
 //
 // Two ways to open this socket fail silently:
 //
@@ -37,12 +41,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// hidEvent reports that one Bluetooth HID device appeared or
-// disappeared. Action is the kernel's word, "add" or "remove".
-type hidEvent struct {
-	Action string
-	MAC    string
+// kernelEvent reports one change the loop acts on: a Bluetooth HID
+// device that appeared or left, with the peer address it resolved, or
+// a power supply whose reading changed, which names no address because
+// the datagram carries none and the pass re-reads sysfs anyway.
+type kernelEvent struct {
+	Subsystem string
+	Action    string
+	MAC       string
 }
+
+// The two subsystems this operator reads events from. hid carries a
+// controller's arrival and departure, and power_supply carries a
+// battery's change.
+const (
+	subsystemHID         = "hid"
+	subsystemPowerSupply = "power_supply"
+)
 
 // devpathMACs remembers which controller registered each HID device,
 // so a remove event can name the controller that left.
@@ -110,43 +125,53 @@ func parseUevent(datagram []byte) (action, devpath string, values map[string]str
 	return string(head), string(path), values, true
 }
 
-// hidEventFrom turns one datagram into an event, when the datagram
-// reports a HID device appearing or disappearing. Everything else on
-// the socket, which on a running machine is most of it, reports false.
+// kernelEventFrom turns one datagram into an event, when the datagram
+// is one of the two kinds the loop acts on, and reports false for
+// every other uevent the kernel sends.
 //
 // The subsystem test drops every other subsystem's events. A
 // controller that connects produces a HID add, an input add for each
 // input device under it, and several more, and the operator needs one
 // wake for the burst. Its settle window (main.go) collapses the rest.
-func hidEventFrom(datagram []byte, macs *devpathMACs) (hidEvent, bool) {
+func kernelEventFrom(datagram []byte, macs *devpathMACs) (kernelEvent, bool) {
 	action, devpath, values, ok := parseUevent(datagram)
 	if !ok {
-		return hidEvent{}, false
+		return kernelEvent{}, false
 	}
-	if action != "add" && action != "remove" {
-		return hidEvent{}, false
+	switch values["SUBSYSTEM"] {
+	case subsystemHID:
+		if action != "add" && action != "remove" {
+			return kernelEvent{}, false
+		}
+		mac := macs.resolve(action, devpath, values["HID_UNIQ"])
+		if mac == "" {
+			return kernelEvent{}, false
+		}
+		return kernelEvent{Subsystem: subsystemHID, Action: action, MAC: mac}, true
+	case subsystemPowerSupply:
+		// A battery reports a new level or a new charging status as a change
+		// on its power supply. An add is not a wake on its own, because the
+		// supply registers during the HID probe that already woke the loop.
+		if action != "change" {
+			return kernelEvent{}, false
+		}
+		return kernelEvent{Subsystem: subsystemPowerSupply, Action: action}, true
 	}
-	if values["SUBSYSTEM"] != "hid" {
-		return hidEvent{}, false
-	}
-	mac := macs.resolve(action, devpath, values["HID_UNIQ"])
-	if mac == "" {
-		return hidEvent{}, false
-	}
-	return hidEvent{Action: action, MAC: mac}, true
+	return kernelEvent{}, false
 }
 
 // listenForUevents opens the kernel's uevent socket and returns a
-// channel of HID events. The channel is buffered, and a full channel
-// drops the event: every consumer of this channel re-reads the whole
-// of sysfs, so the events say when to look, never what is there.
+// channel of the events this operator acts on. The channel is
+// buffered, and a full channel drops the event: every consumer of this
+// channel re-reads the whole of sysfs, so the events say when to look,
+// never what is there.
 //
 // The socket is non-blocking. The reader waits for it in poll, not in
 // a read, so it can also watch a cancel pipe in the same poll and
 // stop the moment the context ends. This is liken's own arrangement,
 // for the reason liken states: closing a descriptor does not wake a
 // thread already blocked on a read of it.
-func listenForUevents(ctx context.Context) (<-chan hidEvent, error) {
+func listenForUevents(ctx context.Context) (<-chan kernelEvent, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
 		return nil, fmt.Errorf("opening the uevent socket: %w", err)
@@ -160,7 +185,7 @@ func listenForUevents(ctx context.Context) (<-chan hidEvent, error) {
 		unix.Close(fd)
 		return nil, fmt.Errorf("opening the cancel pipe: %w", err)
 	}
-	events := make(chan hidEvent, 16)
+	events := make(chan kernelEvent, 16)
 	go func() {
 		<-ctx.Done()
 		unix.Close(pipe[1])
@@ -173,7 +198,7 @@ func listenForUevents(ctx context.Context) (<-chan hidEvent, error) {
 // socket and the cancel pipe. A ready socket means a datagram to
 // read; a ready cancel pipe means the context is done and the loop
 // returns. It closes the descriptors it owns as it leaves.
-func readUevents(fd, cancelRead int, events chan<- hidEvent) {
+func readUevents(fd, cancelRead int, events chan<- kernelEvent) {
 	defer unix.Close(fd)
 	defer unix.Close(cancelRead)
 	defer close(events)
@@ -203,7 +228,7 @@ func readUevents(fd, cancelRead int, events chan<- hidEvent) {
 			// tick in main.go re-reads sysfs anyway.
 			continue
 		}
-		event, ok := hidEventFrom(buf[:size], macs)
+		event, ok := kernelEventFrom(buf[:size], macs)
 		if !ok {
 			continue
 		}

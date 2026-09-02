@@ -51,13 +51,13 @@ func TestHIDEventFrom(t *testing.T) {
 	cases := []struct {
 		name     string
 		datagram []byte
-		want     hidEvent
+		want     kernelEvent
 		wantOK   bool
 	}{
 		{
 			name:     "a HID add names its controller",
 			datagram: datagram("add@"+devpath, "SUBSYSTEM=hid", "HID_UNIQ="+mac),
-			want:     hidEvent{Action: "add", MAC: mac},
+			want:     kernelEvent{Subsystem: "hid", Action: "add", MAC: mac},
 			wantOK:   true,
 		},
 		{
@@ -75,10 +75,24 @@ func TestHIDEventFrom(t *testing.T) {
 			datagram: datagram("add@/devices/pci0000:00/0003:046D:C31C.0002", "SUBSYSTEM=hid"),
 			wantOK:   false,
 		},
+		{
+			name: "a battery reports a new level as a change",
+			datagram: datagram("change@"+devpath+"/power_supply/ps-controller-battery-"+mac,
+				"SUBSYSTEM=power_supply", "POWER_SUPPLY_NAME=ps-controller-battery-"+mac,
+				"POWER_SUPPLY_CAPACITY=40"),
+			want:   kernelEvent{Subsystem: "power_supply", Action: "change"},
+			wantOK: true,
+		},
+		{
+			name: "a power supply that appears is not a level change",
+			datagram: datagram("add@"+devpath+"/power_supply/ps-controller-battery-"+mac,
+				"SUBSYSTEM=power_supply"),
+			wantOK: false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			event, ok := hidEventFrom(c.datagram, newDevpathMACs())
+			event, ok := kernelEventFrom(c.datagram, newDevpathMACs())
 			if ok != c.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
 			}
@@ -94,22 +108,22 @@ func TestHIDRemoveResolvesThroughTheMap(t *testing.T) {
 	const mac = "a0:ab:51:33:b7:12"
 	macs := newDevpathMACs()
 
-	if _, ok := hidEventFrom(datagram("add@"+devpath, "SUBSYSTEM=hid", "HID_UNIQ="+mac), macs); !ok {
+	if _, ok := kernelEventFrom(datagram("add@"+devpath, "SUBSYSTEM=hid", "HID_UNIQ="+mac), macs); !ok {
 		t.Fatal("the add did not produce an event")
 	}
 	// A remove arrives after sysfs is gone. This one also drops
 	// HID_UNIQ, so the map is the only record of which controller
 	// left.
-	event, ok := hidEventFrom(datagram("remove@"+devpath, "SUBSYSTEM=hid"), macs)
+	event, ok := kernelEventFrom(datagram("remove@"+devpath, "SUBSYSTEM=hid"), macs)
 	if !ok {
 		t.Fatal("the remove did not produce an event")
 	}
-	if event != (hidEvent{Action: "remove", MAC: mac}) {
+	if event != (kernelEvent{Subsystem: "hid", Action: "remove", MAC: mac}) {
 		t.Fatalf("event = %+v", event)
 	}
 	// The kernel reuses a DEVPATH for the next device in that slot, so
 	// the removal clears the entry.
-	if _, ok := hidEventFrom(datagram("remove@"+devpath, "SUBSYSTEM=hid"), macs); ok {
+	if _, ok := kernelEventFrom(datagram("remove@"+devpath, "SUBSYSTEM=hid"), macs); ok {
 		t.Fatal("a second remove still resolved to a controller")
 	}
 }

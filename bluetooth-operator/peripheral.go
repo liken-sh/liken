@@ -27,7 +27,7 @@ import (
 
 // reconcilePeripherals makes the Peripherals under one Adapter agree
 // with the bonds bluetoothd holds.
-func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapshot, pass *inventoryPass) {
+func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapshot, batteries map[bonds.Address]*hidBattery, pass *inventoryPass) {
 	adapterKey := adapter.Metadata.Name
 	list, err := get[PeripheralList](i.client, byAdapter(peripheralsPath(), adapterKey))
 	if err != nil {
@@ -76,7 +76,7 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 		if present {
 			i.reconcileDeviceSpec(peripheral, device)
 		}
-		i.writePeripheralStatus(peripheral, adapter, address, device, present)
+		i.writePeripheralStatus(peripheral, adapter, address, device, present, batteries[address])
 		pass.owners[address] = OwnerReference{
 			APIVersion: pairingAPI,
 			Kind:       peripheralKind,
@@ -163,7 +163,10 @@ func (i *inventory) reconcileDeviceSpec(peripheral *Peripheral, device deviceSta
 //
 // pairedAt and bond.request carry over from the object, because the
 // radio reports neither. Every other field is this pass's own reading.
-func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapter, address bonds.Address, device deviceState, present bool) {
+//
+// kernel is the level the kernel's power supply class reports for this
+// device, and nil when it reports none.
+func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery) {
 	status := PeripheralStatus{
 		Address: address.Directory(),
 		Name:    attributeString(deviceReportedName(device)),
@@ -183,7 +186,19 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 	if status.Bond.PairedAt == "" {
 		status.Bond.PairedAt = timestamp(i.now())
 	}
-	if present && device.Battery != nil {
+	// The kernel's reading comes first. A controller that states its charge
+	// in its HID reports has a power supply and no Battery1, a Low Energy
+	// device with a GATT battery service has Battery1 and no power supply,
+	// and a device with both is read once, from the kernel, because that
+	// reading also carries the charging state.
+	switch {
+	case kernel != nil:
+		status.Battery = &BatteryStatus{
+			Percentage: kernel.Percentage,
+			Source:     kernel.Name,
+			Charging:   kernel.Charging,
+		}
+	case present && device.Battery != nil:
 		status.Battery = &BatteryStatus{
 			Percentage: device.Battery.Percentage,
 			Source:     device.Battery.Source,

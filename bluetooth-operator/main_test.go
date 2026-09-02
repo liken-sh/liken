@@ -126,7 +126,7 @@ func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			uevents := make(chan hidEvent)
+			uevents := make(chan kernelEvent)
 			bluez := make(chan struct{})
 			retries := make(chan struct{})
 			requests := make(chan struct{})
@@ -158,13 +158,13 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	uevents := make(chan hidEvent, 1)
+	uevents := make(chan kernelEvent, 1)
 	bluez := make(chan struct{}, 1)
 	retries := make(chan struct{}, 1)
 	requests := make(chan struct{}, 1)
 	out := wakes(ctx, uevents, bluez, retries, requests)
 
-	uevents <- hidEvent{Action: "add", MAC: "a0:ab:51:33:b7:12"}
+	uevents <- kernelEvent{Subsystem: "hid", Action: "add", MAC: "a0:ab:51:33:b7:12"}
 	waitForWake(t, out, time.Second)
 	bluez <- struct{}{}
 	waitForWake(t, out, time.Second)
@@ -172,4 +172,32 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 	waitForWake(t, out, time.Second)
 	requests <- struct{}{}
 	waitForWake(t, out, time.Second)
+}
+
+// The loop prints what woke it. A HID event names its controller, and
+// a power supply change names none.
+func TestKernelEventLine(t *testing.T) {
+	cases := []struct {
+		name  string
+		event kernelEvent
+		want  string
+	}{
+		{
+			name:  "a HID add",
+			event: kernelEvent{Subsystem: "hid", Action: "add", MAC: "a0:ab:51:33:b7:12"},
+			want:  "controller A0:AB:51:33:B7:12: hid add",
+		},
+		{
+			name:  "a battery change",
+			event: kernelEvent{Subsystem: "power_supply", Action: "change"},
+			want:  "kernel: power_supply change",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := kernelEventLine(c.event); got != c.want {
+				t.Errorf("line = %q, want %q", got, c.want)
+			}
+		})
+	}
 }

@@ -173,7 +173,10 @@ func (i *inventory) reconcile() inventoryPass {
 		return pass
 	}
 
-	i.reconcilePeripherals(adapter, snapshot, &pass)
+	// One walk of sysfs answers the battery of every device this pass
+	// writes, before any status write, so each Peripheral reads the level
+	// the kernel reports now.
+	i.reconcilePeripherals(adapter, snapshot, kernelBatteries(draSysfsRoot, snapshot.Adapter.Address), &pass)
 	// The connects run after the Peripherals, because the Peripheral pass
 	// marks the bonds a teardown works through, and a device under
 	// teardown must not be paged.

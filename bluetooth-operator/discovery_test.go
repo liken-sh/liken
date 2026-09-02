@@ -3,7 +3,9 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,10 +15,23 @@ import (
 // fakeHID describes one HID device to build into a fake sysfs tree.
 // Dir is the path below /devices, Uevent is the device's own uevent
 // file, and Nodes are the DEVNAME values of the input nodes below it.
+// Battery is the power supply the kernel registers under a device
+// that reports its charge, and is absent for a device that reports
+// none.
 type fakeHID struct {
-	Dir    string
-	Uevent map[string]string
-	Nodes  []string
+	Dir     string
+	Uevent  map[string]string
+	Nodes   []string
+	Battery *fakePowerSupply
+}
+
+// fakePowerSupply is one entry in the kernel's power supply class,
+// as it appears under a HID device: a directory named for the supply,
+// with the two files this operator reads.
+type fakePowerSupply struct {
+	Name     string
+	Capacity string
+	Status   string
 }
 
 // fakeSysfs builds a sysfs tree in a temporary directory and returns
@@ -51,6 +66,23 @@ func fakeSysfs(t *testing.T, devices ...fakeHID) string {
 			}
 			writeUevent(t, nodeDir, map[string]string{"DEVNAME": devname, "MAJOR": "13"})
 		}
+		if device.Battery != nil {
+			supply := filepath.Join(dir, "power_supply", device.Battery.Name)
+			if err := os.MkdirAll(supply, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for file, value := range map[string]string{
+				"capacity": device.Battery.Capacity,
+				"status":   device.Battery.Status,
+			} {
+				if value == "" {
+					continue
+				}
+				if err := os.WriteFile(filepath.Join(supply, file), []byte(value+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 		base := filepath.Base(device.Dir)
 		target := filepath.Join("..", "..", "..", "devices", device.Dir)
 		if err := os.Symlink(target, filepath.Join(busDir, base)); err != nil {
@@ -58,6 +90,15 @@ func fakeSysfs(t *testing.T, devices ...fakeHID) string {
 		}
 	}
 	return root
+}
+
+// sysfsFor points the walk at a tree this test owns, and puts the
+// fake devices in it.
+func sysfsFor(t *testing.T, devices ...fakeHID) {
+	t.Helper()
+	previous := draSysfsRoot
+	draSysfsRoot = fakeSysfs(t, devices...)
+	t.Cleanup(func() { draSysfsRoot = previous })
 }
 
 func writeUevent(t *testing.T, dir string, values map[string]string) {
@@ -209,5 +250,138 @@ func TestReadUeventFile(t *testing.T) {
 	}
 	if missing := readUeventFile(filepath.Join(dir, "absent")); len(missing) != 0 {
 		t.Errorf("a missing file gave %v, want an empty map", missing)
+	}
+}
+
+// The controller battery the DualSense registers, as the kernel names
+// it: ps-controller-battery-<address>.
+func withBattery(device fakeHID, capacity, status string) fakeHID {
+	device.Battery = &fakePowerSupply{
+		Name:     "ps-controller-battery-" + device.Uevent["HID_UNIQ"],
+		Capacity: capacity,
+		Status:   status,
+	}
+	return device
+}
+
+// A controller that states its charge in its HID reports has no
+// Battery1 in BlueZ, so the walk is where its level is read.
+func TestDiscoverHIDDevicesReadsTheKernelBattery(t *testing.T) {
+	charging, discharging := true, false
+	cases := []struct {
+		name     string
+		capacity string
+		status   string
+		want     *hidBattery
+	}{
+		{
+			name:     "charging",
+			capacity: "40",
+			status:   "Charging",
+			want:     &hidBattery{Percentage: 40, Charging: &charging},
+		},
+		{
+			name:     "full",
+			capacity: "100",
+			status:   "Full",
+			want:     &hidBattery{Percentage: 100, Charging: &charging},
+		},
+		{
+			name:     "discharging",
+			capacity: "88",
+			status:   "Discharging",
+			want:     &hidBattery{Percentage: 88, Charging: &discharging},
+		},
+		{
+			name:     "not charging",
+			capacity: "55",
+			status:   "Not charging",
+			want:     &hidBattery{Percentage: 55, Charging: &discharging},
+		},
+		{
+			name:     "unknown",
+			capacity: "55",
+			status:   "Unknown",
+			want:     &hidBattery{Percentage: 55},
+		},
+		{
+			name:     "no status file",
+			capacity: "55",
+			status:   "",
+			want:     &hidBattery{Percentage: 55},
+		},
+		{name: "no capacity file", capacity: "", status: "Discharging"},
+		{name: "an unreadable capacity", capacity: "unknown", status: "Discharging"},
+		{name: "a capacity above 100", capacity: "127", status: "Discharging"},
+		{name: "a capacity below 0", capacity: "-1", status: "Discharging"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := fakeSysfs(t, withBattery(
+				dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"), c.capacity, c.status))
+
+			devices := discoverHIDDevices(root, bonds.Address{})
+			if len(devices) != 1 {
+				t.Fatalf("got %d devices, want 1: %+v", len(devices), devices)
+			}
+			got := devices[0].Battery
+			if c.want == nil {
+				if got != nil {
+					t.Fatalf("battery = %+v, want none", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("the walk read no battery")
+			}
+			c.want.Name = "ps-controller-battery-a0:ab:51:33:b7:12"
+			if got.Name != c.want.Name || got.Percentage != c.want.Percentage {
+				t.Errorf("battery = %+v, want %+v", got, c.want)
+			}
+			if !reflect.DeepEqual(got.Charging, c.want.Charging) {
+				t.Errorf("charging = %v, want %v", show(got.Charging), show(c.want.Charging))
+			}
+		})
+	}
+}
+
+// show prints an optional flag for a failure message.
+func show(flag *bool) string {
+	if flag == nil {
+		return "unstated"
+	}
+	return strconv.FormatBool(*flag)
+}
+
+// Most controllers register no power supply at all, and a level of
+// zero for them would read as an empty battery.
+func TestDiscoverHIDDevicesWithoutAPowerSupply(t *testing.T) {
+	root := fakeSysfs(t, dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
+	devices := discoverHIDDevices(root, bonds.Address{})
+	if len(devices) != 1 {
+		t.Fatalf("got %d devices, want 1: %+v", len(devices), devices)
+	}
+	if devices[0].Battery != nil {
+		t.Errorf("battery = %+v, want none", devices[0].Battery)
+	}
+}
+
+// A controller that registers more than one HID device carries its
+// battery under one of them, and the pass keys the level by the
+// controller.
+func TestKernelBatteriesKeysByAddress(t *testing.T) {
+	root := fakeSysfs(t,
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
+		withBattery(dualSense("0002", "a0:ab:51:33:b7:12", "input/event6"), "40", "Discharging"),
+		dualSense("0003", "b4:8c:9d:11:22:33", "input/event7"),
+	)
+
+	batteries := kernelBatteries(root, bonds.Address{})
+	if len(batteries) != 1 {
+		t.Fatalf("got %d batteries, want 1: %+v", len(batteries), batteries)
+	}
+	battery := batteries[testAddress(t, "a0:ab:51:33:b7:12")]
+	if battery == nil || battery.Percentage != 40 {
+		t.Errorf("battery = %+v", battery)
 	}
 }

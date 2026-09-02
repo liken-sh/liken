@@ -290,11 +290,11 @@ func exitReason(ctx context.Context, ok bool) error {
 	return errSourcesClosed
 }
 
-// wakes merges the kernel's HID events, bluetoothd's signals, the
+// wakes merges the kernel's uevents, bluetoothd's signals, the
 // PairingRequests that need a pass, and the loop's own retries into
 // one channel. None of them holds state that the loop uses, so the
 // merge loses nothing: each wake means look again.
-func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries, requests <-chan struct{}) <-chan struct{} {
+func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retries, requests <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -314,7 +314,7 @@ func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries, 
 				if !ok {
 					return
 				}
-				fmt.Printf("controller %s: hid %s\n", publishedMAC(event.MAC), event.Action)
+				fmt.Println(kernelEventLine(event))
 				wake()
 			case _, ok := <-blueZChanges:
 				if !ok {
@@ -337,6 +337,16 @@ func wakes(ctx context.Context, uevents <-chan hidEvent, blueZChanges, retries, 
 		}
 	}()
 	return out
+}
+
+// kernelEventLine says what one uevent reported. A HID event names its
+// controller, and a power supply change names none, because the
+// datagram carries no address.
+func kernelEventLine(event kernelEvent) string {
+	if event.MAC == "" {
+		return fmt.Sprintf("kernel: %s %s", event.Subsystem, event.Action)
+	}
+	return fmt.Sprintf("controller %s: %s %s", publishedMAC(event.MAC), event.Subsystem, event.Action)
 }
 
 // settle collapses a burst of events into one wake. It emits after
