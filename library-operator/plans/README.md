@@ -39,10 +39,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   `liken-1`, with the numbers written down.
 * [10, The documentation site](10-the-documentation-site.md). The manual
   and the generated reference, written after plan 09.
-* [22, A screen per kind](22-a-screen-per-kind.md). A movie page with
-  its set strip, a series page with season dividers, the wall's band
-  for the controls to come, sets in the catalog, and the principle
-  that a kind is a screen design in the browser.
 
 ## Future
 
@@ -57,6 +53,14 @@ for a later agent to shape.
   and games.
 * [14, Watch state and people](14-watch-state-and-people.md). Positions,
   history, and who was watching.
+* [23, Motion](23-motion.md). Focus that slides, walls that glide, and
+  pages that open, on a loop that still draws only when it must.
+* [24, Franchises](24-franchises.md). A whole universe of films and
+  series in one order, as a resource the cluster owner writes.
+* [25, People on the screen](25-people-on-the-screen.md). Cast and crew
+  as pages of their own, derived from the bodies the scanner reads.
+* [26, The home page](26-the-home-page.md). A first screen of rows that
+  blends every kind, in place of the list of libraries.
 
 ## Completed
 
@@ -156,6 +160,15 @@ that took a hearing-impaired flag for Hindi.
   versioned claim name, with a rescan, and 2026.08.31-003 returned
   the claim to its plain name after every scanner moved to a fresh
   database.
+* [22, A screen per kind](completed/22-a-screen-per-kind.md). Built in
+  two waves, released in 2026.09.02-003, and drilled on `liken-1` on
+  2026-09-02. A kind is a screen design in the browser: the movies wall
+  with its band and captions, a movie page with its set strip, a series
+  page with a fixed header and season dividers, sets derived in the
+  catalog, and a poster store that draws large art as bands, fits
+  logos, keeps its handles, and holds memory under the pre-plan-22
+  line. Pages are stacks of canvases, because a layer draws fills, then
+  images, then text.
 * [21, A Library takes its rows with
   it](completed/21-a-library-takes-its-rows-with-it.md). Built,
   released in 2026.08.31-004 through -006, and running on `liken-1`.

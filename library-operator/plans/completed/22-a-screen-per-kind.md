@@ -215,4 +215,15 @@ at every step, against plan 07's 131 MiB, and the cause was decode
 transients held in the allocator's arenas and not the cache. With the
 allocator thresholds pinned and one page-size decode in flight at a
 time, the same walk peaks at 186 MiB and rests at 153, and a walk
-through ten movie pages peaks at 156. The `liken-1` drill is owed.
+through ten movie pages peaks at 156.
+
+Drilled on `liken-1` on 2026-09-02, in release 2026.09.02-003. The
+operator, both scanners, and the screen pod came up on the new tag,
+and the scanners walked on the new schema. The screen pod's catalog
+synced from empty for about two minutes, and the wall filled as the
+rows landed. From the couch, the wall, the movie page, and the series
+page drew fast and read well on the 1080p panel. The browser measured
+216 MiB resident on the box after the sync, beside plan 07's 92 MiB;
+the page-size backdrops in the cache are most of the difference. The
+browser's first two starts exited before the display sidecar answered,
+and the third connected; that race predates this plan and is open.
