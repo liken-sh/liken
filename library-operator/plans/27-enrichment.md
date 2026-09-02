@@ -209,9 +209,11 @@ from the sidecars, release order, movies only.
 
 ## What is not decided
 
-- Where the durable claim should be. A SQLite file on an NFS-backed
-  claim can corrupt under a node loss, and the claim today binds the
-  cluster's default `StorageClass`.
+- Nothing about the durable claim's disk. `Catalog.spec.storage`
+  names the `StorageClass` and the size, and plan 28 adds an existing
+  claim as the alternative. The manual says node-local storage is the
+  safe choice for a SQLite file, because one on an NFS-backed claim
+  can corrupt under a node loss.
 - How often the identity rule guesses wrong on a real library. Plan
   29's drill measures it before the rule ships as a default.
 - The retry interval per concern. Thirty days for a miss is a guess.

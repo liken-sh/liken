@@ -37,7 +37,9 @@ memory problem records.
   library's interval. The operator runs at most one full walk per
   `Library` at a time, and a folder scan may run beside one.
 - **The `Library`-owned claim goes away.** The `Catalog` sizes one
-  claim, its own. `Library` status keeps its counts and phase, read
+  claim, its own, from `spec.storage` as today, or binds an existing
+  claim when `spec.storage.claimName` names one, the way a `Library`
+  binds its volume. `Library` status keeps its counts and phase, read
   through the catalog pod after each `Job`.
 - **Screens do not change.** A screen pod keeps its own agent and its
   own copy on an `emptyDir`, and gossips with the catalog pod. A
@@ -82,7 +84,6 @@ plan 27 adds twenty of them. Set aside for the `Job`.
 
 ## What is not decided
 
-Where the durable claim should be, local disk or the NAS. The grace
-period the catalog pod needs, given the slow shutdown problem. Whether
+The grace period the catalog pod needs, given the slow shutdown problem. Whether
 the ingest peak on the one standing pod needs the restart trick plan 06
 uses on screens.
