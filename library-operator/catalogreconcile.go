@@ -77,9 +77,11 @@ func catalogObjectOwner(catalog *NamespaceCatalog) OwnerReference {
 	}
 }
 
-// StandingCatalogStatus reports the cluster the Catalog stands:
-// every member agent pod of the namespace and the storage size the
-// agents were given. Ready follows the catalog pod alone, because that
+// StandingCatalogStatus reports the cluster the Catalog stands: every
+// member agent pod of the namespace, the storage size the agents were given,
+// and one entry per screen pod with the claim its agent runs on.
+//
+// Ready follows the catalog pod alone, because that
 // pod is what holds the durable catalog and reports it; a Job's pod
 // comes and goes and a screen pod holds a copy, so neither decides
 // whether the namespace's catalog stands.
@@ -100,8 +102,45 @@ func standingCatalogStatus(catalog *NamespaceCatalog, pod *Pod, pods []Pod, now 
 	return CatalogStatus{
 		Members:     members,
 		StorageSize: catalogStorageSize(catalog),
+		Screens:     catalogScreens(catalog.Metadata.Namespace, pods),
 		Conditions:  SetCondition(slices.Clone(catalog.Status.Conditions), condition, now),
 	}
+}
+
+// The screen pods of the namespace, in Player order, out of the member
+// pods the pass read. A screen carries the name label of its own kind, so the
+// catalog pod and a Job's pod are not screens.
+func catalogScreens(namespace string, pods []Pod) []CatalogScreen {
+	screens := []CatalogScreen{}
+	for index := range pods {
+		pod := &pods[index]
+		if pod.Metadata.Namespace != namespace ||
+			pod.Metadata.Labels[scannerLabelKey] != screenLabelValue {
+			continue
+		}
+		screens = append(screens, CatalogScreen{
+			Player: pod.Metadata.Labels[playerLabelKey],
+			Claim:  screenClaimOf(pod),
+			Node:   pod.Spec.NodeName,
+			Phase:  pod.Status.Phase,
+		})
+	}
+	sort.Slice(screens, func(one, other int) bool {
+		return screens[one].Player < screens[other].Player
+	})
+	return screens
+}
+
+// The claim a screen pod's catalog agent runs on, read off the pod
+// itself, because the pod is what states which volume the agent has. A pod
+// on an emptyDir names none.
+func screenClaimOf(pod *Pod) string {
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == catalogVolumeName && volume.PersistentVolumeClaim != nil {
+			return volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	return ""
 }
 
 // BlockedCatalogStatus marks a Catalog Blocked when its namespace holds more

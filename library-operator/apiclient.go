@@ -378,9 +378,9 @@ func GetPersistentVolumeClaim(ctx context.Context, c *Client, namespace, name st
 	return claim, nil
 }
 
-// CreatePersistentVolumeClaim provisions the catalog claim one scanner
-// pod mounts. The operator creates it once and never updates it,
-// because a claim's spec is immutable once it binds.
+// CreatePersistentVolumeClaim provisions a catalog claim: a Library's,
+// the catalog pod's, or a screen's. The operator creates one once and never
+// updates it, because a claim's spec is immutable once it binds.
 func CreatePersistentVolumeClaim(ctx context.Context, c *Client, claim *PersistentVolumeClaim) (*PersistentVolumeClaim, error) {
 	body, err := json.Marshal(claim)
 	if err != nil {
@@ -391,6 +391,18 @@ func CreatePersistentVolumeClaim(ctx context.Context, c *Client, claim *Persiste
 		return nil, err
 	}
 	return created, nil
+}
+
+// DeletePersistentVolumeClaim removes the catalog claim of a screen
+// the scheduler cannot place. It is the one claim this operator deletes. An
+// already-absent claim is success, because the operator deletes the claim to
+// replace it and a delete that races another pass must not fail.
+func DeletePersistentVolumeClaim(ctx context.Context, c *Client, namespace, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, claimPath(namespace, name), nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // GetPersistentVolume reads the volume behind a bound claim, for what

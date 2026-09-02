@@ -4,10 +4,11 @@ package main
 // Player, in the Player's namespace and owned by it, so deleting the Player
 // tears it down. It holds the media browser and a Corrosion agent of its own.
 //
-// The agent's state is an emptyDir and not a durable claim,
-// unlike the catalog pod's. A screen holds a copy of the namespace's
-// catalog, not the only copy: the agent joins the cluster through the
-// catalog Service and rebuilds from its peers on every start.
+// The agent's state is a claim of the screen's own, sized by the
+// namespace Catalog, so a screen that restarts syncs a delta rather than
+// pulling the whole catalog. A screen in a namespace with no single Catalog
+// has no size to read, so its agent keeps an emptyDir and rebuilds from its
+// peers on every start.
 //
 // The browser reads the catalog from the agent's file and the update
 // stream from its loopback API, and it draws poster art from every Library's
@@ -24,6 +25,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The container's name reaches a person through kubectl logs, so it
@@ -128,7 +130,7 @@ func playerOwner(player *Player) OwnerReference {
 // settings alone, so two passes over an unchanged namespace build the same
 // pod, which is what makes the template hash mean anything. The Libraries are
 // read in name order for the same reason.
-func buildScreenPod(player *Player, libraries []Library, browserImage, corrosionImage, topicBase string) *Pod {
+func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatalog, browserImage, corrosionImage, topicBase string) *Pod {
 	grace := int64(scannerGracePeriod)
 	// The browser holds no Kubernetes credential. It reads the catalog
 	// from the agent beside it, and nothing in the pod speaks to the API
@@ -150,9 +152,10 @@ func buildScreenPod(player *Player, libraries []Library, browserImage, corrosion
 			},
 		})
 	}
-	// The agent rebuilds its catalog from its peers on every start, so
-	// its state is an emptyDir and the pod provisions no claim for it.
-	volumes = append(volumes, Volume{Name: catalogVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
+	// The agent's state is the screen's own claim, which the pass
+	// creates before this pod. A namespace with no single Catalog states no
+	// size, so the agent takes an emptyDir and pays a full sync per start.
+	volumes = append(volumes, screenCatalogVolume(player, catalog))
 
 	return &Pod{
 		APIVersion: podAPIVersion,
@@ -190,6 +193,17 @@ func buildScreenPod(player *Player, libraries []Library, browserImage, corrosion
 			},
 		},
 	}
+}
+
+// The volume the catalog agent's state is on: the screen's own claim
+// where the namespace holds one Catalog, and an emptyDir where it does not.
+func screenCatalogVolume(player *Player, catalog *NamespaceCatalog) Volume {
+	if catalog == nil {
+		return Volume{Name: catalogVolumeName, EmptyDir: &EmptyDirVolumeSource{}}
+	}
+	return Volume{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
+		ClaimName: screenClaimName(player.Metadata.Name),
+	}}
 }
 
 // BrowserSidecar builds the container that draws the wall. It learns
@@ -310,15 +324,19 @@ func remoteTopics(remotes []PlayerIdleRemote) []EnvVar {
 }
 
 // ReconcileScreens brings one namespace's screen pods into line. A
-// Player that names this operator as its idle controller gets a pod, and a
-// Player that names another, or none, loses the pod that stands for it. That
-// delete is the only one this operator sends for a screen: media-operator
-// deletes the pod itself when the claim under it must be replaced, and the
-// next pass creates it again.
+// Player that names this operator as its idle controller gets a claim and a
+// pod, and a Player that names another, or none, loses the pod that stands
+// for it.
+//
+// The operator sends two other deletes here. media-operator deletes
+// the pod itself when the claim under it must be replaced, and the next pass
+// creates it again. A screen the scheduler has refused for longer than the
+// grace loses its pod and its catalog claim, which is the recovery in
+// screenclaim.go.
 //
 // A failure on one Player is reported and the pass carries on, because
 // one broken screen must not hold up another room's.
-func (o *operator) reconcileScreens(ctx context.Context, namespace string, players []Player, libraries []Library, screens []Pod) {
+func (o *operator) reconcileScreens(ctx context.Context, namespace string, catalog *NamespaceCatalog, players []Player, libraries []Library, screens []Pod, now time.Time) {
 	inNamespace := []Library{}
 	for index := range libraries {
 		if libraries[index].Metadata.Namespace == namespace {
@@ -329,10 +347,10 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, playe
 	// Player this operator does not serve costs no request unless one
 	// of them is its pod, so a cluster full of undelegated units sends
 	// no delete on every pass.
-	standing := map[string]bool{}
+	standing := map[string]*Pod{}
 	for index := range screens {
 		if screens[index].Metadata.Namespace == namespace {
-			standing[screens[index].Metadata.Name] = true
+			standing[screens[index].Metadata.Name] = &screens[index]
 		}
 	}
 
@@ -343,7 +361,7 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, playe
 		}
 		name := player.Metadata.Name
 		if !player.delegated() {
-			if !standing[screenPodName(name)] {
+			if standing[screenPodName(name)] == nil {
 				continue
 			}
 			if err := DeletePod(ctx, o.client, namespace, screenPodName(name)); err != nil {
@@ -351,7 +369,26 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, playe
 			}
 			continue
 		}
-		desired := buildScreenPod(player, inNamespace, o.browserImage, o.corrosionImage, o.topicBase)
+		// The recovery runs before the claim and the pod, because a
+		// pass that has just deleted both creates them on the next one.
+		recovered, err := o.recoverUnschedulableScreen(ctx, player, standing[screenPodName(name)], now)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "recovering the screen of %s/%s: %v\n", namespace, name, err)
+			continue
+		}
+		if recovered {
+			continue
+		}
+		// The claim stands before the pod, because a pod that named a
+		// claim nothing had created would sit Pending until the next pass.
+		if catalog != nil {
+			if err := o.standScreenClaim(ctx, player, catalog); err != nil {
+				fmt.Fprintf(os.Stderr, "standing the catalog claim of the screen of %s/%s: %v\n",
+					namespace, name, err)
+				continue
+			}
+		}
+		desired := buildScreenPod(player, inNamespace, catalog, o.browserImage, o.corrosionImage, o.topicBase)
 		if _, err := o.standPod(ctx, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the screen of %s/%s: %v\n", namespace, name, err)
 		}

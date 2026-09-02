@@ -524,6 +524,9 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 			_, err := GetPersistentVolumeClaim(t.Context(), c, "house", "movies")
 			return err
 		}},
+		{name: "DeletePersistentVolumeClaim", call: func(c *Client) error {
+			return DeletePersistentVolumeClaim(t.Context(), c, "house", "den-tv-media-browser-catalog")
+		}},
 		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
 		{name: "ListPlayers", call: func(c *Client) error { _, err := ListPlayers(t.Context(), c); return err }},
 		{name: "ListCatalogMemberPods", call: func(c *Client) error { _, err := ListCatalogMemberPods(t.Context(), c); return err }},

@@ -174,6 +174,41 @@ func TestStandingCatalogStatusReportsTheNamespacesMembers(t *testing.T) {
 	}
 }
 
+// The status lists one entry per screen pod of the namespace, with
+// the Player, the claim its agent runs on, the node, and the pod's phase. A
+// screen on an emptyDir names no claim.
+func TestStandingCatalogStatusReportsTheScreens(t *testing.T) {
+	catalog := testNamespaceCatalog()
+	onAClaim := buildScreenPod(denScreen(), nil, catalog,
+		testBrowserImage, testCorrosionImage, defaultTopicBase)
+	onAClaim.Spec.NodeName = "nuc-2"
+	onAClaim.Status.Phase = podRunning
+	kitchen := &Player{Metadata: ObjectMeta{Name: "kitchen-tv", Namespace: "house", UID: "kitchen-tv-uid"}}
+	onAnEmptyDir := buildScreenPod(kitchen, nil, nil,
+		testBrowserImage, testCorrosionImage, defaultTopicBase)
+	onAnEmptyDir.Status.Phase = podPending
+
+	status := standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), []Pod{
+		scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1"),
+		*onAnEmptyDir,
+		*onAClaim,
+		screenPodAt("studio-tv-media-browser", "studio", "10.42.3.9", "nuc-3"),
+	}, testNow)
+
+	want := []CatalogScreen{
+		{Player: "den-tv", Claim: "den-tv-media-browser-catalog", Node: "nuc-2", Phase: podRunning},
+		{Player: "kitchen-tv", Phase: podPending},
+	}
+	if len(status.Screens) != len(want) {
+		t.Fatalf("screens = %+v, want the two screens of the namespace", status.Screens)
+	}
+	for index, screen := range want {
+		if status.Screens[index] != screen {
+			t.Errorf("screens[%d] = %+v, want %+v", index, status.Screens[index], screen)
+		}
+	}
+}
+
 // A blocked status reports no members and a condition that names the
 // conflict.
 func TestBlockedCatalogStatusNamesTheConflict(t *testing.T) {

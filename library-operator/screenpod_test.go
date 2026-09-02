@@ -49,7 +49,8 @@ func houseLibraries() []Library {
 }
 
 func testScreenPod(player *Player, libraries []Library) *Pod {
-	return buildScreenPod(player, libraries, testBrowserImage, testCorrosionImage, defaultTopicBase)
+	return buildScreenPod(player, libraries, testNamespaceCatalog(),
+		testBrowserImage, testCorrosionImage, defaultTopicBase)
 }
 
 // The pod's name, namespace, owner, and marks are what tie it to the
@@ -161,9 +162,8 @@ func TestScreenPodWithNoLibrariesMountsNone(t *testing.T) {
 	}
 }
 
-// Every Library's claim is mounted read-only under its own directory,
-// and the catalog agent's state is an emptyDir it rebuilds from its
-// peers.
+// Every Library's claim is mounted read-only under its own
+// directory, and the catalog agent's state is the screen's own claim.
 func TestScreenPodMountsEveryLibraryReadOnly(t *testing.T) {
 	pod := testScreenPod(denScreen(), houseLibraries())
 
@@ -196,8 +196,9 @@ func TestScreenPodMountsEveryLibraryReadOnly(t *testing.T) {
 		t.Error("the library volume is not read-only")
 	}
 	catalog := volumes[catalogVolumeName]
-	if catalog.EmptyDir == nil || catalog.PersistentVolumeClaim != nil {
-		t.Errorf("catalog volume = %+v, want an emptyDir", catalog)
+	if catalog.EmptyDir != nil || catalog.PersistentVolumeClaim == nil ||
+		catalog.PersistentVolumeClaim.ClaimName != "den-tv-media-browser-catalog" {
+		t.Errorf("catalog volume = %+v, want the screen's catalog claim", catalog)
 	}
 }
 
@@ -283,8 +284,8 @@ func TestReconcileScreensStandsAPodForADelegatedPlayer(t *testing.T) {
 	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
 	operator := testOperator(t, cluster)
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace,
-		[]Player{*cluster.players["den-tv"]}, []Library{*cluster.libraries["movies"]}, nil)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
+		[]Player{*cluster.players["den-tv"]}, []Library{*cluster.libraries["movies"]}, nil, testNow)
 
 	pod := cluster.heldPod("den-tv-media-browser")
 	if pod == nil {
@@ -317,8 +318,8 @@ func TestReconcileScreensStopsThePodOfAPlayerItNoLongerServes(t *testing.T) {
 				Metadata: ObjectMeta{Name: "den-tv-media-browser", Namespace: testLibraryNamespace},
 			}
 
-			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace,
-				[]Player{*player}, nil, []Pod{*cluster.pods["den-tv-media-browser"]})
+			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+				[]Player{*player}, nil, []Pod{*cluster.pods["den-tv-media-browser"]}, testNow)
 
 			if cluster.heldPod("den-tv-media-browser") != nil {
 				t.Error("the screen pod still stands for a Player this operator does not serve")
@@ -334,8 +335,8 @@ func TestReconcileScreensSendsNoDeleteWhenNoPodStands(t *testing.T) {
 	cluster := newFakeCluster()
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, "media.liken.sh/idle-screen")
 
-	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace,
-		[]Player{*player}, nil, nil)
+	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+		[]Player{*player}, nil, nil, testNow)
 
 	if got := cluster.countRequests(http.MethodDelete, "pods"); got != 0 {
 		t.Errorf("the pass sent %d deletes for a Player with no pod", got)
@@ -352,13 +353,13 @@ func TestReconcileScreensReplacesAStalePod(t *testing.T) {
 	cluster.pods["den-tv-media-browser"] = stale
 	operator := testOperator(t, cluster)
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, []Player{*player}, nil, nil)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
 
 	if cluster.heldPod("den-tv-media-browser") != nil {
 		t.Fatal("the stale pod still stands")
 	}
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, []Player{*player}, nil, nil)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
 
 	replacement := cluster.heldPod("den-tv-media-browser")
 	if replacement == nil {
@@ -375,9 +376,9 @@ func TestReconcileScreensKeepsAMatchingPod(t *testing.T) {
 	cluster := newFakeCluster()
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
 	operator := testOperator(t, cluster)
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, []Player{*player}, nil, nil)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, []Player{*player}, nil, nil)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
 
 	if cluster.countRequests(http.MethodDelete, "pods") != 0 {
 		t.Error("the pass deleted a pod that matched the template")
@@ -405,8 +406,8 @@ func TestReconcileScreensReadsOneNamespace(t *testing.T) {
 		},
 	}
 
-	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace,
-		[]Player{*house, *studio}, libraries, nil)
+	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+		[]Player{*house, *studio}, libraries, nil, testNow)
 
 	if cluster.heldPod("studio-tv-media-browser") != nil {
 		t.Error("the pass stood a pod for a Player in another namespace")
@@ -427,6 +428,7 @@ func TestReconcileScreensCarriesOnPastAFailure(t *testing.T) {
 		name       string
 		path       string
 		controller string
+		catalog    *NamespaceCatalog
 	}{
 		{
 			name: "the pod cannot be read", controller: screenController,
@@ -436,6 +438,11 @@ func TestReconcileScreensCarriesOnPastAFailure(t *testing.T) {
 			name: "the pod cannot be deleted", controller: "media.liken.sh/idle-screen",
 			path: "/api/v1/namespaces/house/pods/den-tv-media-browser",
 		},
+		{
+			name: "the claim cannot be read", controller: screenController,
+			path:    claimPath(testLibraryNamespace, "den-tv-media-browser-catalog"),
+			catalog: testNamespaceCatalog(),
+		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -444,8 +451,8 @@ func TestReconcileScreensCarriesOnPastAFailure(t *testing.T) {
 			standing := seedPlayer(cluster, "kitchen-tv", testLibraryNamespace, screenController)
 			cluster.broken[one.path] = http.StatusInternalServerError
 
-			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace,
-				[]Player{*broken, *standing}, nil, nil)
+			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, one.catalog,
+				[]Player{*broken, *standing}, nil, nil, testNow)
 
 			if cluster.heldPod("kitchen-tv-media-browser") == nil {
 				t.Error("the pass stopped at the broken Player")

@@ -36,6 +36,18 @@ type CatalogList struct {
 // with room for the catalog-wide settings the design grows into.
 type CatalogSpec struct {
 	Storage CatalogStorage `json:"storage"`
+	// The settings every screen pod in the namespace takes.
+	Screens CatalogScreens `json:"screens,omitzero"`
+}
+
+// The screens' half of the Catalog. StorageClassName classes each
+// screen's catalog volume, and it is a field of its own because the
+// namespace's one durable copy and a screen's replica may want different
+// classes. An empty value makes the operator omit the class, so the cluster's
+// default StorageClass binds the claim. The size is spec.storage's, because a
+// screen holds the same rows the durable catalog holds.
+type CatalogScreens struct {
+	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
 // Size is the one namespace-wide catalog volume size, because each agent
@@ -51,13 +63,24 @@ type CatalogStorage struct {
 	ClaimName string `json:"claimName,omitempty"`
 }
 
-// CatalogStatus reports the cluster the Catalog stands, so a person reads
-// one object to see the namespace's catalog: the member agent pods, the
-// storage the agents were given, and the conditions.
+// The cluster the Catalog stands, so a person reads one object to see
+// the namespace's catalog: the member agent pods, the storage the agents were
+// given, the screens and the claims they run on, and the conditions.
 type CatalogStatus struct {
-	Members     []string    `json:"members,omitempty"`
-	StorageSize string      `json:"storageSize,omitempty"`
-	Conditions  []Condition `json:"conditions,omitempty"`
+	Members     []string        `json:"members,omitempty"`
+	StorageSize string          `json:"storageSize,omitempty"`
+	Screens     []CatalogScreen `json:"screens,omitempty"`
+	Conditions  []Condition     `json:"conditions,omitempty"`
+}
+
+// One screen pod of the namespace: the Player it draws for, the claim
+// its catalog agent runs on, the node it runs on, and its phase. A screen in
+// a namespace this operator provisions no claim for names none.
+type CatalogScreen struct {
+	Player string `json:"player,omitempty"`
+	Claim  string `json:"claim,omitempty"`
+	Node   string `json:"node,omitempty"`
+	Phase  string `json:"phase,omitempty"`
 }
 
 // The default catalog volume size. A catalog of movies and series is

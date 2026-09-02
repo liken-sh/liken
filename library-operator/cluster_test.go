@@ -183,7 +183,7 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	case strings.Contains(r.URL.Path, "/persistentvolumeclaims/"):
-		answer(w, f.claims[name])
+		f.serveClaim(w, r, name)
 	case strings.Contains(r.URL.Path, "/persistentvolumes/"):
 		body, held := f.volumes[name]
 		if !held {
@@ -211,6 +211,20 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		answer(w, f.pods[name])
 	}
+}
+
+// A claim is read by name, and the one delete this operator sends
+// takes a screen's catalog claim; an absent claim is a 404.
+func (f *fakeCluster) serveClaim(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodDelete {
+		answer(w, f.claims[name])
+		return
+	}
+	if _, held := f.claims[name]; !held {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	delete(f.claims, name)
 }
 
 // ServeJob answers a Job the way the API server does: a create stores
@@ -534,6 +548,20 @@ func (f *fakeCluster) countRequests(method, kind string) int {
 		}
 	}
 	return count
+}
+
+// Where one method against one kind of object first appears in the
+// requests a pass sent, so a test reads the order of two writes. A kind the
+// pass never wrote answers -1.
+func (f *fakeCluster) firstRequest(method, kind string) int {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	for index, request := range f.requests {
+		if strings.HasPrefix(request, method) && strings.Contains(request, "/"+kind) {
+			return index
+		}
+	}
+	return -1
 }
 
 func answer[T any](w http.ResponseWriter, held *T) {

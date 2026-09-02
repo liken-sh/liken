@@ -10,9 +10,10 @@ A `Catalog` is a namespace's shared catalog: one Corrosion cluster that
 every `Library` in the namespace writes into. Declare one `Catalog` in a
 namespace. It stands the catalog pod, the one standing member of that
 cluster, which holds the namespace's catalog on a durable claim and
-reports what it holds over the bus. It sizes that claim and the claim
-every `Library`'s `Job`s take, and it owns the pod, its claim, and the
-namespace's catalog `Service` and `EndpointSlice`.
+reports what it holds over the bus. It sizes that claim, the claim
+every `Library`'s `Job`s take, and the claim every screen's agent runs
+on, and it owns the pod, its claim, and the namespace's catalog
+`Service` and `EndpointSlice`.
 
 Each catalog agent holds the whole namespace's catalog, because the
 cluster gossips every row to every peer. So one size covers the whole
@@ -34,7 +35,9 @@ A namespace has exactly one `Catalog`. A `Library` in a namespace with no
 `StorageClass`. A `claimName` names an existing claim for the catalog
 pod to mount in place of the one the operator provisions. A SQLite
 file on a claim served over NFS can corrupt when its node is lost, so
-prefer a `StorageClass` that binds node-local storage.
+prefer a `StorageClass` that binds node-local storage. A
+`spec.screens.storageClassName` classes the screens' claims apart from
+the durable one, and omitted, the cluster's default binds them too.
 
 The namespace's shared catalog. Declare one Catalog in a namespace, and every Library in it writes into that catalog.
 
@@ -45,6 +48,7 @@ Where the catalog is stored and how large each agent's copy is.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | The volume every catalog agent in the namespace takes. |
+| <span id="spec--screens"></span>`screens` | [object](#specscreens) | no | The settings every screen pod in the namespace takes. |
 
 ### spec.storage
 
@@ -56,6 +60,14 @@ The volume every catalog agent in the namespace takes.
 | <span id="specstorage--storageclassname"></span>`storageClassName` | string | no | The StorageClass each agent's catalog volume binds to. Omitted, the cluster's default binds it. |
 | <span id="specstorage--claimname"></span>`claimName` | string | no | An existing PersistentVolumeClaim in this namespace for the catalog pod to mount, in place of the one the operator provisions; the operator creates none when it is set. |
 
+### spec.screens
+
+The settings every screen pod in the namespace takes.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specscreens--storageclassname"></span>`storageClassName` | string | no | The StorageClass each screen's catalog volume binds to. Omitted, the cluster's default binds it, and a node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display. The size is spec.storage.size, because a screen holds the same rows the durable catalog holds. |
+
 ## status
 
 The cluster the Catalog stands, written only by the library operator.
@@ -64,7 +76,19 @@ The cluster the Catalog stands, written only by the library operator.
 | --- | --- | --- | --- |
 | <span id="status--members"></span>`members` | []string | no | The pods that are members of the namespace's catalog cluster: the catalog pod, the pods of the Jobs that are running, and the screen pods. |
 | <span id="status--storagesize"></span>`storageSize` | string | no | The storage size the agents were given. |
+| <span id="status--screens"></span>`screens` | [\[\]object](#statusscreens) | no | One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on an emptyDir and names no claim. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs. |
+
+### status.screens[]
+
+One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on an emptyDir and names no claim.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusscreens--player"></span>`player` | string | no | The Player the screen draws for. |
+| <span id="statusscreens--claim"></span>`claim` | string | no | The claim the screen's catalog agent runs on, or empty for a screen on an emptyDir. |
+| <span id="statusscreens--node"></span>`node` | string | no | The node the screen pod runs on, which is the node its claim is bound to. |
+| <span id="statusscreens--phase"></span>`phase` | string | no | The screen pod's phase, as the kubelet reports it. |
 
 ### status.conditions[]
 

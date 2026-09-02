@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"maps"
 	"slices"
+	"time"
 )
 
 // A PersistentVolumeClaim is read for two answers: whether it is
@@ -355,9 +356,10 @@ type VolumeMount struct {
 // namespace's own.
 //
 // A screen pod carries one claim per Library of its namespace, all
-// read-only, and an emptyDir for its catalog agent. That agent holds a copy of
-// the namespace's catalog and rebuilds it from its peers on every start, so
-// nothing on a screen has to survive the pod.
+// read-only, and its catalog agent's own claim beside them. That agent holds
+// a copy of the namespace's catalog, and the claim is what makes a restart a
+// delta sync. A screen in a namespace with no single Catalog carries an
+// emptyDir there, which is the one emptyDir left.
 type Volume struct {
 	Name                  string                             `json:"name"`
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
@@ -402,6 +404,9 @@ type PodCondition struct {
 	Status  string `json:"status"`
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
+	// When the API server last wrote this verdict. The
+	// unschedulable grace is measured from it, so no pass keeps a timer.
+	LastTransitionTime time.Time `json:"lastTransitionTime,omitzero"`
 }
 
 // The one pod condition this operator reads, and the verdict that

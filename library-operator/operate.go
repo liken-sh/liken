@@ -363,7 +363,11 @@ func (o *operator) pass() {
 		screens = &PodList{}
 	}
 	for _, namespace := range screenNamespaces(players.Items) {
-		o.reconcileScreens(ctx, namespace, players.Items, libraries.Items, screens.Items)
+		// A screen's catalog claim is sized and classed by the
+		// namespace's one Catalog, and a namespace with none, or with more
+		// than one, stands its screens on an emptyDir.
+		o.reconcileScreens(ctx, namespace, singleCatalog(byNamespace[namespace]).catalog,
+			players.Items, libraries.Items, screens.Items, now)
 	}
 	// The play requests are served last, on the collections this pass
 	// already read. A request is one moment: the pass creates its Play

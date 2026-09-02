@@ -2,9 +2,10 @@ A `Catalog` is a namespace's shared catalog: one Corrosion cluster that
 every `Library` in the namespace writes into. Declare one `Catalog` in a
 namespace. It stands the catalog pod, the one standing member of that
 cluster, which holds the namespace's catalog on a durable claim and
-reports what it holds over the bus. It sizes that claim and the claim
-every `Library`'s `Job`s take, and it owns the pod, its claim, and the
-namespace's catalog `Service` and `EndpointSlice`.
+reports what it holds over the bus. It sizes that claim, the claim
+every `Library`'s `Job`s take, and the claim every screen's agent runs
+on, and it owns the pod, its claim, and the namespace's catalog
+`Service` and `EndpointSlice`.
 
 Each catalog agent holds the whole namespace's catalog, because the
 cluster gossips every row to every peer. So one size covers the whole
@@ -26,4 +27,6 @@ A namespace has exactly one `Catalog`. A `Library` in a namespace with no
 `StorageClass`. A `claimName` names an existing claim for the catalog
 pod to mount in place of the one the operator provisions. A SQLite
 file on a claim served over NFS can corrupt when its node is lost, so
-prefer a `StorageClass` that binds node-local storage.
+prefer a `StorageClass` that binds node-local storage. A
+`spec.screens.storageClassName` classes the screens' claims apart from
+the durable one, and omitted, the cluster's default binds them too.
