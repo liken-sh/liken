@@ -1,17 +1,17 @@
 # The Library API, declared to Kubernetes.
 #
-# A Library is one declaration of "this volume holds movies". It names
-# a PersistentVolumeClaim, a directory inside it, and the kind of
-# media that directory holds. The library operator reconciles it into
-# one scanner pod that walks the volume and writes what it finds into
-# the catalog, and it folds the scanner's report back into the
-# status: how many titles, how many folders the scanner could not
-# identify, and when it last walked.
+# A Library is one declaration of "this volume holds movies". It
+# names a PersistentVolumeClaim, a directory inside it, and the kind of
+# media that directory holds. The library operator reconciles it into a
+# CronJob whose Jobs walk the volume and write what they find into the
+# namespace's catalog, and it folds the namespace reporter's message
+# back into the status: how many titles, how many folders the scanner
+# could not identify, and when it last walked.
 #
 # The resource is namespaced, because everything a Library touches is
-# namespaced: the claim it mounts and the scanner pod it becomes both
-# live in one namespace, and RBAC on that namespace covers the set.
-# A namespace may hold many libraries, of any mix of kinds.
+# namespaced: the claim it mounts and the Jobs it becomes both live in
+# one namespace, and RBAC on that namespace covers the set. A namespace
+# may hold many libraries, of any mix of kinds.
 #
 # One field names the kind, and one settings block per kind holds
 # that kind's settings, the way a Volume names one source. A CEL rule
@@ -19,13 +19,13 @@
 # a new kind is a new block and one more clause in that rule, and the
 # kinds already there do not change.
 #
-# The scanner pod is owned by the Library, and a Library's rows are
-# replicated to every catalog agent in its namespace. So a delete is
-# a departure: the operator holds a finalizer on the Library, sweeps
-# those rows out of every surviving copy, and only then lets the
-# object go, garbage-collecting the pod and the claim with it.
-# status.phase reads Departing for that window, and the Departing
-# condition names the step the teardown has reached.
+# The CronJob is owned by the Library, and a Library's rows are
+# replicated to every catalog agent in its namespace. So a delete is a
+# departure: the operator holds a finalizer on the Library, runs a
+# cleanup Job that sweeps those rows out of the namespace's catalog, and
+# only then lets the object go, garbage-collecting the CronJob and the
+# claim with it. status.phase reads Departing for that window, and the
+# Departing condition names the step the teardown has reached.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -184,13 +184,13 @@ spec:
                       type: string
                       minLength: 1
                       description: >-
-                        The scanner image to run in place of the one
-                        this project ships for movies. Set it to run a
-                        scanner of your own, which must speak the
+                        The scanner image to run in place of the
+                        one this project ships for movies. Set it to run
+                        a scanner of your own, which must speak the
                         scanner contract: mount the volume read-only,
-                        write through the catalog sidecar, and
-                        publish its report to the bus. Omitted, the
-                        operator runs the project's own image.
+                        write through the catalog sidecar, and write its
+                        runs row last. Omitted, the operator runs the
+                        project's own image.
                 series:
                   type: object
                   description: >-
@@ -220,6 +220,16 @@ spec:
                   items:
                     type: string
                     minLength: 1
+                scan:
+                  type: object
+                  default: {}
+                  description: "When the full walk of this library runs."
+                  properties:
+                    schedule:
+                      type: string
+                      minLength: 1
+                      default: "0 * * * *"
+                      description: "The cron expression the full walk runs on, in the cluster's time zone; omitted, once an hour on the hour."
                 ignore:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -236,11 +246,12 @@ spec:
             status:
               type: object
               description: >-
-                What the volume resolved to and what the scanner
-                reports, written only by the library operator. The
-                scanner pod holds no API credential. It publishes a
-                retained report on the bus, and the operator folds
-                that report in here.
+                What the volume resolved to and what the
+                namespace's reporter says about this library, written
+                only by the library operator. No pod it creates holds an
+                API credential. The catalog pod publishes a retained
+                report on the bus, and the operator folds that report in
+                here.
               properties:
                 volume:
                   type: object
@@ -273,15 +284,7 @@ spec:
                         this path and the title's own path under it.
                 phase:
                   type: string
-                  description: >-
-                    What the scanner is doing. Scanning while it walks the
-                    volume, Idle between walks, Pending while the storage
-                    or the catalog is not ready, and Offline when no
-                    scanner is running. Departing means the Library is
-                    deleted and the operator holds it open while a
-                    cleanup pod takes this library's rows out of the
-                    namespace's catalog; the Departing condition says
-                    which step that teardown has reached.
+                  description: "What this library is doing. Scanning while a walk runs, Idle between walks, Pending while the storage, the catalog pod, or the schedule is not ready, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached."
                 titles:
                   type: integer
                   minimum: 0
@@ -328,39 +331,59 @@ spec:
                     When the scanner last wrote a change to the
                     catalog. A walk that finds nothing new moves
                     lastWalk and leaves this alone.
-                pod:
-                  type: string
-                  description: >-
-                    The scanner pod's name, for kubectl describe and
-                    logs. The pod is owned by this Library and is
-                    deleted with it.
+                runs:
+                  type: array
+                  description: "The last run of each worker of this library, as the namespace's reporter published it."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [worker]
+                  items:
+                    type: object
+                    required: [worker]
+                    properties:
+                      worker:
+                        type: string
+                        description: "Which worker ran: scan or cleanup."
+                      job:
+                        type: string
+                        description: "The name of the Job that ran, for kubectl describe and logs."
+                      started:
+                        type: string
+                        format: date-time
+                        description: "When that Job started its work."
+                      finished:
+                        type: string
+                        format: date-time
+                        description: "When that Job wrote its last row, which is what a Job waits to see echoed before it exits."
+                      unidentified:
+                        type: integer
+                        minimum: 0
+                        description: "How many folders that run could not identify."
+                      removed:
+                        type: integer
+                        minimum: 0
+                        description: "How many rows that run removed."
                 webhook:
                   type: string
-                  description: >-
-                    The address of the scanner's webhook, which you give
-                    to Radarr, Sonarr, or Jellyfin so that an import
-                    rescans that one title at once. It names the Service
-                    over the scanner pod, so it holds when the pod is
-                    replaced. It is reported once the storage is bound
-                    and the namespace holds one Catalog.
+                  description: "The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog."
                 conditions:
                   type: array
                   description: >-
-                    The typed observations the operator keeps on this
-                    library, in the standard Kubernetes form. Bound
-                    reports the storage: True when the claim exists,
-                    is bound, and its PersistentVolume was read, and
-                    False with the reason ClaimNotFound, ClaimUnbound,
-                    or VolumeNotFound. Ready reports the scanner: True
-                    when its pod runs with every container ready and
-                    the operator holds a report for this library, and
-                    False with the reason NotBound, PodPending,
-                    PodFailed, or NoReport. Departing reports the
-                    teardown of a deleted Library: True for as long as
-                    the operator's finalizer holds the object open,
-                    with the reason StoppingScanner, Sweeping,
-                    AwaitingSurvivor, or Blocked, and a message that
-                    names what the teardown waits on.
+                    The typed observations the operator keeps on
+                    this library, in the standard Kubernetes form. Bound
+                    reports the storage: True when the claim exists, is
+                    bound, and its PersistentVolume was read, and False
+                    with the reason ClaimNotFound, ClaimUnbound, or
+                    VolumeNotFound. Ready reports the scanning path:
+                    True when the namespace's catalog pod runs with
+                    every container ready, the schedule stands, and the
+                    reporter has reported this library, and False with
+                    the reason NotBound, NoCatalog, ManyCatalogs,
+                    CatalogPending, ScanPending, Offline, or NoReport.
+                    Departing reports the teardown of a deleted Library:
+                    True for as long as the operator's finalizer holds
+                    the object open, with the reason ScanRunning,
+                    Sweeping, AwaitingEcho, or Blocked, and a message
+                    that names what the teardown waits on.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.

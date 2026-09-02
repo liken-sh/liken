@@ -8,7 +8,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+	"time"
 )
 
 // streamingServer answers every query with a fixed body and status, so a
@@ -105,5 +107,80 @@ func TestQuerySurfacesANon2xxStatus(t *testing.T) {
 	_, err := catalog.queryStrings(context.Background(), "SELECT id FROM movies", nil)
 	if err == nil {
 		t.Error("the client hid a non-2xx status")
+	}
+}
+
+// The read names every library with rows in any replicated table,
+// sorted, no repeats; an empty catalog names none.
+func TestLibraryKeysReadsEveryLibraryTheCatalogHolds(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+
+	empty, err := catalog.LibraryKeys(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("keys = %v, want none from an empty catalog", empty)
+	}
+
+	seedTwoLibrariesInEveryTable(t, catalog)
+
+	keys, err := catalog.LibraryKeys(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"house/movies", "house/series"}; !slices.Equal(keys, want) {
+		t.Errorf("keys = %v, want %v", keys, want)
+	}
+}
+
+// A library whose only row is its run is a library the reporter
+// reports on, so the runs table is one of the tables the read covers.
+func TestLibraryKeysNamesALibraryThatOnlyHasARun(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	if err := catalog.UpsertRun(t.Context(), "house/departed",
+		libraryRun{Worker: workerCleanup, Job: "cleanup-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := catalog.LibraryKeys(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"house/departed"}; !slices.Equal(keys, want) {
+		t.Errorf("keys = %v, want %v", keys, want)
+	}
+}
+
+// A swept library leaves the set, and the other stays.
+func TestLibraryKeysDropsASweptLibrary(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedTwoLibrariesInEveryTable(t, catalog)
+
+	if _, err := catalog.SweepLibrary(t.Context(), "house/movies"); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := catalog.LibraryKeys(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"house/series"}; !slices.Equal(keys, want) {
+		t.Errorf("keys = %v, want %v", keys, want)
+	}
+}
+
+// The count of titles is the movie rows and the series rows, and
+// never the episodes under a series.
+func TestCountTitlesCountsMoviesAndSeries(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedTwoLibrariesInEveryTable(t, catalog)
+
+	titles, err := catalog.countTitles(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if titles != 2 {
+		t.Errorf("titles = %d, want the movie and the series", titles)
 	}
 }

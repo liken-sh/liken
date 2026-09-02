@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# local/catalog runs a three-agent Corrosion cluster on this workstation, so a
-# schema change, a scanner, or a media browser can be seen without a cluster.
+# PROSE: local/catalog runs a three-agent Corrosion cluster, a broker, and
+# the reporter on this workstation, so a schema change, a scan Job, or a
+# media browser can be seen without a cluster. The reporter is what a Job
+# waits for: it publishes the runs table back over the broker, and a Job
+# exits on that message.
 #
 # Usage:
-#   local/catalog up      start the three agents and wait until they see
-#                         each other; prints the three API addresses
-#   local/catalog down    stop the three agents
-#   local/catalog status  print which agents are up
+#   local/catalog up      start the agents, the broker, and the reporter,
+#                         and wait until they are up; prints the addresses
+#   local/catalog down    stop them all
+#   local/catalog status  print what is up
 set -euo pipefail
 
 # The repository is the directory above this file, so every path resolves
@@ -27,6 +30,13 @@ name_prefix="library-catalog"
 api_ports=(20081 20082 20083)
 gossip_ports=(20871 20872 20873)
 
+# PROSE: the broker every pod on this workstation publishes to, and the
+# reporter that reads the first agent and publishes every library's report
+# over it. The reporter runs from the operator image, the same bytes the
+# cluster runs.
+broker_port=20883
+operator_image="library-operator:local"
+
 # The harness writes under local/state, which .gitignore excludes. Each agent
 # gets a directory of its own for its configuration, its database, its
 # write-ahead log, and its admin socket.
@@ -40,7 +50,7 @@ container_state="/var/lib/corrosion"
 container_schema="/etc/corrosion/schema"
 
 usage() {
-  sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '8,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -119,6 +129,47 @@ peers() {
     jq --slurp 'length' 2>/dev/null || echo 0
 }
 
+# PROSE: the broker's own configuration, which listens on the harness port
+# and takes an unauthenticated client, because nothing outside this
+# workstation reaches it.
+render_broker_config() {
+  mkdir -p "$state/broker"
+  cat >"$state/broker/mosquitto.conf" <<EOF
+listener $broker_port 127.0.0.1
+allow_anonymous true
+EOF
+}
+
+# PROSE: the broker runs on loopback, where the port above is the address
+# a Job and the reporter dial.
+start_broker() {
+  render_broker_config
+  docker run --detach --rm \
+    --name "$name_prefix-broker" \
+    --network host \
+    --volume "$state/broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" \
+    eclipse-mosquitto:2 >/dev/null
+}
+
+# PROSE: one reporter for the local namespace, reading the first agent and
+# publishing over the broker, which is the one process a scan Job waits on.
+start_reporter() {
+  docker run --detach --rm \
+    --name "$name_prefix-reporter" \
+    --network host \
+    --env LIBRARY_NAMESPACE=local \
+    --env LIBRARY_CATALOG_API="http://127.0.0.1:${api_ports[0]}" \
+    --env LIBRARY_BUS_ADDRESS="127.0.0.1:$broker_port" \
+    --env LIBRARY_TOPIC_BASE= \
+    "$operator_image" report >/dev/null
+}
+
+# PROSE: whether the broker takes a connection, which is all a Job and the
+# reporter need of it.
+broker_answers() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$broker_port") 2>/dev/null
+}
+
 # Whether the agent's HTTP API answers. A query is the smallest request that
 # proves the API and the database behind it are both up.
 api_answers() {
@@ -130,7 +181,7 @@ api_answers() {
 
 up() {
   local n
-  for n in 1 2 3; do
+  for n in 1 2 3 broker reporter; do
     if running "$n"; then
       echo "local/catalog: $name_prefix-$n is already running; run 'local/catalog down' first" >&2
       exit 1
@@ -143,10 +194,15 @@ up() {
     echo "local/catalog: building $image" >&2
     docker build "$repo/corrosion" --tag "$image" >&2
   fi
+  if [ -z "$(docker images --quiet "$operator_image")" ]; then
+    echo "local/catalog: building $operator_image" >&2
+    docker build "$repo" --tag "$operator_image" >&2
+  fi
 
   for n in 1 2 3; do
     start_agent "$n"
   done
+  start_broker
 
   # The cluster is up when every agent answers its API and reports the other
   # two as members. Sixty seconds is the ceiling. Three agents on loopback
@@ -160,11 +216,15 @@ up() {
         ready=$((ready + 1))
       fi
     done
-    if [ "$ready" -eq 3 ]; then
+    if [ "$ready" -eq 3 ] && broker_answers; then
+      # PROSE: the reporter starts once the agents answer, because it reads
+      # the first agent the moment it comes up.
+      start_reporter
       local port
       for port in "${api_ports[@]}"; do
         echo "127.0.0.1:$port"
       done
+      echo "127.0.0.1:$broker_port"
       return 0
     fi
     sleep 0.5
@@ -177,7 +237,7 @@ up() {
 
 down() {
   local n
-  for n in 1 2 3; do
+  for n in reporter broker 1 2 3; do
     running "$n" || continue
     # A busy agent flushes its database on the way out, so the stop gives it
     # thirty seconds before docker sends the kill.
@@ -194,6 +254,16 @@ status() {
       echo "$name_prefix-$n down"
     fi
   done
+  if running broker; then
+    echo "$name_prefix-broker up on 127.0.0.1:$broker_port"
+  else
+    echo "$name_prefix-broker down"
+  fi
+  if running reporter; then
+    echo "$name_prefix-reporter up on agent 1"
+  else
+    echo "$name_prefix-reporter down"
+  fi
 }
 
 case "${1:-}" in

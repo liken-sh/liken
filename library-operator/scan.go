@@ -1,18 +1,17 @@
 package main
 
-// The scanner is the container that walks one library's volume and
-// reports what it holds. It runs beside a Corrosion agent in the pod
-// the operator creates for each Library, it mounts the claim read
-// only, and it holds no Kubernetes credentials: every fact it reports
-// reaches the control plane over the bus, and the operator alone
-// writes a Library's status. It writes the catalog only through its
-// own agent's transaction API, on the pod's loopback.
+// The scanner is the container of one scan Job. It walks one
+// library's volume once, beside a Corrosion agent of its own on the
+// Library's claim, and it holds no Kubernetes credentials. It writes the
+// catalog only through that agent's transaction API, on the pod's
+// loopback. It publishes no report: it writes a runs row first and last,
+// and waits for the namespace's reporter to publish that row back before
+// it exits, because an agent drops unsent broadcasts on SIGTERM.
 //
-// The scanner detects a change two ways. A webhook of the kind Radarr,
-// Sonarr, and Jellyfin send rescans one path at once, and a slow timer
-// re-walks the whole root. It does not use inotify, which fires only
-// for writes made through the same kernel and never for another
-// client's writes to a network volume.
+// A Job walks the whole root, or the one folder SCAN_PATH names,
+// which is the path a webhook reported. It does not use inotify, which
+// fires only for writes made through the same kernel and never for
+// another client's writes to a network volume.
 
 import (
 	"context"
@@ -22,13 +21,11 @@ import (
 	"io"
 	"io/fs"
 	"iter"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -53,6 +50,10 @@ const (
 	catalogAPIVariable       = "LIBRARY_CATALOG_API"
 	libraryIgnoreVariable    = "LIBRARY_IGNORE"
 )
+
+// The one folder a scan Job rescans, in the form the webhook
+// handler maps onto the volume. An empty value is a full walk.
+const scanPathVariable = "SCAN_PATH"
 
 // ignoreSet is the folder names the walk skips, and the test for one. A
 // folder whose name is in the set, and everything under it, is left out
@@ -92,62 +93,46 @@ const defaultCatalogAPI = "http://127.0.0.1:8080"
 // and the mount point is this operator's choice.
 const libraryMountPath = "/library"
 
-// The address the scanner's webhook listens on. The port is the one the
-// Service in webhookservice.go states, and both read the same constant, so
-// the two cannot drift apart.
-//
-// A var so a test binds an ephemeral port.
-var webhookAddress = ":" + strconv.Itoa(webhookPort)
-
-// The wait between full walks. The walk is how a file that arrived with
-// no webhook reaches the catalog. A var so a test drives several walks
-// in a second.
-var scanInterval = 5 * time.Minute
-
-// scanFlushGrace is how long the scanner holds the bus open after it
-// publishes the closing offline, so the writer goroutine drains it
-// before the process exits. The message is QoS 0 and carries no
-// acknowledgement, so this window is the only signal the scanner has
-// that it left. It is a variable so a test drives a shutdown in
-// milliseconds.
-var scanFlushGrace = 500 * time.Millisecond
-
 // catalogWriteTimeout bounds a walk's writes to the catalog agent, so a
 // stuck agent cannot hold a walk open forever.
 var catalogWriteTimeout = 2 * time.Minute
 
-// scanner is one scanner container: the two topics it publishes, the
-// mutable report it stands behind, the catalog it writes, and the root
-// it walks. The report changes across walks, so a mutex covers it.
+// One scan Job's scanner: the root it walks, the catalog it
+// writes, the run it records, and the echo it waits for. The walk's own
+// counts are held under a mutex, because the walk and the run row that
+// reads them are written in different steps.
 type scanner struct {
-	statusTopic       string
-	availabilityTopic string
-	root              string
-	library           string
-	kind              string
-	ignore            ignoreSet
-	catalog           *Catalog
-	bus               *Bus
+	statusTopic string
+	root        string
+	library     string
+	kind        string
+	ignore      ignoreSet
+	catalog     *Catalog
+	bus         *Bus
+	echo        *echoWaiter
+	// The Job this container runs, the folder it rescans, and how
+	// long it waits for the reporter to publish its run back.
+	job         string
+	scanPath    string
+	echoTimeout time.Duration
 	// log is where the scanner writes a walk that could not finish a catalog
 	// step, so a swallowed error shows in the pod log instead of a gap in
 	// the report. A scanner built without one writes nowhere.
 	log io.Writer
 
+	// What the walk read, which the run row carries and nothing
+	// publishes.
 	mutex  sync.Mutex
 	report libraryReport
 
-	// walkMutex serializes the walks. A timer walk and a webhook rescan
-	// can arrive at once, and both write the catalog and reconcile it
-	// against the volume. One walk runs at a time, so the reconciliation
-	// reads a settled catalog.
+	// One walk runs at a time, so the reconciliation reads a
+	// settled catalog whichever caller drives the walk.
 	walkMutex sync.Mutex
-
-	webhookAddr string
 }
 
-// runScan is the scan role's whole program. It reads the environment,
-// connects to the bus, and holds the pod open until the kubelet stops
-// it.
+// The scan role's whole program: read the environment, run the
+// one walk, and end the process with what the Job left. A failure is a
+// non-zero exit, so the Job fails and Kubernetes retries it.
 func runScan() {
 	// The kernel runs no default action for a signal sent to PID 1, and
 	// the scanner is its container's PID 1. The signal context is what
@@ -156,13 +141,17 @@ func runScan() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	newScanner(time.Now().UTC(), os.Stdout).serve(stopped)
+	scan := newScanner(time.Now().UTC(), os.Stdout)
+	if err := scan.runJob(stopped); err != nil {
+		scan.logf("the scan job failed: %v", err)
+		stop()
+		os.Exit(1)
+	}
 }
 
-// newScanner reads the container's environment and builds the client
-// that speaks for this Library. started is the time the report carries
-// before the first walk: a scanner that has walked nothing has read
-// the volume as of the moment it came up.
+// NewScanner reads the container's environment and builds the
+// client that speaks for this Library. started is the time the walk's own
+// record carries before it reads anything.
 func newScanner(started time.Time, log io.Writer) *scanner {
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
@@ -189,103 +178,68 @@ func newScanner(started time.Time, log io.Writer) *scanner {
 		namespace, name, kind, mountRoot)
 
 	scan := &scanner{
-		statusTopic:       libraryStatusTopic(base, namespace, name),
-		availabilityTopic: libraryAvailabilityTopic(base, namespace, name),
-		root:              mountRoot,
-		library:           libraryKey(namespace, name),
-		kind:              kind,
-		ignore:            ignore,
-		catalog:           NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
-		log:               log,
-		report:            libraryReport{LastWalk: started, LastChange: started},
+		statusTopic: libraryStatusTopic(base, namespace, name),
+		root:        mountRoot,
+		library:     libraryKey(namespace, name),
+		kind:        kind,
+		ignore:      ignore,
+		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
+		log:         log,
+		report:      libraryReport{LastWalk: started, LastChange: started},
+		job:         os.Getenv(jobNameVariable),
+		scanPath:    os.Getenv(scanPathVariable),
+		echoTimeout: echoTimeout(os.Getenv(echoTimeoutVariable)),
 	}
-	// The will is what marks the scanner offline when the pod dies
-	// without a chance to publish, which is every kill the kubelet does
-	// not ask for first.
-	scan.bus = newBus(os.Getenv(busAddressVariable), "library-"+namespace+"-"+name,
-		&busWill{Topic: scan.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
-		scan.onConnect, nil)
+	// The Job holds no will and publishes nothing. Its one use of
+	// the bus is the subscription that carries the reporter's echo back.
+	scan.echo = newEchoWaiter(scan.statusTopic, workerScan, scan.job)
+	scan.bus = newBus(os.Getenv(busAddressVariable), "scan-"+namespace+"-"+name,
+		nil, nil, scan.echo.note)
 	return scan
 }
 
-// serve runs one full walk, then holds the bus, the webhook, and the
-// slow timer open until the context ends, then marks this scanner
-// offline and returns. The first walk runs before the bus connects, so
-// the first report the broker holds already carries the counts. The bus
-// runs on its own context, so the closing publish has a live connection
-// to leave on. The retained report stays where it is: a library
-// outlives its scanner.
-func (s *scanner) serve(stopped context.Context) {
-	running, stopBus := context.WithCancel(context.Background())
+// The whole of a scan Job: write the run with no finish, walk,
+// write the run again with what the walk left, and wait for the
+// namespace's reporter to publish that run back. The first write says a
+// walk is running, and the last write is the last row the agent has to
+// broadcast, so the echo proves the standing pod holds every row this
+// Job wrote.
+func (s *scanner) runJob(ctx context.Context) error {
+	run := libraryRun{Worker: workerScan, Job: s.job, Started: time.Now().UTC()}
+	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
+		return fmt.Errorf("writing the run of %s: %w", s.library, err)
+	}
 
-	s.fullWalk(running)
+	walked := s.walkOnce(ctx)
 
-	go s.bus.Run(running)
-	server := s.startWebhook()
-	timerDone := make(chan struct{})
-	go func() {
-		defer close(timerDone)
-		s.runTimer(running)
-	}()
-	// The set of libraries the catalog holds changes on gossip from
-	// a peer as well as on this scanner's own writes, so a loop of
-	// its own reads it.
-	librariesDone := make(chan struct{})
-	go func() {
-		defer close(librariesDone)
-		s.watchCatalogLibraries(running)
-	}()
+	run.Finished = time.Now().UTC()
+	s.mutex.Lock()
+	run.Unidentified = s.report.Unidentified
+	run.Removed = s.report.RemovedLastSweep
+	s.mutex.Unlock()
+	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
+		return fmt.Errorf("writing the finished run of %s: %w", s.library, err)
+	}
 
-	<-stopped.Done()
-
-	// Shutting the webhook down drains its in-flight rescans, and the
-	// cancel ends the timer, so no walk runs after serve returns.
-	s.stopWebhook(server)
-	s.bus.Publish(s.availabilityTopic, []byte(availabilityOffline), true)
-	time.Sleep(scanFlushGrace)
-	stopBus()
-	<-timerDone
-	<-librariesDone
+	if err := s.echo.wait(ctx, s.bus, s.echoTimeout); err != nil {
+		return err
+	}
+	return walked
 }
 
-// startWebhook opens the import endpoint. A bind that fails leaves the
-// scanner without a webhook, still walking on the timer.
-func (s *scanner) startWebhook() *http.Server {
-	listener, err := net.Listen("tcp", webhookAddress)
-	if err != nil {
-		return nil
+// The one walk this Job runs: the whole root, or the single folder
+// SCAN_PATH names, which falls back to the whole root when the path names
+// no folder on the volume.
+func (s *scanner) walkOnce(ctx context.Context) error {
+	if s.scanPath == "" {
+		return s.fullWalk(ctx)
 	}
-	s.webhookAddr = listener.Addr().String()
-	server := &http.Server{Handler: s.webhookHandler()}
-	go server.Serve(listener)
-	return server
-}
-
-// stopWebhook closes the import endpoint within the flush grace, so a
-// slow shutdown does not hold the process open.
-func (s *scanner) stopWebhook(server *http.Server) {
-	if server == nil {
-		return
+	absolute := s.resolveWebhookPath(s.scanPath)
+	if absolute == "" {
+		s.logf("could not map %s onto the volume, walking the whole root", s.scanPath)
+		return s.fullWalk(ctx)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), scanFlushGrace)
-	defer cancel()
-	_ = server.Shutdown(ctx)
-}
-
-// runTimer re-walks the whole root on the slow interval until the
-// context ends. This is the path a file that arrived with no webhook
-// takes into the catalog.
-func (s *scanner) runTimer(ctx context.Context) {
-	ticker := time.NewTicker(scanInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.fullWalk(ctx)
-		}
-	}
+	return s.rescan(ctx, absolute)
 }
 
 // walkFolders streams this library's title folders, read by the pool in
@@ -303,40 +257,30 @@ func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
 	return func(yield func(*walkResult) bool) {}
 }
 
-// fullWalk is the walk's one collector. A pool of workers reads the root, and
-// this goroutine takes their folders one at a time. It buffers the rows
-// until the item rows reach scanFlushBatch; the file, link, and alias rows
-// travel with their items and stay uncounted. It flushes each buffer:
+// FullWalk is the walk's one collector. A pool of workers reads the
+// root, and this goroutine takes their folders one at a time. It buffers the
+// rows until the item rows reach scanFlushBatch; the file, link, and alias
+// rows travel with their items and stay uncounted. It flushes each buffer:
 // it upserts the rows and marks them with the walk's epoch. It then prunes
-// the rows the walk did not mark. It updates the counts and the last-walk
-// time, and moves the last-change time only when the catalog changed. A
-// write that fails leaves the catalog as it was, so the next walk retries.
-// An incomplete walk keeps its prune for the next clean walk, so a partial
-// read never mass-deletes.
-func (s *scanner) fullWalk(ctx context.Context) {
+// the rows the walk did not mark, and records what it read. A write that
+// fails leaves the catalog as it was and fails the Job, so the next run
+// retries. An incomplete walk keeps its prune for the next clean walk, so a
+// partial read never mass-deletes.
+func (s *scanner) fullWalk(ctx context.Context) error {
 	s.walkMutex.Lock()
 	defer s.walkMutex.Unlock()
-
-	// A walk publishes its report twice: once here with the walking mark
-	// set, and once from the deferred clear below, whichever way the walk
-	// returns. So the bus carries Scanning for the length of the walk and
-	// Idle after it, down every one of the walk's exit paths.
-	s.markWalking(true)
-	defer s.markWalking(false)
 
 	started := time.Now()
 	s.logf("walking %s", s.root)
 
 	if err := s.catalog.ensureSeen(ctx); err != nil {
-		s.logWalk("ensure the seen table", err)
-		return
+		return s.walkFailed("ensure the seen table", err)
 	}
 	epoch := time.Now().UnixNano()
 
 	before, err := s.catalog.countItems(ctx, s.library)
 	if err != nil {
-		s.logWalk("count the catalog before the walk", err)
-		return
+		return s.walkFailed("count the catalog before the walk", err)
 	}
 
 	buffer := &walkResult{}
@@ -346,21 +290,19 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	buffered, items, titles, unidentified := 0, 0, 0, 0
 	readError := false
 	var unidentifiedNames []string
-	flush := func() bool {
+	flush := func() error {
 		if err := ctx.Err(); err != nil {
-			s.logWalk("write a walk batch", err)
-			return false
+			return s.walkFailed("write a walk batch", err)
 		}
 		if buffered == 0 {
-			return true
+			return nil
 		}
 		if err := flushWalk(ctx, s.catalog, buffer, epoch); err != nil {
-			s.logWalk("write a walk batch", err)
-			return false
+			return s.walkFailed("write a walk batch", err)
 		}
 		buffer = &walkResult{}
 		buffered = 0
-		return true
+		return nil
 	}
 
 	for folder := range s.walkFolders(ctx) {
@@ -382,30 +324,29 @@ func (s *scanner) fullWalk(ctx context.Context) {
 		titles += folder.titles
 		unidentified += folder.unidentified
 		unidentifiedNames = appendSample(unidentifiedNames, folder.unidentifiedNames, unidentifiedSample)
-		if buffered >= scanFlushBatch && !flush() {
-			return
+		if buffered >= scanFlushBatch {
+			if err := flush(); err != nil {
+				return err
+			}
 		}
 	}
-	if !flush() {
-		return
+	if err := flush(); err != nil {
+		return err
 	}
 
 	// A cancelled walk read only part of the volume and wrote only part
 	// of its rows, so it prunes nothing, writes no counts, and leaves the
 	// last-walk time where it was.
 	if err := ctx.Err(); err != nil {
-		s.logWalk("finish the walk", err)
-		return
+		return s.walkFailed("finish the walk", err)
 	}
 
-	// An incomplete walk read only part of the volume, so its counts do
-	// not describe what the volume holds. It returns here without touching
-	// the report's counts, and the deferred mark still moves the phase to
-	// Idle, so a partial read never overwrites a good count with a low one.
-	// The next clean walk replaces the counts.
+	// An incomplete walk read only part of the volume, so its counts
+	// do not describe what the volume holds. It fails the Job here without
+	// pruning, so a partial read never mass-deletes.
 	if incompleteWalk(readError, items, before) {
 		s.logIncompleteWalk(readError, items, before)
-		return
+		return errIncompleteWalk
 	}
 
 	// The sets are written after the last folder, because a set is derived
@@ -414,8 +355,7 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	// it. A write that fails returns before the prune, because a prune with
 	// no set marked would sweep every set the catalog holds.
 	if err := flushWalk(ctx, s.catalog, &walkResult{sets: sets.rows()}, epoch); err != nil {
-		s.logWalk("write the sets", err)
-		return
+		return s.walkFailed("write the sets", err)
 	}
 
 	// The walk read the volume and wrote what it holds, so the count is
@@ -438,8 +378,8 @@ func (s *scanner) fullWalk(ctx context.Context) {
 		after = before
 	}
 
-	// The catalog's own file count, read here beside the item count. A read
-	// that fails leaves the report's file count at its last value, the way
+	// The catalog's own file count, read here beside the item count.
+	// A read that fails leaves the walk's own file count at zero, the way
 	// the item count holds on a failed read.
 	files, err := s.catalog.countFiles(ctx, s.library)
 	countedFiles := err == nil
@@ -466,13 +406,14 @@ func (s *scanner) fullWalk(ctx context.Context) {
 	}
 	s.mutex.Unlock()
 
-	// The walk's own prune can take the last row this catalog held
-	// for some library, so the set is re-read here and the walk's
-	// deferred publish carries it.
-	s.refreshCatalogLibraries(ctx)
-
 	s.logWalkComplete(titles, unidentified, removed, unidentifiedNames, time.Since(started))
+	return nil
 }
+
+// The walk read only part of the volume, so it pruned nothing and
+// kept the counts it had. The Job fails on it, because a run that read
+// half a library is not a run the catalog can be reconciled against.
+var errIncompleteWalk = errors.New("the walk did not read the whole volume")
 
 // unidentifiedSample bounds how many unidentified folder names a walk
 // names in its log, so a library of millions logs a sample and never one
@@ -495,21 +436,28 @@ func appendSample(have, more []string, limit int) []string {
 
 // logWalk writes one line about a walk that could not finish a step, naming
 // the step and the error. It turns a swallowed catalog error into a visible
-// line in the pod log, in place of a report held at the last count until the
+// line in the pod log, in place of a count held at its last value until the
 // next walk. A scanner built without a log writes nowhere.
 func (s *scanner) logWalk(step string, err error) {
 	s.logf("full walk could not %s: %v", step, err)
 }
 
-// logIncompleteWalk names why a walk kept the last report rather than
-// publish its own count: a root it could not read, or a count far below the
+// Names the step that stopped a walk in the pod log and in the
+// error the Job fails with, so the failure reads the same in both places.
+func (s *scanner) walkFailed(step string, err error) error {
+	s.logWalk(step, err)
+	return fmt.Errorf("could not %s: %w", step, err)
+}
+
+// LogIncompleteWalk names why a walk pruned nothing and kept the
+// counts it had: a root it could not read, or a count far below the
 // catalog's.
 func (s *scanner) logIncompleteWalk(readError bool, items, before int) {
 	if readError {
-		s.logf("incomplete walk: could not read the whole volume, keeping the last report")
+		s.logf("incomplete walk: could not read the whole volume, keeping the last counts")
 		return
 	}
-	s.logf("incomplete walk: read %d of %d cataloged items, keeping the last report", items, before)
+	s.logf("incomplete walk: read %d of %d cataloged items, keeping the last counts", items, before)
 }
 
 // logWalkComplete writes the one summary line a finished walk leaves:
@@ -540,19 +488,18 @@ func (s *scanner) logf(format string, args ...any) {
 	fmt.Fprintf(s.log, "library.liken.sh: "+format+"\n", args...)
 }
 
-// rescan reads one title or series folder and reconciles the catalog to
-// it, the answer to a webhook that names an imported path. It upserts what
+// Rescan reads one title or series folder and reconciles the
+// catalog to it, the answer to the folder a scan Job is given. It upserts what
 // the folder holds and prunes only that folder's rows the re-read did not
 // produce, such as a file an upgrade replaced. A folder that left the
 // volume marks nothing, so all of its rows leave. It moves the last-change
 // time when it wrote or removed a row, and leaves the counts and the
 // last-walk time to the next full walk. A path that resolves to no folder
 // falls back to a full walk.
-func (s *scanner) rescan(ctx context.Context, absolute string) {
+func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	folder := s.titleFolderOf(absolute)
 	if folder == "" {
-		s.fullWalk(ctx)
-		return
+		return s.fullWalk(ctx)
 	}
 
 	s.walkMutex.Lock()
@@ -560,8 +507,7 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 
 	relative := relativePath(s.root, folder)
 	if err := s.catalog.ensureSeen(ctx); err != nil {
-		s.logWalk("ensure the seen table", err)
-		return
+		return s.walkFailed("ensure the seen table", err)
 	}
 	epoch := time.Now().UnixNano()
 	result := &walkResult{}
@@ -572,7 +518,7 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 		case libraryKindSeries:
 			scanSeriesFolder(s.root, folder, s.library, s.ignore, result)
 		default:
-			return
+			return nil
 		}
 	}
 
@@ -583,42 +529,38 @@ func (s *scanner) rescan(ctx context.Context, absolute string) {
 	if s.kind == libraryKindMovies {
 		held, err := s.catalog.setIDsUnder(ctx, s.library, relative)
 		if err != nil {
-			s.logWalk("read the sets of a rescan", err)
-			return
+			return s.walkFailed("read the sets of a rescan", err)
 		}
 		affected = append(held, setIDsOf(result.movies)...)
 	}
 
 	if err := flushWalk(ctx, s.catalog, result, epoch); err != nil {
-		s.logWalk("write a rescan", err)
-		return
+		return s.walkFailed("write a rescan", err)
 	}
 
 	removed, err := pruneScope(ctx, s.catalog, s.library, relative, epoch)
 	if err != nil {
-		s.logWalk("prune a rescan", err)
-		return
+		return s.walkFailed("prune a rescan", err)
 	}
 
 	// A rescan reads one folder and not a set's other members, so each
 	// affected set derives again from the movie rows the catalog holds, after
 	// the prune has taken the rows this folder lost.
 	if err := reconcileSets(ctx, s.catalog, s.library, affected); err != nil {
-		s.logWalk("write the sets of a rescan", err)
-		return
+		return s.walkFailed("write the sets of a rescan", err)
 	}
 
 	written := len(result.movies) + len(result.series) + len(result.episodes) + len(result.files)
 	if written == 0 && removed == 0 {
 		s.logf("rescanned %s: no change", relative)
-		return
+		return nil
 	}
 	s.logf("rescanned %s: wrote %d, removed %d", relative, written, removed)
-	s.refreshCatalogLibraries(ctx)
 	s.mutex.Lock()
 	s.report.LastChange = time.Now().UTC()
+	s.report.RemovedLastSweep = removed
 	s.mutex.Unlock()
-	s.publishReport()
+	return nil
 }
 
 // titleFolderOf maps a path on the volume to the title or series folder
@@ -681,35 +623,4 @@ func splitPath(relative string) []string {
 		}
 	}
 	return parts
-}
-
-// markWalking sets or clears the walking mark and publishes the report,
-// so the operator sees a walk start and end and moves the phase between
-// Scanning and Idle.
-func (s *scanner) markWalking(walking bool) {
-	s.mutex.Lock()
-	s.report.Walking = walking
-	s.mutex.Unlock()
-	s.publishReport()
-}
-
-// publishReport writes the current report to the bus, retained. A
-// disconnected bus drops the publish, and onConnect republishes it.
-func (s *scanner) publishReport() {
-	s.mutex.Lock()
-	payload, _ := json.Marshal(s.report)
-	s.mutex.Unlock()
-	s.bus.Publish(s.statusTopic, payload, true)
-}
-
-// onConnect refills the broker the moment a session reaches a CONNACK.
-// It publishes online and republishes the report, because a broker
-// that restarts drops its retained set, and a reconnect has to leave
-// the current report behind again.
-func (s *scanner) onConnect(bus *Bus) {
-	bus.Publish(s.availabilityTopic, []byte(availabilityOnline), true)
-	s.mutex.Lock()
-	payload, _ := json.Marshal(s.report)
-	s.mutex.Unlock()
-	bus.Publish(s.statusTopic, payload, true)
 }

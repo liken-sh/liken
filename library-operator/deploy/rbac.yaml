@@ -1,23 +1,22 @@
-# The operator's identity in the cluster, and deliberately nothing
-# more. It reads libraries and catalogs, writes their statuses, reads
-# the storage behind each library, provisions the catalog claim each
-# scanner pod mounts, creates the scanner pod each library becomes, and
-# stands the catalog Service and EndpointSlice of each namespace that
-# holds a Catalog. It deletes a scanner pod only to replace a stale
-# one, whose template hash no longer matches what the pass builds.
+# The operator's identity in the cluster, and deliberately
+# nothing more. It reads libraries and catalogs, writes their statuses,
+# reads the storage behind each library, provisions the catalog claims,
+# stands the catalog pod of each namespace that holds a Catalog with the
+# catalog Service and EndpointSlice beside it, and creates the CronJob
+# each library becomes and the Jobs a webhook and a departure ask for.
+# It deletes an object only to replace a stale one or to end a run.
 # Every other teardown is the garbage collector's, through the
-# ownerReferences the pod, the catalog claim, and the two catalog
+# ownerReferences the pods, the claims, the CronJob, and the catalog
 # objects carry. It deletes no object a person created. Every grant is
 # cluster-wide, because a Library can be in any namespace.
 #
 # The operator also holds a finalizer on every Library, so a delete
-# waits on a cleanup pod that takes the departed library's rows out
-# of the namespace's catalog. The finalizer is why libraries carry
-# patch below, and the departure is the one reason beyond a stale
-# template that the operator deletes a pod.
+# waits on a cleanup Job that takes the departed library's rows out of
+# the namespace's catalog. The finalizer is why libraries carry patch
+# below.
 #
-# It also stands one Service per Library, over that Library's scanner
-# pod, which is the address the scanner's webhook answers on.
+# The webhook is on the operator itself, over one Service in the
+# operator's own namespace, so this file grants nothing for it.
 #
 # it also reads the Players media-operator publishes, and stands one
 # screen pod for each Player that names it as the idle controller. It writes
@@ -25,10 +24,10 @@
 # template and a departure: the Player it stands for named another idle
 # controller, or none.
 #
-# The scanner pods and the screen pods hold no credential of their own.
-# A scanner reports over the bus, and the operator writes what it
-# reports. A screen asks over the bus, and the operator creates the
-# Play it asked for. So nothing in this file grants a pod anything.
+# No pod this operator creates holds a credential of its own.
+# The catalog pod reports over the bus, and the operator writes what it
+# reports. A screen asks over the bus, and the operator creates the Play
+# it asked for. So nothing in this file grants a pod anything.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -82,10 +81,12 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [plays]
     verbs: [create]
-  # The media claim each Library names, read by name to learn whether it
-  # is bound and which volume it is bound to. The catalog claim each
-  # scanner pod mounts, created once per Library and owned by it, so the
-  # garbage collector removes it with the Library. There is no update:
+  # The media claim each Library names, read by name to learn
+  # whether it is bound and which volume it is bound to. The catalog
+  # claim each Library's Jobs mount, created once per Library and owned
+  # by it, and the catalog claim the catalog pod holds, created once per
+  # Catalog and owned by it, so the garbage collector removes each with
+  # its owner. There is no update:
   # a claim's spec is immutable once it binds, so the operator
   # provisions the catalog claim and never rewrites it. There is no
   # delete: the ownerReference is the whole teardown.
@@ -100,41 +101,43 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumes]
     verbs: [get]
-  # The pods rule below also covers the screen pods: one per delegated
-  # Player, created, read back, and deleted on the same terms as a scanner
-  # pod. The delete covers the rebuild of a stale template and the screen of a
-  # Player that named another idle controller.
-  # The scanner pods: created once per Library and read back on every
-  # pass. The delete verb covers two deletes: the rebuild of a pod whose
-  # template hash no longer matches, and the stop of a Library that no
-  # longer stands a scanner. The list and watch are cluster-scoped, because a Library
-  # lives in any namespace, and the watch wakes the loop when a scanner
-  # pod becomes ready or Kubernetes removes one.
-  #
-  # A deleting Library stands a cleanup pod, which this rule also
-  # covers: the operator creates, reads, and deletes it on the same
-  # terms. The departure's two deletes are the stop of the scanner
-  # before the sweep, and the retirement of the cleanup pod when the
-  # deletes have reached every surviving peer.
+  # The pods this operator stands itself: the catalog pod of each
+  # namespace that holds a Catalog, and one screen pod per delegated
+  # Player. Both are created, read back on every pass, and deleted to
+  # rebuild a stale template; a screen pod is deleted for a second
+  # reason, that its Player named another idle controller. The list and
+  # watch are cluster-scoped, because a Catalog and a Player live in any
+  # namespace, and the watch wakes the loop when a pod becomes ready or
+  # Kubernetes removes one. The pods of a Job are the Job controller's
+  # and never this operator's.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
-  # Two Services, each read by name. The headless catalog Service of
-  # each namespace that holds a Catalog, and the webhook Service over
-  # each Library's scanner pod. The grant is cluster-wide because either
+  # The workers. One CronJob per Library runs its full walk on a
+  # schedule, a Job runs one folder scan for a webhook, and a Job runs
+  # the sweep of a departing Library. The list and watch are
+  # cluster-scoped for the reason the pods are, and every pass re-reads
+  # with the list. The delete verb covers three deletes: the schedule of
+  # a Library that no longer stands one, a cleanup Job that failed and
+  # is stood again on a backoff, and the retirement of a cleanup Job
+  # when its library is released.
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch, create, delete]
+  # The headless catalog Service of each namespace that holds a
+  # Catalog, read by name. The grant is cluster-wide because a Catalog
   # can be in any namespace, and the operator is one Deployment for the
-  # cluster. There is no list and no watch: both are read by name, in
-  # the namespaces the Catalog and Library lists already named. There is
-  # no delete verb: each Service is owned by the object it belongs to,
-  # and the garbage collector removes it with that object.
+  # cluster. There is no list and no watch: it is read by name, in the
+  # namespaces the Catalog list already named. There is no delete verb:
+  # the Service is owned by the Catalog, and the garbage collector
+  # removes it with the Catalog.
   - apiGroups: [""]
     resources: [services]
     verbs: [get, create, update]
   # The EndpointSlice behind the catalog Service, on the same terms
   # and for the same reasons. There is one per namespace that holds a
   # Catalog, and the operator writes it because that Service names no
-  # selector. The webhook Service names one, so the API server writes
-  # its endpoints, and this rule is not for it.
+  # selector.
   - apiGroups: [discovery.k8s.io]
     resources: [endpointslices]
     verbs: [get, create, update]

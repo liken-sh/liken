@@ -237,8 +237,8 @@ func TestThePodWatchWakesOnEveryScannerPodEvent(t *testing.T) {
 			wake := startWatch(t, api, watchPods, "42")
 
 			first := nextWatchRequest(t, api)
-			if got := first.Get("labelSelector"); got != "app.kubernetes.io/name=library-scanner" {
-				t.Errorf("labelSelector = %q, want the scanner selector", got)
+			if got := first.Get("labelSelector"); got != "library.liken.sh/catalog=member" {
+				t.Errorf("labelSelector = %q, want the member selector", got)
 			}
 			waitForWatchWake(t, wake)
 		})

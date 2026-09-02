@@ -21,10 +21,10 @@ import "strings"
 // sets none.
 const defaultTopicBase = "liken/library"
 
-// The two words the availability topic carries. A scanner names its
-// availability topic as the MQTT Last Will with offline as the
-// payload, and publishes online once it connects, so a retained report
-// a killed pod left behind does not read as a running scanner.
+// The two words an availability topic carries. The reporter names
+// its topic as the MQTT Last Will with offline as the payload, and
+// publishes online once it connects, so a retained report a killed pod
+// left behind does not read as a running reporter.
 const (
 	availabilityOnline  = "online"
 	availabilityOffline = "offline"
@@ -38,18 +38,18 @@ const (
 	libraryAvailabilityKind = "availability"
 )
 
-// libraryStatusTopic carries one Library's report: the count of
-// titles, the count of folders the scanner could not identify, and the
-// times of the last walk and the last change. The scanner publishes it
-// retained, so an operator that restarts reads the current counts back
-// from the broker without waiting for the next walk.
+// Carries one Library's report: its counts, the folders no
+// sidecar identified, and the runs of every worker. The namespace's
+// reporter publishes it retained, so an operator that restarts reads the
+// current counts back from the broker without waiting for a walk.
 func libraryStatusTopic(base, namespace, name string) string {
 	return base + "/libraries/" + namespace + "/" + name + "/" + libraryStatusKind
 }
 
-// libraryAvailabilityTopic carries online or offline for the scanner
-// that publishes the report. The broker publishes offline on any
-// disconnect the scanner does not make cleanly.
+// The per-Library availability topic. No pod publishes it any more,
+// because the reporter publishes one availability per namespace. The
+// departure still clears it, so a retained message an older scanner
+// pod left behind goes with the Library.
 func libraryAvailabilityTopic(base, namespace, name string) string {
 	return base + "/libraries/" + namespace + "/" + name + "/" + libraryAvailabilityKind
 }
@@ -65,6 +65,32 @@ func libraryStatusFilter(base string) string {
 // scanner's availability signal.
 func libraryAvailabilityFilter(base string) string {
 	return base + "/libraries/+/+/" + libraryAvailabilityKind
+}
+
+// Carries online or offline for the namespace's one reporter, the
+// container beside the standing catalog agent that publishes every
+// library's report.
+func catalogAvailabilityTopic(base, namespace string) string {
+	return base + "/catalogs/" + namespace + "/" + libraryAvailabilityKind
+}
+
+// The subscription that reaches every namespace's reporter.
+func catalogAvailabilityFilter(base string) string {
+	return base + "/catalogs/+/" + libraryAvailabilityKind
+}
+
+// Maps an inbound catalogs topic back to the namespace it names,
+// so the operator folds one reporter's availability.
+func parseCatalogAvailabilityTopic(base, topic string) (namespace string, ok bool) {
+	prefix := base + "/catalogs/"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != libraryAvailabilityKind {
+		return "", false
+	}
+	return parts[0], true
 }
 
 // playRequestKind is the last level of a play request topic. A screen

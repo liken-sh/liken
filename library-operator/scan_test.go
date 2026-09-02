@@ -7,13 +7,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net"
-	"os"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -58,33 +57,9 @@ func scanEnvironment(t *testing.T, address string) {
 	t.Setenv(libraryRootVariable, "/movies")
 	t.Setenv(busAddressVariable, address)
 	t.Setenv(topicBaseVariable, "")
-
-	flushWas := scanFlushGrace
-	t.Cleanup(func() { scanFlushGrace = flushWas })
-	scanFlushGrace = 5 * time.Millisecond
-
-	// The webhook binds an ephemeral loopback port, so two tests that
-	// each start a scanner never contend for one fixed port.
-	webhookWas := webhookAddress
-	t.Cleanup(func() { webhookAddress = webhookWas })
-	webhookAddress = "127.0.0.1:0"
-}
-
-// startScanner runs one scanner and ends it before the test returns,
-// so no scanner outlives the test that made it and reads an
-// environment the next test has changed.
-func startScanner(t *testing.T, scan *scanner) {
-	t.Helper()
-	stopped, stop := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		scan.serve(stopped)
-	}()
-	t.Cleanup(func() {
-		stop()
-		<-done
-	})
+	t.Setenv(jobNameVariable, "scan-1")
+	t.Setenv(scanPathVariable, "")
+	t.Setenv(echoTimeoutVariable, "")
 }
 
 func waitForBroker(t *testing.T, accepted <-chan *fakeBroker) *fakeBroker {
@@ -98,10 +73,8 @@ func waitForBroker(t *testing.T, accepted <-chan *fakeBroker) *fakeBroker {
 	}
 }
 
-// waitForTopic reads the broker's publishes until one arrives on the
-// topic the test wants, and fails when none does. The scanner
-// publishes on two topics, so a test that wants one of them must skip
-// the other.
+// Reads the broker's publishes until one arrives on the topic the
+// test wants, and fails when none does.
 func waitForTopic(t *testing.T, broker *fakeBroker, topic string) brokerPublish {
 	t.Helper()
 	deadline := time.After(scanTestTimeout)
@@ -118,56 +91,29 @@ func waitForTopic(t *testing.T, broker *fakeBroker, topic string) brokerPublish 
 	}
 }
 
-// The report is retained and carries zero titles, so the operator
-// folds a real report from a scanner that has walked nothing and the
-// broker holds it for a subscriber that arrives later.
-func TestTheScannerPublishesARetainedReportOfZeroTitlesOnConnect(t *testing.T) {
-	address, accepted := testBroker(t)
+// The scanner reads the Job it runs, the folder it rescans, and
+// the wait it gives the echo out of the environment, because the pod
+// carries no credential to look one up with.
+func TestNewScannerReadsTheJobItRuns(t *testing.T) {
+	address, _ := testBroker(t)
 	scanEnvironment(t, address)
-	started := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	t.Setenv(jobNameVariable, "movies-scan-29128191")
+	t.Setenv(scanPathVariable, "/movies/The Thing (1982)")
+	t.Setenv(echoTimeoutVariable, "90s")
 
-	startScanner(t, newScanner(started, io.Discard))
+	scan := newScanner(time.Now().UTC(), io.Discard)
 
-	broker := waitForBroker(t, accepted)
-	got := waitForTopic(t, broker, "liken/library/libraries/house/movies/status")
-
-	if !got.retained {
-		t.Error("the report was not retained")
+	if scan.job != "movies-scan-29128191" {
+		t.Errorf("job = %q, want the Job the environment names", scan.job)
 	}
-	var report libraryReport
-	if err := json.Unmarshal(got.payload, &report); err != nil {
-		t.Fatal(err)
+	if scan.scanPath != "/movies/The Thing (1982)" {
+		t.Errorf("scanPath = %q, want the folder the environment names", scan.scanPath)
 	}
-	if report.Titles != 0 || report.Unidentified != 0 {
-		t.Errorf("report = %+v, want zero counts", report)
+	if scan.echoTimeout != 90*time.Second {
+		t.Errorf("echoTimeout = %s, want the wait the environment names", scan.echoTimeout)
 	}
-	// The initial walk of a root that holds nothing reports zero titles
-	// and no change, so the last-change time stands at the moment the
-	// scanner came up while the last-walk time moved to the walk.
-	if !report.LastChange.Equal(started) {
-		t.Errorf("report last change = %v, want %v", report.LastChange, started)
-	}
-	if report.LastWalk.IsZero() {
-		t.Error("report last walk was not set by the initial walk")
-	}
-}
-
-// Online is retained, so a subscriber that arrives later reads that
-// the scanner is up without waiting for the next message.
-func TestTheScannerPublishesRetainedOnlineOnConnect(t *testing.T) {
-	address, accepted := testBroker(t)
-	scanEnvironment(t, address)
-
-	startScanner(t, newScanner(time.Now().UTC(), io.Discard))
-
-	broker := waitForBroker(t, accepted)
-	got := waitForTopic(t, broker, "liken/library/libraries/house/movies/availability")
-
-	if string(got.payload) != availabilityOnline {
-		t.Errorf("payload = %q, want %q", got.payload, availabilityOnline)
-	}
-	if !got.retained {
-		t.Error("the availability was not retained")
+	if scan.echo.job != "movies-scan-29128191" || scan.echo.worker != workerScan {
+		t.Errorf("the echo waits for %s/%s, want the scan run of this Job", scan.echo.worker, scan.echo.job)
 	}
 }
 
@@ -252,155 +198,6 @@ func TestParseIgnore(t *testing.T) {
 	}
 }
 
-// The kubelet stops a pod with SIGTERM. The scanner marks itself
-// offline and returns, and it leaves the retained report where it is,
-// because a library outlives the pod that walked it.
-func TestRunScanPublishesOfflineOnSIGTERMAndReturns(t *testing.T) {
-	address, accepted := testBroker(t)
-	scanEnvironment(t, address)
-	returned := make(chan struct{})
-	go func() {
-		defer close(returned)
-		runScan()
-	}()
-
-	broker := waitForBroker(t, accepted)
-	// The online publish proves the scanner is past the point where it
-	// registers for the signal, so the signal below always reaches its
-	// handler and never the default one, which would end the test
-	// binary.
-	waitForTopic(t, broker, "liken/library/libraries/house/movies/availability")
-
-	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-
-	got := waitForTopic(t, broker, "liken/library/libraries/house/movies/availability")
-	if string(got.payload) != availabilityOffline {
-		t.Errorf("payload = %q, want %q", got.payload, availabilityOffline)
-	}
-	if !got.retained {
-		t.Error("the closing availability was not retained")
-	}
-	select {
-	case <-returned:
-	case <-time.After(scanTestTimeout):
-		t.Fatal("runScan did not return after SIGTERM")
-	}
-}
-
-// serveScanner builds a scanner over a fixture root, wired to the test
-// broker and a recording catalog, so serve runs a real walk and a real
-// connection with no cluster.
-func serveScanner(t *testing.T, address, root, kind string) (*scanner, *catalogRecorder) {
-	t.Helper()
-	catalog, recorder := recordingCatalog(t)
-	now := time.Now().UTC()
-	scan := &scanner{
-		statusTopic:       libraryStatusTopic(defaultTopicBase, "house", "movies"),
-		availabilityTopic: libraryAvailabilityTopic(defaultTopicBase, "house", "movies"),
-		root:              root,
-		library:           "house/movies",
-		kind:              kind,
-		catalog:           catalog,
-		report:            libraryReport{LastWalk: now, LastChange: now},
-	}
-	scan.bus = newBus(address, "library-house-movies",
-		&busWill{Topic: scan.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
-		scan.onConnect, nil)
-	return scan, recorder
-}
-
-// The initial walk runs before the bus connects, so the first report
-// the broker holds already carries the volume's title count.
-func TestServeRunsTheInitialWalkAndReportsTitles(t *testing.T) {
-	webhookWas := webhookAddress
-	t.Cleanup(func() { webhookAddress = webhookWas })
-	webhookAddress = "127.0.0.1:0"
-	flushWas := scanFlushGrace
-	t.Cleanup(func() { scanFlushGrace = flushWas })
-	scanFlushGrace = 5 * time.Millisecond
-
-	address, accepted := testBroker(t)
-	scan, _ := serveScanner(t, address, "testdata/movies", libraryKindMovies)
-	startScanner(t, scan)
-
-	broker := waitForBroker(t, accepted)
-	got := waitForTopic(t, broker, scan.statusTopic)
-	var report libraryReport
-	if err := json.Unmarshal(got.payload, &report); err != nil {
-		t.Fatal(err)
-	}
-	if report.Titles != 3 {
-		t.Errorf("titles = %d, want the three movies from the initial walk", report.Titles)
-	}
-}
-
-// The slow timer re-walks the whole root, so a second report reaches
-// the broker without any webhook.
-func TestServeRepublishesOnTheSlowTimer(t *testing.T) {
-	webhookWas := webhookAddress
-	t.Cleanup(func() { webhookAddress = webhookWas })
-	webhookAddress = "127.0.0.1:0"
-	flushWas := scanFlushGrace
-	t.Cleanup(func() { scanFlushGrace = flushWas })
-	scanFlushGrace = 5 * time.Millisecond
-	intervalWas := scanInterval
-	t.Cleanup(func() { scanInterval = intervalWas })
-	scanInterval = 20 * time.Millisecond
-
-	address, accepted := testBroker(t)
-	scan, _ := serveScanner(t, address, "testdata/movies", libraryKindMovies)
-	startScanner(t, scan)
-
-	broker := waitForBroker(t, accepted)
-	waitForTopic(t, broker, scan.statusTopic)
-	waitForTopic(t, broker, scan.statusTopic)
-}
-
-// reportOn decodes the report one status publish carried.
-func reportOn(t *testing.T, published brokerPublish) libraryReport {
-	t.Helper()
-	var report libraryReport
-	if err := json.Unmarshal(published.payload, &report); err != nil {
-		t.Fatal(err)
-	}
-	return report
-}
-
-// A walk publishes its report twice, so the bus carries the walk in
-// flight and then the walk done.
-func TestAWalkPublishesTheReportAtItsStartAndAtItsEnd(t *testing.T) {
-	webhookWas := webhookAddress
-	t.Cleanup(func() { webhookAddress = webhookWas })
-	webhookAddress = "127.0.0.1:0"
-	flushWas := scanFlushGrace
-	t.Cleanup(func() { scanFlushGrace = flushWas })
-	scanFlushGrace = 5 * time.Millisecond
-
-	address, accepted := testBroker(t)
-	scan, _ := serveScanner(t, address, "testdata/movies", libraryKindMovies)
-	startScanner(t, scan)
-
-	broker := waitForBroker(t, accepted)
-	// onConnect publishes the report on connect, so waiting for it here
-	// means the bus is connected and the walk's own publishes below reach
-	// the broker.
-	waitForTopic(t, broker, scan.statusTopic)
-
-	scan.fullWalk(context.Background())
-
-	started := reportOn(t, waitForTopic(t, broker, scan.statusTopic))
-	ended := reportOn(t, waitForTopic(t, broker, scan.statusTopic))
-
-	if !started.Walking {
-		t.Error("the report at the start of a walk does not say a walk is in flight")
-	}
-	if ended.Walking {
-		t.Error("the report at the end of a walk still says a walk is in flight")
-	}
-}
-
 // A rescan reads the one folder a path names and upserts it, the work a
 // webhook drives for a series library.
 func TestScannerRescanReadsOneSeriesFolder(t *testing.T) {
@@ -466,8 +263,8 @@ func TestRescanLogsWhetherItChanged(t *testing.T) {
 	}
 }
 
-// A path outside the root names no folder, so the rescan falls back to
-// a full walk.
+// A path outside the root names no folder, so the rescan falls
+// back to a full walk.
 func TestScannerRescanFallsBackToAFullWalk(t *testing.T) {
 	scan, _ := testScanner(t, "testdata/movies", libraryKindMovies)
 
@@ -600,5 +397,230 @@ func TestTitleFolderOfASeriesIsTheChildOfTheRoot(t *testing.T) {
 
 	if got := scan.titleFolderOf(episode); got != filepath.Join("testdata", "series", "Breaking Bad") {
 		t.Errorf("titleFolderOf = %q, want the series folder", got)
+	}
+}
+
+// One scan Job over a fixture root, wired to the test broker and a
+// recording catalog, so the run rows, the walk, and the echo all run with
+// no cluster.
+func scanJob(t *testing.T, root, kind string) (*scanner, *catalogRecorder, <-chan *fakeBroker) {
+	t.Helper()
+	address, accepted := testBroker(t)
+	shorterBackoff(t)
+	catalog, recorder := recordingCatalog(t)
+	scan := &scanner{
+		statusTopic: libraryStatusTopic(defaultTopicBase, "house", "movies"),
+		root:        root,
+		library:     "house/movies",
+		kind:        kind,
+		catalog:     catalog,
+		log:         io.Discard,
+		job:         "scan-1",
+		echoTimeout: scanTestTimeout,
+	}
+	scan.echo = newEchoWaiter(scan.statusTopic, workerScan, scan.job)
+	scan.bus = newBus(address, "scan-house-movies", nil, nil, scan.echo.note)
+	return scan, recorder, accepted
+}
+
+// Answers the Job's subscription with the report the namespace's
+// reporter would publish, which is the echo the Job exits on.
+func echoTheRun(t *testing.T, accepted <-chan *fakeBroker, wait *echoWaiter) {
+	t.Helper()
+	broker := waitForBroker(t, accepted)
+	if got := waitForString(t, broker.subs); got != wait.topic {
+		t.Fatalf("the Job subscribed to %q, want %q", got, wait.topic)
+	}
+	broker.push(wait.topic, reportOf(t, libraryRun{
+		Worker: wait.worker, Job: wait.job,
+		Started: time.Unix(10, 0), Finished: time.Unix(20, 0),
+	}))
+}
+
+// Reads the runs the Job posted, in the order it posted them.
+func runsPosted(recorder *catalogRecorder) []capturedStatement {
+	var posted []capturedStatement
+	for _, statement := range recorder.all() {
+		if strings.HasPrefix(statement.sql, "INSERT INTO runs") {
+			posted = append(posted, statement)
+		}
+	}
+	return posted
+}
+
+// The Job writes its run before it walks and again when the walk
+// ends, and the second write is the last row it posts, so the echo of it
+// proves the standing pod holds everything the walk wrote.
+func TestTheScanJobWritesItsRunFirstAndLast(t *testing.T) {
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	done := make(chan error, 1)
+	go func() { done <- scan.runJob(t.Context()) }()
+
+	echoTheRun(t, accepted, scan.echo)
+	if err := <-done; err != nil {
+		t.Fatalf("the job failed: %v", err)
+	}
+
+	posted := recorder.all()
+	if !strings.HasPrefix(posted[0].sql, "INSERT INTO runs") {
+		t.Errorf("the first statement was %q, want the run", posted[0].sql)
+	}
+	if !strings.HasPrefix(posted[len(posted)-1].sql, "INSERT INTO runs") {
+		t.Errorf("the last statement was %q, want the run", posted[len(posted)-1].sql)
+	}
+	runs := runsPosted(recorder)
+	if len(runs) != 2 {
+		t.Fatalf("the job posted %d runs, want the started one and the finished one", len(runs))
+	}
+	if runs[0].params[4] != float64(0) {
+		t.Errorf("the first run finished at %v, want no finish time", runs[0].params[4])
+	}
+	if runs[1].params[4] == float64(0) {
+		t.Error("the last run carries no finish time")
+	}
+	if runs[1].params[1] != workerScan || runs[1].params[2] != "scan-1" {
+		t.Errorf("the run names %v/%v, want the scan worker and this Job", runs[1].params[1], runs[1].params[2])
+	}
+}
+
+// The finished run carries what the walk read, so a person reads
+// the unidentified folders and the sweep off the Library's status.
+func TestTheFinishedRunCarriesWhatTheWalkRead(t *testing.T) {
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	done := make(chan error, 1)
+	go func() { done <- scan.runJob(t.Context()) }()
+
+	echoTheRun(t, accepted, scan.echo)
+	if err := <-done; err != nil {
+		t.Fatalf("the job failed: %v", err)
+	}
+
+	runs := runsPosted(recorder)
+	scan.mutex.Lock()
+	unidentified := float64(scan.report.Unidentified)
+	scan.mutex.Unlock()
+	if runs[1].params[5] != unidentified {
+		t.Errorf("the run names %v unidentified folders, want the %v the walk read", runs[1].params[5], unidentified)
+	}
+}
+
+// A Job that names a folder rescans that folder alone, which is
+// what a webhook drives, and it never walks the whole root.
+func TestTheScanJobRescansTheFolderItIsGiven(t *testing.T) {
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan.scanPath = "/media/movies/The.Thing.1982.1080p.BluRay.x264-GROUP/" +
+		"The.Thing.1982.1080p.BluRay.x264-GROUP.mkv"
+	done := make(chan error, 1)
+	go func() { done <- scan.runJob(t.Context()) }()
+
+	echoTheRun(t, accepted, scan.echo)
+	if err := <-done; err != nil {
+		t.Fatalf("the job failed: %v", err)
+	}
+
+	if !postedWith(recorder, "movie:path:the-thing-1982-1080p-bluray-x264-group") {
+		t.Error("the job did not upsert the folder it was given")
+	}
+	if scan.report.Titles != 0 {
+		t.Errorf("the job read %d titles, want the one folder it was given and no walk of the root", scan.report.Titles)
+	}
+}
+
+// A folder that maps onto nothing on the volume falls back to the
+// whole root, so a Job is never worse than a full walk.
+func TestTheScanJobFallsBackToTheWholeRoot(t *testing.T) {
+	scan, _, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan.scanPath = "/nothing/on/this/volume"
+	done := make(chan error, 1)
+	go func() { done <- scan.runJob(t.Context()) }()
+
+	echoTheRun(t, accepted, scan.echo)
+	if err := <-done; err != nil {
+		t.Fatalf("the job failed: %v", err)
+	}
+
+	if scan.report.Titles != 3 {
+		t.Errorf("the job read %d titles, want the three the root holds", scan.report.Titles)
+	}
+}
+
+// An echo that never arrives fails the Job, so its rows stay on
+// its own claim and Kubernetes retries it.
+func TestTheScanJobFailsWithNoEcho(t *testing.T) {
+	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan.echoTimeout = 20 * time.Millisecond
+
+	err := scan.runJob(t.Context())
+
+	if err == nil {
+		t.Fatal("the job returned no error, want the echo timeout")
+	}
+	if !strings.Contains(err.Error(), "scan-1") {
+		t.Errorf("error = %v, want the Job named", err)
+	}
+}
+
+// A walk that fails still writes its finished run and still waits
+// for the echo, so the failure is visible in the run, and the Job then
+// fails.
+func TestAFailedWalkStillWritesItsRunAndWaits(t *testing.T) {
+	scan, recorder, accepted := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan.root = filepath.Join(t.TempDir(), "gone")
+	done := make(chan error, 1)
+	go func() { done <- scan.runJob(t.Context()) }()
+
+	echoTheRun(t, accepted, scan.echo)
+	err := <-done
+
+	if err == nil {
+		t.Fatal("the job returned no error, want the failed walk")
+	}
+	runs := runsPosted(recorder)
+	if len(runs) != 2 {
+		t.Fatalf("the job posted %d runs, want the started one and the finished one", len(runs))
+	}
+	if runs[1].params[4] == float64(0) {
+		t.Error("the run of a failed walk carries no finish time")
+	}
+}
+
+// A catalog that refuses the first run fails the Job before it
+// walks, because a Job whose run never landed waits for an echo that
+// cannot come.
+func TestTheScanJobFailsWhenItCannotWriteItsRun(t *testing.T) {
+	unwell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(unwell.Close)
+	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan.catalog = NewCatalog(unwell.URL, unwell.Client())
+
+	if err := scan.runJob(t.Context()); err == nil {
+		t.Error("the job returned no error, want the refused run")
+	}
+}
+
+// A catalog that refuses the finished run fails the Job, so a walk
+// whose run never landed is a Job that failed and not one that waits for
+// an echo it cannot hear.
+func TestTheScanJobFailsWhenItCannotWriteItsFinishedRun(t *testing.T) {
+	catalog, _ := recordingCatalog(t)
+	writes := 0
+	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies)
+	scan.catalog = proxyCatalog(t, catalog, func(path string, body []byte) bool {
+		if !bytes.Contains(body, []byte("INSERT INTO runs")) {
+			return false
+		}
+		writes++
+		return writes == 2
+	})
+
+	err := scan.runJob(t.Context())
+
+	if err == nil {
+		t.Fatal("the job returned no error, want the refused run")
+	}
+	if !strings.Contains(err.Error(), "finished run") {
+		t.Errorf("error = %v, want the finished run named", err)
 	}
 }

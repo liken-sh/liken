@@ -24,30 +24,33 @@ func departingMovies(cluster *fakeCluster) *Library {
 	return library
 }
 
-// the second house Library, whose catalog holds a copy of the departing
-// library's rows.
-const theSurvivor = "shows"
-
-// seeds the survivor with its scanner online or offline and its report;
-// nil report means it said nothing.
-func seedSurvivor(cluster *fakeCluster, operator *operator, online bool, report *libraryReport) {
-	cluster.libraries[theSurvivor] = &Library{
-		Metadata: ObjectMeta{Name: theSurvivor, Namespace: "house", UID: "shows-uid", ResourceVersion: "1"},
-		Spec:     LibrarySpec{Storage: LibraryStorage{Claim: "shows"}, Kind: libraryKindSeries},
-	}
-	operator.reports.availability("house", theSurvivor, online)
-	if report != nil {
-		operator.reports.fold("house", theSurvivor, *report)
+// one Job of the house namespace, in whatever state the Job controller
+// would have left it.
+func houseJob(name, worker string, status JobStatus) Job {
+	return Job{
+		Metadata: ObjectMeta{
+			Name:      name,
+			Namespace: "house",
+			Labels:    workerLabels("movies", worker),
+		},
+		Status: status,
 	}
 }
 
-// the report of a scanner whose catalog holds these libraries.
-func holding(libraries ...string) *libraryReport {
-	return &libraryReport{CatalogLibraries: libraries}
+// the walk the CronJob created, which the CronJob owns.
+func walkJob(status JobStatus) Job {
+	job := houseJob("movies-scan-29380000", workerScan, status)
+	job.Metadata.OwnerReferences = []OwnerReference{{Kind: "CronJob", Name: "movies-scan"}}
+	return job
 }
 
-// the survivor list a pass over the house namespace gives the departure.
-func houseSurvivors() []string { return []string{theSurvivor} }
+// the report in which the namespace's reporter echoes one cleanup Job
+// back, which is the proof the deletes reached the standing catalog.
+func echoing(job string) libraryReport {
+	return libraryReport{Runs: []libraryRun{
+		{Worker: workerCleanup, Job: job, Started: testNow, Finished: testNow},
+	}}
+}
 
 // reads the Departing condition off the held Library, where every rung of
 // the ladder reports.
@@ -66,7 +69,7 @@ func TestReconcileHoldsALibraryAgainstDeletion(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,7 +90,7 @@ func TestReconcileSwapsTheFormerFinalizer(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,22 +103,6 @@ func TestReconcileSwapsTheFormerFinalizer(t *testing.T) {
 	}
 }
 
-// a deleting Library that still holds only the former name departs and
-// releases the same way, so no Library sticks on the retired name.
-func TestDepartReleasesTheFormerFinalizer(t *testing.T) {
-	cluster := newFakeCluster()
-	library := departingMovies(cluster)
-	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
-
-	if err := testOperator(t, cluster).depart(t.Context(), library, nil, withCatalog()); err != nil {
-		t.Fatal(err)
-	}
-
-	if cluster.heldLibrary("movies") != nil {
-		t.Error("the Library still stands, so the former finalizer was not released")
-	}
-}
-
 // a finalizer already held is not patched again, so the pass writes
 // nothing on a settled object.
 func TestReconcileDoesNotPatchAFinalizerItAlreadyHolds(t *testing.T) {
@@ -123,7 +110,7 @@ func TestReconcileDoesNotPatchAFinalizerItAlreadyHolds(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{libraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,257 +119,236 @@ func TestReconcileDoesNotPatchAFinalizerItAlreadyHolds(t *testing.T) {
 	}
 }
 
-// the last Library in a namespace releases at once, because no surviving
-// copy holds its rows. A deleting namespace ends the same way.
-func TestDepartReleasesTheLastLibraryAtOnce(t *testing.T) {
+// a namespace with no Catalog holds no rows to sweep, so the departure
+// releases at once. A deleting namespace ends the same way, because its
+// Catalog goes with everything else.
+func TestDepartReleasesWhenTheNamespaceHasNoCatalog(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, nil, withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, singleCatalog(nil), nil); err != nil {
 		t.Fatal(err)
 	}
 
 	if cluster.heldLibrary("movies") != nil {
 		t.Error("the Library still stands, so the finalizer was not released")
 	}
-	if cluster.heldPod("movies-cleanup") != nil {
-		t.Error("a cleanup pod stands for a library with nothing to clean")
+	if cluster.heldJob("house", "movies-cleanup") != nil {
+		t.Error("a cleanup job stands for a library with nothing to clean")
 	}
 }
 
-// a library that wrote no rows is named by no survivor's report, so it
-// releases through the survivor rung, with or without a catalog claim.
-func TestDepartReleasesALibraryThatWroteNoRows(t *testing.T) {
+// a deleting Library that still holds only the former name departs and
+// releases the same way, so no Library sticks on the retired name.
+func TestDepartReleasesTheFormerFinalizer(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	delete(cluster.claims, "movies-catalog")
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/shows"))
+	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, singleCatalog(nil), nil); err != nil {
 		t.Fatal(err)
 	}
 
 	if cluster.heldLibrary("movies") != nil {
-		t.Error("the Library still stands, so the finalizer was not released")
-	}
-	if cluster.heldPod("movies-cleanup") != nil {
-		t.Error("a cleanup pod stands for a library that wrote no rows")
-	}
-	if cluster.heldClaim("movies-catalog") != nil {
-		t.Error("a catalog claim stands for a library that had nothing to sweep")
+		t.Error("the Library still stands, so the former finalizer was not released")
 	}
 }
 
-// a claim deleted while the library lived leaves the rows in every
-// survivor, so the departure stands a fresh claim and sweeps from it.
-func TestDepartStandsACatalogClaimTheSweepNeeds(t *testing.T) {
+// a namespace with more than one Catalog names no cluster to sweep, so
+// the departure waits for a person and says so.
+func TestDepartBlocksOnANamespaceWithTwoCatalogs(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	delete(cluster.claims, "movies-catalog")
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	choice := singleCatalog([]*NamespaceCatalog{
+		{Metadata: ObjectMeta{Name: "one", Namespace: "house"}},
+		{Metadata: ObjectMeta{Name: "two", Namespace: "house"}},
+	})
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, choice, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	if cluster.heldLibrary("movies") == nil {
-		t.Fatal("the finalizer was released while a survivor still held the rows")
+		t.Fatal("the finalizer was released with no cluster to sweep from")
 	}
-	if cluster.heldClaim("movies-catalog") == nil {
-		t.Error("the pass stood no catalog claim for the cleanup pod to mount")
-	}
-	if cluster.heldPod("movies-cleanup") == nil {
-		t.Error("the pass stood no cleanup pod")
-	}
-	if stage := departingCondition(t, cluster); stage.Reason != reasonSweeping {
-		t.Errorf("Departing = %+v, want %s", stage, reasonSweeping)
+	stage := departingCondition(t, cluster)
+	if stage.Reason != reasonBlocked || !strings.Contains(stage.Message, "2 Catalogs") {
+		t.Errorf("Departing = %+v, want %s naming the conflict", stage, reasonBlocked)
 	}
 }
 
-// a claim the sweep needs and a namespace with no single Catalog to
-// size it: the departure reports the blocker and releases nothing.
-func TestDepartReportsAClaimItCannotStand(t *testing.T) {
-	cases := []struct {
-		name   string
-		choice catalogChoice
-		want   string
-	}{
-		{name: "no Catalog", choice: singleCatalog(nil), want: "has no Catalog"},
-		{
-			name: "two Catalogs",
-			choice: singleCatalog([]*NamespaceCatalog{
-				{Metadata: ObjectMeta{Name: "one", Namespace: "house"}},
-				{Metadata: ObjectMeta{Name: "two", Namespace: "house"}},
-			}),
-			want: "2 Catalogs",
-		},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			library := departingMovies(cluster)
-			delete(cluster.claims, "movies-catalog")
-			operator := testOperator(t, cluster)
-			seedSurvivor(cluster, operator, true, holding("house/movies"))
-
-			if err := operator.depart(t.Context(), library, houseSurvivors(), one.choice); err != nil {
-				t.Fatal(err)
-			}
-
-			if cluster.heldLibrary("movies") == nil {
-				t.Fatal("the finalizer was released while the rows were still out there")
-			}
-			if cluster.heldPod("movies-cleanup") != nil {
-				t.Error("a cleanup pod stands with no catalog claim to mount")
-			}
-			stage := departingCondition(t, cluster)
-			if stage.Reason != reasonBlocked {
-				t.Fatalf("Departing = %+v, want %s", stage, reasonBlocked)
-			}
-			if !strings.Contains(stage.Message, "movies-catalog") ||
-				!strings.Contains(stage.Message, one.want) {
-				t.Errorf("message = %q, want the claim and %q in it", stage.Message, one.want)
-			}
-		})
-	}
-}
-
-// the scanner goes first because it rewrites the rows and holds the
-// ReadWriteOnce catalog claim.
-func TestDepartStopsTheScannerBeforeItSweeps(t *testing.T) {
+// the schedule goes first, so no walk starts behind the sweep.
+func TestDepartStopsTheScheduleFirst(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	cluster.pods["movies-scanner"] = standingPod(t, library, podRunning, true)
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	cluster.cronJobs["house/movies-scan"] = &CronJob{
+		Metadata: ObjectMeta{Name: "movies-scan", Namespace: "house"},
+	}
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("movies-scanner") != nil {
-		t.Error("the scanner pod stands during a departure")
+	if cluster.heldCronJob("house", "movies-scan") != nil {
+		t.Error("the scan schedule stands during a departure")
 	}
-	if cluster.heldPod("movies-cleanup") != nil {
-		t.Error("the cleanup pod stood before the scanner was gone")
+}
+
+// a scan that is still running rewrites the rows the sweep deletes and
+// holds the claim the cleanup job needs, so the departure waits it out.
+func TestDepartWaitsForARunningScan(t *testing.T) {
+	cluster := newFakeCluster()
+	library := departingMovies(cluster)
+	jobs := []Job{walkJob(JobStatus{Active: 1})}
+
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
+		t.Fatal(err)
 	}
-	if stage := departingCondition(t, cluster); stage.Reason != reasonStoppingScanner {
-		t.Errorf("Departing = %+v, want %s", stage, reasonStoppingScanner)
+
+	if cluster.heldJob("house", "movies-cleanup") != nil {
+		t.Error("the cleanup job stood while a scan was still running")
+	}
+	if stage := departingCondition(t, cluster); stage.Reason != reasonScanRunning {
+		t.Errorf("Departing = %+v, want %s", stage, reasonScanRunning)
 	}
 	if phase := cluster.heldLibrary("movies").Status.Phase; phase != phaseDeparting {
 		t.Errorf("phase = %q, want %s", phase, phaseDeparting)
 	}
 }
 
-// a scanner pod already deleting counts as present, so the pass waits
-// instead of deleting twice.
-func TestDepartWaitsForAScannerPodThatIsStillGoing(t *testing.T) {
+// a claim deleted while the library lived leaves the rows in the
+// standing catalog, so the departure stands a fresh claim and sweeps
+// from it.
+func TestDepartStandsACatalogClaimTheSweepNeeds(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	scanner := standingPod(t, library, podRunning, true)
-	scanner.Metadata.DeletionTimestamp = "2026-08-31T12:00:01Z"
-	cluster.pods["movies-scanner"] = scanner
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	delete(cluster.claims, "movies-catalog")
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := cluster.countRequests(http.MethodDelete, "pods"); got != 0 {
-		t.Errorf("pod deletes = %d, want none while the pod is already going", got)
+	if cluster.heldClaim("movies-catalog") == nil {
+		t.Error("the pass stood no catalog claim for the cleanup job to mount")
 	}
-	if stage := departingCondition(t, cluster); stage.Reason != reasonStoppingScanner {
-		t.Errorf("Departing = %+v, want %s", stage, reasonStoppingScanner)
+	if cluster.heldJob("house", "movies-cleanup") == nil {
+		t.Error("the pass stood no cleanup job")
 	}
 }
 
-// scanner gone, the pass stands the cleanup pod: this operator's image in
-// the cleanup role on its own claim.
-func TestDepartStandsTheCleanupPod(t *testing.T) {
+// with the scans quiet the pass stands the cleanup Job: this operator's
+// image in the cleanup role on the library's own claim.
+func TestDepartStandsTheCleanupJob(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
-	pod := cluster.heldPod("movies-cleanup")
-	if pod == nil {
-		t.Fatal("the pass stood no cleanup pod")
+	job := cluster.heldJob("house", "movies-cleanup")
+	if job == nil {
+		t.Fatal("the pass stood no cleanup job")
 	}
-	if pod.Spec.Containers[0].Command[1] != cleanupMode {
-		t.Errorf("command = %v, want the cleanup role", pod.Spec.Containers[0].Command)
+	container := job.Spec.Template.Spec.Containers[0]
+	if container.Command[1] != cleanupMode {
+		t.Errorf("command = %v, want the cleanup role", container.Command)
+	}
+	if len(job.Spec.Template.Spec.Volumes) != 1 {
+		t.Errorf("volumes = %+v, want the catalog claim alone", job.Spec.Template.Spec.Volumes)
 	}
 	if stage := departingCondition(t, cluster); stage.Reason != reasonSweeping {
 		t.Errorf("Departing = %+v, want %s", stage, reasonSweeping)
 	}
 }
 
-// a failed cleanup pod is deleted so the next one can mount the
-// ReadWriteOnce claim; the condition names why.
-func TestDepartRecreatesACleanupPodThatFailed(t *testing.T) {
+// a Job that exited zero is not the end of it: the rows leave the
+// library's own claim only when the standing catalog holds them, and
+// the reporter's echo is what says so.
+func TestDepartWaitsForTheReportersEcho(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	cluster.pods["movies-cleanup"] = &Pod{
-		Metadata: ObjectMeta{Name: "movies-cleanup", Namespace: "house"},
-		Status:   PodStatus{Phase: podFailed, Message: "the container could not reach its catalog agent"},
-	}
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	jobs := []Job{houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})}
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
 		t.Fatal(err)
 	}
-	if cluster.heldPod("movies-cleanup") != nil {
-		t.Error("the failed cleanup pod stands, so no replacement can mount the claim")
-	}
-	stage := departingCondition(t, cluster)
-	if stage.Reason != reasonBlocked {
-		t.Fatalf("Departing = %+v, want %s", stage, reasonBlocked)
-	}
-	if !strings.Contains(stage.Message, "could not reach its catalog agent") {
-		t.Errorf("message = %q, want the kubelet's own words", stage.Message)
-	}
 
-	// the next pass finds no pod and stands one again.
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
-		t.Fatal(err)
+	if cluster.heldLibrary("movies") == nil {
+		t.Fatal("the finalizer was released before the reporter echoed the sweep")
 	}
-	if cluster.heldPod("movies-cleanup") == nil {
-		t.Error("the pass after the failure stood no cleanup pod")
+	if stage := departingCondition(t, cluster); stage.Reason != reasonAwaitingEcho {
+		t.Errorf("Departing = %+v, want %s", stage, reasonAwaitingEcho)
 	}
 }
 
-// an unschedulable cleanup pod reports the scheduler's own sentence, the
-// part a person acts on.
-func TestDepartReportsACleanupPodThatCannotSchedule(t *testing.T) {
+// a run that names another Job, or names this one with no time on it,
+// is not this sweep's echo.
+func TestDepartReadsOnlyItsOwnEcho(t *testing.T) {
+	cases := []struct {
+		name string
+		runs []libraryRun
+	}{
+		{name: "no runs at all"},
+		{name: "another job", runs: []libraryRun{
+			{Worker: workerCleanup, Job: "movies-cleanup-before", Finished: testNow},
+		}},
+		{name: "another worker", runs: []libraryRun{
+			{Worker: workerScan, Job: "movies-cleanup", Finished: testNow},
+		}},
+		{name: "unfinished", runs: []libraryRun{
+			{Worker: workerCleanup, Job: "movies-cleanup", Started: testNow},
+		}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library := departingMovies(cluster)
+			operator := testOperator(t, cluster)
+			operator.reports.fold("house", "movies", libraryReport{Runs: one.runs})
+			jobs := []Job{houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})}
+
+			if err := operator.depart(t.Context(), library, standingCatalog(), jobs); err != nil {
+				t.Fatal(err)
+			}
+
+			if cluster.heldLibrary("movies") == nil {
+				t.Error("the finalizer was released on an echo that names another run")
+			}
+		})
+	}
+}
+
+// a failed cleanup Job blocks the release and names the failure, and it
+// is deleted so the next one can mount the ReadWriteOnce claim.
+func TestDepartRecreatesACleanupJobThatFailed(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	cluster.pods["movies-cleanup"] = &Pod{
-		Metadata: ObjectMeta{Name: "movies-cleanup", Namespace: "house"},
-		Status: PodStatus{Phase: podPending, Conditions: []PodCondition{{
-			Type: podScheduled, Status: conditionIsFalse, Reason: "Unschedulable",
-			Message: "0/3 nodes are available: 3 node(s) had volume node affinity conflict",
-		}}},
-	}
+	failed := houseJob("movies-cleanup", workerCleanup, JobStatus{Failed: 3})
+	cluster.holdJob(&failed)
 	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := operator.depart(t.Context(), library, standingCatalog(), []Job{failed}); err != nil {
 		t.Fatal(err)
 	}
 
+	if cluster.heldJob("house", "movies-cleanup") != nil {
+		t.Error("the failed cleanup job stands, so no replacement can mount the claim")
+	}
 	stage := departingCondition(t, cluster)
 	if stage.Reason != reasonBlocked {
 		t.Fatalf("Departing = %+v, want %s", stage, reasonBlocked)
 	}
-	if !strings.Contains(stage.Message, "volume node affinity conflict") {
-		t.Errorf("message = %q, want the scheduler's own words", stage.Message)
+	if !strings.Contains(stage.Message, "3 attempts") {
+		t.Errorf("message = %q, want the count of attempts", stage.Message)
+	}
+
+	// the next pass finds no Job and stands one again.
+	if err := operator.depart(t.Context(), library, standingCatalog(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.heldJob("house", "movies-cleanup") == nil {
+		t.Error("the pass after the failure stood no cleanup job")
 	}
 }
 
@@ -392,51 +358,17 @@ func TestDepartLeavesALibraryItDoesNotHold(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 	library.Metadata.Finalizers = nil
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
 	if got := cluster.countRequests(http.MethodPatch, "libraries"); got != 0 {
 		t.Errorf("patches = %d, want none", got)
 	}
-	if cluster.heldPod("movies-cleanup") != nil {
-		t.Error("a cleanup pod stands for a Library this operator does not hold")
+	if cluster.heldJob("house", "movies-cleanup") != nil {
+		t.Error("a cleanup job stands for a Library this operator does not hold")
 	}
-}
-
-// survivors are sorted per namespace and leave out deleting Libraries,
-// whose own copies are leaving too.
-func TestSurvivingLibrariesLeavesOutTheDeparting(t *testing.T) {
-	libraries := []Library{
-		{Metadata: ObjectMeta{Name: "shows", Namespace: "house"}},
-		{Metadata: ObjectMeta{Name: "movies", Namespace: "house", DeletionTimestamp: "2026-08-31T12:00:00Z"}},
-		{Metadata: ObjectMeta{Name: "archive", Namespace: "house"}},
-		{Metadata: ObjectMeta{Name: "films", Namespace: "studio"}},
-	}
-
-	survivors := survivingLibraries(libraries)
-
-	if want := []string{"archive", "shows"}; !equalStrings(survivors["house"], want) {
-		t.Errorf("house = %v, want %v", survivors["house"], want)
-	}
-	if want := []string{"films"}; !equalStrings(survivors["studio"], want) {
-		t.Errorf("studio = %v, want %v", survivors["studio"], want)
-	}
-}
-
-func equalStrings(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // a read failure is reported and nothing is written, so no finalizer is
@@ -447,18 +379,19 @@ func TestDepartReportsAFailureItCannotReadPast(t *testing.T) {
 		path string
 	}{
 		{name: "the catalog claim", path: "/api/v1/namespaces/house/persistentvolumeclaims/movies-catalog"},
-		{name: "the scanner pod", path: "/api/v1/namespaces/house/pods/movies-scanner"},
-		{name: "the cleanup pod", path: "/api/v1/namespaces/house/pods/movies-cleanup"},
+		{name: "the scan schedule", path: "/apis/batch/v1/namespaces/house/cronjobs/movies-scan"},
+		{name: "the cleanup job", path: "/apis/batch/v1/namespaces/house/jobs"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			library := departingMovies(cluster)
-			operator := testOperator(t, cluster)
-			seedSurvivor(cluster, operator, true, holding("house/movies"))
+			cluster.cronJobs["house/movies-scan"] = &CronJob{
+				Metadata: ObjectMeta{Name: "movies-scan", Namespace: "house"},
+			}
 			cluster.broken[one.path] = http.StatusInternalServerError
 
-			err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog())
+			err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil)
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the departure could not read past")
@@ -470,16 +403,14 @@ func TestDepartReportsAFailureItCannotReadPast(t *testing.T) {
 	}
 }
 
-// a cleanup pod another writer created first is success: report the sweep,
-// leave the finalizer.
-func TestDepartAnswersACleanupPodAnotherWriterCreated(t *testing.T) {
+// a cleanup Job another writer created first is success: report the
+// sweep, leave the finalizer.
+func TestDepartAnswersACleanupJobAnotherWriterCreated(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 	cluster.refuseCreate = true
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -488,23 +419,20 @@ func TestDepartAnswersACleanupPodAnotherWriterCreated(t *testing.T) {
 	}
 }
 
-// a cleanup pod already deleting counts as present; wait for the
+// a cleanup Job already deleting counts as present; wait for the
 // ReadWriteOnce claim, do not replace it.
-func TestDepartWaitsForACleanupPodThatIsStillGoing(t *testing.T) {
+func TestDepartWaitsForACleanupJobThatIsStillGoing(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	pod := readyCleanupPod()
-	pod.Metadata.DeletionTimestamp = "2026-08-31T12:00:02Z"
-	cluster.pods["movies-cleanup"] = pod
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	going := houseJob("movies-cleanup", workerCleanup, JobStatus{Failed: 1})
+	going.Metadata.DeletionTimestamp = "2026-08-31T12:00:02Z"
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), []Job{going}); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := cluster.countRequests(http.MethodPost, "pods"); got != 0 {
-		t.Errorf("pod creates = %d, want none while the pod is already going", got)
+	if got := cluster.countRequests(http.MethodPost, "jobs"); got != 0 {
+		t.Errorf("job creates = %d, want none while the job is already going", got)
 	}
 }
 
@@ -514,50 +442,58 @@ func TestDepartReportsTheSweepWhileTheBackoffHolds(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
 	operator.cleanupStands["house/movies"] = cleanupStand{count: 4, next: time.Now().Add(time.Hour)}
 
-	if err := operator.depart(t.Context(), library, houseSurvivors(), withCatalog()); err != nil {
+	if err := operator.depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("movies-cleanup") != nil {
-		t.Error("a cleanup pod stood while the backoff held")
+	if cluster.heldJob("house", "movies-cleanup") != nil {
+		t.Error("a cleanup job stood while the backoff held")
 	}
 	if stage := departingCondition(t, cluster); stage.Reason != reasonSweeping {
 		t.Errorf("Departing = %+v, want %s", stage, reasonSweeping)
 	}
 }
 
-// the blocker falls back from the kubelet's message to its reason to the
-// bare fact of the failure.
-func TestTheCleanupBlockerNamesWhatStoppedThePod(t *testing.T) {
+// the backoff grows to the cap and stops there, so the pass keeps
+// trying for as long as the Library is deleting.
+func TestTheCleanupBackoffGrowsToTheCap(t *testing.T) {
+	cases := []struct {
+		count int
+		want  time.Duration
+	}{
+		{count: 1, want: cleanupBackoffBase},
+		{count: 3, want: 4 * cleanupBackoffBase},
+		{count: 20, want: cleanupBackoffCap},
+	}
+	for _, one := range cases {
+		if got := cleanupBackoffDelay(one.count); got != one.want {
+			t.Errorf("delay after %d stands = %v, want %v", one.count, got, one.want)
+		}
+	}
+}
+
+// the blocker names the failure in the cluster's own counts, and a Job
+// that has not failed blocks nothing.
+func TestTheCleanupBlockerNamesTheFailedJob(t *testing.T) {
+	failed := houseJob("movies-cleanup", workerCleanup, JobStatus{Failed: 2})
+	running := houseJob("movies-cleanup", workerCleanup, JobStatus{Active: 1})
+	done := houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1, Failed: 1})
+
 	cases := []struct {
 		name string
-		pod  *Pod
+		job  *Job
 		want string
 	}{
-		{name: "no pod yet", pod: nil, want: ""},
-		{name: "a running pod", pod: readyCleanupPod(), want: ""},
-		{
-			name: "a failure with a message",
-			pod:  &Pod{Status: PodStatus{Phase: podFailed, Message: "the agent never answered"}},
-			want: "the agent never answered",
-		},
-		{
-			name: "a failure with a reason alone",
-			pod:  &Pod{Status: PodStatus{Phase: podFailed, Reason: "Evicted"}},
-			want: "Evicted",
-		},
-		{
-			name: "a failure the kubelet did not explain",
-			pod:  &Pod{Status: PodStatus{Phase: podFailed}},
-			want: "the kubelet gave no reason",
-		},
+		{name: "no job yet", job: nil, want: ""},
+		{name: "a running job", job: &running, want: ""},
+		{name: "a job that succeeded after a retry", job: &done, want: ""},
+		{name: "a job that gave up", job: &failed, want: "movies-cleanup failed after 2 attempts"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := cleanupBlocker(one.pod)
+			got := cleanupBlocker(one.job)
 			if one.want == "" {
 				if got != "" {
 					t.Errorf("blocker = %q, want none", got)

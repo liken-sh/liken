@@ -6,9 +6,10 @@ package main
 // pod's own search path resolves the name to the Service in the pod's
 // namespace, in service.go.
 //
-// that Service names no selector, so this operator writes the slice
-// behind it, over the scanner pods and the screen pods of that namespace and
-// no others. So an agent joins its namespace's cluster and no other.
+// That Service names no selector, so this operator writes the
+// slice behind it, over the pods of that namespace that carry the
+// member label and no others. So an agent joins its namespace's cluster
+// and no other.
 
 import (
 	"context"
@@ -52,7 +53,7 @@ const (
 
 // The EndpointSlice, in the same hand-written form as the other
 // objects. Endpoints and ports carry no omitempty, because an empty
-// endpoints list is the state of a cluster with no scanner pod, and it
+// endpoints list is the state of a namespace with no member pod, and it
 // must reach the API server as a list and not as null.
 type EndpointSlice struct {
 	APIVersion  string         `json:"apiVersion,omitempty"`
@@ -99,26 +100,30 @@ type EndpointPort struct {
 	Port     int32  `json:"port"`
 }
 
-// BuildCatalogEndpoints builds the slice for one namespace. It is a
-// function of the namespace, the owners, and the pods alone, so two passes
-// over the same cluster build the same object. The pass hands in every scanner
-// pod and every screen pod in the cluster, and this reads only the ones in its
-// namespace, which is what keeps one namespace's agents out of another's
-// cluster. Both kinds are peers: a screen's agent gossips like a scanner's, so
-// a screen is a bootstrap peer for the next screen when no scanner is up. A
-// pod with no address is not a peer yet, and a pod with a deletion timestamp
-// is a peer no longer. The endpoints sort by address, so the order the lists
-// arrived in never counts as a divergence. The namespace's one Catalog owns
-// the slice, so the garbage collector removes it with that Catalog.
-func buildCatalogEndpoints(namespace string, owners []OwnerReference, scanners, screens []Pod) *EndpointSlice {
+// BuildCatalogEndpoints builds the slice for one namespace. It
+// is a function of the namespace, the owners, and the pods alone, so
+// two passes over the same cluster build the same object. The pass
+// hands in every pod in the cluster that carries the member label, and
+// this reads only the ones in its namespace, which is what keeps one
+// namespace's agents out of another's cluster. Every kind is a peer:
+// the standing catalog pod, a Job's pod for the length of its run, and
+// a screen pod. A pod with no address is not a peer yet, a pod with a
+// deletion timestamp is a peer no longer, and a pod that has finished
+// gossips no more. The endpoints sort by address, so the order the list
+// arrived in never counts as a divergence. The namespace's one Catalog
+// owns the slice, so the garbage collector removes it with that
+// Catalog.
+func buildCatalogEndpoints(namespace string, owners []OwnerReference, members []Pod) *EndpointSlice {
 	endpoints := []Endpoint{}
-	peers := slices.Concat(scanners, screens)
-	for index := range peers {
-		pod := &peers[index]
+	for index := range members {
+		pod := &members[index]
 		if pod.Metadata.Namespace != namespace {
 			continue
 		}
 		if pod.Status.PodIP == "" || pod.Metadata.DeletionTimestamp != "" {
+			continue
+		}
+		if pod.Status.Phase == podSucceeded || pod.Status.Phase == podFailed {
 			continue
 		}
 		endpoints = append(endpoints, Endpoint{
@@ -168,8 +173,8 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, scanners, 
 // instead of being overwritten. A conflict on the create means another
 // writer got there first, which is success: the next pass reads what
 // that writer wrote.
-func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, owners []OwnerReference, scanners, screens []Pod) error {
-	desired := buildCatalogEndpoints(namespace, owners, scanners, screens)
+func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, owners []OwnerReference, members []Pod) error {
+	desired := buildCatalogEndpoints(namespace, owners, members)
 
 	live, err := GetEndpointSlice(ctx, o.client, namespace, catalogServiceName)
 	if errors.Is(err, ErrNotFound) {
@@ -194,7 +199,7 @@ func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, 
 // SameEndpoints compares only what this operator states: the owners,
 // the endpoints, and the ports. It compares the counts first, so an
 // absent list and an empty list read as the same thing. A namespace
-// with no scanner pod leaves an absent list behind, and without this
+// with no member pod leaves an absent list behind, and without this
 // rule it would be rewritten every pass.
 func sameEndpoints(live, desired *EndpointSlice) bool {
 	if !slices.Equal(live.Metadata.OwnerReferences, desired.Metadata.OwnerReferences) {

@@ -18,27 +18,19 @@ import (
 	"time"
 )
 
-// ReconcileCatalogs stands each namespace's catalog cluster from its one
-// Catalog. The catalog Service and EndpointSlice are owned by the Catalog,
-// which is their real owner: they describe the namespace's one Corrosion
-// cluster. A namespace with more than one Catalog marks every Catalog in
-// it Blocked and stands nothing new. A failure in one namespace is
-// reported, and the rest still stand.
-func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string][]*NamespaceCatalog) {
-	pods, err := ListScannerPods(ctx, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing scanner pods: %v\n", err)
-		return
-	}
-	// The screen pods are peers of the same cluster, so the slice each
-	// namespace stands carries both kinds. A list that fails ends the step,
-	// because a slice written without the screens would drop peers that are up.
-	screens, err := ListScreenPods(ctx, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing screen pods: %v\n", err)
-		return
-	}
-	now := time.Now().UTC()
+// ReconcileCatalogs stands each namespace's catalog cluster from
+// its one Catalog: the pod that holds the durable catalog and reports
+// it, the claim under that pod, and the Service and EndpointSlice the
+// agents find each other through. All four are owned by the Catalog,
+// which is their real owner: they describe the namespace's one
+// Corrosion cluster. A namespace with more than one Catalog marks every
+// Catalog in it Blocked and stands nothing new. A failure in one
+// namespace is reported, and the rest still stand.
+//
+// The members the pass hands in are every pod that holds a catalog
+// agent, read once for the whole pass: the catalog pod, the pods of the
+// Jobs that are running, and the screen pods.
+func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string][]*NamespaceCatalog, members []Pod, now time.Time) {
 	for _, namespace := range slices.Sorted(maps.Keys(byNamespace)) {
 		catalogs := byNamespace[namespace]
 		if len(catalogs) != 1 {
@@ -52,13 +44,20 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		}
 		catalog := catalogs[0]
 		owners := []OwnerReference{catalogObjectOwner(catalog)}
+		// The pod is stood before the status is written, so a Catalog
+		// that has just been created reports its own pod on the pass
+		// that made it rather than one tick later.
+		pod, err := o.standCatalogPod(ctx, catalog)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "standing the catalog pod in %s: %v\n", namespace, err)
+		}
 		if err := o.standCatalogService(ctx, namespace, owners); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog service in %s: %v\n", namespace, err)
 		}
-		if err := o.standCatalogEndpoints(ctx, namespace, owners, pods.Items, screens.Items); err != nil {
+		if err := o.standCatalogEndpoints(ctx, namespace, owners, members); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog endpoints in %s: %v\n", namespace, err)
 		}
-		if err := o.writeCatalogStatus(ctx, catalog, standingCatalogStatus(catalog, pods.Items, now)); err != nil {
+		if err := o.writeCatalogStatus(ctx, catalog, standingCatalogStatus(catalog, pod, members, now)); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the catalog status in %s: %v\n", namespace, err)
 		}
 	}
@@ -78,10 +77,13 @@ func catalogObjectOwner(catalog *NamespaceCatalog) OwnerReference {
 	}
 }
 
-// StandingCatalogStatus reports the cluster the Catalog stands: its member
-// agent pods and the storage size the agents were given, with a Ready
-// condition.
-func standingCatalogStatus(catalog *NamespaceCatalog, pods []Pod, now time.Time) CatalogStatus {
+// StandingCatalogStatus reports the cluster the Catalog stands:
+// every member agent pod of the namespace and the storage size the
+// agents were given. Ready follows the catalog pod alone, because that
+// pod is what holds the durable catalog and reports it; a Job's pod
+// comes and goes and a screen pod holds a copy, so neither decides
+// whether the namespace's catalog stands.
+func standingCatalogStatus(catalog *NamespaceCatalog, pod *Pod, pods []Pod, now time.Time) CatalogStatus {
 	members := catalogMembers(catalog.Metadata.Namespace, pods)
 	condition := Condition{
 		Type:               catalogConditionReady,
@@ -89,6 +91,11 @@ func standingCatalogStatus(catalog *NamespaceCatalog, pods []Pod, now time.Time)
 		ObservedGeneration: catalog.Metadata.Generation,
 		Reason:             catalogReasonStanding,
 		Message:            fmt.Sprintf("the namespace catalog stands with %d member agents", len(members)),
+	}
+	if reason, message := catalogPodBlocker(pod); reason != "" {
+		condition.Status = ConditionFalse
+		condition.Reason = reason
+		condition.Message = message
 	}
 	return CatalogStatus{
 		Members:     members,
@@ -114,9 +121,9 @@ func blockedCatalogStatus(catalog *NamespaceCatalog, catalogs []*NamespaceCatalo
 	}
 }
 
-// CatalogMembers is the member agent pods of the namespace's cluster: the
-// scanner pods in the namespace, by name, sorted so two passes read the same
-// list.
+// CatalogMembers is the member agent pods of the namespace's
+// cluster: the catalog pod, the pods of the Jobs that are running, and
+// the screen pods, by name, sorted so two passes read the same list.
 func catalogMembers(namespace string, pods []Pod) []string {
 	members := []string{}
 	for index := range pods {

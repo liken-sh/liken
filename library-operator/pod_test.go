@@ -1,12 +1,11 @@
 package main
 
-// These tests read the pod the operator would send to the API server.
-// The pod is the whole of what a Library becomes at run time, so what
-// it carries is worth reading field by field: the mount that makes the
-// volume read-only, the environment the scanner learns its Library
-// from, and the address the catalog agent gossips on. The four pod
-// requests the client makes are tested here too, beside the pod they
-// carry.
+// what these tests read: the pod template a scan Job runs. It is the
+// whole of what a Library becomes at run time, so what it carries is
+// worth reading field by field: the mount that makes the volume
+// read-only, the environment the scanner learns its Library from, and
+// the address the catalog agent gossips on. The pod requests the client
+// makes are tested here too.
 
 import (
 	"net/http"
@@ -42,48 +41,49 @@ func studioMovies() *Library {
 	}
 }
 
-func testScannerPod(library *Library) *Pod {
-	return buildScannerPod(library, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+// TestScanPod is the pod a scan Job would run, as a Pod, so the tests
+// below read one object the way the kubelet would.
+func testScanPod(library *Library) *Pod {
+	return scanPodOf(library, "")
 }
 
-// The pod's name, namespace, owner, and marks are what tie it to the
-// Library: the owner reference is the whole teardown, and the labels
-// are what the pod watch and a person's kubectl select on.
-func TestScannerPodBelongsToItsLibrary(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+func scanPodOf(library *Library, path string) *Pod {
+	template := scanPodTemplate(library, path,
+		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+	return &Pod{Metadata: template.Metadata, Spec: template.Spec}
+}
 
-	if pod.Metadata.Name != "movies-scanner" {
-		t.Errorf("name = %q, want movies-scanner", pod.Metadata.Name)
+// the marks are what tie the pod to its Library: the name label one
+// list of this operator's Jobs selects on, the library and worker it
+// belongs to, and the member label that makes its agent a peer of the
+// namespace's catalog cluster.
+func TestScanPodCarriesItsLibrarysMarks(t *testing.T) {
+	labels := testScanPod(studioMovies()).Metadata.Labels
+
+	want := map[string]string{
+		scannerLabelKey: workerLabelValue,
+		libraryLabelKey: "movies",
+		workerLabelKey:  workerScan,
+		memberLabelKey:  memberLabelValue,
 	}
-	if pod.Metadata.Namespace != "house" {
-		t.Errorf("namespace = %q, want house", pod.Metadata.Namespace)
+	for key, value := range want {
+		if labels[key] != value {
+			t.Errorf("labels[%s] = %q, want %q", key, labels[key], value)
+		}
 	}
-	if len(pod.Metadata.OwnerReferences) != 1 {
-		t.Fatalf("ownerReferences = %v, want one", pod.Metadata.OwnerReferences)
-	}
-	owner := pod.Metadata.OwnerReferences[0]
-	if owner.APIVersion != libraryAPIVersion || owner.Kind != "Library" {
-		t.Errorf("owner = %+v, want the Library kind", owner)
-	}
-	if owner.Name != "movies" || owner.UID != "library-uid" || !owner.Controller {
-		t.Errorf("owner = %+v, want the controlling Library movies", owner)
-	}
-	if pod.Metadata.Labels[scannerLabelKey] != scannerLabelValue {
-		t.Errorf("labels = %v, want the scanner name label", pod.Metadata.Labels)
-	}
-	if pod.Metadata.Labels[libraryLabelKey] != "movies" {
-		t.Errorf("labels = %v, want the library label", pod.Metadata.Labels)
+	if len(labels) != len(want) {
+		t.Errorf("labels = %v, want exactly %d", labels, len(want))
 	}
 }
 
-// A scanner is a standing service, so the pod restarts in place, and
+// a Job's pod runs to completion, so it never restarts in place, and
 // the grace period is long enough for the catalog agent to finish its
 // exit.
-func TestScannerPodStandsAndStopsSlowly(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+func TestScanPodRunsToCompletionAndStopsSlowly(t *testing.T) {
+	pod := testScanPod(studioMovies())
 
-	if pod.Spec.RestartPolicy != "Always" {
-		t.Errorf("restartPolicy = %q, want Always", pod.Spec.RestartPolicy)
+	if pod.Spec.RestartPolicy != "Never" {
+		t.Errorf("restartPolicy = %q, want Never", pod.Spec.RestartPolicy)
 	}
 	if pod.Spec.TerminationGracePeriodSeconds == nil {
 		t.Fatal("terminationGracePeriodSeconds is unset")
@@ -100,7 +100,7 @@ func TestScannerPodStandsAndStopsSlowly(t *testing.T) {
 // The scanner runs this same image in its scan role, mounts the claim
 // read-only, and learns its Library from the environment alone.
 func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+	pod := testScanPod(studioMovies())
 
 	scanner := pod.Spec.Containers[0]
 	if scanner.Name != scannerContainer {
@@ -129,23 +129,61 @@ func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	}
 }
 
-// The scanner container declares the webhook port, so a person who reads the
-// pod finds the port the Service sends to.
-func TestScannerContainerDeclaresTheWebhookPort(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+// no container in a worker pod answers on a port. The webhook is on the
+// operator now, and the catalog agent's API is loopback only.
+func TestScanPodDeclaresNoPort(t *testing.T) {
+	pod := testScanPod(studioMovies())
 
-	scanner := pod.Spec.Containers[0]
-	want := ContainerPort{Name: webhookPortName, ContainerPort: webhookPort, Protocol: webhookPortProtocol}
-	if len(scanner.Ports) != 1 || scanner.Ports[0] != want {
-		t.Errorf("ports = %+v, want %+v", scanner.Ports, want)
+	for _, container := range append(append([]Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
+		if len(container.Ports) != 0 {
+			t.Errorf("%s declares %+v, want no port", container.Name, container.Ports)
+		}
 	}
-	if catalog := pod.Spec.InitContainers[0]; len(catalog.Ports) != 0 {
-		t.Errorf("the catalog agent declares %+v, want no port", catalog.Ports)
+}
+
+// the Job's own name reaches the scanner through the downward API,
+// because the scanner writes that name into the runs row the reporter
+// echoes back.
+func TestScannerContainerReadsItsJobName(t *testing.T) {
+	scanner := testScanPod(studioMovies()).Spec.Containers[0]
+
+	for _, variable := range scanner.Env {
+		if variable.Name != jobNameVariable {
+			continue
+		}
+		if variable.ValueFrom == nil || variable.ValueFrom.FieldRef == nil {
+			t.Fatalf("%s = %+v, want a field reference", jobNameVariable, variable)
+		}
+		want := "metadata.labels['batch.kubernetes.io/job-name']"
+		if variable.ValueFrom.FieldRef.FieldPath != want {
+			t.Errorf("fieldPath = %q, want %q", variable.ValueFrom.FieldRef.FieldPath, want)
+		}
+		return
+	}
+	t.Fatalf("env = %+v, want %s", scanner.Env, jobNameVariable)
+}
+
+// a folder scan carries the one path to rescan, and a full walk carries
+// an empty one.
+func TestScannerContainerCarriesTheScanPath(t *testing.T) {
+	cases := []struct{ name, path string }{
+		{name: "a full walk", path: ""},
+		{name: "one folder", path: "/library/movies/Arrival (2016)"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			pod := scanPodOf(studioMovies(), one.path)
+
+			got := containerEnvironment(pod.Spec.Containers[0])
+			if got[scanPathVariable] != one.path {
+				t.Errorf("%s = %q, want %q", scanPathVariable, got[scanPathVariable], one.path)
+			}
+		})
 	}
 }
 
 func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+	pod := testScanPod(studioMovies())
 
 	want := map[string]string{
 		libraryNamespaceVariable: "house",
@@ -156,6 +194,8 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		topicBaseVariable:        defaultTopicBase,
 		catalogAPIVariable:       defaultCatalogAPI,
 		libraryIgnoreVariable:    "null",
+		scanPathVariable:         "",
+		jobNameVariable:          "",
 	}
 	got := containerEnvironment(pod.Spec.Containers[0])
 	for name, value := range want {
@@ -174,7 +214,7 @@ func TestScannerContainerPrefersTheSettingsImage(t *testing.T) {
 	library := studioMovies()
 	library.Spec.Movies.Image = "registry.example/my-scanner:1"
 
-	pod := testScannerPod(library)
+	pod := testScanPod(library)
 
 	if pod.Spec.Containers[0].Image != "registry.example/my-scanner:1" {
 		t.Errorf("image = %q, want the settings block's own", pod.Spec.Containers[0].Image)
@@ -187,7 +227,7 @@ func TestScannerContainerCarriesTheIgnoreList(t *testing.T) {
 	library := studioMovies()
 	library.Spec.Ignore = []string{"#recycle", ".incoming"}
 
-	pod := testScannerPod(library)
+	pod := testScanPod(library)
 
 	got := containerEnvironment(pod.Spec.Containers[0])
 	if got[libraryIgnoreVariable] != `["#recycle",".incoming"]` {
@@ -200,7 +240,7 @@ func TestScannerContainerCarriesTheIgnoreList(t *testing.T) {
 // downward API reads it into POD_IP and the gossip address is built
 // from that variable.
 func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+	pod := testScanPod(studioMovies())
 
 	catalog := catalogSidecarOf(t, pod)
 	if catalog.Image != testCorrosionImage {
@@ -226,12 +266,12 @@ func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
 	}
 }
 
-// The catalog agent writes its database on a durable claim, so a pod
-// that rolls starts from the catalog its claim holds rather than
-// re-syncing the whole namespace over gossip. The claim is mounted
-// writable, and it is the Library's own catalog claim.
+// the catalog agent writes its database on a durable claim, so a run
+// starts from the catalog its claim holds rather than re-syncing the
+// whole namespace over gossip. The claim is mounted writable, and it is
+// the Library's own catalog claim.
 func TestCatalogContainerWritesToItsDurableClaim(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+	pod := testScanPod(studioMovies())
 
 	catalog := catalogSidecarOf(t, pod)
 	if len(catalog.VolumeMounts) != 1 {
@@ -253,13 +293,13 @@ func TestCatalogContainerWritesToItsDurableClaim(t *testing.T) {
 	}
 }
 
-// The catalog agent is a native sidecar: an initContainer with
+// the catalog agent is a native sidecar: an initContainer with
 // restartPolicy Always, so the kubelet starts it and passes its
 // startupProbe before it starts the scanner. The scanner is the only
 // ordinary container, so its first walk cannot race a catalog API that
 // is not listening.
 func TestCatalogContainerIsANativeSidecar(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+	pod := testScanPod(studioMovies())
 
 	if len(pod.Spec.InitContainers) != 1 {
 		t.Fatalf("initContainers = %v, want the catalog agent alone", pod.Spec.InitContainers)
@@ -276,13 +316,13 @@ func TestCatalogContainerIsANativeSidecar(t *testing.T) {
 	}
 }
 
-// The startupProbe and the livenessProbe run a query inside the
+// the startupProbe and the livenessProbe run a query inside the
 // container, because the catalog agent's API binds loopback alone and
 // nothing the kubelet dials over the pod network reaches it. The
-// startupProbe gates the scanner's start, and the livenessProbe covers
+// startupProbe gates the worker's start, and the livenessProbe covers
 // the agent's running life.
 func TestCatalogContainerProbesWithAnExecQuery(t *testing.T) {
-	catalog := catalogSidecarOf(t, testScannerPod(studioMovies()))
+	catalog := catalogSidecarOf(t, testScanPod(studioMovies()))
 
 	cases := []struct {
 		name             string
@@ -316,7 +356,7 @@ func TestCatalogContainerProbesWithAnExecQuery(t *testing.T) {
 
 // Neither container needs a capability, and neither may gain one.
 func TestBothContainersDropEveryCapability(t *testing.T) {
-	pod := testScannerPod(studioMovies())
+	pod := testScanPod(studioMovies())
 	both := append(append([]Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...)
 	for _, container := range both {
 		t.Run(container.Name, func(t *testing.T) {
@@ -334,7 +374,7 @@ func TestBothContainersDropEveryCapability(t *testing.T) {
 	}
 }
 
-// The scanner walks a volume and the catalog agent holds a database,
+// the scanner walks a volume and the catalog agent holds a database,
 // so the two ask for different room. The requests are what the
 // scheduler places the pod by, and the limits are what the kubelet
 // holds each container to.
@@ -347,7 +387,7 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 		{container: scannerContainer, cpuRequest: "10m", memoryLimit: "64Mi"},
 		{container: catalogContainer, cpuRequest: "10m", memoryLimit: "512Mi"},
 	}
-	pod := testScannerPod(studioMovies())
+	pod := testScanPod(studioMovies())
 	for _, one := range cases {
 		t.Run(one.container, func(t *testing.T) {
 			resources := podContainer(t, pod, one.container).Resources
@@ -412,25 +452,25 @@ func containerEnvironment(container Container) map[string]string {
 	return environment
 }
 
-// One list answers every namespace, and the label selector is what
-// keeps the answer to this operator's own pods.
-func TestListScannerPodsSelectsTheOperatorsOwnPods(t *testing.T) {
+// one list answers every namespace, and the member label is what keeps
+// the answer to the pods that hold a catalog agent.
+func TestListCatalogMemberPodsSelectsEveryAgentPod(t *testing.T) {
 	client, recorded := recordingAPI(t, PodList{
 		Metadata: ListMeta{ResourceVersion: "88"},
-		Items:    []Pod{{Metadata: ObjectMeta{Name: "movies-scanner", Namespace: "house"}}},
+		Items:    []Pod{{Metadata: ObjectMeta{Name: "house-catalog-catalog", Namespace: "house"}}},
 	})
 
-	list, err := ListScannerPods(t.Context(), client)
+	list, err := ListCatalogMemberPods(t.Context(), client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	expectRequest(t, recorded, http.MethodGet, "/api/v1/pods")
-	if got := recorded.query.Get("labelSelector"); got != "app.kubernetes.io/name=library-scanner" {
-		t.Errorf("labelSelector = %q, want the scanner selector", got)
+	if got := recorded.query.Get("labelSelector"); got != "library.liken.sh/catalog=member" {
+		t.Errorf("labelSelector = %q, want the member selector", got)
 	}
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "movies-scanner" {
-		t.Errorf("items = %+v, want the one scanner pod the server answered", list.Items)
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house-catalog-catalog" {
+		t.Errorf("items = %+v, want the one pod the server answered", list.Items)
 	}
 }
 
@@ -463,7 +503,7 @@ func TestCreatePodPostsIntoTheLibrarysNamespace(t *testing.T) {
 		Metadata: ObjectMeta{
 			Name:      "movies-scanner",
 			Namespace: "house",
-			Labels:    map[string]string{scannerLabelKey: scannerLabelValue},
+			Labels:    map[string]string{scannerLabelKey: catalogLabelValue},
 		},
 	})
 	if err != nil {

@@ -1,9 +1,11 @@
 A `Library` is one root directory on one volume, holding media of one
 kind. It names a `PersistentVolumeClaim` in its namespace, a directory
 inside it, and the kind that directory holds. The operator reconciles
-it into one scanner pod, which walks the volume into the catalog, and
-it reports back what the scanner found: how many titles, how many
-folders it could not identify, and when it last walked.
+it into a `CronJob` whose `Job`s walk the volume into the namespace's
+catalog, and it reports back what the catalog holds: how many titles,
+how many folders the walk could not identify, and when it last walked.
+An import can rescan one folder at once through the webhook address in
+the status.
 
 A namespace may hold many libraries, of any mix of kinds, and one
 volume may hold several libraries, each with its own root. The kind

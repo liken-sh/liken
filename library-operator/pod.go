@@ -1,29 +1,23 @@
 package main
 
-// The scanner pod is what a Library becomes at run time: one pod per
-// Library, in the Library's namespace, owned by it. Deleting the
-// Library starts the departure in depart.go: the operator's
-// finalizer holds the object while a cleanup pod takes this pod's
-// place and sweeps the library's rows out of the namespace's
-// catalog. Then the garbage collector takes every owned object with
-// its owner.
-//
-// The pod holds two containers. The scanner walks the volume and
-// reports what it holds over the bus, and the catalog agent holds the
-// catalog the scanner writes and replicates it to the pods that read
-// it. They share the pod because they share a loopback address and a
-// lifetime: the catalog an agent holds describes the volume its own
-// scanner walks.
+// The containers every pod this operator builds is made of, and
+// the pod template a scan Job runs. A worker pod holds two containers:
+// the worker itself, and a Corrosion agent of its own as a native
+// sidecar. They share the pod because they share a loopback address and
+// a lifetime: no agent answers on the network, so a worker that writes
+// the catalog carries the agent that holds it.
 
-// The two containers, and the pod-local names of the two volumes they
+// The containers, and the pod-local names of the two volumes they
 // mount. The container names reach a person through kubectl logs, so
 // they say what the container does rather than what it runs.
 
 import "encoding/json"
 
 const (
-	scannerContainer = "scanner"
-	catalogContainer = "catalog"
+	scannerContainer  = "scanner"
+	catalogContainer  = "catalog"
+	cleanupContainer  = "cleanup"
+	reporterContainer = "reporter"
 
 	libraryVolumeName = "library"
 	catalogVolumeName = "catalog"
@@ -73,8 +67,7 @@ const catalogBinary = "/corrosion"
 
 // ScannerGracePeriod is how long the kubelet waits between the SIGTERM
 // and the kill. A busy catalog agent flushes its database on the way
-// out, so the pod asks for a minute rather than the default 30
-// seconds.
+// out, so a pod asks for a minute rather than the default 30 seconds.
 const scannerGracePeriod = 60
 
 // The room each container asks for. The requests are what the
@@ -97,82 +90,61 @@ const (
 	catalogMemoryLimit   = "512Mi"
 )
 
-// ScannerPodName is the pod one Library becomes. The name is derived
-// rather than generated, so every pass names the same pod and the
-// operator needs no record of what it created.
-func scannerPodName(library string) string {
-	return library + "-scanner"
+// The pod a scan Job runs: the scanner beside a Corrosion agent
+// on the Library's own catalog claim, with the library volume mounted
+// read-only. It is a function of the Library, the scan path, and the
+// operator's own settings alone, so two passes build the same template,
+// which is what makes the template hash mean anything.
+func scanPodTemplate(library *Library, scanPath, scannerImage, corrosionImage, busAddress, topicBase string) PodTemplateSpec {
+	template := workerPodTemplate(library, workerScan,
+		scannerSidecar(library, scanPath, scannerImage, busAddress, topicBase), corrosionImage)
+	// The library volume is the scanner's alone; the cleanup worker
+	// reads no media, so it mounts none.
+	template.Spec.Volumes = append(template.Spec.Volumes, Volume{
+		Name: libraryVolumeName,
+		PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
+			ClaimName: library.Spec.Storage.Claim,
+			ReadOnly:  true,
+		},
+	})
+	return template
 }
 
-// BuildScannerPod writes the pod one Library becomes. It is a function
-// of the Library and the operator's own settings alone, so two passes
-// over an unchanged Library build the same pod, which is what makes
-// the template hash mean anything.
-func buildScannerPod(library *Library, scannerImage, corrosionImage, busAddress, topicBase string) *Pod {
+// The pod shape both workers share: one worker container, the
+// catalog agent beside it on the Library's catalog claim, and no
+// Kubernetes credential.
+func workerPodTemplate(library *Library, worker string, container Container, corrosionImage string) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
-	// The scanner holds no Kubernetes credential: it reports over the
-	// bus, and the operator alone writes the status. Without this the
-	// kubelet would mount the namespace's default ServiceAccount token
-	// into both containers, a credential nothing in the pod should hold.
+	// A worker holds no Kubernetes credential: it writes the catalog
+	// through the agent beside it, and the operator alone writes the
+	// status. Without this the kubelet would mount the namespace's
+	// default ServiceAccount token into both containers.
 	noToken := false
-	return &Pod{
-		APIVersion: podAPIVersion,
-		Kind:       "Pod",
+	return PodTemplateSpec{
 		Metadata: ObjectMeta{
-			Name:            scannerPodName(library.Metadata.Name),
-			Namespace:       library.Metadata.Namespace,
-			Labels:          scannerLabels(library.Metadata.Name),
-			OwnerReferences: []OwnerReference{libraryOwner(library)},
+			Labels: withMemberLabel(workerLabels(library.Metadata.Name, worker)),
 		},
 		Spec: PodSpec{
-			// A scanner is a standing service and not a run to
-			// completion, so the kubelet restarts a container that
-			// exits rather than letting the pod end.
-			RestartPolicy:                 "Always",
+			// Never, because a Job's pod runs to completion, and a
+			// restart in place would hide the failure the Job reports.
+			RestartPolicy:                 "Never",
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,
-			// The catalog agent is a native sidecar in
-			// initContainers, so the kubelet starts it and passes its
-			// startupProbe before it starts the scanner. The scanner's
-			// first walk then cannot reach a catalog API that is not
-			// listening. A native sidecar shares the pod's network and
-			// volumes like any container, so the scanner still writes the
-			// agent on the pod's loopback and both still mount the catalog
-			// volume.
 			InitContainers: []Container{
 				catalogSidecar(corrosionImage),
 			},
-			Containers: []Container{
-				scannerSidecar(library, scannerImage, busAddress, topicBase),
-			},
+			Containers: []Container{container},
 			Volumes: []Volume{
-				{
-					Name: libraryVolumeName,
-					PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-						ClaimName: library.Spec.Storage.Claim,
-						ReadOnly:  true,
-					},
-				},
-				// The catalog agent's state is on a durable claim, not an
-				// emptyDir. The claim survives a pod roll, so the next pod
-				// starts from the catalog it holds rather than re-syncing the
-				// whole namespace over gossip.
+				// The agent's state is the Library's own durable claim.
+				// It keeps the agent's actor id and its rows between
+				// runs, so a run syncs a delta rather than the whole
+				// namespace, and its ReadWriteOnce is what serializes
+				// one library's workers.
 				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
 					ClaimName: scannerCatalogClaimName(library.Metadata.Name),
 				}},
 			},
 		},
-	}
-}
-
-// ScannerLabels is the label pair that names one Library's scanner pod. The
-// pod carries them, the webhook Service selects on them, and the catalog
-// claim is marked with them, so all three read one function and no two of
-// them can drift apart.
-func scannerLabels(library string) map[string]string {
-	return map[string]string{
-		scannerLabelKey: scannerLabelValue,
-		libraryLabelKey: library,
 	}
 }
 
@@ -199,7 +171,12 @@ func libraryOwner(library *Library) OwnerReference {
 // alone, because it holds no API credential to look one up with. The
 // claim is mounted read-only, so a scanner cannot write to the media
 // volume whatever it does.
-func scannerSidecar(library *Library, image, busAddress, topicBase string) Container {
+//
+// An empty scan path is a full walk, and a path names the one
+// folder to rescan; the Job's own name arrives through the downward
+// API, because the scanner writes it into the runs row the reporter
+// echoes back.
+func scannerSidecar(library *Library, scanPath, image, busAddress, topicBase string) Container {
 	if settings := library.Spec.settings(); settings != nil && settings.Image != "" {
 		image = settings.Image
 	}
@@ -219,12 +196,10 @@ func scannerSidecar(library *Library, image, busAddress, topicBase string) Conta
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: libraryIgnoreVariable, Value: string(ignore)},
-		},
-		// The port the scanner's webhook listens on, declared so a
-		// person who reads the pod finds it. The Service in
-		// webhookservice.go states the same number and the same name.
-		Ports: []ContainerPort{
-			{Name: webhookPortName, ContainerPort: webhookPort, Protocol: webhookPortProtocol},
+			{Name: scanPathVariable, Value: scanPath},
+			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
+				FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
+			}},
 		},
 		VolumeMounts: []VolumeMount{
 			{Name: libraryVolumeName, MountPath: libraryMountPath, ReadOnly: true},

@@ -24,6 +24,9 @@ func main() {
 		case cleanupMode:
 			runCleanup()
 			return
+		case reportMode:
+			runReport()
+			return
 		}
 	}
 

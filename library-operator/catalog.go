@@ -316,10 +316,12 @@ func (c *Catalog) DeleteAliases(ctx context.Context, library string, aliases []s
 	return c.apply(ctx, deleteByKey("aliases", "alias", library, aliases))
 }
 
-// The seven replicated tables of the schema: the set a whole-library
-// read and a whole-library sweep both cover. A table added to the
-// schema is one entry here, and both reach it.
-var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files"}
+// The replicated tables of the schema: the set the read of every
+// library the catalog holds covers. A table added to the schema is one
+// entry here. The runs table is one of them, so a library that has lost
+// every item row but whose last Job wrote a run is still a library the
+// reporter reports on.
+var catalogTables = []string{"aliases", "movies", "sets", "series", "episodes", "file_items", "files", "runs"}
 
 // DeleteFileItems names all three columns of the link row, because all
 // three are the primary key. A delete by fewer would take every other

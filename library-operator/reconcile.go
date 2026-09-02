@@ -1,12 +1,13 @@
 package main
 
-// One pass over one Library: resolve the storage it names, stand the
-// scanner pod it becomes, and write what both say into its status.
+// One pass over one Library: resolve the storage it names, stand
+// the schedule its full walk runs on, create a Job for every webhook
+// path it holds, and write what all of it says into its status.
 //
 // The order is the order of the conditions. A Library that names a
-// claim nothing has bound has no volume to mount, so it gets no pod,
-// and the Bound condition alone says why. Only a bound Library reaches
-// the pod.
+// claim nothing has bound has no volume to mount, so it gets no
+// schedule, and the Bound condition alone says why. Only a bound
+// Library reaches the CronJob.
 
 import (
 	"context"
@@ -35,10 +36,10 @@ type binding struct {
 // events arrived in.
 //
 // The catalog is a precondition beside the storage. A Library stands a
-// scanner pod only when its storage is bound and its namespace holds
-// exactly one Catalog, because the pod's catalog agent joins the cluster
-// the Catalog stands and takes a volume the Catalog sizes.
-func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice) error {
+// schedule only when its storage is bound and its namespace holds
+// exactly one Catalog, because every scan Job's catalog agent joins the
+// cluster the Catalog stands and takes a volume the Catalog sizes.
+func (o *operator) reconcile(ctx context.Context, library *Library, choice catalogChoice, jobs []Job, now time.Time) error {
 	if err := o.holdLibrary(ctx, library); err != nil {
 		return err
 	}
@@ -49,33 +50,33 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 	}
 
 	// A Library with no volume, or in a namespace with no single
-	// Catalog, gets no pod. There would be nothing to mount, or no
+	// Catalog, gets no schedule. There would be nothing to mount, or no
 	// cluster to join, and the Ready condition says which.
-	//
-	// It gets no webhook Service either. The Service selects the scanner
-	// pod, and an address with no pod behind it answers nothing.
-	var pod *Pod
-	if scannerStands(bound, choice) {
+	var cronJob *CronJob
+	if libraryStands(bound, choice) {
 		if err := o.standCatalogClaim(ctx, library, choice.catalog); err != nil {
 			return err
 		}
-		if err := o.standWebhookService(ctx, library); err != nil {
-			return err
-		}
-		desired := buildScannerPod(library, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
-		pod, err = o.standPod(ctx, desired)
+		cronJob, err = o.standScanCronJob(ctx, library)
 		if err != nil {
 			return err
 		}
-	} else if err := o.stopScannerPod(ctx, library); err != nil {
+		if err := o.serveHeldPaths(ctx, library, jobs, now); err != nil {
+			return err
+		}
+	} else if err := o.stopScanCronJob(ctx, library); err != nil {
 		return err
 	}
 
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
-	report := o.reports.latestFor(namespace, name)
-	online := o.reports.onlineFor(namespace, name)
-	return writeLibraryStatus(ctx, o.client, library,
-		deriveLibraryStatus(library, bound, choice, pod, report, online, time.Now().UTC()))
+	return writeLibraryStatus(ctx, o.client, library, deriveLibraryStatus(library, libraryObservation{
+		bound:             bound,
+		choice:            choice,
+		cronJob:           cronJob,
+		report:            o.reports.latestFor(namespace, name),
+		online:            o.reporters.onlineFor(namespace),
+		operatorNamespace: o.namespace,
+	}, now))
 }
 
 // HoldLibrary puts the finalizer on a Library that does not carry
@@ -111,21 +112,11 @@ func (o *operator) holdLibrary(ctx context.Context, library *Library) error {
 	return nil
 }
 
-// StopScannerPod removes the pod of a Library that no longer stands one.
-// The pass is level-triggered, so a Library whose claim or Catalog went
-// away loses its scanner on the next pass, rather than keeping a pod that
-// walks a volume the Library no longer reports. On every later pass the
-// pod is already absent, and an absent pod is success.
-func (o *operator) stopScannerPod(ctx context.Context, library *Library) error {
-	return DeletePod(ctx, o.client, library.Metadata.Namespace,
-		scannerPodName(library.Metadata.Name))
-}
-
-// ScannerStands reports the one condition a Library's scanner needs: its
+// LibraryStands reports the one condition a Library's scans need: its
 // storage is bound, and its namespace holds exactly one Catalog. The pass
 // reads it to create the objects, and the status derivation reads it to
 // report the webhook address, so the two cannot answer differently.
-func scannerStands(bound binding, choice catalogChoice) bool {
+func libraryStands(bound binding, choice catalogChoice) bool {
 	return bound.volume != nil && choice.catalog != nil
 }
 
@@ -207,12 +198,12 @@ func libraryVolume(volume *PersistentVolume) *LibraryVolume {
 // returns the pod that stands after it: the live pod when it matches the
 // template, the created pod when there was none, and nil when this pass
 // deleted a stale one or another writer created it first. Every pod this
-// operator stands and rebuilds goes through here: a Library's scanner pod and
-// a Player's screen pod both.
+// operator stands and rebuilds goes through here: a Catalog's catalog pod
+// and a Player's screen pod both.
 //
-// A Deployment finds a stale pod by stamping a hash of the template it
-// built and comparing that hash, never by comparing live specs,
-// because the API server defaults fields the builder never set and a
+// A Deployment finds a stale pod by stamping a hash of the
+// template it built and comparing that hash, never by comparing live
+// specs, because the API server defaults fields the builder never set and a
 // live comparison would either roll on every pass or grow a
 // field-by-field allowlist. This operator does the same with one
 // annotation on the pod it creates.
@@ -244,8 +235,8 @@ func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
 	// it completes, so one divergence causes one delete and not one
 	// delete per pass.
 	//
-	// this wait is also the ReadWriteOnce handoff for a scanner pod,
-	// whose catalog claim admits one pod at a time: the pass creates the
+	// this wait is also the ReadWriteOnce handoff for the catalog pod,
+	// whose claim admits one pod at a time: the pass creates the
 	// replacement only after the old pod releases the claim, which is the
 	// create on the not-found branch above. A screen pod's catalog is an
 	// emptyDir and needs no handoff.

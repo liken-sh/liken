@@ -42,8 +42,7 @@ type Service struct {
 
 // Selector is omitted where it is empty. The catalog Service must state no
 // selector, because a Service that states one takes its endpoints from the
-// API server in place of the slice this operator writes. The webhook Service
-// in webhookservice.go states one, and takes the API server's.
+// API server in place of the slice this operator writes.
 type ServiceSpec struct {
 	ClusterIP                string            `json:"clusterIP,omitempty"`
 	ClusterIPs               []string          `json:"clusterIPs,omitempty"`

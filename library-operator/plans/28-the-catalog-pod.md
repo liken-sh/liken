@@ -80,7 +80,7 @@ last write can leave those rows on its own claim until its next run.
   The per-`Library` webhook `Service` goes away with the scanner pod.
 - **`Library` status gains `runs`.** One entry per worker with the
   `Job`'s name and the time, from the reporter's message. `phase`
-  reads `Walking` while a scan `Job` runs.
+  reads `Scanning` while a scan `Job` runs, as it does today.
 - **Departure uses the same door.** A deleting `Library`'s cleanup
   runs as a `Job` on the library's claim, deletes the rows, writes its
   `runs` row, and waits for the standing pod to echo it. The

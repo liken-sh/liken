@@ -1,9 +1,9 @@
 package main
 
-// These tests read what a pass does with a namespace's Catalog: it
-// stands the catalog Service, the EndpointSlice, and the Catalog's own
-// status from the one Catalog, and it marks every Catalog Blocked when a
-// namespace holds more than one.
+// what these tests read: what a pass does with a namespace's Catalog.
+// It stands the catalog pod, the catalog Service, the EndpointSlice,
+// and the Catalog's own status from the one Catalog, and it marks every
+// Catalog Blocked when a namespace holds more than one.
 
 import (
 	"net/http"
@@ -16,17 +16,22 @@ func oneNamespace(namespace string, catalogs ...*NamespaceCatalog) map[string][]
 	return map[string][]*NamespaceCatalog{namespace: catalogs}
 }
 
-// A namespace with one Catalog stands the catalog Service and slice
-// owned by the Catalog, and the Catalog's status lists the member pods
-// and the storage size.
+// a namespace with one Catalog stands the catalog pod, its claim, the
+// catalog Service, and the slice, all owned by the Catalog, and the
+// Catalog's status lists the member pods and the storage size.
 func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	pod := scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1")
-	cluster.pods["movies-scanner"] = &pod
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog))
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{pod}, testNow)
 
+	if cluster.heldPod("house-catalog-catalog") == nil {
+		t.Fatal("the pass stood no catalog pod")
+	}
+	if cluster.heldClaim("house-catalog-catalog") == nil {
+		t.Fatal("the pass provisioned no claim for the catalog pod")
+	}
 	service := cluster.heldService("house", catalogServiceName)
 	if service == nil || len(service.Metadata.OwnerReferences) != 1 ||
 		service.Metadata.OwnerReferences[0].Name != "house-catalog" {
@@ -38,13 +43,54 @@ func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 	}
 	status := cluster.heldCatalog("house-catalog").Status
 	if len(status.Members) != 1 || status.Members[0] != "movies-scanner" {
-		t.Errorf("members = %v, want the scanner pod", status.Members)
+		t.Errorf("members = %v, want the member pod the pass read", status.Members)
 	}
 	if status.StorageSize != defaultCatalogSize {
 		t.Errorf("storageSize = %q, want the default", status.StorageSize)
 	}
-	if ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady); ready.Status != ConditionTrue {
-		t.Errorf("Ready = %+v, want True", ready)
+	// The pod was created on this pass, so the kubelet has said nothing
+	// about it and Ready reads PodPending.
+	ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
+	if ready.Status != ConditionFalse || ready.Reason != catalogReasonPodPending {
+		t.Errorf("Ready = %+v, want False with PodPending", ready)
+	}
+}
+
+// a Catalog that names a claim of its own mounts that claim, and the
+// operator provisions none.
+func TestReconcileCatalogsMountsTheClaimTheCatalogNames(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := seedCatalog(cluster, "house-catalog", "house")
+	catalog.Spec.Storage.ClaimName = "catalog-of-my-own"
+
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+
+	if cluster.heldClaim("house-catalog-catalog") != nil {
+		t.Error("the pass provisioned a claim over the one the Catalog names")
+	}
+	pod := cluster.heldPod("house-catalog-catalog")
+	if pod == nil {
+		t.Fatal("the pass stood no catalog pod")
+	}
+	source := podVolume(t, pod, catalogVolumeName).PersistentVolumeClaim
+	if source == nil || source.ClaimName != "catalog-of-my-own" {
+		t.Errorf("claim = %+v, want the one the Catalog names", source)
+	}
+}
+
+// a catalog pod the kubelet reports ready makes the Catalog Ready.
+func TestReconcileCatalogsIsReadyWhenTheCatalogPodIsUp(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := seedCatalog(cluster, "house-catalog", "house")
+	pod := readyCatalogPod("house-catalog", "house")
+	cluster.pods["house-catalog-catalog"] = pod
+
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{*pod}, testNow)
+
+	status := cluster.heldCatalog("house-catalog").Status
+	ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
+	if ready.Status != ConditionTrue || ready.Reason != catalogReasonStanding {
+		t.Errorf("Ready = %+v, want True with Standing", ready)
 	}
 }
 
@@ -56,7 +102,7 @@ func TestReconcileCatalogsMarksEveryCatalogBlockedWhenThereAreTwo(t *testing.T) 
 	first := seedCatalog(cluster, "first", "house")
 	second := seedCatalog(cluster, "second", "house")
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second))
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second), nil, testNow)
 
 	if cluster.heldService("house", catalogServiceName) != nil {
 		t.Error("the pass stood a catalog Service for a namespace with two Catalogs")
@@ -73,17 +119,17 @@ func TestReconcileCatalogsMarksEveryCatalogBlockedWhenThereAreTwo(t *testing.T) 
 	}
 }
 
-// A failure to list the scanner pods is reported and stands nothing,
-// because the members and the endpoints are read from that list.
-func TestReconcileCatalogsStopsWhenThePodsCannotBeListed(t *testing.T) {
+// a failure on one object is reported and the rest of the namespace
+// still stands, because one broken write must not cost the others.
+func TestReconcileCatalogsCarriesOnFromAFailedWrite(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
-	cluster.broken[podsAllPath] = http.StatusInternalServerError
+	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-catalog"] = http.StatusInternalServerError
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog))
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 
-	if cluster.heldService("house", catalogServiceName) != nil {
-		t.Error("the pass stood a catalog Service without the pods it needs")
+	if cluster.heldService("house", catalogServiceName) == nil {
+		t.Error("the pass stood no catalog Service after the pod failed")
 	}
 }
 
@@ -100,7 +146,7 @@ func TestCatalogObjectOwnerIsTheControllingCatalog(t *testing.T) {
 	}
 }
 
-// The standing status lists only the member pods of the Catalog's own
+// the standing status lists only the member pods of the Catalog's own
 // namespace, in name order, with the storage the agents were given.
 func TestStandingCatalogStatusReportsTheNamespacesMembers(t *testing.T) {
 	catalog := &NamespaceCatalog{
@@ -113,7 +159,7 @@ func TestStandingCatalogStatusReportsTheNamespacesMembers(t *testing.T) {
 		scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1"),
 	}
 
-	status := standingCatalogStatus(catalog, pods, testNow)
+	status := standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), pods, testNow)
 
 	want := []string{"movies-scanner", "shows-scanner"}
 	if len(status.Members) != 2 || status.Members[0] != want[0] || status.Members[1] != want[1] {
@@ -155,7 +201,7 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	seedCatalog(cluster, "house-catalog", "house")
 	operator := testOperator(t, cluster)
 	catalog := cluster.heldCatalog("house-catalog")
-	settled := standingCatalogStatus(catalog, nil, testNow)
+	settled := standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), nil, testNow)
 
 	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
 		t.Fatal(err)
@@ -195,13 +241,55 @@ func TestWriteCatalogStatusReadsAConflictAsSuccessAndReportsAFailure(t *testing.
 			operator := testOperator(t, cluster)
 			catalog := cluster.heldCatalog("house-catalog")
 
-			err := operator.writeCatalogStatus(t.Context(), catalog, standingCatalogStatus(catalog, nil, testNow))
+			err := operator.writeCatalogStatus(t.Context(), catalog,
+				standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), nil, testNow))
 
 			if testCase.wantErr && err == nil {
 				t.Fatal("err = nil, want the server's refusal")
 			}
 			if !testCase.wantErr && err != nil {
 				t.Fatalf("err = %v, want a conflict to read as success", err)
+			}
+		})
+	}
+}
+
+// Ready follows the catalog pod alone, and its reason names what the
+// pod is doing, so a person reads one object to find the namespace's
+// catalog.
+func TestStandingCatalogStatusFollowsTheCatalogPod(t *testing.T) {
+	failed := readyCatalogPod("house-catalog", "house")
+	failed.Status.Phase = podFailed
+	failed.Status.Reason = "Evicted"
+	starting := readyCatalogPod("house-catalog", "house")
+	starting.Status.ContainerStatuses[0].Ready = false
+
+	cases := []struct {
+		name   string
+		pod    *Pod
+		status ConditionStatus
+		reason string
+	}{
+		{name: "no pod yet", status: ConditionFalse, reason: catalogReasonPodPending},
+		{name: "a failed pod", pod: failed, status: ConditionFalse, reason: catalogReasonPodFailed},
+		{name: "a starting pod", pod: starting, status: ConditionFalse, reason: catalogReasonPodPending},
+		{
+			name: "a ready pod", pod: readyCatalogPod("house-catalog", "house"),
+			status: ConditionTrue, reason: catalogReasonStanding,
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			catalog := &NamespaceCatalog{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}
+
+			status := standingCatalogStatus(catalog, one.pod, nil, testNow)
+
+			ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
+			if ready.Status != one.status || ready.Reason != one.reason {
+				t.Errorf("Ready = %+v, want %s with %s", ready, one.status, one.reason)
+			}
+			if ready.Message == "" {
+				t.Error("the condition carries no message")
 			}
 		})
 	}

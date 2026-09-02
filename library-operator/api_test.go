@@ -46,7 +46,7 @@ func TestSetConditionMovesTheTimeOnlyWhenTheVerdictFlips(t *testing.T) {
 			standing: []Condition{
 				{Type: conditionReady, Status: ConditionTrue, Reason: reasonReady, LastTransitionTime: firstSeen},
 			},
-			written: Condition{Type: conditionReady, Status: ConditionFalse, Reason: reasonPodFailed},
+			written: Condition{Type: conditionReady, Status: ConditionFalse, Reason: reasonCatalogPending},
 			want:    laterSeen,
 		},
 		{

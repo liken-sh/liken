@@ -23,21 +23,29 @@ import (
 // Deployment can give it, and it names the one that is missing.
 func TestOperateRequiresItsEnvironment(t *testing.T) {
 	cases := []struct {
-		name    string
-		unset   string
-		scanner string
-		catalog string
-		browser string
-		bus     string
+		name      string
+		unset     string
+		scanner   string
+		catalog   string
+		browser   string
+		bus       string
+		namespace string
 	}{
 		{name: "no scanner image", unset: scannerImageVariable,
-			catalog: testCorrosionImage, browser: testBrowserImage, bus: testBusAddress},
+			catalog: testCorrosionImage, browser: testBrowserImage, bus: testBusAddress,
+			namespace: testOperatorNamespace},
 		{name: "no catalog image", unset: corrosionImageVariable,
-			scanner: testScannerImage, browser: testBrowserImage, bus: testBusAddress},
+			scanner: testScannerImage, browser: testBrowserImage, bus: testBusAddress,
+			namespace: testOperatorNamespace},
 		{name: "no media browser image", unset: browserImageVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage, bus: testBusAddress},
+			scanner: testScannerImage, catalog: testCorrosionImage, bus: testBusAddress,
+			namespace: testOperatorNamespace},
 		{name: "no broker", unset: busAddressVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage, browser: testBrowserImage},
+			scanner: testScannerImage, catalog: testCorrosionImage, browser: testBrowserImage,
+			namespace: testOperatorNamespace},
+		{name: "no namespace", unset: operatorNamespaceVariable,
+			scanner: testScannerImage, catalog: testCorrosionImage, browser: testBrowserImage,
+			bus: testBusAddress},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -45,6 +53,7 @@ func TestOperateRequiresItsEnvironment(t *testing.T) {
 			t.Setenv(corrosionImageVariable, one.catalog)
 			t.Setenv(browserImageVariable, one.browser)
 			t.Setenv(busAddressVariable, one.bus)
+			t.Setenv(operatorNamespaceVariable, one.namespace)
 
 			err := operate()
 
@@ -60,6 +69,7 @@ func TestOperateRefusesOutsideACluster(t *testing.T) {
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
 	t.Setenv(browserImageVariable, testBrowserImage)
 	t.Setenv(busAddressVariable, testBusAddress)
+	t.Setenv(operatorNamespaceVariable, testOperatorNamespace)
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
 
@@ -101,6 +111,10 @@ func testClusterEnvironment(t *testing.T, cluster *fakeCluster) chan struct{} {
 	// the test and no pass waits on it.
 	t.Setenv(busAddressVariable, "127.0.0.1:1")
 	t.Setenv(topicBaseVariable, "")
+	t.Setenv(operatorNamespaceVariable, testOperatorNamespace)
+	// Port zero is a port the kernel picks, so the webhook server of one
+	// test never collides with another's.
+	t.Setenv(webhookPortVariable, "0")
 
 	directory := testServiceAccountDir(t, testCertificatePEM(t, server))
 	if err := os.WriteFile(filepath.Join(directory, "token"), []byte("a-service-account-token"), 0o600); err != nil {
@@ -162,8 +176,8 @@ func TestRunReconcilesOnceAndStops(t *testing.T) {
 	if !strings.Contains(line, "1 libraries") || !strings.Contains(line, testBusAddress) {
 		t.Errorf("report = %q, want the count and the broker", line)
 	}
-	if cluster.heldPod("movies-scanner") == nil {
-		t.Error("the pass created no scanner pod")
+	if cluster.heldCronJob("house", "movies-scan") == nil {
+		t.Error("the pass created no scan schedule")
 	}
 }
 
@@ -174,7 +188,7 @@ func TestRunFailsWhenTheCollectionsCannotBeRead(t *testing.T) {
 	}{
 		{name: "the libraries", path: librariesPath},
 		{name: "the catalogs", path: catalogsPath},
-		{name: "the scanner pods", path: podsAllPath},
+		{name: "the member pods", path: podsAllPath},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -219,7 +233,6 @@ func TestPassClearsTheTopicsOfALibraryTheCollectionDoesNotHold(t *testing.T) {
 	operator, broker := operatorOnABroker(t, cluster)
 	operator.reports.fold("house", "movies", libraryReport{Titles: 12})
 	operator.reports.fold("house", "gone", libraryReport{Titles: 3})
-	operator.reports.availability("house", "gone", false)
 
 	operator.pass()
 
@@ -243,8 +256,6 @@ func TestPassClearsTheLitterOfALibraryItNeverSaw(t *testing.T) {
 	operator, broker := operatorOnABroker(t, cluster)
 	operator.handleBusMessage(libraryStatusTopic(defaultTopicBase, "studio", "films"),
 		[]byte(`{"titles":4}`))
-	operator.handleBusMessage(libraryAvailabilityTopic(defaultTopicBase, "studio", "films"),
-		[]byte(availabilityOffline))
 
 	operator.pass()
 
@@ -259,15 +270,15 @@ func TestPassClearsTheLitterOfALibraryItNeverSaw(t *testing.T) {
 	}
 }
 
-// The operator's own clear comes back on its subscription, and folding
+// the operator's own clear comes back on its subscription, and folding
 // it would put back the desk state the pass just dropped.
 func TestHandleBusMessageIgnoresAClearedAvailability(t *testing.T) {
 	operator := testOperator(t, newFakeCluster())
 
-	operator.handleBusMessage(libraryAvailabilityTopic(defaultTopicBase, "house", "movies"), nil)
+	operator.handleBusMessage(catalogAvailabilityTopic(defaultTopicBase, "house"), nil)
 
-	if held := operator.reports.retain(map[string]bool{}); len(held) != 0 {
-		t.Errorf("the desk holds %v, want nothing from a cleared availability", held)
+	if operator.reporters.onlineFor("house") {
+		t.Error("a cleared availability marked the namespace's reporter online")
 	}
 }
 
@@ -289,11 +300,11 @@ func TestPassCarriesOnPastOneBrokenLibrary(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	if cluster.heldPod("movies-scanner") == nil {
+	if cluster.heldCronJob("house", "movies-scan") == nil {
 		t.Error("the movies library was not reconciled")
 	}
-	if cluster.heldPod("series-scanner") != nil {
-		t.Error("a scanner pod was created for a library whose claim could not be read")
+	if cluster.heldCronJob("house", "series-scan") != nil {
+		t.Error("a schedule was created for a library whose claim could not be read")
 	}
 }
 
@@ -306,14 +317,14 @@ func TestPassStopsWhenTheCollectionCannotBeRead(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	if cluster.countRequests(http.MethodPost, "pods") != 0 {
-		t.Error("the pass created a pod without reading the collection")
+	if cluster.countRequests(http.MethodPost, "cronjobs") != 0 {
+		t.Error("the pass created a schedule without reading the collection")
 	}
 }
 
-// A pass stands one catalog Service and one EndpointSlice in every
-// namespace that holds a Library, each over that namespace's scanner
-// pods and owned by that namespace's Library objects.
+// a pass stands one catalog Service and one EndpointSlice in every
+// namespace that holds a Catalog, each over that namespace's member
+// pods and owned by that namespace's Catalog.
 func TestPassStandsACatalogInEveryNamespaceThatHoldsALibrary(t *testing.T) {
 	cluster := newFakeCluster()
 	house := boundHouse(cluster)
@@ -322,10 +333,9 @@ func TestPassStandsACatalogInEveryNamespaceThatHoldsALibrary(t *testing.T) {
 		library *Library
 		address string
 	}{{house, "10.42.1.7"}, {studio, "10.42.3.2"}} {
-		pod := standingPod(t, one.library, podRunning, true)
-		pod.Spec.NodeName = "nuc-1"
-		pod.Status.PodIP = one.address
-		cluster.pods[pod.Metadata.Name] = pod
+		pod := scannerPodAt(one.library.Metadata.Name+"-scan-1", one.library.Metadata.Namespace,
+			one.address, "nuc-1")
+		cluster.pods[pod.Metadata.Name] = &pod
 	}
 
 	testOperator(t, cluster).pass()
@@ -349,22 +359,20 @@ func TestPassStandsACatalogInEveryNamespaceThatHoldsALibrary(t *testing.T) {
 			t.Fatalf("the pass wrote no catalog slice in %s", one.namespace)
 		}
 		if len(slice.Endpoints) != 1 || slice.Endpoints[0].Addresses[0] != one.address {
-			t.Errorf("endpoints = %+v, want the scanner pod of %s alone",
+			t.Errorf("endpoints = %+v, want the member pod of %s alone",
 				slice.Endpoints, one.namespace)
 		}
 	}
 }
 
-// A pass stands the screen of every delegated Player, in the namespace
+// a pass stands the screen of every delegated Player, in the namespace
 // the Player is in, and the screen pod joins that namespace's catalog
-// slice beside the scanner pod.
+// slice beside the scan pod.
 func TestPassStandsTheScreenOfADelegatedPlayer(t *testing.T) {
 	cluster := newFakeCluster()
-	library := boundHouse(cluster)
-	scanner := standingPod(t, library, podRunning, true)
-	scanner.Spec.NodeName = "nuc-1"
-	scanner.Status.PodIP = "10.42.1.7"
-	cluster.pods[scanner.Metadata.Name] = scanner
+	boundHouse(cluster)
+	scanner := scannerPodAt("movies-scan-1", testLibraryNamespace, "10.42.1.7", "nuc-1")
+	cluster.pods[scanner.Metadata.Name] = &scanner
 	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
 	seedPlayer(cluster, "kitchen-radio", testLibraryNamespace, "media.liken.sh/idle-screen")
 	operator := testOperator(t, cluster)
@@ -396,7 +404,7 @@ func TestPassStandsTheScreenOfADelegatedPlayer(t *testing.T) {
 		addresses = append(addresses, endpoint.Addresses[0])
 	}
 	if len(addresses) != 2 || addresses[0] != "10.42.1.7" || addresses[1] != "10.42.2.4" {
-		t.Errorf("addresses = %v, want the scanner and the screen", addresses)
+		t.Errorf("addresses = %v, want the scan pod and the screen", addresses)
 	}
 }
 
@@ -410,8 +418,8 @@ func TestPassCarriesOnWithNoPlayersToRead(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	if cluster.heldPod("movies-scanner") == nil {
-		t.Error("the pass stood no scanner pod")
+	if cluster.heldCronJob("house", "movies-scan") == nil {
+		t.Error("the pass stood no scan schedule")
 	}
 	if cluster.heldLibrary("movies").Status.Conditions == nil {
 		t.Error("the pass wrote no status for the library")
@@ -426,7 +434,6 @@ func TestPassCarriesOnPastABrokenCatalogObject(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "the pods cannot be listed", path: podsAllPath},
 		{name: "the screen pods cannot be listed", path: podsAllPath + "?" + screenPodsQuery},
 		{name: "the Service cannot be read",
 			path: servicesPath(testLibraryNamespace) + "/" + catalogServiceName},
@@ -457,14 +464,14 @@ func TestPassStopsWhenTheCatalogsCannotBeRead(t *testing.T) {
 
 	testOperator(t, cluster).pass()
 
-	if cluster.countRequests(http.MethodPost, "pods") != 0 {
-		t.Error("the pass created a pod without reading the Catalogs")
+	if cluster.countRequests(http.MethodPost, "cronjobs") != 0 {
+		t.Error("the pass created a schedule without reading the Catalogs")
 	}
 }
 
-// The bus handler folds a report onto the desk and marks a scanner
-// online, and it ignores a message it cannot read rather than failing
-// the connection every other library reports over.
+// the bus handler folds a report onto the desk, and it ignores a
+// message it cannot read rather than failing the connection every other
+// library reports over.
 func TestHandleBusMessageFoldsWhatItCanRead(t *testing.T) {
 	cluster := newFakeCluster()
 	library := testOperator(t, cluster)
@@ -505,14 +512,14 @@ func TestHandleBusMessageIgnoresWhatItCannotRead(t *testing.T) {
 	}
 }
 
-// A scanner that connects publishes online, and the availability
-// carries no report, so the desk holds the flag and nothing else.
-func TestHandleBusMessageMarksAScannerOnline(t *testing.T) {
+// a reporter that connects publishes online on its namespace's own
+// topic, and that one flag stands for every Library of the namespace.
+func TestHandleBusMessageMarksANamespacesReporterOnline(t *testing.T) {
 	library := testOperator(t, newFakeCluster())
 	woken := make(chan struct{}, 1)
-	library.reports = newReports(woken)
+	library.reporters = newReporters(woken)
 
-	library.handleBusMessage(libraryAvailabilityTopic(defaultTopicBase, "house", "movies"),
+	library.handleBusMessage(catalogAvailabilityTopic(defaultTopicBase, "house"),
 		[]byte(availabilityOnline))
 
 	select {
@@ -520,8 +527,25 @@ func TestHandleBusMessageMarksAScannerOnline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("the availability woke no pass")
 	}
+	if !library.reporters.onlineFor("house") {
+		t.Error("the desk holds the namespace offline after an online message")
+	}
 	if library.reports.latestFor("house", "movies") != nil {
 		t.Error("an availability message folded a report")
+	}
+}
+
+// a reporter that leaves the bus takes every Library of its namespace
+// offline, which is the last will the broker publishes for it.
+func TestHandleBusMessageMarksANamespacesReporterOffline(t *testing.T) {
+	library := testOperator(t, newFakeCluster())
+	library.reporters.mark("house", true)
+
+	library.handleBusMessage(catalogAvailabilityTopic(defaultTopicBase, "house"),
+		[]byte(availabilityOffline))
+
+	if library.reporters.onlineFor("house") {
+		t.Error("the desk holds the namespace online after its last will")
 	}
 }
 
@@ -530,23 +554,25 @@ func TestHandleBusMessageMarksAScannerOnline(t *testing.T) {
 func TestPassDepartsADeletingLibraryAndReconcilesTheRest(t *testing.T) {
 	cluster := newFakeCluster()
 	departingMovies(cluster)
-	operator := testOperator(t, cluster)
-	seedSurvivor(cluster, operator, true, holding("house/movies"))
+	cluster.libraries["shows"] = &Library{
+		Metadata: ObjectMeta{Name: "shows", Namespace: "house", UID: "shows-uid", ResourceVersion: "1"},
+		Spec:     LibrarySpec{Storage: LibraryStorage{Claim: "shows"}, Kind: libraryKindSeries},
+	}
 	cluster.claims["shows"] = &PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "shows", Namespace: "house"},
 		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	}
 
-	operator.pass()
+	testOperator(t, cluster).pass()
 
-	if cluster.heldPod("movies-cleanup") == nil {
-		t.Error("the pass stood no cleanup pod for the departing library")
+	if cluster.heldJob("house", "movies-cleanup") == nil {
+		t.Error("the pass stood no cleanup job for the departing library")
 	}
-	if cluster.heldPod("movies-scanner") != nil {
-		t.Error("the pass stood a scanner for a library on its way out")
+	if cluster.heldCronJob("house", "movies-scan") != nil {
+		t.Error("the pass stood a schedule for a library on its way out")
 	}
-	if cluster.heldPod("shows-scanner") == nil {
+	if cluster.heldCronJob("house", "shows-scan") == nil {
 		t.Error("the surviving library was not reconciled")
 	}
 	if phase := cluster.heldLibrary("movies").Status.Phase; phase != phaseDeparting {
@@ -554,8 +580,8 @@ func TestPassDepartsADeletingLibraryAndReconcilesTheRest(t *testing.T) {
 	}
 }
 
-// A cleanup pod's backoff is dropped with the Library it belonged to, so
-// the map is as short-lived as the departures.
+// a cleanup Job's backoff is dropped with the Library it belonged to,
+// so the map is as short-lived as the departures.
 func TestPassForgetsTheBackoffOfALibraryThatIsGone(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
@@ -570,5 +596,50 @@ func TestPassForgetsTheBackoffOfALibraryThatIsGone(t *testing.T) {
 	}
 	if _, held := operator.cleanupStands["house/gone"]; held {
 		t.Error("the backoff of a Library the collection no longer holds was kept")
+	}
+}
+
+// a pass that cannot read the Jobs or the member pods reports it and
+// reconciles nothing, because it cannot tell what is running or whether
+// a namespace's catalog stands.
+func TestPassStopsWhenTheClusterCannotBeRead(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "the jobs", path: jobsAllPath},
+		{name: "the member pods", path: podsAllPath + "?" + catalogMemberQuery},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			boundHouse(cluster)
+			cluster.broken[one.path] = http.StatusInternalServerError
+
+			testOperator(t, cluster).pass()
+
+			if cluster.countRequests(http.MethodPost, "cronjobs") != 0 {
+				t.Error("the pass created a schedule without reading the cluster")
+			}
+		})
+	}
+}
+
+// a webhook the operator held becomes a Job on the next pass, and the
+// path is dropped for a Library the collection no longer holds.
+func TestPassServesTheHeldWebhookPaths(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	operator := testOperator(t, cluster)
+	operator.paths.hold("house", "movies", "/library/movies/Arrival (2016)")
+	operator.paths.hold("house", "gone", "/library/movies/Dune (2021)")
+
+	operator.pass()
+
+	if len(cluster.heldJobs()) != 1 {
+		t.Errorf("jobs = %+v, want the one folder scan", cluster.heldJobs())
+	}
+	if len(operator.paths.held("house", "gone")) != 0 {
+		t.Error("a path is held for a Library the collection does not hold")
 	}
 }

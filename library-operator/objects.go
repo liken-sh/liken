@@ -1,10 +1,10 @@
 package main
 
-// The Kubernetes objects a Library touches, in the same hand-written
-// form as the Library API in api.go: the claim and the volume behind
-// it, which the operator reads, and the scanner pod, which it writes.
-// Each type carries only the fields this operator reads or writes;
-// the API server fills in the rest.
+// The Kubernetes objects a Library touches, in the same
+// hand-written form as the Library API in api.go: the claim and the
+// volume behind it, which the operator reads, and the pods, which it
+// writes. Each type carries only the fields this operator reads or
+// writes; the API server fills in the rest.
 
 import (
 	"encoding/json"
@@ -130,23 +130,55 @@ func (s *PersistentVolumeSpec) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// The marks every scanner pod carries. The first pair is the standard
-// Kubernetes name label, and it is what one cluster-wide watch selects
-// on, so the operator sees its own pods and no others. The second
-// names the Library the pod scans, so a person can list the pods of
-// one library. The annotation carries the hash of the template the pod
-// was built from, which is how a pass tells a live pod from the pod it
-// would build now.
+// The marks the objects this operator writes carry. The name
+// label is the standard Kubernetes one, and its value tells a Job of
+// this operator's from a catalog pod and from a screen pod, so one
+// cluster-wide list answers one kind. The library label names the
+// Library an object belongs to, and the worker label names which worker
+// a Job runs. The member label is on every pod that holds a catalog
+// agent, whatever kind of pod it is, and it is what the catalog
+// EndpointSlice is written over. The annotation carries the hash of the
+// template an object was built from, which is how a pass tells a live
+// object from the one it would build now.
 const (
 	scannerLabelKey        = "app.kubernetes.io/name"
-	scannerLabelValue      = "library-scanner"
+	workerLabelValue       = "library-worker"
+	catalogLabelValue      = "library-catalog"
 	libraryLabelKey        = "library.liken.sh/library"
+	workerLabelKey         = "library.liken.sh/worker"
+	memberLabelKey         = "library.liken.sh/catalog"
+	memberLabelValue       = "member"
 	templateHashAnnotation = "library.liken.sh/template-hash"
 )
 
-// The scanner pod. The operator writes its spec once and reads its
-// status every pass, because a Library is Ready only when its scanner
-// runs.
+// The label pair that names one Library's objects, on the
+// catalog claim the Library owns.
+func libraryLabels(library string) map[string]string {
+	return map[string]string{libraryLabelKey: library}
+}
+
+// The labels one Job and its pods carry: the name label one list
+// selects on, the Library the Job works for, and the worker it runs.
+func workerLabels(library, worker string) map[string]string {
+	return map[string]string{
+		scannerLabelKey: workerLabelValue,
+		libraryLabelKey: library,
+		workerLabelKey:  worker,
+	}
+}
+
+// The member label on top of the labels a pod already carries,
+// so that every pod holding a catalog agent reaches the namespace's
+// EndpointSlice through one selector.
+func withMemberLabel(labels map[string]string) map[string]string {
+	marked := maps.Clone(labels)
+	marked[memberLabelKey] = memberLabelValue
+	return marked
+}
+
+// A pod. The operator writes a spec once and reads a status
+// every pass, because a Library is Ready only when its namespace's
+// catalog pod runs.
 type Pod struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`
@@ -155,18 +187,17 @@ type Pod struct {
 	Status     PodStatus  `json:"status"`
 }
 
-// PodList is the collection ListScannerPods returns. Its
+// PodList is the collection ListCatalogMemberPods returns. Its
 // resourceVersion is where the pod watch begins.
 type PodList struct {
 	Metadata ListMeta `json:"metadata"`
 	Items    []Pod    `json:"items"`
 }
 
-// The pod spec's few fields: a restartPolicy, Always on the scanner
-// pod because a scanner is a standing service, and Never on the
-// cleanup pod because a restart there would hide a failure the
-// operator reports as Blocked. The termination grace period is long
-// enough for a busy catalog agent to finish its exit.
+// The pod spec's few fields: a restartPolicy, Always on a
+// standing pod and Never on a Job's pod, which runs to completion. The
+// termination grace period is long enough for a busy catalog agent to
+// finish its exit.
 type PodSpec struct {
 	RestartPolicy string `json:"restartPolicy,omitempty"`
 	// NodeName is written by the scheduler, never by the builder. The
@@ -181,7 +212,8 @@ type PodSpec struct {
 	// InitContainers holds the native sidecar. A container here
 	// with restartPolicy Always starts before the containers below and
 	// keeps running beside them, so the kubelet brings the catalog agent
-	// up and passes its startupProbe before it starts the scanner.
+	// up and passes its startupProbe before it starts the container it
+	// serves.
 	InitContainers []Container `json:"initContainers,omitempty"`
 	Containers     []Container `json:"containers"`
 	Volumes        []Volume    `json:"volumes,omitempty"`
@@ -217,8 +249,8 @@ type Container struct {
 	// container starts.
 	RestartPolicy string `json:"restartPolicy,omitempty"`
 	// The two probes on the catalog agent. The startupProbe gates
-	// the scanner's start, and the livenessProbe covers the agent's
-	// running life. There is no readinessProbe: the scanner pod's
+	// the start of the container beside it, and the livenessProbe covers
+	// the agent's running life. There is no readinessProbe: a pod's
 	// readiness gates its place in the catalog gossip EndpointSlice, and a
 	// momentary API hiccup must not drop the agent from the bootstrap
 	// list.
@@ -275,8 +307,9 @@ type ResourceClaim struct {
 	Request string `json:"request,omitempty"`
 }
 
-// A scanner reads a volume and writes to a socket on its own pod, so
-// it needs no capability at all and can never gain one.
+// Every container this operator builds reads a volume or writes
+// to a socket on its own pod, so none needs a capability at all and
+// none may gain one.
 type SecurityContext struct {
 	Capabilities             *Capabilities `json:"capabilities,omitempty"`
 	AllowPrivilegeEscalation *bool         `json:"allowPrivilegeEscalation,omitempty"`
@@ -316,10 +349,12 @@ type VolumeMount struct {
 	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
-// A scanner pod carries two volumes: the library's claim, mounted
-// read-only, and the catalog agent's durable claim.
+// A scan pod carries two volumes: the library's claim, mounted
+// read-only, and the catalog agent's durable claim. A cleanup pod
+// carries the second alone, and the catalog pod carries the
+// namespace's own.
 //
-// a screen pod carries one claim per Library of its namespace, all
+// A screen pod carries one claim per Library of its namespace, all
 // read-only, and an emptyDir for its catalog agent. That agent holds a copy of
 // the namespace's catalog and rebuilds it from its peers on every start, so
 // nothing on a screen has to survive the pod.
@@ -341,9 +376,9 @@ type PersistentVolumeClaimVolumeSource struct {
 	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
-// The pod status this operator reads: the phase, the per container
-// readiness, the words the kubelet gives for a failure, and the
-// address the catalog agents gossip on.
+// The pod status this operator reads: the phase, the per
+// container readiness, the words the kubelet gives for a failure, and
+// the address the catalog agents gossip on.
 type PodStatus struct {
 	Phase   string `json:"phase,omitempty"`
 	Reason  string `json:"reason,omitempty"`
@@ -352,19 +387,16 @@ type PodStatus struct {
 	// catalog agents gossip on, and a pod without one is not a peer yet.
 	PodIP string `json:"podIP,omitempty"`
 	// The catalog agent is a native sidecar, so the kubelet reports it
-	// here and not beside the scanner. A readiness gate that read only
-	// the list below would never see the agent at all.
+	// here and not beside the container it serves. A readiness gate that
+	// read only the list below would never see the agent at all.
 	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
 	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
-	// Read for one answer: why a cleanup pod does not schedule. The
-	// scheduler writes that sentence on the PodScheduled condition,
-	// and the pod's own status.message stays empty.
-	Conditions []PodCondition `json:"conditions,omitempty"`
+	Conditions            []PodCondition    `json:"conditions,omitempty"`
 }
 
-// PodCondition is the fields this operator reads of a pod condition.
-// Status is a string rather than a bool, because a condition has
-// three states: True, False, and Unknown.
+// PodCondition is the fields this operator reads of a pod
+// condition. Status is a string rather than a bool, because a condition
+// has three states: True, False, and Unknown.
 type PodCondition struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
@@ -386,11 +418,14 @@ type ContainerStatus struct {
 	Ready bool   `json:"ready"`
 }
 
-// The pod phases Kubernetes reports, named here so the derivation
-// reads as the mapping it is. A scanner pod restarts in place, so it
-// reaches Failed only when the kubelet gives up on it.
+// The pod phases Kubernetes reports, named here so the
+// derivation reads as the mapping it is. A standing pod restarts in
+// place, so it reaches Failed only when the kubelet gives up on it; a
+// Job's pod runs to completion, so it reaches Succeeded or Failed on
+// every run.
 const (
-	podPending = "Pending"
-	podRunning = "Running"
-	podFailed  = "Failed"
+	podPending   = "Pending"
+	podRunning   = "Running"
+	podSucceeded = "Succeeded"
+	podFailed    = "Failed"
 )

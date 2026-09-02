@@ -1,6 +1,6 @@
 package main
 
-// This file is the sweep the cleanup pod runs: every row one library
+// This file is the sweep the cleanup Job runs: every row one library
 // holds, out of all seven replicated tables, through the local agent.
 //
 // The sweep reads bounded batches of keys and deletes by key, the
@@ -29,7 +29,7 @@ type librarySweepStep struct {
 // and each delete reaches that library's rows and no other's.
 //
 // The sweep is safe to repeat: a second run reads no keys and
-// deletes nothing, which is what lets the cleanup pod re-issue it on
+// deletes nothing, which is what lets the cleanup Job re-issue it on
 // every tick for as long as the operator keeps the pod up.
 func (c *Catalog) SweepLibrary(ctx context.Context, library string) (int, error) {
 	removed := 0

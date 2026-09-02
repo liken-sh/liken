@@ -1,17 +1,16 @@
 package main
 
-// The cleanup role deletes one departed library's rows out of the
-// namespace's catalog, through its own agent's loopback API, and
-// replication carries the deletes to every peer. The API binds
-// loopback alone, which is why a pod does this work and the operator
-// cannot.
+// The cleanup role is the container of one cleanup Job. It deletes
+// one departed library's rows out of the namespace's catalog, through its
+// own agent's loopback API, and replication carries the deletes to every
+// peer. The API binds loopback alone, which is why a pod does this work
+// and the operator cannot.
 //
-// The loop never ends on its own. Corrosion's sync is a pull: a peer
-// fetches what it is missing, there is no acknowledgment to wait on,
-// and an agent that receives SIGTERM drops whatever broadcasts it
-// still has queued. So the pod's lifetime is the replication window,
-// and the operator retires the pod only after the survivors' own
-// reports say the rows are gone from their copies.
+// The sweep is one pass, not a loop. The Job writes its own runs
+// row as its last write and waits for the namespace's reporter to publish
+// that row back, because an agent that receives SIGTERM drops whatever
+// broadcasts it still holds. The echo is what says the standing pod holds
+// the deletes.
 
 import (
 	"context"
@@ -28,32 +27,36 @@ import (
 // scanner. The operator writes it over the image's entrypoint.
 const cleanupMode = "cleanup"
 
-// The wait between sweeps. The sweep repeats because it is cheap
-// once the rows are gone, and a repeat catches rows a returning peer
-// gossips back in. A variable so the tests can shorten it.
-var cleanupInterval = 30 * time.Second
-
 // cleanupTimeout bounds each request of one sweep, so an agent that
 // stops answering cannot hold a sweep open forever.
 var cleanupTimeout = 2 * time.Minute
 
-// sweeper is one cleanup container: the library it deletes, the
-// catalog client it deletes through, and the log it writes.
+// One cleanup container: the library it deletes, the catalog it
+// deletes through, the bus it hears the echo on, and the log it writes.
 type sweeper struct {
-	library string
-	catalog *Catalog
-	log     io.Writer
+	library     string
+	job         string
+	catalog     *Catalog
+	bus         *Bus
+	echo        *echoWaiter
+	echoTimeout time.Duration
+	log         io.Writer
 }
 
-// runCleanup is the role's whole program: read the environment,
-// sweep on a loop, and hold the pod open until the operator retires
-// it. The signal context is what ends the loop, because this process
-// is PID 1 and the kernel runs no default action for its signals.
+// The role's whole program: read the environment, sweep once, and
+// end the process with what the Job left. A failure is a non-zero exit,
+// so the Job fails, its rows stay on its own claim, and the retry carries
+// them.
 func runCleanup() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	newSweeper(os.Stdout).run(stopped)
+	sweep := newSweeper(os.Stdout)
+	if err := sweep.runJob(stopped); err != nil {
+		fmt.Fprintf(sweep.log, "library.liken.sh: the cleanup job failed: %v\n", err)
+		stop()
+		os.Exit(1)
+	}
 }
 
 // newSweeper reads the library to sweep from the environment, the
@@ -62,6 +65,10 @@ func runCleanup() {
 func newSweeper(log io.Writer) *sweeper {
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
+	base := os.Getenv(topicBaseVariable)
+	if base == "" {
+		base = defaultTopicBase
+	}
 	api := os.Getenv(catalogAPIVariable)
 	if api == "" {
 		api = defaultCatalogAPI
@@ -69,36 +76,51 @@ func newSweeper(log io.Writer) *sweeper {
 
 	fmt.Fprintf(log, "library.liken.sh: sweeping %s/%s out of the catalog\n", namespace, name)
 
-	return &sweeper{
-		library: libraryKey(namespace, name),
-		catalog: NewCatalog(api, &http.Client{Timeout: cleanupTimeout}),
-		log:     log,
+	sweep := &sweeper{
+		library:     libraryKey(namespace, name),
+		job:         os.Getenv(jobNameVariable),
+		catalog:     NewCatalog(api, &http.Client{Timeout: cleanupTimeout}),
+		echoTimeout: echoTimeout(os.Getenv(echoTimeoutVariable)),
+		log:         log,
 	}
+	sweep.echo = newEchoWaiter(libraryStatusTopic(base, namespace, name), workerCleanup, sweep.job)
+	sweep.bus = newBus(os.Getenv(busAddressVariable), "cleanup-"+namespace+"-"+name,
+		nil, nil, sweep.echo.note)
+	return sweep
 }
 
-// run sweeps on every tick with no attempt cap, and no success ends
-// it. The pod stays up so its agent serves the deletes to every peer
-// that pulls, for as long as the operator keeps the pod standing.
-func (s *sweeper) run(stopped context.Context) {
-	ticker := time.NewTicker(cleanupInterval)
-	defer ticker.Stop()
-	for {
-		s.sweep(stopped)
-		select {
-		case <-stopped.Done():
-			return
-		case <-ticker.C:
-		}
+// The whole of a cleanup Job: take every row the library holds,
+// including the runs of every other worker, then write its own run as the
+// last row the agent has to broadcast, and wait for the reporter to
+// publish it back.
+func (s *sweeper) runJob(ctx context.Context) error {
+	started := time.Now().UTC()
+	if err := s.sweep(ctx); err != nil {
+		return err
 	}
+
+	run := libraryRun{Worker: workerCleanup, Job: s.job, Started: started, Finished: time.Now().UTC()}
+	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
+		return fmt.Errorf("writing the run of %s: %w", s.library, err)
+	}
+
+	return s.echo.wait(ctx, s.bus, s.echoTimeout)
 }
 
-// sweep logs a failure and leaves it for the next tick, because an
-// exit would take down the agent that serves the deletes.
-func (s *sweeper) sweep(ctx context.Context) {
+// Deletes every row of the library in every table, the runs of
+// every other worker with them, so the only row this library holds after
+// the sweep is the one the Job writes next.
+func (s *sweeper) sweep(ctx context.Context) error {
 	removed, err := s.catalog.SweepLibrary(ctx, s.library)
 	if err != nil {
 		fmt.Fprintf(s.log, "library.liken.sh: could not sweep %s: %v\n", s.library, err)
-		return
+		return fmt.Errorf("sweeping %s: %w", s.library, err)
 	}
-	fmt.Fprintf(s.log, "library.liken.sh: swept %s: %d rows removed\n", s.library, removed)
+	runs, err := s.catalog.DeleteRuns(ctx, s.library)
+	if err != nil {
+		fmt.Fprintf(s.log, "library.liken.sh: could not sweep the runs of %s: %v\n", s.library, err)
+		return fmt.Errorf("sweeping the runs of %s: %w", s.library, err)
+	}
+	fmt.Fprintf(s.log, "library.liken.sh: swept %s: %d rows removed\n", s.library, removed+runs)
+	return nil
 }

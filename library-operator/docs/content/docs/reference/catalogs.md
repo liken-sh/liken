@@ -8,8 +8,11 @@ toc: true
 
 A `Catalog` is a namespace's shared catalog: one Corrosion cluster that
 every `Library` in the namespace writes into. Declare one `Catalog` in a
-namespace. It sizes the durable volume every catalog agent takes, and it
-owns the namespace's catalog `Service` and `EndpointSlice`.
+namespace. It stands the catalog pod, the one standing member of that
+cluster, which holds the namespace's catalog on a durable claim and
+reports what it holds over the bus. It sizes that claim and the claim
+every `Library`'s `Job`s take, and it owns the pod, its claim, and the
+namespace's catalog `Service` and `EndpointSlice`.
 
 Each catalog agent holds the whole namespace's catalog, because the
 cluster gossips every row to every peer. So one size covers the whole
@@ -28,7 +31,10 @@ A namespace has exactly one `Catalog`. A `Library` in a namespace with no
 `Catalog` waits until one exists, and more than one `Catalog` marks every
 `Catalog` in the namespace `Blocked` and stands no cluster. An empty
 `storageClassName` binds each catalog volume to the cluster's default
-`StorageClass`.
+`StorageClass`. A `claimName` names an existing claim for the catalog
+pod to mount in place of the one the operator provisions. A SQLite
+file on a claim served over NFS can corrupt when its node is lost, so
+prefer a `StorageClass` that binds node-local storage.
 
 The namespace's shared catalog. Declare one Catalog in a namespace, and every Library in it writes into that catalog.
 
@@ -48,6 +54,7 @@ The volume every catalog agent in the namespace takes.
 | --- | --- | --- | --- |
 | <span id="specstorage--size"></span>`size` | string | no | The size of each agent's catalog volume. Small by default. Default: `1Gi`. |
 | <span id="specstorage--storageclassname"></span>`storageClassName` | string | no | The StorageClass each agent's catalog volume binds to. Omitted, the cluster's default binds it. |
+| <span id="specstorage--claimname"></span>`claimName` | string | no | An existing PersistentVolumeClaim in this namespace for the catalog pod to mount, in place of the one the operator provisions; the operator creates none when it is set. |
 
 ## status
 
@@ -55,13 +62,13 @@ The cluster the Catalog stands, written only by the library operator.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--members"></span>`members` | []string | no | The catalog agent pods that are members of the namespace's cluster. |
+| <span id="status--members"></span>`members` | []string | no | The pods that are members of the namespace's catalog cluster: the catalog pod, the pods of the Jobs that are running, and the screen pods. |
 | <span id="status--storagesize"></span>`storageSize` | string | no | The storage size the agents were given. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when the Catalog stands the namespace's cluster, and False with the reason ManyCatalogs when the namespace holds more than one Catalog. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs. |
 
 ### status.conditions[]
 
-The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when the Catalog stands the namespace's cluster, and False with the reason ManyCatalogs when the namespace holds more than one Catalog.
+The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

@@ -39,6 +39,11 @@ type fakeCluster struct {
 	// holds a Library.
 	slices   map[string]*EndpointSlice
 	services map[string]*Service
+	// The Jobs and CronJobs the operator creates, keyed by namespace and
+	// name, because a worker of one namespace and a worker of another
+	// may take the same name.
+	jobs     map[string]*Job
+	cronJobs map[string]*CronJob
 	// The Plays the operator creates, in the order it created them. They
 	// are a list and not a map, because every Play takes a name the API
 	// server mints.
@@ -75,6 +80,8 @@ func newFakeCluster() *fakeCluster {
 		pods:      map[string]*Pod{},
 		slices:    map[string]*EndpointSlice{},
 		services:  map[string]*Service{},
+		jobs:      map[string]*Job{},
+		cronJobs:  map[string]*CronJob{},
 		broken:    map[string]int{},
 		parked:    make(chan struct{}),
 	}
@@ -94,12 +101,17 @@ func (f *fakeCluster) handler() http.Handler {
 
 func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
-	// A test breaks a path, or one request against a path: the two pod
-	// lists differ by their selector alone, so the whole request line is
-	// the key that tells them apart.
+	// A test breaks a path, one request against a path, or one method
+	// against a path: the two pod lists differ by their selector alone,
+	// so the whole request line is a key too.
 	status := f.broken[r.URL.Path]
 	if status == 0 {
 		status = f.broken[r.URL.RequestURI()]
+	}
+	// A path is broken for one method alone where a test drives a
+	// failure on the write and not on the read before it.
+	if status == 0 {
+		status = f.broken[r.Method+" "+r.URL.Path]
 	}
 	if status != 0 {
 		w.WriteHeader(status)
@@ -151,6 +163,16 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&created)
 		f.claims[created.Metadata.Name] = &created
 		_ = json.NewEncoder(w).Encode(created)
+	case r.URL.Path == jobsAllPath:
+		list := JobList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.jobs) {
+			list.Items = append(list.Items, *f.jobs[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.Contains(r.URL.Path, "/cronjobs"):
+		f.serveCronJob(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/jobs"):
+		f.serveJob(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case r.URL.Path == podsAllPath:
 		list := PodList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.pods) {
@@ -189,6 +211,94 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		answer(w, f.pods[name])
 	}
+}
+
+// ServeJob answers a Job the way the API server does: a create stores
+// what the body carries, a delete removes it, and anything else reads
+// it by name.
+func (f *fakeCluster) serveJob(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		var created Job
+		_ = json.NewDecoder(r.Body).Decode(&created)
+		f.jobs[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
+		_ = json.NewEncoder(w).Encode(created)
+	case http.MethodDelete:
+		if _, held := f.jobs[key]; !held {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(f.jobs, key)
+	default:
+		answer(w, f.jobs[key])
+	}
+}
+
+// ServeCronJob answers a CronJob the same way, with the update the
+// operator sends when a schedule or an image changes.
+func (f *fakeCluster) serveCronJob(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		f.writeCronJob(w, r, "1")
+	case http.MethodPut:
+		f.writeCronJob(w, r, "2")
+	case http.MethodDelete:
+		if _, held := f.cronJobs[key]; !held {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(f.cronJobs, key)
+	default:
+		answer(w, f.cronJobs[key])
+	}
+}
+
+func (f *fakeCluster) writeCronJob(w http.ResponseWriter, r *http.Request, resourceVersion string) {
+	var written CronJob
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	written.Metadata.ResourceVersion = resourceVersion
+	f.cronJobs[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
+	_ = json.NewEncoder(w).Encode(written)
+}
+
+func (f *fakeCluster) heldJob(namespace, name string) *Job {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.jobs[namespace+"/"+name]
+}
+
+func (f *fakeCluster) heldCronJob(namespace, name string) *CronJob {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.cronJobs[namespace+"/"+name]
+}
+
+// HoldJob puts a Job into the cluster as the Job controller would have
+// left it, so a test drives the state a pass reads.
+func (f *fakeCluster) holdJob(job *Job) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.jobs[job.Metadata.Namespace+"/"+job.Metadata.Name] = job
+}
+
+// HeldJobs is every Job the cluster holds, in name order, so a test
+// reads what one pass created.
+func (f *fakeCluster) heldJobs() []Job {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	held := []Job{}
+	for _, key := range sortedNames(f.jobs) {
+		held = append(held, *f.jobs[key])
+	}
+	return held
 }
 
 // The suffix the API server mints onto a generateName. Its own is
@@ -459,8 +569,18 @@ func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 	t.Helper()
 	server := httptest.NewServer(cluster.handler())
 	return newOperator(NewClient(server.URL, server.Client(), ""),
-		testScannerImage, testCorrosionImage, testBrowserImage, testBusAddress, defaultTopicBase)
+		testScannerImage, testCorrosionImage, testBrowserImage, testBusAddress,
+		defaultTopicBase, testOperatorNamespace, testWebhookAddress)
 }
+
+// The namespace the operator itself runs in, which is what every
+// reported webhook address names, and the address its own endpoint
+// listens on. Port zero is a port the kernel picks, so two tests that
+// serve at once never collide.
+const (
+	testOperatorNamespace = "liken-system"
+	testWebhookAddress    = "127.0.0.1:0"
+)
 
 // OperatorOnABroker is the operator of testOperator with its
 // bus connected to a broker the test reads. A test that watches what
@@ -550,6 +670,37 @@ func testNamespaceCatalog() *NamespaceCatalog {
 // resolves to, the ordinary state a Library is reconciled against.
 func withCatalog() catalogChoice {
 	return catalogChoice{catalog: testNamespaceCatalog()}
+}
+
+// ReadyCatalogPod is the namespace's catalog pod as the kubelet
+// reports it with both containers up, which is the state a Library
+// needs before it is Ready.
+func readyCatalogPod(catalog, namespace string) *Pod {
+	pod := buildCatalogPod(
+		&NamespaceCatalog{Metadata: ObjectMeta{Name: catalog, Namespace: namespace, UID: catalog + "-uid"}},
+		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+	// The stamp is what a pass compares against, so a pod without one
+	// would read as stale and be replaced on the pass that read it.
+	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
+		panic(err)
+	}
+	pod.Status = PodStatus{
+		Phase:                 podRunning,
+		PodIP:                 "10.42.0.9",
+		InitContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: true}},
+		ContainerStatuses:     []ContainerStatus{{Name: reporterContainer, Ready: true}},
+	}
+	return pod
+}
+
+// StandingCatalog is the namespace's Catalog with its pod up, as
+// a Library is reconciled against in the ordinary case.
+func standingCatalog() catalogChoice {
+	catalog := testNamespaceCatalog()
+	return catalogChoice{
+		catalog: catalog,
+		pod:     readyCatalogPod(catalog.Metadata.Name, catalog.Metadata.Namespace),
+	}
 }
 
 // BoundHouse seeds the cluster with a movies Library over a claim bound

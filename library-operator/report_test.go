@@ -105,73 +105,18 @@ func TestTheDeskHoldsNoReportForALibraryItHasNotHeardFrom(t *testing.T) {
 	}
 }
 
-// A scanner that goes offline keeps the report it published: the
-// counts describe the volume and not the pod, so the last walk stands
-// until the next walk replaces it.
-func TestAnOfflineScannerKeepsItsReport(t *testing.T) {
-	desk, wake := reportDesk(t)
-	desk.fold("house", "movies", walkedReport())
-	waitForReportWake(t, wake)
-
-	desk.availability("house", "movies", false)
-
-	stored := desk.latestFor("house", "movies")
-	if stored == nil {
-		t.Fatal("the offline scanner's report is gone")
-	}
-	if stored.Titles != 412 {
-		t.Errorf("stored report = %+v, want the last walk's counts", *stored)
-	}
-	waitForReportWake(t, wake)
-}
-
-// The first signal for a Library is a change, and so is every flip of
-// the flag after it. A repeat of the flag wakes nothing, because a
-// reconnecting scanner republishes online on every session.
-func TestAvailabilityWakesOnEveryChangeAndOnNoRepeat(t *testing.T) {
-	desk, wake := reportDesk(t)
-
-	desk.availability("house", "movies", true)
-	waitForReportWake(t, wake)
-
-	desk.availability("house", "movies", true)
-	expectNoReportWake(t, wake)
-
-	desk.availability("house", "movies", false)
-	waitForReportWake(t, wake)
-}
-
-// The desk reports the last availability the bus carried for a scanner,
-// the fact the phase reads to tell Offline from Idle.
-func TestTheDeskAnswersWhetherAScannerIsOnline(t *testing.T) {
-	desk, _ := reportDesk(t)
-
-	if desk.onlineFor("house", "movies") {
-		t.Error("a Library the desk holds no availability for reads online")
-	}
-
-	desk.availability("house", "movies", true)
-	if !desk.onlineFor("house", "movies") {
-		t.Error("the desk reads an online scanner as offline")
-	}
-
-	desk.availability("house", "movies", false)
-	if desk.onlineFor("house", "movies") {
-		t.Error("the desk reads a scanner that left as online")
-	}
-}
-
-// The pass hands over the Libraries that still exist, and the desk
+// the pass hands over the Libraries that still exist, and the desk
 // shrinks to match, so a Library created later under the same name
-// starts with no report and no availability.
+// starts with no report. The keys it dropped come back sorted, because
+// the pass clears the topics behind them.
 func TestTheDeskForgetsALibraryThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {
 	desk, wake := reportDesk(t)
 	desk.fold("house", "movies", walkedReport())
 	desk.fold("attic", "series", walkedReport())
-	desk.availability("attic", "series", true)
+	desk.fold("attic", "photos", walkedReport())
 	waitForReportWake(t, wake)
 
-	desk.retain(map[string]bool{libraryKey("house", "movies"): true})
+	dropped := desk.retain(map[string]bool{libraryKey("house", "movies"): true})
 
 	if desk.latestFor("house", "movies") == nil {
 		t.Error("the live Library's report is gone")
@@ -179,10 +124,10 @@ func TestTheDeskForgetsALibraryThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {
 	if stored := desk.latestFor("attic", "series"); stored != nil {
 		t.Errorf("the gone Library's report = %+v, want none", *stored)
 	}
-	// The availability the desk held for the gone Library went with
-	// it, so the same signal reads as a change again.
-	desk.availability("attic", "series", true)
-	waitForReportWake(t, wake)
+	want := []string{"attic/photos", "attic/series"}
+	if len(dropped) != 2 || dropped[0] != want[0] || dropped[1] != want[1] {
+		t.Errorf("dropped = %v, want %v", dropped, want)
+	}
 }
 
 func TestALibraryKeyNamesTheNamespaceAndTheName(t *testing.T) {

@@ -9,11 +9,13 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -68,7 +70,74 @@ func (a *sqliteAgent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.serveQuery(w, r)
 		return
 	}
+	if strings.HasSuffix(r.URL.Path, subscriptionsPath) {
+		a.serveSubscription(w, r)
+		return
+	}
 	a.serveTransaction(w, r)
+}
+
+// Answers a subscription the way the agent does: the columns, the
+// rows the query holds now, the end of that snapshot, and then one change
+// per row that appears or moves after it, until the caller goes away.
+func (a *sqliteAgent) serveSubscription(w http.ResponseWriter, r *http.Request) {
+	query, _ := parseQuery(readBody(r))
+	enc := json.NewEncoder(w)
+	flusher, _ := w.(http.Flusher)
+
+	columns, rows, err := a.readAll(query)
+	if err != nil {
+		_ = enc.Encode(map[string]any{"error": err.Error()})
+		return
+	}
+	_ = enc.Encode(map[string]any{"columns": columns})
+	held := map[string]bool{}
+	for number, cells := range rows {
+		held[fmt.Sprint(cells)] = true
+		_ = enc.Encode(map[string]any{"row": []any{number + 1, cells}})
+	}
+	_ = enc.Encode(map[string]any{"eoq": map[string]any{"time": 0.0}})
+	flusher.Flush()
+
+	for r.Context().Err() == nil {
+		time.Sleep(time.Millisecond)
+		_, rows, err := a.readAll(query)
+		if err != nil {
+			return
+		}
+		for number, cells := range rows {
+			key := fmt.Sprint(cells)
+			if held[key] {
+				continue
+			}
+			held[key] = true
+			_ = enc.Encode(map[string]any{"change": []any{"update", number + 1, cells, len(held)}})
+			flusher.Flush()
+		}
+	}
+}
+
+// Reads one query into its columns and every row's cells.
+func (a *sqliteAgent) readAll(query string) ([]string, [][]any, error) {
+	rows, err := a.db.Query(query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	columns, _ := rows.Columns()
+	var out [][]any
+	for rows.Next() {
+		cells := make([]any, len(columns))
+		into := make([]any, len(columns))
+		for i := range cells {
+			into[i] = &cells[i]
+		}
+		if err := rows.Scan(into...); err != nil {
+			return nil, nil, err
+		}
+		out = append(out, cells)
+	}
+	return columns, out, rows.Err()
 }
 
 // serveTransaction runs each posted statement and answers with one

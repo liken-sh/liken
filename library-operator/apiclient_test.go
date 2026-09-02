@@ -376,7 +376,7 @@ func TestListScreenPodsSelectsTheScreenPodsAlone(t *testing.T) {
 func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	written := &Library{
 		Metadata: ObjectMeta{Name: "movies", Namespace: "house", ResourceVersion: "1200"},
-		Status:   LibraryStatus{Titles: 412, Pod: "movies-scanner"},
+		Status:   LibraryStatus{Titles: 412, Webhook: "http://library-operator.liken-system.svc/webhook/house/movies"},
 	}
 	client, recorded := recordingAPI(t, written)
 
@@ -392,8 +392,8 @@ func TestPutLibraryStatusWritesTheStatusSubresource(t *testing.T) {
 	if !strings.Contains(recorded.body, `"titles":412`) {
 		t.Errorf("body = %s, want the counts the operator folded", recorded.body)
 	}
-	if back.Status.Pod != "movies-scanner" {
-		t.Errorf("pod = %q, want the value the server wrote back", back.Status.Pod)
+	if back.Status.Webhook == "" {
+		t.Errorf("webhook = %q, want the value the server wrote back", back.Status.Webhook)
 	}
 }
 
@@ -526,7 +526,14 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		}},
 		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
 		{name: "ListPlayers", call: func(c *Client) error { _, err := ListPlayers(t.Context(), c); return err }},
-		{name: "ListScannerPods", call: func(c *Client) error { _, err := ListScannerPods(t.Context(), c); return err }},
+		{name: "ListCatalogMemberPods", call: func(c *Client) error { _, err := ListCatalogMemberPods(t.Context(), c); return err }},
+		{name: "ListWorkerJobs", call: func(c *Client) error { _, err := ListWorkerJobs(t.Context(), c); return err }},
+		{name: "CreateJob", call: func(c *Client) error { _, err := CreateJob(t.Context(), c, &Job{}); return err }},
+		{name: "DeleteJob", call: func(c *Client) error { return DeleteJob(t.Context(), c, "house", "movies-cleanup") }},
+		{name: "GetCronJob", call: func(c *Client) error { _, err := GetCronJob(t.Context(), c, "house", "movies-scan"); return err }},
+		{name: "CreateCronJob", call: func(c *Client) error { _, err := CreateCronJob(t.Context(), c, &CronJob{}); return err }},
+		{name: "UpdateCronJob", call: func(c *Client) error { _, err := UpdateCronJob(t.Context(), c, &CronJob{}); return err }},
+		{name: "DeleteCronJob", call: func(c *Client) error { return DeleteCronJob(t.Context(), c, "house", "movies-scan") }},
 		{name: "ListScreenPods", call: func(c *Client) error { _, err := ListScreenPods(t.Context(), c); return err }},
 		{name: "GetPod", call: func(c *Client) error { _, err := GetPod(t.Context(), c, "house", "movies-scanner"); return err }},
 		{name: "CreatePod", call: func(c *Client) error { _, err := CreatePod(t.Context(), c, &Pod{}); return err }},

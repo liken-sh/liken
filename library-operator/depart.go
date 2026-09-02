@@ -1,31 +1,30 @@
 package main
 
-// This file is plan 21: a deleted Library takes its rows with it.
-// The catalog replicates to every agent in the namespace, and each
-// scanner prunes only its own library, so a deleted Library's items,
-// files, links, and aliases would stay in every surviving copy
-// forever. The operator holds a finalizer on every Library, and the
-// deletion window the finalizer opens is where a cleanup pod deletes
-// those rows and replication carries the deletes to every peer.
+// A deleted Library takes its rows with it. The catalog
+// replicates to every agent in the namespace, and each scan prunes only
+// its own library, so a deleted Library's items, files, links, and
+// aliases would stay in the standing catalog forever. The operator
+// holds a finalizer on every Library, and the deletion window the
+// finalizer opens is where a cleanup Job deletes those rows and
+// replication carries the deletes to the catalog pod.
 //
-// The departure is a ladder, read from the top on every pass. A
-// namespace with no survivor releases at once, because no copy of
-// the catalog outlives the Library. The scanner stops before the
-// sweep, so nothing rewrites the rows while they go. The finalizer
-// goes only when every survivor's own report says the departed
-// library's rows are out of its catalog.
+// The departure is a ladder, read from the top on every pass. The
+// schedule goes first, then the departure waits out any scan that is
+// still running, because a scan rewrites the rows the sweep deletes and
+// holds the ReadWriteOnce claim the cleanup Job needs. The finalizer
+// goes only when the cleanup Job exited zero and the reporter echoed
+// that same Job back over the bus.
 //
-// A finalizer's classic cost is an object stuck deleting forever.
-// The operator never gives up on a timer: while something blocks the
+// A finalizer's classic cost is an object stuck deleting forever. The
+// operator never gives up on a timer: while something blocks the
 // departure, it retries and reports the blocker in the Departing
-// condition. The two states where a cleanup pod could never run, the
-// last Library in a namespace and a namespace that is itself
-// deleting, both land in the no-survivor rule and release at once.
+// condition. A namespace with no Catalog releases at once, because
+// nothing there holds the rows any more, and that one rule also answers
+// a namespace that is itself being deleted.
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"time"
 )
@@ -42,16 +41,12 @@ type departure struct {
 // depart runs one pass over a deleting Library. A Library that does
 // not hold this operator's finalizer is the API server's to remove,
 // and the pass leaves it alone.
-//
-// The departure takes the namespace's catalog choice, because the
-// sweep may have to stand the catalog claim again, and the claim is
-// sized from the Catalog.
-func (o *operator) depart(ctx context.Context, library *Library, survivors []string, choice catalogChoice) error {
+func (o *operator) depart(ctx context.Context, library *Library, choice catalogChoice, jobs []Job) error {
 	if !library.Metadata.holds(libraryFinalizer) && !library.Metadata.holds(formerLibraryFinalizer) {
 		return nil
 	}
 
-	stage, err := o.departureStage(ctx, library, survivors, choice)
+	stage, err := o.departureStage(ctx, library, choice, jobs)
 	if err != nil {
 		return err
 	}
@@ -65,45 +60,33 @@ func (o *operator) depart(ctx context.Context, library *Library, survivors []str
 // departureStage reads every release rule before it acts, so a
 // departure that is already complete stands nothing, and a release
 // that failed repeats on the next pass without more churn.
-func (o *operator) departureStage(ctx context.Context, library *Library, survivors []string, choice catalogChoice) (departure, error) {
+func (o *operator) departureStage(ctx context.Context, library *Library, choice catalogChoice, jobs []Job) (departure, error) {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 
-	// No survivor means no copy of the catalog outlives this Library,
-	// so there is nothing to sweep. This one rule also answers a
-	// namespace under deletion, where every Library is deleting and
-	// no new pod can start.
-	if len(survivors) == 0 {
-		return departure{clear: true}, nil
+	// A namespace with no Catalog holds no catalog to sweep, so there is
+	// nothing to delete and nothing to wait for. This one rule also
+	// answers a namespace under deletion, where the Catalog goes with
+	// everything else and no new Job can start.
+	if choice.catalog == nil {
+		if choice.reason == reasonNoCatalog {
+			return departure{clear: true}, nil
+		}
+		// More than one Catalog: the sweep cannot tell which cluster it
+		// would be deleting from, so the departure waits for a person.
+		return departure{reason: reasonBlocked, message: choice.message}, nil
 	}
 
-	// The release rule: every survivor is online and no survivor's
-	// report names this library. An offline survivor holds the
-	// release, and that is correct, because its copy of the catalog
-	// still carries the rows and sheds them only after it returns
-	// and syncs.
-	//
-	// This rung also answers the Library that wrote no rows: no
-	// survivor's report names it, so it releases here, and the
-	// departure never asks whether its catalog claim ever existed.
-	// The rows are the question, so a claim a person deleted
-	// mid-life reads the same as one that never stood, and both end
-	// only when the survivors' reports come clean.
-	holder := o.survivorHoldingRows(namespace, name, survivors)
-	if holder == "" {
-		return departure{clear: true}, nil
-	}
-
-	// The scanner goes before the sweep, because it rewrites the rows
-	// the sweep deletes, and because it holds the ReadWriteOnce
-	// catalog claim the cleanup pod needs.
-	stopped, err := o.scannerStopped(ctx, library)
-	if err != nil {
+	// The schedule goes first, so no new walk starts behind the sweep.
+	if err := o.stopScanCronJob(ctx, library); err != nil {
 		return departure{}, err
 	}
-	if !stopped {
+
+	// A scan that is still running rewrites the rows the sweep deletes,
+	// and it holds the ReadWriteOnce claim the cleanup Job needs.
+	if scanRunning(jobs, namespace, name) {
 		return departure{
-			reason:  reasonStoppingScanner,
-			message: "the scanner pod is stopping, so nothing writes the catalog during the sweep",
+			reason:  reasonScanRunning,
+			message: "a scan job of this library is still running",
 		}, nil
 	}
 
@@ -115,73 +98,34 @@ func (o *operator) departureStage(ctx context.Context, library *Library, survivo
 		return departure{reason: reasonBlocked, message: blocker}, nil
 	}
 
-	pod, err := o.standCleanupPod(ctx, library)
+	job, err := o.standCleanupJob(ctx, library, jobs)
 	if err != nil {
 		return departure{}, err
 	}
-	if blocker := cleanupBlocker(pod); blocker != "" {
+	if blocker := cleanupBlocker(job); blocker != "" {
 		return departure{reason: reasonBlocked, message: blocker}, nil
 	}
-	if pod == nil || !everyContainerReady(pod) {
+	if cleanupComplete(job, o.reports.latestFor(namespace, name)) {
+		return departure{clear: true}, nil
+	}
+	if job != nil && job.Status.Succeeded > 0 {
 		return departure{
-			reason:  reasonSweeping,
-			message: "the cleanup pod is deleting this library's rows from the catalog",
+			reason:  reasonAwaitingEcho,
+			message: "the sweep is done and the namespace's reporter has not echoed it yet",
 		}, nil
 	}
-	return departure{reason: reasonAwaitingSurvivor, message: holder}, nil
+	return departure{
+		reason:  reasonSweeping,
+		message: "the cleanup job is deleting this library's rows from the catalog",
+	}, nil
 }
 
-// survivorHoldingRows names the first survivor whose catalog still
-// holds the departed library's rows, and why, or answers empty when
-// none does. The survivors arrive sorted, so a blocked departure
-// names the same survivor on every pass and the status write settles
-// instead of flapping between messages.
-func (o *operator) survivorHoldingRows(namespace, departed string, survivors []string) string {
-	key := libraryKey(namespace, departed)
-	for _, survivor := range survivors {
-		if !o.reports.onlineFor(namespace, survivor) {
-			return fmt.Sprintf("the scanner of %s is offline, so its catalog still holds %s", survivor, key)
-		}
-		report := o.reports.latestFor(namespace, survivor)
-		if report == nil {
-			return fmt.Sprintf("%s has not reported which libraries its catalog holds", survivor)
-		}
-		if slices.Contains(report.CatalogLibraries, key) {
-			return fmt.Sprintf("the catalog of %s still holds %s", survivor, key)
-		}
-	}
-	return ""
-}
-
-// scannerStopped deletes the scanner pod and reports whether it is
-// gone. A pod with a deletion timestamp counts as still present, the
-// rule the reconcile pass follows, so one departure sends one delete
-// and not one delete per pass.
-func (o *operator) scannerStopped(ctx context.Context, library *Library) (bool, error) {
-	namespace, name := library.Metadata.Namespace, scannerPodName(library.Metadata.Name)
-
-	live, err := GetPod(ctx, o.client, namespace, name)
-	if errors.Is(err, ErrNotFound) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if live.Metadata.DeletionTimestamp != "" {
-		return false, nil
-	}
-	return false, DeletePod(ctx, o.client, namespace, name)
-}
-
-// standDepartureClaim gives the cleanup pod a volume to mount, and
+// standDepartureClaim gives the cleanup Job a volume to mount, and
 // answers with the sentence a person has to act on, or empty when
 // the claim stands. A fresh empty claim is enough: the agent joins
-// the namespace's cluster, the rows arrive over gossip, and each
-// sweep tick deletes what has arrived, so the release still waits on
-// the survivors' own reports. A namespace with no single Catalog
-// blocks instead, because the claim is sized from the Catalog and
-// there is nothing to make the volume from; the departure retries
-// until the namespace holds exactly one.
+// the namespace's cluster, the rows arrive over gossip, and the sweep
+// deletes what has arrived, so the release still waits on the
+// reporter's own echo.
 func (o *operator) standDepartureClaim(ctx context.Context, library *Library, choice catalogChoice) (string, error) {
 	namespace := library.Metadata.Namespace
 	name := scannerCatalogClaimName(library.Metadata.Name)
@@ -193,54 +137,18 @@ func (o *operator) standDepartureClaim(ctx context.Context, library *Library, ch
 	if !errors.Is(err, ErrNotFound) {
 		return "", err
 	}
-	if choice.catalog == nil {
-		return fmt.Sprintf("the catalog volume %s does not exist and the sweep cannot make one: %s",
-			name, choice.message), nil
-	}
 	return "", o.standCatalogClaim(ctx, library, choice.catalog)
 }
 
-// cleanupBlocker answers with the sentence a person has to act on: a
-// cleanup pod that failed, or one the scheduler cannot place. Both
-// answers quote the cluster's own words, because the remedy is out
-// there and not in this operator.
-func cleanupBlocker(pod *Pod) string {
-	if pod == nil {
-		return ""
-	}
-	if pod.Status.Phase == podFailed {
-		return "the cleanup pod failed: " + podFailureReason(pod)
-	}
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == podScheduled && condition.Status == conditionIsFalse && condition.Message != "" {
-			return "the cleanup pod cannot be scheduled: " + condition.Message
-		}
-	}
-	return ""
-}
-
-// podFailureReason prefers the kubelet's sentence, then its one-word
-// reason, then the bare fact that the pod failed with no reason
-// given.
-func podFailureReason(pod *Pod) string {
-	if pod.Status.Message != "" {
-		return pod.Status.Message
-	}
-	if pod.Status.Reason != "" {
-		return pod.Status.Reason
-	}
-	return "the kubelet gave no reason"
-}
-
-// releaseLibrary lets a swept Library go: it retires the cleanup
-// pod, drops the library's retained messages from the bus, and takes
-// the finalizer off last, so the act that releases the object is the
-// final one. The garbage collector then takes the catalog claim and
-// the webhook Service with the Library.
+// releaseLibrary lets a swept Library go: it retires the cleanup Job,
+// drops the library's retained messages from the bus, and takes the
+// finalizer off last, so the act that releases the object is the final
+// one. The garbage collector then takes the catalog claim and the
+// CronJob with the Library.
 func (o *operator) releaseLibrary(ctx context.Context, library *Library) error {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 
-	if err := DeletePod(ctx, o.client, namespace, cleanupPodName(name)); err != nil {
+	if err := o.retireCleanupJob(ctx, namespace, name); err != nil {
 		return err
 	}
 	o.clearLibraryTopics(namespace, name)
@@ -288,24 +196,4 @@ func departingStatus(library *Library, stage departure, now time.Time) LibrarySt
 		Message:            stage.message,
 	}, now)
 	return status
-}
-
-// survivingLibraries groups the Libraries that are not deleting by
-// namespace, because a catalog is one namespace's and no other
-// namespace holds its rows. The names are sorted so every reader of
-// one namespace's survivors reads them in one order.
-func survivingLibraries(libraries []Library) map[string][]string {
-	byNamespace := map[string][]string{}
-	for i := range libraries {
-		library := &libraries[i]
-		if library.Metadata.deleting() {
-			continue
-		}
-		namespace := library.Metadata.Namespace
-		byNamespace[namespace] = append(byNamespace[namespace], library.Metadata.Name)
-	}
-	for namespace := range byNamespace {
-		slices.Sort(byNamespace[namespace])
-	}
-	return byNamespace
 }

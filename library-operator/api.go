@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// The group this operator serves, and the core group it writes into:
-// a Library becomes an ordinary pod, so any tool that reads pods reads
-// what a Library became.
+// The group this operator serves, and the core group it writes
+// into: a Library becomes an ordinary CronJob and its Jobs ordinary
+// pods, so any tool that reads them reads what a Library became.
 const (
 	libraryAPIVersion = "library.liken.sh/v1alpha1"
 	podAPIVersion     = "v1"
@@ -102,7 +102,7 @@ func (m ObjectMeta) without(finalizers ...string) []string {
 // An ownerReference ties an object's life to its owner's: the garbage
 // collector deletes the owned object when the owner goes, which is
 // this operator's whole teardown. Controller is true because exactly
-// one thing manages each scanner pod; there is no blockOwnerDeletion,
+// one thing manages each owned object; there is no blockOwnerDeletion,
 // because nothing here needs the owner to wait.
 type OwnerReference struct {
 	APIVersion string `json:"apiVersion"`
@@ -154,6 +154,30 @@ type LibrarySpec struct {
 	// a recycle bin or a staging folder, because no fixed list can
 	// anticipate every volume's layout.
 	Ignore []string `json:"ignore,omitempty"`
+
+	// How often the full walk runs.
+	Scan LibraryScan `json:"scan,omitzero"`
+}
+
+// The schedule the Library's full walk runs on, as the cron
+// expression a CronJob takes.
+type LibraryScan struct {
+	Schedule string `json:"schedule,omitempty"`
+}
+
+// Once an hour, which is the interval a library with a webhook
+// needs as a backstop and a library with none can live on.
+const defaultScanSchedule = "0 * * * *"
+
+// The schedule the CronJob takes: the Library's own, or the
+// default when it names none. The CRD defaults the field, so a Library
+// from the API server always carries one, and this answers for the ones
+// built in this program.
+func (s LibrarySpec) scanSchedule() string {
+	if s.Scan.Schedule != "" {
+		return s.Scan.Schedule
+	}
+	return defaultScanSchedule
 }
 
 // The kinds of media a Library holds. Each one names a settings block
@@ -231,9 +255,12 @@ type LibraryStatus struct {
 	RemovedLastSweep int       `json:"removedLastSweep"`
 	LastWalk         time.Time `json:"lastWalk,omitzero"`
 	LastChange       time.Time `json:"lastChange,omitzero"`
-	Pod              string    `json:"pod,omitempty"`
-	// Webhook is the URL of the scanner's webhook endpoint, the address a
-	// person gives to Radarr, Sonarr, or Jellyfin.
+	// One entry per worker, from the reporter: the Job that ran
+	// last for that worker and when it finished.
+	Runs []libraryRun `json:"runs,omitempty"`
+	// Webhook is the URL of this Library's webhook endpoint on the
+	// operator, the address a person gives to Radarr, Sonarr, or
+	// Jellyfin.
 	Webhook    string      `json:"webhook,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
 }
@@ -405,21 +432,23 @@ const (
 	reasonNotBound     = "NotBound"
 	reasonNoCatalog    = "NoCatalog"
 	reasonManyCatalogs = "ManyCatalogs"
-	reasonPodPending   = "PodPending"
-	reasonPodFailed    = "PodFailed"
 	reasonNoReport     = "NoReport"
+	// The namespace's catalog pod is not up, the schedule does
+	// not stand yet, and the namespace's reporter has left the bus.
+	reasonCatalogPending = "CatalogPending"
+	reasonScanPending    = "ScanPending"
+	reasonOffline        = "Offline"
 
 	// The Departing condition's reasons, in the order depart.go
-	// reaches them: the scanner pod is stopping, the cleanup pod is
-	// deleting the rows, the sweep ran here and a survivor's catalog
-	// still holds the rows, and the cleanup cannot run at all.
-	// Blocked covers a cleanup pod that failed or cannot be
-	// scheduled, and a catalog volume that is gone in a namespace
-	// with no single Catalog to size a new one from.
-	reasonStoppingScanner  = "StoppingScanner"
-	reasonSweeping         = "Sweeping"
-	reasonAwaitingSurvivor = "AwaitingSurvivor"
-	reasonBlocked          = "Blocked"
+	// reaches them: a scan Job of this library is still running, the
+	// cleanup Job is deleting the rows, the Job finished and the
+	// reporter has not echoed it yet, and the cleanup cannot run at
+	// all. Blocked covers a cleanup Job that failed and a namespace
+	// with more than one Catalog.
+	reasonScanRunning  = "ScanRunning"
+	reasonSweeping     = "Sweeping"
+	reasonAwaitingEcho = "AwaitingEcho"
+	reasonBlocked      = "Blocked"
 )
 
 // The values status.phase takes. libraryPhase in status.go derives

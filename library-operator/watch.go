@@ -121,18 +121,19 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
-// WatchPods wakes the loop on every change to a scanner pod, and the
-// label selector keeps the stream to this operator's own pods. Every
-// event earns a wake here, because a Library is Ready only while its
-// pod runs with every container ready: the update that turns a
-// container ready is as much a change to report as a delete.
+// WatchPods wakes the loop on every change to a pod that holds a
+// catalog agent, and the label selector keeps the stream to those pods.
+// Every event earns a wake here, because a Library is Ready only while
+// its namespace's catalog pod runs with every container ready: the
+// update that turns a container ready is as much a change to report as
+// a delete.
 //
 // The recovery is the same as watchLibraries: a dropped stream or a
 // 410 Gone lists the collection, wakes the loop, and resumes the watch
 // from the list's version.
 func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
 	for {
-		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + scannerPodsQuery +
+		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + catalogMemberQuery +
 			"&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -143,9 +144,9 @@ func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
 		}
 
 		time.Sleep(watchRetryPause)
-		list, err := ListScannerPods(watchContext(), c)
+		list, err := ListCatalogMemberPods(watchContext(), c)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing scanner pods to resume the watch: %v\n", err)
+			fmt.Fprintf(os.Stderr, "listing catalog member pods to resume the watch: %v\n", err)
 			continue
 		}
 		resourceVersion = list.Metadata.ResourceVersion

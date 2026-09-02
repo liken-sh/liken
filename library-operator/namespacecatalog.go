@@ -45,6 +45,10 @@ type CatalogSpec struct {
 type CatalogStorage struct {
 	Size             string `json:"size,omitempty"`
 	StorageClassName string `json:"storageClassName,omitempty"`
+	// The claim the catalog pod mounts in place of one the
+	// operator provisions, for a namespace whose catalog volume a person
+	// makes themselves.
+	ClaimName string `json:"claimName,omitempty"`
 }
 
 // CatalogStatus reports the cluster the Catalog stands, so a person reads
@@ -77,6 +81,10 @@ const (
 
 	catalogReasonStanding     = "Standing"
 	catalogReasonManyCatalogs = "ManyCatalogs"
+	// The catalog pod has not started, and the catalog pod
+	// failed.
+	catalogReasonPodPending = "PodPending"
+	catalogReasonPodFailed  = "PodFailed"
 )
 
 // catalogChoice is the namespace's single Catalog, or the reason a Library
@@ -85,6 +93,9 @@ const (
 // reports.
 type catalogChoice struct {
 	catalog *NamespaceCatalog
+	// The pod that Catalog stands, as the pass read it, or nil
+	// when it does not stand yet.
+	pod     *Pod
 	reason  string
 	message string
 }

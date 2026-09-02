@@ -15,6 +15,7 @@
 -- nullable column on a table that other kinds share.
 --
 -- This file defines the item tables movies, sets, series, and episodes,
+-- the runs table at the end,
 -- and the shared files, file_items, and aliases tables. An item's id is
 -- provider-scoped and derived from the sidecar, movie:tmdb:603, so a
 -- re-walk of an unchanged sidecar reads the same id. A folder with no
@@ -231,3 +232,17 @@ CREATE TABLE aliases (
 -- resolve to it. It leads with the library, as every index in this
 -- schema does.
 CREATE INDEX aliases_library_item ON aliases (library, item);
+
+-- One row per library and worker, holding the Job that ran, when
+-- it started and finished, and what it left behind; a Job writes it last
+-- and waits for the reporter to echo it.
+CREATE TABLE runs (
+    library TEXT NOT NULL DEFAULT '',
+    worker TEXT NOT NULL DEFAULT '',
+    job TEXT NOT NULL DEFAULT '',
+    started INTEGER NOT NULL DEFAULT 0,
+    finished INTEGER NOT NULL DEFAULT 0,
+    unidentified INTEGER NOT NULL DEFAULT 0,
+    removed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (library, worker)
+);

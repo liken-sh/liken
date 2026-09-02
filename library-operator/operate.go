@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-// The images the operator stamps into every scanner pod. Neither is
+// The images the operator stamps into every pod it creates. Neither is
 // discoverable from inside a pod, because which image a release ships
 // is a decision the manifest carries, so the Deployment sets both and
 // the operator refuses to start without them.
@@ -51,10 +51,10 @@ const backstopInterval = 10 * time.Second
 var passTimeout = 30 * time.Second
 
 // Operator holds what every pass needs: the client it reads and writes
-// through, the settings it stamps into each scanner pod, the bus, and
-// the desk the bus folds each report onto. They are fields rather than
-// globals so a test builds an operator around a desk and a cluster it
-// controls.
+// through, the settings it stamps into each pod and Job it
+// creates, the bus, and the desks the bus folds each message onto. They
+// are fields rather than globals so a test builds an operator around a
+// desk and a cluster it controls.
 type operator struct {
 	client         *Client
 	scannerImage   string
@@ -64,6 +64,21 @@ type operator struct {
 	topicBase      string
 	bus            *Bus
 	reports        *reports
+
+	// The namespace this operator runs in, which is what the
+	// webhook address it reports on every Library names, and the address
+	// its own webhook server listens on.
+	namespace      string
+	webhookAddress string
+
+	// Whether each namespace's reporter is on the bus, which is
+	// what "online" means for every Library of that namespace.
+	reporters *reporters
+
+	// The webhook paths the server holds for the next pass, one
+	// set per Library. A path becomes a scan Job on the pass that finds
+	// no full walk running.
+	paths *heldPaths
 
 	// The play requests the bus handler holds for the next pass. A
 	// screen's choice reaches the API server only here, because the
@@ -75,7 +90,7 @@ type operator struct {
 	// beyond "read the collection again".
 	wake chan struct{}
 
-	// The recreate backoff of each departing Library's cleanup pod,
+	// The recreate backoff of each departing Library's cleanup Job,
 	// keyed the way the report desk keys a Library, and dropped when
 	// the Library goes.
 	cleanupStands map[string]cleanupStand
@@ -86,7 +101,7 @@ type operator struct {
 // bus subscriptions that fill it. The subscriptions are remembered
 // here and sent on every connection, so they outlive a broker
 // restart.
-func newOperator(client *Client, scannerImage, corrosionImage, browserImage, busAddress, topicBase string) *operator {
+func newOperator(client *Client, scannerImage, corrosionImage, browserImage, busAddress, topicBase, namespace, webhookAddress string) *operator {
 	wake := make(chan struct{}, 1)
 	library := &operator{
 		client:         client,
@@ -95,7 +110,11 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 		browserImage:   browserImage,
 		busAddress:     busAddress,
 		topicBase:      topicBase,
+		namespace:      namespace,
+		webhookAddress: webhookAddress,
 		reports:        newReports(wake),
+		reporters:      newReporters(wake),
+		paths:          newHeldPaths(wake),
 		plays:          newPlayRequests(wake),
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
@@ -107,7 +126,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 	// connection breaks.
 	library.bus = newBus(busAddress, "library-operator", nil, nil, library.handleBusMessage)
 	library.bus.Subscribe(libraryStatusFilter(topicBase))
-	library.bus.Subscribe(libraryAvailabilityFilter(topicBase))
+	library.bus.Subscribe(catalogAvailabilityFilter(topicBase))
 	library.bus.Subscribe(playRequestFilter(topicBase))
 	return library
 }
@@ -136,11 +155,25 @@ func operate() error {
 	if busAddress == "" {
 		return fmt.Errorf("%s is unset; the Deployment must name the broker", busAddressVariable)
 	}
+	// The namespace the operator's own Service is in, which is
+	// what the address it reports on every Library names. The Deployment
+	// reads it off the pod with the downward API.
+	namespace := os.Getenv(operatorNamespaceVariable)
+	if namespace == "" {
+		return fmt.Errorf("%s is unset; the Deployment must name the operator's namespace", operatorNamespaceVariable)
+	}
 	// The topic base has a default, because a cluster that runs one
 	// bus needs no policy for it.
 	topicBase := os.Getenv(topicBaseVariable)
 	if topicBase == "" {
 		topicBase = defaultTopicBase
+	}
+	// The port the webhook endpoint answers on, with a default,
+	// because a cluster that takes the manifest as it ships needs no
+	// policy for it.
+	port := os.Getenv(webhookPortVariable)
+	if port == "" {
+		port = defaultWebhookPort
 	}
 
 	client, err := InClusterClient()
@@ -154,7 +187,8 @@ func operate() error {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	return newOperator(client, scannerImage, corrosionImage, browserImage, busAddress, topicBase).run(stopped, os.Stdout)
+	return newOperator(client, scannerImage, corrosionImage, browserImage,
+		busAddress, topicBase, namespace, ":"+port).run(stopped, os.Stdout)
 }
 
 // Run is the operator without the process around it, so a test drives
@@ -177,9 +211,9 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("listing catalogs: %w", err)
 	}
-	pods, err := ListScannerPods(startup, o.client)
+	pods, err := ListCatalogMemberPods(startup, o.client)
 	if err != nil {
-		return fmt.Errorf("listing scanner pods: %w", err)
+		return fmt.Errorf("listing catalog member pods: %w", err)
 	}
 	// A Player belongs to media-operator, and a cluster that runs none
 	// serves no such collection. That failure is reported and the operator
@@ -199,12 +233,23 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake)
 	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake)
 
+	// The webhook endpoint runs for the life of the operator. A
+	// failure to listen ends the loop, because an operator that reports
+	// an address nothing answers is worse than one that stops.
+	serving := make(chan error, 1)
+	go func() { serving <- o.serveWebhooks(stopped, o.webhookAddress) }()
+
 	ticker := time.NewTicker(backstopInterval)
 	defer ticker.Stop()
 	for {
 		o.pass()
 		select {
 		case <-stopped.Done():
+			return nil
+		case err := <-serving:
+			if err != nil {
+				return fmt.Errorf("serving webhooks on %s: %w", o.webhookAddress, err)
+			}
 			return nil
 		case <-o.wake:
 		case <-ticker.C:
@@ -247,10 +292,23 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
 		players = &PlayerList{}
 	}
+	// The Jobs and the member pods are read once for the whole
+	// pass, because a Library's status reads both and the catalog step
+	// reads the pods again. A list that fails ends the pass: without the
+	// Jobs the pass cannot tell what is running, and without the pods it
+	// cannot tell whether a namespace's catalog stands.
+	jobs, err := ListWorkerJobs(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing worker jobs: %v\n", err)
+		return
+	}
+	members, err := ListCatalogMemberPods(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing catalog member pods: %v\n", err)
+		return
+	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
-	// The release rule reads every other Library in a namespace, so
-	// the pass groups the survivors once for all of them.
-	survivors := survivingLibraries(libraries.Items)
+	now := time.Now().UTC()
 
 	live := make(map[string]bool, len(libraries.Items))
 	for index := range libraries.Items {
@@ -259,18 +317,19 @@ func (o *operator) pass() {
 		live[libraryKey(namespace, name)] = true
 
 		choice := singleCatalog(byNamespace[namespace])
+		choice.pod = catalogPodOf(choice.catalog, members.Items)
 
 		// A deleting Library takes the departure and never the
-		// reconcile, because the reconcile would stand the scanner
+		// reconcile, because the reconcile would stand the schedule
 		// back up to rewrite the rows the sweep is deleting.
 		if library.Metadata.deleting() {
-			if err := o.depart(ctx, library, survivors[namespace], choice); err != nil {
+			if err := o.depart(ctx, library, choice, jobs.Items); err != nil {
 				fmt.Fprintf(os.Stderr, "departing library %s/%s: %v\n", namespace, name, err)
 			}
 			continue
 		}
 
-		if err := o.reconcile(ctx, library, choice); err != nil {
+		if err := o.reconcile(ctx, library, choice, jobs.Items, now); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n", namespace, name, err)
 		}
 	}
@@ -278,9 +337,8 @@ func (o *operator) pass() {
 	// anything else the desk holds belongs to a Library that is gone.
 	// The pass clears the topics of every key it drops, because the
 	// desk holds a key only while a retained message stands on the
-	// bus: a scanner that died after its Library released leaves its
-	// last will there, and a deletion from before this operator
-	// cleared topics left both. Only a pass may clear one, because
+	// bus: a report from before this operator cleared topics is
+	// standing there still. Only a pass may clear one, because
 	// the bus handler holds no Library list; the subscription
 	// delivers the litter, the desk holds it, and the next pass
 	// drops it.
@@ -288,6 +346,7 @@ func (o *operator) pass() {
 		namespace, name, _ := strings.Cut(key, "/")
 		o.clearLibraryTopics(namespace, name)
 	}
+	o.paths.retain(live)
 	for key := range o.cleanupStands {
 		if !live[key] {
 			delete(o.cleanupStands, key)
@@ -311,7 +370,7 @@ func (o *operator) pass() {
 	// now or drops it, and the person presses again.
 	o.createPlays(ctx, players.Items, libraries.Items)
 
-	o.reconcileCatalogs(ctx, byNamespace)
+	o.reconcileCatalogs(ctx, byNamespace, members.Items, now)
 }
 
 // HandleBusMessage folds one message from the broker onto the place
@@ -327,30 +386,30 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.readPlayRequest(namespace, player, topic, payload)
 		return
 	}
+	// A namespace's reporter says online or offline on a topic of
+	// its own, and that one signal stands for every Library of the
+	// namespace.
+	if namespace, ok := parseCatalogAvailabilityTopic(o.topicBase, topic); ok {
+		if len(payload) != 0 {
+			o.reporters.mark(namespace, string(payload) == availabilityOnline)
+		}
+		return
+	}
 	namespace, name, kind, ok := parseLibraryTopic(o.topicBase, topic)
 	if !ok {
 		return
 	}
 	// An empty payload is how a retained topic is cleared, so it
-	// carries nothing to fold, for either kind. The rule must cover
-	// availability too: the operator subscribes to the topics it
-	// clears, so its own clears come back to it, and folding one as
-	// offline would put back the desk state the pass just dropped.
-	// The next pass would clear again, and the two would trade
-	// messages forever. A real scanner only ever publishes online or
-	// offline, so nothing real is dropped here.
-	if len(payload) == 0 {
+	// carries nothing to fold. The operator subscribes to the topics it
+	// clears, so its own clears come back to it, and folding one would
+	// put back the desk state the pass just dropped.
+	if len(payload) == 0 || kind != libraryStatusKind {
 		return
 	}
-	switch kind {
-	case libraryStatusKind:
-		var report libraryReport
-		if err := json.Unmarshal(payload, &report); err != nil {
-			fmt.Fprintf(os.Stderr, "reading the report on %s: %v\n", topic, err)
-			return
-		}
-		o.reports.fold(namespace, name, report)
-	case libraryAvailabilityKind:
-		o.reports.availability(namespace, name, string(payload) == availabilityOnline)
+	var report libraryReport
+	if err := json.Unmarshal(payload, &report); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the report on %s: %v\n", topic, err)
+		return
 	}
+	o.reports.fold(namespace, name, report)
 }

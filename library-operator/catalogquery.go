@@ -137,6 +137,146 @@ func (c *Catalog) stream(ctx context.Context, sql string, params []any, onRow fu
 	return scanner.Err()
 }
 
+// Reads how many titles the catalog holds for this library: the
+// movie rows and the series rows, which are the folders a walk reads, and
+// never the episodes under a series.
+func (c *Catalog) countTitles(ctx context.Context, library string) (int, error) {
+	return c.queryInt(ctx, `SELECT `+
+		`(SELECT count(*) FROM movies WHERE library = ?) + `+
+		`(SELECT count(*) FROM series WHERE library = ?)`,
+		[]any{library, library})
+}
+
+// The subscriptions endpoint, which answers one statement with the
+// rows it holds now and then every later change to them.
+const subscriptionsPath = "/v1/subscriptions"
+
+// Posts one statement and calls onRow for every row of the opening
+// snapshot and every change after it, with the column names the stream
+// opened with, because the agent's matcher prepends the primary key to
+// the projection and a reader that counts cells would read the wrong one.
+// onReady is called once the snapshot ends. The call returns when the
+// stream ends, which a cancelled context is one way to do.
+func (c *Catalog) subscribe(ctx context.Context, sql string, onReady func(), onRow func(columns []string, cells []any)) error {
+	payload, _ := json.Marshal(sql)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+subscriptionsPath, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer drain(resp.Body)
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("catalog subscription: %s: %s", resp.Status, message)
+	}
+
+	var columns []string
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), queryReadLimit)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		event, err := decodeSubscriptionEvent(line)
+		if err != nil {
+			return err
+		}
+		switch event.kind {
+		case subscriptionColumns:
+			columns = event.columns
+		case subscriptionRow:
+			onRow(columns, event.cells)
+		case subscriptionEnd:
+			onReady()
+		case subscriptionError:
+			return fmt.Errorf("catalog subscription: %s", event.message)
+		}
+	}
+	return scanner.Err()
+}
+
+// The four events a subscription stream carries that the reader
+// acts on; every other event reads as a skipped one.
+const (
+	subscriptionColumns = "columns"
+	subscriptionRow     = "row"
+	subscriptionEnd     = "eoq"
+	subscriptionError   = "error"
+)
+
+// One decoded event of a subscription stream.
+type subscriptionEvent struct {
+	kind    string
+	columns []string
+	cells   []any
+	message string
+}
+
+// Reads one streamed subscription event. A row event is
+// [rowid, [cells]] and a change event is [kind, rowid, [cells], id], so
+// both carry their cells and both read as a row here.
+func decodeSubscriptionEvent(line []byte) (subscriptionEvent, error) {
+	var event map[string]json.RawMessage
+	if err := json.Unmarshal(line, &event); err != nil {
+		return subscriptionEvent{}, err
+	}
+	if raw, held := event[subscriptionError]; held {
+		var message string
+		_ = json.Unmarshal(raw, &message)
+		return subscriptionEvent{kind: subscriptionError, message: message}, nil
+	}
+	if raw, held := event[subscriptionColumns]; held {
+		var columns []string
+		if err := json.Unmarshal(raw, &columns); err != nil {
+			return subscriptionEvent{}, err
+		}
+		return subscriptionEvent{kind: subscriptionColumns, columns: columns}, nil
+	}
+	if _, held := event[subscriptionEnd]; held {
+		return subscriptionEvent{kind: subscriptionEnd}, nil
+	}
+	raw, held := event[subscriptionRow]
+	at := 1
+	if !held {
+		raw, held = event["change"]
+		at = 2
+	}
+	if !held {
+		return subscriptionEvent{}, nil
+	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return subscriptionEvent{}, err
+	}
+	if len(parts) <= at {
+		return subscriptionEvent{}, nil
+	}
+	var cells []any
+	if err := json.Unmarshal(parts[at], &cells); err != nil {
+		return subscriptionEvent{}, err
+	}
+	return subscriptionEvent{kind: subscriptionRow, cells: cells}, nil
+}
+
+// Reads one named column out of a streamed row.
+func cellNamed(columns []string, cells []any, name string) (any, bool) {
+	for at, column := range columns {
+		if column == name && at < len(cells) {
+			return cells[at], true
+		}
+	}
+	return nil, false
+}
+
 // decodeQueryEvent reads one streamed query event. A row event carries
 // the row's cells, an error event carries a message, and the columns and
 // end-of-query events carry neither, so they read as a skipped event.

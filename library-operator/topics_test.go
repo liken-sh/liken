@@ -35,6 +35,16 @@ func TestTopicsCarryTheLibraryLayout(t *testing.T) {
 			want: "liken/library/libraries/+/+/availability",
 		},
 		{
+			name: "catalog availability",
+			got:  catalogAvailabilityTopic(base, "house"),
+			want: "liken/library/catalogs/house/availability",
+		},
+		{
+			name: "catalog availability filter",
+			got:  catalogAvailabilityFilter(base),
+			want: "liken/library/catalogs/+/availability",
+		},
+		{
 			name: "play",
 			got:  playRequestTopic(base, "house", "den-tv"),
 			want: "liken/library/players/house/den-tv/play",
@@ -158,6 +168,41 @@ func TestParsePlayRequestTopicNamesThePlayer(t *testing.T) {
 			if namespace != each.namespace || player != each.player {
 				t.Errorf("parsed (%q, %q), want (%q, %q)",
 					namespace, player, each.namespace, each.player)
+			}
+		})
+	}
+}
+
+// The operator folds one reporter's availability by the namespace
+// its topic names, and reads nothing off a topic of another shape.
+func TestParseCatalogAvailabilityTopicNamesTheNamespace(t *testing.T) {
+	base := defaultTopicBase
+	cases := []struct {
+		name      string
+		topic     string
+		namespace string
+		ok        bool
+	}{
+		{
+			name:      "a catalog availability topic",
+			topic:     catalogAvailabilityTopic(base, "house"),
+			namespace: "house",
+			ok:        true,
+		},
+		{name: "a topic under another base", topic: "other/catalogs/house/availability"},
+		{name: "a libraries topic", topic: libraryStatusTopic(base, "house", "movies")},
+		{name: "a catalogs topic with a kind this operator does not read", topic: base + "/catalogs/house/status"},
+		{name: "a catalogs topic with a level too many", topic: base + "/catalogs/house/movies/availability"},
+		{name: "an empty namespace", topic: base + "/catalogs//availability"},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			namespace, ok := parseCatalogAvailabilityTopic(base, each.topic)
+			if ok != each.ok {
+				t.Fatalf("ok = %v, want %v", ok, each.ok)
+			}
+			if namespace != each.namespace {
+				t.Errorf("parsed %q, want %q", namespace, each.namespace)
 			}
 		})
 	}

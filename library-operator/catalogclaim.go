@@ -1,10 +1,10 @@
 package main
 
-// catalogclaim.go provisions the durable catalog volume. The operator
-// provisions one catalog PersistentVolumeClaim per scanner pod. It is
-// ReadWriteOnce, sized from the namespace Catalog, and owned by the Library,
-// so the claim survives a pod roll and is garbage-collected with the
-// Library.
+// The durable catalog volumes. There is one per Library, which
+// its worker Jobs mount in turn, and one per namespace, which the
+// catalog pod holds. Both are ReadWriteOnce, because one agent writes
+// one SQLite database, and both are sized from the namespace Catalog,
+// because every agent holds the whole namespace's catalog.
 
 import (
 	"context"
@@ -12,8 +12,9 @@ import (
 )
 
 // scannerCatalogClaimName is the durable catalog volume one Library's
-// scanner pod mounts. It is derived from the Library name, so every pass
-// names the same claim and the operator keeps no record of it.
+// worker Jobs mount. It is derived from the Library name, so every pass
+// names the same claim and the operator keeps no record of it. Its
+// ReadWriteOnce is what serializes one library's Jobs.
 //
 // The claim must hold a database whose schema matches this release.
 // Corrosion refuses to change the primary key of a database it already
@@ -27,7 +28,7 @@ func scannerCatalogClaimName(library string) string {
 	return library + "-catalog"
 }
 
-// buildCatalogClaim writes the catalog claim one Library's scanner takes.
+// buildCatalogClaim writes the catalog claim one Library's workers take.
 // It is ReadWriteOnce, because one agent writes one SQLite database. It is
 // sized from the namespace Catalog, because each agent holds the whole
 // namespace's catalog. It is owned by the Library, so it survives a pod roll
@@ -40,7 +41,7 @@ func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentV
 		Metadata: ObjectMeta{
 			Name:            scannerCatalogClaimName(library.Metadata.Name),
 			Namespace:       library.Metadata.Namespace,
-			Labels:          scannerLabels(library.Metadata.Name),
+			Labels:          libraryLabels(library.Metadata.Name),
 			OwnerReferences: []OwnerReference{libraryOwner(library)},
 		},
 		Spec: PersistentVolumeClaimSpec{
@@ -75,4 +76,42 @@ func (o *operator) standCatalogClaim(ctx context.Context, library *Library, cata
 		return nil
 	}
 	return err
+}
+
+// The durable catalog volume the namespace's catalog pod holds,
+// named from the Catalog, unless the Catalog names a claim of its own.
+func catalogPodClaimName(catalog string) string {
+	return catalog + "-catalog"
+}
+
+// The claim the catalog pod mounts: the one the Catalog names,
+// or the one the operator provisions when it names none.
+func catalogClaimFor(catalog *NamespaceCatalog) string {
+	if catalog.Spec.Storage.ClaimName != "" {
+		return catalog.Spec.Storage.ClaimName
+	}
+	return catalogPodClaimName(catalog.Metadata.Name)
+}
+
+// The catalog pod's own claim, owned by the Catalog, so the
+// garbage collector takes it with the Catalog and the standing catalog
+// survives every roll of the pod.
+func buildCatalogPodClaim(catalog *NamespaceCatalog) *PersistentVolumeClaim {
+	return &PersistentVolumeClaim{
+		APIVersion: claimAPIVersion,
+		Kind:       "PersistentVolumeClaim",
+		Metadata: ObjectMeta{
+			Name:            catalogPodClaimName(catalog.Metadata.Name),
+			Namespace:       catalog.Metadata.Namespace,
+			Labels:          catalogPodLabels(),
+			OwnerReferences: []OwnerReference{catalogObjectOwner(catalog)},
+		},
+		Spec: PersistentVolumeClaimSpec{
+			AccessModes: []string{accessModeReadWriteOnce},
+			Resources: VolumeResourceRequirements{
+				Requests: map[string]string{"storage": catalogStorageSize(catalog)},
+			},
+			StorageClassName: catalog.Spec.Storage.StorageClassName,
+		},
+	}
 }

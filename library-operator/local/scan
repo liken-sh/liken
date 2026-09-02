@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# local/scan runs the scanner in its scan role against a directory of media on
-# this workstation, into the local three-agent Corrosion cluster local/catalog
-# starts, so a parser change shows in the catalog without a cluster.
+# PROSE: local/scan runs one scan Job against a directory of media on this
+# workstation, into the local Corrosion cluster local/catalog starts, so a
+# parser change shows in the catalog without a cluster. The Job exits when
+# the harness reporter publishes its run back, the same wait a Job makes in
+# the cluster.
 #
 # Usage:
 #   local/scan <media-directory> [kind]   walk the directory into the catalog;
@@ -23,8 +25,12 @@ image="library-operator:local"
 # so a read against any of them shows the walk.
 catalog_api="http://127.0.0.1:20081"
 
-# The cap on the run, because the walk itself ends the run and this
-# number only bounds a walk that never reaches its last line.
+# PROSE: the broker the harness reporter publishes over, which is where the
+# Job hears its own run come back.
+bus_address="127.0.0.1:20883"
+
+# PROSE: the cap on the run, because the walk and the echo end the run and
+# this number only bounds a Job that never reaches its last line.
 run_seconds="${RUN_SECONDS:-600}"
 
 # The mount point inside the container, the path the pod mounts the claim
@@ -34,7 +40,7 @@ run_seconds="${RUN_SECONDS:-600}"
 container_mount="/library"
 
 usage() {
-  sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '8,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -56,6 +62,13 @@ if ! curl --silent --fail --max-time 2 \
   exit 1
 fi
 
+# PROSE: the Job waits for the reporter's message before it exits, so the
+# broker has to be up as well as the agents.
+if ! (exec 3<>"/dev/tcp/${bus_address%:*}/${bus_address##*:}") 2>/dev/null; then
+  echo "local/scan: no broker answers on $bus_address; run 'local/catalog up' first" >&2
+  exit 1
+fi
+
 # A missing image is built here rather than reported, and the build is
 # the same one CI runs.
 if [ -z "$(docker images --quiet "$image")" ]; then
@@ -63,14 +76,11 @@ if [ -z "$(docker images --quiet "$image")" ]; then
   docker build "$repo" --tag "$image" >&2
 fi
 
-# --network host puts the scanner on loopback, where the catalog API port
-# is the address it posts to. The bus address is empty, because the walk
-# runs before the scanner connects to a bus and this harness watches the
-# catalog and not the report. --user runs it as the person at the
-# keyboard, so it reads a media directory they own.
+# PROSE: --network host puts the Job on loopback, where the catalog API
+# port and the broker port are the addresses it uses. --user runs it as the
+# person at the keyboard, so it reads a media directory they own.
 #
-# The scanner runs detached, because this script reads its log to
-# learn when the walk ended.
+# The Job runs detached, because this script reads its log while it runs.
 echo "local/scan: walking $media as a $kind library into $catalog_api" >&2
 container="library-operator-scan-$$"
 docker run --detach --name "$container" \
@@ -82,20 +92,22 @@ docker run --detach --name "$container" \
   --env LIBRARY_KIND="$kind" \
   --env LIBRARY_ROOT=/ \
   --env LIBRARY_CATALOG_API="$catalog_api" \
-  --env LIBRARY_BUS_ADDRESS= \
+  --env LIBRARY_BUS_ADDRESS="$bus_address" \
   --env LIBRARY_TOPIC_BASE= \
+  --env JOB_NAME="$container" \
+  --env ECHO_TIMEOUT=2m \
   "$image" scan >/dev/null
 
-# The scanner is a standing service and holds its container open long
-# after the walk, so every way out of this script removes it.
+# PROSE: the Job exits on its own, and every way out of this script removes
+# what is left of its container.
 cleanup() {
   docker rm --force "$container" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-# The scanner logs one line for the end of its first walk, and that
-# line reports the prune as well, so the log is what this script waits
-# for and the timeout is only a cap on the wait.
+# PROSE: the Job logs one line for the end of its walk, and that line
+# reports the prune as well. The log runs to the end of the container,
+# because the Job holds the container open until it hears its own run.
 walk="capped"
 while IFS= read -r line; do
   printf '%s\n' "$line" >&2
@@ -105,19 +117,25 @@ while IFS= read -r line; do
       case "$line" in
         *"prune deferred"*) walk="unpruned" ;;
       esac
-      break
       ;;
     *"incomplete walk:"*)
       walk="incomplete"
-      break
       ;;
   esac
 done < <(timeout --signal=TERM "$run_seconds" docker logs --follow "$container" 2>&1)
 
-# A log that ends with no walk line is either a scanner that left or a
-# walk still running at the cap, and the two are read apart here.
-if [ "$walk" = "capped" ] && [ -z "$(docker ps --quiet --filter "name=^${container}\$")" ]; then
-  walk="ended"
+# PROSE: a container still running at the cap is a Job that did not finish,
+# and one that left carries the exit code the Job ended with: zero once the
+# reporter has echoed its run, and non-zero on a failed walk or an echo
+# that never came.
+job=1
+if [ -n "$(docker ps --quiet --filter "name=^${container}\$")" ]; then
+  echo "local/scan: the job did not finish within the RUN_SECONDS cap of ${run_seconds}s" >&2
+else
+  job="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || echo 1)"
+  if [ "$walk" = "capped" ]; then
+    walk="ended"
+  fi
 fi
 
 # A walk prunes only when it read the whole directory, so a run that
@@ -131,7 +149,7 @@ case "$walk" in
     echo "local/scan: the walk did not read all of $media, so it pruned nothing; rows for files that left $media are still in the catalog" >&2
     ;;
   ended)
-    echo "local/scan: the scanner ended before it finished a walk; the catalog holds what it wrote up to that point" >&2
+    echo "local/scan: the job ended before it finished a walk; the catalog holds what it wrote up to that point" >&2
     ;;
   capped)
     echo "local/scan: the walk did not finish within the RUN_SECONDS cap of ${run_seconds}s, so it pruned nothing; rows for files that left $media are still in the catalog, and a longer RUN_SECONDS finishes the walk" >&2
@@ -145,3 +163,7 @@ count="$(curl --silent --fail --max-time 5 \
   --data "\"SELECT count(*) FROM $kind\"" \
   "$catalog_api/v1/queries" 2>/dev/null | grep -o '\[[0-9]*\]' | head -1 || true)"
 echo "local/scan: the $kind table holds ${count:-an unknown number of} rows" >&2
+
+# PROSE: the script ends with what the Job ended with, so a failed walk or
+# an echo that never came fails the run here too.
+exit "$job"

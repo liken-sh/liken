@@ -4,10 +4,10 @@ package main
 // Player, in the Player's namespace and owned by it, so deleting the Player
 // tears it down. It holds the media browser and a Corrosion agent of its own.
 //
-// The agent's state is an emptyDir and not a durable claim, unlike the
-// scanner pod's. A screen holds a copy of the namespace's catalog, not the
-// only copy: the agent joins the cluster through the catalog Service and
-// rebuilds from its peers on every start.
+// The agent's state is an emptyDir and not a durable claim,
+// unlike the catalog pod's. A screen holds a copy of the namespace's
+// catalog, not the only copy: the agent joins the cluster through the
+// catalog Service and rebuilds from its peers on every start.
 //
 // The browser reads the catalog from the agent's file and the update
 // stream from its loopback API, and it draws poster art from every Library's
@@ -29,8 +29,9 @@ import (
 // The container's name reaches a person through kubectl logs, so it
 const browserContainer = "browser"
 
-// The name label a screen pod carries. It is neither the scanner's
-// value nor the cleanup pod's, so one list answers one kind of pod.
+// The name label value a screen pod carries. It is neither a
+// worker Job's value nor the catalog pod's, so one list answers one
+// kind of pod.
 const screenLabelValue = "library-media-browser"
 
 // The label that names the Player a screen pod draws for, beside the
@@ -97,14 +98,15 @@ func screenPodName(player string) string {
 	return player + "-media-browser"
 }
 
-// ScreenLabels is the label pair that names one Player's screen pod.
-// The pod carries them and a list of this operator's screens selects on the
-// first, so the two cannot drift apart.
+// ScreenLabels is what one Player's screen pod carries: the name
+// label a list of this operator's screens selects on, the Player it
+// draws for, and the member label that makes its agent a peer of the
+// namespace's catalog cluster.
 func screenLabels(player string) map[string]string {
-	return map[string]string{
+	return withMemberLabel(map[string]string{
 		scannerLabelKey: screenLabelValue,
 		playerLabelKey:  player,
-	}
+	})
 }
 
 // PlayerOwner ties the pod's life to the Player's. Controller is true
@@ -169,7 +171,7 @@ func buildScreenPod(player *Player, libraries []Library, browserImage, corrosion
 			RestartPolicy:                 "Always",
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,
-			// The catalog agent is the same native sidecar the scanner
+			// The catalog agent is the same native sidecar every other
 			// pod runs, so the kubelet passes its startupProbe before it
 			// starts the browser, and the browser's first read never races an
 			// API that is not listening.

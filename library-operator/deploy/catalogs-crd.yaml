@@ -1,7 +1,9 @@
-# The Catalog API, declared to Kubernetes. A namespace has exactly one
-# Catalog. It sizes the durable volume every catalog agent takes, and it
-# owns the namespace's catalog Service and EndpointSlice. More than one
-# Catalog in a namespace marks every Catalog Blocked and stands no cluster.
+# The Catalog API, declared to Kubernetes. A namespace has
+# exactly one Catalog. It stands the catalog pod that holds the
+# namespace's durable catalog and reports it, it sizes the volume every
+# catalog agent takes, and it owns that pod, its claim, and the
+# namespace's catalog Service and EndpointSlice. More than one Catalog
+# in a namespace marks every Catalog Blocked and stands no cluster.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -65,6 +67,10 @@ spec:
                         The StorageClass each agent's catalog volume
                         binds to. Omitted, the cluster's default binds
                         it.
+                    claimName:
+                      type: string
+                      minLength: 1
+                      description: "An existing PersistentVolumeClaim in this namespace for the catalog pod to mount, in place of the one the operator provisions; the operator creates none when it is set."
             status:
               type: object
               description: >-
@@ -74,9 +80,7 @@ spec:
                 members:
                   type: array
                   x-kubernetes-list-type: atomic
-                  description: >-
-                    The catalog agent pods that are members of the
-                    namespace's cluster.
+                  description: "The pods that are members of the namespace's catalog cluster: the catalog pod, the pods of the Jobs that are running, and the screen pods."
                   items:
                     type: string
                 storageSize:
@@ -85,12 +89,7 @@ spec:
                     The storage size the agents were given.
                 conditions:
                   type: array
-                  description: >-
-                    The typed observations the operator keeps on this
-                    Catalog, in the standard Kubernetes form. Ready is
-                    True when the Catalog stands the namespace's cluster,
-                    and False with the reason ManyCatalogs when the
-                    namespace holds more than one Catalog.
+                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

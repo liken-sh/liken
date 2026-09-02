@@ -15,29 +15,43 @@ import (
 	"time"
 )
 
-// deriveLibraryStatus builds the whole status of one Library. Each
-// argument is one authority: the binding is what the API server says
-// about the storage, the pod is what the kubelet says about the
-// scanner, and the report is what the scanner itself says about the
-// volume. A nil pod is a library with no scanner, and a nil report is
-// a scanner that has said nothing yet.
-func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, pod *Pod, latest *libraryReport, online bool, now time.Time) LibraryStatus {
-	status := LibraryStatus{Volume: bound.volume}
-	if pod != nil {
-		status.Pod = pod.Metadata.Name
+// Everything one pass observed about one Library, gathered so
+// the derivation stays one function of its arguments: what the API
+// server says about the storage, which Catalog the namespace resolved
+// to and how its pod is doing, whether the schedule stands, what the
+// namespace's reporter last said about this library, whether that
+// reporter is on the bus, and the namespace the operator's own Service
+// is in.
+type libraryObservation struct {
+	bound             binding
+	choice            catalogChoice
+	cronJob           *CronJob
+	report            *libraryReport
+	online            bool
+	operatorNamespace string
+}
+
+// deriveLibraryStatus builds the whole status of one Library from one
+// pass's observation and nothing else. A nil cronJob is a library whose
+// schedule does not stand, and a nil report is one the reporter has
+// said nothing about yet.
+func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Time) LibraryStatus {
+	status := LibraryStatus{Volume: seen.bound.volume}
+
+	// The webhook address names the operator's own Service and this
+	// Library, so it holds for the whole life of the Library. It is
+	// reported on the same condition the schedule is written on, so a
+	// Library that is not being scanned reports no address to send an
+	// import to.
+	if libraryStands(seen.bound, seen.choice) {
+		status.Webhook = webhookURL(seen.operatorNamespace,
+			library.Metadata.Namespace, library.Metadata.Name)
 	}
 
-	// The operator writes the Service whenever it writes the scanner, so
-	// the address is reported on that same condition and not on the pod.
-	// A pod the operator replaces then leaves the address in place.
-	if scannerStands(bound, choice) {
-		status.Webhook = webhookURL(library)
-	}
-
-	// The counts and the times are the scanner's, carried through as
-	// it reported them. A Library with no report keeps zeroes, and the
-	// Ready condition says why.
-	if latest != nil {
+	// The counts, the times, and the runs are the reporter's, carried
+	// through as it published them. A Library with no report keeps
+	// zeroes, and the Ready condition says why.
+	if latest := seen.report; latest != nil {
 		status.Titles = latest.Titles
 		status.Unidentified = latest.Unidentified
 		status.Items = latest.Items
@@ -45,6 +59,7 @@ func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, 
 		status.RemovedLastSweep = latest.RemovedLastSweep
 		status.LastWalk = latest.LastWalk
 		status.LastChange = latest.LastChange
+		status.Runs = latest.Runs
 	}
 
 	// The conditions are built on a copy of the ones the Library
@@ -54,25 +69,26 @@ func deriveLibraryStatus(library *Library, bound binding, choice catalogChoice, 
 	// every status look unchanged.
 	conditions := slices.Clone(library.Status.Conditions)
 	generation := library.Metadata.Generation
-	ready := readyCondition(bound, choice, pod, latest, generation)
-	conditions = SetCondition(conditions, boundCondition(bound, generation), now)
+	ready := readyCondition(seen, generation)
+	conditions = SetCondition(conditions, boundCondition(seen.bound, generation), now)
 	conditions = SetCondition(conditions, ready, now)
 	status.Conditions = conditions
-	status.Phase = libraryPhase(ready, online, latest)
+	status.Phase = libraryPhase(ready, seen.report)
 	return status
 }
 
-// libraryPhase says what the scanner is doing, in the word a person
-// reads in the status column. It reads the Ready condition this same
-// derivation built, so the column and the condition never disagree. The
-// phase is Pending until Ready is True, then Offline when the scanner has
-// left the bus, Scanning while a walk runs, and Idle otherwise.
-func libraryPhase(ready Condition, online bool, latest *libraryReport) string {
+// LibraryPhase says what the library is doing, in the word a
+// person reads in the status column. It reads the Ready condition this
+// same derivation built, so the column and the condition never
+// disagree. The phase is Offline when the reporter has left the bus,
+// Pending while any other step of the path is missing, Scanning while
+// the report says a walk runs, and Idle otherwise.
+func libraryPhase(ready Condition, latest *libraryReport) string {
 	switch {
+	case ready.Reason == reasonOffline:
+		return phaseOffline
 	case ready.Status != ConditionTrue:
 		return phasePending
-	case !online:
-		return phaseOffline
 	case latest != nil && latest.Walking:
 		return phaseScanning
 	default:
@@ -97,43 +113,45 @@ func boundCondition(bound binding, generation int64) Condition {
 	}
 }
 
-// readyCondition reports whether this library is being scanned. Ready
-// is the whole path working: the storage is bound, the pod runs with
-// every container ready, and a report has arrived over the bus. Each
-// reason names the step that has not happened, so the condition says
-// where to look.
-func readyCondition(bound binding, choice catalogChoice, pod *Pod, latest *libraryReport, generation int64) Condition {
+// ReadyCondition reports whether this library is being scanned.
+// Ready is the whole path working: the storage is bound, the namespace
+// holds one Catalog whose pod runs with every container ready, the
+// schedule stands, the reporter is on the bus, and it has reported this
+// library. Each reason names the step that has not happened, so the
+// condition says where to look.
+func readyCondition(seen libraryObservation, generation int64) Condition {
 	condition := Condition{
 		Type:               conditionReady,
 		Status:             ConditionFalse,
 		ObservedGeneration: generation,
 	}
+	_, blocker := catalogPodBlocker(seen.choice.pod)
 	switch {
-	case bound.volume == nil:
+	case seen.bound.volume == nil:
 		condition.Reason = reasonNotBound
 		condition.Message = "the library's storage is not bound"
-	case choice.catalog == nil:
+	case seen.choice.catalog == nil:
 		// The namespace has no single Catalog, so the Library waits. The
 		// reason and message are the catalog choice's own, which name whether
 		// the namespace has none or several.
-		condition.Reason = choice.reason
-		condition.Message = choice.message
-	case pod == nil:
-		condition.Reason = reasonPodPending
-		condition.Message = "there is no scanner pod yet"
-	case pod.Status.Phase == podFailed:
-		condition.Reason = reasonPodFailed
-		condition.Message = podFailureMessage(pod)
-	case pod.Status.Phase != podRunning || !everyContainerReady(pod):
-		condition.Reason = reasonPodPending
-		condition.Message = podPendingMessage(pod)
-	case latest == nil:
+		condition.Reason = seen.choice.reason
+		condition.Message = seen.choice.message
+	case blocker != "":
+		condition.Reason = reasonCatalogPending
+		condition.Message = blocker
+	case seen.cronJob == nil:
+		condition.Reason = reasonScanPending
+		condition.Message = "the scan schedule does not stand yet"
+	case !seen.online:
+		condition.Reason = reasonOffline
+		condition.Message = "the namespace's reporter is not on the bus"
+	case seen.report == nil:
 		condition.Reason = reasonNoReport
-		condition.Message = "the scanner has not reported yet"
+		condition.Message = "the reporter has not reported this library yet"
 	default:
 		condition.Status = ConditionTrue
 		condition.Reason = reasonReady
-		condition.Message = fmt.Sprintf("the scanner reports %d titles", latest.Titles)
+		condition.Message = fmt.Sprintf("the reporter reports %d titles", seen.report.Titles)
 	}
 	return condition
 }
@@ -143,9 +161,9 @@ func readyCondition(bound binding, choice catalogChoice, pod *Pod, latest *libra
 // is not ready: an empty list is a pod that is still starting, not a
 // pod whose containers all passed.
 //
-// The catalog agent counts here as much as the scanner does, and the
-// kubelet reports it under initContainerStatuses because it is a native
-// sidecar. A Library whose agent has not opened its API is not scanning.
+// The catalog agent counts here as much as the container beside it, and
+// the kubelet reports it under initContainerStatuses because it is a
+// native sidecar. A pod whose agent has not opened its API is not up.
 func everyContainerReady(pod *Pod) bool {
 	if !containerReady(pod.Status.InitContainerStatuses, catalogContainer) {
 		return false
@@ -180,19 +198,19 @@ func podPendingMessage(pod *Pod) string {
 		return pod.Status.Message
 	}
 	if pod.Status.Phase == podRunning {
-		return "the scanner pod runs and not every container is ready"
+		return "the catalog pod runs and not every container is ready"
 	}
-	return "the scanner pod has not started"
+	return "the catalog pod has not started"
 }
 
 func podFailureMessage(pod *Pod) string {
 	if pod.Status.Message != "" {
-		return "the scanner pod failed: " + pod.Status.Message
+		return "the catalog pod failed: " + pod.Status.Message
 	}
 	if pod.Status.Reason != "" {
-		return "the scanner pod failed: " + pod.Status.Reason
+		return "the catalog pod failed: " + pod.Status.Reason
 	}
-	return "the scanner pod failed"
+	return "the catalog pod failed"
 }
 
 // writeLibraryStatus writes only a status that differs from the one

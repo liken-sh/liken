@@ -221,11 +221,12 @@ const (
 	endpointSlicePrefix = "/apis/" + endpointSliceAPIVersion + "/namespaces/"
 )
 
-// ScannerPodsQuery narrows a pod list or a pod watch to this
-// operator's own scanner pods, by the name label every scanner pod
-// carries. The equals sign inside the selector is percent-encoded, so
-// the server reads one parameter and not two.
-const scannerPodsQuery = "labelSelector=" + scannerLabelKey + "%3D" + scannerLabelValue
+// CatalogMemberQuery narrows a pod list or a pod watch to the
+// pods that hold a catalog agent, whatever kind of pod they are: the
+// catalog pod, a running Job's pod, and a screen pod. The equals sign
+// inside the selector is percent-encoded, so the server reads one
+// parameter and not two.
+const catalogMemberQuery = "labelSelector=" + memberLabelKey + "%3D" + memberLabelValue
 
 // The same narrowing for the screen pods, which carry a name label of
 // their own. The two selectors keep the two kinds of pod apart, so a list of
@@ -403,21 +404,22 @@ func GetPersistentVolume(ctx context.Context, c *Client, name string) (*Persiste
 	return volume, nil
 }
 
-// ListScannerPods reads this operator's scanner pods across every
-// namespace, because a Library lives in whatever namespace its claim
-// does. The list's resourceVersion is where the pod watch begins.
-func ListScannerPods(ctx context.Context, c *Client) (*PodList, error) {
+// ListCatalogMemberPods reads every pod that holds a catalog
+// agent across every namespace, because a Catalog is in whatever
+// namespace its Libraries do. The list's resourceVersion is where the
+// pod watch begins.
+func ListCatalogMemberPods(ctx context.Context, c *Client) (*PodList, error) {
 	list := &PodList{}
-	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+scannerPodsQuery, nil, list); err != nil {
+	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+catalogMemberQuery, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil
 }
 
 // ListScreenPods reads this operator's screen pods across every
-// namespace, on the same terms as the scanner pods. The catalog EndpointSlice
-// carries both kinds, because a screen's catalog agent is a peer of the
-// namespace's cluster like a scanner's.
+// namespace, on the same terms, so the pass knows which screens stand
+// before it deletes one. They reach the catalog EndpointSlice through
+// the member label like every other agent.
 func ListScreenPods(ctx context.Context, c *Client) (*PodList, error) {
 	list := &PodList{}
 	if err := c.RequestJSON(ctx, http.MethodGet, podsAllPath+"?"+screenPodsQuery, nil, list); err != nil {
@@ -461,9 +463,9 @@ func CreatePlay(ctx context.Context, c *Client, play *Play) (*Play, error) {
 	return created, nil
 }
 
-// DeletePod removes one scanner pod. An already-absent pod is success,
-// because the operator deletes a pod to replace it and a delete that
-// races another pass must not fail.
+// DeletePod removes one pod this operator stands. An
+// already-absent pod is success, because the operator deletes a pod to
+// replace it and a delete that races another pass must not fail.
 func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
 	err := c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
 	if errors.Is(err, ErrNotFound) {
