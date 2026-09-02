@@ -127,6 +127,7 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	scanMovieFiles(root, dir, library, id, videos, result)
 
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeMovie, meta.ProviderIDs, key, id)...)
+	readLikenSidecar(likenSidecar{root: root, dir: dir, library: library, item: id}, result)
 	result.titles++
 	if !identified {
 		result.unidentified++
@@ -134,19 +135,17 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	}
 }
 
-// movieIdentity reads a folder's identity. A readable movie.nfo with a title is
-// the identity, and the folder is identified. A folder with no usable sidecar
-// falls back to the name parse, and it is identified only when the name yields
-// a year, the signal that the parse read a real release and not an arbitrary
-// folder.
-// A sidecar that is not there falls through to the name parse. A sidecar
-// the scanner cannot read is an error, because falling through would mint
-// a different id and sweep the title's own rows.
+// PROSE: reads a folder's identity from movie.nfo where there is one, and from
+// the folder name where there is none. Say that a name is identified when it
+// yields a year or a provider id, that a name's provider ids fill what the
+// sidecar left out, and that a sidecar the scanner cannot read is an error
+// because falling through would mint a different id.
 func movieIdentity(dir, name string) (movieMeta, bool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "movie.nfo"))
 	switch {
 	case err == nil:
 		if meta, err := parseMovieNFO(data); err == nil && meta.Title != "" {
+			meta.ProviderIDs = mergeProviderIDs(meta.ProviderIDs, parseProviderIDs(name))
 			return meta, true, nil
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -156,7 +155,10 @@ func movieIdentity(dir, name string) (movieMeta, bool, error) {
 	if title == "" {
 		title = name
 	}
-	return movieMeta{Title: title, Year: year, Released: releasedFromYear(year)}, year > 0, nil
+	ids := parseProviderIDs(name)
+	return movieMeta{
+		Title: title, Year: year, Released: releasedFromYear(year), ProviderIDs: ids,
+	}, year > 0 || len(ids) > 0, nil
 }
 
 // releasedFromYear renders a year as the released column, or leaves it empty

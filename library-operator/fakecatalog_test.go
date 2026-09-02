@@ -41,6 +41,7 @@ type fakeCatalog struct {
 	series     map[string]fakeRow
 	episodes   map[string]fakeRow
 	files      map[string]fakeRow
+	attempts   map[string]fakeRow
 	aliases    map[string]string
 	fileItems  map[string]bool
 	seen       map[string]int64
@@ -76,6 +77,7 @@ func newFakeCatalog(t *testing.T) (*Catalog, *fakeCatalog) {
 		series:    map[string]fakeRow{},
 		episodes:  map[string]fakeRow{},
 		files:     map[string]fakeRow{},
+		attempts:  map[string]fakeRow{},
 		aliases:   map[string]string{},
 		fileItems: map[string]bool{},
 		seen:      map[string]int64{},
@@ -136,6 +138,10 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		f.files[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[1])}
 	case strings.HasPrefix(s.sql, "INSERT INTO file_items"):
 		f.fileItems[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = true
+	case strings.HasPrefix(s.sql, "INSERT INTO attempts"):
+		f.attempts[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
+	case strings.HasPrefix(s.sql, "DELETE FROM attempts"):
+		delete(f.attempts, fakeKey(str(p[0]), str(p[1]), str(p[2])))
 	case strings.HasPrefix(s.sql, "INSERT INTO aliases"):
 		f.aliases[fakeKey(str(p[0]), str(p[1]))] = str(p[2])
 	case strings.HasPrefix(s.sql, "INSERT INTO seen"):
@@ -204,6 +210,8 @@ func (f *fakeCatalog) serveQuery(w http.ResponseWriter, r *http.Request) {
 // every table and any later case would catch it by accident.
 func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	switch {
+	case strings.Contains(sql, "|| concern"):
+		return f.unmarkedAttempts(sql, p)
 	case strings.Contains(sql, "UNION"):
 		return f.libraryKeys()
 	case strings.Contains(sql, "count(*) FROM seen"):
@@ -240,6 +248,10 @@ func (f *fakeCatalog) libraryKeys() []any {
 		held[library] = true
 	}
 	for key := range f.fileItems {
+		library, _, _ := strings.Cut(key, "\x00")
+		held[library] = true
+	}
+	for key := range f.attempts {
 		library, _, _ := strings.Cut(key, "\x00")
 		held[library] = true
 	}
@@ -282,6 +294,35 @@ func (f *fakeCatalog) unmarkedLinks(sql string, p []any) []any {
 			continue
 		}
 		keys = append(keys, path+linkKeySeparator+item)
+	}
+	return keys
+}
+
+// unmarkedAttempts reads this library's attempts that the current epoch
+// did not mark. A scoped read reaches a file concern's row by the path in
+// its item column, and an item concern's row through the item tables, the
+// way the alias prune reaches an alias.
+func (f *fakeCatalog) unmarkedAttempts(sql string, p []any) []any {
+	scoped := strings.Contains(sql, "item >=")
+	library, epoch := str(p[0]), num(p[1])
+	folder := ""
+	if scoped {
+		folder = str(p[2])
+	}
+	scope := f.scopeItems(library, folder, scoped)
+	var keys []any
+	for composite, row := range f.attempts {
+		rest := strings.SplitN(composite, "\x00", 3)
+		if row.library != library || len(rest) != 3 {
+			continue
+		}
+		item, concern := rest[1], rest[2]
+		if f.seen[seenPrefix(sql)+item+linkKeySeparator+concern] == epoch {
+			continue
+		}
+		if !scoped || inScope(item, folder) || scope[item] {
+			keys = append(keys, item+linkKeySeparator+concern)
+		}
 	}
 	return keys
 }

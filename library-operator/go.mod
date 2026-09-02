@@ -7,7 +7,10 @@ go 1.26.5
 
 toolchain go1.27.0
 
-require modernc.org/sqlite v1.57.0
+require (
+	gopkg.in/yaml.v3 v3.0.1
+	modernc.org/sqlite v1.57.0
+)
 
 require (
 	github.com/alexflint/go-arg v1.6.0 // indirect
@@ -40,7 +43,6 @@ require (
 	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

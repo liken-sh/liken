@@ -70,9 +70,9 @@ var gapQueries = map[string]string{
 		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND concern = 'probe' AND result != 'error')`,
 	concernIdentity: `SELECT id FROM (` +
 		`SELECT library, id FROM movies WHERE id LIKE 'movie:path:%' ` +
-		`UNION ALL SELECT library, id FROM series WHERE id LIKE 'series:path:%') ` +
+		`UNION ALL SELECT library, id FROM series WHERE id LIKE 'series:path:%') AS items ` +
 		`WHERE library = ? AND id NOT IN (SELECT item FROM attempts ` +
-		`WHERE library = ? AND concern = 'identity' AND result != 'error' AND at >= ?)`,
+		`WHERE attempts.library = items.library AND concern = 'identity' AND result != 'error' AND at >= ?)`,
 }
 
 // The two counts a person reads on the Library beside the gaps. Waiting

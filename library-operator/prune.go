@@ -64,6 +64,9 @@ const (
 	seenFile  = "file:"
 	seenAlias = "alias:"
 	seenLink  = "link:"
+	// PROSE: says why an attempt has a key space of its own, and that its key
+	// is the item and the concern joined.
+	seenAttempt = "attempt:"
 )
 
 // The separator between a link key's two halves. A path and an item id can
@@ -177,6 +180,9 @@ func markKeys(result *walkResult) []string {
 	}
 	for _, row := range result.aliases {
 		add(seenAlias, row.Alias)
+	}
+	for _, row := range result.attempts {
+		add(seenAttempt, attemptSeenKey(row))
 	}
 	return keys
 }
@@ -296,6 +302,15 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
+	n, err = catalog.sweep(ctx, attemptPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteAttempts(ctx, library, attemptKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
 	if _, err := catalog.cleanSeen(ctx, epoch); err != nil {
 		return removed, err
 	}
@@ -361,12 +376,21 @@ func pathScopeParams(folder string) []any {
 func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, epoch int64) (int, error) {
 	removed := 0
 
-	// The alias sweep runs first, and here the order matters: the folder
-	// scope of an alias is the folder of the item it names, so the item
-	// rows must still stand when this sweep reads them.
+	// PROSE: says why the alias and attempt sweeps run before the item
+	// sweeps: each of them scopes itself through the item it names, so those
+	// item rows must still stand when these sweeps read them.
 	n, err := catalog.sweep(ctx, scopedAliasPruneSQL(), scopedAliasPruneParams(library, folder, epoch),
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteAliases(ctx, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, scopedAttemptPruneSQL(), scopedAttemptPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteAttempts(ctx, library, attemptKeys(keys))
 		})
 	if err != nil {
 		return removed, err

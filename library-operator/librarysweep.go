@@ -1,7 +1,7 @@
 package main
 
-// This file is the sweep the cleanup Job runs: every row one library
-// holds, out of all seven replicated tables, through the local agent.
+// PROSE: the sweep the cleanup Job runs, which takes every row one library
+// holds out of every replicated table through the local agent.
 //
 // The sweep reads bounded batches of keys and deletes by key, the
 // shape pruneLibrary already uses, and not one bare DELETE per
@@ -69,6 +69,9 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		{librarySweepSQL("files", "path"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteFiles(ctx, library, keys)
 		}},
+		{librarySweepAttemptSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteAttempts(ctx, library, attemptKeys(keys))
+		}},
 	}
 }
 
@@ -77,6 +80,12 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 // never input, so naming them in the SQL text carries no injection.
 func librarySweepSQL(table, column string) string {
 	return `SELECT ` + column + ` FROM ` + table + ` WHERE library = ? LIMIT ?`
+}
+
+// PROSE: reads one bounded batch of one library's attempts, with the two key
+// columns joined the way every sweep of a two-column key joins them.
+func librarySweepAttemptSQL() string {
+	return `SELECT item || char(31) || concern FROM attempts WHERE library = ? LIMIT ?`
 }
 
 // librarySweepLinkSQL reads the link table's two key columns joined

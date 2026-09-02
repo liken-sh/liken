@@ -1,10 +1,9 @@
 package main
 
-// names.go reads a title, a year, and a season and episode off a folder or file
-// name in the *arr form, for a folder or file with no sidecar. The token list is
-// fixed, so a re-walk of the same volume reads the same names every time. It
-// also reads a file's technical attributes off its name where a sidecar carried
-// none, and discovers the art and the trickplay directory a folder holds.
+// PROSE: this file reads a title, a year, a season and episode, and a provider
+// id off a folder or file name, for a folder or file with no sidecar. Say why
+// the token lists are fixed, and that the file also reads a file's technical
+// attributes off its name and finds the art and trickplay a folder holds.
 
 import (
 	"crypto/sha256"
@@ -59,6 +58,10 @@ var (
 	resolutionToken = regexp.MustCompile(`^\d{3,4}[pi]$`)
 	// seasonFolder reads the number off a Season 02 folder.
 	seasonFolder = regexp.MustCompile(`(?i)^season\s*0*(\d+)$`)
+	// PROSE: reads a provider id off a name in Jellyfin's form, as in
+	// [tmdbid-603] or [imdbid-tt0133093], which is how a person confirms a
+	// candidate without opening the sidecar.
+	providerIDToken = regexp.MustCompile(`(?i)\[(tmdb|imdb|tvdb)id-([^]\s]+)]`)
 	// episodeMarker reads the season and episode off an s02e05 or 2x05 name,
 	// wherever it sits.
 	// The third group closes a range, so s04e10-e11, s04e10-11, and s04e10e11
@@ -67,13 +70,12 @@ var (
 	episodeMarker = regexp.MustCompile(`(?i)s(\d{1,3})[ ._-]?e(\d{1,3})(?:(?:[ ._-]?e|-)(\d{1,3}))?|(\d{1,2})x(\d{1,3})`)
 )
 
-// parseReleaseName reads a title and a year off a folder or file name in
-// the *arr form. A parenthesized or bracketed year wins; with none, a
-// dotted release name is cut at its first release token and reads a year
-// off a token before the cut. The year is 0 where the name carries none,
-// the signal the walk counts as unidentified.
+// PROSE: reads a title and a year off a folder or file name in the *arr form.
+// Say that a provider-id token is cut out before the parse, that a delimited
+// year wins, that a dotted name is cut at its first release token, and that a
+// year of 0 is the signal the walk counts as unidentified.
 func parseReleaseName(name string) (string, int) {
-	name = strings.TrimSpace(stripExtension(name))
+	name = strings.TrimSpace(providerIDToken.ReplaceAllString(stripExtension(name), " "))
 	if match := yearDelimited.FindStringIndex(name); match != nil {
 		year, _ := strconv.Atoi(name[match[0]+1 : match[1]-1])
 		return cleanTitle(name[:match[0]]), year
@@ -165,6 +167,39 @@ func stripExtension(name string) string {
 		return name[:len(name)-len(ext)]
 	}
 	return name
+}
+
+// PROSE: reads every provider id a folder or file name carries in Jellyfin's
+// form, keyed by the lowercased provider, so a name states an id as a sidecar
+// does.
+func parseProviderIDs(name string) map[string]string {
+	ids := map[string]string{}
+	for _, match := range providerIDToken.FindAllStringSubmatch(name, -1) {
+		provider := strings.ToLower(match[1])
+		if _, held := ids[provider]; !held {
+			ids[provider] = match[2]
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
+// PROSE: says why a sidecar's ids win over a name's, and why a name's ids still
+// fill the providers the sidecar left out.
+func mergeProviderIDs(held, more map[string]string) map[string]string {
+	if len(more) == 0 {
+		return held
+	}
+	merged := map[string]string{}
+	for provider, value := range more {
+		merged[provider] = value
+	}
+	for provider, value := range held {
+		merged[provider] = value
+	}
+	return merged
 }
 
 // parseSeasonFolder reads a season number off a folder name. Specials is season

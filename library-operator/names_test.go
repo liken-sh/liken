@@ -354,3 +354,100 @@ func TestFileHelpersOnMissingPaths(t *testing.T) {
 		t.Errorf("addedTime = %d, want 0 for a missing file", added)
 	}
 }
+
+func TestANameStatesAProviderIdInJellyfinsForm(t *testing.T) {
+	cases := []struct {
+		name  string
+		want  map[string]string
+		title string
+		year  int
+	}{
+		{
+			name:  "The Matrix (1999) [tmdbid-603]",
+			want:  map[string]string{"tmdb": "603"},
+			title: "The Matrix",
+			year:  1999,
+		},
+		{
+			name:  "Jellyfin Documentary (2030) [imdbid-tt00000000]",
+			want:  map[string]string{"imdb": "tt00000000"},
+			title: "Jellyfin Documentary",
+			year:  2030,
+		},
+		{
+			name:  "Twin Peaks [tvdbid-70533]",
+			want:  map[string]string{"tvdb": "70533"},
+			title: "Twin Peaks",
+		},
+		{
+			name:  "Two Ids [tmdbid-603] [imdbid-tt0133093]",
+			want:  map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+			title: "Two Ids",
+		},
+		{
+			name:  "The Thing (1982)",
+			want:  nil,
+			title: "The Thing",
+			year:  1982,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			ids := parseProviderIDs(test.name)
+			if len(ids) != len(test.want) {
+				t.Fatalf("ids = %v, want %v", ids, test.want)
+			}
+			for provider, value := range test.want {
+				if ids[provider] != value {
+					t.Errorf("ids[%s] = %q, want %q", provider, ids[provider], value)
+				}
+			}
+			title, year := parseReleaseName(test.name)
+			if title != test.title || year != test.year {
+				t.Errorf("parseReleaseName = %q, %d, want %q, %d", title, year, test.title, test.year)
+			}
+		})
+	}
+}
+
+func TestASidecarsIdsWinOverANames(t *testing.T) {
+	merged := mergeProviderIDs(map[string]string{"tmdb": "1"}, map[string]string{"tmdb": "2", "imdb": "tt3"})
+
+	if merged["tmdb"] != "1" {
+		t.Errorf("tmdb = %q, want the sidecar's", merged["tmdb"])
+	}
+	if merged["imdb"] != "tt3" {
+		t.Errorf("imdb = %q, want the name's, which the sidecar left out", merged["imdb"])
+	}
+	if got := mergeProviderIDs(map[string]string{"tmdb": "1"}, nil); got["tmdb"] != "1" {
+		t.Errorf("a name with no ids changed the sidecar's to %v", got)
+	}
+}
+
+func TestAFolderNamedWithAProviderIdTakesThatIdAndIsIdentified(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "The Matrix [tmdbid-603]", "The Matrix.mkv"), "video")
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.movies) != 1 {
+		t.Fatalf("movies = %+v, want one", result.movies)
+	}
+	if got := result.movies[0]; got.Id != "movie:tmdb:603" || got.Title != "The Matrix" {
+		t.Errorf("movie = %+v, want the provider id and the plain title", got)
+	}
+	if result.unidentified != 0 {
+		t.Errorf("unidentified = %d, want none, because the name states an id", result.unidentified)
+	}
+}
+
+func TestASeriesFolderNamedWithAProviderIdTakesThatId(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "Twin Peaks [tvdbid-70533]", "Season 01", "S01E01.mkv"), "video")
+
+	result := walkSeries(root, "house/series", nil)
+
+	if len(result.series) != 1 || result.series[0].Id != "series:tvdb:70533" {
+		t.Fatalf("series = %+v, want the provider id off the name", result.series)
+	}
+}

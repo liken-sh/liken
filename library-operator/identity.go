@@ -38,18 +38,21 @@ func aliasRowsForItem(library, kind string, providerIDs map[string]string, folde
 	return rows
 }
 
-// walkResult is what one walk read off the volume: the item rows per kind, the
-// file rows and their item links, the alias rows, and the two counts the report
-// carries.
+// PROSE: what one walk read off the volume: the item rows per kind, the file
+// rows and their item links, the alias rows, the attempts the .liken files
+// record, and the two counts the report carries.
 type walkResult struct {
 	movies []movieRow
 	// No folder produces a set row. The full walk fills sets after its last
 	// folder, from the fold over every movie it read.
-	sets         []setRow
-	series       []seriesRow
-	episodes     []episodeRow
-	files        []fileRow
-	aliases      []aliasRow
+	sets     []setRow
+	series   []seriesRow
+	episodes []episodeRow
+	files    []fileRow
+	aliases  []aliasRow
+	// PROSE: says that the volume holds the attempts and the catalog only
+	// derives them, so a folder that left takes its attempts with it.
+	attempts     []attemptRow
 	titles       int
 	unidentified int
 	// the paths of the folders this walk could not identify, so a
@@ -92,6 +95,7 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.episodes = append(buffer.episodes, folder.episodes...)
 	buffer.files = append(buffer.files, folder.files...)
 	buffer.aliases = append(buffer.aliases, folder.aliases...)
+	buffer.attempts = append(buffer.attempts, folder.attempts...)
 }
 
 // collectFolders reads a whole folder stream into one walkResult, with the
