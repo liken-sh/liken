@@ -93,7 +93,7 @@ func TestPassCreatesAResourceForEveryEndpoint(t *testing.T) {
 	if speaker.Claim == nil || speaker.Claim.Name != "kitchen" || speaker.Claim.Namespace != "media" {
 		t.Errorf("the speaker's claim = %+v", speaker.Claim)
 	}
-	if speaker.Bluetooth == nil || speaker.Bluetooth.Pairing != testSpeakerName {
+	if speaker.Bluetooth == nil || speaker.Bluetooth.Peripheral != testSpeakerName {
 		t.Errorf("the speaker's bluetooth block = %+v", speaker.Bluetooth)
 	}
 }

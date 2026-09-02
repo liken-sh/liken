@@ -246,7 +246,7 @@ func TestSourceStatusOfAUSBDAC(t *testing.T) {
 	}
 }
 
-// A speaker reports the pairing it belongs to and the codec the
+// A speaker reports the Peripheral it belongs to and the codec the
 // transport negotiated, and its level comes from the device's Route,
 // which is the speaker's own volume.
 func TestSinkStatusOfASpeaker(t *testing.T) {
@@ -276,11 +276,11 @@ func TestSinkStatusOfASpeaker(t *testing.T) {
 		Node:           "liken-1",
 		ConnectionType: "bluetooth",
 		Bluetooth: &EndpointBluetooth{
-			Address: "A0:AB:51:33:B7:12",
-			Name:    "Kitchen Speaker",
-			Pairing: testSpeakerName,
-			Codec:   "sbc",
-			Codecs:  []string{"sbc", "aptx"},
+			Address:    "A0:AB:51:33:B7:12",
+			Name:       "Kitchen Speaker",
+			Peripheral: testSpeakerName,
+			Codec:      "sbc",
+			Codecs:     []string{"sbc", "aptx"},
 		},
 		NodeName: testSpeakerNode,
 		Format:   &EndpointFormat{Rate: 44100, Channels: 2, Positions: []string{"FL", "FR"}},

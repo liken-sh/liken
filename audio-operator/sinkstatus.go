@@ -219,12 +219,12 @@ func (f endpointFacts) monitor() *EndpointMonitor {
 
 // bluetooth is what bluetoothd and the graph say about the speaker.
 // The codec and the offered set come from the transport, so a speaker
-// that is not connected reports the pairing alone.
+// that is not connected reports the Peripheral alone.
 func (f endpointFacts) bluetooth() *EndpointBluetooth {
 	facts := &EndpointBluetooth{
-		Address: publishedMAC(f.Speaker.Address),
-		Name:    f.Speaker.Paired.Name,
-		Pairing: speakerName(f.Speaker.Address),
+		Address:    publishedMAC(f.Speaker.Address),
+		Name:       f.Speaker.Paired.Name,
+		Peripheral: speakerName(f.Speaker.Address),
 	}
 	if f.Speaker.HasSink {
 		facts.Codec = f.Speaker.Sink.Codec

@@ -178,14 +178,15 @@ type EndpointMonitor struct {
 }
 
 // EndpointBluetooth is the speaker behind a Bluetooth endpoint.
-// Pairing is the name the Bluetooth operator's own Pairing carries,
-// which is the address in lowercase with dashes.
+// Peripheral is the name of the Peripheral the Bluetooth operator
+// publishes for the bonded device, which is the address in lowercase
+// with dashes.
 type EndpointBluetooth struct {
-	Address string   `json:"address,omitempty"`
-	Name    string   `json:"name,omitempty"`
-	Pairing string   `json:"pairing,omitempty"`
-	Codec   string   `json:"codec,omitempty"`
-	Codecs  []string `json:"codecs,omitempty"`
+	Address    string   `json:"address,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Peripheral string   `json:"peripheral,omitempty"`
+	Codec      string   `json:"codec,omitempty"`
+	Codecs     []string `json:"codecs,omitempty"`
 }
 
 // EndpointFormat is what the node negotiated and runs at now.

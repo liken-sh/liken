@@ -161,9 +161,9 @@ spec:
                     name:
                       type: string
                       description: "The name the speaker reports for itself."
-                    pairing:
+                    peripheral:
                       type: string
-                      description: "The name of the Pairing the bluetooth operator holds for this speaker, which is the address in lowercase with dashes."
+                      description: "The name of the Peripheral the bluetooth operator publishes for this speaker, which is the address in lowercase with dashes."
                     codec:
                       type: string
                       description: "The A2DP codec the transport negotiated, present while the speaker is connected."

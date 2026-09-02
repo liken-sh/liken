@@ -145,7 +145,7 @@ The speaker behind a Bluetooth endpoint. Absent on every other connection type.
 | --- | --- | --- | --- |
 | <span id="statusbluetooth--address"></span>`address` | string | no | The speaker's address, uppercase with colons. |
 | <span id="statusbluetooth--name"></span>`name` | string | no | The name the speaker reports for itself. |
-| <span id="statusbluetooth--pairing"></span>`pairing` | string | no | The name of the Pairing the bluetooth operator holds for this speaker, which is the address in lowercase with dashes. |
+| <span id="statusbluetooth--peripheral"></span>`peripheral` | string | no | The name of the Peripheral the bluetooth operator publishes for this speaker, which is the address in lowercase with dashes. |
 | <span id="statusbluetooth--codec"></span>`codec` | string | no | The A2DP codec the transport negotiated, present while the speaker is connected. |
 | <span id="statusbluetooth--codecs"></span>`codecs` | []string | no | Every codec the speaker and this image both support, the one playing first. |
 
