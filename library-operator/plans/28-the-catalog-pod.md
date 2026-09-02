@@ -36,9 +36,11 @@ last write can leave those rows on its own claim until its next run.
   operator's image reads the loopback API and publishes over the bus:
   the counts per library that the scanner publishes today, the `runs`
   table below, and later the gaps the enrichers act on. It takes the
-  agent's subscription stream for the tables it reports, so a change
-  reaches the bus within the update stream's latency, and it polls
-  nothing. It is the one reporter in the namespace.
+  agent's subscription stream for `runs`, and the per-table update
+  stream for every other table, republishing at most once a second
+  while rows move, so a change reaches the bus within the stream's
+  latency and it polls nothing. It is the one reporter in the
+  namespace.
 - **The `runs` table.** A replicated table with one row per library
   and worker. A worker is `scan`, `cleanup`, or a concern from plan 27.
   The row holds the `Job`'s name and the time it finished, and a `Job`
