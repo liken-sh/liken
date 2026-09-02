@@ -18,6 +18,17 @@ import (
 // specPaths reads back every device node in one claim's spec file.
 func specPaths(t *testing.T, fixture *draFixture, claimUID string) []string {
 	t.Helper()
+	var paths []string
+	for _, node := range specNodes(t, fixture, claimUID) {
+		paths = append(paths, node.Path)
+	}
+	return paths
+}
+
+// specNodes reads back every device node one claim's spec grants,
+// with the fields the runtime creates the node from.
+func specNodes(t *testing.T, fixture *draFixture, claimUID string) []cdiDeviceNode {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(fixture.cdi, "liken.sh-"+claimUID+".json"))
 	if err != nil {
 		t.Fatal(err)
@@ -26,13 +37,11 @@ func specPaths(t *testing.T, fixture *draFixture, claimUID string) []string {
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		t.Fatal(err)
 	}
-	var paths []string
+	var nodes []cdiDeviceNode
 	for _, device := range spec.Devices {
-		for _, node := range device.ContainerEdits.DeviceNodes {
-			paths = append(paths, node.Path)
-		}
+		nodes = append(nodes, device.ContainerEdits.DeviceNodes...)
 	}
-	return paths
+	return nodes
 }
 
 // prepared runs one prepare call, the way the kubelet does before it
@@ -149,7 +158,7 @@ func TestRefreshDeliversUHIDAfterTheModuleLoads(t *testing.T) {
 	fixture.allocated = "usb-1-8-1-0"
 	prepared(t, fixture)
 
-	fixture.loadUHID(t)
+	miscDevice(t, draSysfsRoot, "uhid", 239)
 	refreshCDISpecs(draSysfsRoot)
 
 	paths := specPaths(t, fixture, "claim-1")

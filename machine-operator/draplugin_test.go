@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -256,22 +257,6 @@ func TestPrepareDeliversTheUsbfsNodeOfABluetoothAdapter(t *testing.T) {
 	}
 }
 
-// loadUHID registers the misc device the uhid module creates, which
-// a machine has only while its spec.modules declares uhid.
-func (f *draFixture) loadUHID(t *testing.T) {
-	t.Helper()
-	dir := filepath.Join(draSysfsRoot, "class", "misc", "uhid")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "dev"), []byte("10:239\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte("DEVNAME=uhid\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestPrepareDeliversUHIDWithABluetoothAdapter(t *testing.T) {
 	// BlueZ carries HID over GATT in userspace and presents the
 	// peripheral as an input device by writing /dev/uhid, so a stack
@@ -279,7 +264,7 @@ func TestPrepareDeliversUHIDWithABluetoothAdapter(t *testing.T) {
 	// adapter, and the HID profile fails without it.
 	fixture := newDRAFixture(t)
 	fixture.addBluetooth(t)
-	fixture.loadUHID(t)
+	miscDevice(t, draSysfsRoot, "uhid", 239)
 	fixture.allocated = "usb-1-8-1-0"
 
 	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
@@ -304,7 +289,7 @@ func TestPrepareDeliversUHIDToNoOtherDevice(t *testing.T) {
 	// Bluetooth stack is what the node exists for.
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
-	fixture.loadUHID(t)
+	miscDevice(t, draSysfsRoot, "uhid", 239)
 
 	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
@@ -320,6 +305,47 @@ func TestPrepareDeliversUHIDToNoOtherDevice(t *testing.T) {
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004", "/dev/sda"}) {
 		t.Errorf("paths = %v, want the stick's own nodes", paths)
+	}
+}
+
+func TestPrepareDeliversTheInputNodesWithABluetoothAdapter(t *testing.T) {
+	// A Bluetooth stack in an unprivileged container relays a controller's
+	// events from the evdev node the radio link creates into a uinput
+	// virtual device with a stable minor. The spec states the evdev range
+	// by number, because the kernel registers each of those nodes only
+	// while a controller is connected, and the container must hold a node
+	// for a minor that appears later.
+	fixture := newDRAFixture(t)
+	fixture.addBluetooth(t)
+	miscDevice(t, draSysfsRoot, "uhid", 239)
+	miscDevice(t, draSysfsRoot, "uinput", 223)
+	fixture.allocated = "usb-1-8-1-0"
+
+	resp, err := fixture.plugin.NodePrepareResources(t.Context(), &drav1.NodePrepareResourcesRequest{
+		Claims: []*drav1.Claim{{Namespace: "media", Name: "stick", Uid: "claim-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer := resp.Claims["claim-1"]; answer == nil || answer.Error != "" {
+		t.Fatalf("answer = %+v", answer)
+	}
+
+	mode := 0o600
+	want := []cdiDeviceNode{{Path: "/dev/uhid"}, {Path: "/dev/uinput"}}
+	for i := range 32 {
+		want = append(want, cdiDeviceNode{
+			Path:     fmt.Sprintf("/dev/input/event%d", i),
+			Type:     "c",
+			Major:    13,
+			Minor:    64 + i,
+			FileMode: &mode,
+		})
+	}
+	want = append(want, cdiDeviceNode{Path: "/dev/bus/usb/001/008"})
+
+	if nodes := specNodes(t, fixture, "claim-1"); !reflect.DeepEqual(nodes, want) {
+		t.Errorf("nodes = %+v, want %+v", nodes, want)
 	}
 }
 

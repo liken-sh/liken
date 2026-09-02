@@ -265,9 +265,10 @@ these claims can communicate with the whole device.
 
 ### Bluetooth adapters
 
-A claim on a Bluetooth adapter delivers the adapter's usbfs node and,
-on a machine whose `spec.modules` declares `uhid`, the `/dev/uhid`
-node. The adapter has no node of its own. A program reaches a radio
+A claim on a Bluetooth adapter delivers the adapter's usbfs node,
+`/dev/uinput`, the 32 legacy input event nodes, and, on a machine
+whose `spec.modules` declares `uhid`, the `/dev/uhid` node. The
+adapter has no node of its own. A program reaches a radio
 through an `AF_BLUETOOTH` socket, and it binds that socket to an
 adapter by index. The kernel registers no `/dev` entry anywhere the
 adapter owns. The claim states which workload owns the radio, and it
@@ -286,17 +287,29 @@ logs `input-hog profile accept failed`.
 
 `liken` stops the delivery walk at a `bluetooth` subtree. The kernel
 puts the HID device of a connected peripheral under the adapter's own
-USB interface, so a game controller's `/dev/input/event*` and
-`/dev/hidraw*` nodes appear in the adapter's part of sysfs. Those
-nodes belong to the controller. A claim on the adapter does not
-deliver them, and a controller that connects later adds no nodes to
-the claim.
-
-The same nodes move when BlueZ changes how it drives the kernel. With
-`/dev/uhid` present, BlueZ 5.73 and later create the HID device under
+USB interface, so a game controller's `/dev/hidraw*` node appears in
+the adapter's part of sysfs. That node belongs to the controller, and
+a claim on the adapter does not deliver it. The same node moves when
+BlueZ changes how it drives the kernel. With `/dev/uhid` present,
+BlueZ 5.73 and later create the HID device under
 `/sys/devices/virtual/misc/uhid`, where nothing connects it to the
-adapter. A claim that delivered these nodes would deliver them only
-under one of the two arrangements.
+adapter.
+
+The input event nodes are delivered by number instead. The kernel
+fixes the numbers of the first 32 event devices: character major 13,
+minors 64 to 95, at `/dev/input/event0` to `/dev/input/event31`. A
+node in that range exists only while a device is registered at that
+minor, and a peripheral that connects over the air registers one
+after the claim was prepared. So the claim states each of the 32
+nodes by its numbers, the container runtime creates them with `mknod`
+and allows them in the device cgroup, and a program in the container
+opens a controller's node the moment the kernel registers it. The
+Bluetooth stack uses those nodes together with `/dev/uinput`, the
+kernel's inlet for a virtual input device: it relays a controller's
+events from the real node, which comes and goes with the radio link,
+into a virtual device whose node stays. `uinput` is built into the
+`liken` kernel, so every machine has `/dev/uinput`. The bound is 32
+input devices on one machine.
 
 ## Limits
 

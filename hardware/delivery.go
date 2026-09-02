@@ -38,6 +38,13 @@ package hardware
 // device, so the walk cannot reach it, and MiscNode below reads the
 // misc class directly. The publish policy decides which claim
 // receives such a node.
+//
+// One set of nodes comes from no walk at all. The kernel fixes the
+// numbers of the first 32 input event nodes, and a node in that range
+// exists only while a device is registered at that minor. EvdevNodes
+// below lists the whole range from those numbers, so a claim can hold a
+// node for a minor that a peripheral registers after the claim was
+// prepared.
 
 import (
 	"fmt"
@@ -198,6 +205,49 @@ func MiscNode(sysRoot, name string) string {
 		return ""
 	}
 	return "/dev/" + devname
+}
+
+// The kernel's numbering for the input subsystem's legacy event
+// nodes: character major 13, one minor for each of the first 32
+// event devices, counting up from 64.
+const (
+	evdevMajor     = 13
+	evdevMinorBase = 64
+	evdevMinors    = 32
+)
+
+// EvdevNodes lists the 32 legacy input event nodes by the numbers the
+// kernel fixes for them, with no sysfs entry behind them. A peripheral
+// that connects over the air registers its node after a claim is
+// prepared, and the container runtime injects a node only when the
+// container starts. A claim that carries the whole range holds a node
+// for every minor the kernel may use later, so a program in the
+// container opens the device the moment it appears.
+func EvdevNodes() []DeliveredNode {
+	nodes := make([]DeliveredNode, 0, evdevMinors)
+	for i := range evdevMinors {
+		nodes = append(nodes, DeliveredNode{
+			Path:      fmt.Sprintf("/dev/input/event%d", i),
+			Subsystem: "input",
+		})
+	}
+	return nodes
+}
+
+// EvdevNumbers reports the character device numbers of a legacy input
+// event node, and answers only for the first 32. Above that range the
+// kernel allocates the minor when the device registers, so no fixed
+// number exists to state before the node exists.
+func EvdevNumbers(path string) (major, minor int, ok bool) {
+	digits, found := strings.CutPrefix(path, "/dev/input/event")
+	if !found {
+		return 0, 0, false
+	}
+	index, err := strconv.Atoi(digits)
+	if err != nil || index < 0 || index >= evdevMinors || strconv.Itoa(index) != digits {
+		return 0, 0, false
+	}
+	return evdevMajor, evdevMinorBase + index, true
 }
 
 // isSubtreeBoundary reports whether a sysfs directory ends the walk.

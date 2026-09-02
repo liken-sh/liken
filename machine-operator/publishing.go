@@ -30,8 +30,9 @@ package main
 // socket, so the policy names this shape by its driver rather than by
 // the kinds it delivers. The device it publishes carries the usbfs
 // node.
-// On a machine whose modules include uhid, the device also carries
-// /dev/uhid, because a Bluetooth stack is what that node exists for.
+// On a machine that has /dev/uhid, the device also carries that node,
+// because a Bluetooth stack is what it exists for. A machine that has
+// /dev/uinput adds that node and the legacy evdev range beside it.
 // claimDelivery states the reasoning.
 //
 // The mechanism is generic; the tables below are deliberately not.
@@ -108,16 +109,31 @@ const displaySuffix = "-display"
 // stack holds. The node exists only while the machine declares the
 // uhid module, and a machine that declares none delivers what it
 // delivered before.
+//
+// The adapter's claim also receives /dev/uinput and the 32 legacy
+// evdev nodes. A Bluetooth stack relays a controller's events from
+// the evdev node the radio link creates, which appears and vanishes
+// with the link, into a uinput virtual device whose minor stays fixed
+// while the stack holds it. The relay needs both ends, and its
+// container is unprivileged, so both come through the adapter claim it
+// already holds. The evdev nodes are stated by number, because the
+// kernel registers each one only while a controller is connected, and
+// the container must already hold the node a controller registers
+// later. uinput is built into the liken kernel, so every machine has
+// the node, and a sysfs root without it delivers what it delivered
+// before.
 func claimDelivery(sysRoot string, d hardware.Device) hardware.Delivery {
 	delivery := hardware.InspectDelivery(sysRoot, d)
 	if !bluetoothAdapter(d) {
 		return delivery
 	}
-	node := hardware.MiscNode(sysRoot, "uhid")
-	if node == "" {
-		return delivery
+	if node := hardware.MiscNode(sysRoot, "uhid"); node != "" {
+		delivery.Nodes = append(delivery.Nodes, hardware.DeliveredNode{Path: node, Subsystem: "misc"})
 	}
-	delivery.Nodes = append(delivery.Nodes, hardware.DeliveredNode{Path: node, Subsystem: "misc"})
+	if node := hardware.MiscNode(sysRoot, "uinput"); node != "" {
+		delivery.Nodes = append(delivery.Nodes, hardware.DeliveredNode{Path: node, Subsystem: "misc"})
+		delivery.Nodes = append(delivery.Nodes, hardware.EvdevNodes()...)
+	}
 	return delivery
 }
 
@@ -338,9 +354,9 @@ func publishAudio(delivery hardware.Delivery) []publishedDevice {
 // publishes nothing, because such a claim would deliver no node at
 // all.
 //
-// The delivery can also carry /dev/uhid, which claimDelivery adds
-// from outside the subtree, and this device is where that node
-// reaches a claim.
+// The delivery can also carry /dev/uhid, /dev/uinput, and the legacy
+// evdev nodes, which claimDelivery adds from outside the subtree, and
+// this device is where those nodes reach a claim.
 //
 // The device is exclusive. The kernel arbitrates nothing between two
 // Bluetooth stacks on one radio: both scan, both pair, and each one

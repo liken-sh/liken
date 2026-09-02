@@ -6,6 +6,7 @@ package hardware
 // whose nodes belong to the peripherals connected over the air.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -283,6 +284,49 @@ func TestMiscNodeReportsNothingForAModuleThatIsNotLoaded(t *testing.T) {
 
 	if node := MiscNode(sysfs.root, "uhid"); node != "" {
 		t.Errorf("MiscNode = %q, want nothing", node)
+	}
+}
+
+func TestEvdevNodesCoverTheLegacyMinors(t *testing.T) {
+	// The kernel gives the first 32 event devices a fixed character number,
+	// major 13 and minor 64 plus the index, so the list is the same on every
+	// machine and needs no sysfs walk.
+	nodes := EvdevNodes()
+
+	if len(nodes) != 32 {
+		t.Fatalf("nodes = %d, want the 32 legacy event minors", len(nodes))
+	}
+	for i, node := range nodes {
+		want := fmt.Sprintf("/dev/input/event%d", i)
+		if node.Path != want || node.Subsystem != "input" {
+			t.Errorf("node %d = %+v, want %s in the input subsystem", i, node, want)
+		}
+	}
+}
+
+func TestEvdevNumbersReportsTheKernelsNumbering(t *testing.T) {
+	for _, test := range []struct {
+		path  string
+		major int
+		minor int
+		ok    bool
+	}{
+		{path: "/dev/input/event0", major: 13, minor: 64, ok: true},
+		{path: "/dev/input/event31", major: 13, minor: 95, ok: true},
+		// Above the legacy range the kernel allocates a minor when the device
+		// registers, so no fixed number exists to state.
+		{path: "/dev/input/event32"},
+		{path: "/dev/input/event07"},
+		{path: "/dev/input/mice"},
+		{path: "/dev/uinput"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			major, minor, ok := EvdevNumbers(test.path)
+			if major != test.major || minor != test.minor || ok != test.ok {
+				t.Errorf("EvdevNumbers(%q) = %d, %d, %v, want %d, %d, %v",
+					test.path, major, minor, ok, test.major, test.minor, test.ok)
+			}
+		})
 	}
 }
 

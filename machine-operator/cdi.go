@@ -76,19 +76,46 @@ type cdiEdits struct {
 	DeviceNodes []cdiDeviceNode `json:"deviceNodes"`
 }
 
+// cdiDeviceNode is one node the runtime injects. A node named by
+// path alone is one the runtime reads from the host: it stats the
+// path to learn the node's kind and numbers. Type, Major, and Minor
+// state those facts instead, and a node that states them needs no
+// host node at all.
 type cdiDeviceNode struct {
-	Path string `json:"path"`
+	Path     string `json:"path"`
+	Type     string `json:"type,omitempty"`
+	Major    int    `json:"major,omitempty"`
+	Minor    int    `json:"minor,omitempty"`
+	FileMode *int   `json:"fileMode,omitempty"`
 }
 
 // deviceNodes turns the paths one published device delivers into the
-// container edits that grant them.
+// container edits that grant them. A path whose numbers the kernel
+// fixes carries those numbers, because the node it names can be
+// absent when the kubelet prepares the claim. The runtime then
+// creates the node with mknod and writes the matching cgroup rule,
+// and the container can open the device the moment the kernel
+// registers it.
 func deviceNodes(paths []string) []cdiDeviceNode {
 	nodes := make([]cdiDeviceNode, 0, len(paths))
 	for _, path := range paths {
-		nodes = append(nodes, cdiDeviceNode{Path: path})
+		node := cdiDeviceNode{Path: path}
+		if major, minor, ok := hardware.EvdevNumbers(path); ok {
+			mode := evdevFileMode
+			node.Type, node.Major, node.Minor, node.FileMode = "c", major, minor, &mode
+		}
+		nodes = append(nodes, node)
 	}
 	return nodes
 }
+
+// evdevFileMode is the mode the runtime gives a node it creates with
+// mknod. The runtime copies the mode of a host node it can stat, but a
+// node in the evdev range can be absent when the container starts, and
+// a node created with no mode is openable only by a process that holds
+// CAP_DAC_OVERRIDE. The owner is the container's own user, so owner
+// read and write is what the program needs.
+const evdevFileMode = 0o600
 
 // cdiKind identifies liken's CDI devices, the same way the driver
 // name identifies liken's slices. A CDI device ID has the form

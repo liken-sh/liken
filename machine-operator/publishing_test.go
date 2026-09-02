@@ -4,6 +4,9 @@ package main
 // published slice devices, each delivering exactly one kind of node.
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -467,5 +470,92 @@ func TestPublishRoutesAnUnknownNodeToTheUnknownBranch(t *testing.T) {
 	}
 	if !slices.Contains(p.Nodes, "/dev/dri/renderD128") || !slices.Contains(p.Nodes, "/dev/i2c-0") {
 		t.Errorf("nodes = %v, want both /dev/dri/renderD128 and /dev/i2c-0", p.Nodes)
+	}
+}
+
+// miscDevice registers a misc class entry under a fake sysfs root, the
+// shape the kernel gives a driver that owns one character node and no
+// bus device of its own. MiscNode reads the uevent file's DEVNAME, and
+// the dev file carries the node's numbers the way the kernel writes
+// them.
+func miscDevice(t *testing.T, sysRoot, name string, minor int) {
+	t.Helper()
+	dir := filepath.Join(sysRoot, "class", "misc", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dev"), fmt.Appendf(nil, "10:%d\n", minor), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte("DEVNAME="+name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// bluetoothAdapterDevice is the shape claimDelivery names by driver:
+// a USB interface bound to btusb.
+var bluetoothAdapterDevice = hardware.Device{Bus: "usb", Address: "1-8:1.0", Driver: "btusb"}
+
+func TestClaimDeliveryAddsTheInputNodesToABluetoothAdapter(t *testing.T) {
+	// The bluetooth-operator relays a controller's events from the real
+	// evdev node, which appears and vanishes with the radio link, into a
+	// uinput virtual device with a stable minor. Its container is
+	// unprivileged, so it needs the uinput outlet and one node for every
+	// evdev minor the kernel may register later.
+	sysRoot := t.TempDir()
+	miscDevice(t, sysRoot, "uhid", 239)
+	miscDevice(t, sysRoot, "uinput", 223)
+
+	delivery := claimDelivery(sysRoot, bluetoothAdapterDevice)
+
+	want := []string{"/dev/uhid", "/dev/uinput"}
+	for i := range 32 {
+		want = append(want, fmt.Sprintf("/dev/input/event%d", i))
+	}
+	if !slices.Equal(delivery.DevNodes(), want) {
+		t.Errorf("nodes = %v, want %v", delivery.DevNodes(), want)
+	}
+}
+
+func TestClaimDeliveryAddsNoEvdevNodesWithoutUinput(t *testing.T) {
+	// Without the uinput outlet the inlet nodes serve nothing, so a
+	// machine that has no /dev/uinput delivers uhid alone.
+	sysRoot := t.TempDir()
+	miscDevice(t, sysRoot, "uhid", 239)
+
+	delivery := claimDelivery(sysRoot, bluetoothAdapterDevice)
+
+	if !slices.Equal(delivery.DevNodes(), []string{"/dev/uhid"}) {
+		t.Errorf("nodes = %v, want the uhid node alone", delivery.DevNodes())
+	}
+}
+
+func TestClaimDeliveryAddsTheEvdevNodesWithoutUHID(t *testing.T) {
+	// The two misc nodes are separate declarations, so uinput delivers
+	// its own range whether or not uhid is loaded.
+	sysRoot := t.TempDir()
+	miscDevice(t, sysRoot, "uinput", 223)
+
+	delivery := claimDelivery(sysRoot, bluetoothAdapterDevice)
+
+	if len(delivery.Nodes) != 33 {
+		t.Fatalf("nodes = %v, want uinput and the 32 event nodes", delivery.DevNodes())
+	}
+	if delivery.Nodes[0].Path != "/dev/uinput" {
+		t.Errorf("first node = %q, want /dev/uinput", delivery.Nodes[0].Path)
+	}
+}
+
+func TestClaimDeliveryAddsTheInputNodesToNoOtherDevice(t *testing.T) {
+	// These nodes belong to the adapter's claim alone, because a
+	// Bluetooth stack is what they exist for.
+	sysRoot := t.TempDir()
+	miscDevice(t, sysRoot, "uhid", 239)
+	miscDevice(t, sysRoot, "uinput", 223)
+
+	delivery := claimDelivery(sysRoot, hardware.Device{Bus: "usb", Address: "2-1:1.0", Driver: "usb-storage"})
+
+	if len(delivery.Nodes) != 0 {
+		t.Errorf("nodes = %v, want none", delivery.DevNodes())
 	}
 }
