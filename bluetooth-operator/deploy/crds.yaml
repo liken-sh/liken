@@ -144,6 +144,10 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
+        - name: Alias
+          type: string
+          description: The name a person gave the device.
+          jsonPath: .spec.alias
         - name: Device
           type: string
           description: The name the device reports for itself.
