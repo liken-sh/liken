@@ -144,7 +144,7 @@ spec:
       subresources:
         status: {}
       additionalPrinterColumns:
-        - name: Name
+        - name: Device
           type: string
           description: The name the device reports for itself.
           jsonPath: .status.name
