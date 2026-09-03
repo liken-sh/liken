@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -290,9 +292,11 @@ func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result strin
 	e.writeRows(fact, folder, result == attemptFound)
 }
 
-// The actors the sidecar holds, in its own order, which is the billing order
-// the union starts from. A document this reader cannot parse holds no cast,
-// and the fill has already recorded that as an error.
+// The actors the sidecar holds, in billing order, which is where the union
+// starts. An actor element with an order takes that place, and one without
+// follows every actor that has one, in document order. A document this reader
+// cannot parse holds no cast, and the fill has already recorded that as an
+// error.
 func sidecarCast(document []byte) []creditedActor {
 	var read struct {
 		Actors []nfoActor `xml:"actor"`
@@ -300,6 +304,9 @@ func sidecarCast(document []byte) []creditedActor {
 	if err := lenientXML(document).Decode(&read); err != nil {
 		return nil
 	}
+	sort.SliceStable(read.Actors, func(i, j int) bool {
+		return billingOf(read.Actors[i]) < billingOf(read.Actors[j])
+	})
 	var cast []creditedActor
 	for _, actor := range read.Actors {
 		name := strings.TrimSpace(actor.Name)
@@ -314,6 +321,15 @@ func sidecarCast(document []byte) []creditedActor {
 		})
 	}
 	return cast
+}
+
+// The billing an actor element states, and a place after every stated one
+// for an element that states none.
+func billingOf(actor nfoActor) int {
+	if actor.Order == nil {
+		return math.MaxInt
+	}
+	return *actor.Order
 }
 
 // The crew the sidecar holds, in its own order, which is where the union

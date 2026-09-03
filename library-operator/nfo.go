@@ -19,10 +19,14 @@ type nfoUniqueID struct {
 // nfoActor is one actor element, a name and the part played.
 // The thumb is read because the credits fact rewrites the actor group, and a
 // picture another writer put there stays only where this reader keeps it.
+// The order is read because Jellyfin writes the actor elements in no
+// particular order and puts the billing in each one, so document order alone
+// puts a lead last.
 type nfoActor struct {
 	Name  string `xml:"name"`
 	Role  string `xml:"role"`
 	Thumb string `xml:"thumb"`
+	Order *int   `xml:"order"`
 }
 
 // One rating element inside the ratings block, in Kodi's form: the site that

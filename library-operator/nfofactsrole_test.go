@@ -923,6 +923,19 @@ func TestTheUnionStartsFromTheActorsTheSidecarHolds(t *testing.T) {
 			},
 		},
 		{
+			name: "actors Jellyfin wrote out of billing order",
+			document: "<movie><actor><name>Ivo Brandt</name><order>2</order></actor>" +
+				"<actor><name>Nora Vance</name><order>0</order></actor>" +
+				"<actor><name>Ada Ferris</name></actor>" +
+				"<actor><name>Mira Solberg</name><order>1</order></actor></movie>",
+			want: []creditedActor{
+				{Name: "Nora Vance", Order: 0},
+				{Name: "Mira Solberg", Order: 1},
+				{Name: "Ivo Brandt", Order: 2},
+				{Name: "Ada Ferris", Order: 3},
+			},
+		},
+		{
 			name:     "an actor with no name at all",
 			document: "<movie><actor><role>Captain</role></actor></movie>",
 		},
