@@ -143,8 +143,8 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	if strings.Contains(got.sql, "603") || strings.Contains(got.sql, "Matrix") {
 		t.Errorf("sql = %q, want no values concatenated in", got.sql)
 	}
-	if len(got.params) != 13 {
-		t.Fatalf("params = %d, want 13", len(got.params))
+	if len(got.params) != 14 {
+		t.Fatalf("params = %d, want 14", len(got.params))
 	}
 	if got.params[0] != "house/movies" {
 		t.Errorf("params[0] = %v, want the library", got.params[0])
@@ -210,8 +210,8 @@ func TestUpsertSeriesTargetsTheSeriesTable(t *testing.T) {
 	if !strings.Contains(got.sql, "INSERT INTO series") {
 		t.Errorf("sql = %q, want an upsert on series", got.sql)
 	}
-	if len(got.params) != 12 {
-		t.Errorf("params = %d, want 12", len(got.params))
+	if len(got.params) != 13 {
+		t.Errorf("params = %d, want 13", len(got.params))
 	}
 }
 

@@ -80,18 +80,56 @@ type likenLedger struct {
 	Attempts []likenAttempt `yaml:"attempts,omitempty"`
 }
 
-// One item's answer: an id with the reason it was written, or the candidates
-// that wait for a person.
+// The provider blocks that answered one fact: one name for a single value,
+// and a list for a set the fact took the union of. A person reads either form
+// back the same way.
+type providerNames []string
+
+func (p providerNames) MarshalYAML() (any, error) {
+	if len(p) == 1 {
+		return p[0], nil
+	}
+	return []string(p), nil
+}
+
+func (p *providerNames) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		var name string
+		if err := node.Decode(&name); err != nil {
+			return err
+		}
+		*p = providerNames{name}
+		return nil
+	}
+	var names []string
+	if err := node.Decode(&names); err != nil {
+		return err
+	}
+	*p = names
+	return nil
+}
+
+// One item as a ledger records it. Provider is which provider answered, and
+// Wrote is the hash of the element group the fact left in the .nfo. The next
+// run compares the group on disk with that hash, so a group another writer
+// changed is a fight and not an overwrite.
 type likenItem struct {
 	Path string `yaml:"path"`
 	// Which provider answered for this item, so a person reads why the file
 	// looks the way it does. An art fact writes existing here for a file another
 	// tool had already written.
-	Provider   string           `yaml:"provider,omitempty"`
+	Provider   providerNames    `yaml:"provider,omitempty"`
 	ID         providerIDs      `yaml:"id,omitempty"`
 	Reason     string           `yaml:"reason,omitempty"`
+	Wrote      string           `yaml:"wrote,omitempty"`
 	Written    time.Time        `yaml:"written,omitempty"`
 	Candidates []likenCandidate `yaml:"candidates,omitempty"`
+}
+
+// One name reads back as the one provider that answered, so a fact that takes
+// a single value asks whether that block wrote the item.
+func (p providerNames) is(name string) bool {
+	return len(p) == 1 && p[0] == name
 }
 
 // One candidate and its receipt, which says what matched and what did not, so
@@ -103,17 +141,31 @@ type likenCandidate struct {
 	Receipt map[string]string `yaml:"receipt,omitempty"`
 }
 
-// One attempt: which item, when, and how it ended.
+// One attempt as a ledger records it. Provider names the provider blocks the
+// attempt asked, empty for a fact that asks none, and the scanner lifts it
+// into the attempts table.
 type likenAttempt struct {
-	Path   string    `yaml:"path"`
-	At     time.Time `yaml:"at"`
-	Result string    `yaml:"result"`
+	Path     string        `yaml:"path"`
+	At       time.Time     `yaml:"at"`
+	Result   string        `yaml:"result"`
+	Provider providerNames `yaml:"provider,omitempty"`
 }
 
 // A fact's file is named for the fact itself, so the one-file-per-
 // writer rule is the file name.
 func likenLedgerName(fact string) string {
 	return fact + ".yaml"
+}
+
+// One item's entry out of a fact's ledger, or false where the ledger holds
+// none for that path.
+func (l *likenLedger) itemAt(path string) (likenItem, bool) {
+	for _, item := range l.Items {
+		if item.Path == path {
+			return item, true
+		}
+	}
+	return likenItem{}, false
 }
 
 // A folder with no .liken directory reads as an empty ledger and not as an

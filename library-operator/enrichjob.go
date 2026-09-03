@@ -106,13 +106,22 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 
 	// The agent starts first, and the facts run in order behind it, because
 	// the kubelet starts an init container only when the one before it is up.
-	// Both facts here edit the same sidecar file, so they must never run at
+	// The facts here edit the same sidecar file, so they must never run at
 	// once.
 	facts := []Container{
 		factsContainer(library, factProbe, []string{factProbe}, path, scannerImage, busAddress, topicBase),
 	}
 	if providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity) != nil {
 		facts = append(facts, factsContainer(library, factIdentity, []string{factIdentity}, path,
+			scannerImage, busAddress, topicBase))
+	}
+	// The nfo container: one phase that runs every fact of the nfo group in
+	// order, each fact reading the .nfo and writing its own element group. It
+	// names the facts the Library's own sources serve. It runs before the art
+	// container because a plot costs one call and an image costs a download, so
+	// the cheap facts land first.
+	if served := servedNFOFacts(library, providers); len(served) > 0 {
+		facts = append(facts, factsContainer(library, nfoContainerName, served, path,
 			scannerImage, busAddress, topicBase))
 	}
 	// The art container. It runs where a Ready provider of the Library's sources
@@ -127,9 +136,9 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 		images.Resources.Limits = map[string]string{"memory": artMemoryLimit}
 		facts = append(facts, images)
 	}
-	// Every facts container carries every key the sources reach, so a container
-	// that asks a second provider needs no wiring of its own.
-	keys := providerKeyEnv(library, providers)
+	// The same environment carries the source order, so a container asks its
+	// providers in the order spec.sources names them.
+	keys := providerEnv(library, providers)
 	for index := range facts {
 		facts[index].Env = append(facts[index].Env, keys...)
 	}

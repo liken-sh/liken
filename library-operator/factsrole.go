@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 )
 
@@ -24,6 +23,11 @@ type factRun func(ctx context.Context, e *enricher) error
 var factRuns = map[string]factRun{
 	factProbe:    func(ctx context.Context, e *enricher) error { return e.probeFact(ctx) },
 	factIdentity: func(ctx context.Context, e *enricher) error { return e.identityFact(ctx) },
+
+	factOverview:      nfoFactRun(factOverview),
+	factCertification: nfoFactRun(factCertification),
+	factRatingTMDb:    nfoFactRun(factRatingTMDb),
+	factCredits:       nfoFactRun(factCredits),
 
 	factPoster:       artFactRun(factPoster),
 	factBackdrop:     artFactRun(factBackdrop),
@@ -49,13 +53,7 @@ func runFacts() {
 // The facts a container runs, in the order its list names them. An empty name
 // is dropped, so a trailing comma or a space around a name names no fact.
 func namedFacts(list string) []string {
-	var facts []string
-	for _, name := range strings.Split(list, ",") {
-		if name = strings.TrimSpace(name); name != "" {
-			facts = append(facts, name)
-		}
-	}
-	return facts
+	return commaNames(list)
 }
 
 // Every name is checked before the first fact runs, so a container that names

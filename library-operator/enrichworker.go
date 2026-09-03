@@ -35,6 +35,10 @@ type enricher struct {
 	// container waits for its own copy to hold what that report counts.
 	statusTopic string
 	syncTimeout time.Duration
+	// The providers a container can ask, built once and held here, so a provider
+	// that spends its day in one fact is not asked again in the next fact of the
+	// same container.
+	providers *answerLine
 }
 
 // A container with no API credential learns everything from its environment,

@@ -265,6 +265,9 @@ type LibraryStatus struct {
 	Gaps       map[string]int `json:"gaps,omitempty"`
 	Waiting    int            `json:"waiting"`
 	Unresolved int            `json:"unresolved"`
+	// The titles a fact left because another writer holds the element group it
+	// writes. The repair is to stop that writer for this library.
+	Fights int `json:"fights"`
 	// Webhook is the URL of this Library's webhook endpoint on the
 	// operator, the address a person gives to Radarr, Sonarr, or
 	// Jellyfin.

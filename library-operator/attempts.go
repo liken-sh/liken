@@ -29,6 +29,9 @@ type attemptRow struct {
 	Fact    string
 	At      int64
 	Result  string
+	// The provider block that answered, empty for a fact that asks no provider.
+	// A set fact joins the blocks it took the union of with commas.
+	Provider string
 }
 
 // One attempts row, by the two key columns that follow the library.
@@ -44,9 +47,10 @@ func (c *Catalog) UpsertAttempts(ctx context.Context, rows []attemptRow) (int, e
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
 		statements[i] = statement{
-			sql: `INSERT INTO attempts (library, item, ` + attemptFactColumn + `, at, result) VALUES (?, ?, ?, ?, ?) ` +
-				`ON CONFLICT (library, item, ` + attemptFactColumn + `) DO UPDATE SET at = excluded.at, result = excluded.result`,
-			params: []any{row.Library, row.Item, row.Fact, row.At, row.Result},
+			sql: `INSERT INTO attempts (library, item, ` + attemptFactColumn + `, at, result, provider) VALUES (?, ?, ?, ?, ?, ?) ` +
+				`ON CONFLICT (library, item, ` + attemptFactColumn + `) DO UPDATE SET at = excluded.at, ` +
+				`result = excluded.result, provider = excluded.provider`,
+			params: []any{row.Library, row.Item, row.Fact, row.At, row.Result, row.Provider},
 		}
 	}
 	return c.apply(ctx, statements)
@@ -132,6 +136,7 @@ type likenSidecar struct {
 // path, because it works per file, and the identity fact keys on an item
 // id, because it works per title.
 var likenFacts = []string{factProbe, factIdentity,
+	factOverview, factCertification, factRatingTMDb, factCredits,
 	factPoster, factBackdrop, factLogo, factSeasonPoster, factEpisodeThumb}
 
 // Reads every .liken file the folder holds into attempts rows. A folder that
@@ -150,11 +155,12 @@ func (s likenSidecar) attempts() ([]attemptRow, error) {
 				continue
 			}
 			rows = append(rows, attemptRow{
-				Library: s.library,
-				Item:    item,
-				Fact:    fact,
-				At:      attempt.At.Unix(),
-				Result:  attempt.Result,
+				Library:  s.library,
+				Item:     item,
+				Fact:     fact,
+				At:       attempt.At.Unix(),
+				Result:   attempt.Result,
+				Provider: strings.Join(attempt.Provider, ","),
 			})
 		}
 	}
@@ -196,6 +202,13 @@ func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time) 
 		counts[fact] = count
 	}
 	return counts, nil
+}
+
+// The fights of one library: the attempts that found an element group another
+// writer had changed, over every fact. A person reads it on the Library, and
+// the repair is to stop the other writer.
+func (c *Catalog) fightCount(ctx context.Context, library string) (int, error) {
+	return c.queryInt(ctx, fightsQuery, []any{library})
 }
 
 // The two counts a person reads on the Library beside the gaps: the titles

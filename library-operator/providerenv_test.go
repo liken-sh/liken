@@ -115,3 +115,45 @@ func TestAProviderKeyNamesItsOwnSecret(t *testing.T) {
 		t.Errorf("secretKeyRef = %+v, want the provider's Secret and the default key", reference)
 	}
 }
+
+// The source order reaches every facts container, so a container asks its
+// providers in the order spec.sources names them.
+func TestTheSourceOrderOfALibrary(t *testing.T) {
+	tmdb := providerOfBlock("tmdb", providerBlockTMDb)
+	omdb := providerOfBlock("omdb", providerBlockOMDb)
+	tvmaze := providerOfBlock("tvmaze", providerBlockTVmaze)
+	second := providerOfBlock("second-omdb", providerBlockOMDb)
+	refused := providerOfBlock("refused", providerBlockFanart)
+	refused.Status.Conditions = []Condition{
+		{Type: conditionReady, Status: ConditionFalse, Reason: reasonNoSecret},
+	}
+
+	cases := []struct {
+		name    string
+		sources []string
+		want    string
+	}{
+		{name: "no sources at all"},
+		{name: "the order the sources name them", sources: []string{"omdb", "tmdb"}, want: "omdb,tmdb"},
+		{name: "a provider that takes no key", sources: []string{"tvmaze"}, want: "tvmaze"},
+		{name: "a provider that is not Ready", sources: []string{"refused", "tmdb"}, want: "tmdb"},
+		{name: "the first account of a block wins",
+			sources: []string{"omdb", "second-omdb"}, want: "omdb"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			env := providerEnv(libraryWithSources(one.sources...),
+				providersOf(tmdb, omdb, tvmaze, second, refused))
+
+			order := ""
+			for _, variable := range env {
+				if variable.Name == librarySourcesVariable {
+					order = variable.Value
+				}
+			}
+			if order != one.want {
+				t.Errorf("%s = %q, want %q", librarySourcesVariable, order, one.want)
+			}
+		})
+	}
+}

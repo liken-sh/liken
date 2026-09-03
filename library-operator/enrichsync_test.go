@@ -162,10 +162,8 @@ func TestAFactContainerFailsWhereTheCopyNeverSyncs(t *testing.T) {
 	work, _ := syncingEnricher(t, catalog)
 	work.syncTimeout = 100 * time.Millisecond
 
-	for _, fact := range likenFacts {
-		if err := work.runFacts(t.Context(), []string{fact}); err == nil {
-			t.Errorf("the %s container read its gap off an unsynced copy", fact)
-		}
+	if err := work.runFacts(t.Context(), likenFacts); err == nil {
+		t.Error("the container read its gap off an unsynced copy")
 	}
 }
 

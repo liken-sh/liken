@@ -341,6 +341,10 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 	if err != nil {
 		return libraryReport{}, err
 	}
+	report.Fights, err = r.catalog.fightCount(ctx, library)
+	if err != nil {
+		return libraryReport{}, err
+	}
 	return report, nil
 }
 

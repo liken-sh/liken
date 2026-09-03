@@ -127,12 +127,7 @@ func artFactRun(fact string) factRun {
 // The provider one Library's sources hold for the art: the first of them that
 // is Ready and serves any art fact.
 func (s providerSet) servingArt(namespace string, sources []string) *MetadataProvider {
-	for _, fact := range artFactNames {
-		if provider := s.serving(namespace, sources, fact); provider != nil {
-			return provider
-		}
-	}
-	return nil
+	return s.servingAny(namespace, sources, artFactNames)
 }
 
 // The gap query of the title's own art, over the movies and the series of one

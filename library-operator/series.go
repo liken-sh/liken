@@ -81,6 +81,7 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 		Added:    addedTime(dir),
 		Art:      primaryArt,
 		Body:     body,
+		NFOFacts: meta.NFOFacts,
 	})
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeSeries, meta.ProviderIDs, key, seriesID)...)
 	readLikenSidecar(likenSidecar{root: root, dir: dir, library: library, item: seriesID}, result)

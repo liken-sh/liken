@@ -58,18 +58,19 @@ CREATE TABLE movies (
     body TEXT NOT NULL DEFAULT '{}',
     slug TEXT NOT NULL DEFAULT '',
     set_id TEXT NOT NULL DEFAULT '',
+    nfo_facts TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, id)
 );
 
 -- The movie item table adds one column after the header: set_id is the
 -- id of the set the movie belongs to, a row of the sets table, or empty
--- where the sidecar names none. A join from set_id to a set must match
--- the library as well, as every join between item tables does.
+-- where the sidecar names none.
 --
--- The three sorts a media browser offers over one library: by title,
--- by release, and by the time of arrival. Each index leads with the
--- library column, because every list a screen draws is for one
--- library first.
+-- nfo_facts holds the names of the nfo facts the title's sidecar already
+-- answers, each name wrapped in commas, as in ",overview,credits,". The
+-- scanner derives it from the elements the sidecar holds, and a gap query
+-- reads it with instr(). The list carries the names and not the values,
+-- so a new nfo fact needs no new column.
 CREATE INDEX movies_library_sort_key ON movies (library, sort_key);
 CREATE INDEX movies_library_released ON movies (library, released);
 CREATE INDEX movies_library_added ON movies (library, added);
@@ -104,6 +105,8 @@ CREATE TABLE sets (
 CREATE INDEX sets_library_sort_key ON sets (library, sort_key);
 
 -- The series item table: the same item header as movies, with the series body.
+-- series carries the same nfo_facts column as movies, for the same
+-- reason: a tvshow.nfo answers the same nfo facts a movie.nfo does.
 CREATE TABLE series (
     library TEXT NOT NULL DEFAULT '',
     id TEXT NOT NULL,
@@ -117,6 +120,7 @@ CREATE TABLE series (
     duration INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL DEFAULT '{}',
     slug TEXT NOT NULL DEFAULT '',
+    nfo_facts TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, id)
 );
 
@@ -255,11 +259,16 @@ CREATE TABLE runs (
 -- fact's column is named concern: Corrosion refuses to remove a column,
 -- and this one is part of the primary key, which it refuses to add to a
 -- table that exists. attempts.go maps the two names.
+--
+-- provider names the provider block that answered, as in "tmdb", or the
+-- blocks joined by commas where a set fact took the union of several. It
+-- is empty for a fact that asks no provider, such as probe.
 CREATE TABLE attempts (
     library TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
     concern TEXT NOT NULL DEFAULT '',
     at INTEGER NOT NULL DEFAULT 0,
     result TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, item, concern)
 );

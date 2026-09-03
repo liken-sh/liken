@@ -105,6 +105,9 @@ type movieRow struct {
 	Duration int64
 	Body     movieBody
 	SetID    string
+	// The nfo_facts column: the nfo facts the title's sidecar already answers,
+	// each name wrapped in commas. The gap query of each nfo fact reads it.
+	NFOFacts string
 }
 
 // seriesRow is one row of the series item table, the same header as a
@@ -122,6 +125,8 @@ type seriesRow struct {
 	Art      string
 	Duration int64
 	Body     seriesBody
+	// The nfo_facts column, the same list a movie carries.
+	NFOFacts string
 }
 
 // episodeRow is one row of the episodes item table: the shared header, the

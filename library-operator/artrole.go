@@ -126,7 +126,7 @@ func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
 	now := time.Now().UTC()
 	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
 		if provider != "" {
-			item := likenItem{Path: entry, Provider: provider}
+			item := likenItem{Path: entry, Provider: providerNames{provider}}
 			if provider != artProviderExisting {
 				item.Written = now
 			}

@@ -42,15 +42,18 @@ const (
 	factIdentity = "identity"
 )
 
-// What one attempt left behind. found, candidates, and nothing are facts
-// with a date, and the retry interval applies to them. An error is a
-// provider that was down, a key that was refused, or a file that would
-// not open, and the next run tries again.
+// What one attempt left behind. found, candidates, nothing, and fight are
+// facts with a date, and the retry interval applies to them. A fight is a
+// fact that read its element group on disk, found bytes it did not write, and
+// left them; Library status counts it. An error is a provider that was down,
+// a key that was refused, or a file that would not open, and the next run
+// tries again.
 const (
 	attemptFound      = "found"
 	attemptCandidates = "candidates"
 	attemptNothing    = "nothing"
 	attemptError      = "error"
+	attemptFight      = "fight"
 )
 
 // How long an attempt with a date stands before the fact that wrote it asks
@@ -81,11 +84,15 @@ var gapQueries = map[string]string{
 		`UNION ALL SELECT library, id FROM series WHERE id LIKE 'series:path:%') AS items ` +
 		`WHERE library = ? AND id NOT IN (SELECT item FROM attempts ` +
 		`WHERE attempts.library = items.library AND ` + attemptFactColumn + ` = 'identity' AND result != 'error' AND at >= ?)`,
-	factPoster:       titleArtGapSQL(factPoster),
-	factBackdrop:     titleArtGapSQL(factBackdrop),
-	factLogo:         titleArtGapSQL(factLogo),
-	factSeasonPoster: seasonPosterGapSQL(),
-	factEpisodeThumb: episodeThumbGapSQL(),
+	factOverview:      nfoGapQuery(factOverview),
+	factCertification: nfoGapQuery(factCertification),
+	factRatingTMDb:    nfoGapQuery(factRatingTMDb),
+	factCredits:       nfoGapQuery(factCredits),
+	factPoster:        titleArtGapSQL(factPoster),
+	factBackdrop:      titleArtGapSQL(factBackdrop),
+	factLogo:          titleArtGapSQL(factLogo),
+	factSeasonPoster:  seasonPosterGapSQL(),
+	factEpisodeThumb:  episodeThumbGapSQL(),
 }
 
 // The two counts a person reads on the Library beside the gaps. Waiting

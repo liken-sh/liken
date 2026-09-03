@@ -1,15 +1,9 @@
 package main
 
-// nfo.go reads Jellyfin and Kodi .nfo sidecars, the XML the *arr tools and
-// Jellyfin write beside every title. It turns a movie.nfo, a tvshow.nfo, and an
-// episode .nfo into the fields the rows carry, and reads streamdetails so a
-// file's resolution and codec come off the sidecar and never off a media probe.
+// The episode sidecar's reader is in nfoepisode.go.
 
 import (
-	"bytes"
 	"encoding/xml"
-	"errors"
-	"io"
 	"strconv"
 	"strings"
 )
@@ -25,6 +19,40 @@ type nfoUniqueID struct {
 type nfoActor struct {
 	Name string `xml:"name"`
 	Role string `xml:"role"`
+}
+
+// One rating element inside the ratings block, in Kodi's form: the site that
+// scored the title, the top of that site's scale, whether a reader takes this
+// one first, the score, and how many people voted.
+type nfoRating struct {
+	Name    string  `xml:"name,attr"`
+	Max     float64 `xml:"max,attr"`
+	Default bool    `xml:"default,attr"`
+	Value   float64 `xml:"value"`
+	Votes   int     `xml:"votes"`
+}
+
+// The ratings element holds one rating per site, which is why one site's
+// score is a fact of its own.
+type nfoRatings struct {
+	Ratings []nfoRating `xml:"rating"`
+}
+
+// themoviedb is the name Kodi and Jellyfin write on a TMDb rating, and 10 is
+// the top of TMDb's own scale.
+const (
+	tmdbRatingName = "themoviedb"
+	tmdbRatingMax  = 10
+)
+
+// One site's rating in the block, or nil where the block holds none.
+func ratingNamed(ratings []nfoRating, name string) *nfoRating {
+	for at := range ratings {
+		if strings.EqualFold(strings.TrimSpace(ratings[at].Name), name) {
+			return &ratings[at]
+		}
+	}
+	return nil
 }
 
 // nfoSet is a set element, either a plain name or a nested name element.
@@ -82,6 +110,7 @@ type movieNFO struct {
 	Country       string        `xml:"country"`
 	MPAA          string        `xml:"mpaa"`
 	Certification string        `xml:"certification"`
+	Ratings       nfoRatings    `xml:"ratings"`
 	UniqueIDs     []nfoUniqueID `xml:"uniqueid"`
 	IMDBID        string        `xml:"imdbid"`
 	TMDBID        string        `xml:"tmdbid"`
@@ -105,30 +134,12 @@ type seriesNFO struct {
 	Country       string        `xml:"country"`
 	MPAA          string        `xml:"mpaa"`
 	Certification string        `xml:"certification"`
+	Ratings       nfoRatings    `xml:"ratings"`
 	UniqueIDs     []nfoUniqueID `xml:"uniqueid"`
 	IMDBID        string        `xml:"imdbid"`
 	TMDBID        string        `xml:"tmdbid"`
 	TVDBID        string        `xml:"tvdbid"`
 	ID            string        `xml:"id"`
-}
-
-// episodeNFO mirrors an episodedetails .nfo, the fields that place an episode
-// under its series and describe it.
-type episodeNFO struct {
-	XMLName   xml.Name      `xml:"episodedetails"`
-	Title     string        `xml:"title"`
-	Season    int           `xml:"season"`
-	Episode   int           `xml:"episode"`
-	Aired     string        `xml:"aired"`
-	Premiered string        `xml:"premiered"`
-	Plot      string        `xml:"plot"`
-	Runtime   int           `xml:"runtime"`
-	Directors []string      `xml:"director"`
-	Writers   []string      `xml:"writer"`
-	Credits   []string      `xml:"credits"`
-	Actors    []nfoActor    `xml:"actor"`
-	UniqueIDs []nfoUniqueID `xml:"uniqueid"`
-	FileInfo  nfoFileInfo   `xml:"fileinfo"`
 }
 
 // streamDetailsNFO is the one block a per-file sidecar is read for, under
@@ -177,6 +188,9 @@ type movieMeta struct {
 	Duration    int64
 	Stream      streamInfo
 	SetID       string
+	// The nfo facts this sidecar already answers, in the form the nfo_facts
+	// column holds.
+	NFOFacts string
 }
 
 // parseMovieNFO reads movie.nfo into a movieMeta. The art and the provider-id
@@ -212,6 +226,8 @@ func parseMovieNFO(data []byte) (movieMeta, error) {
 		Duration: itemDuration(stream, raw.Runtime),
 		Stream:   stream,
 		SetID:    setID(strings.TrimSpace(raw.Set.TMDBColID), collection),
+		NFOFacts: nfoFactsAnswered(raw.Plot, contentRating(raw.MPAA, raw.Certification),
+			raw.Ratings.Ratings, raw.Actors),
 	}, nil
 }
 
@@ -222,6 +238,9 @@ type seriesMeta struct {
 	Released    string
 	ProviderIDs map[string]string
 	Body        seriesBody
+	// The nfo facts this sidecar already answers, in the form the nfo_facts
+	// column holds; a series sidecar answers the same facts a movie one does.
+	NFOFacts string
 }
 
 // parseSeriesNFO reads tvshow.nfo into a seriesMeta.
@@ -248,72 +267,9 @@ func parseSeriesNFO(data []byte) (seriesMeta, error) {
 			Country:       strings.TrimSpace(raw.Country),
 			ContentRating: contentRating(raw.MPAA, raw.Certification),
 		},
+		NFOFacts: nfoFactsAnswered(raw.Plot, contentRating(raw.MPAA, raw.Certification),
+			raw.Ratings.Ratings, raw.Actors),
 	}, nil
-}
-
-// episodeMeta is what parseEpisodeNFOs reads from an episode .nfo.
-type episodeMeta struct {
-	Title       string
-	Season      int
-	Episode     int
-	Released    string
-	ProviderIDs map[string]string
-	Body        episodeBody
-	Duration    int64
-	Stream      streamInfo
-}
-
-// parseEpisodeNFOs reads every episodedetails block an episode .nfo holds, in
-// the order the sidecar wrote them. A file that holds two episodes carries one
-// block for each, which is how Kodi and Jellyfin write it.
-//
-// It streams the decoder over the file rather than unmarshaling once, because
-// those blocks are consecutive root elements and encoding/xml reads only the
-// first of those. A block that fails after one has been read keeps what was
-// read, so a truncated second block does not lose the first.
-func parseEpisodeNFOs(data []byte) ([]episodeMeta, error) {
-	decoder := xml.NewDecoder(bytes.NewReader(data))
-	var metas []episodeMeta
-	for {
-		var raw episodeNFO
-		err := decoder.Decode(&raw)
-		if errors.Is(err, io.EOF) {
-			return metas, nil
-		}
-		if err != nil {
-			if len(metas) > 0 {
-				return metas, nil
-			}
-			return nil, err
-		}
-		metas = append(metas, episodeMetaFrom(raw))
-	}
-}
-
-// episodeMetaFrom turns one episodedetails block into an episodeMeta.
-func episodeMetaFrom(raw episodeNFO) episodeMeta {
-	providers := collectProviders(raw.UniqueIDs, "", "", "", "")
-	aired := strings.TrimSpace(raw.Aired)
-	if aired == "" {
-		aired = strings.TrimSpace(raw.Premiered)
-	}
-	stream := streamFrom(raw.FileInfo)
-	return episodeMeta{
-		Title:       strings.TrimSpace(raw.Title),
-		Season:      raw.Season,
-		Episode:     raw.Episode,
-		Released:    aired,
-		ProviderIDs: providers,
-		Body: episodeBody{
-			Plot:        strings.TrimSpace(raw.Plot),
-			Directors:   trimAll(raw.Directors),
-			Writers:     mergeDedup(raw.Writers, raw.Credits),
-			Cast:        castMembers(raw.Actors),
-			ProviderIDs: providers,
-		},
-		Duration: itemDuration(stream, raw.Runtime),
-		Stream:   stream,
-	}
 }
 
 // collectProviders reads every uniqueid and the convenience id tags into one

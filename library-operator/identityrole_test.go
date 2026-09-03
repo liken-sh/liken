@@ -64,6 +64,55 @@ func TestTheIdentityFactWritesTheIdIntoTheSidecar(t *testing.T) {
 	}
 }
 
+// Every id the provider knows goes into the sidecar as its own uniqueid, and
+// the scanner lifts each one into aliases, which is what makes a provider that
+// keys on an IMDb id or a TheTVDB id reachable.
+func TestTheIdentityFactWritesEveryIdTheProviderKnows(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	folder := "The Thing (1982)"
+	writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
+	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	client, _ := newFakeTMDb(t, map[string]string{
+		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+		tmdbKey("/3/movie/1091/external_ids", "", ""):   `{"imdb_id":"tt0084787","tvdb_id":12345}`,
+	})
+
+	if err := work.identityGap(t.Context(), client); err != nil {
+		t.Fatal(err)
+	}
+
+	sidecar := readFileString(t, filepath.Join(root, folder, movieSidecarName))
+	for _, want := range []string{
+		`<uniqueid type="tmdb" default="true">1091</uniqueid>`,
+		`<uniqueid type="imdb">tt0084787</uniqueid>`,
+		`<uniqueid type="tvdb">12345</uniqueid>`,
+	} {
+		if !strings.Contains(sidecar, want) {
+			t.Errorf("the sidecar holds no %s:\n%s", want, sidecar)
+		}
+	}
+	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Items) != 1 || ledger.Items[0].ID["imdb"] != "tt0084787" || ledger.Items[0].ID["tvdb"] != "12345" {
+		t.Errorf("ledger items = %+v, want every id under one key", ledger.Items)
+	}
+
+	walk := walkMovies(root, "house/movies", nil)
+	aliases := map[string]string{}
+	for _, alias := range walk.aliases {
+		aliases[alias.Alias] = alias.Item
+	}
+	for _, want := range []string{"movie:tmdb:1091", "movie:imdb:tt0084787", "movie:tvdb:12345"} {
+		if aliases[want] == "" {
+			t.Errorf("aliases = %v, want one for %s", aliases, want)
+		}
+	}
+}
+
 func TestTheIdentityFactRecordsWhatItLeftForAPerson(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -319,5 +368,32 @@ func TestASidecarThatWillNotTakeTheIdRecordsAnError(t *testing.T) {
 	}
 	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptError {
 		t.Errorf("attempts = %+v, want one error", ledger.Attempts)
+	}
+}
+
+// An external ids call the provider refuses leaves the title with the id it
+// has, because the provider's own id is what the catalog keys on.
+func TestATitleKeepsItsIDWhereTheOtherIDsFail(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	folder := "The Thing (1982)"
+	writeFile(t, filepath.Join(root, folder, "thing.mkv"), "video")
+	seedIdentityGap(t, catalog, libraryKindMovies, folder, "1982", 0)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	client, fake := newFakeTMDb(t, map[string]string{
+		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` + tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
+	})
+	fake.statuses[tmdbKey("/3/movie/1091/external_ids", "", "")] = http.StatusUnauthorized
+
+	if err := work.identityGap(t.Context(), client); err != nil {
+		t.Fatal(err)
+	}
+
+	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1091" || len(ledger.Items[0].ID) != 1 {
+		t.Errorf("ledger items = %+v, want the provider's own id alone", ledger.Items)
 	}
 }

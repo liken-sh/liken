@@ -102,6 +102,7 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 		Duration: meta.Duration,
 		Body:     body,
 		SetID:    meta.SetID,
+		NFOFacts: meta.NFOFacts,
 	})
 
 	videos := map[string]bool{}

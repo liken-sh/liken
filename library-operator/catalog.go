@@ -162,14 +162,14 @@ func (c *Catalog) UpsertMovies(ctx context.Context, rows []movieRow) (int, error
 	for i, row := range rows {
 		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
 		statements[i] = statement{
-			sql: `INSERT INTO movies (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, set_id) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO movies (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, set_id, nfo_facts) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, id) DO UPDATE SET ` +
 				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
 				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
 				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
-				`set_id = excluded.set_id`,
-			params: append(params, row.SetID),
+				`set_id = excluded.set_id, nfo_facts = excluded.nfo_facts`,
+			params: append(params, row.SetID, row.NFOFacts),
 		}
 	}
 	return c.apply(ctx, statements)
@@ -186,12 +186,23 @@ func (c *Catalog) UpsertSets(ctx context.Context, rows []setRow) (int, error) {
 	return c.apply(ctx, statements)
 }
 
-// UpsertSeries writes series rows in place.
+// UpsertSeries writes series rows in place. The series table adds nfo_facts
+// after the header, so this upsert names its own columns, as the movies one
+// does.
 func (c *Catalog) UpsertSeries(ctx context.Context, rows []seriesRow) (int, error) {
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
 		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
-		statements[i] = plainItemUpsert("series", params)
+		statements[i] = statement{
+			sql: `INSERT INTO series (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, nfo_facts) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+				`ON CONFLICT (library, id) DO UPDATE SET ` +
+				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
+				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
+				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
+				`nfo_facts = excluded.nfo_facts`,
+			params: append(params, row.NFOFacts),
+		}
 	}
 	return c.apply(ctx, statements)
 }

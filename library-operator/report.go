@@ -49,6 +49,9 @@ type libraryReport struct {
 	// name. Both are folded into Library status.
 	Waiting    int `json:"waiting"`
 	Unresolved int `json:"unresolved"`
+	// The count of titles a fact left because another writer holds the element
+	// group it writes. The operator folds it into Library status.
+	Fights int `json:"fights"`
 }
 
 // reports holds the newest report per Library and the wake the loop

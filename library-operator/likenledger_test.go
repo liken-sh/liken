@@ -2,6 +2,8 @@ package main
 
 import (
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -156,6 +158,43 @@ func TestAnIdReadsBackFromANumberOrAString(t *testing.T) {
 			}
 			if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != test.want {
 				t.Errorf("read %+v, want the id %s", ledger.Items, test.want)
+			}
+		})
+	}
+}
+
+// A set fact records every provider that answered, and a person reads the list
+// back as the list it wrote.
+func TestALedgerReadsBackTheProvidersThatAnswered(t *testing.T) {
+	cases := []struct {
+		name  string
+		names providerNames
+		want  string
+	}{
+		{name: "one provider", names: providerNames{"tmdb"}, want: "provider: tmdb"},
+		{name: "a set of two", names: providerNames{"tmdb", "omdb"}, want: "provider:\n"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			folder := t.TempDir()
+			err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factOverview,
+				func(ledger *likenLedger) {
+					ledger.noteItem(likenItem{Path: likenSelfPath, Provider: test.names, Wrote: "3b1f"})
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			held := readFileString(t, filepath.Join(folder, likenDirectory, likenLedgerName(factOverview)))
+			if !strings.Contains(held, test.want) {
+				t.Errorf("the ledger reads:\n%s\nwant %q", held, test.want)
+			}
+			ledger, err := readLikenLedger(folder, factOverview)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal([]string(ledger.Items[0].Provider), []string(test.names)) {
+				t.Errorf("provider = %v, want %v", ledger.Items[0].Provider, test.names)
 			}
 		})
 	}

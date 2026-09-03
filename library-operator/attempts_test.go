@@ -201,3 +201,52 @@ func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
 		t.Errorf("gaps = %v, want none for a file the probe already opened", gaps)
 	}
 }
+
+// The ledger an nfo fact writes, with the provider that answered and the hash
+// of the group it left.
+const overviewLedger = `items:
+    - path: .
+      provider: tmdb
+      wrote: 3b1f
+      written: 2026-09-02T14:00:00Z
+attempts:
+    - path: .
+      at: 2026-09-02T14:00:00Z
+      result: found
+      provider: tmdb
+`
+
+func TestAnNFOLedgerYieldsAnAttemptsRowWithItsProvider(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Star Wars (1977)")
+	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factOverview)), overviewLedger)
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.attempts) != 1 {
+		t.Fatalf("attempts = %+v, want one", result.attempts)
+	}
+	got := result.attempts[0]
+	if got.Fact != factOverview || got.Item != "movie:path:star-wars-1977" {
+		t.Errorf("attempt = %+v, want the title's own id under the overview fact", got)
+	}
+	if got.Provider != "tmdb" || got.Result != attemptFound {
+		t.Errorf("attempt = %+v, want the provider that answered", got)
+	}
+}
+
+// A set fact records every provider that answered, and the row joins them.
+func TestALedgerOfSeveralProvidersJoinsThemInTheRow(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Star Wars (1977)")
+	writeFile(t, filepath.Join(dir, "Star Wars (1977).mkv"), "video")
+	writeFile(t, filepath.Join(dir, likenDirectory, likenLedgerName(factCredits)),
+		"attempts:\n    - path: .\n      at: 2026-09-02T14:00:00Z\n      result: found\n      provider: [tmdb, omdb]\n")
+
+	result := walkMovies(root, "house/movies", nil)
+
+	if len(result.attempts) != 1 || result.attempts[0].Provider != "tmdb,omdb" {
+		t.Fatalf("attempts = %+v, want the two blocks joined", result.attempts)
+	}
+}

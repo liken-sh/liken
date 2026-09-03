@@ -106,7 +106,7 @@ func TestEachArtFactWritesItsFileWhereNoneExists(t *testing.T) {
 				t.Errorf("log = %q, want the line that names the file", log.String())
 			}
 			ledger := artLedger(t, filepath.Join(root, filepath.Dir(test.want)), test.fact)
-			if len(ledger.Items) != 1 || ledger.Items[0].Provider != providerTMDb {
+			if len(ledger.Items) != 1 || !ledger.Items[0].Provider.is(providerTMDb) {
 				t.Errorf("ledger items = %+v, want the provider that answered", ledger.Items)
 			}
 			if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
@@ -141,7 +141,7 @@ func TestAnArtFileThatExistsIsLeftAsItIs(t *testing.T) {
 		t.Error("the fact asked the provider about a title whose file is already there")
 	}
 	ledger := artLedger(t, filepath.Join(root, folder), factPoster)
-	if len(ledger.Items) != 1 || ledger.Items[0].Provider != artProviderExisting {
+	if len(ledger.Items) != 1 || !ledger.Items[0].Provider.is(artProviderExisting) {
 		t.Errorf("ledger items = %+v, want the entry that says the file was already there", ledger.Items)
 	}
 	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
@@ -359,7 +359,7 @@ func TestAnArtFactKeepsAFileThatArrivedBeforeTheWrite(t *testing.T) {
 		t.Errorf("poster = %q, want the bytes that were there", got)
 	}
 	ledger := artLedger(t, folder, factPoster)
-	if len(ledger.Items) != 1 || ledger.Items[0].Provider != artProviderExisting {
+	if len(ledger.Items) != 1 || !ledger.Items[0].Provider.is(artProviderExisting) {
 		t.Errorf("ledger items = %+v, want the entry that says the file was already there", ledger.Items)
 	}
 }

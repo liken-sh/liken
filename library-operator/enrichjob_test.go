@@ -366,3 +366,66 @@ func TestTheEnrichContainerStillRunsLast(t *testing.T) {
 		t.Fatalf("containers = %+v, want the one enrich container", spec.Containers)
 	}
 }
+
+// the nfo container stands only where the Library's sources serve one of its
+// facts, and it names the facts they serve in the order the group runs them.
+func TestTheNFOContainerStandsWhereASourceServesItsFacts(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts []string
+		want  string
+	}{
+		{name: "a provider that serves identity alone", facts: []string{factIdentity}},
+		{name: "a provider narrowed to the overview", facts: []string{factIdentity, factOverview}, want: factOverview},
+		{
+			name:  "a provider that serves every nfo fact",
+			facts: nil,
+			want:  "overview,certification,rating.tmdb,credits",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", test.facts...))
+
+			var nfo *Container
+			for at, container := range job.Spec.Template.Spec.InitContainers {
+				if container.Name == nfoContainerName {
+					nfo = &job.Spec.Template.Spec.InitContainers[at]
+				}
+			}
+			if test.want == "" {
+				if nfo != nil {
+					t.Fatal("the pod holds an nfo container, want none")
+				}
+				return
+			}
+			if nfo == nil {
+				t.Fatalf("the pod holds no nfo container, initContainers = %+v",
+					job.Spec.Template.Spec.InitContainers)
+			}
+			if got := containerEnvironment(*nfo)[libraryFactsVariable]; got != test.want {
+				t.Errorf("%s = %q, want %q", libraryFactsVariable, got, test.want)
+			}
+		})
+	}
+}
+
+// the nfo container runs after the identity container, because a title takes
+// its id before a fact asks about it, and before the art container.
+func TestTheNFOContainerRunsAfterIdentityAndBeforeArt(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
+
+	names := []string{}
+	for _, container := range job.Spec.Template.Spec.InitContainers {
+		names = append(names, container.Name)
+	}
+	want := []string{catalogContainer, factProbe, factIdentity, nfoContainerName, artContainerName}
+	if len(names) != len(want) {
+		t.Fatalf("initContainers = %v, want %v", names, want)
+	}
+	for at, name := range want {
+		if names[at] != name {
+			t.Errorf("initContainer %d = %q, want %q", at, names[at], name)
+		}
+	}
+}

@@ -70,6 +70,17 @@ func (s providerSet) serving(namespace string, sources []string, fact string) *M
 	return nil
 }
 
+// A group of facts resolves to the first provider that serves any one of
+// them, which is what stands the container that runs the group.
+func (s providerSet) servingAny(namespace string, sources, facts []string) *MetadataProvider {
+	for _, fact := range facts {
+		if provider := s.serving(namespace, sources, fact); provider != nil {
+			return provider
+		}
+	}
+	return nil
+}
+
 // What one check learned, or an empty reason for an answer that says nothing
 // about the account.
 type providerVerdict struct {

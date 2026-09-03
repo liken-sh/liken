@@ -66,7 +66,7 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 	}
 	switch {
 	case answer.id > 0:
-		e.writeIdentity(folder, item, answer)
+		e.writeIdentity(ctx, client, folder, item, answer)
 	case len(answer.candidates) > 0:
 		e.logf("%s waits for a person, with %d candidates", item.path, len(answer.candidates))
 		e.recordIdentity(folder, &likenItem{Path: likenSelfPath, Candidates: answer.candidates}, attemptCandidates)
@@ -76,25 +76,57 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 	}
 }
 
-// The id goes into the .nfo and the reason into the ledger. The sidecar is
-// what the next scan reads, and what every ecosystem player reads. The ledger
-// is never the truth.
-func (e *enricher) writeIdentity(folder string, item identityItem, answer identityAnswer) {
+// The other databases' ids follow the provider's own: one call to TMDb's
+// external ids gives them, each one goes into the sidecar as its own
+// uniqueid, and the scanner lifts every one into aliases. That is what makes
+// a provider that keys on an IMDb id or a TheTVDB id reachable with no
+// account at that database.
+func (e *enricher) writeIdentity(ctx context.Context, client *tmdbClient, folder string,
+	item identityItem, answer identityAnswer) {
 	id := strconv.Itoa(answer.id)
-	element := fmt.Appendf(nil, `<uniqueid type="tmdb" default="true">%s</uniqueid>`, id)
 	sidecar, rootElement := identitySidecar(e.kind, folder)
-
-	err := e.writer.editNFO(sidecar, rootElement, item.title,
-		xmlElement{name: "uniqueid", attribute: "type", value: "tmdb"}, element)
-	if err != nil {
+	if err := e.writeUniqueID(sidecar, rootElement, item.title, "tmdb", id); err != nil {
 		e.logf("could not write the id of %s: %v", item.path, err)
 		e.recordIdentity(folder, nil, attemptError)
 		return
 	}
+	ids := providerIDs{"tmdb": id}
+	external := e.externalIDs(ctx, client, item, answer.id)
+	for _, provider := range sortedKeys(external) {
+		if err := e.writeUniqueID(sidecar, rootElement, item.title, provider, external[provider]); err != nil {
+			e.logf("could not write the %s id of %s: %v", provider, item.path, err)
+			continue
+		}
+		ids[provider] = external[provider]
+	}
 	e.logf("identified %s as tmdb %s, by %s", item.path, id, answer.reason)
 	e.recordIdentity(folder, &likenItem{
-		Path: likenSelfPath, ID: providerIDs{"tmdb": id}, Reason: answer.reason, Written: time.Now().UTC(),
+		Path: likenSelfPath, ID: ids, Reason: answer.reason, Written: time.Now().UTC(),
 	}, attemptFound)
+}
+
+// An id the provider will not answer for leaves the title with the id it has,
+// because the provider's own id is what the catalog keys on, and the next run
+// asks again.
+func (e *enricher) externalIDs(ctx context.Context, client *tmdbClient,
+	item identityItem, id int) providerIDs {
+	external, err := client.externalIDs(ctx, e.kind, id)
+	if err != nil {
+		e.logf("could not read the other ids of %s: %v", item.path, err)
+		return nil
+	}
+	return external.providerIDs()
+}
+
+// The default mark goes on the provider this operator keys its own ids on, so
+// a reader takes that one first.
+func (e *enricher) writeUniqueID(sidecar, rootElement, title, provider, id string) error {
+	element := fmt.Appendf(nil, `<uniqueid type=%q>%s</uniqueid>`, provider, id)
+	if provider == "tmdb" {
+		element = fmt.Appendf(nil, `<uniqueid type="tmdb" default="true">%s</uniqueid>`, id)
+	}
+	return e.writer.editNFO(sidecar, rootElement, title,
+		xmlElement{name: "uniqueid", attribute: "type", value: provider}, element)
 }
 
 // The item entry and the attempt are one write of one file, so a reader never
