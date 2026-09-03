@@ -45,6 +45,25 @@ const (
 	tmdbRatingMax  = 10
 )
 
+// The name and the scale of the three other sites. Kodi's own NFO page lists
+// imdb, metacritic, and the tomatometer names for the ratings block. IMDb
+// scores out of 10; the tomatometer and the Metascore score out of 100.
+// Jellyfin reads a name that holds "tomato", without "audience" and without
+// "avg", as the critic rating, which is why the Rotten Tomatoes name is
+// tomatometerallcritics. Sources read on 2026-09-03: the Kodi wiki page NFO
+// files/Movies, and Jellyfin's
+// MediaBrowser.XbmcMetadata/Parsers/BaseNfoParser.cs.
+const (
+	imdbRatingName = "imdb"
+	imdbRatingMax  = 10
+
+	rottenTomatoesRatingName = "tomatometerallcritics"
+	rottenTomatoesRatingMax  = 100
+
+	metacriticRatingName = "metacritic"
+	metacriticRatingMax  = 100
+)
+
 // One site's rating in the block, or nil where the block holds none.
 func ratingNamed(ratings []nfoRating, name string) *nfoRating {
 	for at := range ratings {

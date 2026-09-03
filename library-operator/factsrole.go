@@ -24,10 +24,13 @@ var factRuns = map[string]factRun{
 	factProbe:    func(ctx context.Context, e *enricher) error { return e.probeFact(ctx) },
 	factIdentity: func(ctx context.Context, e *enricher) error { return e.identityFact(ctx) },
 
-	factOverview:      nfoFactRun(factOverview),
-	factCertification: nfoFactRun(factCertification),
-	factRatingTMDb:    nfoFactRun(factRatingTMDb),
-	factCredits:       nfoFactRun(factCredits),
+	factOverview:             nfoFactRun(factOverview),
+	factCertification:        nfoFactRun(factCertification),
+	factRatingTMDb:           nfoFactRun(factRatingTMDb),
+	factRatingIMDb:           nfoFactRun(factRatingIMDb),
+	factRatingRottenTomatoes: nfoFactRun(factRatingRottenTomatoes),
+	factRatingMetacritic:     nfoFactRun(factRatingMetacritic),
+	factCredits:              nfoFactRun(factCredits),
 
 	factPoster:       artFactRun(factPoster),
 	factBackdrop:     artFactRun(factBackdrop),

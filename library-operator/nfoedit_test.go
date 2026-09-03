@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -327,6 +328,50 @@ func TestAGroupLandsUnderAnEmptyParent(t *testing.T) {
 	}
 }
 
+// The four rating facts write four elements into one ratings block, each fact
+// owning its own element and leaving the others.
+func TestTheRatingOfEachSiteSitsBesideTheOthers(t *testing.T) {
+	scores := map[string]float64{
+		factRatingTMDb: 8.4, factRatingIMDb: 7.9,
+		factRatingRottenTomatoes: 91, factRatingMetacritic: 76,
+	}
+	document := minimalNFO(nfoRootMovie, "Winter Harbour")
+	for fact, score := range scores {
+		edited, err := editElementGroup(document, nfoGroup(fact),
+			nfoElements(fact, factAnswer{Rating: &titleRating{Value: score}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		document = edited
+	}
+
+	var read movieNFO
+	if err := xml.Unmarshal(document, &read); err != nil {
+		t.Fatalf("the edited sidecar does not parse: %v\n%s", err, document)
+	}
+	marked := []string{}
+	for fact, want := range scores {
+		site := ratingSites[fact]
+		rating := ratingNamed(read.Ratings.Ratings, site.name)
+		if rating == nil || rating.Value != want || rating.Max != float64(site.max) {
+			t.Fatalf("the %s rating reads %+v, want %v out of %d:\n%s", fact, rating, want, site.max, document)
+		}
+		marked = append(marked, markedRatings(*rating, site)...)
+	}
+	if !slices.Equal(marked, []string{tmdbRatingName}) {
+		t.Errorf("the ratings marked are %v, want the one a reader takes first:\n%s", marked, document)
+	}
+}
+
+// The name of a rating that carries the mark a reader takes first, and the
+// names of the three that do not.
+func markedRatings(rating nfoRating, site ratingSite) []string {
+	if !rating.Default {
+		return nil
+	}
+	return []string{site.name}
+}
+
 // The hash of a document the parser stops on is an error, so the fight check
 // never reads a torn document as another writer's work.
 func TestTheGroupHashFailsOnADocumentThatIsNotXML(t *testing.T) {
@@ -355,13 +400,13 @@ func TestAGroupLandsInADocumentWithNoChildren(t *testing.T) {
 
 // A fact this wave does not run owns no element, so nothing writes for it.
 func TestAFactOfALaterWaveOwnsNoElement(t *testing.T) {
-	if group := nfoGroup("rating.imdb"); len(group.owned) != 0 {
+	if group := nfoGroup(factContributorBiography); len(group.owned) != 0 {
 		t.Errorf("group = %+v, want no element", group)
 	}
-	if elements := nfoElements("rating.imdb", factAnswer{Plot: "A new plot."}); elements != nil {
+	if elements := nfoElements(factContributorBiography, factAnswer{Plot: "A new plot."}); elements != nil {
 		t.Errorf("elements = %s, want none", elements)
 	}
-	if answersFact("rating.imdb", factAnswer{Plot: "A new plot."}) {
+	if answersFact(factContributorBiography, factAnswer{Plot: "A new plot."}) {
 		t.Error("a fact of a later wave reads an answer, want none")
 	}
 }

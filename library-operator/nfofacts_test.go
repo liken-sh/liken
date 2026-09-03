@@ -19,7 +19,7 @@ func seedNFOFactRows(t *testing.T, catalog *Catalog) {
 			{Id: "movie:tmdb:1", Library: "house/movies", Path: "One (2001)", Title: "One"},
 			{
 				Id: "movie:tmdb:2", Library: "house/movies", Path: "Two (2002)", Title: "Two",
-				NFOFacts: nfoFactList([]string{factOverview, factCredits}),
+				NFOFacts: nfoFactList([]string{factOverview, factRatingIMDb, factCredits}),
 			},
 			{Id: "movie:path:three-2003", Library: "house/movies", Path: "Three (2003)", Title: "Three"},
 		},
@@ -44,6 +44,9 @@ func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *t
 		{fact: factOverview, want: []string{"movie:tmdb:1", "series:tvdb:9"}},
 		{fact: factCertification, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
 		{fact: factRatingTMDb, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
+		{fact: factRatingIMDb, want: []string{"movie:tmdb:1", "series:tvdb:9"}},
+		{fact: factRatingRottenTomatoes, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
+		{fact: factRatingMetacritic, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
 		{fact: factCredits, want: []string{"movie:tmdb:1", "series:tvdb:9"}},
 	}
 	for _, test := range cases {
@@ -158,9 +161,18 @@ func TestASidecarSaysWhichFactsItAnswers(t *testing.T) {
 			want: []string{factOverview, factCertification, factRatingTMDb, factCredits},
 		},
 		{
-			name: "a sidecar with another site's rating alone",
+			name: "a sidecar with the rating of each site",
+			sidecar: `<movie><title>One</title><ratings>` +
+				`<rating name="imdb" max="10"><value>7</value></rating>` +
+				`<rating name="tomatometerallcritics" max="100"><value>91</value></rating>` +
+				`<rating name="metacritic" max="100"><value>76</value></rating>` +
+				`</ratings></movie>`,
+			want: []string{factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic},
+		},
+		{
+			name: "a sidecar with a site no fact holds",
 			sidecar: `<movie><title>One</title>` +
-				`<ratings><rating name="imdb" max="10"><value>7</value></rating></ratings></movie>`,
+				`<ratings><rating name="trakt" max="10"><value>7</value></rating></ratings></movie>`,
 			want: nil,
 		},
 	}

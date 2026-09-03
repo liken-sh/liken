@@ -12,10 +12,33 @@ import (
 	"strings"
 )
 
+// One rating fact per site, and what a reader of the file needs to tell the
+// sites apart: the name the rating element carries, the top of that site's
+// scale, and which one a reader takes first. Only the TMDb rating carries the
+// default mark, because Kodi reads one default, and the other three sit
+// beside it.
+type ratingSite struct {
+	name  string
+	max   int
+	first bool
+}
+
+var ratingSites = map[string]ratingSite{
+	factRatingTMDb:           {name: tmdbRatingName, max: tmdbRatingMax, first: true},
+	factRatingIMDb:           {name: imdbRatingName, max: imdbRatingMax},
+	factRatingRottenTomatoes: {name: rottenTomatoesRatingName, max: rottenTomatoesRatingMax},
+	factRatingMetacritic:     {name: metacriticRatingName, max: metacriticRatingMax},
+}
+
 // The group of each fact. The rating group names a parent because Kodi holds
 // one rating per site inside the ratings element, so the rating of one site
 // is the group and the ratings of the other sites stay.
 func nfoGroup(fact string) elementGroup {
+	if site, held := ratingSites[fact]; held {
+		return elementGroup{parent: "ratings", owned: []xmlElement{
+			{name: "rating", attribute: "name", value: site.name},
+		}}
+	}
 	switch fact {
 	case factOverview:
 		return elementGroup{owned: []xmlElement{
@@ -24,10 +47,6 @@ func nfoGroup(fact string) elementGroup {
 		}}
 	case factCertification:
 		return elementGroup{owned: []xmlElement{{name: "mpaa"}}}
-	case factRatingTMDb:
-		return elementGroup{parent: "ratings", owned: []xmlElement{
-			{name: "rating", attribute: "name", value: tmdbRatingName},
-		}}
 	case factCredits:
 		return elementGroup{owned: []xmlElement{{name: "actor"}}}
 	}
@@ -37,13 +56,14 @@ func nfoGroup(fact string) elementGroup {
 // The group one fact writes, in the order a reader of the file expects. An
 // empty value writes no element at all.
 func nfoElements(fact string, answer factAnswer) [][]byte {
+	if site, held := ratingSites[fact]; held {
+		return [][]byte{ratingElement(site, *answer.Rating)}
+	}
 	switch fact {
 	case factOverview:
 		return overviewElements(answer)
 	case factCertification:
 		return [][]byte{textElement("mpaa", answer.Certification)}
-	case factRatingTMDb:
-		return [][]byte{ratingElement(tmdbRatingName, tmdbRatingMax, *answer.Rating)}
 	case factCredits:
 		return actorElements(answer.Cast)
 	}
@@ -74,11 +94,15 @@ func overviewElements(answer factAnswer) [][]byte {
 }
 
 // The rating's form: the site's name, the top of its scale, the mark that
-// says a reader takes this one first, the score, and the votes where the
-// provider stated a count.
-func ratingElement(name string, max int, rating titleRating) []byte {
-	out := fmt.Appendf(nil, "<rating name=%q max=%q default=\"true\">\n  <value>%s</value>",
-		name, strconv.Itoa(max), strconv.FormatFloat(rating.Value, 'f', -1, 64))
+// says a reader takes this one first where the site carries it, the score,
+// and the votes where the provider stated a count.
+func ratingElement(site ratingSite, rating titleRating) []byte {
+	mark := ""
+	if site.first {
+		mark = ` default="true"`
+	}
+	out := fmt.Appendf(nil, "<rating name=%q max=%q%s>\n  <value>%s</value>",
+		site.name, strconv.Itoa(site.max), mark, strconv.FormatFloat(rating.Value, 'f', -1, 64))
 	if rating.Votes > 0 {
 		out = fmt.Appendf(out, "\n  <votes>%d</votes>", rating.Votes)
 	}

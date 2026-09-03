@@ -136,7 +136,9 @@ type likenSidecar struct {
 // path, because it works per file, and the identity fact keys on an item
 // id, because it works per title.
 var likenFacts = []string{factProbe, factIdentity,
-	factOverview, factCertification, factRatingTMDb, factCredits,
+	factOverview, factCertification,
+	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
+	factCredits,
 	factPoster, factBackdrop, factLogo, factSeasonPoster, factEpisodeThumb}
 
 // Reads every .liken file the folder holds into attempts rows. A folder that

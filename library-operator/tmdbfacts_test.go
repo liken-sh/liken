@@ -165,6 +165,9 @@ func TestTheTMDbAnswererCarriesTheProvidersRefusal(t *testing.T) {
 	answerer := tmdbAnswerer{client: client}
 
 	for _, fact := range nfoFacts {
+		if !answerer.serves(fact) {
+			continue
+		}
 		t.Run(fact, func(t *testing.T) {
 			_, held, err := answerer.answer(t.Context(), fact,
 				titleRef{kind: libraryKindMovies, ids: providerIDs{"tmdb": "4242"}})

@@ -85,21 +85,22 @@ func mergeAnswers(fact string, answers []providerAnswer) (factAnswer, providerNa
 			names = append(names, block)
 		}
 	}
+	_, rating := ratingSites[fact]
 	for _, held := range answers {
-		switch fact {
-		case factOverview:
-			mergeOverview(&merged, held, note)
-		case factCertification:
-			if merged.Certification == "" && held.answer.Certification != "" {
-				merged.Certification = held.answer.Certification
-				note(held.block)
-			}
-		case factRatingTMDb:
+		switch {
+		case rating:
 			if merged.Rating == nil && held.answer.Rating != nil {
 				merged.Rating = held.answer.Rating
 				note(held.block)
 			}
-		case factCredits:
+		case fact == factOverview:
+			mergeOverview(&merged, held, note)
+		case fact == factCertification:
+			if merged.Certification == "" && held.answer.Certification != "" {
+				merged.Certification = held.answer.Certification
+				note(held.block)
+			}
+		case fact == factCredits:
 			mergeCast(&merged, held, note)
 		}
 	}
@@ -165,14 +166,15 @@ func namedInCast(cast []creditedActor, name string) bool {
 // An answer with nothing in it for the fact asked is a miss with a date and
 // not a write.
 func answersFact(fact string, answer factAnswer) bool {
+	if _, rating := ratingSites[fact]; rating {
+		return answer.Rating != nil
+	}
 	switch fact {
 	case factOverview:
 		return answer.Plot != "" || answer.Tagline != "" || answer.Premiered != "" ||
 			answer.RuntimeMinutes > 0 || len(answer.Genres) > 0 || len(answer.Studios) > 0
 	case factCertification:
 		return answer.Certification != ""
-	case factRatingTMDb:
-		return answer.Rating != nil
 	case factCredits:
 		return len(answer.Cast) > 0
 	}

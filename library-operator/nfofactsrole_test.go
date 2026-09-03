@@ -68,9 +68,12 @@ func harbourAnswers() map[string]factAnswer {
 			Genres: []string{"Drama"}, Studios: []string{"Harbour Pictures"},
 			Premiered: "2011-05-06", RuntimeMinutes: 101,
 		},
-		factCertification: {Certification: "PG-13"},
-		factRatingTMDb:    {Rating: &titleRating{Value: 8.4, Votes: 1234}},
-		factCredits:       {Cast: []creditedActor{{Name: "Nora Vance", Role: "Captain"}}},
+		factCertification:        {Certification: "PG-13"},
+		factRatingTMDb:           {Rating: &titleRating{Value: 8.4, Votes: 1234}},
+		factRatingIMDb:           {Rating: &titleRating{Value: 7.9, Votes: 5678}},
+		factRatingRottenTomatoes: {Rating: &titleRating{Value: 91}},
+		factRatingMetacritic:     {Rating: &titleRating{Value: 76}},
+		factCredits:              {Cast: []creditedActor{{Name: "Nora Vance", Role: "Captain"}}},
 	}
 }
 
@@ -185,6 +188,66 @@ func TestTheMergeTakesTheFirstValueAndTheUnionOfASet(t *testing.T) {
 			test.check(t, merged)
 			if !slices.Equal([]string(names), test.names) {
 				t.Errorf("providers = %v, want %v", names, test.names)
+			}
+		})
+	}
+}
+
+// Two providers of one fact: the plot comes from the first source in order
+// that answers, and the genres are the union of both.
+func TestTwoProvidersAnswerOneFactByTheTwoRules(t *testing.T) {
+	tmdb := providerAnswer{block: providerBlockTMDb, answer: factAnswer{
+		Plot: "A keeper watches the ice.", Genres: []string{"Drama"},
+	}}
+	omdb := providerAnswer{block: providerBlockOMDb, answer: factAnswer{
+		Plot: "A plot no reader sees.", Certification: "PG-13",
+		Genres: []string{"Drama", "Thriller"},
+	}}
+
+	overview, names := mergeAnswers(factOverview, []providerAnswer{tmdb, omdb})
+	certification, whoRated := mergeAnswers(factCertification, []providerAnswer{tmdb, omdb})
+
+	if overview.Plot != "A keeper watches the ice." {
+		t.Errorf("plot = %q, want the plot of the first source that held one", overview.Plot)
+	}
+	if !slices.Equal(overview.Genres, []string{"Drama", "Thriller"}) {
+		t.Errorf("genres = %v, want the union in source order", overview.Genres)
+	}
+	if !slices.Equal([]string(names), []string{providerBlockTMDb, providerBlockOMDb}) {
+		t.Errorf("providers = %v, want both", names)
+	}
+	if certification.Certification != "PG-13" {
+		t.Errorf("certification = %q, want the one the second source held", certification.Certification)
+	}
+	if !slices.Equal([]string(whoRated), []string{providerBlockOMDb}) {
+		t.Errorf("providers = %v, want the source that answered", whoRated)
+	}
+}
+
+// Each site's rating is a fact of its own, so the ratings of two sites from
+// two providers sit side by side in one ratings block.
+func TestEachSitesRatingMergesOnItsOwn(t *testing.T) {
+	tmdb := providerAnswer{block: providerBlockTMDb, answer: factAnswer{
+		Rating: &titleRating{Value: 8.4, Votes: 1234},
+	}}
+	omdb := providerAnswer{block: providerBlockOMDb, answer: factAnswer{
+		Rating: &titleRating{Value: 7.9, Votes: 5678},
+	}}
+
+	for fact, answers := range map[string][]providerAnswer{
+		factRatingTMDb:           {tmdb},
+		factRatingIMDb:           {omdb},
+		factRatingRottenTomatoes: {omdb},
+		factRatingMetacritic:     {omdb},
+	} {
+		t.Run(fact, func(t *testing.T) {
+			merged, names := mergeAnswers(fact, answers)
+
+			if merged.Rating == nil || merged.Rating.Value != answers[0].answer.Rating.Value {
+				t.Fatalf("rating = %+v, want the one the provider answered", merged.Rating)
+			}
+			if !slices.Equal([]string(names), []string{answers[0].block}) {
+				t.Errorf("providers = %v, want %s", names, answers[0].block)
 			}
 		})
 	}
@@ -370,17 +433,30 @@ var errRefused = fmt.Errorf("the provider refused the key")
 // none for a block with no key.
 func TestTheAnswerLineHoldsTheBlocksWithAKey(t *testing.T) {
 	cases := []struct {
-		name  string
-		keys  map[string]string
-		want  int
-		block string
+		name   string
+		blocks []string
+		keys   map[string]string
+		want   int
+		block  string
 	}{
-		{name: "a key for TMDb", keys: map[string]string{tmdbTokenVariable: "a-token"}, want: 1, block: providerBlockTMDb},
-		{name: "no key at all", want: 0},
+		{
+			name: "a key for TMDb", blocks: []string{providerBlockTMDb},
+			keys: map[string]string{tmdbTokenVariable: "a-token"}, want: 1, block: providerBlockTMDb,
+		},
+		{
+			name: "a key for OMDb", blocks: []string{providerBlockOMDb},
+			keys: map[string]string{providerTokenVariable(providerBlockOMDb): "a-token"},
+			want: 1, block: providerBlockOMDb,
+		},
+		{
+			name: "TVmaze, which takes no key", blocks: []string{providerBlockTVmaze},
+			want: 1, block: providerBlockTVmaze,
+		},
+		{name: "no key at all", blocks: []string{providerBlockTMDb, providerBlockOMDb}, want: 0},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			line := newAnswerLine([]string{providerBlockTMDb},
+			line := newAnswerLine(test.blocks,
 				func(name string) string { return test.keys[name] })
 
 			if len(line.answerers) != test.want {
@@ -578,6 +654,10 @@ func TestTheAnswerLineTakesTheOrderOfTheSources(t *testing.T) {
 		{name: "the one block this image asks", sources: "tmdb", want: []string{providerBlockTMDb}},
 		{name: "a block with no answerer yet", sources: "omdb,fanart", want: []string{}},
 		{name: "the blocks in the order they are named", sources: "omdb,tmdb", want: []string{providerBlockTMDb}},
+		{
+			name: "a block that takes no key", sources: "tvmaze,tmdb",
+			want: []string{providerBlockTVmaze, providerBlockTMDb},
+		},
 		{name: "no sources at all", sources: "", want: []string{}},
 	}
 	for _, test := range cases {

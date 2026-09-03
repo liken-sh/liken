@@ -34,15 +34,21 @@ type answerLine struct {
 // the Library's own spec.sources order, and the two rules for who answers
 // read that order. A block this image has no answerer for yet, and a block
 // whose key did not reach the container, are both skipped with no error.
+// TVmaze joins the line with no key, because it takes no account.
 func newAnswerLine(blocks []string, value func(string) string) *answerLine {
 	line := &answerLine{spent: map[string]bool{}}
 	for _, block := range blocks {
-		if block != providerBlockTMDb {
-			continue
-		}
-		if token := value(providerTokenVariable(block)); token != "" {
+		token := value(providerTokenVariable(block))
+		switch {
+		case block == providerBlockTMDb && token != "":
 			line.answerers = append(line.answerers,
 				tmdbAnswerer{client: newTMDbClient(tmdbAPIBase, token)})
+		case block == providerBlockOMDb && token != "":
+			line.answerers = append(line.answerers,
+				newOMDbAnswerer(newOMDbClient(omdbAPIBase, token)))
+		case block == providerBlockTVmaze:
+			line.answerers = append(line.answerers,
+				newTVmazeAnswerer(newTVmazeClient(tvmazeAPIBase)))
 		}
 	}
 	return line

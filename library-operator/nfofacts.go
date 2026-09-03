@@ -1,16 +1,19 @@
 package main
 
-// The four nfo facts this wave fills, the list a sidecar answers, and the gap
+// The nfo facts this wave fills, the list a sidecar answers, and the gap
 // query each fact works from. The full fact vocabulary lives in factnames.go.
-// These four names are the ones the nfo container runs today.
+// These names are the ones the nfo container runs today.
 
 import "strings"
 
 // The nfo facts this image runs today, in the order the container names them
-// in LIBRARY_FACTS. The ratings of the other sites join them once their
-// providers can answer. overview runs first because it writes the elements
-// every other reader looks for.
-var nfoFacts = []string{factOverview, factCertification, factRatingTMDb, factCredits}
+// in LIBRARY_FACTS. overview runs first because it writes the elements every
+// other reader looks for.
+var nfoFacts = []string{
+	factOverview, factCertification,
+	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
+	factCredits,
+}
 
 // The container that fills the .nfo body, which is the phase a person reads
 // in kubectl get pod.
@@ -46,18 +49,19 @@ func nfoFactList(facts []string) string {
 // lead element of each group is the test: a sidecar that holds the plot holds
 // the group the overview fact wrote.
 func nfoFactsAnswered(plot, certification string, ratings []nfoRating, actors []nfoActor) string {
+	held := map[string]bool{
+		factOverview:      strings.TrimSpace(plot) != "",
+		factCertification: strings.TrimSpace(certification) != "",
+		factCredits:       len(castMembers(actors)) > 0,
+	}
+	for fact, site := range ratingSites {
+		held[fact] = ratingNamed(ratings, site.name) != nil
+	}
 	var answered []string
-	if strings.TrimSpace(plot) != "" {
-		answered = append(answered, factOverview)
-	}
-	if strings.TrimSpace(certification) != "" {
-		answered = append(answered, factCertification)
-	}
-	if ratingNamed(ratings, tmdbRatingName) != nil {
-		answered = append(answered, factRatingTMDb)
-	}
-	if len(castMembers(actors)) > 0 {
-		answered = append(answered, factCredits)
+	for _, fact := range nfoFacts {
+		if held[fact] {
+			answered = append(answered, fact)
+		}
 	}
 	return nfoFactList(answered)
 }
