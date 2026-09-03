@@ -294,7 +294,9 @@ func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
 // FullWalk is the walk's one collector. A pool of workers reads the
 // root, and this goroutine takes their folders one at a time. It buffers the
 // rows until the item rows reach scanFlushBatch; the file, link, and alias
-// rows travel with their items and stay uncounted. It flushes each buffer:
+// rows travel with their items and stay uncounted. The people of the store
+// follow the titles through the same buffer, one person counted as one item.
+// It flushes each buffer:
 // it upserts the rows and marks them with the walk's epoch. It then prunes
 // the rows the walk did not mark, and records what it read. A write that
 // fails leaves the catalog as it was and fails the Job, so the next run
@@ -369,12 +371,25 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 	}
 
 	// The people are read after the last title folder, because the walk of the
-	// titles skips every dot directory and this store is the one exception. A
-	// store the scanner cannot read marks the pass incomplete, as a title folder
-	// does, so a store that would not open never sweeps its people.
-	people := walkContributors(s.root, s.library)
-	if people.readError {
-		readError = true
+	// titles skips every dot directory and this store is the one exception. They
+	// stream through the same buffer as the titles, so the scanner holds one
+	// batch of people and never the whole store. A store the scanner cannot read
+	// marks the pass incomplete, as a title folder does, so a store that would
+	// not open never sweeps its people.
+	for person := range walkContributors(s.root, s.library) {
+		if person.readError {
+			readError = true
+		}
+		appendFolder(buffer, person)
+		buffered += len(person.contributors)
+		if buffered >= scanFlushBatch {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return err
 	}
 
 	// A cancelled walk read only part of the volume and wrote only part
@@ -399,12 +414,6 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 	// no set marked would sweep every set the catalog holds.
 	if err := flushWalk(ctx, s.catalog, &walkResult{sets: sets.rows()}, epoch); err != nil {
 		return s.walkFailed("write the sets", err)
-	}
-
-	// The people are written with the walk's own epoch, before the prune, so a
-	// person whose directory left the store is unmarked and the prune takes them.
-	if err := flushWalk(ctx, s.catalog, people, epoch); err != nil {
-		return s.walkFailed("write the contributors", err)
 	}
 
 	// The walk read the volume and wrote what it holds, so the count is

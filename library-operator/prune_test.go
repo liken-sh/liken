@@ -310,6 +310,42 @@ func TestFullWalkFlushesInBoundedChunks(t *testing.T) {
 	}
 }
 
+// The people of the store stream through the same buffer as the titles, so a
+// store of tens of thousands of people never sits in memory at once. With a
+// batch of one, every person flushes alone.
+func TestFullWalkFlushesThePeopleInBoundedChunks(t *testing.T) {
+	cases := []struct {
+		name        string
+		batch       int
+		wantFlushes int
+	}{
+		{name: "one person per flush", batch: 1, wantFlushes: 3},
+		{name: "one flush holds the whole small store", batch: 100, wantFlushes: 1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := titleTree(t, "A (2001)")
+			writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\n")
+			writeContributorEntry(t, root, "iris-kell", "name: Iris Kell\n")
+			writeContributorEntry(t, root, "ann-lee", "name: Ann Lee\n")
+			scan, fake := fakeScanner(t, root, libraryKindMovies)
+
+			batchWas := scanFlushBatch
+			t.Cleanup(func() { scanFlushBatch = batchWas })
+			scanFlushBatch = testCase.batch
+
+			scan.fullWalk(context.Background())
+
+			if got := len(fake.held(fake.contributors)); got != 3 {
+				t.Fatalf("contributors = %d, want the three people of the store", got)
+			}
+			if got := fake.personFlushes(); got != testCase.wantFlushes {
+				t.Errorf("person flushes = %d, want %d for a batch of %d", got, testCase.wantFlushes, testCase.batch)
+			}
+		})
+	}
+}
+
 func TestFullWalkSkipsThePruneOnAnUnreadableRoot(t *testing.T) {
 	root := titleTree(t, "A (2001)", "B (2002)")
 	scan, fake := fakeScanner(t, root, libraryKindMovies)

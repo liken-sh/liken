@@ -66,6 +66,9 @@ type fakeCatalog struct {
 	// movieBatches counts the transaction POSTs that carried a movie upsert,
 	// so a test reads how many times the streaming full walk flushed.
 	movieBatches int
+	// personBatches counts the transaction POSTs that carried a contributor
+	// upsert, so a test reads how many batches the walk of the store took.
+	personBatches int
 	// keepDeleted answers every delete with no rows affected and keeps
 	// the row, which models an agent whose delete lands on no row while
 	// the query still reads it. A test drives the sweep's no-progress
@@ -113,11 +116,16 @@ func (f *fakeCatalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (f *fakeCatalog) serveTransactions(w http.ResponseWriter, r *http.Request) {
 	statements := parseStatements(readBody(r))
 	f.statements = append(f.statements, statements...)
+	movies, people := false, false
 	for _, s := range statements {
-		if strings.HasPrefix(s.sql, "INSERT INTO movies") {
-			f.movieBatches++
-			break
-		}
+		movies = movies || strings.HasPrefix(s.sql, "INSERT INTO movies")
+		people = people || strings.HasPrefix(s.sql, "INSERT INTO contributors ")
+	}
+	if movies {
+		f.movieBatches++
+	}
+	if people {
+		f.personBatches++
 	}
 	results := make([]map[string]any, len(statements))
 	for i, s := range statements {
@@ -554,6 +562,12 @@ func (f *fakeCatalog) flushes() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.movieBatches
+}
+
+func (f *fakeCatalog) personFlushes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.personBatches
 }
 
 // deletesNothing makes every later delete land on no row, so a test

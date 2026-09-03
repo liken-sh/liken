@@ -62,7 +62,7 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 			Contributor: ".contributors/ir/iris-kell"},
 	})
 
-	result := walkContributors(root, contributorLibrary)
+	result := collectFolders(walkContributors(root, contributorLibrary))
 	scanMovieFolder(root, filepath.Join(root, "The Signal (2014)"), contributorLibrary, result)
 	if result.readError {
 		t.Fatal("the walk reported a read error, want none")
@@ -130,7 +130,7 @@ func TestTheWalkOfTheStoreReadsTheAttempts(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(folder, likenDirectory, likenLedgerName(factContributorHeadshot)), string(data))
 
-	result := walkContributors(root, contributorLibrary)
+	result := collectFolders(walkContributors(root, contributorLibrary))
 
 	if len(result.attempts) != 1 {
 		t.Fatalf("attempts = %+v, want the one the ledger holds", result.attempts)
@@ -148,7 +148,7 @@ func TestTheWalkOfTheStoreReadsOnlyTheEntries(t *testing.T) {
 	writeFile(t, filepath.Join(root, contributorsDirectory, "t", "a-stray", "notes.txt"), "a stray")
 	writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\n")
 
-	result := walkContributors(root, contributorLibrary)
+	result := collectFolders(walkContributors(root, contributorLibrary))
 	if len(result.contributors) != 1 || result.contributors[0].Path != ".contributors/to/tom-hanks" {
 		t.Errorf("contributors = %+v, want the one entry", result.contributors)
 	}
@@ -156,7 +156,7 @@ func TestTheWalkOfTheStoreReadsOnlyTheEntries(t *testing.T) {
 		t.Error("the walk reported a read error, want none")
 	}
 
-	empty := walkContributors(t.TempDir(), contributorLibrary)
+	empty := collectFolders(walkContributors(t.TempDir(), contributorLibrary))
 	if len(empty.contributors) != 0 || empty.readError {
 		t.Errorf("a library with no store read %+v, want no rows and no error", empty)
 	}
@@ -168,7 +168,7 @@ func TestAStoreThatCannotBeReadMarksThePassIncomplete(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, contributorsDirectory), "a file where the store should be")
 
-	if result := walkContributors(root, contributorLibrary); !result.readError {
+	if result := collectFolders(walkContributors(root, contributorLibrary)); !result.readError {
 		t.Error("the walk reported no read error, want the incomplete mark")
 	}
 }

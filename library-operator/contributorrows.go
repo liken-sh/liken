@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"iter"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -61,34 +62,51 @@ var contributorLedgerFacts = []string{
 	factContributorIDs, factContributorBiography, factContributorHeadshot,
 }
 
-// The walk of one library's .contributors/ store. The walk of the titles skips
-// every dot directory, and this one is the exception, read after the titles
-// and read only. A store that is not there is no error, because a library
-// whose credits fact has not run yet holds none.
-func walkContributors(root, library string) *walkResult {
-	result := &walkResult{}
-	store := filepath.Join(root, contributorsDirectory)
-	letters, err := os.ReadDir(store)
-	if errors.Is(err, fs.ErrNotExist) {
-		return result
-	}
-	if err != nil {
-		result.noteReadError(err)
-		return result
-	}
-	for _, letter := range letters {
-		if !letter.IsDir() {
-			continue
+// The walk of one library's .contributors/ store, one person per result. The
+// walk of the titles skips every dot directory, and this one is the exception,
+// read after the titles and read only. The full walk feeds each person through
+// the same buffer as the titles, because a store holds tens of thousands of
+// people and their rows do not fit the scanner's memory at once. A store that
+// is not there is no error, because a library whose credits fact has not run
+// yet holds none.
+func walkContributors(root, library string) iter.Seq[*walkResult] {
+	return func(yield func(*walkResult) bool) {
+		store := filepath.Join(root, contributorsDirectory)
+		letters, err := os.ReadDir(store)
+		if errors.Is(err, fs.ErrNotExist) {
+			return
 		}
-		people, err := os.ReadDir(filepath.Join(store, letter.Name()))
-		result.noteReadError(err)
-		for _, person := range people {
-			if !person.IsDir() {
+		if err != nil {
+			yield(readFailed(err))
+			return
+		}
+		for _, letter := range letters {
+			if !letter.IsDir() {
 				continue
 			}
-			readContributorFolder(root, library, filepath.Join(store, letter.Name(), person.Name()), result)
+			people, err := os.ReadDir(filepath.Join(store, letter.Name()))
+			if err != nil && !yield(readFailed(err)) {
+				return
+			}
+			for _, person := range people {
+				if !person.IsDir() {
+					continue
+				}
+				result := &walkResult{}
+				readContributorFolder(root, library, filepath.Join(store, letter.Name(), person.Name()), result)
+				if !yield(result) {
+					return
+				}
+			}
 		}
 	}
+}
+
+// readFailed is the result of a directory the walk could not read: no rows,
+// and the incomplete mark.
+func readFailed(err error) *walkResult {
+	result := &walkResult{}
+	result.noteReadError(err)
 	return result
 }
 
