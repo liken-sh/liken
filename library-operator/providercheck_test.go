@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -343,19 +344,26 @@ func TestProviderCheckReportsARefusedWrite(t *testing.T) {
 	}
 }
 
-// a provider that answers nothing at all leaves the verdict alone,
-// because a provider that was down says nothing about the key.
+// A check that gets no HTTP answer at all writes Unreachable, so no verdict
+// from an earlier pass stands as the reason.
 func TestProviderCheckOnAProviderThatDoesNotAnswer(t *testing.T) {
 	cluster := newFakeCluster()
 	provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+	provider.Status.Conditions = []Condition{{
+		Type: conditionReady, Status: ConditionFalse, Reason: reasonNoSecret,
+	}}
 	cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
 	operator := testOperator(t, cluster)
 	operator.providerBase = "http://127.0.0.1:1"
 
 	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 
-	if got := cluster.heldProvider("tmdb").Status.Conditions; len(got) != 0 {
-		t.Errorf("conditions = %+v, want none written for a provider that did not answer", got)
+	got := conditionNamed(cluster.heldProvider("tmdb").Status.Conditions, conditionReady)
+	if got.Status != ConditionFalse || got.Reason != reasonUnreachable {
+		t.Errorf("Ready = %s/%s, want %s/%s", got.Status, got.Reason, ConditionFalse, reasonUnreachable)
+	}
+	if got.Message == "" {
+		t.Error("the condition carries no message, want the error the check read")
 	}
 }
 
@@ -380,6 +388,62 @@ func TestProviderReadsItsOwnReadyCondition(t *testing.T) {
 
 			if got := provider.ready(); got != one.want {
 				t.Errorf("ready = %v, want %v", got, one.want)
+			}
+		})
+	}
+}
+
+// The recorder keeps the credential of the request the check made, in both of
+// the forms a key can travel in.
+type credentialRecorder struct {
+	mutex  sync.Mutex
+	header string
+	query  string
+}
+
+func (c *credentialRecorder) ServeHTTP(_ http.ResponseWriter, r *http.Request) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.header = r.Header.Get("Authorization")
+	c.query = r.URL.Query().Get("api_key")
+}
+
+func (c *credentialRecorder) read() (string, string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.header, c.query
+}
+
+// The check sends the key in the form its shape names, the same decision the
+// identity client makes.
+func TestTheCheckSendsTheKeyInTheFormItsShapeNames(t *testing.T) {
+	cases := []struct {
+		name       string
+		key        string
+		wantHeader string
+		wantQuery  string
+	}{
+		{name: "a v3 api key travels as a query parameter",
+			key: tmdbV3APIKey, wantQuery: tmdbV3APIKey},
+		{name: "a v4 read access token travels as a bearer token",
+			key: tmdbV4AccessToken, wantHeader: "Bearer " + tmdbV4AccessToken},
+		{name: "thirty-two characters that are not hex travel as a bearer token",
+			key: tmdbKeyOfNoKnownForm, wantHeader: "Bearer " + tmdbKeyOfNoKnownForm},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+			cluster.secrets["tmdb-key"] = tmdbSecret("token", test.key)
+			recorder := &credentialRecorder{}
+			operator := providerOperator(t, cluster, recorder)
+
+			operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+			header, query := recorder.read()
+			if header != test.wantHeader || query != test.wantQuery {
+				t.Errorf("the key arrived as %q and %q, want %q and %q",
+					header, query, test.wantHeader, test.wantQuery)
 			}
 		})
 	}

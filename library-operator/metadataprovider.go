@@ -71,12 +71,13 @@ type MetadataProviderStatus struct {
 	LastRefusal time.Time   `json:"lastRefusal,omitzero"`
 }
 
-// The three reasons the Ready condition takes, one per answer the check can
-// get.
+// The reasons the Ready condition takes, one per answer the check can get.
+// Unreachable is the answer where the provider gave no HTTP answer at all.
 const (
-	reasonReachable = "Reachable"
-	reasonNoSecret  = "NoSecret"
-	reasonRefused   = "Refused"
+	reasonReachable   = "Reachable"
+	reasonNoSecret    = "NoSecret"
+	reasonRefused     = "Refused"
+	reasonUnreachable = "Unreachable"
 )
 
 // A provider serves a concern only when it lists that concern.

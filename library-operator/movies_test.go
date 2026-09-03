@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -435,5 +436,106 @@ func TestAnUnreadableSidecarWritesNoRow(t *testing.T) {
 	}
 	if len(result.files) != 0 {
 		t.Errorf("files = %+v, want no file row either", result.files)
+	}
+}
+
+// streamNFO is the sidecar the probe writes for one video: the root element
+// the scanner reads, and the stream details inside it.
+func streamNFO(title, videoCodec, audioCodec string, width, height, seconds int) string {
+	return `<movie><title>` + title + `</title><fileinfo><streamdetails>` +
+		`<video><codec>` + videoCodec + `</codec>` +
+		`<width>` + strconv.Itoa(width) + `</width>` +
+		`<height>` + strconv.Itoa(height) + `</height>` +
+		`<durationinseconds>` + strconv.Itoa(seconds) + `</durationinseconds></video>` +
+		`<audio><codec>` + audioCodec + `</codec></audio>` +
+		`</streamdetails></fileinfo></movie>`
+}
+
+// partedMovieFolder holds every shape the sidecar rule covers: the first
+// video, which the folder's own movie.nfo describes, a second video with its
+// own sidecar, a second video with none, and an extra with its own.
+func partedMovieFolder(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "Solaris (1972)")
+	writeFile(t, filepath.Join(dir, "movie.nfo"), streamNFO("Solaris", "h264", "dts", 1920, 1080, 8000))
+	writeFile(t, filepath.Join(dir, "Solaris (1972) - part1.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Solaris (1972) - part2.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Solaris (1972) - part2.nfo"),
+		streamNFO("Solaris", "hevc", "eac3", 3840, 2160, 3000))
+	writeFile(t, filepath.Join(dir, "Solaris (1972) - part3.720p.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Extras", "Making Of.mkv"), "video")
+	writeFile(t, filepath.Join(dir, "Extras", "Making Of.nfo"),
+		streamNFO("Making Of", "mpeg4", "mp3", 640, 480, 600))
+	return root
+}
+
+// Every video reads the sidecar the probe wrote for it, and a video with no
+// sidecar still reads its name.
+func TestEveryVideoReadsTheSidecarBesideIt(t *testing.T) {
+	files := filesByPath(walkMovies(partedMovieFolder(t), "house/movies", nil))
+
+	cases := []struct {
+		name           string
+		path           string
+		wantWidth      int
+		wantHeight     int
+		wantVideoCodec string
+		wantDurationMs int64
+	}{
+		{name: "the first video reads the folder's movie.nfo",
+			path: "Solaris (1972) - part1.mkv", wantWidth: 1920, wantHeight: 1080,
+			wantVideoCodec: "h264", wantDurationMs: 8000000},
+		{name: "a second video reads its own sidecar",
+			path: "Solaris (1972) - part2.mkv", wantWidth: 3840, wantHeight: 2160,
+			wantVideoCodec: "hevc", wantDurationMs: 3000000},
+		{name: "a video with no sidecar reads its name",
+			path: "Solaris (1972) - part3.720p.mkv", wantWidth: 1280, wantHeight: 720},
+		{name: "an extra reads its own sidecar",
+			path: filepath.Join("Extras", "Making Of.mkv"), wantWidth: 640, wantHeight: 480,
+			wantVideoCodec: "mpeg4", wantDurationMs: 600000},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			row := files[filepath.Join("Solaris (1972)", test.path)]
+
+			if row.Width != test.wantWidth || row.Height != test.wantHeight ||
+				row.VideoCodec != test.wantVideoCodec || row.DurationMs != test.wantDurationMs {
+				t.Errorf("attributes = %dx%d %s %dms, want %dx%d %s %dms",
+					row.Width, row.Height, row.VideoCodec, row.DurationMs,
+					test.wantWidth, test.wantHeight, test.wantVideoCodec, test.wantDurationMs)
+			}
+		})
+	}
+}
+
+// A per-file sidecar the scanner cannot read marks the walk incomplete, the
+// way an unreadable movie.nfo does, so the prune stands down.
+func TestAnUnreadablePerFileSidecarMarksTheWalkIncomplete(t *testing.T) {
+	cases := []struct {
+		name    string
+		sidecar string
+	}{
+		{name: "beside a second video", sidecar: "Solaris (1972) - part2.nfo"},
+		{name: "inside an extras folder", sidecar: filepath.Join("Extras", "Making Of.nfo")},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := partedMovieFolder(t)
+			sidecar := filepath.Join(root, "Solaris (1972)", test.sidecar)
+			// A directory in the sidecar's place is a read that fails for a
+			// reason other than an absent file, on every filesystem and for any
+			// user.
+			if err := os.RemoveAll(sidecar); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(sidecar, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			if result := walkMovies(root, "house/movies", nil); !result.readError {
+				t.Error("a sidecar that could not be read left the walk complete")
+			}
+		})
 	}
 }

@@ -1,10 +1,10 @@
-# The operator's image: one static Go binary, one static ffprobe, and nothing
-# else. The operator holds the cluster credentials and writes every status, so
-# its image carries no shell, no libc, and no other tools. The probe concern
-# is the one role that opens a media file, and ffprobe is the one tool it
-# needs. The media browser and the Corrosion sidecar build from media-
-# browser/Dockerfile and corrosion/Dockerfile, and the release ships the three
-# together.
+# The operator's image: one static Go binary, one static ffprobe, the CA
+# bundle every TLS call reads, and nothing else. The operator holds the
+# cluster credentials and writes every status, so its image carries no shell,
+# no libc, and no other tools. The probe concern is the one role that opens a
+# media file, and ffprobe is the one tool it needs. The media browser and the
+# Corrosion sidecar build from media-browser/Dockerfile and
+# corrosion/Dockerfile, and the release ships the three together.
 
 FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
@@ -26,6 +26,9 @@ FROM mwader/static-ffmpeg:8.0 AS ffmpeg
 
 FROM scratch
 COPY --from=build /library-operator /library-operator
+# A scratch image carries no trust store, and every TLS call fails without
+# one. The bundle is the build stage's own Debian set.
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=ffmpeg /ffprobe /usr/bin/ffprobe
 # A scratch image carries no PATH, and the probe role finds ffprobe by name.
 ENV PATH=/usr/bin

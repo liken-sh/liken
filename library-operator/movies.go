@@ -104,18 +104,16 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 		SetID:    meta.SetID,
 	})
 
-	// The sidecar's streamdetails describe the primary file, so only the first
-	// video file reads its attributes from the sidecar; the rest read them from
-	// their own name.
 	videos := map[string]bool{}
 	files, err := listVideoFiles(dir)
 	result.noteReadError(err)
 	for i, video := range files {
-		var stream *streamInfo
-		if i == 0 && meta.Stream.present() {
-			stream = &meta.Stream
-		}
 		videos[video] = true
+		stream, err := movieFileStream(dir, video, i, meta.Stream)
+		result.noteReadError(err)
+		if err != nil {
+			continue
+		}
 		row, err := movieFileRow(root, dir, video, library, id, stream)
 		result.noteReadError(err)
 		if err != nil {
@@ -172,6 +170,19 @@ func releasedFromYear(year int) string {
 		return ""
 	}
 	return strconv.Itoa(year)
+}
+
+// movie.nfo describes the first video of a title folder, and the sidecar
+// beside a file describes every other video. That is the same division the
+// probe writes them under.
+func movieFileStream(dir, file string, index int, folder streamInfo) (*streamInfo, error) {
+	if index == 0 {
+		if folder.present() {
+			return &folder, nil
+		}
+		return nil, nil
+	}
+	return streamBeside(dir, file)
 }
 
 // movieFileRow reads one video file into a file row linked to its movie. The

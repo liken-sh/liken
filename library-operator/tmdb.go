@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,18 +36,18 @@ var tmdbRequestTimeout = 30 * time.Second
 // One account with TMDb, and the wait a cooldown takes, which a test replaces
 // so no test sleeps.
 type tmdbClient struct {
-	base  string
-	token string
-	http  *http.Client
-	wait  func(context.Context, time.Duration) error
+	base string
+	key  string
+	http *http.Client
+	wait func(context.Context, time.Duration) error
 }
 
-func newTMDbClient(base, token string) *tmdbClient {
+func newTMDbClient(base, key string) *tmdbClient {
 	return &tmdbClient{
-		base:  base,
-		token: token,
-		http:  &http.Client{Timeout: tmdbRequestTimeout},
-		wait:  waitFor,
+		base: base,
+		key:  key,
+		http: &http.Client{Timeout: tmdbRequestTimeout},
+		wait: waitFor,
 	}
 }
 
@@ -177,8 +178,8 @@ func (c *tmdbClient) get(ctx context.Context, path string, query url.Values, int
 	}
 }
 
-// The key travels as a bearer token, which is the form TMDb's v4 read access
-// tokens take.
+// The send builds the request and lets the key's own shape decide the form it
+// travels in.
 func (c *tmdbClient) send(ctx context.Context, path string, query url.Values) (int, time.Duration, []byte, error) {
 	address := c.base + path
 	if len(query) > 0 {
@@ -188,8 +189,8 @@ func (c *tmdbClient) send(ctx context.Context, path string, query url.Values) (i
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	request.Header.Set("Authorization", "Bearer "+c.token)
 	request.Header.Set("Accept", "application/json")
+	authorizeTMDb(request, c.key)
 
 	response, err := c.http.Do(request)
 	if err != nil {
@@ -202,6 +203,23 @@ func (c *tmdbClient) send(ctx context.Context, path string, query url.Values) (i
 		return 0, 0, nil, err
 	}
 	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), body, nil
+}
+
+// TMDb takes two credential kinds. A v3 API key is 32 hex characters and
+// travels as the api_key query parameter. Anything else is a v4 read access
+// token and travels as a bearer token. TMDb refuses a v3 key sent as a bearer
+// token, checked against the real API on 2026-09-03. This is the one place
+// either caller decides.
+const tmdbV3KeyLength = 32
+
+func authorizeTMDb(request *http.Request, key string) {
+	if _, err := hex.DecodeString(key); err == nil && len(key) == tmdbV3KeyLength {
+		query := request.URL.Query()
+		query.Set("api_key", key)
+		request.URL.RawQuery = query.Encode()
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+key)
 }
 
 // One answer's bound, so a provider that streams without end cannot grow the

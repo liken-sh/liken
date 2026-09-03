@@ -65,9 +65,9 @@ func (o *operator) checkProviders(ctx context.Context, providers []MetadataProvi
 	return set
 }
 
-// One provider's check and the status it writes. An empty verdict leaves the
-// last condition standing, because a provider that was down says nothing
-// about whether the key is good.
+// An empty verdict leaves the last condition standing. Two answers still
+// produce one: a status that is neither 200 nor 401, and a Secret the API
+// server would not serve.
 func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider, now time.Time) error {
 	verdict, err := o.reachProvider(ctx, provider)
 	if verdict.reason == "" {
@@ -110,10 +110,9 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 	return status
 }
 
-// The check itself: read the key out of the Secret, ask the provider for its
-// configuration, and read the answer. A 200 is the account working, a 401 is
-// the provider refusing the key, and every other answer leaves the last
-// verdict.
+// What each answer means: 200 is the account working, 401 is the provider
+// refusing the key, no answer at all is Unreachable, and every other status
+// leaves the last verdict.
 func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider) (providerVerdict, error) {
 	if provider.Spec.TMDb == nil {
 		return providerVerdict{reason: reasonNoSecret,
@@ -129,15 +128,15 @@ func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider
 	if err != nil {
 		return providerVerdict{}, err
 	}
-	token := string(secret.Data[reference.secretKey()])
-	if token == "" {
+	key := string(secret.Data[reference.secretKey()])
+	if key == "" {
 		return providerVerdict{reason: reasonNoSecret,
 			message: fmt.Sprintf("the Secret %s holds no %s", reference.Name, reference.secretKey())}, nil
 	}
 
-	status, err := o.askProvider(ctx, token)
+	status, err := o.askProvider(ctx, key)
 	if err != nil {
-		return providerVerdict{}, err
+		return providerVerdict{reason: reasonUnreachable, message: err.Error()}, nil
 	}
 	switch status {
 	case http.StatusOK:
@@ -150,9 +149,10 @@ func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider
 	return providerVerdict{}, fmt.Errorf("the provider answered %d", status)
 }
 
-// One request, with the key as a bearer token and a timeout of its own, so a
-// provider that stops answering costs the pass its check and no more.
-func (o *operator) askProvider(ctx context.Context, token string) (int, error) {
+// The request carries a timeout of its own, so a provider that stops
+// answering costs the pass its check and no more. The key travels in the form
+// its shape names.
+func (o *operator) askProvider(ctx context.Context, key string) (int, error) {
 	asking, done := context.WithTimeout(ctx, providerCheckTimeout)
 	defer done()
 
@@ -161,8 +161,8 @@ func (o *operator) askProvider(ctx context.Context, token string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", jsonContentType)
+	authorizeTMDb(request, key)
 
 	response, err := o.providerClient.Do(request)
 	if err != nil {

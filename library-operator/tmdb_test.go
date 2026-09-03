@@ -24,6 +24,10 @@ type fakeTMDb struct {
 	tooMany     int
 	cooldowns   []time.Duration
 	requestPath []string
+	// The fake keeps the credential of the last request in both forms, so a test
+	// reads which form the key travelled in.
+	authorization string
+	apiKey        string
 }
 
 // The one key shape a test declares its answers under: the path, the query,
@@ -43,6 +47,8 @@ func (f *fakeTMDb) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := tmdbKey(r.URL.Path, query.Get("query"), year)
 	f.served[key]++
 	f.requestPath = append(f.requestPath, key)
+	f.authorization = r.Header.Get("Authorization")
+	f.apiKey = query.Get("api_key")
 
 	if f.tooMany > 0 {
 		f.tooMany--
@@ -248,4 +254,49 @@ func TestASearchWithNoYearNarrowsToNone(t *testing.T) {
 // to so a case reads in one place.
 func tmdbResultJSON(id int, title, date string) string {
 	return `{"id":` + strconv.Itoa(id) + `,"title":"` + title + `","original_title":"` + title + `","release_date":"` + date + `"}`
+}
+
+// The two shapes a key takes: the v3 API key is 32 hex characters, and the v4
+// read access token is anything longer.
+const (
+	tmdbV3APIKey         = "0123456789abcdef0123456789ABCDEF"
+	tmdbV4AccessToken    = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwMTIzIn0.c2lnbmF0dXJl"
+	tmdbKeyOfNoKnownForm = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+)
+
+// The form the key travels in comes from its shape alone. A v3 key sent as a
+// bearer token is what TMDb refuses.
+func TestTheIdentityClientSendsTheKeyInTheFormItsShapeNames(t *testing.T) {
+	cases := []struct {
+		name       string
+		key        string
+		wantHeader string
+		wantQuery  string
+	}{
+		{name: "a v3 api key travels as a query parameter",
+			key: tmdbV3APIKey, wantQuery: tmdbV3APIKey},
+		{name: "a v4 read access token travels as a bearer token",
+			key: tmdbV4AccessToken, wantHeader: "Bearer " + tmdbV4AccessToken},
+		{name: "thirty-two characters that are not hex travel as a bearer token",
+			key: tmdbKeyOfNoKnownForm, wantHeader: "Bearer " + tmdbKeyOfNoKnownForm},
+		{name: "hex of another length travels as a bearer token",
+			key: "0123456789abcdef", wantHeader: "Bearer 0123456789abcdef"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			client, fake := newFakeTMDb(t, nil)
+			client.key = test.key
+
+			if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err != nil {
+				t.Fatal(err)
+			}
+
+			fake.mutex.Lock()
+			defer fake.mutex.Unlock()
+			if fake.authorization != test.wantHeader || fake.apiKey != test.wantQuery {
+				t.Errorf("the key arrived as %q and %q, want %q and %q",
+					fake.authorization, fake.apiKey, test.wantHeader, test.wantQuery)
+			}
+		})
+	}
 }

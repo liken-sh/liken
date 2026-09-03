@@ -3,10 +3,13 @@ package main
 // files.go classifies every file a title folder carries: the sidecars, the
 // art, the subtitles, the trickplay tiles, and the extras beside the video.
 // The classification reads a file's name and the place that holds it, and
-// opens no file, so a re-walk classifies a file the same way every time and a
-// large library costs one stat per file.
+// opens no media file, so a re-walk classifies a file the same way every time
+// and a large library costs one stat per file. A video row also reads the
+// sidecar beside it, for the stream details the probe wrote there.
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -509,13 +512,38 @@ func (f folderFiles) row(name string, class fileClass) (fileRow, error) {
 		Present:   true,
 	}
 	if class.Type == fileTypeVideo {
-		row.Width, row.Height = resolutionFromName(name)
+		stream, err := streamBeside(f.dir, name)
+		if err != nil {
+			return fileRow{}, err
+		}
+		row.Container, row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.DurationMs =
+			fileAttributes(name, stream)
 		row.Trickplay = trickplayFor(f.root, f.dir, name)
 	}
 	if items := f.item(name); len(items) > 0 {
 		row.Items = items
 	}
 	return row, nil
+}
+
+// The probe writes one video's stream details into the sidecar beside it,
+// under the same name with the .nfo extension. A video with no sidecar is not
+// an error and reads its name instead. A sidecar the scanner cannot read is
+// an error, because a row from the name would replace the details the volume
+// holds and the prune would act on it.
+func streamBeside(dir, file string) (*streamInfo, error) {
+	data, err := os.ReadFile(sidecarBeside(filepath.Join(dir, file)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	meta, err := parseMovieNFO(data)
+	if err != nil || !meta.Stream.present() {
+		return nil, nil
+	}
+	return &meta.Stream, nil
 }
 
 // constantItem answers with one item id for every file in a directory, the

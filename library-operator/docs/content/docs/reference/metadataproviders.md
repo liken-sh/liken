@@ -37,7 +37,9 @@ asked.
 
 The operator checks each provider once per pass with one call to the
 provider's configuration endpoint, and reports the answer in the
-`Ready` condition: `Reachable`, `NoSecret`, or `Refused`. The key
+`Ready` condition: `Reachable`, `NoSecret`, `Refused`, or
+`Unreachable`, where the last is a check that got no answer at all and
+carries the error as its message. The key
 reaches an enricher container through a `secretKeyRef` that the
 kubelet resolves. It never passes through a status, a log, or the
 catalog.
@@ -59,11 +61,11 @@ The account is with The Movie Database, which serves movies, series, and people.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectmdb--secretref"></span>`secretRef` | [object](#spectmdbsecretref) | yes | The Secret in this namespace that holds the read access token, and the key inside it. |
+| <span id="spectmdb--secretref"></span>`secretRef` | [object](#spectmdbsecretref) | yes | The Secret in this namespace that holds the credential, and the key inside it. Either credential TMDb issues works: a v3 API key of 32 hex characters, or a v4 read access token. |
 
 #### spec.tmdb.secretRef
 
-The Secret in this namespace that holds the read access token, and the key inside it.
+The Secret in this namespace that holds the credential, and the key inside it. Either credential TMDb issues works: a v3 API key of 32 hex characters, or a v4 read access token.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -77,11 +79,11 @@ What the operator's own check found, written only by the library operator.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--lastrefusal"></span>`lastRefusal` | string | no | When the provider last refused the key. It stands after the key works again, so a person reads that it once failed. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret or Refused. A provider that did not answer at all keeps the verdict it carried. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, or Unreachable. Unreachable is a check that got no answer at all, and its message is the error the check read. |
 
 ### status.conditions[]
 
-Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret or Refused. A provider that did not answer at all keeps the verdict it carried.
+Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, or Unreachable. Unreachable is a check that got no answer at all, and its message is the error the check read.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

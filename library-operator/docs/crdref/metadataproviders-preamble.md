@@ -29,7 +29,9 @@ asked.
 
 The operator checks each provider once per pass with one call to the
 provider's configuration endpoint, and reports the answer in the
-`Ready` condition: `Reachable`, `NoSecret`, or `Refused`. The key
+`Ready` condition: `Reachable`, `NoSecret`, `Refused`, or
+`Unreachable`, where the last is a check that got no answer at all and
+carries the error as its message. The key
 reaches an enricher container through a `secretKeyRef` that the
 kubelet resolves. It never passes through a status, a log, or the
 catalog.
