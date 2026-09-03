@@ -211,3 +211,22 @@ func TestAContributorFactWritesTheColumnsItOwns(t *testing.T) {
 		t.Errorf("contributor_aliases = %v, want the id the entry carries", ids)
 	}
 }
+
+// The nfo fact's own row write carries the ratings block into the body,
+// so a score reaches the catalog with the sidecar the fact just wrote.
+func TestARatingFactWritesTheScoreIntoTheBody(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedNFOGap(t, catalog, root, "Winter Harbour (2011)", "movie:tmdb:4242")
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: harbourAnswers()}
+
+	if err := work.nfoGap(t.Context(), factRatingIMDb, lineOf(fake)); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := catalogLines(t, catalog, `SELECT CAST(json_extract(body, '$.ratings.imdb') AS TEXT) FROM movies WHERE library = ?`)
+	if strings.Join(rows, ",") != "7.9" {
+		t.Errorf("ratings = %v, want the score the fact wrote", rows)
+	}
+}

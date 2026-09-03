@@ -60,6 +60,9 @@ type movieBody struct {
 	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
 	Country       string            `json:"country,omitempty"`
 	ContentRating string            `json:"contentRating,omitempty"`
+	// The sidecar's ratings block, each site's own name against its
+	// score on that site's scale.
+	Ratings map[string]float64 `json:"ratings,omitempty"`
 }
 
 // seriesBody is what tvshow.nfo holds beyond the shared header. A series
@@ -74,6 +77,8 @@ type seriesBody struct {
 	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
 	Country       string            `json:"country,omitempty"`
 	ContentRating string            `json:"contentRating,omitempty"`
+	// The sidecar's ratings block, the same shape a movie carries.
+	Ratings map[string]float64 `json:"ratings,omitempty"`
 }
 
 // episodeBody is what an episode .nfo holds beyond the shared header.

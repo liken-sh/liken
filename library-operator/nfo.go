@@ -29,59 +29,6 @@ type nfoActor struct {
 	Order *int   `xml:"order"`
 }
 
-// One rating element inside the ratings block, in Kodi's form: the site that
-// scored the title, the top of that site's scale, whether a reader takes this
-// one first, the score, and how many people voted.
-type nfoRating struct {
-	Name    string  `xml:"name,attr"`
-	Max     float64 `xml:"max,attr"`
-	Default bool    `xml:"default,attr"`
-	Value   float64 `xml:"value"`
-	Votes   int     `xml:"votes"`
-}
-
-// The ratings element holds one rating per site, which is why one site's
-// score is a fact of its own.
-type nfoRatings struct {
-	Ratings []nfoRating `xml:"rating"`
-}
-
-// themoviedb is the name Kodi and Jellyfin write on a TMDb rating, and 10 is
-// the top of TMDb's own scale.
-const (
-	tmdbRatingName = "themoviedb"
-	tmdbRatingMax  = 10
-)
-
-// The name and the scale of the three other sites. Kodi's own NFO page lists
-// imdb, metacritic, and the tomatometer names for the ratings block. IMDb
-// scores out of 10; the tomatometer and the Metascore score out of 100.
-// Jellyfin reads a name that holds "tomato", without "audience" and without
-// "avg", as the critic rating, which is why the Rotten Tomatoes name is
-// tomatometerallcritics. Sources read on 2026-09-03: the Kodi wiki page NFO
-// files/Movies, and Jellyfin's
-// MediaBrowser.XbmcMetadata/Parsers/BaseNfoParser.cs.
-const (
-	imdbRatingName = "imdb"
-	imdbRatingMax  = 10
-
-	rottenTomatoesRatingName = "tomatometerallcritics"
-	rottenTomatoesRatingMax  = 100
-
-	metacriticRatingName = "metacritic"
-	metacriticRatingMax  = 100
-)
-
-// One site's rating in the block, or nil where the block holds none.
-func ratingNamed(ratings []nfoRating, name string) *nfoRating {
-	for at := range ratings {
-		if strings.EqualFold(strings.TrimSpace(ratings[at].Name), name) {
-			return &ratings[at]
-		}
-	}
-	return nil
-}
-
 // nfoSet is a set element, either a plain name or a nested name element.
 // tmdbcolid is the collection id Jellyfin writes on the element, and it
 // scopes the set's id where the sidecar carries one.
@@ -249,6 +196,7 @@ func parseMovieNFO(data []byte) (movieMeta, error) {
 			ProviderIDs:   providers,
 			Country:       strings.TrimSpace(raw.Country),
 			ContentRating: contentRating(raw.MPAA, raw.Certification),
+			Ratings:       bodyRatings(raw.Ratings.Ratings),
 		},
 		Duration: itemDuration(stream, raw.Runtime),
 		Stream:   stream,
@@ -293,6 +241,7 @@ func parseSeriesNFO(data []byte) (seriesMeta, error) {
 			ProviderIDs:   providers,
 			Country:       strings.TrimSpace(raw.Country),
 			ContentRating: contentRating(raw.MPAA, raw.Certification),
+			Ratings:       bodyRatings(raw.Ratings.Ratings),
 		},
 		NFOFacts: nfoFactsAnswered(raw.Plot, contentRating(raw.MPAA, raw.Certification),
 			raw.Ratings.Ratings),

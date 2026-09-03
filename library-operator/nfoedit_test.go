@@ -216,7 +216,7 @@ func TestARatingLandsInsideTheRatingsElement(t *testing.T) {
 		t.Fatal(err)
 	}
 	rating := ratingNamed(read.Ratings.Ratings, tmdbRatingName)
-	if rating == nil || rating.Value != 8.4 || rating.Votes != 12 || rating.Max != 10 {
+	if rating == nil || rating.Value != "8.4" || rating.Votes != 12 || rating.Max != 10 {
 		t.Fatalf("read %+v, want the TMDb rating under the ratings element:\n%s", read.Ratings, edited)
 	}
 
@@ -323,7 +323,7 @@ func TestAGroupLandsUnderAnEmptyParent(t *testing.T) {
 	if err := xml.Unmarshal(edited, &read); err != nil {
 		t.Fatalf("the edited sidecar does not parse: %v\n%s", err, edited)
 	}
-	if rating := ratingNamed(read.Ratings.Ratings, tmdbRatingName); rating == nil || rating.Value != 8.4 {
+	if rating := ratingNamed(read.Ratings.Ratings, tmdbRatingName); rating == nil || rating.Value != "8.4" {
 		t.Errorf("read %+v, want the rating under the parent it found:\n%s", read.Ratings, edited)
 	}
 }
@@ -353,7 +353,10 @@ func TestTheRatingOfEachSiteSitsBesideTheOthers(t *testing.T) {
 	for fact, want := range scores {
 		site := ratingSites[fact]
 		rating := ratingNamed(read.Ratings.Ratings, site.name)
-		if rating == nil || rating.Value != want || rating.Max != float64(site.max) {
+		if rating == nil || rating.Max != float64(site.max) {
+			t.Fatalf("the %s rating reads %+v, want %v out of %d:\n%s", fact, rating, want, site.max, document)
+		}
+		if value, _ := rating.score(); value != want {
 			t.Fatalf("the %s rating reads %+v, want %v out of %d:\n%s", fact, rating, want, site.max, document)
 		}
 		marked = append(marked, markedRatings(*rating, site)...)

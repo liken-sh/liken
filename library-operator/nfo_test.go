@@ -5,7 +5,9 @@ package main
 // streamdetails a file's attributes come from are proved with no volume.
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -360,5 +362,110 @@ func TestTheStreamDetailsReadTheSameUnderEitherRoot(t *testing.T) {
 func TestASidecarThatIsNotXMLYieldsNoStreamDetails(t *testing.T) {
 	if _, err := parseStreamNFO([]byte("this is not xml <<<")); err == nil {
 		t.Error("the parse reported no error, want one")
+	}
+}
+
+// The ratings block reaches the movie body under the sidecar's own
+// rating names, on each site's own scale.
+func TestTheMovieBodyCarriesTheRatingsBlock(t *testing.T) {
+	meta, err := parseMovieNFO([]byte(`<movie>
+  <title>Winter Harbour</title>
+  <ratings>
+    <rating name="imdb" max="10"><value>6.5</value><votes>1200</votes></rating>
+    <rating name="tomatometerallcritics" max="100"><value>83</value></rating>
+    <rating name="metacritic" max="100"><value>80</value></rating>
+    <rating name="themoviedb" max="10" default="true"><value>7.1</value></rating>
+  </ratings>
+</movie>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"imdb": 6.5, "tomatometerallcritics": 83, "metacritic": 80, "themoviedb": 7.1}
+	if !reflect.DeepEqual(meta.Body.Ratings, want) {
+		t.Errorf("ratings = %v, want %v", meta.Body.Ratings, want)
+	}
+	body, err := json.Marshal(meta.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const shape = `"ratings":{"imdb":6.5,"metacritic":80,"themoviedb":7.1,"tomatometerallcritics":83}`
+	if !strings.Contains(string(body), shape) {
+		t.Errorf("body = %s, want it to hold %s", body, shape)
+	}
+}
+
+// A score that is not a number, or an empty one, drops that one score and
+// nothing else: the title keeps its plot and the sites that scored, where a
+// numeric field on the element would have failed the whole sidecar.
+func TestAScoreThatIsNotANumberDropsOnlyThatScore(t *testing.T) {
+	meta, err := parseMovieNFO([]byte(`<movie>
+  <title>Winter Harbour</title>
+  <plot>A keeper watches the ice.</plot>
+  <ratings>
+    <rating name="imdb" max="10"><value>abc</value></rating>
+    <rating name="metacritic" max="100"><value></value></rating>
+    <rating name="tomatometerallcritics" max="100"><value> 83 </value></rating>
+  </ratings>
+</movie>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Body.Plot != "A keeper watches the ice." {
+		t.Errorf("plot = %q, want the sidecar's plot kept", meta.Body.Plot)
+	}
+	want := map[string]float64{"tomatometerallcritics": 83}
+	if !reflect.DeepEqual(meta.Body.Ratings, want) {
+		t.Errorf("ratings = %v, want %v", meta.Body.Ratings, want)
+	}
+}
+
+// A series sidecar carries the same block into the series body.
+func TestTheSeriesBodyCarriesTheRatingsBlock(t *testing.T) {
+	meta, err := parseSeriesNFO([]byte(`<tvshow>
+  <title>The Long Winter</title>
+  <ratings>
+    <rating name="imdb" max="10"><value>8.2</value></rating>
+    <rating name="metacritic" max="100"><value>74</value></rating>
+  </ratings>
+</tvshow>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"imdb": 8.2, "metacritic": 74}
+	if !reflect.DeepEqual(meta.Body.Ratings, want) {
+		t.Errorf("ratings = %v, want %v", meta.Body.Ratings, want)
+	}
+}
+
+// A rating element with no value states no score, so the body leaves
+// that site out and keeps the sites that scored.
+func TestARatingWithNoValueIsLeftOutOfTheBody(t *testing.T) {
+	meta, err := parseMovieNFO([]byte(`<movie>
+  <title>Winter Harbour</title>
+  <ratings>
+    <rating name="imdb" max="10"><votes>1200</votes></rating>
+    <rating name="metacritic" max="100"><value>80</value></rating>
+  </ratings>
+</movie>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(meta.Body.Ratings, map[string]float64{"metacritic": 80}) {
+		t.Errorf("ratings = %v, want the one site that scored", meta.Body.Ratings)
+	}
+}
+
+// An item whose sidecar holds no ratings block has no ratings key.
+func TestASidecarWithNoRatingsBlockHasNoRatingsKey(t *testing.T) {
+	meta, err := parseMovieNFO([]byte(`<movie><title>Winter Harbour</title></movie>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(meta.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "ratings") {
+		t.Errorf("body = %s, want no ratings key", body)
 	}
 }
