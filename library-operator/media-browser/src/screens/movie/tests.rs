@@ -194,7 +194,7 @@ fn a_page_draws_a_stripe_for_every_part_the_title_credits() {
         .iter()
         .map(|band| band.heading)
         .collect();
-    assert_eq!(headings, ["Directed by", "Cast"]);
+    assert_eq!(headings, ["Crew", "Cast"]);
     assert_eq!(page.stripes.bands()[1].faces.len(), 2);
 }
 

@@ -26,6 +26,13 @@ pub fn muted() -> Color {
     palette::dark().ink_muted
 }
 
+/// The color of the part under a name in a stripe: the muted ink at a
+/// lower opacity, so a character's name reads as an aside to the
+/// person's.
+pub fn faint() -> Color {
+    Color { a: 0.72, ..muted() }
+}
+
 /// The accent that marks focus, the dark scheme's `--link`.
 pub fn accent() -> Color {
     palette::dark().link

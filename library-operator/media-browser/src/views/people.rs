@@ -126,7 +126,7 @@ pub fn draw<T: Card, P: Posters>(
         }
         let name = captioned(slot);
         written(frame, name, person.name(), look::text());
-        written(frame, under(name), person.detail(), look::muted());
+        written(frame, under(name), person.detail(), look::faint());
     }
 }
 
@@ -152,15 +152,16 @@ fn written(frame: &mut canvas::Frame<Renderer>, band: Rectangle, content: &str, 
     if content.is_empty() {
         return;
     }
+    let shown = text::cut(content, look::FACE, band.width);
     frame.with_clip(band, |frame| {
         frame.fill_text(label(
-            content,
+            &shown,
             Point::new(band.center_x(), band.y),
             look::FACE,
             color,
             Alignment::Center,
             Vertical::Top,
-            band.width,
+            f32::INFINITY,
         ));
     });
 }

@@ -57,6 +57,33 @@ impl Card for Face {
     }
 }
 
+// The crew as one list: the directors first, then the writers the directors
+// do not already name, each with the parts they hold joined under the name.
+// A person is the same person by their entry, or by their name where the
+// store has no entry for them.
+fn crew(directors: Vec<CreditSlot>, writers: Vec<CreditSlot>) -> Vec<CreditSlot> {
+    let mut crew: Vec<CreditSlot> = Vec::with_capacity(directors.len() + writers.len());
+    for (part, slots) in [("Director", directors), ("Writer", writers)] {
+        for slot in slots {
+            match crew.iter_mut().find(|held| same_person(held, &slot)) {
+                Some(held) => held.role = format!("{}, {part}", held.role),
+                None => crew.push(CreditSlot {
+                    role: part.to_string(),
+                    ..slot
+                }),
+            }
+        }
+    }
+    crew
+}
+
+fn same_person(a: &CreditSlot, b: &CreditSlot) -> bool {
+    match (a.contributor.is_empty(), b.contributor.is_empty()) {
+        (false, false) => a.contributor == b.contributor,
+        _ => a.name.eq_ignore_ascii_case(&b.name),
+    }
+}
+
 /// One stripe: the part its heading names, and the people in it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stripe {
@@ -78,11 +105,12 @@ pub struct Stripes {
 }
 
 impl Stripes {
-    /// The stripes of one title's credits.
+    /// The stripes of one title's credits: the crew, and the cast. A person
+    /// who both directed and wrote is one face of the crew, with both parts
+    /// under their name where an actor's character goes.
     pub fn of(credits: Credits) -> Self {
         let bands = [
-            ("Directed by", credits.directors),
-            ("Written by", credits.writers),
+            ("Crew", crew(credits.directors, credits.writers)),
             ("Cast", credits.cast),
         ]
         .into_iter()
@@ -170,8 +198,31 @@ mod tests {
     fn a_title_draws_only_the_parts_it_credits() {
         let stripes = Stripes::of(credits());
         let headings: Vec<&str> = stripes.bands().iter().map(|band| band.heading).collect();
-        assert_eq!(headings, ["Directed by", "Cast"]);
+        assert_eq!(headings, ["Crew", "Cast"]);
+        assert_eq!(stripes.bands()[0].faces[0].role, "Director");
         assert_eq!(stripes.bands()[1].faces.len(), 2);
+    }
+
+    #[test]
+    fn a_person_who_directed_and_wrote_is_one_face_with_both_parts() {
+        let stripes = Stripes::of(Credits {
+            directors: vec![slot("A Director", "", true), slot("Both", "", true)],
+            writers: vec![slot("Both", "", true), slot("A Writer", "", false)],
+            cast: Vec::new(),
+        });
+        let crew: Vec<(&str, &str)> = stripes.bands()[0]
+            .faces
+            .iter()
+            .map(|face| (face.name.as_str(), face.role.as_str()))
+            .collect();
+        assert_eq!(
+            crew,
+            [
+                ("A Director", "Director"),
+                ("Both", "Director, Writer"),
+                ("A Writer", "Writer")
+            ]
+        );
     }
 
     #[test]
@@ -187,7 +238,7 @@ mod tests {
         let face = stripes.face((0, 0)).expect("the title has a director");
         assert_eq!(face.art, ".contributors/A Director/headshot.jpg");
         assert_eq!(face.name, "A Director");
-        assert_eq!(face.detail(), "");
+        assert_eq!(face.detail(), "Director");
     }
 
     #[test]

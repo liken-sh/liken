@@ -306,7 +306,7 @@ mod tests {
     // has something to do.
     const SHORT: f32 = 720.0;
 
-    // The three stripes of an invented title, so a crowded page carries
+    // The two stripes of an invented title, so a crowded page carries
     // every rung a press can reach.
     fn stripes() -> Stripes {
         let slot = |name: &str| CreditSlot {
@@ -365,7 +365,7 @@ mod tests {
     #[test]
     fn the_focused_stripe_is_in_view_and_the_page_scrolls_to_reach_it() {
         let mut offsets = Vec::new();
-        for stripe in 0..3 {
+        for stripe in 0..2 {
             let movie = crowded(Focus::Stripe(stripe, 0));
             let blocks = blocks(&movie);
             let offset = blocks.scroll(&movie, SHORT);
@@ -375,8 +375,7 @@ mod tests {
             offsets.push(offset);
         }
         assert!(offsets[0] > 0.0);
-        assert!(offsets[1] >= offsets[0]);
-        assert!(offsets[2] > offsets[1]);
+        assert!(offsets[1] > offsets[0]);
     }
 
     #[test]

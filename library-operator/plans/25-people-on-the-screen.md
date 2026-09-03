@@ -25,14 +25,14 @@ person, the one holding the remote, and this plan does not touch that.
 
 ## The stripes
 
-The end of a movie's page and the end of a series' page hold up to
-three stripes, in this order: "Directed by", "Written by", and "Cast".
-A stripe draws only when the title credits someone in that part, so a
-title with no crew shows the cast alone. Each slot is a headshot with
-the name under it, and a second line for the part: the character an
-actor played, and nothing for the crew, because the heading says it.
-The cast is in billing order. A person who both wrote and directed is
-in two stripes.
+The end of a movie's page and the end of a series' page hold up to two
+stripes, "Crew" and then "Cast". A stripe draws only when the title
+credits someone in it, so a title with no crew shows the cast alone.
+Each slot is a headshot with the name under it, and a dimmer second
+line for the part: the character an actor played, and "Director",
+"Writer", or "Director, Writer" for the crew. The crew stripe holds
+each person once, the directors first and then the writers the
+directors do not already name. The cast is in billing order.
 
 The stripes are the last rungs of each page's focus ladder. On the
 movie page they follow the set strip, or the buttons where the movie
@@ -108,7 +108,7 @@ one-gigabyte screen holds nothing more than it does today.
 
 ## Proof
 
-- The movie page and the series page each show the three stripes for a
+- The movie page and the series page each show both stripes for a
   title with crew and cast, and only the cast stripe for a title with
   no crew.
 - Down from the last rung lands on the first stripe, and up from the

@@ -24,6 +24,19 @@ pub fn fits(size: f32, width: f32) -> usize {
     (width / (size * ADVANCE)).max(0.0) as usize
 }
 
+/// The content cut to what one line of this width holds at this size,
+/// with an ellipsis where it was cut. A caption band is one line tall,
+/// and a line the shaper wrapped would show the tops of its second line
+/// inside the band's clip.
+pub fn cut(content: &str, size: f32, width: f32) -> String {
+    let room = fits(size, width);
+    if content.chars().count() <= room {
+        return content.to_string();
+    }
+    let kept: String = content.chars().take(room.saturating_sub(1)).collect();
+    format!("{}\u{2026}", kept.trim_end())
+}
+
 /// How many lines this content takes at this size and width. The count
 /// is an estimate from the number of characters, because the shaper runs
 /// on the draw path and the page decides its geometry before it draws.
@@ -104,6 +117,16 @@ pub fn block(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_caption_longer_than_its_band_ends_in_an_ellipsis() {
+        let room = fits(16.0, 120.0);
+        let long: String = "a".repeat(room + 5);
+        let shown = cut(&long, 16.0, 120.0);
+        assert_eq!(shown.chars().count(), room);
+        assert!(shown.ends_with('\u{2026}'));
+        assert_eq!(cut("short", 16.0, 120.0), "short");
+    }
 
     #[test]
     fn a_short_block_is_one_line() {

@@ -267,7 +267,7 @@ fn a_page_draws_a_stripe_for_every_part_the_series_credits() {
         .iter()
         .map(|band| band.heading)
         .collect();
-    assert_eq!(headings, ["Directed by", "Cast"]);
+    assert_eq!(headings, ["Crew", "Cast"]);
 
     let (bare, _) = page(Serials::default());
     assert!(bare.stripes.is_empty());

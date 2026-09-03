@@ -214,15 +214,16 @@ fn written(frame: &mut canvas::Frame<Renderer>, band: Rectangle, content: &str, 
     if content.is_empty() {
         return;
     }
+    let shown = text::cut(content, look::CAPTION, band.width);
     frame.with_clip(band, |frame| {
         frame.fill_text(label(
-            content,
+            &shown,
             Point::new(band.center_x(), band.y),
             look::CAPTION,
             color,
             Alignment::Center,
             Vertical::Top,
-            band.width,
+            f32::INFINITY,
         ));
     });
 }
