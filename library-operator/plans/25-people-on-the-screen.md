@@ -6,7 +6,7 @@ one title to the next.
 
 ## Blocked on plan 30
 
-This plan waits for [plan 30](30-facts-art-and-contributors.md). A
+This plan builds on [plan 30](completed/30-facts-art-and-contributors.md), which is done. A
 sidecar names a person by name alone: Jellyfin's NFO writer puts a
 name, a role, a type, a sort order, and a thumb path inside `<actor>`,
 and no provider id, and the thumb path points into Jellyfin's own
