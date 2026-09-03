@@ -24,10 +24,9 @@ import (
 	"time"
 )
 
-// The images the operator stamps into every pod it creates. Neither is
-// discoverable from inside a pod, because which image a release ships
-// is a decision the manifest carries, so the Deployment sets both and
-// the operator refuses to start without them.
+// The three image overrides. A variable that is set wins over the
+// image operatorimages.go derives from the operator's own pod, and
+// one that is unset derives.
 const (
 	scannerImageVariable   = "SCANNER_IMAGE"
 	corrosionImageVariable = "CORROSION_IMAGE"
@@ -146,20 +145,6 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 // before the first pass, because a pod that cannot name the images it
 // creates has nothing to reconcile with.
 func operate() error {
-	scannerImage := os.Getenv(scannerImageVariable)
-	if scannerImage == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the scanner image", scannerImageVariable)
-	}
-	corrosionImage := os.Getenv(corrosionImageVariable)
-	if corrosionImage == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the catalog image", corrosionImageVariable)
-	}
-	// The media browser one screen pod runs. The operator refuses to
-	// start without it for the reason it refuses without the other two.
-	browserImage := os.Getenv(browserImageVariable)
-	if browserImage == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the media browser image", browserImageVariable)
-	}
 	busAddress := os.Getenv(busAddressVariable)
 	if busAddress == "" {
 		return fmt.Errorf("%s is unset; the Deployment must name the broker", busAddressVariable)
@@ -196,7 +181,17 @@ func operate() error {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	return newOperator(client, scannerImage, corrosionImage, browserImage,
+	// The stop signal is registered before the pod read, so a SIGTERM
+	// during start-up reaches the handler, and the read has the same
+	// timeout as a pass.
+	naming, endNaming := context.WithTimeout(context.Background(), passTimeout)
+	defer endNaming()
+	stamped, err := operatorImages(naming, client, namespace)
+	if err != nil {
+		return err
+	}
+
+	return newOperator(client, stamped.scanner, stamped.corrosion, stamped.browser,
 		busAddress, topicBase, namespace, ":"+port).run(stopped, os.Stdout)
 }
 

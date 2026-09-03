@@ -25,33 +25,16 @@ func TestOperateRequiresItsEnvironment(t *testing.T) {
 	cases := []struct {
 		name      string
 		unset     string
-		scanner   string
-		catalog   string
-		browser   string
 		bus       string
 		namespace string
 	}{
-		{name: "no scanner image", unset: scannerImageVariable,
-			catalog: testCorrosionImage, browser: testBrowserImage, bus: testBusAddress,
-			namespace: testOperatorNamespace},
-		{name: "no catalog image", unset: corrosionImageVariable,
-			scanner: testScannerImage, browser: testBrowserImage, bus: testBusAddress,
-			namespace: testOperatorNamespace},
-		{name: "no media browser image", unset: browserImageVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage, bus: testBusAddress,
-			namespace: testOperatorNamespace},
 		{name: "no broker", unset: busAddressVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage, browser: testBrowserImage,
 			namespace: testOperatorNamespace},
 		{name: "no namespace", unset: operatorNamespaceVariable,
-			scanner: testScannerImage, catalog: testCorrosionImage, browser: testBrowserImage,
 			bus: testBusAddress},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			t.Setenv(scannerImageVariable, one.scanner)
-			t.Setenv(corrosionImageVariable, one.catalog)
-			t.Setenv(browserImageVariable, one.browser)
 			t.Setenv(busAddressVariable, one.bus)
 			t.Setenv(operatorNamespaceVariable, one.namespace)
 
@@ -104,9 +87,13 @@ func testClusterEnvironment(t *testing.T, cluster *fakeCluster) chan struct{} {
 	}
 	t.Setenv("KUBERNETES_SERVICE_HOST", host)
 	t.Setenv("KUBERNETES_SERVICE_PORT", port)
-	t.Setenv(scannerImageVariable, testScannerImage)
-	t.Setenv(corrosionImageVariable, testCorrosionImage)
-	t.Setenv(browserImageVariable, testBrowserImage)
+	// The operator derives its images from its own pod, so the fake
+	// cluster serves one and the downward API variable names it.
+	cluster.pods[testOperatorPod] = operatorPod(testScannerImage)
+	t.Setenv(podNameVariable, testOperatorPod)
+	t.Setenv(scannerImageVariable, "")
+	t.Setenv(corrosionImageVariable, "")
+	t.Setenv(browserImageVariable, "")
 	// Port 1 answers nothing, so the bus reconnects for the length of
 	// the test and no pass waits on it.
 	t.Setenv(busAddressVariable, "127.0.0.1:1")

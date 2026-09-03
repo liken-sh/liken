@@ -40,20 +40,12 @@ spec:
             # passes the address into every pod it creates.
             - name: LIBRARY_BUS_ADDRESS
               value: bus.liken-system.svc:1883
-            # The two images the operator stamps into every pod
-            # and Job. The scanner image is this same binary in its
-            # scan, cleanup, report, probe, identity, and enrich
-            # roles, and one image serves every kind. Both are
-            # environment variables rather than constants, so a
-            # cluster pins the three images together with one patch.
-            - name: SCANNER_IMAGE
-              value: ghcr.io/liken-sh/library-operator:latest
-            - name: CORROSION_IMAGE
-              value: ghcr.io/liken-sh/library-operator-corrosion:latest
-            # The media browser one screen pod runs, stamped into every
-            # screen pod the same way, so a cluster pins it with the others.
-            - name: BROWSER_IMAGE
-              value: ghcr.io/liken-sh/library-operator-media-browser:latest
+            # The operator reads its own pod to learn its image, and
+            # derives every companion image from it at the same tag.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             # The namespace this pod runs in, which is what the
             # webhook address the operator reports on every Library
             # names. Nothing in a pod knows its own namespace, so the

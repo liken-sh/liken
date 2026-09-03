@@ -1,11 +1,19 @@
-# A pushed tag cuts a release. A push to main releases nothing:
-# ci.yaml tests it and stops. The tag is the release act, as in the
-# main liken repository, so main takes docs and intermediate work
-# freely and every image in the registry traces to a version somebody
-# chose to name.
+# Every image this repository publishes goes through this workflow.
+# A pushed tag cuts a release: the tag names a version in liken's
+# calendar scheme, 2026.09.03-007, and the images ship under that
+# tag and :latest. A push to main cuts a development build: the
+# version is the most recent release tag plus a suffix,
+# 2026.09.03-007-dev-003-abcdef01, where 003 counts the commits since
+# that release and abcdef01 is this commit. The suffix sorts after
+# its release and before the next one, so a registry listing reads
+# in order. A development build never moves :latest, so a cluster
+# that pulls a release keeps pulling releases.
 #
-# The version is the tag, in liken's own scheme: 2026.08.29-001. The
-# release cadences of the operators do not couple, and reading one
+# Both kinds run the tests first and build only when they pass. A
+# development build that skipped the tests would put a broken image
+# one pin away from a cluster.
+#
+# The release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
 # The three images release together, always, under one version. The
@@ -19,7 +27,8 @@ name: release
 
 on:
   push:
-    tags: ['*']
+    branches: [main]
+    tags: ["**"]
 
 permissions:
   contents: read
@@ -31,26 +40,7 @@ concurrency:
   group: release
 
 jobs:
-  # The tag names the version, so its shape is an input this
-  # workflow must check before it spends anything on a build. A
-  # tag of any other shape is a mistake. The run says so and
-  # stops, before an image can ship under a name no machine can
-  # order against the others.
-  #
-  # Every other job waits on this one, so a malformed tag costs one
-  # runner and neither a test nor a build.
-  version:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check the tag shape
-        run: |
-          echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
-            echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.29-001"
-            exit 1
-          }
-
-  # The tests gate the build. ci.yaml already ran them on the tagged
-  # commit when it landed on main. A tag can name any commit, so the
+  # The tests gate the build. A tag can name any commit, so the
   # release proves the one it ships. An image that reaches the registry
   # has passed them. A rollback names an older tag, and never has to
   # find out which tag was good.
@@ -59,7 +49,6 @@ jobs:
   # for step and target for target, so the release gate is never weaker
   # than the one main passes.
   go:
-    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -79,7 +68,6 @@ jobs:
       - run: make test-go
 
   rust:
-    needs: version
     # The headless tests run under cage, and the cage in Ubuntu 24.04
     # (0.1.5) dies on an assertion when wlr-randr changes the output
     # mode. Ubuntu 26.04 carries 0.2.1, which takes the change, and it
@@ -143,7 +131,6 @@ jobs:
       - run: make test
 
   docs:
-    needs: version
     runs-on: ubuntu-latest
     steps:
       # The theme is the brand repository, a submodule at
@@ -167,14 +154,60 @@ jobs:
   release:
     needs: [go, rust, docs]
     runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ github.ref_name }}
     steps:
       # The media browser image builds liken-iced from the submodule
       # at media-browser/brand, so the checkout brings every submodule.
       - uses: actions/checkout@v7
         with:
           submodules: true
+          fetch-depth: 0
+
+      # The version comes from the event. A tag names it, and a tag of
+      # any other shape stops the run before a build spends anything,
+      # so no image ships under a name no machine can order against
+      # the others. A push to main derives it: git describe finds the
+      # most recent release tag and counts the commits since it, and
+      # the first eight characters of the commit sha make the build
+      # traceable. The checkout fetches the whole history, because
+      # describe needs the tags.
+      - name: Name the version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
+              echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.20-001"
+              exit 1
+            }
+            echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+            echo "RELEASE=true" >> "$GITHUB_ENV"
+          else
+            described=$(git describe --tags --long --match '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-[0-9][0-9][0-9]')
+            release=${described%-*-g*}
+            count=${described#"$release"-}
+            count=${count%-g*}
+            echo "VERSION=$(printf '%s-dev-%03d-%s' "$release" "$count" "${GITHUB_SHA:0:8}")" >> "$GITHUB_ENV"
+            echo "RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
+      # A development build has no tag, so a kustomization that pins
+      # its manifests needs the full commit sha: a git fetch by sha
+      # wants all forty characters, and the eight in the version are
+      # not enough. The run's summary prints the two lines to paste,
+      # so a roll is a copy.
+      - name: Write the roll lines
+        run: |
+          {
+            echo '```yaml'
+            echo "resources:"
+            echo "  - https://github.com/$GITHUB_REPOSITORY//deploy?ref=$GITHUB_SHA"
+            echo "images:"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY"
+            echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY-media-browser"
+            echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY-corrosion"
+            echo "    newTag: $VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -188,9 +221,10 @@ jobs:
       # below have to pass first, and a push that happened first would
       # leave a broken :latest behind when a gate failed.
       #
-      # The builds read and write the same :buildcache tags ci.yaml
-      # uses, so a release of a commit CI already built rebuilds
-      # nothing.
+      # The builds read and write the :buildcache tags beside each
+      # image. A tag's release of a commit whose development build
+      # already ran here rebuilds nothing, and a pull request's builds
+      # in ci.yaml read the same tags.
       - name: Build the operator image
         uses: docker/build-push-action@v6
         with:
@@ -237,11 +271,16 @@ jobs:
           docker run --rm "ghcr.io/liken-sh/library-operator-media-browser:$VERSION" --help
           docker run --rm "ghcr.io/liken-sh/library-operator-corrosion:$VERSION" --version
 
+      # :latest marks the newest release and nothing else. A
+      # development build pushes its own tag only.
       - name: Push the images
         run: |
+          set -eu
           docker push "ghcr.io/liken-sh/library-operator:$VERSION"
-          docker push "ghcr.io/liken-sh/library-operator:latest"
           docker push "ghcr.io/liken-sh/library-operator-media-browser:$VERSION"
-          docker push "ghcr.io/liken-sh/library-operator-media-browser:latest"
           docker push "ghcr.io/liken-sh/library-operator-corrosion:$VERSION"
-          docker push "ghcr.io/liken-sh/library-operator-corrosion:latest"
+          if [ "$RELEASE" = true ]; then
+            docker push "ghcr.io/liken-sh/library-operator:latest"
+            docker push "ghcr.io/liken-sh/library-operator-media-browser:latest"
+            docker push "ghcr.io/liken-sh/library-operator-corrosion:latest"
+          fi
