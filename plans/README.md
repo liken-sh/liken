@@ -272,7 +272,3 @@ one yet. Each one has a document in [`open-problems/`](open-problems/).
   `replicas: 1` does not bound the cluster operator to one instance
   under a partition or a `replicas` patch. A leader `Lease` in the
   operator code makes a second instance harmless.
-* [Development releases cost a real release](open-problems/development-releases-cost-a-real-release.md).
-  The only path onto a cluster is the release path, so a drill of an
-  unreleased liken or operator change pays for a full release: CI, a
-  permanent tag, published images, and a pin bump per iteration.
