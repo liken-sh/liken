@@ -48,11 +48,14 @@ func nfoFactList(facts []string) string {
 // sidecar holds. The scanner writes the answer into the nfo_facts column. The
 // lead element of each group is the test: a sidecar that holds the plot holds
 // the group the overview fact wrote.
-func nfoFactsAnswered(plot, certification string, ratings []nfoRating, actors []nfoActor) string {
+//
+// The credits fact is not in this map. The people are the point of the fact,
+// and a sidecar's actors say nothing about credits.yaml or the .contributors/
+// entries, so the credits gap reads the credits table instead.
+func nfoFactsAnswered(plot, certification string, ratings []nfoRating) string {
 	held := map[string]bool{
 		factOverview:      strings.TrimSpace(plot) != "",
 		factCertification: strings.TrimSpace(certification) != "",
-		factCredits:       len(castMembers(actors)) > 0,
 	}
 	for fact, site := range ratingSites {
 		held[fact] = ratingNamed(ratings, site.name) != nil
@@ -76,6 +79,19 @@ func nfoGapQuery(fact string) string {
 		`UNION ALL SELECT library, id, nfo_facts FROM series WHERE id NOT LIKE 'series:path:%') AS items ` +
 		`WHERE library = ?1 AND instr(nfo_facts, '` + nfoFactSeparator + fact + nfoFactSeparator + `') = 0 ` +
 		`AND ` + attemptClause(fact, "id")
+}
+
+// The credits gap, which is the one nfo gap that does not read nfo_facts: a
+// title with a provider id whose credits.yaml is not there yet, which the
+// catalog holds as no row in the credits table, whatever actors the sidecar
+// holds. The attempt window is every other query's own.
+func creditsGapQuery() string {
+	return `SELECT id FROM (` +
+		`SELECT library, id FROM movies WHERE id NOT LIKE 'movie:path:%' ` +
+		`UNION ALL SELECT library, id FROM series WHERE id NOT LIKE 'series:path:%') AS items ` +
+		`WHERE library = ?1 ` +
+		`AND id NOT IN (SELECT item FROM credits WHERE credits.library = ?1) ` +
+		`AND ` + attemptClause(factCredits, "id")
 }
 
 // The count of fights every fact of one library recorded. The reporter

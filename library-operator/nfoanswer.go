@@ -159,12 +159,72 @@ func mergeCast(merged *factAnswer, held providerAnswer, note func(string)) {
 }
 
 func namedInCast(cast []creditedActor, name string) bool {
-	for _, held := range cast {
+	return castIndex(cast, name) >= 0
+}
+
+func castIndex(cast []creditedActor, name string) int {
+	for at, held := range cast {
 		if strings.EqualFold(held.Name, name) {
-			return true
+			return at
 		}
 	}
-	return false
+	return -1
+}
+
+// The union with the cast the sidecar already holds. The sidecar's order comes
+// first, so a person another writer listed keeps their place and gains the ids
+// the provider gave for them, and the people the providers name and the
+// sidecar does not follow in the order the providers answered.
+func unionCast(sidecar, provider []creditedActor) []creditedActor {
+	cast := append(make([]creditedActor, 0, len(sidecar)+len(provider)), sidecar...)
+	for _, actor := range provider {
+		at := castIndex(cast, actor.Name)
+		if at < 0 {
+			cast = append(cast, actor)
+			continue
+		}
+		cast[at] = filledActor(cast[at], actor)
+	}
+	for at := range cast {
+		cast[at].Order = at
+	}
+	return cast
+}
+
+// What a person the sidecar holds takes from the provider that names them:
+// every id, which is what reaches .contributors/, and the part and the picture
+// where the sidecar carries none.
+func filledActor(held, adding creditedActor) creditedActor {
+	if held.Role == "" {
+		held.Role = adding.Role
+	}
+	if held.Thumb == "" {
+		held.Thumb = adding.Thumb
+	}
+	for scheme, id := range adding.IDs {
+		if held.IDs == nil {
+			held.IDs = providerIDs{}
+		}
+		if held.IDs[scheme] == "" {
+			held.IDs[scheme] = id
+		}
+	}
+	return held
+}
+
+// Whether the merged cast is what the sidecar already holds, which is what
+// says if the actor group is rewritten. The ids are out of the comparison,
+// because they never reach the .nfo.
+func sameCast(sidecar, merged []creditedActor) bool {
+	if len(sidecar) != len(merged) {
+		return false
+	}
+	for at, held := range sidecar {
+		if held.Name != merged[at].Name || held.Role != merged[at].Role || held.Thumb != merged[at].Thumb {
+			return false
+		}
+	}
+	return true
 }
 
 // An answer with nothing in it for the fact asked is a miss with a date and
@@ -180,7 +240,10 @@ func answersFact(fact string, answer factAnswer) bool {
 	case factCertification:
 		return answer.Certification != ""
 	case factCredits:
-		return len(answer.Cast) > 0
+		// A provider that answered is the whole answer, cast or none. The fact
+		// writes credits.yaml either way, and an empty one is the mark that says
+		// this title's people are asked for and not there.
+		return true
 	}
 	return false
 }

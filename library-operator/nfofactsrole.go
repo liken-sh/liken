@@ -187,6 +187,9 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 	}
 
 	merged, names := mergeAnswers(fact, answers)
+	if fact == factCredits {
+		merged.Cast = unionCast(sidecarCast(document), merged.Cast)
+	}
 	if !answersFact(fact, merged) {
 		e.recordNFO(folder, fact, nil, attemptNothing, nil)
 		return attemptNothing
@@ -199,16 +202,20 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 // compares like with like.
 func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem, group elementGroup,
 	document []byte, merged factAnswer, names providerNames) string {
-	edited, err := editElementGroup(document, group, nfoElements(fact, merged))
-	if err != nil {
-		e.logf("could not write the %s of %s: %v", fact, item.path, err)
-		e.recordNFO(folder, fact, nil, attemptError, names)
-		return attemptError
-	}
-	if err := e.writer.write(sidecar, edited); err != nil {
-		e.logf("could not write the %s of %s: %v", fact, item.path, err)
-		e.recordNFO(folder, fact, nil, attemptError, names)
-		return attemptError
+	edited := document
+	if groupNeedsWrite(fact, document, merged) {
+		written, err := editElementGroup(document, group, nfoElements(fact, merged))
+		if err != nil {
+			e.logf("could not write the %s of %s: %v", fact, item.path, err)
+			e.recordNFO(folder, fact, nil, attemptError, names)
+			return attemptError
+		}
+		if err := e.writer.write(sidecar, written); err != nil {
+			e.logf("could not write the %s of %s: %v", fact, item.path, err)
+			e.recordNFO(folder, fact, nil, attemptError, names)
+			return attemptError
+		}
+		edited = written
 	}
 	hash, err := groupHash(edited, group)
 	if err != nil {
@@ -227,6 +234,14 @@ func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem,
 		Path: likenSelfPath, Provider: names, Wrote: hash, Written: time.Now().UTC(),
 	}, attemptFound, names)
 	return attemptFound
+}
+
+// Which facts write their group on every answer and which compare first. The
+// credits fact leaves the actor elements where the merged cast is what the
+// sidecar holds, because the union added nothing a player reads, and
+// credits.yaml and the .contributors/ entries are written either way.
+func groupNeedsWrite(fact string, document []byte, merged factAnswer) bool {
+	return fact != factCredits || !sameCast(sidecarCast(document), merged.Cast)
 }
 
 // The fight check compares the group on disk with the hash the ledger holds.
@@ -262,6 +277,32 @@ func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result strin
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v", fact, folder, err)
 	}
+}
+
+// The actors the sidecar holds, in its own order, which is the billing order
+// the union starts from. A document this reader cannot parse holds no cast,
+// and the fill has already recorded that as an error.
+func sidecarCast(document []byte) []creditedActor {
+	var read struct {
+		Actors []nfoActor `xml:"actor"`
+	}
+	if err := lenientXML(document).Decode(&read); err != nil {
+		return nil
+	}
+	var cast []creditedActor
+	for _, actor := range read.Actors {
+		name := strings.TrimSpace(actor.Name)
+		if name == "" {
+			continue
+		}
+		cast = append(cast, creditedActor{
+			Name:  name,
+			Role:  strings.TrimSpace(actor.Role),
+			Thumb: strings.TrimSpace(actor.Thumb),
+			Order: len(cast),
+		})
+	}
+	return cast
 }
 
 // The ids a fact asks with come off the sidecar itself, which is where the

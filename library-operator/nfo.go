@@ -17,9 +17,12 @@ type nfoUniqueID struct {
 }
 
 // nfoActor is one actor element, a name and the part played.
+// The thumb is read because the credits fact rewrites the actor group, and a
+// picture another writer put there stays only where this reader keeps it.
 type nfoActor struct {
-	Name string `xml:"name"`
-	Role string `xml:"role"`
+	Name  string `xml:"name"`
+	Role  string `xml:"role"`
+	Thumb string `xml:"thumb"`
 }
 
 // One rating element inside the ratings block, in Kodi's form: the site that
@@ -247,7 +250,7 @@ func parseMovieNFO(data []byte) (movieMeta, error) {
 		Stream:   stream,
 		SetID:    setID(strings.TrimSpace(raw.Set.TMDBColID), collection),
 		NFOFacts: nfoFactsAnswered(raw.Plot, contentRating(raw.MPAA, raw.Certification),
-			raw.Ratings.Ratings, raw.Actors),
+			raw.Ratings.Ratings),
 	}, nil
 }
 
@@ -288,7 +291,7 @@ func parseSeriesNFO(data []byte) (seriesMeta, error) {
 			ContentRating: contentRating(raw.MPAA, raw.Certification),
 		},
 		NFOFacts: nfoFactsAnswered(raw.Plot, contentRating(raw.MPAA, raw.Certification),
-			raw.Ratings.Ratings, raw.Actors),
+			raw.Ratings.Ratings),
 	}, nil
 }
 

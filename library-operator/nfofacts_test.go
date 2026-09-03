@@ -47,11 +47,68 @@ func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *t
 		{fact: factRatingIMDb, want: []string{"movie:tmdb:1", "series:tvdb:9"}},
 		{fact: factRatingRottenTomatoes, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
 		{fact: factRatingMetacritic, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
-		{fact: factCredits, want: []string{"movie:tmdb:1", "series:tvdb:9"}},
+		{fact: factCredits, want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"}},
 	}
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[test.fact],
+				gapParams("house/movies", now))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			slices.Sort(ids)
+			if !slices.Equal(ids, test.want) {
+				t.Errorf("gap = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
+// The credits gap is credits.yaml and never the sidecar's actors: a title
+// Jellyfin gave a cast is a gap until the fact wrote the file, and a title
+// whose providers named no cast holds it through the attempt window.
+func TestTheCreditsGapIsATitleWithNoCreditsFileAgainstTheRealSchema(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name     string
+		credits  []creditRow
+		attempts []attemptRow
+		want     []string
+	}{
+		{
+			name: "every title with an id, the one Jellyfin gave a cast included",
+			want: []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"},
+		},
+		{
+			name: "a title whose credits.yaml names a person",
+			credits: []creditRow{{
+				Library: "house/movies", Item: "movie:tmdb:2", Billing: 0,
+				Name: "Nora Vance", Contributor: ".contributors/n/nora-vance",
+			}},
+			want: []string{"movie:tmdb:1", "series:tvdb:9"},
+		},
+		{
+			name: "a title whose providers named no cast, inside the window",
+			attempts: []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:1", Fact: factCredits,
+				At: now.Unix(), Result: attemptFound, Provider: "tmdb",
+			}},
+			want: []string{"movie:tmdb:2", "series:tvdb:9"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedNFOFactRows(t, catalog)
+			if _, err := catalog.UpsertCredits(t.Context(), test.credits); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), test.attempts); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
 				gapParams("house/movies", now))
 			if err != nil {
 				t.Fatal(err)
@@ -161,7 +218,7 @@ func TestASidecarSaysWhichFactsItAnswers(t *testing.T) {
 			sidecar: `<movie><title>One</title><plot>A plot.</plot><mpaa>PG</mpaa>` +
 				`<ratings><rating name="themoviedb" max="10"><value>8</value></rating></ratings>` +
 				`<actor><name>Nora Vance</name></actor></movie>`,
-			want: []string{factOverview, factCertification, factRatingTMDb, factCredits},
+			want: []string{factOverview, factCertification, factRatingTMDb},
 		},
 		{
 			name: "a sidecar with the rating of each site",

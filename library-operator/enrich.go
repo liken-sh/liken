@@ -115,7 +115,7 @@ var gapQueries = map[string]string{
 	factRatingIMDb:           nfoGapQuery(factRatingIMDb),
 	factRatingRottenTomatoes: nfoGapQuery(factRatingRottenTomatoes),
 	factRatingMetacritic:     nfoGapQuery(factRatingMetacritic),
-	factCredits:              nfoGapQuery(factCredits),
+	factCredits:              creditsGapQuery(),
 	factPoster:               titleArtGapSQL(factPoster),
 	factBackdrop:             titleArtGapSQL(factBackdrop),
 	factLogo:                 titleArtGapSQL(factLogo),

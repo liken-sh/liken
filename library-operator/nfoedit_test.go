@@ -189,12 +189,12 @@ func TestAGroupEditFillsASidecarThatHoldsNoneOfIt(t *testing.T) {
 			if !strings.Contains(string(edited), "<title>Winter Harbour</title>") {
 				t.Errorf("the edit lost the title:\n%s", edited)
 			}
-			meta, err := parseMovieNFO(edited)
+			hash, err := groupHash(edited, nfoGroup(fact))
 			if err != nil {
 				t.Fatalf("the edited sidecar does not parse: %v", err)
 			}
-			if !strings.Contains(meta.NFOFacts, nfoFactSeparator+fact+nfoFactSeparator) {
-				t.Errorf("the sidecar answers %q, want the %s fact", meta.NFOFacts, fact)
+			if hash == "" {
+				t.Errorf("the sidecar holds none of the %s group:\n%s", fact, edited)
 			}
 		})
 	}
