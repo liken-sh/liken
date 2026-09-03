@@ -51,12 +51,47 @@ func (w *volumeWriter) temporary(target string) string {
 	return filepath.Join(dir, base+likenTempMark+w.job)
 }
 
-// The whole write rule in one function: a temporary in the same directory,
-// flushed, then renamed onto the target. A crash leaves a stray temporary and
-// never a half-written file. The rename lands on a target that may exist,
-// which is how an edited .nfo replaces the one before it.
+// The whole write rule: a temporary in the same directory, flushed, then
+// renamed onto the target. A crash leaves a stray temporary and never a
+// half-written file. The rename lands on a target that may exist, which is
+// how an edited .nfo replaces the one before it.
 func (w *volumeWriter) write(target string, data []byte) error {
 	temporary := w.temporary(target)
+	if err := w.stage(temporary, data); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, target); err != nil {
+		_ = w.removeTemporary(temporary)
+		return err
+	}
+	return nil
+}
+
+// The write that never lands on a file that exists. The link fails where the
+// target is there, and the filesystem itself decides, so two writers never
+// lose one of the two files. The answer says whether this call wrote the
+// file. Art takes this door and not write, because a poster another tool
+// wrote is a file a person kept, and plan 30 leaves it.
+func (w *volumeWriter) createOnce(target string, data []byte) (bool, error) {
+	temporary := w.temporary(target)
+	if err := w.stage(temporary, data); err != nil {
+		return false, err
+	}
+	linked := os.Link(temporary, target)
+	_ = w.removeTemporary(temporary)
+	if errors.Is(linked, fs.ErrExist) {
+		return false, nil
+	}
+	if linked != nil {
+		return false, linked
+	}
+	return true, nil
+}
+
+// The temporary both writes start from: opened, written, flushed, and closed,
+// so the bytes are on the disk before any name points at them. A failure
+// takes the temporary with it.
+func (w *volumeWriter) stage(temporary string, data []byte) error {
 	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, volumeFilePerm)
 	if err != nil {
 		return err
@@ -67,10 +102,6 @@ func (w *volumeWriter) write(target string, data []byte) error {
 		return err
 	}
 	if err := file.Close(); err != nil {
-		_ = w.removeTemporary(temporary)
-		return err
-	}
-	if err := os.Rename(temporary, target); err != nil {
 		_ = w.removeTemporary(temporary)
 		return err
 	}

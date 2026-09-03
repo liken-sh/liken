@@ -280,3 +280,89 @@ func slicesContainsOwner(owners []OwnerReference, name string) bool {
 	}
 	return false
 }
+
+// The art container runs where a provider of the Library's sources serves an
+// art fact, and never where none does.
+func TestTheArtContainerRunsWhereAProviderServesArt(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts []string
+		want  bool
+	}{
+		{name: "a provider that serves every fact", facts: nil, want: true},
+		{name: "a provider narrowed to one art fact", facts: []string{factPoster}, want: true},
+		{name: "a provider narrowed to the identity", facts: []string{factIdentity}, want: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", test.facts...))
+
+			held := false
+			for _, container := range job.Spec.Template.Spec.InitContainers {
+				if container.Name == artContainerName {
+					held = true
+				}
+			}
+			if held != test.want {
+				t.Errorf("the pod holds the art container: %t, want %t", held, test.want)
+			}
+		})
+	}
+}
+
+// The art container names every art fact, takes the provider key, holds a
+// memory line of its own above the scanner's, and mounts the volume the way
+// the facts before it do.
+func TestTheArtContainerNamesItsFactsAndItsMemory(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
+
+	var art Container
+	for _, container := range job.Spec.Template.Spec.InitContainers {
+		if container.Name == artContainerName {
+			art = container
+		}
+	}
+	if art.Name == "" {
+		t.Fatal("the pod holds no art container")
+	}
+	facts := ""
+	key := false
+	for _, variable := range art.Env {
+		if variable.Name == libraryFactsVariable {
+			facts = variable.Value
+		}
+		if variable.Name == tmdbTokenVariable {
+			key = variable.ValueFrom != nil && variable.ValueFrom.SecretKeyRef != nil
+		}
+	}
+	want := "poster,backdrop,logo,season-poster,episode-thumb"
+	if facts != want {
+		t.Errorf("%s = %q, want %q", libraryFactsVariable, facts, want)
+	}
+	if !key {
+		t.Error("the art container reads no provider key")
+	}
+	if art.Resources.Limits["memory"] != artMemoryLimit || artMemoryLimit == scannerMemoryLimit {
+		t.Errorf("memory limit = %q, want %q, above the scanner's %q",
+			art.Resources.Limits["memory"], artMemoryLimit, scannerMemoryLimit)
+	}
+	if len(art.VolumeMounts) != 1 || art.VolumeMounts[0].Name != libraryVolumeName ||
+		art.VolumeMounts[0].ReadOnly {
+		t.Errorf("mounts = %+v, want the library volume read-write", art.VolumeMounts)
+	}
+}
+
+// The enrich container is still the last container of the Job, because it
+// writes the runs row and waits for the echo.
+func TestTheEnrichContainerStillRunsLast(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
+
+	spec := job.Spec.Template.Spec
+	last := spec.InitContainers[len(spec.InitContainers)-1]
+	if last.Name != artContainerName {
+		t.Errorf("the last init container is %q, want the art container", last.Name)
+	}
+	if len(spec.Containers) != 1 || spec.Containers[0].Name != enrichMode {
+		t.Fatalf("containers = %+v, want the one enrich container", spec.Containers)
+	}
+}

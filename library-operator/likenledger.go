@@ -83,7 +83,11 @@ type likenLedger struct {
 // One item's answer: an id with the reason it was written, or the candidates
 // that wait for a person.
 type likenItem struct {
-	Path       string           `yaml:"path"`
+	Path string `yaml:"path"`
+	// Which provider answered for this item, so a person reads why the file
+	// looks the way it does. An art fact writes existing here for a file another
+	// tool had already written.
+	Provider   string           `yaml:"provider,omitempty"`
 	ID         providerIDs      `yaml:"id,omitempty"`
 	Reason     string           `yaml:"reason,omitempty"`
 	Written    time.Time        `yaml:"written,omitempty"`

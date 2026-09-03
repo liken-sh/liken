@@ -81,6 +81,11 @@ var gapQueries = map[string]string{
 		`UNION ALL SELECT library, id FROM series WHERE id LIKE 'series:path:%') AS items ` +
 		`WHERE library = ? AND id NOT IN (SELECT item FROM attempts ` +
 		`WHERE attempts.library = items.library AND ` + attemptFactColumn + ` = 'identity' AND result != 'error' AND at >= ?)`,
+	factPoster:       titleArtGapSQL(factPoster),
+	factBackdrop:     titleArtGapSQL(factBackdrop),
+	factLogo:         titleArtGapSQL(factLogo),
+	factSeasonPoster: seasonPosterGapSQL(),
+	factEpisodeThumb: episodeThumbGapSQL(),
 }
 
 // The two counts a person reads on the Library beside the gaps. Waiting

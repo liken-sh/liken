@@ -131,7 +131,8 @@ type likenSidecar struct {
 // The facts the scanner lifts out of a folder. The file fact keys on a
 // path, because it works per file, and the identity fact keys on an item
 // id, because it works per title.
-var likenFacts = []string{factProbe, factIdentity}
+var likenFacts = []string{factProbe, factIdentity,
+	factPoster, factBackdrop, factLogo, factSeasonPoster, factEpisodeThumb}
 
 // Reads every .liken file the folder holds into attempts rows. A folder that
 // holds none reads as no rows and not as an error, because most folders hold
@@ -163,7 +164,7 @@ func (s likenSidecar) attempts() ([]attemptRow, error) {
 // How an entry's path resolves: a file fact names the file itself, and an
 // item fact names the title the folder holds.
 func (s likenSidecar) itemOf(fact, path string) string {
-	if fact == factProbe {
+	if _, art := artTypes[fact]; fact == factProbe || art {
 		return relativePath(s.root, filepath.Join(s.dir, path))
 	}
 	if path == likenSelfPath || path == "" {

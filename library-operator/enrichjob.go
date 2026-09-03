@@ -115,6 +115,18 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 		facts = append(facts, factsContainer(library, factIdentity, []string{factIdentity}, path,
 			scannerImage, busAddress, topicBase))
 	}
+	// The art container. It runs where a Ready provider of the Library's sources
+	// serves one of the art facts, and it takes a memory line of its own because
+	// it holds an image while it writes it. It is an init container because the
+	// enrich container must run last, and a regular container beside it would
+	// let the run end before the art is written. Plan 30 makes it a regular
+	// container once a second fan-out container exists.
+	if providers.servingArt(library.Metadata.Namespace, library.Spec.Sources) != nil {
+		images := factsContainer(library, artContainerName, artFactNames, path,
+			scannerImage, busAddress, topicBase)
+		images.Resources.Limits = map[string]string{"memory": artMemoryLimit}
+		facts = append(facts, images)
+	}
 	// Every facts container carries every key the sources reach, so a container
 	// that asks a second provider needs no wiring of its own.
 	keys := providerKeyEnv(library, providers)

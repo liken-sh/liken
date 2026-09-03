@@ -24,6 +24,12 @@ type factRun func(ctx context.Context, e *enricher) error
 var factRuns = map[string]factRun{
 	factProbe:    func(ctx context.Context, e *enricher) error { return e.probeFact(ctx) },
 	factIdentity: func(ctx context.Context, e *enricher) error { return e.identityFact(ctx) },
+
+	factPoster:       artFactRun(factPoster),
+	factBackdrop:     artFactRun(factBackdrop),
+	factLogo:         artFactRun(factLogo),
+	factSeasonPoster: artFactRun(factSeasonPoster),
+	factEpisodeThumb: artFactRun(factEpisodeThumb),
 }
 
 // The role's whole program. A failure is a non-zero exit, so the Job fails

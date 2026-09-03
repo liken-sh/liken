@@ -140,6 +140,54 @@ func (r *providerRequests) send(ctx context.Context, path string, query url.Valu
 	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), body, nil
 }
 
+// One file, by the retry rule the JSON calls follow. It carries no credential
+// and asks for no JSON, because the host that serves a provider's images and
+// headshots is a plain file host. Its bound is above the answer's, because a
+// file is larger than an answer, and the caller holds the bytes only until
+// the write door has them.
+const providerFileLimit = 16 << 20
+
+func (r *providerRequests) fetchFile(ctx context.Context, address string) ([]byte, error) {
+	for attempt := 1; ; attempt++ {
+		status, cooldown, body, err := r.sendFile(ctx, address)
+		if err != nil {
+			return nil, err
+		}
+		if status == http.StatusTooManyRequests && attempt < providerAttempts {
+			if err := r.wait(ctx, cooldown); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if status < 200 || status > 299 {
+			return nil, providerStatusError{provider: r.provider, path: address, status: status}
+		}
+		if len(body) == 0 {
+			return nil, providerStatusError{provider: r.provider, path: address,
+				status: status, body: "the answer was empty"}
+		}
+		return body, nil
+	}
+}
+
+func (r *providerRequests) sendFile(ctx context.Context, address string) (int, time.Duration, []byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	response, err := r.http.Do(request)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	defer drain(response.Body)
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, providerFileLimit))
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), body, nil
+}
+
 // An unreadable or absent header takes the fixed cooldown.
 func retryAfter(header string) time.Duration {
 	seconds, err := strconv.Atoi(strings.TrimSpace(header))

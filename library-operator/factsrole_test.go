@@ -52,7 +52,7 @@ func TestAContainerRefusesAListItCannotRun(t *testing.T) {
 		{name: "a fact this image does not run", facts: []string{"trickplay"},
 			says: "does not run"},
 		{name: "one name this image does not run among ones it does",
-			facts: []string{factProbe, "poster"}, says: "does not run"},
+			facts: []string{factProbe, factClearart}, says: "does not run"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

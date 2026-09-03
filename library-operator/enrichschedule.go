@@ -259,8 +259,8 @@ func gapOpen(library *Library, report *libraryReport, providers providerSet) boo
 		if count <= 0 {
 			continue
 		}
-		if fact == factIdentity &&
-			providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity) == nil {
+		if fact != factProbe &&
+			providers.serving(library.Metadata.Namespace, library.Spec.Sources, fact) == nil {
 			continue
 		}
 		return true

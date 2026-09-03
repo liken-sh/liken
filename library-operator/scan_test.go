@@ -33,7 +33,7 @@ func testBroker(t *testing.T) (address string, accepted <-chan *fakeBroker) {
 	}
 	t.Cleanup(func() { listener.Close() })
 
-	brokers := make(chan *fakeBroker, 4)
+	brokers := make(chan *fakeBroker, 32)
 	go func() {
 		for {
 			conn, err := listener.Accept()
