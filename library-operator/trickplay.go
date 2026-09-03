@@ -104,6 +104,9 @@ func (e *enricher) trickplayOne(ctx context.Context, gap trickplayGap) bool {
 		e.recordArt(folder, factTrickplay, entry, artProviderExisting, attemptFound)
 		return false
 	}
+	// The line goes out before the decode, because a decode of a feature
+	// runs for minutes with nothing else to say.
+	e.logf("tiling %s, %s long", filepath.Base(absolute), gap.duration.Round(time.Second))
 	result := e.buildTrickplay(ctx, absolute, target, gap.duration)
 	e.recordArt(folder, factTrickplay, entry, "", result)
 	return result == attemptFound

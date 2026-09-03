@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 // One fact's whole run against one Library. A fact reads its own gap out of
@@ -85,9 +86,14 @@ func (e *enricher) runFacts(ctx context.Context, facts []string) error {
 			return fmt.Errorf("%s names %s, which this image does not run", libraryFactsVariable, name)
 		}
 	}
+	// The wait is silent otherwise, and it can run for minutes on a fresh
+	// claim, so its two ends are logged.
+	e.logf("waiting for the catalog to sync onto this claim")
+	started := time.Now()
 	if err := e.awaitCatalogSync(ctx, facts[0]); err != nil {
 		return err
 	}
+	e.logf("the catalog synced in %s", time.Since(started).Round(time.Second))
 	for _, name := range facts {
 		if err := factRuns[name](ctx, e); err != nil {
 			return fmt.Errorf("the %s fact failed: %w", name, err)
