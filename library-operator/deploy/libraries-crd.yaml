@@ -336,7 +336,7 @@ spec:
                 gaps:
                   type: object
                   x-kubernetes-map-type: atomic
-                  description: "One count per fact of the rows that fact has left to fill, counted by the namespace's reporter. The operator creates the enricher Job while any count is above zero, and the count falls after the scan that follows the enricher."
+                  description: "One count per fact of the rows that fact has left to fill, counted by the namespace's reporter. The operator creates the enricher Job while any count is above zero, and the count falls after the scan that follows the enricher. A row a fact tried leaves the count until its attempt has passed a window: thirty days for a miss, and one day for an error."
                   additionalProperties:
                     type: integer
                     minimum: 0

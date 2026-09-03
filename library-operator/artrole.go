@@ -153,9 +153,8 @@ func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
 // write, the TMDb id to ask for, and the season and episode where the fact
 // needs them.
 func (c *Catalog) artGaps(ctx context.Context, library, fact string, now time.Time) ([]artGap, error) {
-	cutoff := now.Add(-defaultRetryInterval).Unix()
 	var gaps []artGap
-	err := c.stream(ctx, gapQueries[fact], []any{library, cutoff}, func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(library, now), func(cells []any) error {
 		if len(cells) < 4 {
 			return nil
 		}

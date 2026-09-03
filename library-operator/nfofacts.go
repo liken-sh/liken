@@ -69,16 +69,13 @@ func nfoFactsAnswered(plot, certification string, ratings []nfoRating, actors []
 // The gap query of one nfo fact. A title with no provider id is not a gap,
 // because a fact cannot ask about a title no provider has named, and the
 // identity fact fills that gap first. The query reads nfo_facts with instr(),
-// and it excludes a title with an attempt inside the retry window unless that
-// attempt ended in an error.
+// and it excludes a title with an attempt inside that attempt's own window.
 func nfoGapQuery(fact string) string {
 	return `SELECT id FROM (` +
 		`SELECT library, id, nfo_facts FROM movies WHERE id NOT LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id, nfo_facts FROM series WHERE id NOT LIKE 'series:path:%') AS items ` +
 		`WHERE library = ?1 AND instr(nfo_facts, '` + nfoFactSeparator + fact + nfoFactSeparator + `') = 0 ` +
-		`AND id NOT IN (SELECT item FROM attempts ` +
-		`WHERE attempts.library = ?1 AND ` + attemptFactColumn + ` = '` + fact + `' ` +
-		`AND result != 'error' AND at >= ?2)`
+		`AND ` + attemptClause(fact, "id")
 }
 
 // The count of fights every fact of one library recorded. The reporter

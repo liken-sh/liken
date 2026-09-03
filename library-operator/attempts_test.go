@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // The ledger a folder carries in these tests, in the shape the identity
@@ -192,13 +193,75 @@ func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
 	}
 
 	gaps, err := catalog.queryStrings(t.Context(), gapQueries[factProbe],
-		[]any{"house/series", ledgerTime.Add(-defaultRetryInterval).Unix()})
+		gapParams("house/series", ledgerTime))
 
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(gaps) != 0 {
 		t.Errorf("gaps = %v, want none for a file the probe already opened", gaps)
+	}
+}
+
+// The cases every gap query answers the same way: one dated fact and one
+// error on either side of its own window. Each case is the last attempt at
+// one item, its age, and whether the item is still a gap.
+type attemptWindowCase struct {
+	name    string
+	result  string
+	age     time.Duration
+	wantGap int
+}
+
+var attemptWindowCases = []attemptWindowCase{
+	{name: "an error an hour old", result: attemptError, age: time.Hour, wantGap: 0},
+	{name: "an error two days old", result: attemptError, age: 48 * time.Hour, wantGap: 1},
+	{name: "a miss ten days old", result: attemptNothing, age: 10 * 24 * time.Hour, wantGap: 0},
+	{name: "a miss forty days old", result: attemptNothing, age: 40 * 24 * time.Hour, wantGap: 1},
+}
+
+// The probe and the identity gaps hold an item again only after that item's
+// last attempt has passed the window its own kind carries.
+func TestEveryAttemptKindGatesTheProbeAndIdentityGapsAgainstTheRealSchema(t *testing.T) {
+	for _, test := range attemptWindowCases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			now := time.Now().UTC()
+			seed := &walkResult{
+				movies: []movieRow{{
+					Id: "movie:path:one-2001", Library: "house/movies",
+					Kind: libraryKindMovies, Path: "One (2001)", Title: "One",
+				}},
+				files: []fileRow{{
+					Path: "One (2001)/one.mkv", Library: "house/movies", Present: true,
+					Type: fileTypeVideo, Items: []string{"movie:path:one-2001"},
+				}},
+				attempts: []attemptRow{
+					{
+						Library: "house/movies", Item: "movie:path:one-2001", Fact: factIdentity,
+						At: now.Add(-test.age).Unix(), Result: test.result,
+					},
+					{
+						Library: "house/movies", Item: "One (2001)/one.mkv", Fact: factProbe,
+						At: now.Add(-test.age).Unix(), Result: test.result,
+					},
+				},
+			}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+
+			gaps, err := catalog.gapCounts(t.Context(), "house/movies", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gaps[factIdentity] != test.wantGap {
+				t.Errorf("identity gap = %d, want %d", gaps[factIdentity], test.wantGap)
+			}
+			if gaps[factProbe] != test.wantGap {
+				t.Errorf("probe gap = %d, want %d", gaps[factProbe], test.wantGap)
+			}
+		})
 	}
 }
 

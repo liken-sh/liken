@@ -46,8 +46,9 @@ const (
 // facts with a date, and the retry interval applies to them. A fight is a
 // fact that read its element group on disk, found bytes it did not write, and
 // left them; Library status counts it. An error is a provider that was down,
-// a key that was refused, or a file that would not open, and the next run
-// tries again.
+// a key that was refused, or a file that would not open. An error stands for
+// its own shorter window, so a fault that lasts is tried again the next day
+// and not on every run.
 const (
 	attemptFound      = "found"
 	attemptCandidates = "candidates"
@@ -56,36 +57,58 @@ const (
 	attemptFight      = "fight"
 )
 
-// How long an attempt with a date stands before the fact that wrote it asks
-// again. Providers gain ids and art over time, so a miss is retried. Thirty
-// days is the guess plan 27 records.
-const defaultRetryInterval = 30 * 24 * time.Hour
+// How long an attempt stands before the fact that wrote it asks again. A
+// dated fact stands for thirty days, the guess plan 27 records, because
+// providers gain ids and art over time. An error stands for a day, so a
+// provider that is down or a volume that will not read is asked again the
+// next day, and a fault that stands costs one try a day.
+const (
+	defaultRetryInterval = 30 * 24 * time.Hour
+	errorRetryInterval   = 24 * time.Hour
+)
 
-// The gap query per fact, keyed by fact. Every query takes the
-// library as its first parameter and the retry cutoff in Unix seconds as
-// its second, and selects the key of each row that needs work, so a
-// count(*) over it is the reporter's number and the rows are the
-// container's work list.
+// The three parameters every gap query binds by number: the library, the
+// cutoff a dated attempt stands until, and the cutoff an error stands until.
+func gapParams(library string, now time.Time) []any {
+	return []any{library,
+		now.Add(-defaultRetryInterval).Unix(),
+		now.Add(-errorRetryInterval).Unix()}
+}
+
+// The attempt window every gap query carries. An item whose last attempt is a
+// dated fact inside the retry window is no gap, and an item whose last
+// attempt is an error is no gap until the error window has passed. The
+// library is bound by number and never read off the outer row, because a
+// subquery that reads the outer row runs again for every item.
+func attemptClause(fact, column string) string {
+	return column + ` NOT IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
+		`AND ` + attemptFactColumn + ` = '` + fact + `' ` +
+		`AND ((result != '` + attemptError + `' AND at >= ?2) ` +
+		`OR (result = '` + attemptError + `' AND at >= ?3)))`
+}
+
+// The gap query per fact, keyed by fact. Every query binds the library as ?1,
+// the cutoff of a dated attempt in Unix seconds as ?2, and the cutoff of an
+// error as ?3, and selects the key of each row that needs work, so a count(*)
+// over it is the reporter's number and the rows are the container's work list.
 //
-// A probe gap is a present video file with no duration, which is what a
-// file with no streamdetails in its sidecar looks like in the catalog.
-// An identity gap is an item whose id is its folder key, so no provider
-// named it. Both exclude an item with an attempt inside the window,
-// unless that attempt ended in an error. A probe whose details landed
-// closes its gap through the duration on the next scan, and a probe whose
-// details landed nowhere the scanner reads is tried again after the
-// window.
+// A probe gap is a present video file with no duration, which is what a file
+// with no streamdetails in its sidecar looks like in the catalog. An identity
+// gap is an item whose id is its folder key, so no provider named it. Both
+// exclude an item with an attempt inside that attempt's own window. A probe
+// whose details landed closes its gap through the duration on the next scan,
+// and a probe whose details landed nowhere the scanner reads is tried again
+// after the window.
 var gapQueries = map[string]string{
 	// A video with a length and no tiles beside it.
 	factTrickplay: trickplayGapSQL(),
 	factProbe: `SELECT path FROM files ` +
-		`WHERE library = ? AND type = 'video' AND present = 1 AND duration_ms = 0 ` +
-		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND ` + attemptFactColumn + ` = 'probe' AND result != 'error' AND at >= ?)`,
+		`WHERE library = ?1 AND type = 'video' AND present = 1 AND duration_ms = 0 ` +
+		`AND ` + attemptClause(factProbe, "path"),
 	factIdentity: `SELECT id FROM (` +
 		`SELECT library, id FROM movies WHERE id LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id FROM series WHERE id LIKE 'series:path:%') AS items ` +
-		`WHERE library = ? AND id NOT IN (SELECT item FROM attempts ` +
-		`WHERE attempts.library = items.library AND ` + attemptFactColumn + ` = 'identity' AND result != 'error' AND at >= ?)`,
+		`WHERE library = ?1 AND ` + attemptClause(factIdentity, "id"),
 	factOverview:             nfoGapQuery(factOverview),
 	factCertification:        nfoGapQuery(factCertification),
 	factRatingTMDb:           nfoGapQuery(factRatingTMDb),

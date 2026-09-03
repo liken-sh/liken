@@ -309,9 +309,8 @@ func (e *enricher) recordContributor(folder, fact, provider, result, wrote strin
 // query the reporter counts the gap with. Every row names the person's
 // directory and the TMDb id to ask for.
 func (c *Catalog) contributorGaps(ctx context.Context, library, fact string, now time.Time) ([]contributorGap, error) {
-	cutoff := now.Add(-defaultRetryInterval).Unix()
 	var gaps []contributorGap
-	err := c.stream(ctx, gapQueries[fact], []any{library, cutoff}, func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(library, now), func(cells []any) error {
 		if len(cells) < 2 {
 			return nil
 		}
@@ -331,15 +330,14 @@ func (c *Catalog) contributorGaps(ctx context.Context, library, fact string, now
 
 // The gap query of one contributor fact. A person with no TMDb id is no gap,
 // because every call this image makes keys on that id, and the join is what
-// reads it. The query excludes a person with an attempt inside the retry
-// window unless that attempt ended in an error.
+// reads it. The query excludes a person with an attempt inside that attempt's
+// own window.
 func contributorGapSQL(fact, condition string) string {
 	return `SELECT c.path, a.id FROM contributors AS c ` +
 		`JOIN contributor_aliases AS a ON a.library = c.library AND a.path = c.path ` +
 		`AND a.scheme = '` + contributorTMDbScheme + `' ` +
-		`WHERE c.library = ? AND (` + condition + `) ` +
-		`AND c.path NOT IN (SELECT item FROM attempts WHERE attempts.library = c.library ` +
-		`AND ` + attemptFactColumn + ` = '` + fact + `' AND result != 'error' AND at >= ?)`
+		`WHERE c.library = ?1 AND (` + condition + `) ` +
+		`AND ` + attemptClause(fact, "c.path")
 }
 
 // The ids gap: a person with no birth date, or with no id under any scheme but

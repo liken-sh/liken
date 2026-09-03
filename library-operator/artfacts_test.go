@@ -141,32 +141,23 @@ func TestATitleWithNoProviderIdHasNoArtGap(t *testing.T) {
 	}
 }
 
-// An attempt inside the window closes the gap, and an attempt that ended in
-// an error leaves it open.
-func TestAnArtAttemptInsideTheWindowClosesTheGap(t *testing.T) {
-	cases := []struct {
-		name     string
-		result   string
-		wantGaps int
-	}{
-		{name: "a miss with a date", result: attemptNothing, wantGaps: 0},
-		{name: "a file that was found", result: attemptFound, wantGaps: 0},
-		{name: "an error", result: attemptError, wantGaps: 1},
-	}
-	for _, test := range cases {
+// An art gap holds a file again only after that file's last attempt has passed
+// the window its own kind carries.
+func TestEveryAttemptKindGatesTheArtGap(t *testing.T) {
+	for _, test := range attemptWindowCases {
 		t.Run(test.name, func(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			seedArtMovie(t, catalog, "The Signal (2014)")
 			attempts := []attemptRow{{
 				Library: artLibrary, Item: "The Signal (2014)/poster.jpg", Fact: factPoster,
-				At: time.Now().UTC().Unix(), Result: test.result,
+				At: time.Now().UTC().Add(-test.age).Unix(), Result: test.result,
 			}}
 			if _, err := catalog.UpsertAttempts(t.Context(), attempts); err != nil {
 				t.Fatal(err)
 			}
 
-			if gaps := artGapsOf(t, catalog, factPoster); len(gaps) != test.wantGaps {
-				t.Errorf("gaps = %+v, want %d", gaps, test.wantGaps)
+			if gaps := artGapsOf(t, catalog, factPoster); len(gaps) != test.wantGap {
+				t.Errorf("gaps = %+v, want %d", gaps, test.wantGap)
 			}
 		})
 	}

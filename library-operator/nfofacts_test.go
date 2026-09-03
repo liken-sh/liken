@@ -35,7 +35,7 @@ func seedNFOFactRows(t *testing.T, catalog *Catalog) {
 func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedNFOFactRows(t, catalog)
-	cutoff := time.Now().UTC().Add(-defaultRetryInterval).Unix()
+	now := time.Now().UTC()
 
 	cases := []struct {
 		fact string
@@ -52,7 +52,7 @@ func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *t
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[test.fact],
-				[]any{"house/movies", cutoff})
+				gapParams("house/movies", now))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,33 +65,36 @@ func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *t
 	}
 }
 
-// A title tried inside the retry window is out of the gap, and a title whose
-// try ended in an error is back in it.
-func TestAnNFOGapExcludesATitleTriedInsideTheWindow(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	seedNFOFactRows(t, catalog)
-	now := time.Now().UTC()
-	if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{
-		{
-			Library: "house/movies", Item: "movie:tmdb:1", Fact: factOverview,
-			At: now.Unix(), Result: attemptNothing, Provider: "tmdb",
-		},
-		{
-			Library: "house/movies", Item: "series:tvdb:9", Fact: factOverview,
-			At: now.Unix(), Result: attemptError, Provider: "tmdb",
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
+// An nfo gap holds a title again only after that title's last attempt has
+// passed the window its own kind carries.
+func TestEveryAttemptKindGatesTheNFOGap(t *testing.T) {
+	for _, test := range attemptWindowCases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			now := time.Now().UTC()
+			seed := &walkResult{movies: []movieRow{
+				{Id: "movie:tmdb:1", Library: "house/movies", Path: "One (2001)", Title: "One"},
+			}}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:1", Fact: factOverview,
+				At: now.Add(-test.age).Unix(), Result: test.result, Provider: "tmdb",
+			}}); err != nil {
+				t.Fatal(err)
+			}
 
-	ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
-		[]any{"house/movies", now.Add(-defaultRetryInterval).Unix()})
-	if err != nil {
-		t.Fatal(err)
-	}
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
+				gapParams("house/movies", now))
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	if !slices.Equal(ids, []string{"series:tvdb:9"}) {
-		t.Errorf("gap = %v, want the title whose try ended in an error", ids)
+			if len(ids) != test.wantGap {
+				t.Errorf("gap = %v, want %d", ids, test.wantGap)
+			}
+		})
 	}
 }
 

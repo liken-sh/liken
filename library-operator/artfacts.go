@@ -184,7 +184,7 @@ func titleArtGapSQL(fact string) string {
 		branches = append(branches, branch("series", scopeSeries))
 	}
 	return `SELECT file, tmdb, 0, 0 FROM (` + strings.Join(branches, ` UNION ALL `) +
-		`) AS wanted WHERE library = ?1 AND ` + artFileClause() + ` AND ` + artAttemptClause(fact, "file")
+		`) AS wanted WHERE library = ?1 AND ` + artFileClause() + ` AND ` + attemptClause(fact, "file")
 }
 
 // One row per season a library holds episodes of, because the catalog keeps
@@ -201,7 +201,7 @@ func seasonArtGapSQL(fact string) string {
 		`JOIN aliases AS a ON a.library = s.library AND a.item = s.id ` +
 		`AND a.alias LIKE '` + scopeSeries + `:tmdb:%'` +
 		`) AS wanted WHERE library = ?1 AND ` + artFileClause() + ` AND ` +
-		artAttemptClause(fact, "file")
+		attemptClause(fact, "file")
 }
 
 // One row per episode with no image of its own. The episode keys on its own
@@ -226,7 +226,7 @@ func episodeThumbGapSQL() string {
 		`WHERE fi.library = ?1 ` +
 		`AND f.type = '` + fileTypeImage + `' ` +
 		`AND f.role IN ('` + fileRoleThumb + `', '` + fileRoleStill + `')) AND ` +
-		artAttemptClause(factEpisodeThumb, "video")
+		attemptClause(factEpisodeThumb, "video")
 }
 
 // The file the fact would write is not in the catalog. This is the whole of
@@ -237,11 +237,4 @@ func episodeThumbGapSQL() string {
 // one over a library's files took seven seconds a fact.
 func artFileClause() string {
 	return `file NOT IN (SELECT path FROM files WHERE files.library = ?1)`
-}
-
-// The attempt window, as every gap query carries it: an item tried inside the
-// window is no gap, unless that attempt ended in an error.
-func artAttemptClause(fact, column string) string {
-	return column + ` NOT IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
-		`AND ` + attemptFactColumn + ` = '` + fact + `' AND result != 'error' AND at >= ?2)`
 }

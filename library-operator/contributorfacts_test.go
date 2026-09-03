@@ -271,25 +271,33 @@ func TestEachContributorFactReadsItsOwnGap(t *testing.T) {
 	}
 }
 
-// A person tried inside the retry window is no gap, so a miss is a fact with a
-// date and never a person the enricher opens every night.
-func TestAPersonTriedInsideTheWindowIsNoGap(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	person := contributorRow{Library: contributorLibrary, Path: ".contributors/p/person-2", Name: "Two"}
-	seedContributors(t, catalog, person)
-	if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
-		Library: contributorLibrary, Item: person.Path, Fact: factContributorHeadshot,
-		At: time.Now().UTC().Unix(), Result: attemptNothing,
-	}}); err != nil {
-		t.Fatal(err)
-	}
+// A contributor gap holds a person again only after that person's last attempt
+// has passed the window its own kind carries.
+func TestEveryAttemptKindGatesTheContributorGap(t *testing.T) {
+	for _, test := range attemptWindowCases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			now := time.Now().UTC()
+			person := contributorRow{
+				Library: contributorLibrary, Path: ".contributors/p/person-2", Name: "Two",
+			}
+			seedContributors(t, catalog, person)
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: contributorLibrary, Item: person.Path, Fact: factContributorHeadshot,
+				At: now.Add(-test.age).Unix(), Result: test.result,
+			}}); err != nil {
+				t.Fatal(err)
+			}
 
-	gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, factContributorHeadshot, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(gaps) != 0 {
-		t.Errorf("gaps = %+v, want none inside the window", gaps)
+			gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary,
+				factContributorHeadshot, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(gaps) != test.wantGap {
+				t.Errorf("gaps = %+v, want %d", gaps, test.wantGap)
+			}
+		})
 	}
 }
 

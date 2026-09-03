@@ -215,10 +215,9 @@ func readLikenSidecar(sidecar likenSidecar, result *walkResult) {
 // the number the operator schedules on and the rows the container finds are
 // one set.
 func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time) (map[string]int, error) {
-	cutoff := now.Add(-defaultRetryInterval).Unix()
 	counts := map[string]int{}
 	for fact, query := range gapQueries {
-		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`, []any{library, cutoff})
+		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`, gapParams(library, now))
 		if err != nil {
 			return nil, err
 		}

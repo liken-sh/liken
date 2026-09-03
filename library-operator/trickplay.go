@@ -32,8 +32,7 @@ func trickplayGapSQL() string {
 	return `SELECT path, duration_ms FROM files ` +
 		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
 		`AND duration_ms > 0 AND video_codec != '' AND trickplay = '' ` +
-		`AND path NOT IN (SELECT item FROM attempts WHERE library = ?1 AND ` +
-		attemptFactColumn + ` = '` + factTrickplay + `' AND result != 'error' AND at >= ?2)`
+		`AND ` + attemptClause(factTrickplay, "path")
 }
 
 // One gap: the file to open, and the length the probe wrote, which is what
@@ -46,9 +45,8 @@ type trickplayGap struct {
 // The work list, out of the local copy of the catalog, with the same query the
 // reporter counts the gap with.
 func (c *Catalog) trickplayGaps(ctx context.Context, library string, now time.Time) ([]trickplayGap, error) {
-	cutoff := now.Add(-defaultRetryInterval).Unix()
 	var gaps []trickplayGap
-	err := c.stream(ctx, gapQueries[factTrickplay], []any{library, cutoff}, func(cells []any) error {
+	err := c.stream(ctx, gapQueries[factTrickplay], gapParams(library, now), func(cells []any) error {
 		if len(cells) < 2 {
 			return nil
 		}
@@ -157,9 +155,9 @@ func (e *enricher) stageTrickplay(ctx context.Context, input, staging string,
 		return 0, attemptError
 	}
 	// A decode ffmpeg refuses is the file's own state, and not a fault of
-	// the run, so it is a miss with a date and the window applies: a file
+	// the run, so it is a miss with a date and the long window applies: a file
 	// that will not decode today will not decode tomorrow. A run a signal
-	// ended is an error, and the next run tries the file again.
+	// ended is an error, and the error window applies.
 	if err := ffmpegSheets(ctx, input, tiles); err != nil {
 		e.logf("could not tile %s: %v", filepath.Base(input), err)
 		if ffmpegRefused(err) {

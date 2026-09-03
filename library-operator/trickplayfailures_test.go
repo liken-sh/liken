@@ -175,26 +175,31 @@ func TestACrashBetweenTwoSheetsLandsNoTrickplayDirectory(t *testing.T) {
 	}
 }
 
-// An error attempt leaves the gap open, so the file the crashed run left
-// behind is worked again on the next run and not after the retry window.
-func TestAnErrorAttemptLeavesTheTrickplayGapOpenAgainstTheRealSchema(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	seed := &walkResult{
-		files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
-			Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"}},
-		attempts: []attemptRow{{Library: trickplayLibrary, Item: "A/a.mkv", Fact: factTrickplay,
-			At: ledgerTime.Unix(), Result: attemptError}},
-	}
-	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
-		t.Fatal(err)
-	}
+// The file a crashed run left behind is tiled again after the error window
+// and not on the next run. A file ffmpeg refused is a miss with a date and
+// waits the long window.
+func TestEveryAttemptKindGatesTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
+	for _, test := range attemptWindowCases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seed := &walkResult{
+				files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
+					Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"}},
+				attempts: []attemptRow{{Library: trickplayLibrary, Item: "A/a.mkv",
+					Fact: factTrickplay, At: ledgerTime.Add(-test.age).Unix(), Result: test.result}},
+			}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
 
-	gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gaps[factTrickplay] != 1 {
-		t.Errorf("trickplay gap = %d, want the file the run could not tile", gaps[factTrickplay])
+			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gaps[factTrickplay] != test.wantGap {
+				t.Errorf("trickplay gap = %d, want %d", gaps[factTrickplay], test.wantGap)
+			}
+		})
 	}
 }
 
