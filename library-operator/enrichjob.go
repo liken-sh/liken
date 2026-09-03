@@ -144,6 +144,20 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 		facts = append(facts, factsContainer(library, contributorsContainerName, contributorFactNames,
 			path, scannerImage, busAddress, topicBase))
 	}
+	// The trickplay container. It runs only where the Library turns the fact on,
+	// because a first pass over a whole library is hours of CPU. It asks no
+	// provider: the file alone answers it. It takes a memory line and a CPU
+	// request of its own because it decodes a video where every other container
+	// reads rows. It is an init container for the reason the art container is:
+	// the enrich container must run last. Plan 30 makes it a regular container
+	// once the fan-out exists.
+	if library.Spec.Trickplay.Enabled {
+		tiles := factsContainer(library, trickplayContainerName, []string{factTrickplay},
+			path, scannerImage, busAddress, topicBase)
+		tiles.Resources.Requests["cpu"] = trickplayCPURequest
+		tiles.Resources.Limits = map[string]string{"memory": trickplayMemoryLimit}
+		facts = append(facts, tiles)
+	}
 	// The same environment carries the source order, so a container asks its
 	// providers in the order spec.sources names them.
 	keys := providerEnv(library, providers)

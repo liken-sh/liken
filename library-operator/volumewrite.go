@@ -128,6 +128,90 @@ func (w *volumeWriter) removeTemporary(path string) error {
 	return os.Remove(path)
 }
 
+// The staging door for a tool that writes its own files. The directory carries
+// the temporary mark, so the remove below takes it and the scanner reads
+// nothing under it as a title's file. A staging a crashed run left behind goes
+// first, so the tool never reads that run's output as its own.
+func (w *volumeWriter) stageTree(target string) (string, error) {
+	staging := w.temporary(target)
+	if err := w.removeTemporaryTree(staging); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(staging, volumeDirectoryPerm); err != nil {
+		return "", err
+	}
+	return staging, nil
+}
+
+// The create door for a whole directory. Every file in the staged tree and
+// every directory of it reaches the disk, then one rename lands the tree under
+// its real name, so a reader sees the whole directory or none of it. The Lstat
+// is what refuses a target that is there: it decides, because a rename onto an
+// existing empty directory would succeed and take it. The rename's own failure
+// on a directory that holds files is the backstop for the window between the
+// two, where another writer created the target. A failure takes the staged
+// tree with it, and the answer says whether this call landed it.
+func (w *volumeWriter) createTree(target string) (bool, error) {
+	staging := w.temporary(target)
+	if _, err := os.Lstat(target); err == nil {
+		return false, w.removeTemporaryTree(staging)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	if err := syncTree(staging); err != nil {
+		_ = w.removeTemporaryTree(staging)
+		return false, err
+	}
+	if err := os.Rename(staging, target); err != nil {
+		_ = w.removeTemporaryTree(staging)
+		return false, err
+	}
+	return true, nil
+}
+
+// Every file first, then the directory that names it, so the rename above
+// lands a tree whose bytes and whose entries are both on the disk.
+func syncTree(directory string) error {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		under := filepath.Join(directory, entry.Name())
+		if entry.IsDir() {
+			err = syncTree(under)
+		} else {
+			err = syncPath(under)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return syncPath(directory)
+}
+
+// One open and one sync. A directory answers this call the way a file does,
+// which is how the entries under it reach the disk.
+func syncPath(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return file.Sync()
+}
+
+// The remove that takes a staging directory and everything under it. It
+// refuses every name that does not carry the temporary mark, the rule
+// removeTemporary holds, so the files under a name a person wrote are out of
+// reach of this binary.
+func (w *volumeWriter) removeTemporaryTree(path string) error {
+	if !strings.Contains(filepath.Base(path), likenTempMark) {
+		return fmt.Errorf("refusing to remove %s: it carries no %s mark", path, likenTempMark)
+	}
+	return os.RemoveAll(path)
+}
+
 // A .liken directory does not exist until the first fact writes into it,
 // so the directory is created before the file lands in it.
 func (w *volumeWriter) writeInto(directory, name string, data []byte) error {

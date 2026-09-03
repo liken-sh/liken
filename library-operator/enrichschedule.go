@@ -259,6 +259,15 @@ func gapOpen(library *Library, report *libraryReport, providers providerSet) boo
 		if count <= 0 {
 			continue
 		}
+		// The trickplay gap counts only where the Library turned the fact on,
+		// because a library that leaves it off never closes that gap and would
+		// schedule a Job every pass for ever.
+		if fact == factTrickplay {
+			if library.Spec.Trickplay.Enabled {
+				return true
+			}
+			continue
+		}
 		if fact != factProbe &&
 			providers.serving(library.Metadata.Namespace, library.Spec.Sources, fact) == nil {
 			continue

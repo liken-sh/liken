@@ -157,6 +157,15 @@ type LibrarySpec struct {
 
 	// How often the full walk runs.
 	Scan LibraryScan `json:"scan,omitzero"`
+
+	// Whether this library builds the thumbnail sheets a scrub bar reads, which
+	// costs hours of CPU over a whole library on the first run.
+	Trickplay LibraryTrickplay `json:"trickplay,omitzero"`
+}
+
+// The trickplay block of the spec, off unless the owner turns it on.
+type LibraryTrickplay struct {
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // The schedule the Library's full walk runs on, as the cron

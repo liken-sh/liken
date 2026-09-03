@@ -1,8 +1,10 @@
-# The operator's image: one static Go binary, one static ffprobe, the CA
+# The operator's image: one static Go binary, two static ffmpeg tools, the CA
 # bundle every TLS call reads, and nothing else. The operator holds the
 # cluster credentials and writes every status, so its image carries no shell,
-# no libc, and no other tools. The probe fact is the one that opens a
-# media file, and ffprobe is the one tool it needs. The media browser and the
+# no libc, and no other tools.
+# Two facts open a media file: the probe fact reads a file's streams with
+# ffprobe, and the trickplay fact decodes a video into thumbnail sheets with
+# ffmpeg. The media browser and the
 # Corrosion sidecar build from media-browser/Dockerfile and
 # corrosion/Dockerfile, and the release ships the three together.
 
@@ -18,7 +20,7 @@ COPY *.go ./
 # from scratch, where there is no loader to need.
 RUN CGO_ENABLED=0 go build -trimpath -o /library-operator .
 
-# ffprobe comes from a pinned upstream image and not from a package install.
+# The tools come from a pinned upstream image and not from a package install.
 # The binaries there are static, so they run from scratch with no loader, and
 # the exact tag is what makes two builds of one commit read the same file the
 # same way.
@@ -30,6 +32,11 @@ COPY --from=build /library-operator /library-operator
 # one. The bundle is the build stage's own Debian set.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=ffmpeg /ffprobe /usr/bin/ffprobe
-# A scratch image carries no PATH, and the probe fact finds ffprobe by name.
+# The trickplay fact decodes a video and tiles its thumbnails, which ffprobe
+# cannot do. The static ffmpeg is 133 MiB, the largest thing in the image by
+# far, and it ships with the operator and the probe fact because one image
+# runs every role.
+COPY --from=ffmpeg /ffmpeg /usr/bin/ffmpeg
+# A scratch image carries no PATH, and the file facts find their tools by name.
 ENV PATH=/usr/bin
 ENTRYPOINT ["/library-operator"]

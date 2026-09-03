@@ -76,6 +76,8 @@ const defaultRetryInterval = 30 * 24 * time.Hour
 // details landed nowhere the scanner reads is tried again after the
 // window.
 var gapQueries = map[string]string{
+	// A video with a length and no tiles beside it.
+	factTrickplay: trickplayGapSQL(),
 	factProbe: `SELECT path FROM files ` +
 		`WHERE library = ? AND type = 'video' AND present = 1 AND duration_ms = 0 ` +
 		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND ` + attemptFactColumn + ` = 'probe' AND result != 'error' AND at >= ?)`,

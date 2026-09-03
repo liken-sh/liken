@@ -289,3 +289,141 @@ func TestAnEditKeepsTheByteOrderMarkTheDocumentOpensWith(t *testing.T) {
 		t.Errorf("edited to\n%q\nwant\n%q", edited, want)
 	}
 }
+
+// The tree remove refuses every name that does not carry the temporary mark,
+// so no path in this binary can take a directory a person filled.
+func TestATreeRemoveRefusesANameWithNoTemporaryMark(t *testing.T) {
+	root := t.TempDir()
+	held := filepath.Join(root, "One (2001).trickplay")
+	writeFile(t, filepath.Join(held, "0.jpg"), "a sheet")
+
+	if err := newVolumeWriter("movies-enrich").removeTemporaryTree(held); err == nil {
+		t.Error("the remove ran, want a refusal")
+	}
+	if !fileExistsInTest(t, filepath.Join(held, "0.jpg")) {
+		t.Error("the refused remove took the directory")
+	}
+}
+
+// A staged tree lands under its real name with one rename, and the staging
+// directory is gone when it does.
+func TestAStagedTreeLandsWithOneRename(t *testing.T) {
+	writer := newVolumeWriter("movies-enrich")
+	target := filepath.Join(t.TempDir(), "One (2001).trickplay")
+
+	staging, err := writer.stageTree(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(staging, "320 - 10x10", "0.jpg"), "a sheet")
+
+	landed, err := writer.createTree(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !landed {
+		t.Error("the tree did not land, want the rename")
+	}
+	if got := readFileString(t, filepath.Join(target, "320 - 10x10", "0.jpg")); got != "a sheet" {
+		t.Errorf("the sheet reads %q, want the staged bytes", got)
+	}
+	if fileExistsInTest(t, staging) {
+		t.Error("the staging directory is still on the volume")
+	}
+}
+
+// A target another writer holds is never opened and never replaced. The
+// staged tree goes, and the answer says this call landed nothing.
+func TestAStagedTreeLeavesATargetThatIsThere(t *testing.T) {
+	writer := newVolumeWriter("movies-enrich")
+	target := filepath.Join(t.TempDir(), "One (2001).trickplay")
+	writeFile(t, filepath.Join(target, "held"), "what the other writer left")
+
+	staging, err := writer.stageTree(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(staging, "0.jpg"), "a sheet")
+
+	landed, err := writer.createTree(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if landed {
+		t.Error("the tree landed, want the target left as it was")
+	}
+	if got := readFileString(t, filepath.Join(target, "held")); got != "what the other writer left" {
+		t.Errorf("the file reads %q, want the other writer's bytes", got)
+	}
+	if fileExistsInTest(t, filepath.Join(target, "0.jpg")) {
+		t.Error("a staged file reached the target")
+	}
+	if fileExistsInTest(t, staging) {
+		t.Error("the staging directory is still on the volume")
+	}
+}
+
+// A tree the volume will not sync or rename is an error, and the staged tree
+// goes with it, so nothing of the failed write stays behind.
+func TestAStagedTreeThatCannotLandIsAnError(t *testing.T) {
+	cases := []struct {
+		name  string
+		setUp func(t *testing.T, root, staging string)
+	}{
+		{name: "a staged file that will not open", setUp: func(t *testing.T, root, staging string) {
+			t.Helper()
+			sheet := filepath.Join(staging, "0.jpg")
+			writeFile(t, sheet, "a sheet")
+			if err := os.Chmod(sheet, 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "a folder that takes no rename", setUp: func(t *testing.T, root, staging string) {
+			t.Helper()
+			writeFile(t, filepath.Join(staging, "0.jpg"), "a sheet")
+			if err := os.Chmod(root, 0o555); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			writer := newVolumeWriter("movies-enrich")
+			root := t.TempDir()
+			target := filepath.Join(root, "One (2001).trickplay")
+			staging, err := writer.stageTree(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.setUp(t, root, staging)
+
+			if _, err := writer.createTree(target); err == nil {
+				t.Error("the tree landed, want an error")
+			}
+			if fileExistsInTest(t, target) {
+				t.Error("the failed write left the target on the volume")
+			}
+		})
+	}
+}
+
+// A target the write door cannot even read about is an error and not a target
+// that is not there.
+func TestATargetTheDoorCannotReadIsAnError(t *testing.T) {
+	writer := newVolumeWriter("movies-enrich")
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "One (2001)"), "a file where the folder goes")
+
+	if _, err := writer.createTree(filepath.Join(root, "One (2001)", "x.trickplay")); err == nil {
+		t.Error("the target read as absent, want an error")
+	}
+}
+
+// A staged tree that is not there reads as an error rather than as an empty
+// one, so a rename never lands nothing.
+func TestSyncingATreeThatIsNotThereIsAnError(t *testing.T) {
+	if err := syncTree(filepath.Join(t.TempDir(), "gone")); err == nil {
+		t.Error("the sync ran, want an error")
+	}
+}

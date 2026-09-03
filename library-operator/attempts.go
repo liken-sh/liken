@@ -145,10 +145,10 @@ func (s likenSidecar) ledgerFacts() []string {
 	return likenFacts
 }
 
-// The facts the scanner lifts out of a folder. The file fact keys on a
+// The facts the scanner lifts out of a folder. A file fact keys on a
 // path, because it works per file, and the identity fact keys on an item
 // id, because it works per title.
-var likenFacts = []string{factProbe, factIdentity,
+var likenFacts = []string{factProbe, factTrickplay, factIdentity,
 	factOverview, factCertification,
 	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
 	factCredits,
@@ -192,7 +192,7 @@ func (s likenSidecar) read() ([]attemptRow, []creditRow, error) {
 // How an entry's path resolves: a file fact names the file itself, and an
 // item fact names the title the folder holds.
 func (s likenSidecar) itemOf(fact, path string) string {
-	if _, art := artTypes[fact]; fact == factProbe || art {
+	if _, art := artTypes[fact]; fact == factProbe || fact == factTrickplay || art {
 		return relativePath(s.root, filepath.Join(s.dir, path))
 	}
 	if path == likenSelfPath || path == "" {

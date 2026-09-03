@@ -49,10 +49,10 @@ func TestAContainerRefusesAListItCannotRun(t *testing.T) {
 		says  string
 	}{
 		{name: "a list with no fact in it", says: "names no fact"},
-		{name: "a fact this image does not run", facts: []string{"trickplay"},
+		{name: "a fact this image does not run", facts: []string{"posters"},
 			says: "does not run"},
 		{name: "one name this image does not run among ones it does",
-			facts: []string{factProbe, factTrickplay}, says: "does not run"},
+			facts: []string{factProbe, "posters"}, says: "does not run"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

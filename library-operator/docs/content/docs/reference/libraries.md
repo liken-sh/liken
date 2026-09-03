@@ -50,6 +50,7 @@ The volume this library covers, the kind of media it holds, and the settings for
 | <span id="spec--series"></span>`series` | [object](#specseries) | no | The settings for a library of series, one folder per series with a folder per season inside it. Present exactly when kind is series, and empty is a complete block. |
 | <span id="spec--sources"></span>`sources` | []string | no | The MetadataProviders in this namespace to ask about a title, by name, in the order they are asked: for each fact, the first provider in the list that serves it and is Ready is the one asked. The Sources condition reports a name that resolves to no provider, or a list where none serves a fact this library needs. A library that omits the list runs only the facts that need no provider. |
 | <span id="spec--scan"></span>`scan` | [object](#specscan) | no | When the full walk of this library runs. |
+| <span id="spec--trickplay"></span>`trickplay` | [object](#spectrickplay) | no | The thumbnail sheets and the WebVTT map a scrub bar reads, built beside each video from the file alone, with no provider. |
 | <span id="spec--ignore"></span>`ignore` | []string | no | Path components to skip. The scanner leaves out any folder whose name matches an entry, and everything under it, so a volume's non-media folders such as a recycle bin or a staging directory stay out of the catalog. |
 
 ### spec.storage
@@ -84,6 +85,14 @@ When the full walk of this library runs.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specscan--schedule"></span>`schedule` | string | no | The cron expression the full walk runs on, in the cluster's time zone; omitted, once an hour on the hour. Default: `0 * * * *`. |
+
+### spec.trickplay
+
+The thumbnail sheets and the WebVTT map a scrub bar reads, built beside each video from the file alone, with no provider.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrickplay--enabled"></span>`enabled` | boolean | no | Off by default, because a first pass reads every video of the library end to end, which is hours of CPU for a library of any size, and writes a directory of sheets beside every one of them. Turned on, the enricher Job gains a trickplay container that fills the gap one video after another. Default: `false`. |
 
 ## status
 

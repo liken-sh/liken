@@ -236,6 +236,15 @@ spec:
                       minLength: 1
                       default: "0 * * * *"
                       description: "The cron expression the full walk runs on, in the cluster's time zone; omitted, once an hour on the hour."
+                trickplay:
+                  type: object
+                  default: {}
+                  description: "The thumbnail sheets and the WebVTT map a scrub bar reads, built beside each video from the file alone, with no provider."
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: "Off by default, because a first pass reads every video of the library end to end, which is hours of CPU for a library of any size, and writes a directory of sheets beside every one of them. Turned on, the enricher Job gains a trickplay container that fills the gap one video after another."
                 ignore:
                   type: array
                   x-kubernetes-list-type: atomic

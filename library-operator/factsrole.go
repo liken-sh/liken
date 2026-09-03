@@ -21,8 +21,9 @@ type factRun func(ctx context.Context, e *enricher) error
 // A name this map does not hold ends the container, because a pod that asks
 // for work this image cannot do is a manifest to repair.
 var factRuns = map[string]factRun{
-	factProbe:    func(ctx context.Context, e *enricher) error { return e.probeFact(ctx) },
-	factIdentity: func(ctx context.Context, e *enricher) error { return e.identityFact(ctx) },
+	factProbe:     func(ctx context.Context, e *enricher) error { return e.probeFact(ctx) },
+	factIdentity:  func(ctx context.Context, e *enricher) error { return e.identityFact(ctx) },
+	factTrickplay: func(ctx context.Context, e *enricher) error { return e.trickplayFact(ctx) },
 
 	factOverview:             nfoFactRun(factOverview),
 	factCertification:        nfoFactRun(factCertification),
