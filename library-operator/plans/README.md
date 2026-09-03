@@ -73,6 +73,9 @@ they share, and plans 28 to 31 build them in order.
 * [33, The IMDb datasets](33-the-imdb-datasets.md). A stub: a provider
   with a store, because the datasets are bulk files and not a call per
   title. OMDb serves `rating.imdb` until then.
+* [34, Every fact writes its rows](34-every-fact-writes-its-rows.md).
+  Each fact writes its own catalog rows as it writes its files, only
+  the columns it owns, and the phases that share no file run at once.
 
 Plan 32 stands apart from the enrichment work.
 
