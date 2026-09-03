@@ -96,13 +96,13 @@ func (e *enricher) inScope(relative string) bool {
 	return relative == e.scope || strings.HasPrefix(relative, e.scope+string(filepath.Separator))
 }
 
-// Reads one concern's work list out of the local copy of the catalog, with
+// Reads one fact's work list out of the local copy of the catalog, with
 // the same query the reporter counts the gap with.
-func (e *enricher) gaps(ctx context.Context, concern string, now time.Time) ([]string, error) {
+func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]string, error) {
 	cutoff := now.Add(-defaultRetryInterval).Unix()
-	keys, err := e.catalog.queryStrings(ctx, gapQueries[concern], []any{e.library, cutoff})
+	keys, err := e.catalog.queryStrings(ctx, gapQueries[fact], []any{e.library, cutoff})
 	if err != nil {
-		return nil, fmt.Errorf("reading the %s gap of %s: %w", concern, e.library, err)
+		return nil, fmt.Errorf("reading the %s gap of %s: %w", fact, e.library, err)
 	}
 	return keys, nil
 }
@@ -120,15 +120,15 @@ func (e *enricher) markRunStarted(ctx context.Context) error {
 }
 
 // An attempt is recorded whatever the outcome, so a miss is a fact with a
-// date and never a hole a concern falls into every run. The entry path is
+// date and never a hole a fact falls into every run. The entry path is
 // relative to the folder that holds the .liken directory, which is how the
 // scanner keys it.
-func (e *enricher) recordAttempt(folder, concern, entryPath, result string, at time.Time) {
-	err := e.writer.updateLikenLedger(folder, concern, func(ledger *likenLedger) {
+func (e *enricher) recordAttempt(folder, fact, entryPath, result string, at time.Time) {
+	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
 		ledger.noteAttempt(likenAttempt{Path: entryPath, At: at, Result: result})
 	})
 	if err != nil {
-		e.logf("could not record the %s attempt at %s: %v", concern, entryPath, err)
+		e.logf("could not record the %s attempt at %s: %v", fact, entryPath, err)
 	}
 }
 
@@ -139,7 +139,7 @@ func (e *enricher) logf(format string, args ...any) {
 	fmt.Fprintf(e.log, "library.liken.sh: "+format+"\n", args...)
 }
 
-// The folder whose .liken directory records a file concern's attempt: the
+// The folder whose .liken directory records a file fact's attempt: the
 // folder the walk reads a sidecar from, which is the title folder even where
 // the file sits in a movie's extras.
 func likenFolderFor(kind, absolute string) (string, string) {

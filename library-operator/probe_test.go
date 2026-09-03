@@ -105,7 +105,7 @@ func TestTheProbeRecordsItsAttemptAndTheRunItStarted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), concernProbe)
+	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestTheProbeRecordsAnErrorWhereTheFileWillNotOpen(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), concernProbe)
+			ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -369,7 +369,7 @@ func TestACommandThatFailsIsAnError(t *testing.T) {
 }
 
 // A sidecar with no root element holds nothing to keep, so the minimal
-// document takes its place and the concern's edit lands in it.
+// document takes its place and the fact's edit lands in it.
 func TestASidecarWithNoRootElementIsWrittenAsIfItWereAbsent(t *testing.T) {
 	cases := []struct {
 		name    string

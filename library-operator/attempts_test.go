@@ -6,7 +6,7 @@ import (
 )
 
 // The ledger a folder carries in these tests, in the shape the identity
-// concern writes when no rung parted two results.
+// fact writes when no rung parted two results.
 const candidatesLedger = `items:
     - path: .
       candidates:
@@ -32,8 +32,8 @@ func TestAFolderWithAnIdentityLedgerYieldsAnAttemptsRow(t *testing.T) {
 		t.Fatalf("attempts = %+v, want one", result.attempts)
 	}
 	got := result.attempts[0]
-	if got.Item != "movie:path:star-wars-1977" || got.Concern != concernIdentity || got.Result != attemptCandidates {
-		t.Errorf("attempt = %+v, want the item's own id under the identity concern", got)
+	if got.Item != "movie:path:star-wars-1977" || got.Fact != factIdentity || got.Result != attemptCandidates {
+		t.Errorf("attempt = %+v, want the item's own id under the identity fact", got)
 	}
 	if got.Library != "house/movies" || got.At != ledgerTime.Unix() {
 		t.Errorf("attempt = %+v, want the library and the time the ledger records", got)
@@ -53,8 +53,8 @@ func TestAProbeAttemptKeysOnTheFilePath(t *testing.T) {
 		t.Fatalf("attempts = %+v, want one", result.attempts)
 	}
 	want := filepath.Join("Star Wars (1977)", "Star Wars (1977).mkv")
-	if got := result.attempts[0]; got.Item != want || got.Concern != concernProbe {
-		t.Errorf("attempt = %+v, want the file path under the probe concern", got)
+	if got := result.attempts[0]; got.Item != want || got.Fact != factProbe {
+		t.Errorf("attempt = %+v, want the file path under the probe fact", got)
 	}
 }
 
@@ -92,14 +92,14 @@ func TestASeasonFolderLedgerKeysOnTheEpisodeItem(t *testing.T) {
 
 	items := map[string]string{}
 	for _, attempt := range result.attempts {
-		items[attempt.Concern] = attempt.Item
+		items[attempt.Fact] = attempt.Item
 	}
 	wantFile := filepath.Join("Twin Peaks (1990)", "Season 01", "Twin Peaks - S01E01.mkv")
-	if items[concernProbe] != wantFile {
-		t.Errorf("the probe attempt names %q, want the file path", items[concernProbe])
+	if items[factProbe] != wantFile {
+		t.Errorf("the probe attempt names %q, want the file path", items[factProbe])
 	}
-	if items[concernIdentity] != "episode:path:twin-peaks-1990:s01e01" {
-		t.Errorf("the identity attempt names %q, want the episode item", items[concernIdentity])
+	if items[factIdentity] != "episode:path:twin-peaks-1990:s01e01" {
+		t.Errorf("the identity attempt names %q, want the episode item", items[factIdentity])
 	}
 }
 
@@ -148,10 +148,10 @@ func TestAnAttemptWithNoResolvableItemIsLeftOut(t *testing.T) {
 }
 
 func TestAttemptKeysSplitBackIntoTheirColumns(t *testing.T) {
-	keys := attemptKeys([]string{"movie:path:x" + linkKeySeparator + concernIdentity, "no-separator"})
+	keys := attemptKeys([]string{"movie:path:x" + linkKeySeparator + factIdentity, "no-separator"})
 
-	if keys[0] != (attemptKey{Item: "movie:path:x", Concern: concernIdentity}) {
-		t.Errorf("key = %+v, want the item and the concern", keys[0])
+	if keys[0] != (attemptKey{Item: "movie:path:x", Fact: factIdentity}) {
+		t.Errorf("key = %+v, want the item and the fact", keys[0])
 	}
 	if keys[1] != (attemptKey{Item: "no-separator"}) {
 		t.Errorf("key = %+v, want the item alone", keys[1])
@@ -173,8 +173,8 @@ func TestAnExtrasFolderLedgerKeysOnTheFilePath(t *testing.T) {
 		t.Fatalf("attempts = %+v, want the extras folder's own", result.attempts)
 	}
 	want := filepath.Join("Twin Peaks (1990)", "Extras", "Deleted Scene.mkv")
-	if got := result.attempts[0]; got.Item != want || got.Concern != concernProbe {
-		t.Errorf("attempt = %+v, want the file path under the probe concern", got)
+	if got := result.attempts[0]; got.Item != want || got.Fact != factProbe {
+		t.Errorf("attempt = %+v, want the file path under the probe fact", got)
 	}
 }
 
@@ -191,7 +191,7 @@ func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gaps, err := catalog.queryStrings(t.Context(), gapQueries[concernProbe],
+	gaps, err := catalog.queryStrings(t.Context(), gapQueries[factProbe],
 		[]any{"house/series", ledgerTime.Add(-defaultRetryInterval).Unix()})
 
 	if err != nil {

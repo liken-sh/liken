@@ -27,11 +27,8 @@ func main() {
 		case reportMode:
 			runReport()
 			return
-		case probeMode:
-			runProbe()
-			return
-		case identityMode:
-			runIdentity()
+		case factsMode:
+			runFacts()
 			return
 		case enrichMode:
 			runEnrich()

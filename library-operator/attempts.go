@@ -12,32 +12,41 @@ import (
 	"time"
 )
 
+// The column of the attempts table that holds the fact. Corrosion applies the
+// difference between the schema file and the database on every start. It adds
+// tables, columns, and indexes, and it refuses to remove a column. This
+// column is also part of the primary key, and Corrosion refuses to add a
+// primary key column to a table that exists. So the column keeps the name it
+// was created with, every Go name is fact, and this constant is the one place
+// the two meet.
+const attemptFactColumn = "concern"
+
 // One enricher's last attempt at one item, as the attempts table holds it.
-// For a file concern the item is the file's path under the library root.
+// For a file fact the item is the file's path under the library root.
 type attemptRow struct {
 	Library string
 	Item    string
-	Concern string
+	Fact    string
 	At      int64
 	Result  string
 }
 
 // One attempts row, by the two key columns that follow the library.
 type attemptKey struct {
-	Item    string
-	Concern string
+	Item string
+	Fact string
 }
 
-// A repeat write updates the row in place, because one item and one concern
+// A repeat write updates the row in place, because one item and one fact
 // hold one attempt, the latest. The update names no key column, so the row's
 // identity never moves.
 func (c *Catalog) UpsertAttempts(ctx context.Context, rows []attemptRow) (int, error) {
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
 		statements[i] = statement{
-			sql: `INSERT INTO attempts (library, item, concern, at, result) VALUES (?, ?, ?, ?, ?) ` +
-				`ON CONFLICT (library, item, concern) DO UPDATE SET at = excluded.at, result = excluded.result`,
-			params: []any{row.Library, row.Item, row.Concern, row.At, row.Result},
+			sql: `INSERT INTO attempts (library, item, ` + attemptFactColumn + `, at, result) VALUES (?, ?, ?, ?, ?) ` +
+				`ON CONFLICT (library, item, ` + attemptFactColumn + `) DO UPDATE SET at = excluded.at, result = excluded.result`,
+			params: []any{row.Library, row.Item, row.Fact, row.At, row.Result},
 		}
 	}
 	return c.apply(ctx, statements)
@@ -49,8 +58,8 @@ func (c *Catalog) DeleteAttempts(ctx context.Context, library string, keys []att
 	statements := make([]statement, len(keys))
 	for i, key := range keys {
 		statements[i] = statement{
-			sql:    `DELETE FROM attempts WHERE library = ? AND item = ? AND concern = ?`,
-			params: []any{library, key.Item, key.Concern},
+			sql:    `DELETE FROM attempts WHERE library = ? AND item = ? AND ` + attemptFactColumn + ` = ?`,
+			params: []any{library, key.Item, key.Fact},
 		}
 	}
 	return c.apply(ctx, statements)
@@ -62,37 +71,37 @@ func (c *Catalog) DeleteAttempts(ctx context.Context, library string, keys []att
 func attemptKeys(keys []string) []attemptKey {
 	out := make([]attemptKey, len(keys))
 	for i, key := range keys {
-		item, concern, _ := strings.Cut(key, linkKeySeparator)
-		out[i] = attemptKey{Item: item, Concern: concern}
+		item, fact, _ := strings.Cut(key, linkKeySeparator)
+		out[i] = attemptKey{Item: item, Fact: fact}
 	}
 	return out
 }
 
 func attemptSeenKey(row attemptRow) string {
-	return row.Item + linkKeySeparator + row.Concern
+	return row.Item + linkKeySeparator + row.Fact
 }
 
 // Reads the attempts this library holds that the current epoch did not mark,
 // one bounded batch, with the two key columns joined the way the mark joined
 // them.
 func attemptPruneSQL() string {
-	return `SELECT item || char(31) || concern FROM attempts` +
+	return `SELECT item || char(31) || ` + attemptFactColumn + ` FROM attempts` +
 		` WHERE library = ?` +
-		` AND '` + seenAttempt + `' || item || char(31) || concern` +
+		` AND '` + seenAttempt + `' || item || char(31) || ` + attemptFactColumn +
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
 		` LIMIT ?`
 }
 
-// How a rescan reaches one folder's attempts: a file concern keys on a path
-// under the folder, and an item concern keys on the id of an item the folder
+// How a rescan reaches one folder's attempts: a file fact keys on a path
+// under the folder, and an item fact keys on the id of an item the folder
 // holds.
 func scopedAttemptPruneSQL() string {
 	scope := func(table string) string {
 		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")
 	}
-	return `SELECT item || char(31) || concern FROM attempts` +
+	return `SELECT item || char(31) || ` + attemptFactColumn + ` FROM attempts` +
 		` WHERE library = ?` +
-		` AND '` + seenAttempt + `' || item || char(31) || concern` +
+		` AND '` + seenAttempt + `' || item || char(31) || ` + attemptFactColumn +
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
 		` AND (` + pathScopeClause("item") +
 		` OR item IN (` + scope("movies") + ` UNION ` + scope("series") + ` UNION ` + scope("episodes") + `))` +
@@ -119,30 +128,30 @@ type likenSidecar struct {
 	items   map[string]string
 }
 
-// The concerns the scanner lifts out of a folder. The file concern keys on a
-// path, because it works per file, and the identity concern keys on an item
+// The facts the scanner lifts out of a folder. The file fact keys on a
+// path, because it works per file, and the identity fact keys on an item
 // id, because it works per title.
-var likenConcerns = []string{concernProbe, concernIdentity}
+var likenFacts = []string{factProbe, factIdentity}
 
 // Reads every .liken file the folder holds into attempts rows. A folder that
 // holds none reads as no rows and not as an error, because most folders hold
 // none.
 func (s likenSidecar) attempts() ([]attemptRow, error) {
 	var rows []attemptRow
-	for _, concern := range likenConcerns {
-		ledger, err := readLikenLedger(s.dir, concern)
+	for _, fact := range likenFacts {
+		ledger, err := readLikenLedger(s.dir, fact)
 		if err != nil {
 			return rows, err
 		}
 		for _, attempt := range ledger.Attempts {
-			item := s.itemOf(concern, attempt.Path)
+			item := s.itemOf(fact, attempt.Path)
 			if item == "" || attempt.Result == "" {
 				continue
 			}
 			rows = append(rows, attemptRow{
 				Library: s.library,
 				Item:    item,
-				Concern: concern,
+				Fact:    fact,
 				At:      attempt.At.Unix(),
 				Result:  attempt.Result,
 			})
@@ -151,10 +160,10 @@ func (s likenSidecar) attempts() ([]attemptRow, error) {
 	return rows, nil
 }
 
-// How an entry's path resolves: a file concern names the file itself, and an
-// item concern names the title the folder holds.
-func (s likenSidecar) itemOf(concern, path string) string {
-	if concern == concernProbe {
+// How an entry's path resolves: a file fact names the file itself, and an
+// item fact names the title the folder holds.
+func (s likenSidecar) itemOf(fact, path string) string {
+	if fact == factProbe {
 		return relativePath(s.root, filepath.Join(s.dir, path))
 	}
 	if path == likenSelfPath || path == "" {
@@ -178,12 +187,12 @@ func readLikenSidecar(sidecar likenSidecar, result *walkResult) {
 func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time) (map[string]int, error) {
 	cutoff := now.Add(-defaultRetryInterval).Unix()
 	counts := map[string]int{}
-	for concern, query := range gapQueries {
+	for fact, query := range gapQueries {
 		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`, []any{library, cutoff})
 		if err != nil {
 			return nil, err
 		}
-		counts[concern] = count
+		counts[fact] = count
 	}
 	return counts, nil
 }

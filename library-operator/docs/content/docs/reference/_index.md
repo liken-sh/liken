@@ -12,4 +12,4 @@ is a volume of media of one kind, and what its scanner reports.
 [Catalogs](/docs/reference/catalogs/) is a namespace's shared catalog
 and the claims its agents run on.
 [Metadata providers](/docs/reference/metadataproviders/) is one
-account with one provider, and the concerns it may serve.
+account with one provider, and the facts it may serve.

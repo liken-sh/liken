@@ -299,8 +299,8 @@ func (f *fakeCatalog) unmarkedLinks(sql string, p []any) []any {
 }
 
 // unmarkedAttempts reads this library's attempts that the current epoch
-// did not mark. A scoped read reaches a file concern's row by the path in
-// its item column, and an item concern's row through the item tables, the
+// did not mark. A scoped read reaches a file fact's row by the path in
+// its item column, and an item fact's row through the item tables, the
 // way the alias prune reaches an alias.
 func (f *fakeCatalog) unmarkedAttempts(sql string, p []any) []any {
 	scoped := strings.Contains(sql, "item >=")
@@ -316,12 +316,12 @@ func (f *fakeCatalog) unmarkedAttempts(sql string, p []any) []any {
 		if row.library != library || len(rest) != 3 {
 			continue
 		}
-		item, concern := rest[1], rest[2]
-		if f.seen[seenPrefix(sql)+item+linkKeySeparator+concern] == epoch {
+		item, fact := rest[1], rest[2]
+		if f.seen[seenPrefix(sql)+item+linkKeySeparator+fact] == epoch {
 			continue
 		}
 		if !scoped || inScope(item, folder) || scope[item] {
-			keys = append(keys, item+linkKeySeparator+concern)
+			keys = append(keys, item+linkKeySeparator+fact)
 		}
 	}
 	return keys

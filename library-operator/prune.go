@@ -65,7 +65,7 @@ const (
 	seenAlias = "alias:"
 	seenLink  = "link:"
 	// An attempt has a key space of its own, and its key is the item and the
-	// concern joined, so a mark on an attempt never touches an item.
+	// fact joined, so a mark on an attempt never touches an item.
 	seenAttempt = "attempt:"
 )
 

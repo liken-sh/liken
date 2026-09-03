@@ -3,7 +3,7 @@ package main
 // providercheck.go holds the one call the operator makes against each
 // MetadataProvider per pass, the Ready condition it writes from the answer,
 // and the resolution of a Library's ordered sources to the provider that
-// serves a concern.
+// serves a fact.
 
 import (
 	"context"
@@ -30,12 +30,12 @@ var providerCheckTimeout = 10 * time.Second
 // with the verdict this pass wrote on each.
 type providerSet map[string]*MetadataProvider
 
-// The provider a Library's sources resolve to for one concern: the first
-// named provider that exists, is Ready, and lists the concern.
-func (s providerSet) serving(namespace string, sources []string, concern string) *MetadataProvider {
+// The provider a Library's sources resolve to for one fact: the first
+// named provider that exists, is Ready, and lists the fact.
+func (s providerSet) serving(namespace string, sources []string, fact string) *MetadataProvider {
 	for _, name := range sources {
 		provider, held := s[libraryKey(namespace, name)]
-		if held && provider.ready() && provider.serves(concern) {
+		if held && provider.ready() && provider.serves(fact) {
 			return provider
 		}
 	}
@@ -90,7 +90,9 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 
 // The whole status of one provider from its verdict alone. The refusal time
 // stands until another refusal replaces it, so a person reads when the key
-// last failed even after it works again.
+// last failed even after it works again. The facts are what the provider
+// serves right now, so a provider that is not Ready reports none, and the
+// list reads as what this provider can be asked for today.
 func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, now time.Time) MetadataProviderStatus {
 	status := MetadataProviderStatus{LastRefusal: provider.Status.LastRefusal}
 	if verdict.reason == reasonRefused {
@@ -105,6 +107,7 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 	}
 	if verdict.reason == reasonReachable {
 		condition.Status = ConditionTrue
+		status.Facts = provider.servedFacts()
 	}
 	status.Conditions = SetCondition(slices.Clone(provider.Status.Conditions), condition, now)
 	return status
@@ -173,15 +176,15 @@ func (o *operator) askProvider(ctx context.Context, key string) (int, error) {
 }
 
 // The Sources condition's reasons: every named provider resolves, one does
-// not exist, the provider that serves a concern is not Ready, or no named
-// provider serves a concern this library needs.
+// not exist, the provider that serves a fact is not Ready, or no named
+// provider serves a fact this library needs.
 const (
 	conditionSources = "Sources"
 
 	reasonSourcesReady     = "SourcesReady"
 	reasonProviderNotFound = "ProviderNotFound"
 	reasonProviderNotReady = "ProviderNotReady"
-	reasonConcernNotServed = "ConcernNotServed"
+	reasonFactNotServed    = "FactNotServed"
 )
 
 // What the Library's sources resolved to, in the shape a binding takes. An
@@ -192,7 +195,7 @@ type sourcesVerdict struct {
 	message string
 }
 
-// The verdict on one Library's ordered sources. The concerns a Library needs
+// The verdict on one Library's ordered sources. The facts a Library needs
 // from a provider are identity alone in this plan, so a list where none
 // serves identity is a list that fills no gap.
 func checkSources(library *Library, providers providerSet) sourcesVerdict {
@@ -209,24 +212,24 @@ func checkSources(library *Library, providers providerSet) sourcesVerdict {
 			}
 		}
 	}
-	if providers.serving(namespace, library.Spec.Sources, concernIdentity) == nil {
-		return unservedVerdict(namespace, library.Spec.Sources, providers, concernIdentity)
+	if providers.serving(namespace, library.Spec.Sources, factIdentity) == nil {
+		return unservedVerdict(namespace, library.Spec.Sources, providers, factIdentity)
 	}
 	return sourcesVerdict{
 		reason:  reasonSourcesReady,
-		message: "the sources serve the concerns this library needs",
+		message: "the sources serve the facts this library needs",
 	}
 }
 
 // A list that fills no gap has two reasons, because they call for two
-// repairs. A provider that lists the concern and failed its check is a key or
-// a Secret to repair, and a list where no provider lists the concern at all
+// repairs. A provider that lists the fact and failed its check is a key or
+// a Secret to repair, and a list where no provider lists the fact at all
 // is a source to add. The message names the provider and the reason its own
 // check wrote.
-func unservedVerdict(namespace string, sources []string, providers providerSet, concern string) sourcesVerdict {
+func unservedVerdict(namespace string, sources []string, providers providerSet, fact string) sourcesVerdict {
 	for _, name := range sources {
 		provider, held := providers[libraryKey(namespace, name)]
-		if !held || !provider.serves(concern) {
+		if !held || !provider.serves(fact) {
 			continue
 		}
 		return sourcesVerdict{
@@ -236,7 +239,7 @@ func unservedVerdict(namespace string, sources []string, providers providerSet, 
 		}
 	}
 	return sourcesVerdict{
-		reason:  reasonConcernNotServed,
-		message: "no source serves the " + concern + " concern",
+		reason:  reasonFactNotServed,
+		message: "no source serves the " + fact + " fact",
 	}
 }

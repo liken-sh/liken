@@ -39,7 +39,7 @@ func walkedRuns(at time.Time) []libraryRun {
 func libraryWithProvider() (*Library, providerSet) {
 	library := studioMovies()
 	library.Spec.Sources = []string{"tmdb"}
-	provider := readyProvider("tmdb", "house", concernIdentity)
+	provider := readyProvider("tmdb", "house", factIdentity)
 	return library, providerSet{libraryKey("house", "tmdb"): provider}
 }
 
@@ -59,32 +59,32 @@ func TestEnrichSchedulesOneJobPerLibrary(t *testing.T) {
 		want    bool
 	}{
 		{name: "a gap is open and nothing is running",
-			gaps: map[string]int{concernProbe: 4}, runs: walkedRuns(walked), want: true},
+			gaps: map[string]int{factProbe: 4}, runs: walkedRuns(walked), want: true},
 		{name: "a scan Job is still running",
-			gaps: map[string]int{concernProbe: 4}, runs: walkedRuns(walked),
+			gaps: map[string]int{factProbe: 4}, runs: walkedRuns(walked),
 			jobs: []Job{runningJob("movies-scan-29", "house", scanLabels)}},
 		{name: "an enricher Job is still running",
-			gaps: map[string]int{concernProbe: 4}, runs: walkedRuns(walked),
+			gaps: map[string]int{factProbe: 4}, runs: walkedRuns(walked),
 			jobs: []Job{runningJob("movies-enrich", "house", enrichLabels)}},
 		{name: "a scan run is in flight",
-			gaps: map[string]int{concernProbe: 4},
+			gaps: map[string]int{factProbe: 4},
 			runs: []libraryRun{{Worker: workerScan, Job: "movies-scan-2", Started: testNow}}},
 		{name: "no scan has finished since the last enrich",
-			gaps: map[string]int{concernProbe: 4},
+			gaps: map[string]int{factProbe: 4},
 			runs: append(walkedRuns(walked), libraryRun{Worker: workerEnrich, Job: "movies-enrich",
 				Started: walked, Finished: walked.Add(time.Minute)})},
 		{name: "a scan has finished since the last enrich",
-			gaps: map[string]int{concernProbe: 4},
+			gaps: map[string]int{factProbe: 4},
 			runs: append(walkedRuns(walked), libraryRun{Worker: workerEnrich, Job: "movies-enrich",
 				Started: walked.Add(-time.Hour), Finished: walked.Add(-time.Minute)}),
 			want: true},
-		{name: "every concern is filled",
-			gaps: map[string]int{concernProbe: 0, concernIdentity: 0}, runs: walkedRuns(walked)},
+		{name: "every fact is filled",
+			gaps: map[string]int{factProbe: 0, factIdentity: 0}, runs: walkedRuns(walked)},
 		{name: "the report carries no gaps at all", runs: walkedRuns(walked)},
 		{name: "an identity gap with no provider to fill it",
-			gaps: map[string]int{concernIdentity: 7}, runs: walkedRuns(walked)},
+			gaps: map[string]int{factIdentity: 7}, runs: walkedRuns(walked)},
 		{name: "an identity gap with a provider that serves it",
-			gaps: map[string]int{concernIdentity: 7}, runs: walkedRuns(walked),
+			gaps: map[string]int{factIdentity: 7}, runs: walkedRuns(walked),
 			sources: true, want: true},
 	}
 	for _, one := range cases {
@@ -111,14 +111,14 @@ func TestEnrichSchedulesOneJobPerLibrary(t *testing.T) {
 	}
 }
 
-// the enricher Job runs the identity concern only for a Library whose
+// the enricher Job runs the identity fact only for a Library whose
 // sources name a ready provider that serves it.
 func TestEnrichJobTakesTheProviderTheSourcesName(t *testing.T) {
 	cluster := newFakeCluster()
 	library, providers := libraryWithProvider()
 	boundHouse(cluster)
 	operator := testOperator(t, cluster)
-	report := &libraryReport{Gaps: map[string]int{concernIdentity: 2}, Runs: walkedRuns(testNow)}
+	report := &libraryReport{Gaps: map[string]int{factIdentity: 2}, Runs: walkedRuns(testNow)}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
 		report, nil, providers); err != nil {
@@ -157,7 +157,7 @@ func TestEnrichNamesTheJobAfterTheWalkItAnswers(t *testing.T) {
 	// has not taken it yet.
 	jobs := []Job{finishedJob(standingEnrichJobName("movies", walkedRuns(first)), "house",
 		workerLabels("movies", workerEnrich), nil)}
-	report := &libraryReport{Gaps: map[string]int{concernProbe: 2}, Runs: runs}
+	report := &libraryReport{Gaps: map[string]int{factProbe: 2}, Runs: runs}
 
 	if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
 		report, jobs, providers); err != nil {
@@ -175,7 +175,7 @@ func TestWebhookChainRunsScanEnrichRescan(t *testing.T) {
 	library, providers := libraryWithProvider()
 	boundHouse(cluster)
 	operator := testOperator(t, cluster)
-	report := &libraryReport{Gaps: map[string]int{concernIdentity: 1}, Runs: walkedRuns(testNow)}
+	report := &libraryReport{Gaps: map[string]int{factIdentity: 1}, Runs: walkedRuns(testNow)}
 
 	chain := newChain("/library/movies/Arrival (2016)", testNow)
 	folder := "/library/movies/Arrival (2016)"
@@ -268,7 +268,7 @@ func TestChainReadsTheStageThatIsLeft(t *testing.T) {
 			library, providers := libraryWithProvider()
 			boundHouse(cluster)
 			operator := testOperator(t, cluster)
-			report := &libraryReport{Gaps: map[string]int{concernIdentity: 1}, Runs: walkedRuns(testNow)}
+			report := &libraryReport{Gaps: map[string]int{factIdentity: 1}, Runs: walkedRuns(testNow)}
 			jobs := []Job{finishedJob(chainJobName("movies", one.stage, chain), "house",
 				workerLabels("movies", one.worker), chainMarks(chain, folder, one.stage))}
 
@@ -291,7 +291,7 @@ func TestWebhookChainStopsWhenNoGapIsOpen(t *testing.T) {
 	library, providers := libraryWithProvider()
 	boundHouse(cluster)
 	operator := testOperator(t, cluster)
-	report := &libraryReport{Gaps: map[string]int{concernIdentity: 0}, Runs: walkedRuns(testNow)}
+	report := &libraryReport{Gaps: map[string]int{factIdentity: 0}, Runs: walkedRuns(testNow)}
 
 	chain := newChain("/library/movies/Arrival (2016)", testNow)
 	jobs := []Job{finishedJob(chainJobName("movies", chainStageScan, chain), "house",
@@ -352,7 +352,7 @@ func TestEnrichWaitsForAReport(t *testing.T) {
 // schedules on.
 func TestLibraryStatusCarriesTheGaps(t *testing.T) {
 	report := &libraryReport{
-		Gaps:       map[string]int{concernProbe: 3, concernIdentity: 1},
+		Gaps:       map[string]int{factProbe: 3, factIdentity: 1},
 		Waiting:    2,
 		Unresolved: 5,
 	}
@@ -361,7 +361,7 @@ func TestLibraryStatusCarriesTheGaps(t *testing.T) {
 		bound: binding{volume: &LibraryVolume{Name: "pv-movies"}}, report: report,
 	}, testNow)
 
-	if status.Gaps[concernProbe] != 3 || status.Gaps[concernIdentity] != 1 {
+	if status.Gaps[factProbe] != 3 || status.Gaps[factIdentity] != 1 {
 		t.Errorf("gaps = %v, want the counts the reporter published", status.Gaps)
 	}
 	if status.Waiting != 2 || status.Unresolved != 5 {
@@ -452,7 +452,7 @@ func TestEnrichReportsWhatTheAPIServerRefuses(t *testing.T) {
 			boundHouse(cluster)
 			cluster.broken[one.broken] = http.StatusInternalServerError
 			operator := testOperator(t, cluster)
-			report := &libraryReport{Gaps: map[string]int{concernIdentity: 1}, Runs: walkedRuns(testNow)}
+			report := &libraryReport{Gaps: map[string]int{factIdentity: 1}, Runs: walkedRuns(testNow)}
 
 			err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
 				report, one.jobs, providers)

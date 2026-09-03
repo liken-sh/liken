@@ -1,6 +1,6 @@
 package main
 
-// tmdb.go is the whole of what the identity concern asks TMDb: a search by
+// tmdb.go is the whole of what the identity fact asks TMDb: a search by
 // title and year, and the runtime of one result. A 429 is a cooldown inside
 // the container and nothing more. TMDb's limit is about 40 requests a second,
 // and one library's gaps never come near it, so no limiter lives anywhere
@@ -20,7 +20,7 @@ import (
 )
 
 // The provider's own address, which only a test replaces.
-const tmdbAPIBase = "https://api.themoviedb.org"
+var tmdbAPIBase = "https://api.themoviedb.org"
 
 // The cooldown a 429 with no Retry-After header takes.
 const tmdbCooldown = 10 * time.Second

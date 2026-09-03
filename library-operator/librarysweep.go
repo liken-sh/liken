@@ -85,7 +85,7 @@ func librarySweepSQL(table, column string) string {
 // One bounded batch of one library's attempts, with the two key
 // columns joined the way every sweep of a two-column key joins them.
 func librarySweepAttemptSQL() string {
-	return `SELECT item || char(31) || concern FROM attempts WHERE library = ? LIMIT ?`
+	return `SELECT item || char(31) || ` + attemptFactColumn + ` FROM attempts WHERE library = ? LIMIT ?`
 }
 
 // librarySweepLinkSQL reads the link table's two key columns joined

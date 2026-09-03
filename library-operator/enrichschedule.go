@@ -160,7 +160,7 @@ func (o *operator) createEnrichJob(ctx context.Context, library *Library, catalo
 	if err := o.standEnrichClaim(ctx, library, catalog); err != nil {
 		return err
 	}
-	provider := providers.serving(library.Metadata.Namespace, library.Spec.Sources, concernIdentity)
+	provider := providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity)
 	job := buildEnrichJob(library, provider, name, path,
 		o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
 	job.Metadata.Annotations = marks
@@ -251,17 +251,17 @@ func lastScanFinish(runs []libraryRun) time.Time {
 	return latest
 }
 
-// Whether any concern has work left that this Library can do. A concern that
+// Whether any fact has work left that this Library can do. A fact that
 // needs a provider counts only where the Library's sources name one that is
 // Ready and serves it, so a library with no key never runs a Job that has
 // nothing to ask.
 func gapOpen(library *Library, report *libraryReport, providers providerSet) bool {
-	for concern, count := range report.Gaps {
+	for fact, count := range report.Gaps {
 		if count <= 0 {
 			continue
 		}
-		if concern == concernIdentity &&
-			providers.serving(library.Metadata.Namespace, library.Spec.Sources, concernIdentity) == nil {
+		if fact == factIdentity &&
+			providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity) == nil {
 			continue
 		}
 		return true

@@ -1,54 +1,32 @@
 package main
 
-// identityrole.go is the identity concern's container: what it reads out of
+// identityrole.go is the identity fact's container: what it reads out of
 // the catalog for one gap, and what it writes when the ladder answers.
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
 )
 
-// The role's whole program. A container with no key fails before it writes
-// anything, so the Job says what the pod is missing.
-func runIdentity() {
-	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
-
-	work := newEnricher(os.Stdout)
+// A container with no key fails before it writes anything, so the Job says
+// what the pod is missing.
+func (e *enricher) identityFact(ctx context.Context) error {
 	token := os.Getenv(tmdbTokenVariable)
 	if token == "" {
-		work.logf("%s is empty, and the identity concern cannot ask a provider without it", tmdbTokenVariable)
-		stop()
-		os.Exit(1)
+		return fmt.Errorf("%s is empty, and the identity fact cannot ask a provider without it", tmdbTokenVariable)
 	}
-	if err := work.identityConcern(stopped, newTMDbClient(tmdbAPIBase, token)); err != nil {
-		work.logf("the identity container failed: %v", err)
-		stop()
-		os.Exit(1)
-	}
-}
-
-// The container waits for its own copy of the catalog to hold what the
-// standing pod reports before it reads its gap, because a gap query against a
-// copy that has not synced names a fraction of the work.
-func (e *enricher) identityConcern(ctx context.Context, client *tmdbClient) error {
-	if err := e.awaitCatalogSync(ctx, concernIdentity); err != nil {
-		return err
-	}
-	return e.identityGap(ctx, client)
+	return e.identityGap(ctx, newTMDbClient(tmdbAPIBase, token))
 }
 
 // A catalog read that fails ends the container, because the gap list is the
 // work. A provider that refuses one title records an error attempt, and the
 // run carries on to the next.
 func (e *enricher) identityGap(ctx context.Context, client *tmdbClient) error {
-	ids, err := e.gaps(ctx, concernIdentity, time.Now().UTC())
+	ids, err := e.gaps(ctx, factIdentity, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -122,7 +100,7 @@ func (e *enricher) writeIdentity(folder string, item identityItem, answer identi
 // The item entry and the attempt are one write of one file, so a reader never
 // sees an answer without its attempt.
 func (e *enricher) recordIdentity(folder string, entry *likenItem, result string) {
-	err := e.writer.updateLikenLedger(folder, concernIdentity, func(ledger *likenLedger) {
+	err := e.writer.updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
 		if entry != nil {
 			ledger.noteItem(*entry)
 		}
@@ -162,7 +140,7 @@ func (e *enricher) runtimeOf(item identityItem, folder string) time.Duration {
 	return time.Duration(meta.Duration) * time.Second
 }
 
-// What the identity concern reads for one gap: where the title sits, the
+// What the identity fact reads for one gap: where the title sits, the
 // clues its name gave, and the runtime the catalog holds.
 type identityItem struct {
 	id       string

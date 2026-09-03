@@ -11,7 +11,7 @@ import (
 var ledgerTime = time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC)
 
 func TestAFolderWithNoLikenDirectoryReadsAsAnEmptyLedger(t *testing.T) {
-	ledger, err := readLikenLedger(t.TempDir(), concernIdentity)
+	ledger, err := readLikenLedger(t.TempDir(), factIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestALedgerThatIsNotYAMLIsAnError(t *testing.T) {
 	folder := t.TempDir()
 	writeFile(t, filepath.Join(folder, likenDirectory, "identity.yaml"), "items: [oh: {: no\n")
 
-	if _, err := readLikenLedger(folder, concernIdentity); err == nil {
+	if _, err := readLikenLedger(folder, factIdentity); err == nil {
 		t.Error("the read reported no error, want one")
 	}
 }
@@ -32,7 +32,7 @@ func TestALedgerThatIsNotYAMLIsAnError(t *testing.T) {
 func TestAProbeAttemptIsWrittenInThePlansShape(t *testing.T) {
 	folder := t.TempDir()
 
-	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, concernProbe, func(ledger *likenLedger) {
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
 		ledger.noteAttempt(likenAttempt{Path: "The Thing (1982).mkv", At: ledgerTime, Result: attemptFound})
 	})
 	if err != nil {
@@ -48,7 +48,7 @@ func TestAProbeAttemptIsWrittenInThePlansShape(t *testing.T) {
 func TestAnIdentityLedgerHoldsAnIdAndItsReason(t *testing.T) {
 	folder := t.TempDir()
 
-	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, concernIdentity, func(ledger *likenLedger) {
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
 		ledger.noteItem(likenItem{Path: likenSelfPath, ID: providerIDs{"tmdb": "603"}, Reason: reasonFrom(testTitle, testYear), Written: ledgerTime})
 		ledger.noteAttempt(likenAttempt{Path: likenSelfPath, At: ledgerTime, Result: attemptFound})
 	})
@@ -67,7 +67,7 @@ func TestAnIdentityLedgerHoldsAnIdAndItsReason(t *testing.T) {
 func TestAnIdentityLedgerHoldsCandidatesWithTheirReceipts(t *testing.T) {
 	folder := t.TempDir()
 
-	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, concernIdentity, func(ledger *likenLedger) {
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
 		ledger.noteItem(likenItem{Path: likenSelfPath, Candidates: []likenCandidate{
 			{ID: providerIDs{"tmdb": "11"}, Title: "Star Wars", Year: 1977, Receipt: map[string]string{"title": "match"}},
 		}})
@@ -76,7 +76,7 @@ func TestAnIdentityLedgerHoldsCandidatesWithTheirReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ledger, err := readLikenLedger(folder, concernIdentity)
+	ledger, err := readLikenLedger(folder, factIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestALaterEntryReplacesTheOneForItsOwnPath(t *testing.T) {
 	writer := newVolumeWriter("movies-enrich")
 
 	for _, result := range []string{attemptError, attemptFound} {
-		err := writer.updateLikenLedger(folder, concernProbe, func(ledger *likenLedger) {
+		err := writer.updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
 			ledger.noteAttempt(likenAttempt{Path: "a.mkv", At: ledgerTime, Result: result})
 			ledger.noteAttempt(likenAttempt{Path: "b.mkv", At: ledgerTime, Result: attemptFound})
 		})
@@ -102,7 +102,7 @@ func TestALaterEntryReplacesTheOneForItsOwnPath(t *testing.T) {
 		}
 	}
 
-	ledger, err := readLikenLedger(folder, concernProbe)
+	ledger, err := readLikenLedger(folder, factProbe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestAnIdentityItemReplacesTheAnswerBeforeIt(t *testing.T) {
 	writer := newVolumeWriter("movies-enrich")
 
 	for _, reason := range []string{"", reasonFrom(testTitle, testYear)} {
-		err := writer.updateLikenLedger(folder, concernIdentity, func(ledger *likenLedger) {
+		err := writer.updateLikenLedger(folder, factIdentity, func(ledger *likenLedger) {
 			ledger.noteItem(likenItem{Path: likenSelfPath, Reason: reason})
 		})
 		if err != nil {
@@ -127,7 +127,7 @@ func TestAnIdentityItemReplacesTheAnswerBeforeIt(t *testing.T) {
 		}
 	}
 
-	ledger, err := readLikenLedger(folder, concernIdentity)
+	ledger, err := readLikenLedger(folder, factIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestAnIdReadsBackFromANumberOrAString(t *testing.T) {
 			folder := t.TempDir()
 			writeFile(t, filepath.Join(folder, likenDirectory, "identity.yaml"), test.document)
 
-			ledger, err := readLikenLedger(folder, concernIdentity)
+			ledger, err := readLikenLedger(folder, factIdentity)
 			if err != nil {
 				t.Fatal(err)
 			}

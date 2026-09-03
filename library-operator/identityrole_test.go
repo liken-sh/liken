@@ -30,7 +30,7 @@ func seedIdentityGap(t *testing.T, catalog *Catalog, kind, folder, released stri
 	}
 }
 
-func TestTheIdentityConcernWritesTheIdIntoTheSidecar(t *testing.T) {
+func TestTheIdentityFactWritesTheIdIntoTheSidecar(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "The Thing (1982)"
@@ -49,7 +49,7 @@ func TestTheIdentityConcernWritesTheIdIntoTheSidecar(t *testing.T) {
 	if !strings.Contains(sidecar, `<uniqueid type="tmdb" default="true">1091</uniqueid>`) {
 		t.Errorf("the sidecar holds no id:\n%s", sidecar)
 	}
-	ledger, err := readLikenLedger(filepath.Join(root, folder), concernIdentity)
+	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestTheIdentityConcernWritesTheIdIntoTheSidecar(t *testing.T) {
 	}
 }
 
-func TestTheIdentityConcernRecordsWhatItLeftForAPerson(t *testing.T) {
+func TestTheIdentityFactRecordsWhatItLeftForAPerson(t *testing.T) {
 	cases := []struct {
 		name       string
 		answers    map[string]string
@@ -112,7 +112,7 @@ func TestTheIdentityConcernRecordsWhatItLeftForAPerson(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ledger, err := readLikenLedger(filepath.Join(root, folder), concernIdentity)
+			ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +123,7 @@ func TestTheIdentityConcernRecordsWhatItLeftForAPerson(t *testing.T) {
 				t.Errorf("items = %+v, want %d", ledger.Items, test.wantItems)
 			}
 			if _, err := os.Stat(filepath.Join(root, folder, movieSidecarName)); err == nil {
-				t.Error("the concern wrote a sidecar for an answer it was not sure of")
+				t.Error("the fact wrote a sidecar for an answer it was not sure of")
 			}
 		})
 	}
@@ -172,7 +172,7 @@ func TestTheRuntimeRungReadsTheSidecarTheProbeJustWrote(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ledger, err := readLikenLedger(filepath.Join(root, folder), concernIdentity)
+	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestTheRuntimeComesOffTheCatalogWhereItHoldsOne(t *testing.T) {
 	}
 }
 
-func TestTheIdentityConcernWorksOverTheFolderItsJobNames(t *testing.T) {
+func TestTheIdentityFactWorksOverTheFolderItsJobNames(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "The Thing (1982)", "thing.mkv"), "video")
@@ -236,10 +236,10 @@ func TestTheIdentityConcernWorksOverTheFolderItsJobNames(t *testing.T) {
 	}
 
 	if fake.served[tmdbKey("/3/search/movie", "Alien", "1979")] != 0 {
-		t.Error("the concern asked about a title outside the folder its Job named")
+		t.Error("the fact asked about a title outside the folder its Job named")
 	}
 	if fake.served[tmdbKey("/3/search/movie", "The Thing", "1982")] == 0 {
-		t.Error("the concern asked nothing about the folder its Job named")
+		t.Error("the fact asked nothing about the folder its Job named")
 	}
 }
 
@@ -288,13 +288,13 @@ func TestAnIdentityItemReadsTheTableItsScopeNames(t *testing.T) {
 	}
 }
 
-func TestTheIdentityConcernFailsWhereItCannotReadItsGap(t *testing.T) {
+func TestTheIdentityFactFailsWhereItCannotReadItsGap(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
 		NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
 	client, _ := newFakeTMDb(t, nil)
 
 	if err := work.identityGap(t.Context(), client); err == nil {
-		t.Error("the concern reported no error, want the unreachable sidecar's")
+		t.Error("the fact reported no error, want the unreachable sidecar's")
 	}
 }
 
@@ -313,7 +313,7 @@ func TestASidecarThatWillNotTakeTheIdRecordsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ledger, err := readLikenLedger(filepath.Join(root, folder), concernIdentity)
+	ledger, err := readLikenLedger(filepath.Join(root, folder), factIdentity)
 	if err != nil {
 		t.Fatal(err)
 	}

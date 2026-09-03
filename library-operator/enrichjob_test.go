@@ -10,8 +10,8 @@ import (
 
 // the provider a Library's sources resolve to, as the pass would have
 // checked it.
-func readyProvider(name, namespace string, concerns ...string) *MetadataProvider {
-	provider := seedProvider(newFakeCluster(), name, namespace, concerns...)
+func readyProvider(name, namespace string, facts ...string) *MetadataProvider {
+	provider := seedProvider(newFakeCluster(), name, namespace, facts...)
 	provider.Status.Conditions = []Condition{
 		{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
 	}
@@ -24,17 +24,17 @@ func testEnrichJob(library *Library, provider *MetadataProvider, path string) *J
 		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 
-// the pod holds the catalog agent, then the two concerns that edit the
+// the pod holds the catalog agent, then the two facts that edit the
 // sidecar in order, then the container that writes the runs row.
 func TestEnrichJobHoldsItsContainersInOrder(t *testing.T) {
-	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", concernIdentity), "")
+	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
 
 	spec := job.Spec.Template.Spec
 	names := []string{}
 	for _, container := range spec.InitContainers {
 		names = append(names, container.Name)
 	}
-	want := []string{catalogContainer, probeMode, identityMode}
+	want := []string{catalogContainer, factProbe, factIdentity}
 	if len(names) != len(want) {
 		t.Fatalf("initContainers = %v, want %v", names, want)
 	}
@@ -46,17 +46,35 @@ func TestEnrichJobHoldsItsContainersInOrder(t *testing.T) {
 	if len(spec.Containers) != 1 || spec.Containers[0].Name != enrichMode {
 		t.Fatalf("containers = %+v, want the one enrich container", spec.Containers)
 	}
-	for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
-		if len(container.Command) != 2 || container.Command[1] != container.Name {
-			t.Errorf("%s runs %v, want the binary in its own role", container.Name, container.Command)
+}
+
+// each init container after the agent runs the facts role and names the one
+// fact it fills, and the enrich container runs its own role.
+func TestEnrichJobNamesTheFactsOfEachContainer(t *testing.T) {
+	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
+
+	spec := job.Spec.Template.Spec
+	for _, container := range spec.InitContainers[1:] {
+		if len(container.Command) != 2 || container.Command[1] != factsMode {
+			t.Errorf("%s runs %v, want the binary in the facts role", container.Name, container.Command)
 		}
+		if got := containerEnvironment(container)[libraryFactsVariable]; got != container.Name {
+			t.Errorf("%s reads %s = %q, want its own fact", container.Name, libraryFactsVariable, got)
+		}
+	}
+	enrich := spec.Containers[0]
+	if len(enrich.Command) != 2 || enrich.Command[1] != enrichMode {
+		t.Errorf("%s runs %v, want the binary in the enrich role", enrich.Name, enrich.Command)
+	}
+	if got := containerEnvironment(enrich)[libraryFactsVariable]; got != "" {
+		t.Errorf("%s reads %s = %q, want none", enrich.Name, libraryFactsVariable, got)
 	}
 }
 
 // the enricher writes the volume, where a scanner reads it, and its
 // agent runs on a claim of the Library's own.
 func TestEnrichJobMountsTheVolumeReadWrite(t *testing.T) {
-	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", concernIdentity), "")
+	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
 
 	spec := job.Spec.Template.Spec
 	for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
@@ -83,7 +101,7 @@ func TestEnrichJobMountsTheVolumeReadWrite(t *testing.T) {
 // the key reaches the identity container through a secretKeyRef, so no
 // container reads the API server.
 func TestEnrichJobPassesTheKeyThroughASecretKeyRef(t *testing.T) {
-	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", concernIdentity), "")
+	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
 
 	identity := job.Spec.Template.Spec.InitContainers[2]
 	var reference *SecretKeySelector
@@ -106,7 +124,7 @@ func TestEnrichJobWithoutAProviderRunsTheProbeAlone(t *testing.T) {
 	job := testEnrichJob(studioMovies(), nil, "")
 
 	spec := job.Spec.Template.Spec
-	if len(spec.InitContainers) != 2 || spec.InitContainers[1].Name != probeMode {
+	if len(spec.InitContainers) != 2 || spec.InitContainers[1].Name != factProbe {
 		t.Fatalf("initContainers = %+v, want the agent and the probe", spec.InitContainers)
 	}
 }
@@ -120,7 +138,7 @@ func TestEnrichJobCarriesTheJobEnvironment(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", concernIdentity), one.path)
+			job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), one.path)
 
 			spec := job.Spec.Template.Spec
 			for _, container := range append(spec.InitContainers[1:], spec.Containers...) {

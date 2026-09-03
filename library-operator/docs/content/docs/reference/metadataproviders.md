@@ -7,12 +7,17 @@ toc: true
 <!-- Generated from deploy/metadataproviders-crd.yaml by crdref. Do not edit. -->
 
 A `MetadataProvider` is one account with one metadata provider: the
-`Secret` that holds its key, and the concerns it may serve. It lives
+`Secret` that holds its key, and the facts it may serve. It lives
 in the namespace of the libraries that name it, because a pod mounts
 a `Secret` only from its own namespace. A `Library` names providers by
 name in `spec.sources`, in the order they are asked, and for each
-concern the first provider in that list that serves it is the one
+fact the first provider in that list that serves it is the one
 asked.
+
+`spec.facts` is optional. A provider that names none serves every
+fact the operator knows how to ask it for, and `status.facts`, shown
+in the `FACTS` column, lists what it serves right now. That list is
+empty while the provider is not `Ready`.
 
     apiVersion: library.liken.sh/v1alpha1
     kind: MetadataProvider
@@ -24,7 +29,7 @@ asked.
         secretRef:
           name: tmdb-key
           key: token
-      concerns: [identity]
+      facts: [identity]   # optional; omit to serve the whole table
     ---
     apiVersion: library.liken.sh/v1alpha1
     kind: Library
@@ -48,12 +53,12 @@ One account with one metadata provider, named by the Libraries of its namespace 
 
 ## spec
 
-The provider this account is with, and the concerns it may serve.
+The provider this account is with, and the facts it may serve. A spec that names no facts serves every fact the operator knows how to ask this provider for.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--tmdb"></span>`tmdb` | [object](#spectmdb) | yes | The account is with The Movie Database, which serves movies, series, and people. |
-| <span id="spec--concerns"></span>`concerns` | []string | yes | The concerns this account may serve, from the fixed vocabulary. A Library asks this provider only for a concern it lists. |
+| <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator knows how to ask this provider for. Omit it to serve all of that. A Library asks this provider only for a fact that status.facts lists. |
 
 ### spec.tmdb
 
@@ -78,6 +83,7 @@ What the operator's own check found, written only by the library operator.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="status--facts"></span>`facts` | []string | no | The facts this provider serves right now: what the operator knows how to ask this provider for, narrowed by spec.facts. The list is empty while the Ready condition is not True, because a provider the operator cannot reach serves nothing. |
 | <span id="status--lastrefusal"></span>`lastRefusal` | string | no | When the provider last refused the key. It stands after the key works again, so a person reads that it once failed. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Ready is True with the reason Reachable when the provider answered the operator's check, and False with the reason NoSecret, Refused, or Unreachable. Unreachable is a check that got no answer at all, and its message is the error the check read. |
 

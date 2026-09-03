@@ -216,12 +216,12 @@ spec:
                   description: >-
                     The MetadataProviders in this namespace to ask
                     about a title, by name, in the order they are
-                    asked: for each concern, the first provider in the
+                    asked: for each fact, the first provider in the
                     list that serves it and is Ready is the one asked.
                     The Sources condition reports a name that resolves
                     to no provider, or a list where none serves a
-                    concern this library needs. A library that omits
-                    the list runs only the concerns that need no
+                    fact this library needs. A library that omits
+                    the list runs only the facts that need no
                     provider.
                   items:
                     type: string
@@ -327,18 +327,18 @@ spec:
                 gaps:
                   type: object
                   x-kubernetes-map-type: atomic
-                  description: "One count per concern of the rows that concern has left to fill, counted by the namespace's reporter. The operator creates the enricher Job while any count is above zero, and the count falls after the scan that follows the enricher."
+                  description: "One count per fact of the rows that fact has left to fill, counted by the namespace's reporter. The operator creates the enricher Job while any count is above zero, and the count falls after the scan that follows the enricher."
                   additionalProperties:
                     type: integer
                     minimum: 0
                 waiting:
                   type: integer
                   minimum: 0
-                  description: "How many titles the identity concern left as candidates for a person to choose from. The candidates are in the title's .liken/identity.yaml. A person puts the right uniqueid into the .nfo, and the next scan identifies the title."
+                  description: "How many titles the identity fact left as candidates for a person to choose from. The candidates are in the title's .liken/identity.yaml. A person puts the right uniqueid into the .nfo, and the next scan identifies the title."
                 unresolved:
                   type: integer
                   minimum: 0
-                  description: "How many titles no provider could name. A miss is a fact with a date, and the concern asks again after its retry interval."
+                  description: "How many titles no provider could name. A miss is recorded with its date, and the identity fact asks again after its retry interval."
                 lastWalk:
                   type: string
                   format: date-time
@@ -407,9 +407,9 @@ spec:
                     and a message that names what the teardown waits
                     on. Sources reports spec.sources: True when every
                     name resolves to a MetadataProvider and one of them
-                    serves each concern this library needs, and False
+                    serves each fact this library needs, and False
                     with the reason ProviderNotFound, ProviderNotReady,
-                    or ConcernNotServed. A library that names no source
+                    or FactNotServed. A library that names no source
                     carries no Sources condition.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by

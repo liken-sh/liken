@@ -1,6 +1,6 @@
 package main
 
-// enrichsync.go is the wait every concern container makes before it reads its
+// enrichsync.go is the wait every fact container makes before it reads its
 // gap. A fresh or stale claim answers SELECT 1 long before the standing pod's
 // rows have reached it, and a gap query against an empty copy reports work
 // that is not there. On the first drill the probe read zero files where the
@@ -126,15 +126,15 @@ func (s *catalogSync) wait(ctx context.Context, bus *Bus, catalog *Catalog,
 	}
 }
 
-// Every concern container makes this wait before its gap read. A container
+// Every fact container makes this wait before its gap read. A container
 // with no broker refuses to start, because it could never hear the report.
-func (e *enricher) awaitCatalogSync(ctx context.Context, concern string) error {
+func (e *enricher) awaitCatalogSync(ctx context.Context, fact string) error {
 	address, err := echoBusAddress(e.log)
 	if err != nil {
 		return err
 	}
 	sync := newCatalogSync(e.statusTopic)
-	client := concern + "-sync-" + strings.ReplaceAll(e.library, "/", "-")
+	client := fact + "-sync-" + strings.ReplaceAll(e.library, "/", "-")
 	return sync.wait(ctx, newBus(address, client, nil, nil, sync.note),
 		e.catalog, e.library, e.syncTimeout)
 }

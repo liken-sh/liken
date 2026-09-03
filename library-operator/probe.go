@@ -1,6 +1,6 @@
 package main
 
-// probe.go is the probe concern: the one container that opens a video file.
+// probe.go is the probe fact: the one container that opens a video file.
 // The answer goes into the .nfo and not into the catalog alone, because the
 // volume holds the truth. A rebuilt catalog reads the sidecar and probes
 // nothing.
@@ -14,11 +14,9 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -30,28 +28,14 @@ var ffprobeTimeout = time.Minute
 // its own.
 type mediaProbe func(ctx context.Context, path string) ([]byte, error)
 
-// The role's whole program. A failure is a non-zero exit, so the Job fails
-// and Kubernetes retries it.
-func runProbe() {
-	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
+// The read the probe fact makes of every file in its gap. It is a variable so
+// a test answers in ffprobe's place.
+var probeFile mediaProbe = ffprobeFile
 
-	work := newEnricher(os.Stdout)
-	if err := work.probeConcern(stopped, ffprobeFile); err != nil {
-		work.logf("the probe container failed: %v", err)
-		stop()
-		os.Exit(1)
-	}
-}
-
-// The container waits for its own copy of the catalog to hold what the
-// standing pod reports before it reads its gap, because a gap query against a
-// copy that has not synced names a fraction of the work.
-func (e *enricher) probeConcern(ctx context.Context, probe mediaProbe) error {
-	if err := e.awaitCatalogSync(ctx, concernProbe); err != nil {
-		return err
-	}
-	return e.probeGap(ctx, probe)
+// The probe fact's whole run: the gap of files with no duration, read with
+// ffprobe.
+func (e *enricher) probeFact(ctx context.Context) error {
+	return e.probeGap(ctx, probeFile)
 }
 
 // A catalog read that fails ends the container, because the gap list is the
@@ -61,7 +45,7 @@ func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 	if err := e.markRunStarted(ctx); err != nil {
 		return err
 	}
-	paths, err := e.gaps(ctx, concernProbe, time.Now().UTC())
+	paths, err := e.gaps(ctx, factProbe, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -90,12 +74,12 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 		result = attemptError
 	}
 	folder, entry := likenFolderFor(e.kind, absolute)
-	e.recordAttempt(folder, concernProbe, entry, result, time.Now().UTC())
+	e.recordAttempt(folder, factProbe, entry, result, time.Now().UTC())
 }
 
 // The answer is one surgical edit of the sidecar, so every other element the
 // sidecar holds stays as it was. A file with no sidecar gets a minimal one,
-// and the later concerns edit that same file.
+// and the later facts edit that same file.
 func (e *enricher) writeStreamDetails(ctx context.Context, probe mediaProbe, absolute string) error {
 	output, err := probe(ctx, absolute)
 	if err != nil {
@@ -147,7 +131,7 @@ func sidecarBeside(absolute string) string {
 }
 
 // The smallest document a reader accepts: the root element and a title. Every
-// later concern edits this same file.
+// later fact edits this same file.
 func minimalNFO(rootElement, title string) []byte {
 	var escaped strings.Builder
 	_ = xml.EscapeText(&escaped, []byte(title))
@@ -264,7 +248,7 @@ func ffprobeFile(ctx context.Context, path string) ([]byte, error) {
 }
 
 // An absent sidecar becomes a minimal one and not an error, because the
-// sidecar-less title is the case this concern exists for. A sidecar with no
+// sidecar-less title is the case this fact exists for. A sidecar with no
 // root element, an empty file or a declaration alone, is treated the same
 // way, because there is nothing in it to keep. Otherwise the edit never
 // rewrites the document it read. It replaces one element and keeps every

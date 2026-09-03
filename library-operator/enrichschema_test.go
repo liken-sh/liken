@@ -6,13 +6,13 @@ import (
 )
 
 // walkWithAttempts seeds one title, its file, its aliases, and one attempt
-// per concern, so a prune and a gap query both read the shape a real walk
+// per fact, so a prune and a gap query both read the shape a real walk
 // leaves.
 func walkWithAttempts(library, id, path, folderKey string, at time.Time) *walkResult {
 	walk := walkOfOneTitle(library, id, path, folderKey)
 	walk.attempts = []attemptRow{
-		{Library: library, Item: id, Concern: concernIdentity, At: at.Unix(), Result: attemptCandidates},
-		{Library: library, Item: path + "/movie.mkv", Concern: concernProbe, At: at.Unix(), Result: attemptFound},
+		{Library: library, Item: id, Fact: factIdentity, At: at.Unix(), Result: attemptCandidates},
+		{Library: library, Item: path + "/movie.mkv", Fact: factProbe, At: at.Unix(), Result: attemptFound},
 	}
 	return walk
 }
@@ -135,11 +135,11 @@ func TestEveryGapQueryRunsAgainstTheRealSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gaps[concernProbe] != 1 {
-		t.Errorf("probe gap = %d, want the one file with no duration", gaps[concernProbe])
+	if gaps[factProbe] != 1 {
+		t.Errorf("probe gap = %d, want the one file with no duration", gaps[factProbe])
 	}
-	if gaps[concernIdentity] != 2 {
-		t.Errorf("identity gap = %d, want the movie and the series with a path id", gaps[concernIdentity])
+	if gaps[factIdentity] != 2 {
+		t.Errorf("identity gap = %d, want the movie and the series with a path id", gaps[factIdentity])
 	}
 }
 
@@ -151,8 +151,8 @@ func TestAnAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 		movies: []movieRow{{Id: "movie:path:one-2001", Library: "house/movies", Kind: libraryKindMovies, Path: "One (2001)", Title: "One"}},
 		files:  []fileRow{{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Items: []string{"movie:path:one-2001"}}},
 		attempts: []attemptRow{
-			{Library: "house/movies", Item: "movie:path:one-2001", Concern: concernIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
-			{Library: "house/movies", Item: "One (2001)/one.mkv", Concern: concernProbe, At: ledgerTime.Unix(), Result: attemptFound},
+			{Library: "house/movies", Item: "movie:path:one-2001", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
+			{Library: "house/movies", Item: "One (2001)/one.mkv", Fact: factProbe, At: ledgerTime.Unix(), Result: attemptFound},
 		},
 	}
 	if err := upsertWalk(ctx, catalog, seed); err != nil {
@@ -173,11 +173,11 @@ func TestAnAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if gaps[concernIdentity] != test.want {
-				t.Errorf("identity gap = %d, want %d", gaps[concernIdentity], test.want)
+			if gaps[factIdentity] != test.want {
+				t.Errorf("identity gap = %d, want %d", gaps[factIdentity], test.want)
 			}
-			if gaps[concernProbe] != test.want {
-				t.Errorf("probe gap = %d, want %d", gaps[concernProbe], test.want)
+			if gaps[factProbe] != test.want {
+				t.Errorf("probe gap = %d, want %d", gaps[factProbe], test.want)
 			}
 		})
 	}
@@ -188,9 +188,9 @@ func TestTheWaitingAndUnresolvedCountsReadTheAttemptsTable(t *testing.T) {
 	ctx := t.Context()
 
 	seed := &walkResult{attempts: []attemptRow{
-		{Library: "house/movies", Item: "movie:path:one", Concern: concernIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
-		{Library: "house/movies", Item: "series:path:show", Concern: concernIdentity, At: ledgerTime.Unix(), Result: attemptNothing},
-		{Library: "house/movies", Item: "movie:tmdb:2", Concern: concernIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
+		{Library: "house/movies", Item: "movie:path:one", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
+		{Library: "house/movies", Item: "series:path:show", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptNothing},
+		{Library: "house/movies", Item: "movie:tmdb:2", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
 	}}
 	if err := upsertWalk(ctx, catalog, seed); err != nil {
 		t.Fatal(err)

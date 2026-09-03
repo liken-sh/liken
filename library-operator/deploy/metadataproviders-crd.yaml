@@ -1,6 +1,6 @@
 # A MetadataProvider is one account with one metadata provider, in the
 # namespace of the libraries that name it. It holds the Secret for its
-# key and states the concerns it may serve. A Library's spec.sources
+# key and states the facts it may serve. A Library's spec.sources
 # orders the providers it asks. The operator checks each provider once
 # per pass with one cheap call and reports the answer in its status.
 # The key reaches an enricher container through a secretKeyRef, and
@@ -29,6 +29,9 @@ spec:
           type: string
           jsonPath: .spec.tmdb.secretRef.name
           priority: 1
+        - name: Facts
+          type: string
+          jsonPath: .status.facts
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -45,8 +48,8 @@ spec:
           properties:
             spec:
               type: object
-              required: [tmdb, concerns]
-              description: "The provider this account is with, and the concerns it may serve."
+              required: [tmdb]
+              description: "The provider this account is with, and the facts it may serve. A spec that names no facts serves every fact the operator knows how to ask this provider for."
               # The block names the provider, the way a Library's kind
               # names its settings block. A second provider is a second
               # block here, with a rule that requires exactly one of
@@ -71,22 +74,23 @@ spec:
                           minLength: 1
                           default: token
                           description: "The key inside that Secret. When omitted, token."
-                concerns:
+                facts:
                   type: array
                   x-kubernetes-list-type: atomic
                   minItems: 1
                   maxItems: 30
-                  description: "The concerns this account may serve, from the fixed vocabulary. A Library asks this provider only for a concern it lists."
+                  description: "The facts this account may serve, from the fixed vocabulary. The list narrows what the operator knows how to ask this provider for. Omit it to serve all of that. A Library asks this provider only for a fact that status.facts lists."
                   items:
                     type: string
-                    # The concern vocabulary of the enrichment design.
-                    # A concern is one gap in the catalog, one container
-                    # that fills it, and one attempts file it writes.
+                    # The fact vocabulary of the enrichment design. A
+                    # fact is one gap in the catalog, one name in a
+                    # container's LIBRARY_FACTS, and one attempts file
+                    # it writes.
                     enum:
                       - probe
                       - trickplay
                       - identity
-                      - facts
+                      - overview
                       - credits
                       - poster
                       - fanart
@@ -108,6 +112,13 @@ spec:
               type: object
               description: "What the operator's own check found, written only by the library operator."
               properties:
+                facts:
+                  type: array
+                  x-kubernetes-list-type: atomic
+                  maxItems: 30
+                  description: "The facts this provider serves right now: what the operator knows how to ask this provider for, narrowed by spec.facts. The list is empty while the Ready condition is not True, because a provider the operator cannot reach serves nothing."
+                  items:
+                    type: string
                 lastRefusal:
                   type: string
                   format: date-time

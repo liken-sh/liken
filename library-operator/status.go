@@ -123,7 +123,7 @@ func enrichInFlight(runs []libraryRun) bool {
 }
 
 // The Sources condition reports the providers a Library names: True when
-// every one exists and one of them serves the concerns this library needs,
+// every one exists and one of them serves the facts this library needs,
 // and False with the reason that names what is wrong.
 func sourcesCondition(verdict sourcesVerdict, generation int64) Condition {
 	status := ConditionFalse

@@ -18,7 +18,7 @@ import (
 const metadataProviderAPIVersion = libraryAPIVersion
 
 // A MetadataProvider is one account with one provider: the Secret that holds
-// its key, and the concerns it may serve.
+// its key, and the facts it may serve.
 type MetadataProvider struct {
 	APIVersion string                 `json:"apiVersion,omitempty"`
 	Kind       string                 `json:"kind,omitempty"`
@@ -34,10 +34,12 @@ type MetadataProviderList struct {
 }
 
 // One block per provider, the way a Library carries one block per kind, and
-// the concerns this account serves.
+// the facts this account serves. An absent list of facts is every fact the
+// operator's table holds for the block, so a person who wants all of one
+// provider names the block alone.
 type MetadataProviderSpec struct {
-	TMDb     *ProviderTMDb `json:"tmdb,omitempty"`
-	Concerns []string      `json:"concerns,omitempty"`
+	TMDb  *ProviderTMDb `json:"tmdb,omitempty"`
+	Facts []string      `json:"facts,omitempty"`
 }
 
 // The TMDb block names the Secret alone. The endpoint is TMDb's own, and the
@@ -65,9 +67,11 @@ func (r SecretKeyRef) secretKey() string {
 }
 
 // What the operator reports on a provider: the Ready condition its one check
-// per pass produced, and when the provider last refused the key.
+// per pass produced, the facts the provider serves right now, and when the
+// provider last refused the key.
 type MetadataProviderStatus struct {
 	Conditions  []Condition `json:"conditions,omitempty"`
+	Facts       []string    `json:"facts,omitempty"`
 	LastRefusal time.Time   `json:"lastRefusal,omitzero"`
 }
 
@@ -80,9 +84,11 @@ const (
 	reasonUnreachable = "Unreachable"
 )
 
-// A provider serves a concern only when it lists that concern.
-func (p *MetadataProvider) serves(concern string) bool {
-	return slices.Contains(p.Spec.Concerns, concern)
+// A provider serves a fact when the table's row for its block holds that fact
+// and spec.facts does not narrow it away. Readiness is a separate question,
+// so a Library can say which repair a source needs.
+func (p *MetadataProvider) serves(fact string) bool {
+	return slices.Contains(p.servedFacts(), fact)
 }
 
 // A provider is ready when its last check reached it. A provider no check has

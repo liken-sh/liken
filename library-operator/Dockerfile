@@ -1,7 +1,7 @@
 # The operator's image: one static Go binary, one static ffprobe, the CA
 # bundle every TLS call reads, and nothing else. The operator holds the
 # cluster credentials and writes every status, so its image carries no shell,
-# no libc, and no other tools. The probe concern is the one role that opens a
+# no libc, and no other tools. The probe fact is the one that opens a
 # media file, and ffprobe is the one tool it needs. The media browser and the
 # Corrosion sidecar build from media-browser/Dockerfile and
 # corrosion/Dockerfile, and the release ships the three together.
@@ -30,6 +30,6 @@ COPY --from=build /library-operator /library-operator
 # one. The bundle is the build stage's own Debian set.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=ffmpeg /ffprobe /usr/bin/ffprobe
-# A scratch image carries no PATH, and the probe role finds ffprobe by name.
+# A scratch image carries no PATH, and the probe fact finds ffprobe by name.
 ENV PATH=/usr/bin
 ENTRYPOINT ["/library-operator"]

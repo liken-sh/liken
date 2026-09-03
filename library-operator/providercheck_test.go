@@ -7,6 +7,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,12 +15,12 @@ import (
 
 // a provider with a Secret the cluster holds, over a server the test
 // answers for.
-func seedProvider(cluster *fakeCluster, name, namespace string, concerns ...string) *MetadataProvider {
+func seedProvider(cluster *fakeCluster, name, namespace string, facts ...string) *MetadataProvider {
 	provider := &MetadataProvider{
 		Metadata: ObjectMeta{Name: name, Namespace: namespace, UID: name + "-uid", Generation: 2},
 		Spec: MetadataProviderSpec{
-			TMDb:     &ProviderTMDb{SecretRef: SecretKeyRef{Name: name + "-key", Key: "token"}},
-			Concerns: concerns,
+			TMDb:  &ProviderTMDb{SecretRef: SecretKeyRef{Name: name + "-key", Key: "token"}},
+			Facts: facts,
 		},
 	}
 	cluster.providers[name] = provider
@@ -60,7 +61,7 @@ func TestProviderCheckReadsEachAnswer(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+			provider := seedProvider(cluster, "tmdb", "house", factIdentity)
 			if one.secret != nil {
 				cluster.secrets["tmdb-key"] = one.secret
 			}
@@ -80,11 +81,46 @@ func TestProviderCheckReadsEachAnswer(t *testing.T) {
 	}
 }
 
+// the facts a provider reports are the operator's table for its block,
+// narrowed by the facts its spec names, and none at all while its check has
+// not reached it.
+func TestProviderStatusReportsTheFactsItServesNow(t *testing.T) {
+	cases := []struct {
+		name   string
+		facts  []string
+		status int
+		want   []string
+	}{
+		{name: "a spec that names no fact serves the whole table",
+			status: http.StatusOK, want: providerFacts[providerBlockTMDb]},
+		{name: "a spec narrows the table to what it names",
+			facts: []string{factIdentity}, status: http.StatusOK, want: []string{factIdentity}},
+		{name: "a spec that names a fact outside the table serves none",
+			facts: []string{"poster"}, status: http.StatusOK},
+		{name: "a provider the check cannot reach serves none",
+			facts: []string{factIdentity}, status: http.StatusUnauthorized},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			provider := seedProvider(cluster, "tmdb", "house", one.facts...)
+			cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
+			operator := providerOperator(t, cluster, tokenServer(t, one.status, "the-key"))
+
+			operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+			if got := cluster.heldProvider("tmdb").Status.Facts; !slices.Equal(got, one.want) {
+				t.Errorf("status.facts = %v, want %v", got, one.want)
+			}
+		})
+	}
+}
+
 // a provider that answers neither 200 nor 401 keeps the verdict it
 // carried, because the operator learned nothing.
 func TestProviderCheckKeepsTheLastVerdictOnAFailure(t *testing.T) {
 	cluster := newFakeCluster()
-	provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+	provider := seedProvider(cluster, "tmdb", "house", factIdentity)
 	provider.Status.Conditions = []Condition{{
 		Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable,
 	}}
@@ -102,34 +138,36 @@ func TestProviderCheckKeepsTheLastVerdictOnAFailure(t *testing.T) {
 	}
 }
 
+// a MetadataProvider as a pass leaves it: the block that gives it a row in
+// the operator's table, the facts its spec narrows that row to, and the
+// verdict of its own check. An empty reason is a provider no check has
+// reported on yet.
+func checkedProvider(name string, facts []string, reason string) *MetadataProvider {
+	provider := &MetadataProvider{
+		Metadata: ObjectMeta{Name: name, Namespace: "house"},
+		Spec: MetadataProviderSpec{
+			TMDb:  &ProviderTMDb{SecretRef: SecretKeyRef{Name: name + "-key"}},
+			Facts: facts,
+		},
+	}
+	if reason == "" {
+		return provider
+	}
+	status := ConditionFalse
+	if reason == reasonReachable {
+		status = ConditionTrue
+	}
+	provider.Status.Conditions = []Condition{{Type: conditionReady, Status: status, Reason: reason}}
+	return provider
+}
+
 // a provider the operator has checked and found reachable serves the
-// concerns it lists, and one that failed its check serves none.
+// facts it lists, and one that failed its check serves none.
 func TestProviderSetServesTheFirstReadyProvider(t *testing.T) {
-	ready := &MetadataProvider{
-		Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"},
-		Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
-		Status: MetadataProviderStatus{Conditions: []Condition{
-			{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
-		}},
-	}
-	refused := &MetadataProvider{
-		Metadata: ObjectMeta{Name: "fanart", Namespace: "house"},
-		Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
-		Status: MetadataProviderStatus{Conditions: []Condition{
-			{Type: conditionReady, Status: ConditionFalse, Reason: reasonRefused},
-		}},
-	}
-	art := &MetadataProvider{
-		Metadata: ObjectMeta{Name: "art", Namespace: "house"},
-		Spec:     MetadataProviderSpec{Concerns: []string{"poster"}},
-		Status: MetadataProviderStatus{Conditions: []Condition{
-			{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
-		}},
-	}
 	set := providerSet{
-		libraryKey("house", "tmdb"):   ready,
-		libraryKey("house", "fanart"): refused,
-		libraryKey("house", "art"):    art,
+		libraryKey("house", "tmdb"):   checkedProvider("tmdb", []string{factIdentity}, reasonReachable),
+		libraryKey("house", "fanart"): checkedProvider("fanart", []string{factIdentity}, reasonRefused),
+		libraryKey("house", "art"):    checkedProvider("art", []string{"poster"}, reasonReachable),
 	}
 
 	cases := []struct {
@@ -140,12 +178,12 @@ func TestProviderSetServesTheFirstReadyProvider(t *testing.T) {
 		{name: "no sources at all"},
 		{name: "a source that does not exist", sources: []string{"tvdb"}},
 		{name: "a source that is not ready", sources: []string{"fanart"}},
-		{name: "a source that serves another concern", sources: []string{"art"}},
+		{name: "a source that serves another fact", sources: []string{"art"}},
 		{name: "the first ready source that serves it", sources: []string{"art", "tmdb"}, want: "tmdb"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			got := set.serving("house", one.sources, concernIdentity)
+			got := set.serving("house", one.sources, factIdentity)
 			if one.want == "" {
 				if got != nil {
 					t.Errorf("serving = %s, want none", got.Metadata.Name)
@@ -163,31 +201,11 @@ func TestProviderSetServesTheFirstReadyProvider(t *testing.T) {
 // that does not exist, and a list where none serves identity.
 func TestSourcesVerdictNamesWhatIsWrong(t *testing.T) {
 	set := providerSet{
-		libraryKey("house", "art"): {
-			Metadata: ObjectMeta{Name: "art", Namespace: "house"},
-			Spec:     MetadataProviderSpec{Concerns: []string{"poster"}},
-			Status: MetadataProviderStatus{Conditions: []Condition{
-				{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
-			}},
-		},
-		libraryKey("house", "tmdb"): {
-			Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"},
-			Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
-			Status: MetadataProviderStatus{Conditions: []Condition{
-				{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
-			}},
-		},
-		libraryKey("house", "fanart"): {
-			Metadata: ObjectMeta{Name: "fanart", Namespace: "house"},
-			Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
-			Status: MetadataProviderStatus{Conditions: []Condition{
-				{Type: conditionReady, Status: ConditionFalse, Reason: reasonRefused},
-			}},
-		},
-		libraryKey("house", "unchecked"): {
-			Metadata: ObjectMeta{Name: "unchecked", Namespace: "house"},
-			Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
-		},
+		libraryKey("house", "art"):       checkedProvider("art", []string{"poster"}, reasonReachable),
+		libraryKey("house", "tmdb"):      checkedProvider("tmdb", []string{factIdentity}, reasonReachable),
+		libraryKey("house", "fanart"):    checkedProvider("fanart", []string{factIdentity}, reasonRefused),
+		libraryKey("house", "unchecked"): checkedProvider("unchecked", []string{factIdentity}, ""),
+		libraryKey("house", "whole"):     checkedProvider("whole", nil, reasonReachable),
 	}
 	cases := []struct {
 		name    string
@@ -196,13 +214,15 @@ func TestSourcesVerdictNamesWhatIsWrong(t *testing.T) {
 	}{
 		{name: "a library that names no source"},
 		{name: "a source that does not exist", sources: []string{"tvdb"}, reason: reasonProviderNotFound},
-		{name: "sources that serve no concern this library needs",
-			sources: []string{"art"}, reason: reasonConcernNotServed},
+		{name: "sources that serve no fact this library needs",
+			sources: []string{"art"}, reason: reasonFactNotServed},
 		{name: "the one source that serves identity is not Ready",
 			sources: []string{"art", "fanart"}, reason: reasonProviderNotReady},
 		{name: "the one source that serves identity has no check yet",
 			sources: []string{"unchecked"}, reason: reasonProviderNotReady},
 		{name: "a source that serves identity", sources: []string{"art", "tmdb"}, reason: reasonSourcesReady},
+		{name: "a source that names no fact serves every fact in the table",
+			sources: []string{"whole"}, reason: reasonSourcesReady},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -221,13 +241,7 @@ func TestSourcesVerdictNamesWhatIsWrong(t *testing.T) {
 // Library and reads no second object.
 func TestASourceThatIsNotReadyNamesTheProviderAndItsReason(t *testing.T) {
 	set := providerSet{
-		libraryKey("house", "tmdb"): {
-			Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"},
-			Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
-			Status: MetadataProviderStatus{Conditions: []Condition{
-				{Type: conditionReady, Status: ConditionFalse, Reason: reasonNoSecret},
-			}},
-		},
+		libraryKey("house", "tmdb"): checkedProvider("tmdb", []string{factIdentity}, reasonNoSecret),
 	}
 	library := studioMovies()
 	library.Spec.Sources = []string{"tmdb"}
@@ -292,7 +306,7 @@ func TestProviderCheckReadsTheKeyItNames(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+			provider := seedProvider(cluster, "tmdb", "house", factIdentity)
 			provider.Spec.TMDb.SecretRef.Key = one.key
 			cluster.secrets["tmdb-key"] = tmdbSecret(one.secret, "the-key")
 			operator := providerOperator(t, cluster, tokenServer(t, http.StatusOK, "the-key"))
@@ -311,9 +325,9 @@ func TestProviderCheckReadsTheKeyItNames(t *testing.T) {
 // server will not serve leaves the verdict alone.
 func TestProviderCheckWithNothingToRead(t *testing.T) {
 	cluster := newFakeCluster()
-	blockless := seedProvider(cluster, "empty", "house", concernIdentity)
+	blockless := seedProvider(cluster, "empty", "house", factIdentity)
 	blockless.Spec.TMDb = nil
-	broken := seedProvider(cluster, "tmdb", "house", concernIdentity)
+	broken := seedProvider(cluster, "tmdb", "house", factIdentity)
 	cluster.broken[secretPath("house", "tmdb-key")] = http.StatusInternalServerError
 	operator := providerOperator(t, cluster, tokenServer(t, http.StatusOK, "the-key"))
 
@@ -332,7 +346,7 @@ func TestProviderCheckWithNothingToRead(t *testing.T) {
 // keeps the verdict the server holds.
 func TestProviderCheckReportsARefusedWrite(t *testing.T) {
 	cluster := newFakeCluster()
-	provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+	provider := seedProvider(cluster, "tmdb", "house", factIdentity)
 	cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
 	cluster.broken[metadataProviderPath("house", "tmdb")+"/status"] = http.StatusInternalServerError
 	operator := providerOperator(t, cluster, tokenServer(t, http.StatusOK, "the-key"))
@@ -348,7 +362,7 @@ func TestProviderCheckReportsARefusedWrite(t *testing.T) {
 // from an earlier pass stands as the reason.
 func TestProviderCheckOnAProviderThatDoesNotAnswer(t *testing.T) {
 	cluster := newFakeCluster()
-	provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+	provider := seedProvider(cluster, "tmdb", "house", factIdentity)
 	provider.Status.Conditions = []Condition{{
 		Type: conditionReady, Status: ConditionFalse, Reason: reasonNoSecret,
 	}}
@@ -433,7 +447,7 @@ func TestTheCheckSendsTheKeyInTheFormItsShapeNames(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			cluster := newFakeCluster()
-			provider := seedProvider(cluster, "tmdb", "house", concernIdentity)
+			provider := seedProvider(cluster, "tmdb", "house", factIdentity)
 			cluster.secrets["tmdb-key"] = tmdbSecret("token", test.key)
 			recorder := &credentialRecorder{}
 			operator := providerOperator(t, cluster, recorder)

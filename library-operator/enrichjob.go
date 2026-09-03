@@ -1,13 +1,14 @@
 package main
 
 // enrichjob.go builds the enricher Job of one Library and stands the claim
-// its catalog agent runs on. The order of the concerns is the order of the
+// its catalog agent runs on. The order of the facts is the order of the
 // containers in the pod, so a person reads it with kubectl get pod, and the
 // operator holds no order of its own.
 
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // The fixed part of every enricher Job's name, and the claim its catalog
@@ -91,7 +92,7 @@ func buildEnrichJob(library *Library, provider *MetadataProvider, name, path str
 	}
 }
 
-// The pod the enricher Job runs. The concerns that must run in order are init
+// The pod the enricher Job runs. The facts that must run in order are init
 // containers, and the enrich container is the one regular container: it
 // writes the runs row last and waits for the echo.
 func enrichPodTemplate(library *Library, provider *MetadataProvider, path string,
@@ -102,16 +103,17 @@ func enrichPodTemplate(library *Library, provider *MetadataProvider, path string
 	// nothing in this pod reads the API server.
 	noToken := false
 
-	// The agent starts first, and the concerns run in order behind it, because
+	// The agent starts first, and the facts run in order behind it, because
 	// the kubelet starts an init container only when the one before it is up.
-	// Both concerns here edit the same sidecar file, so they must never run at
+	// Both facts here edit the same sidecar file, so they must never run at
 	// once.
 	sequence := []Container{
 		catalogSidecar(corrosionImage),
-		enrichContainer(library, probeMode, path, scannerImage, busAddress, topicBase),
+		factsContainer(library, factProbe, []string{factProbe}, path, scannerImage, busAddress, topicBase),
 	}
 	if provider != nil {
-		identity := enrichContainer(library, identityMode, path, scannerImage, busAddress, topicBase)
+		identity := factsContainer(library, factIdentity, []string{factIdentity}, path,
+			scannerImage, busAddress, topicBase)
 		identity.Env = append(identity.Env, providerKeyVariable(provider))
 		sequence = append(sequence, identity)
 	}
@@ -126,7 +128,7 @@ func enrichPodTemplate(library *Library, provider *MetadataProvider, path string
 			AutomountServiceAccountToken:  &noToken,
 			InitContainers:                sequence,
 			Containers: []Container{
-				enrichContainer(library, enrichMode, path, scannerImage, busAddress, topicBase),
+				enrichContainer(library, enrichMode, enrichMode, path, scannerImage, busAddress, topicBase),
 			},
 			Volumes: []Volume{
 				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
@@ -142,13 +144,13 @@ func enrichPodTemplate(library *Library, provider *MetadataProvider, path string
 	}
 }
 
-// One concern's container. It runs this operator's own image in the role its
-// name states, and it learns everything else from the environment, because it
-// holds no credential to look a Library up with. The kind's own image is the
-// scanner's alone: a scanner a person supplies is not an enricher.
-func enrichContainer(library *Library, role, path, image, busAddress, topicBase string) Container {
+// One phase's container. Its name is the phase and its command is the role,
+// and it learns everything else from the environment, because it holds no
+// credential to look a Library up with. The kind's own image is the scanner's
+// alone: a scanner a person supplies is not an enricher.
+func enrichContainer(library *Library, name, role, path, image, busAddress, topicBase string) Container {
 	return Container{
-		Name:    role,
+		Name:    name,
 		Image:   image,
 		Command: []string{"/library-operator", role},
 		Env: []EnvVar{
@@ -175,6 +177,17 @@ func enrichContainer(library *Library, role, path, image, busAddress, topicBase 
 		},
 		SecurityContext: unprivileged(),
 	}
+}
+
+// A container that runs facts. Its name is the phase, and LIBRARY_FACTS names
+// the facts it runs in order, so the pod reads as the sequence and one
+// container fills more than one gap.
+func factsContainer(library *Library, name string, facts []string,
+	path, image, busAddress, topicBase string) Container {
+	container := enrichContainer(library, name, factsMode, path, image, busAddress, topicBase)
+	container.Env = append(container.Env,
+		EnvVar{Name: libraryFactsVariable, Value: strings.Join(facts, ",")})
+	return container
 }
 
 // The provider key the identity container reads, from the Secret the

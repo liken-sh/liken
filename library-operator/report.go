@@ -40,9 +40,9 @@ type libraryReport struct {
 	// by worker, each naming the Job that ran and what it left. A Job waits
 	// for its own entry here before it exits.
 	Runs []libraryRun `json:"runs,omitempty"`
-	// One count per concern of the rows that concern has left to fill,
+	// One count per fact of the rows that fact has left to fill,
 	// from gapQueries. The operator creates the enricher Job when any
-	// count is above zero, so a concern with no key here never runs.
+	// count is above zero, so a fact with no key here never runs.
 	Gaps map[string]int `json:"gaps,omitempty"`
 	// Waiting is the titles whose identity ended in candidates for a
 	// person to choose from, and Unresolved the titles no provider could

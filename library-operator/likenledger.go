@@ -1,6 +1,6 @@
 package main
 
-// likenledger.go is the .liken/ directory beside a title: what each concern
+// likenledger.go is the .liken/ directory beside a title: what each fact
 // writes there, and how an entry is keyed. One file per writer is what lets
 // several containers write beside one title on a network mount with no locks.
 // No two of them ever open the same file for write.
@@ -27,7 +27,7 @@ const likenDirectory = ".liken"
 const likenSelfPath = "."
 
 // The ids are a map of provider to id and never one column, because a title
-// carries ids under several schemes and a later concern adds more.
+// carries ids under several schemes and a later fact adds more.
 type providerIDs map[string]string
 
 // A numeric id is written as a number, which is the shape the plan's example
@@ -73,8 +73,8 @@ func sortedKeys(ids providerIDs) []string {
 	return keys
 }
 
-// One .liken/<concern>.yaml file: the ledger the identity concern keeps, and
-// the attempts every concern appends to.
+// One .liken/<fact>.yaml file: the ledger the identity fact keeps, and
+// the attempts every fact appends to.
 type likenLedger struct {
 	Items    []likenItem    `yaml:"items,omitempty"`
 	Attempts []likenAttempt `yaml:"attempts,omitempty"`
@@ -106,16 +106,16 @@ type likenAttempt struct {
 	Result string    `yaml:"result"`
 }
 
-// A concern's file is named for the concern itself, so the one-file-per-
+// A fact's file is named for the fact itself, so the one-file-per-
 // writer rule is the file name.
-func likenLedgerName(concern string) string {
-	return concern + ".yaml"
+func likenLedgerName(fact string) string {
+	return fact + ".yaml"
 }
 
 // A folder with no .liken directory reads as an empty ledger and not as an
 // error, because the first write to a folder starts from nothing.
-func readLikenLedger(folder, concern string) (likenLedger, error) {
-	data, err := os.ReadFile(filepath.Join(folder, likenDirectory, likenLedgerName(concern)))
+func readLikenLedger(folder, fact string) (likenLedger, error) {
+	data, err := os.ReadFile(filepath.Join(folder, likenDirectory, likenLedgerName(fact)))
 	if errors.Is(err, fs.ErrNotExist) {
 		return likenLedger{}, nil
 	}
@@ -124,7 +124,7 @@ func readLikenLedger(folder, concern string) (likenLedger, error) {
 	}
 	var ledger likenLedger
 	if err := yaml.Unmarshal(data, &ledger); err != nil {
-		return likenLedger{}, fmt.Errorf("reading %s: %w", likenLedgerName(concern), err)
+		return likenLedger{}, fmt.Errorf("reading %s: %w", likenLedgerName(fact), err)
 	}
 	return ledger, nil
 }
@@ -132,8 +132,8 @@ func readLikenLedger(folder, concern string) (likenLedger, error) {
 // The whole file is read, changed, and written again through the write door.
 // That is safe because one writer owns one file, and the write is a temporary
 // and a rename, so a reader never sees half of it.
-func (w *volumeWriter) updateLikenLedger(folder, concern string, change func(*likenLedger)) error {
-	ledger, err := readLikenLedger(folder, concern)
+func (w *volumeWriter) updateLikenLedger(folder, fact string, change func(*likenLedger)) error {
+	ledger, err := readLikenLedger(folder, fact)
 	if err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func (w *volumeWriter) updateLikenLedger(folder, concern string, change func(*li
 	if err != nil {
 		return err
 	}
-	return w.writeInto(filepath.Join(folder, likenDirectory), likenLedgerName(concern), data)
+	return w.writeInto(filepath.Join(folder, likenDirectory), likenLedgerName(fact), data)
 }
 
 // One path holds one attempt, the latest, so a file grows with the titles
@@ -158,7 +158,7 @@ func (l *likenLedger) noteAttempt(attempt likenAttempt) {
 }
 
 // One path holds one answer. A later answer replaces the one before it,
-// because the ledger says what the concern last found and not how it got
+// because the ledger says what the fact last found and not how it got
 // there.
 func (l *likenLedger) noteItem(item likenItem) {
 	for at, held := range l.Items {

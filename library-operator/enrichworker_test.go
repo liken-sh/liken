@@ -177,7 +177,7 @@ func TestAnEnricherThatCannotReachItsSidecarFails(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
 		NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
 
-	if _, err := work.gaps(t.Context(), concernProbe, ledgerTime); err == nil {
+	if _, err := work.gaps(t.Context(), factProbe, ledgerTime); err == nil {
 		t.Error("the gap read reported no error, want one")
 	}
 	if err := work.markRunStarted(t.Context()); err == nil {

@@ -64,12 +64,12 @@ func TestTheProbeFailsWhereTheGapReadIsRefused(t *testing.T) {
 	}
 }
 
-func TestTheIdentityConcernFailsWhereAnItemReadIsRefused(t *testing.T) {
+func TestTheIdentityFactFailsWhereAnItemReadIsRefused(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), oneGapThenRefuses(t, "movie:path:x"))
 	client, _ := newFakeTMDb(t, nil)
 
 	if err := work.identityGap(t.Context(), client); err == nil {
-		t.Error("the concern reported no error, want the refused read's")
+		t.Error("the fact reported no error, want the refused read's")
 	}
 }
 
@@ -131,10 +131,10 @@ func TestALedgerTheEnricherCannotReadIsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := readLikenLedger(folder, concernProbe); err == nil {
+	if _, err := readLikenLedger(folder, factProbe); err == nil {
 		t.Error("the read reported no error, want one")
 	}
-	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, concernProbe, func(*likenLedger) {})
+	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factProbe, func(*likenLedger) {})
 	if err == nil {
 		t.Error("the update reported no error, want the read's")
 	}
@@ -144,7 +144,7 @@ func TestAnIdThatIsNotAMappingIsAnError(t *testing.T) {
 	folder := t.TempDir()
 	writeFile(t, filepath.Join(folder, likenDirectory, "identity.yaml"), "items:\n  - path: .\n    id: [1, 2]\n")
 
-	if _, err := readLikenLedger(folder, concernIdentity); err == nil {
+	if _, err := readLikenLedger(folder, factIdentity); err == nil {
 		t.Error("the read reported no error, want one")
 	}
 }
@@ -262,7 +262,7 @@ func TestTheProbeStopsOnAShutdown(t *testing.T) {
 	}
 }
 
-func TestTheIdentityConcernStopsOnAShutdown(t *testing.T) {
+func TestTheIdentityFactStopsOnAShutdown(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seed := &walkResult{movies: []movieRow{
@@ -279,7 +279,7 @@ func TestTheIdentityConcernStopsOnAShutdown(t *testing.T) {
 	client.http.Transport = cancellingTransport{cancel: cancel, inner: client.http.Transport}
 
 	if err := work.identityGap(ctx, client); err == nil {
-		t.Error("the concern reported no error, want the shutdown's")
+		t.Error("the fact reported no error, want the shutdown's")
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// These tests run one concern container against the test broker and a real
+// These tests run one fact container against the test broker and a real
 // catalog, so the wait for the copy runs over a real connection and real
 // rows.
 
@@ -23,7 +23,7 @@ func shorterSyncInterval(t *testing.T) {
 	catalogSyncInterval = 5 * time.Millisecond
 }
 
-// syncingEnricher builds one concern container with the environment the
+// syncingEnricher builds one fact container with the environment the
 // operator gives it: the broker it subscribes on, the Library's status topic,
 // and the bound on the wait.
 func syncingEnricher(t *testing.T, catalog *Catalog) (*enricher, <-chan *fakeBroker) {
@@ -65,7 +65,7 @@ func TestAContainerWaitsUntilItsCopyHoldsWhatTheReportCounts(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	work, accepted := syncingEnricher(t, catalog)
 	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), concernProbe) }()
+	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
 
 	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
 	select {
@@ -86,7 +86,7 @@ func TestAContainerWhoseCopyAlreadyMatchesReadsItsGapAtOnce(t *testing.T) {
 	work, accepted := syncingEnricher(t, catalog)
 	seedProbeGap(t, catalog, work.root, "The Thing (1982)", "The Thing (1982).mkv")
 	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), concernProbe) }()
+	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
 
 	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
 
@@ -100,7 +100,7 @@ func TestAContainerThatHearsNoReportFails(t *testing.T) {
 	work, _ := syncingEnricher(t, catalog)
 	work.syncTimeout = 100 * time.Millisecond
 
-	if err := work.awaitCatalogSync(t.Context(), concernProbe); err == nil {
+	if err := work.awaitCatalogSync(t.Context(), factProbe); err == nil {
 		t.Error("the wait ended with no report, want a failure")
 	}
 }
@@ -124,7 +124,7 @@ func TestOnlyThisLibrarysReportEndsTheWait(t *testing.T) {
 func TestAContainerThatCannotReachItsAgentFailsTheWait(t *testing.T) {
 	work, accepted := syncingEnricher(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
 	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(t.Context(), concernProbe) }()
+	go func() { done <- work.awaitCatalogSync(t.Context(), factProbe) }()
 
 	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
 
@@ -138,7 +138,7 @@ func TestAStoppedContainerEndsItsWait(t *testing.T) {
 	work, _ := syncingEnricher(t, catalog)
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- work.awaitCatalogSync(ctx, concernProbe) }()
+	go func() { done <- work.awaitCatalogSync(ctx, factProbe) }()
 
 	stop()
 
@@ -152,23 +152,29 @@ func TestAContainerWithNoBrokerRefusesToWait(t *testing.T) {
 	work, _ := syncingEnricher(t, catalog)
 	t.Setenv(busAddressVariable, "")
 
-	if err := work.awaitCatalogSync(t.Context(), concernProbe); err == nil {
+	if err := work.awaitCatalogSync(t.Context(), factProbe); err == nil {
 		t.Error("the wait started with no broker, want a refusal")
 	}
 }
 
-func TestAConcernContainerFailsWhereTheCopyNeverSyncs(t *testing.T) {
+func TestAFactContainerFailsWhereTheCopyNeverSyncs(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	work, _ := syncingEnricher(t, catalog)
 	work.syncTimeout = 100 * time.Millisecond
-	client, _ := newFakeTMDb(t, nil)
 
-	if err := work.probeConcern(t.Context(), answeringProbe(ffprobeOfOneFile)); err == nil {
-		t.Error("the probe container read its gap off an unsynced copy")
+	for _, fact := range likenFacts {
+		if err := work.runFacts(t.Context(), []string{fact}); err == nil {
+			t.Errorf("the %s container read its gap off an unsynced copy", fact)
+		}
 	}
-	if err := work.identityConcern(t.Context(), client); err == nil {
-		t.Error("the identity container read its gap off an unsynced copy")
-	}
+}
+
+// the probe the probe fact makes, answered for the life of one test.
+func answering(t *testing.T, probe mediaProbe) {
+	t.Helper()
+	was := probeFile
+	t.Cleanup(func() { probeFile = was })
+	probeFile = probe
 }
 
 func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
@@ -176,8 +182,9 @@ func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	work, accepted := syncingEnricher(t, catalog)
 	folder := "The Thing (1982)"
 	seedProbeGap(t, catalog, work.root, folder, "The Thing (1982).mkv")
+	answering(t, answeringProbe(ffprobeOfOneFile))
 	done := make(chan error, 1)
-	go func() { done <- work.probeConcern(t.Context(), answeringProbe(ffprobeOfOneFile)) }()
+	go func() { done <- work.runFacts(t.Context(), []string{factProbe}) }()
 
 	reportTheCounts(t, accepted, work.statusTopic, 1, 1)
 
@@ -190,6 +197,16 @@ func TestTheProbeContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	}
 }
 
+// the provider the identity fact asks, answered by a fake TMDb for the life
+// of one test.
+func answeringTMDb(t *testing.T, client *tmdbClient) {
+	t.Helper()
+	was := tmdbAPIBase
+	t.Cleanup(func() { tmdbAPIBase = was })
+	tmdbAPIBase = client.base
+	t.Setenv(tmdbTokenVariable, "a-token")
+}
+
 func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	work, accepted := syncingEnricher(t, catalog)
@@ -200,8 +217,9 @@ func TestTheIdentityContainerFillsItsGapOnceTheCopyIsSynced(t *testing.T) {
 		tmdbKey("/3/search/movie", "The Thing", "1982"): `{"results":[` +
 			tmdbResultJSON(1091, "The Thing", "1982-06-25") + `]}`,
 	})
+	answeringTMDb(t, client)
 	done := make(chan error, 1)
-	go func() { done <- work.identityConcern(t.Context(), client) }()
+	go func() { done <- work.runFacts(t.Context(), []string{factIdentity}) }()
 
 	reportTheCounts(t, accepted, work.statusTopic, 1, 0)
 

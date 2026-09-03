@@ -97,7 +97,7 @@ func (w *volumeWriter) removeTemporary(path string) error {
 	return os.Remove(path)
 }
 
-// A .liken directory does not exist until the first concern writes into it,
+// A .liken directory does not exist until the first fact writes into it,
 // so the directory is created before the file lands in it.
 func (w *volumeWriter) writeInto(directory, name string, data []byte) error {
 	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
@@ -208,7 +208,7 @@ type documentSpans struct {
 
 // Reads those three places in one pass over the document, so the edit needs
 // no parse of the whole tree into values. Only the root's direct children are
-// candidates, because every element the concerns edit sits there.
+// candidates, because every element the facts edit sits there.
 func elementSpans(document []byte, element xmlElement) (documentSpans, error) {
 	spans := documentSpans{start: -1, end: -1, rootEnd: -1, firstChild: -1}
 	decoder := xml.NewDecoder(bytes.NewReader(document))

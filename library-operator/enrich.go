@@ -2,23 +2,27 @@ package main
 
 // enrich.go is the seam between the enricher Job's containers and the
 // operator that creates the Job. Plan 29 builds both sides on the names
-// here: the roles the binary runs, the concerns those roles fill, the
+// here: the roles the binary runs, the facts those roles fill, the
 // results an attempt can record, and the queries that say how much work
-// each concern has left. The reporter counts a gap with the same query a
+// each fact has left. The reporter counts a gap with the same query a
 // container works from, so the count the operator schedules on and the
 // rows the container finds are one set.
 
 import "time"
 
-// The roles the enricher Job runs, one container each. probe and identity
-// are init containers in that order, because both edit the .nfo and the
-// identity ladder reads the runtime the probe measured. enrich is the one
-// regular container: it writes the runs row last and waits for the echo.
+// The roles the enricher Job runs. Every fact container runs facts, which
+// runs the facts its container names, in order, in one process. The one
+// regular container runs enrich, which writes the runs row last and waits for
+// the echo.
 const (
-	probeMode    = "probe"
-	identityMode = "identity"
-	enrichMode   = "enrich"
+	factsMode  = "facts"
+	enrichMode = "enrich"
 )
+
+// The variable a facts container reads its work from: the facts it runs, by
+// name, separated by commas, in the order it runs them. The container's own
+// name is the phase, so kubectl get pod reads as the sequence.
+const libraryFactsVariable = "LIBRARY_FACTS"
 
 // The worker name the enricher Job's runs row carries. One row per
 // Library, whatever the Job's scope, so the operator reads one entry to
@@ -30,11 +34,12 @@ const workerEnrich = "enrich"
 // secretKeyRef, so the container never reads the API server.
 const tmdbTokenVariable = "TMDB_TOKEN"
 
-// The concerns this plan fills, in the order they run. A concern is one
-// gap query, one container, and one attempts file in .liken/.
+// The facts this image fills, in the order they run. A fact is one gap query,
+// one name in a container's LIBRARY_FACTS, and one ledger file in .liken/. A
+// container runs one fact or several.
 const (
-	concernProbe    = "probe"
-	concernIdentity = "identity"
+	factProbe    = "probe"
+	factIdentity = "identity"
 )
 
 // What one attempt left behind. found, candidates, and nothing are facts
@@ -48,12 +53,12 @@ const (
 	attemptError      = "error"
 )
 
-// How long a fact with a date stands before a concern asks again.
-// Providers gain ids and art over time, so a miss is retried, and thirty
+// How long an attempt with a date stands before the fact that wrote it asks
+// again. Providers gain ids and art over time, so a miss is retried. Thirty
 // days is the guess plan 27 records.
 const defaultRetryInterval = 30 * 24 * time.Hour
 
-// The gap query per concern, keyed by concern. Every query takes the
+// The gap query per fact, keyed by fact. Every query takes the
 // library as its first parameter and the retry cutoff in Unix seconds as
 // its second, and selects the key of each row that needs work, so a
 // count(*) over it is the reporter's number and the rows are the
@@ -68,14 +73,14 @@ const defaultRetryInterval = 30 * 24 * time.Hour
 // details landed nowhere the scanner reads is tried again after the
 // window.
 var gapQueries = map[string]string{
-	concernProbe: `SELECT path FROM files ` +
+	factProbe: `SELECT path FROM files ` +
 		`WHERE library = ? AND type = 'video' AND present = 1 AND duration_ms = 0 ` +
-		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND concern = 'probe' AND result != 'error' AND at >= ?)`,
-	concernIdentity: `SELECT id FROM (` +
+		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND ` + attemptFactColumn + ` = 'probe' AND result != 'error' AND at >= ?)`,
+	factIdentity: `SELECT id FROM (` +
 		`SELECT library, id FROM movies WHERE id LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id FROM series WHERE id LIKE 'series:path:%') AS items ` +
 		`WHERE library = ? AND id NOT IN (SELECT item FROM attempts ` +
-		`WHERE attempts.library = items.library AND concern = 'identity' AND result != 'error' AND at >= ?)`,
+		`WHERE attempts.library = items.library AND ` + attemptFactColumn + ` = 'identity' AND result != 'error' AND at >= ?)`,
 }
 
 // The two counts a person reads on the Library beside the gaps. Waiting
@@ -84,8 +89,8 @@ var gapQueries = map[string]string{
 // that ended in nothing for an item still unidentified, the titles no
 // provider could name.
 const (
-	waitingQuery = `SELECT count(*) FROM attempts WHERE library = ? AND concern = 'identity' AND result = 'candidates' ` +
+	waitingQuery = `SELECT count(*) FROM attempts WHERE library = ? AND ` + attemptFactColumn + ` = 'identity' AND result = 'candidates' ` +
 		`AND (item LIKE 'movie:path:%' OR item LIKE 'series:path:%')`
-	unresolvedQuery = `SELECT count(*) FROM attempts WHERE library = ? AND concern = 'identity' AND result = 'nothing' ` +
+	unresolvedQuery = `SELECT count(*) FROM attempts WHERE library = ? AND ` + attemptFactColumn + ` = 'identity' AND result = 'nothing' ` +
 		`AND (item LIKE 'movie:path:%' OR item LIKE 'series:path:%')`
 )

@@ -247,11 +247,14 @@ CREATE TABLE runs (
     PRIMARY KEY (library, worker)
 );
 
--- One row per library, item, and concern: the last attempt an enricher
--- made and how it ended. The scanner lifts these from the attempts files
--- in each folder's .liken/ directory, so a gap query can exclude an item
--- that was tried, and a lost catalog gets them back from the volume. For
--- a file concern the item column holds the file's path.
+-- One row per library, item, and fact: the last attempt an enricher
+-- made and how it ended. The scanner lifts these from the ledger files
+-- in each folder's .liken/ directory, so a gap query can exclude an
+-- item that was tried, and a lost catalog gets them back from the
+-- volume. For a file fact the item column holds the file's path. The
+-- fact's column is named concern: Corrosion refuses to remove a column,
+-- and this one is part of the primary key, which it refuses to add to a
+-- table that exists. attempts.go maps the two names.
 CREATE TABLE attempts (
     library TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
