@@ -173,7 +173,11 @@ func (e *enricher) contributorFor(person creditedPerson) (string, error) {
 			return "", err
 		}
 		if data == nil {
-			return directory, e.createContributor(directory, person)
+			if err := e.createContributor(directory, person); err != nil {
+				return directory, err
+			}
+			e.writePersonRows(directory)
+			return directory, nil
 		}
 		if held.isPerson(person.IDs) {
 			return directory, nil

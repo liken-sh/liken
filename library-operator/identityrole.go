@@ -141,6 +141,11 @@ func (e *enricher) recordIdentity(folder string, entry *likenItem, result string
 	if err != nil {
 		e.logf("could not record the identity attempt at %s: %v", folder, err)
 	}
+	if result == attemptFound {
+		e.rescanTitle(folder)
+		return
+	}
+	e.writeRows(factIdentity, folder, false)
 }
 
 // Which sidecar carries a title's id: tvshow.nfo for a series, movie.nfo for

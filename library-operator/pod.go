@@ -180,9 +180,6 @@ func scannerSidecar(library *Library, scanPath, image, busAddress, topicBase str
 	if settings := library.Spec.settings(); settings != nil && settings.Image != "" {
 		image = settings.Image
 	}
-	// The ignore list travels as one JSON value, so a folder name of any
-	// character reaches the scanner whole.
-	ignore, _ := json.Marshal(library.Spec.Ignore)
 	return Container{
 		Name:    scannerContainer,
 		Image:   image,
@@ -195,7 +192,7 @@ func scannerSidecar(library *Library, scanPath, image, busAddress, topicBase str
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
-			{Name: libraryIgnoreVariable, Value: string(ignore)},
+			{Name: libraryIgnoreVariable, Value: ignoreValue(library)},
 			{Name: scanPathVariable, Value: scanPath},
 			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
 				FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
@@ -280,4 +277,11 @@ func unprivileged() *SecurityContext {
 		Capabilities:             &Capabilities{Drop: []string{"ALL"}},
 		AllowPrivilegeEscalation: &escalation,
 	}
+}
+
+// The ignore list travels as one JSON value, so a folder name of any
+// character reaches the scanner whole.
+func ignoreValue(library *Library) string {
+	ignore, _ := json.Marshal(library.Spec.Ignore)
+	return string(ignore)
 }

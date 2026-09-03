@@ -154,6 +154,16 @@ func itemParams(library, id, kind, path, title, sortKey, released string, added 
 	return []any{library, id, kind, path, title, sortKey, released, added, art, duration, string(payload), slug}
 }
 
+// The arts column: the list as JSON, and an empty list for an item with none,
+// so a reader always parses a list.
+func artsParam(arts []string) string {
+	if len(arts) == 0 {
+		return "[]"
+	}
+	payload, _ := json.Marshal(arts)
+	return string(payload)
+}
+
 // UpsertMovies writes movie rows in place, so a re-walk updates a title rather
 // than dropping and recreating it. The movies table adds set_id after the
 // header, so this upsert names its own columns.
@@ -162,14 +172,14 @@ func (c *Catalog) UpsertMovies(ctx context.Context, rows []movieRow) (int, error
 	for i, row := range rows {
 		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
 		statements[i] = statement{
-			sql: `INSERT INTO movies (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, set_id, nfo_facts) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO movies (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, set_id, nfo_facts, arts) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, id) DO UPDATE SET ` +
 				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
 				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
 				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
-				`set_id = excluded.set_id, nfo_facts = excluded.nfo_facts`,
-			params: append(params, row.SetID, row.NFOFacts),
+				`set_id = excluded.set_id, nfo_facts = excluded.nfo_facts, arts = excluded.arts`,
+			params: append(params, row.SetID, row.NFOFacts, artsParam(row.Arts)),
 		}
 	}
 	return c.apply(ctx, statements)
@@ -194,14 +204,14 @@ func (c *Catalog) UpsertSeries(ctx context.Context, rows []seriesRow) (int, erro
 	for i, row := range rows {
 		params := itemParams(row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, row.Body, row.Slug)
 		statements[i] = statement{
-			sql: `INSERT INTO series (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, nfo_facts) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO series (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, nfo_facts, arts) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, id) DO UPDATE SET ` +
 				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
 				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
 				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
-				`nfo_facts = excluded.nfo_facts`,
-			params: append(params, row.NFOFacts),
+				`nfo_facts = excluded.nfo_facts, arts = excluded.arts`,
+			params: append(params, row.NFOFacts, artsParam(row.Arts)),
 		}
 	}
 	return c.apply(ctx, statements)
@@ -214,14 +224,14 @@ func (c *Catalog) UpsertEpisodes(ctx context.Context, rows []episodeRow) (int, e
 	for i, row := range rows {
 		payload, _ := json.Marshal(row.Body)
 		statements[i] = statement{
-			sql: `INSERT INTO episodes (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, series, season, episode) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO episodes (library, id, kind, path, title, sort_key, released, added, art, duration, body, slug, series, season, episode, arts) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, id) DO UPDATE SET ` +
 				`kind = excluded.kind, path = excluded.path, title = excluded.title, ` +
 				`sort_key = excluded.sort_key, released = excluded.released, added = excluded.added, art = excluded.art, ` +
 				`duration = excluded.duration, body = excluded.body, slug = excluded.slug, ` +
-				`series = excluded.series, season = excluded.season, episode = excluded.episode`,
-			params: []any{row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, string(payload), row.Slug, row.Series, row.Season, row.Episode},
+				`series = excluded.series, season = excluded.season, episode = excluded.episode, arts = excluded.arts`,
+			params: []any{row.Library, row.Id, row.Kind, row.Path, row.Title, row.SortKey, row.Released, row.Added, row.Art, row.Duration, string(payload), row.Slug, row.Series, row.Season, row.Episode, artsParam(row.Arts)},
 		}
 	}
 	return c.apply(ctx, statements)

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // pruneBatch bounds how many unmarked ids the prune reads and deletes at
@@ -308,7 +309,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
-	n, err = catalog.sweep(ctx, itemPruneSQL("files", "path", seenFile), []any{library, epoch, pruneBatch},
+	n, err = catalog.sweep(ctx, filePruneSQL(), []any{library, epoch, walkStart(epoch), pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteFiles(ctx, library, keys)
 		})
@@ -317,7 +318,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
-	n, err = catalog.sweep(ctx, attemptPruneSQL(), []any{library, epoch, pruneBatch},
+	n, err = catalog.sweep(ctx, attemptPruneSQL(), []any{library, epoch, walkStart(epoch), pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteAttempts(ctx, library, attemptKeys(keys))
 		})
@@ -470,7 +471,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	}
 	removed += n
 
-	n, err = catalog.sweep(ctx, scopedItemPruneSQL("files", "path", seenFile), scopedItemPruneParams(library, folder, epoch),
+	n, err = catalog.sweep(ctx, scopedFilePruneSQL(), append(scopedItemPruneParams(library, folder, epoch)[:5], walkStart(epoch), pruneBatch),
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteFiles(ctx, library, keys)
 		})
@@ -493,8 +494,28 @@ func scopedLinkPruneSQL() string {
 		` LIMIT ?`
 }
 
-// scopedItemPruneSQL reads the keys of one folder's rows in a table that
-// the current epoch did not mark, one bounded batch.
+// A walk's epoch is its start in nanoseconds, and a row a fact writes after
+// that start carries no mark from the walk. The sweep spares a file whose
+// modified time, and an attempt whose time, is past the start, so a poster
+// written while the walk ran survives to the next walk, which marks it.
+func walkStart(epoch int64) int64 {
+	return epoch / int64(time.Second)
+}
+
+func filePruneSQL() string {
+	return `SELECT path FROM files` +
+		` WHERE library = ? AND '` + seenFile + `' || path` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND modified < ? LIMIT ?`
+}
+
+func scopedFilePruneSQL() string {
+	return `SELECT path FROM files` +
+		` WHERE library = ? AND ` + pathScopeClause("path") + ` AND '` + seenFile + `' || path` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND modified < ? LIMIT ?`
+}
+
 func scopedItemPruneSQL(table, key, space string) string {
 	return `SELECT ` + key + ` FROM ` + table +
 		` WHERE library = ? AND ` + pathScopeClause("path") + ` AND '` + space + `' || ` + key +

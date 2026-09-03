@@ -24,7 +24,7 @@ func TestAPrunedFolderTakesItsAttemptsAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := int64(1000)
+	first := time.Now().Add(-time.Hour).UnixNano()
 	for _, walk := range []*walkResult{
 		walkWithAttempts("house/movies", "movie:path:one-2001", "One (2001)", "movie:path:one-2001", ledgerTime),
 		walkWithAttempts("house/movies", "movie:path:two-2002", "Two (2002)", "movie:path:two-2002", ledgerTime),
@@ -37,7 +37,7 @@ func TestAPrunedFolderTakesItsAttemptsAgainstTheRealSchema(t *testing.T) {
 		t.Fatalf("attempts = %d, want two per title", got)
 	}
 
-	second := int64(2000)
+	second := time.Now().UnixNano()
 	kept := walkWithAttempts("house/movies", "movie:path:one-2001", "One (2001)", "movie:path:one-2001", ledgerTime)
 	if err := flushWalk(ctx, catalog, kept, second); err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ func TestARescanTakesOnlyItsOwnFoldersAttemptsAgainstTheRealSchema(t *testing.T)
 		t.Fatal(err)
 	}
 
-	first := int64(1000)
+	first := time.Now().Add(-time.Hour).UnixNano()
 	for _, walk := range []*walkResult{
 		walkWithAttempts("house/movies", "movie:path:one-2001", "One (2001)", "movie:path:one-2001", ledgerTime),
 		walkWithAttempts("house/movies", "movie:path:two-2002", "Two (2002)", "movie:path:two-2002", ledgerTime),
@@ -69,7 +69,7 @@ func TestARescanTakesOnlyItsOwnFoldersAttemptsAgainstTheRealSchema(t *testing.T)
 	}
 
 	// The folder left the volume, so the rescan marks nothing under it.
-	second := int64(2000)
+	second := time.Now().UnixNano()
 	if err := flushWalk(ctx, catalog, &walkResult{}, second); err != nil {
 		t.Fatal(err)
 	}

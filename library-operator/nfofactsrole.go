@@ -287,6 +287,7 @@ func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result strin
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v", fact, folder, err)
 	}
+	e.writeRows(fact, folder, result == attemptFound)
 }
 
 // The actors the sidecar holds, in its own order, which is the billing order

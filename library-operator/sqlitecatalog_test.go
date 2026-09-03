@@ -273,7 +273,7 @@ func TestPruneLibraryAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := int64(1000)
+	first := time.Now().Add(-time.Hour).UnixNano()
 	for _, walk := range []*walkResult{
 		walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001"),
 		walkOfOneTitle("house/movies", "movie:tmdb:2", "Two (2002)", "movie:path:two-2002"),
@@ -289,7 +289,7 @@ func TestPruneLibraryAgainstTheRealSchema(t *testing.T) {
 
 	// The second walk of this library read the first title alone, so the
 	// second title's rows carry the old epoch and leave.
-	second := int64(2000)
+	second := time.Now().UnixNano()
 	if err := flushWalk(ctx, catalog, walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001"), second); err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestPruneScopeAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := int64(1000)
+	first := time.Now().Add(-time.Hour).UnixNano()
 	for _, walk := range []*walkResult{
 		walkOfOneTitle("house/movies", "movie:tmdb:1", "100% Wolf (2020)", "movie:path:100-wolf-2020"),
 		walkOfOneTitle("house/movies", "movie:tmdb:2", "100 Bullets (2019)", "movie:path:100-bullets-2019"),
@@ -366,7 +366,7 @@ func TestPruneScopeAgainstTheRealSchema(t *testing.T) {
 
 	// The folder left the volume, so the rescan marks nothing and every
 	// row under it is unmarked.
-	removed, err := pruneScope(ctx, catalog, "house/movies", "100% Wolf (2020)", int64(2000))
+	removed, err := pruneScope(ctx, catalog, "house/movies", "100% Wolf (2020)", time.Now().UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,13 +399,13 @@ func TestTheKeySpacesSeparateAnAliasFromAnItemAgainstTheRealSchema(t *testing.T)
 
 	// The first walk read the folder with no sidecar, so its id is the
 	// folder key.
-	if err := flushWalk(ctx, catalog, walkOfOneTitle("house/movies", "movie:path:one-2001", "One (2001)", "movie:path:one-2001"), int64(1000)); err != nil {
+	if err := flushWalk(ctx, catalog, walkOfOneTitle("house/movies", "movie:path:one-2001", "One (2001)", "movie:path:one-2001"), time.Now().Add(-time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 
 	// The sidecar arrived, so the title's id is now the provider id and
 	// the old id is one of its aliases.
-	second := int64(2000)
+	second := time.Now().UnixNano()
 	if err := flushWalk(ctx, catalog, walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001"), second); err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestTwoLibrariesHoldTheSameIdAndPathAgainstTheRealSchema(t *testing.T) {
 
 	for _, library := range []string{"house/movies", "studio/films"} {
 		walk := walkOfOneTitle(library, "movie:tmdb:1", "One (2001)", "movie:path:one-2001")
-		if err := flushWalk(ctx, catalog, walk, int64(1000)); err != nil {
+		if err := flushWalk(ctx, catalog, walk, time.Now().Add(-time.Hour).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -496,12 +496,12 @@ func TestPruneLibraryLeavesTheOtherLibrarysIdenticalRows(t *testing.T) {
 	if err := catalog.ensureSeen(ctx); err != nil {
 		t.Fatal(err)
 	}
-	seedTwoLibraries(t, catalog, int64(1000))
+	seedTwoLibraries(t, catalog, time.Now().Add(-time.Hour).UnixNano())
 	before := libraryRows(t, agent, "studio/films")
 
 	// The next walk of this library read the first title alone, so the
 	// second title's rows carry the old epoch and leave.
-	second := int64(2000)
+	second := time.Now().UnixNano()
 	walk := walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001")
 	if err := flushWalk(ctx, catalog, walk, second); err != nil {
 		t.Fatal(err)
@@ -536,12 +536,12 @@ func TestPruneScopeLeavesTheOtherLibrarysFolder(t *testing.T) {
 	if err := catalog.ensureSeen(ctx); err != nil {
 		t.Fatal(err)
 	}
-	seedTwoLibraries(t, catalog, int64(1000))
+	seedTwoLibraries(t, catalog, time.Now().Add(-time.Hour).UnixNano())
 	before := libraryRows(t, agent, "studio/films")
 
 	// The folder left this library's volume, so the rescan marks nothing
 	// and every row under it is unmarked.
-	removed, err := pruneScope(ctx, catalog, "house/movies", "One (2001)", int64(2000))
+	removed, err := pruneScope(ctx, catalog, "house/movies", "One (2001)", time.Now().UnixNano())
 	if err != nil {
 		t.Fatal(err)
 	}

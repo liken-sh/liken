@@ -67,7 +67,6 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 
 	body := meta.Body
 	body.ProviderIDs = meta.ProviderIDs
-	body.Art = allArt
 
 	result.series = append(result.series, seriesRow{
 		Id:       seriesID,
@@ -80,6 +79,7 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 		Released: meta.Released,
 		Added:    addedTime(dir),
 		Art:      primaryArt,
+		Arts:     allArt,
 		Body:     body,
 		NFOFacts: meta.NFOFacts,
 	})
@@ -292,8 +292,9 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 		}
 
 		body := meta.Body
+		var arts []string
 		if thumb != "" {
-			body.Art = []string{thumb}
+			arts = []string{thumb}
 		}
 
 		result.episodes = append(result.episodes, episodeRow{
@@ -307,6 +308,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 			Released: meta.Released,
 			Added:    addedTime(absolute),
 			Art:      thumb,
+			Arts:     arts,
 			Duration: meta.Duration,
 			Body:     body,
 			Series:   seriesID,

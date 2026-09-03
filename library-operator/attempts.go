@@ -93,6 +93,7 @@ func attemptPruneSQL() string {
 		` WHERE library = ?` +
 		` AND '` + seenAttempt + `' || item || char(31) || ` + attemptFactColumn +
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND at < ?` +
 		` LIMIT ?`
 }
 
@@ -109,6 +110,7 @@ func scopedAttemptPruneSQL() string {
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
 		` AND (` + pathScopeClause("item") +
 		` OR item IN (` + scope("movies") + ` UNION ` + scope("series") + ` UNION ` + scope("episodes") + `))` +
+		` AND at < ?` +
 		` LIMIT ?`
 }
 
@@ -119,7 +121,7 @@ func scopedAttemptPruneParams(library, folder string, epoch int64) []any {
 		params = append(params, library)
 		params = append(params, pathScopeParams(folder)...)
 	}
-	return append(params, pruneBatch)
+	return append(params, walkStart(epoch), pruneBatch)
 }
 
 // What one folder's .liken directory means to the scanner: which item the

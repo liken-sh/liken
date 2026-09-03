@@ -60,7 +60,6 @@ type movieBody struct {
 	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
 	Country       string            `json:"country,omitempty"`
 	ContentRating string            `json:"contentRating,omitempty"`
-	Art           []string          `json:"art,omitempty"`
 }
 
 // seriesBody is what tvshow.nfo holds beyond the shared header. A series
@@ -75,7 +74,6 @@ type seriesBody struct {
 	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
 	Country       string            `json:"country,omitempty"`
 	ContentRating string            `json:"contentRating,omitempty"`
-	Art           []string          `json:"art,omitempty"`
 }
 
 // episodeBody is what an episode .nfo holds beyond the shared header.
@@ -85,7 +83,6 @@ type episodeBody struct {
 	Writers     []string          `json:"writers,omitempty"`
 	Cast        []castMember      `json:"cast,omitempty"`
 	ProviderIDs map[string]string `json:"providerIds,omitempty"`
-	Art         []string          `json:"art,omitempty"`
 }
 
 // movieRow is one row of the movies item table: the header columns every
@@ -102,6 +99,7 @@ type movieRow struct {
 	Released string
 	Added    int64
 	Art      string
+	Arts     []string
 	Duration int64
 	Body     movieBody
 	SetID    string
@@ -123,6 +121,7 @@ type seriesRow struct {
 	Released string
 	Added    int64
 	Art      string
+	Arts     []string
 	Duration int64
 	Body     seriesBody
 	// The nfo_facts column, the same list a movie carries.
@@ -142,6 +141,7 @@ type episodeRow struct {
 	Released string
 	Added    int64
 	Art      string
+	Arts     []string
 	Duration int64
 	Body     episodeBody
 	Series   string

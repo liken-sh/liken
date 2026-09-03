@@ -209,6 +209,7 @@ func enrichContainer(library *Library, name, role, path, image, busAddress, topi
 			{Name: busAddressVariable, Value: busAddress},
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
+			{Name: libraryIgnoreVariable, Value: ignoreValue(library)},
 			{Name: scanPathVariable, Value: path},
 			{Name: echoTimeoutVariable, Value: defaultEchoTimeout.String()},
 			{Name: syncTimeoutVariable, Value: defaultSyncTimeout.String()},

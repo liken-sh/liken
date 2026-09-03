@@ -27,6 +27,9 @@ type enricher struct {
 	catalog  *Catalog
 	writer   *volumeWriter
 	log      io.Writer
+	// The folder names the walk skips. A fact reads its folder through the
+	// scan's reader after each write, and that reader takes the same set.
+	ignore ignoreSet
 	// The folder this Job was narrowed to, relative to the library root, and
 	// empty where the Job covers the whole library.
 	scope string
@@ -73,6 +76,7 @@ func newEnricher(log io.Writer) *enricher {
 		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
 		writer:      newVolumeWriter(job),
 		log:         log,
+		ignore:      parseIgnore(os.Getenv(libraryIgnoreVariable)),
 		statusTopic: libraryStatusTopic(base, namespace, name),
 		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
 	}
@@ -136,6 +140,7 @@ func (e *enricher) recordAttempt(folder, fact, entryPath, result string, at time
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v", fact, entryPath, err)
 	}
+	e.writeRows(fact, folder, result == attemptFound)
 }
 
 func (e *enricher) logf(format string, args ...any) {

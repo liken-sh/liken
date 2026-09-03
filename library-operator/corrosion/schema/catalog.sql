@@ -34,6 +34,7 @@
 --   released  a year (1999) or an ISO date (2004-09-22); both sort as text
 --   added     the time the item was added, in Unix seconds
 --   art       the path of the primary art, relative to the library root
+--   arts      every art file beside the item, as a JSON list of paths
 --   duration  seconds, or 0 where none exists
 --   body      the kind's own shape, as JSON
 --   slug      the legible display name, the-matrix-1999, for a URL or a screen
@@ -54,6 +55,7 @@ CREATE TABLE movies (
     released TEXT NOT NULL DEFAULT '',
     added INTEGER NOT NULL DEFAULT 0,
     art TEXT NOT NULL DEFAULT '',
+    arts TEXT NOT NULL DEFAULT '[]',
     duration INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL DEFAULT '{}',
     slug TEXT NOT NULL DEFAULT '',
@@ -117,6 +119,7 @@ CREATE TABLE series (
     released TEXT NOT NULL DEFAULT '',
     added INTEGER NOT NULL DEFAULT 0,
     art TEXT NOT NULL DEFAULT '',
+    arts TEXT NOT NULL DEFAULT '[]',
     duration INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL DEFAULT '{}',
     slug TEXT NOT NULL DEFAULT '',
@@ -146,6 +149,7 @@ CREATE TABLE episodes (
     released TEXT NOT NULL DEFAULT '',
     added INTEGER NOT NULL DEFAULT 0,
     art TEXT NOT NULL DEFAULT '',
+    arts TEXT NOT NULL DEFAULT '[]',
     duration INTEGER NOT NULL DEFAULT 0,
     body TEXT NOT NULL DEFAULT '{}',
     slug TEXT NOT NULL DEFAULT '',

@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"iter"
 	"net/http"
 	"os"
@@ -560,48 +559,11 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	defer s.walkMutex.Unlock()
 
 	relative := relativePath(s.root, folder)
-	if err := s.catalog.ensureSeen(ctx); err != nil {
-		return s.walkFailed("ensure the seen table", err)
-	}
-	epoch := time.Now().UnixNano()
-	result := &walkResult{}
-	if dirExists(folder) {
-		switch s.kind {
-		case libraryKindMovies:
-			scanMovieFolder(s.root, folder, s.library, result)
-		case libraryKindSeries:
-			scanSeriesFolder(s.root, folder, s.library, s.ignore, result)
-		default:
-			return nil
-		}
-	}
-
-	// The sets this folder's movies named are read before the upsert, so a
-	// movie that left its set still names the set that has to be derived
-	// again. The set the folder names now is affected as well.
-	var affected []string
-	if s.kind == libraryKindMovies {
-		held, err := s.catalog.setIDsUnder(ctx, s.library, relative)
-		if err != nil {
-			return s.walkFailed("read the sets of a rescan", err)
-		}
-		affected = append(held, setIDsOf(result.movies)...)
-	}
-
-	if err := flushWalk(ctx, s.catalog, result, epoch); err != nil {
-		return s.walkFailed("write a rescan", err)
-	}
-
-	removed, err := pruneScope(ctx, s.catalog, s.library, relative, epoch)
+	written, removed, err := rescanFolder(ctx, s.catalog, folderScan{
+		root: s.root, library: s.library, kind: s.kind, ignore: s.ignore,
+	}, folder)
 	if err != nil {
-		return s.walkFailed("prune a rescan", err)
-	}
-
-	// A rescan reads one folder and not a set's other members, so each
-	// affected set derives again from the movie rows the catalog holds, after
-	// the prune has taken the rows this folder lost.
-	if err := reconcileSets(ctx, s.catalog, s.library, affected); err != nil {
-		return s.walkFailed("write the sets of a rescan", err)
+		return s.walkFailed("rescan "+relative, err)
 	}
 
 	// A rescan moves the counts, so the Job's echo compares
@@ -616,7 +578,6 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	s.countsRead = true
 	s.mutex.Unlock()
 
-	written := len(result.movies) + len(result.series) + len(result.episodes) + len(result.files)
 	if written == 0 && removed == 0 {
 		s.logf("rescanned %s: no change", relative)
 		return nil
@@ -629,54 +590,89 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	return nil
 }
 
-// titleFolderOf maps a path on the volume to the title or series folder
-// that holds it. A path outside the root maps to nothing.
-//
-// The movies rule is the walk's own rule: step down the path through the
-// grouping folders, and stop at the first level that is a title folder or
-// that has left the volume, no deeper than the walk's grouping cap. A
-// level the scanner cannot read, and a path that names no title folder,
-// both map to nothing, and the caller then walks the whole root. A series
-// folder is always a child of the root.
-func (s *scanner) titleFolderOf(absolute string) string {
-	relative := relativePath(s.root, absolute)
-	if relative == absolute || relative == "." || strings.HasPrefix(relative, "..") {
-		return ""
+// What a reader of one folder needs beside the folder: the root, the library
+// and kind the rows belong to, and the folder names the walk skips.
+type folderScan struct {
+	root    string
+	library string
+	kind    string
+	ignore  ignoreSet
+}
+
+// Reads one title or series folder into rows, upserts them, and prunes the
+// folder's rows the read did not produce. It is the body of a webhook rescan,
+// and the identity fact calls it after it writes a title's ids, because the
+// id keys every other row of the title.
+func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder string) (int, int, error) {
+	relative := relativePath(scan.root, folder)
+	if err := catalog.ensureSeen(ctx); err != nil {
+		return 0, 0, fmt.Errorf("ensure the seen table: %w", err)
 	}
-	parts := splitPath(relative)
-	if len(parts) == 0 {
-		return ""
-	}
-	if s.kind == libraryKindSeries {
-		return path.Join(s.root, parts[0])
+	epoch := time.Now().UnixNano()
+	result := readFolder(scan, folder)
+	if result == nil {
+		return 0, 0, nil
 	}
 
-	folder := s.root
-	for depth, part := range parts {
-		// The walk reads a title folder at one level past its grouping
-		// cap, because it tests a directory for a title before it tests
-		// the depth, so the resolver reaches the same level.
-		if depth > movieGroupingDepth {
-			return ""
+	// The sets this folder's movies named are read before the upsert, so a
+	// movie that left its set still names the set that has to be derived
+	// again. The set the folder names now is affected as well.
+	var affected []string
+	if scan.kind == libraryKindMovies {
+		held, err := catalog.setIDsUnder(ctx, scan.library, relative)
+		if err != nil {
+			return 0, 0, fmt.Errorf("read the sets of a rescan: %w", err)
 		}
-		folder = path.Join(folder, part)
-		info, err := os.Stat(folder)
-		// A folder that left the volume is the rescan's whole point: it
-		// marks nothing, and every row under it leaves.
-		if errors.Is(err, fs.ErrNotExist) {
-			return folder
-		}
-		// A level the scanner cannot read is not a title folder that
-		// left, and a prune scoped to it would delete rows the volume
-		// still holds.
-		if err != nil || !info.IsDir() {
-			return ""
-		}
-		if isMovieTitleFolder(folder) {
-			return folder
-		}
+		affected = append(held, setIDsOf(result.movies)...)
 	}
-	return ""
+
+	if err := flushWalk(ctx, catalog, result, epoch); err != nil {
+		return 0, 0, fmt.Errorf("write a rescan: %w", err)
+	}
+
+	removed, err := pruneScope(ctx, catalog, scan.library, relative, epoch)
+	if err != nil {
+		return 0, removed, fmt.Errorf("prune a rescan: %w", err)
+	}
+
+	// A rescan reads one folder and not a set's other members, so each
+	// affected set derives again from the movie rows the catalog holds, after
+	// the prune has taken the rows this folder lost.
+	if err := reconcileSets(ctx, catalog, scan.library, affected); err != nil {
+		return 0, removed, fmt.Errorf("write the sets of a rescan: %w", err)
+	}
+	written := len(result.movies) + len(result.series) + len(result.episodes) + len(result.files)
+	return written, removed, nil
+}
+
+// One title or series folder as rows, through the reader the walk uses for
+// the kind. A folder that left the volume reads as no rows, so the prune that
+// follows takes every row it held. A kind with no reader reads as nil.
+func readFolder(scan folderScan, folder string) *walkResult {
+	result := &walkResult{}
+	if !dirExists(folder) {
+		return result
+	}
+	switch scan.kind {
+	case libraryKindMovies:
+		scanMovieFolder(scan.root, folder, scan.library, result)
+	case libraryKindSeries:
+		scanSeriesFolder(scan.root, folder, scan.library, scan.ignore, result)
+	default:
+		return nil
+	}
+	return result
+}
+
+// titleFolderOf maps a path on the volume to the title or series folder
+// that holds it. A path outside the root maps to nothing, and so does a path
+// that names no title folder, and the caller then walks the whole root.
+func (s *scanner) titleFolderOf(absolute string) string {
+	folder, held := titleFolderOf(s.root, s.kind, absolute)
+	if !held {
+		return ""
+	}
+	return folder
 }
 
 // splitPath splits a relative path into its elements, dropping the

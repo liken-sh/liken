@@ -267,8 +267,14 @@ func TestAFactLeavesAGroupAnotherWriterHolds(t *testing.T) {
 		"<plot>A keeper watches the ice.</plot>", "<plot>A plot a person wrote.</plot>", 1)
 	writeFile(t, sidecar, byHand)
 
-	if err := work.nfoGap(t.Context(), factOverview, lineOf(fake)); err != nil {
+	// The title's rows now say the overview is answered, so the gap no longer
+	// lists it; the fact reaches the title again the way a rerun over it does.
+	item, _, err := catalog.identityItem(t.Context(), "house/movies", "movie:tmdb:4242")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if got := work.fillNFOFact(t.Context(), factOverview, lineOf(fake), item); got != attemptFight {
+		t.Fatalf("the rerun answered %q, want a fight", got)
 	}
 
 	if held := readFileString(t, sidecar); !strings.Contains(held, "A plot a person wrote.") {

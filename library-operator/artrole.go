@@ -146,6 +146,7 @@ func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v", fact, entry, err)
 	}
+	e.writeRows(fact, folder, result == attemptFound)
 }
 
 // One art fact's work list, out of the local copy of the catalog, with the

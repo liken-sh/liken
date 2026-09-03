@@ -425,8 +425,8 @@ func TestWalkSeriesReadsNamePrefixedArt(t *testing.T) {
 		t.Errorf("art = %q, want %q", series.Art, poster)
 	}
 	want := []string{poster, filepath.Join("Twin Peaks (1990)", "Twin Peaks (1990)-clearlogo.png")}
-	if !reflect.DeepEqual(series.Body.Art, want) {
-		t.Errorf("body art = %v, want %v", series.Body.Art, want)
+	if !reflect.DeepEqual(series.Arts, want) {
+		t.Errorf("arts = %v, want %v", series.Arts, want)
 	}
 }
 

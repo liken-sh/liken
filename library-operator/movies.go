@@ -86,7 +86,6 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 
 	body := meta.Body
 	body.ProviderIDs = meta.ProviderIDs
-	body.Art = allArt
 
 	result.movies = append(result.movies, movieRow{
 		Id:       id,
@@ -99,6 +98,7 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 		Released: meta.Released,
 		Added:    addedTime(dir),
 		Art:      primaryArt,
+		Arts:     allArt,
 		Duration: meta.Duration,
 		Body:     body,
 		SetID:    meta.SetID,

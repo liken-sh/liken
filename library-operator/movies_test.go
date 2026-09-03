@@ -186,8 +186,8 @@ func TestWalkMoviesReadsNamePrefixedArt(t *testing.T) {
 		t.Errorf("art = %q, want %q", solaris.Art, poster)
 	}
 	want := []string{poster, filepath.Join("Solaris (1972)", "Solaris (1972)-fanart.jpg")}
-	if !reflect.DeepEqual(solaris.Body.Art, want) {
-		t.Errorf("body art = %v, want %v", solaris.Body.Art, want)
+	if !reflect.DeepEqual(solaris.Arts, want) {
+		t.Errorf("arts = %v, want %v", solaris.Arts, want)
 	}
 	files := filesByPath(result)
 	if row := files[poster]; row.Role != fileRolePoster {
