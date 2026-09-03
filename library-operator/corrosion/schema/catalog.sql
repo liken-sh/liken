@@ -316,12 +316,16 @@ CREATE INDEX contributor_aliases_library_path ON contributor_aliases (library, p
 -- title gives each of its people one slot; the column is not named order,
 -- which is a word SQL keeps for itself. contributor is the person's directory,
 -- empty for a person the store has no entry for.
+-- part is actor, director, or writer, and tells the cast of a title from its
+-- crew. role is the character an actor played, and the crew carry none. The
+-- crew hold the billing after the cast, because the billing is the key.
 CREATE TABLE credits (
     library TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
     billing INTEGER NOT NULL DEFAULT 0,
     contributor TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL DEFAULT '',
+    part TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, item, billing)
 );

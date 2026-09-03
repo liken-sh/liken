@@ -48,6 +48,7 @@ type creditRow struct {
 	Item        string
 	Contributor string
 	Name        string
+	Part        string
 	Role        string
 	Billing     int
 }
@@ -134,7 +135,7 @@ func creditRows(library, item string, credits []creditEntry) []creditRow {
 		}
 		rows = append(rows, creditRow{
 			Library: library, Item: item, Contributor: credit.Contributor,
-			Name: credit.Name, Role: credit.Role, Billing: credit.Order,
+			Name: credit.Name, Part: credit.Part, Role: credit.Role, Billing: credit.Order,
 		})
 	}
 	return rows
@@ -187,11 +188,13 @@ func (c *Catalog) UpsertCredits(ctx context.Context, rows []creditRow) (int, err
 	statements := make([]statement, len(rows))
 	for i, row := range rows {
 		statements[i] = statement{
-			sql: `INSERT INTO credits (library, item, billing, contributor, name, role) ` +
-				`VALUES (?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO credits (library, item, billing, contributor, name, part, role) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, item, billing) DO UPDATE SET ` +
-				`contributor = excluded.contributor, name = excluded.name, role = excluded.role`,
-			params: []any{row.Library, row.Item, row.Billing, row.Contributor, row.Name, row.Role},
+				`contributor = excluded.contributor, name = excluded.name, ` +
+				`part = excluded.part, role = excluded.role`,
+			params: []any{row.Library, row.Item, row.Billing, row.Contributor, row.Name,
+				row.Part, row.Role},
 		}
 	}
 	return c.apply(ctx, statements)

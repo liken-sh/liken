@@ -743,19 +743,23 @@ func TestTheCreditsFactKeepsTheActorsTheSidecarHolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []creditEntry{
-		{Name: "Nora Vance", Role: "Captain", Order: 0, Contributor: ".contributors/n/nora-vance"},
-		{Name: "Ivo Brandt", Role: "The Mate", Order: 1, Contributor: ".contributors/i/ivo-brandt"},
-		{Name: "Rea Solberg", Order: 2, Contributor: ".contributors/r/rea-solberg"},
-		{Name: "Ada Ferris", Role: "The Pilot", Order: 3, Contributor: ".contributors/a/ada-ferris"},
+		{Name: "Nora Vance", Part: creditPartActor, Role: "Captain", Order: 0,
+			Contributor: ".contributors/no/nora-vance"},
+		{Name: "Ivo Brandt", Part: creditPartActor, Role: "The Mate", Order: 1,
+			Contributor: ".contributors/iv/ivo-brandt"},
+		{Name: "Rea Solberg", Part: creditPartActor, Order: 2,
+			Contributor: ".contributors/re/rea-solberg"},
+		{Name: "Ada Ferris", Part: creditPartActor, Role: "The Pilot", Order: 3,
+			Contributor: ".contributors/ad/ada-ferris"},
 	}
 	if !slices.Equal(ledger.Credits, want) {
 		t.Fatalf("credits = %+v, want %+v", ledger.Credits, want)
 	}
-	if entry := readFileString(t, filepath.Join(root, ".contributors/n/nora-vance", contributorFileName)); entry !=
+	if entry := readFileString(t, filepath.Join(root, ".contributors/no/nora-vance", contributorFileName)); entry !=
 		"name: Nora Vance\nids: {tmdb: 31}\n" {
 		t.Errorf("contributor.yaml = %q, want the ids the provider gave for the person the sidecar holds", entry)
 	}
-	if entry := readFileString(t, filepath.Join(root, ".contributors/i/ivo-brandt", contributorFileName)); entry !=
+	if entry := readFileString(t, filepath.Join(root, ".contributors/iv/ivo-brandt", contributorFileName)); entry !=
 		"name: Ivo Brandt\n" {
 		t.Errorf("contributor.yaml = %q, want the person the sidecar alone holds", entry)
 	}
@@ -928,4 +932,27 @@ func TestTheUnionStartsFromTheActorsTheSidecarHolds(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A sidecar Jellyfin filled with a crew: the director and the writer elements
+// it writes, Kodi's credits element beside them, and the URL it leaves after
+// the root element.
+func writeJellyfinCrew(t *testing.T, sidecar string) {
+	t.Helper()
+	writeFile(t, sidecar, `<?xml version="1.0" encoding="utf-8"?>
+<movie>
+  <title>Winter Harbour</title>
+  <year>2011</year>
+  <plot>A keeper watches the ice.</plot>
+  <director>Iris Kell</director>
+  <credits>Petra Lund</credits>
+  <uniqueid type="tmdb" default="true">4242</uniqueid>
+  <actor>
+    <name>Nora Vance</name>
+    <role>Captain</role>
+    <order>0</order>
+  </actor>
+</movie>
+<url function="GetDetails" cache="4242.xml">https://api.example.test/series?apikey=k&amp;id=4242</url>
+`)
 }

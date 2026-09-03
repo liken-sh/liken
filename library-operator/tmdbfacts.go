@@ -174,16 +174,87 @@ type tmdbCredits struct {
 			Character string `json:"character"`
 		} `json:"roles"`
 	} `json:"cast"`
+	Crew []tmdbCrewMember `json:"crew"`
 }
 
-func (c *tmdbClient) credits(ctx context.Context, kind string, id int) ([]creditedActor, error) {
+// One crew credit. A movie states one job per credit, and a series states
+// every job the person held over its seasons, which is why the jobs of a
+// credit are a list.
+type tmdbCrewMember struct {
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	Job        string `json:"job"`
+	Department string `json:"department"`
+	Jobs       []struct {
+		Job string `json:"job"`
+	} `json:"jobs"`
+}
+
+func (m tmdbCrewMember) jobs() []string {
+	if len(m.Jobs) == 0 {
+		return []string{m.Job}
+	}
+	held := make([]string, 0, len(m.Jobs))
+	for _, one := range m.Jobs {
+		held = append(held, one.Job)
+	}
+	return held
+}
+
+// Which crew credits the two parts take. A director is the one job of that
+// name, because the directing department also holds the assistants a player
+// does not name. A writer is anyone in the writing department, because a
+// person credited with the screenplay, the story, or the novel wrote the
+// title.
+const (
+	tmdbDirectorJob       = "Director"
+	tmdbWritingDepartment = "Writing"
+)
+
+func (m tmdbCrewMember) directs() bool { return slices.Contains(m.jobs(), tmdbDirectorJob) }
+
+func (m tmdbCrewMember) writes() bool { return m.Department == tmdbWritingDepartment }
+
+// The crew of one title that one part takes, in the order TMDb states them,
+// with one entry per person, because a person credited twice is one name a
+// player reads once. The id tells two people of one name apart, and a person
+// TMDb states no id for is told apart by the name alone.
+func tmdbCrew(members []tmdbCrewMember, takes func(tmdbCrewMember) bool) []creditedPerson {
+	var people []creditedPerson
+	held := map[int]bool{}
+	for _, member := range members {
+		name := strings.TrimSpace(member.Name)
+		if name == "" || !takes(member) {
+			continue
+		}
+		if member.ID > 0 && held[member.ID] {
+			continue
+		}
+		if member.ID <= 0 && personIndex(people, name) >= 0 {
+			continue
+		}
+		held[member.ID] = true
+		people = append(people, creditedPerson{Name: name, IDs: creditedIDs(member.ID)})
+	}
+	return people
+}
+
+// The people one title's credits name: the billed cast, cut to the limit, and
+// the crew, which has no cut because a title names few of them.
+type titleCredits struct {
+	Cast      []creditedActor
+	Directors []creditedPerson
+	Writers   []creditedPerson
+}
+
+func (c *tmdbClient) credits(ctx context.Context, kind string, id int) (titleCredits, error) {
 	path := tmdbTitlePath(kind, id) + "/credits"
 	if kind == libraryKindSeries {
 		path = tmdbTitlePath(kind, id) + "/aggregate_credits"
 	}
 	var answer tmdbCredits
 	if err := c.get(ctx, path, nil, &answer); err != nil {
-		return nil, err
+		return titleCredits{}, err
 	}
 	cast := make([]creditedActor, 0, len(answer.Cast))
 	for _, member := range answer.Cast {
@@ -203,7 +274,11 @@ func (c *tmdbClient) credits(ctx context.Context, kind string, id int) ([]credit
 	if len(cast) > tmdbCastLimit {
 		cast = cast[:tmdbCastLimit]
 	}
-	return cast, nil
+	return titleCredits{
+		Cast:      cast,
+		Directors: tmdbCrew(answer.Crew, tmdbCrewMember.directs),
+		Writers:   tmdbCrew(answer.Crew, tmdbCrewMember.writes),
+	}, nil
 }
 
 // The ids one credit carries. A person TMDb states no id for carries none, and
@@ -299,9 +374,11 @@ func (a tmdbAnswerer) rating(ctx context.Context, kind string, id int) (factAnsw
 }
 
 func (a tmdbAnswerer) credits(ctx context.Context, kind string, id int) (factAnswer, bool, error) {
-	cast, err := a.client.credits(ctx, kind, id)
+	credits, err := a.client.credits(ctx, kind, id)
 	if err != nil {
 		return factAnswer{}, false, err
 	}
-	return factAnswer{Cast: cast}, len(cast) > 0, nil
+	answer := factAnswer{Cast: credits.Cast, Directors: credits.Directors, Writers: credits.Writers}
+	held := len(credits.Cast) > 0 || len(credits.Directors) > 0 || len(credits.Writers) > 0
+	return answer, held, nil
 }

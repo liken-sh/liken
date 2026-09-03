@@ -51,9 +51,15 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 	writeContributorEntry(t, root, "tom-hanks",
 		"name: Tom Hanks\nids: {imdb: nm0000158, tmdb: 31}\nborn: \"1956-07-09\"\n",
 		contributorBiographyName, contributorHeadshotName)
+	writeContributorEntry(t, root, "iris-kell", "name: Iris Kell\nids: {tmdb: 11}\n")
 	writeCreditsLedger(t, root, "The Signal (2014)", []creditEntry{
-		{Name: "Tom Hanks", Role: "The Captain", Order: 0, Contributor: ".contributors/t/tom-hanks"},
-		{Name: "宮崎 駿", Role: "Himself", Order: 1},
+		{Name: "Tom Hanks", Part: creditPartActor, Role: "The Captain", Order: 0,
+			Contributor: ".contributors/to/tom-hanks"},
+		{Name: "宮崎 駿", Part: creditPartActor, Role: "Himself", Order: 1},
+		{Name: "Iris Kell", Part: creditPartDirector, Order: 2,
+			Contributor: ".contributors/ir/iris-kell"},
+		{Name: "Iris Kell", Part: creditPartWriter, Order: 3,
+			Contributor: ".contributors/ir/iris-kell"},
 	})
 
 	result := walkContributors(root, contributorLibrary)
@@ -66,19 +72,29 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 	}
 
 	people := catalogLines(t, catalog, `SELECT path || '|' || name || '|' || born || '|' || died ||`+
-		`'|' || biography || '|' || headshot FROM contributors WHERE library = ?`)
-	if len(people) != 1 || people[0] != ".contributors/t/tom-hanks|Tom Hanks|1956-07-09||1|1" {
-		t.Errorf("contributors = %v, want the one person and the files beside the entry", people)
+		`'|' || biography || '|' || headshot FROM contributors WHERE library = ? ORDER BY path`)
+	wantPeople := []string{
+		".contributors/ir/iris-kell|Iris Kell|||0|0",
+		".contributors/to/tom-hanks|Tom Hanks|1956-07-09||1|1",
+	}
+	if strings.Join(people, ",") != strings.Join(wantPeople, ",") {
+		t.Errorf("contributors = %v, want %v", people, wantPeople)
 	}
 	ids := catalogLines(t, catalog, `SELECT scheme || '|' || id || '|' || path FROM contributor_aliases `+
-		`WHERE library = ? ORDER BY scheme`)
-	want := []string{"imdb|nm0000158|.contributors/t/tom-hanks", "tmdb|31|.contributors/t/tom-hanks"}
+		`WHERE library = ? ORDER BY scheme, id`)
+	want := []string{"imdb|nm0000158|.contributors/to/tom-hanks", "tmdb|11|.contributors/ir/iris-kell",
+		"tmdb|31|.contributors/to/tom-hanks"}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Errorf("contributor_aliases = %v, want %v", ids, want)
 	}
-	credits := catalogLines(t, catalog, `SELECT billing || '|' || contributor || '|' || name || '|' || role `+
-		`FROM credits WHERE library = ? ORDER BY billing`)
-	wantCredits := []string{"0|.contributors/t/tom-hanks|Tom Hanks|The Captain", "1||宮崎 駿|Himself"}
+	credits := catalogLines(t, catalog, `SELECT billing || '|' || contributor || '|' || name || '|' || `+
+		`part || '|' || role FROM credits WHERE library = ? ORDER BY billing`)
+	wantCredits := []string{
+		"0|.contributors/to/tom-hanks|Tom Hanks|actor|The Captain",
+		"1||宮崎 駿|actor|Himself",
+		"2|.contributors/ir/iris-kell|Iris Kell|director|",
+		"3|.contributors/ir/iris-kell|Iris Kell|writer|",
+	}
 	if strings.Join(credits, ",") != strings.Join(wantCredits, ",") {
 		t.Errorf("credits = %v, want %v", credits, wantCredits)
 	}
@@ -89,7 +105,7 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 func TestACreditNamesItsTitle(t *testing.T) {
 	root := t.TempDir()
 	writeCreditsLedger(t, root, "The Signal (2014)",
-		[]creditEntry{{Name: "Tom Hanks", Contributor: ".contributors/t/tom-hanks"}})
+		[]creditEntry{{Name: "Tom Hanks", Contributor: ".contributors/to/tom-hanks"}})
 
 	result := &walkResult{}
 	scanMovieFolder(root, filepath.Join(root, "The Signal (2014)"), contributorLibrary, result)
@@ -120,7 +136,7 @@ func TestTheWalkOfTheStoreReadsTheAttempts(t *testing.T) {
 		t.Fatalf("attempts = %+v, want the one the ledger holds", result.attempts)
 	}
 	got := result.attempts[0]
-	if got.Item != ".contributors/t/tom-hanks" || got.Fact != factContributorHeadshot {
+	if got.Item != ".contributors/to/tom-hanks" || got.Fact != factContributorHeadshot {
 		t.Errorf("attempt = %+v, want the person and the fact", got)
 	}
 }
@@ -133,7 +149,7 @@ func TestTheWalkOfTheStoreReadsOnlyTheEntries(t *testing.T) {
 	writeContributorEntry(t, root, "tom-hanks", "name: Tom Hanks\n")
 
 	result := walkContributors(root, contributorLibrary)
-	if len(result.contributors) != 1 || result.contributors[0].Path != ".contributors/t/tom-hanks" {
+	if len(result.contributors) != 1 || result.contributors[0].Path != ".contributors/to/tom-hanks" {
 		t.Errorf("contributors = %+v, want the one entry", result.contributors)
 	}
 	if result.readError {
@@ -168,18 +184,18 @@ func TestPruningThePeopleTheWalkDidNotMark(t *testing.T) {
 	}
 	held := &walkResult{
 		contributors: []contributorRow{
-			{Library: contributorLibrary, Path: ".contributors/t/tom-hanks", Name: "Tom Hanks"},
-			{Library: contributorLibrary, Path: ".contributors/s/one-who-left", Name: "One Who Left"},
+			{Library: contributorLibrary, Path: ".contributors/to/tom-hanks", Name: "Tom Hanks"},
+			{Library: contributorLibrary, Path: ".contributors/on/one-who-left", Name: "One Who Left"},
 		},
 		contributorAliases: []contributorAliasRow{
-			{Library: contributorLibrary, Scheme: "tmdb", ID: "31", Path: ".contributors/t/tom-hanks"},
-			{Library: contributorLibrary, Scheme: "tmdb", ID: "99", Path: ".contributors/s/one-who-left"},
+			{Library: contributorLibrary, Scheme: "tmdb", ID: "31", Path: ".contributors/to/tom-hanks"},
+			{Library: contributorLibrary, Scheme: "tmdb", ID: "99", Path: ".contributors/on/one-who-left"},
 		},
 		credits: []creditRow{
 			{Library: contributorLibrary, Item: "movie:tmdb:603", Billing: 0, Name: "Tom Hanks",
-				Contributor: ".contributors/t/tom-hanks"},
+				Contributor: ".contributors/to/tom-hanks"},
 			{Library: contributorLibrary, Item: "movie:tmdb:603", Billing: 1, Name: "One Who Left",
-				Contributor: ".contributors/s/one-who-left"},
+				Contributor: ".contributors/on/one-who-left"},
 		},
 	}
 	if err := upsertWalk(ctx, catalog, held); err != nil {
@@ -202,7 +218,7 @@ func TestPruningThePeopleTheWalkDidNotMark(t *testing.T) {
 	}
 
 	people := catalogLines(t, catalog, `SELECT path FROM contributors WHERE library = ?`)
-	if len(people) != 1 || people[0] != ".contributors/t/tom-hanks" {
+	if len(people) != 1 || people[0] != ".contributors/to/tom-hanks" {
 		t.Errorf("contributors = %v, want the person the walk read", people)
 	}
 	ids := catalogLines(t, catalog, `SELECT id FROM contributor_aliases WHERE library = ?`)

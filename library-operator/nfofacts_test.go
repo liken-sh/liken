@@ -84,7 +84,7 @@ func TestTheCreditsGapIsATitleWithNoCreditsFileAgainstTheRealSchema(t *testing.T
 			name: "a title whose credits.yaml names a person",
 			credits: []creditRow{{
 				Library: "house/movies", Item: "movie:tmdb:2", Billing: 0,
-				Name: "Nora Vance", Contributor: ".contributors/n/nora-vance",
+				Name: "Nora Vance", Contributor: ".contributors/no/nora-vance",
 			}},
 			want: []string{"movie:tmdb:1", "series:tvdb:9"},
 		},

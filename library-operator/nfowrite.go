@@ -48,7 +48,12 @@ func nfoGroup(fact string) elementGroup {
 	case factCertification:
 		return elementGroup{owned: []xmlElement{{name: "mpaa"}}}
 	case factCredits:
-		return elementGroup{owned: []xmlElement{{name: "actor"}}}
+		// The credits element is not owned. Kodi reads a writer from it, but Kodi
+		// and Jellyfin both read the writer element, so the fact writes the writer
+		// element and leaves a credits element another writer put there.
+		return elementGroup{owned: []xmlElement{
+			{name: "actor"}, {name: "director"}, {name: "writer"},
+		}}
 	}
 	return elementGroup{}
 }
@@ -65,9 +70,27 @@ func nfoElements(fact string, answer factAnswer) [][]byte {
 	case factCertification:
 		return [][]byte{textElement("mpaa", answer.Certification)}
 	case factCredits:
-		return actorElements(answer.Cast)
+		return creditsElements(answer)
 	}
 	return nil
+}
+
+// The elements of the credits group: the cast, then the directors, then the
+// writers.
+func creditsElements(answer factAnswer) [][]byte {
+	elements := actorElements(answer.Cast)
+	elements = append(elements, crewElements("director", answer.Directors)...)
+	return append(elements, crewElements("writer", answer.Writers)...)
+}
+
+// A director element and a writer element carry the name alone, which is all
+// Kodi and Jellyfin read from them.
+func crewElements(name string, people []creditedPerson) [][]byte {
+	elements := make([][]byte, 0, len(people))
+	for _, person := range people {
+		elements = append(elements, textElement(name, person.Name))
+	}
+	return elements
 }
 
 func overviewElements(answer factAnswer) [][]byte {

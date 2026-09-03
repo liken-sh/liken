@@ -62,6 +62,11 @@ func TestTheTVmazeAnswererReadsWhatTheProviderStates(t *testing.T) {
 				if answer.Cast[1].Thumb != "" {
 					t.Errorf("cast = %+v, want no picture for a person TVmaze holds none of", answer.Cast[1])
 				}
+				// TVmaze states no crew, so the directors and the writers of a
+				// series come from the other providers alone.
+				if len(answer.Directors) > 0 || len(answer.Writers) > 0 {
+					t.Errorf("crew = %+v and %+v, want none", answer.Directors, answer.Writers)
+				}
 			},
 		},
 	}

@@ -41,7 +41,7 @@ The vocabulary, in dependency order:
 | identity | `identity` | name, year, runtime, and the providers | every `<uniqueid>` the provider knows, `identity.yaml` |
 | nfo | `overview`, `certification`, `rating.tmdb`, `rating.imdb`, `rating.rottentomatoes`, `rating.metacritic`, `credits` | the providers | one element group each in the `.nfo`, and `credits.yaml` |
 | art | `poster`, `backdrop`, `logo`, `clearart`, `banner`, `landscape`, `discart`, `season-poster`, `season-banner`, `episode-thumb` | the providers | one file under Kodi's name |
-| people | `contributor.ids`, `contributor.biography`, `contributor.headshot` | the providers | `.contributors/<letter>/<slug>/` |
+| people | `contributor.ids`, `contributor.biography`, `contributor.headshot` | the providers | `.contributors/<two characters>/<slug>/` |
 
 `overview` holds the plot, the tagline, the genres, the studios, the
 premiere, and the runtime, because every provider that serves any of

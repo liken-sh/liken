@@ -53,12 +53,13 @@ logo is "not found before this date", and never a hole an enricher
 falls into every night.
 
 **People have a store of their own.** `.contributors/` at a library's
-root holds one directory per person, sharded by the first letter of a
-slug in natural name order:
+root holds one directory per person, sharded by the first two
+characters of a slug in natural name order, because first letters of
+names bunch up and one letter would hold thousands:
 
 ```
 .contributors/
-  k/keanu-reeves/
+  ke/keanu-reeves/
     contributor.yaml     name, ids under every scheme, born, died, biography
     headshot.jpg
 ```

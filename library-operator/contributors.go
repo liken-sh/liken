@@ -44,12 +44,21 @@ type contributorFile struct {
 	Died string      `yaml:"died,omitempty"`
 }
 
+// The part a person took on the title. The part tells the cast from the crew,
+// and the role, which only an actor carries, is the character they played.
+const (
+	creditPartActor    = "actor"
+	creditPartDirector = "director"
+	creditPartWriter   = "writer"
+)
+
 // One line of credits.yaml: the person, the part, the billing order, and the
 // directory in .contributors/ the person's own files are in. The path is
 // relative to the library root, which is the form the contributors table
 // holds, so a reader joins the two with no rewriting.
 type creditEntry struct {
 	Name        string `yaml:"name"`
+	Part        string `yaml:"part,omitempty"`
 	Role        string `yaml:"role,omitempty"`
 	Order       int    `yaml:"order"`
 	Contributor string `yaml:"contributor,omitempty"`
@@ -79,15 +88,18 @@ func contributorIDMark(ids providerIDs) string {
 	return ""
 }
 
-// Where one slug's directory sits: under the first character of the slug,
-// which the fold leaves as a letter or a digit. The letter directory is what
-// keeps a store of thousands of people readable, and it costs one directory
-// read to reach a person.
+// Where one slug's directory sits: under the first two characters of the
+// slug. First letters of names bunch up, and one letter would hold thousands
+// of the people a large library credits; two characters keep the biggest
+// bucket near a thousand at thirty thousand people, at the cost of one
+// directory read to reach a person. A slug of one character is its own
+// bucket, and a hyphen in the second place stays, because the bucket is a
+// prefix of the slug and nothing else.
 func contributorDirectory(slug string) string {
 	if slug == "" {
 		return ""
 	}
-	return path.Join(contributorsDirectory, slug[:1], slug)
+	return path.Join(contributorsDirectory, slug[:min(2, len(slug))], slug)
 }
 
 // Reads one contributor.yaml, with the bytes it read, which the ids fact
@@ -145,13 +157,13 @@ func (f contributorFile) isPerson(ids providerIDs) bool {
 // tells the two apart, so the answer is the same whichever title reaches the
 // person first, and a run over a library that already holds the person writes
 // nothing.
-func (e *enricher) contributorFor(actor creditedActor) (string, error) {
-	slug := contributorSlug(actor.Name, actor.IDs)
+func (e *enricher) contributorFor(person creditedPerson) (string, error) {
+	slug := contributorSlug(person.Name, person.IDs)
 	if slug == "" {
 		return "", nil
 	}
 	candidates := []string{slug}
-	if mark := contributorIDMark(actor.IDs); mark != "" && mark != slug {
+	if mark := contributorIDMark(person.IDs); mark != "" && mark != slug {
 		candidates = append(candidates, slug+"-"+mark)
 	}
 	for _, candidate := range candidates {
@@ -161,9 +173,9 @@ func (e *enricher) contributorFor(actor creditedActor) (string, error) {
 			return "", err
 		}
 		if data == nil {
-			return directory, e.createContributor(directory, actor)
+			return directory, e.createContributor(directory, person)
 		}
-		if held.isPerson(actor.IDs) {
+		if held.isPerson(person.IDs) {
 			return directory, nil
 		}
 	}
@@ -173,8 +185,8 @@ func (e *enricher) contributorFor(actor creditedActor) (string, error) {
 // The entry the credits fact creates: the name, and every id the provider gave
 // at credit time. The create never lands on a file that exists, so a person
 // another title wrote, or a person edited by hand, is left as it is.
-func (e *enricher) createContributor(directory string, actor creditedActor) error {
-	data := marshalContributorFile(contributorFile{Name: actor.Name, IDs: actor.IDs})
+func (e *enricher) createContributor(directory string, person creditedPerson) error {
+	data := marshalContributorFile(contributorFile{Name: person.Name, IDs: person.IDs})
 	_, err := e.writer.createInto(filepath.Join(e.root, directory), contributorFileName, data)
 	return err
 }
@@ -183,16 +195,30 @@ func (e *enricher) createContributor(directory string, actor creditedActor) erro
 // directory, which is the fact's ledger file, so the credits, the answer, and
 // the attempts are one file with one writer. Every person named here has an
 // entry in .contributors/ by the time it lands.
-func (e *enricher) writeCredits(folder string, cast []creditedActor) {
-	entries := make([]creditEntry, 0, len(cast))
-	for _, actor := range cast {
-		directory, err := e.contributorFor(actor)
-		if err != nil {
-			e.logf("could not write the entry of %s: %v", actor.Name, err)
-		}
+func (e *enricher) writeCredits(folder string, answer factAnswer) {
+	entries := make([]creditEntry, 0, len(answer.Cast)+len(answer.Directors)+len(answer.Writers))
+	for _, actor := range answer.Cast {
 		entries = append(entries, creditEntry{
-			Name: actor.Name, Role: actor.Role, Order: actor.Order, Contributor: directory,
+			Name: actor.Name, Part: creditPartActor, Role: actor.Role, Order: actor.Order,
+			Contributor: e.contributorPath(actor.person()),
 		})
+	}
+	// The crew take the orders after the cast. The order is the key of a credit
+	// beside the title, and the cast holds the orders from zero up to its own
+	// length, so a director who also acts holds two credits with two orders.
+	for _, crew := range []struct {
+		part   string
+		people []creditedPerson
+	}{
+		{part: creditPartDirector, people: answer.Directors},
+		{part: creditPartWriter, people: answer.Writers},
+	} {
+		for _, person := range crew.people {
+			entries = append(entries, creditEntry{
+				Name: person.Name, Part: crew.part, Order: len(entries),
+				Contributor: e.contributorPath(person),
+			})
+		}
 	}
 	err := e.writer.updateLikenLedger(folder, factCredits, func(ledger *likenLedger) {
 		ledger.Credits = entries
@@ -200,4 +226,15 @@ func (e *enricher) writeCredits(folder string, cast []creditedActor) {
 	if err != nil {
 		e.logf("could not write the credits at %s: %v", folder, err)
 	}
+}
+
+// The directory of one credited person. Where the store cannot be read or
+// written, the credit keeps the name and no directory, and the run goes on:
+// the credit is the fact, and the directory is a link to it.
+func (e *enricher) contributorPath(person creditedPerson) string {
+	directory, err := e.contributorFor(person)
+	if err != nil {
+		e.logf("could not write the entry of %s: %v", person.Name, err)
+	}
+	return directory
 }

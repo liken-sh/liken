@@ -249,10 +249,10 @@ func seedContributors(t *testing.T, catalog *Catalog, rows ...contributorRow) {
 func TestEachContributorFactReadsItsOwnGap(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	filled := contributorRow{
-		Library: contributorLibrary, Path: ".contributors/p/person-1", Name: "One",
+		Library: contributorLibrary, Path: ".contributors/pe/person-1", Name: "One",
 		Born: "1956-07-09", Biography: true, Headshot: true,
 	}
-	empty := contributorRow{Library: contributorLibrary, Path: ".contributors/p/person-2", Name: "Two"}
+	empty := contributorRow{Library: contributorLibrary, Path: ".contributors/pe/person-2", Name: "Two"}
 	seedContributors(t, catalog, filled, empty)
 	if _, err := catalog.UpsertContributorAliases(t.Context(), []contributorAliasRow{{
 		Library: contributorLibrary, Scheme: "imdb", ID: "nm0000158", Path: filled.Path,
@@ -279,7 +279,7 @@ func TestEveryAttemptKindGatesTheContributorGap(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			now := time.Now().UTC()
 			person := contributorRow{
-				Library: contributorLibrary, Path: ".contributors/p/person-2", Name: "Two",
+				Library: contributorLibrary, Path: ".contributors/pe/person-2", Name: "Two",
 			}
 			seedContributors(t, catalog, person)
 			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
@@ -307,9 +307,9 @@ func TestTheContributorFactRunsItsWholeGap(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seedContributors(t, catalog, contributorRow{
-		Library: contributorLibrary, Path: ".contributors/p/person-31", Name: "Tom Hanks",
+		Library: contributorLibrary, Path: ".contributors/pe/person-31", Name: "Tom Hanks",
 	})
-	folder := filepath.Join(root, ".contributors/p/person-31")
+	folder := filepath.Join(root, ".contributors/pe/person-31")
 	writeFile(t, filepath.Join(folder, contributorFileName), "name: Tom Hanks\n")
 	work, log := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newPersonTMDb(t, map[string]string{
@@ -505,9 +505,9 @@ func TestAContributorOutsideTheScopeIsLeftAlone(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	seedContributors(t, catalog, contributorRow{
-		Library: contributorLibrary, Path: ".contributors/p/person-31", Name: "Tom Hanks",
+		Library: contributorLibrary, Path: ".contributors/pe/person-31", Name: "Tom Hanks",
 	})
-	writeFile(t, filepath.Join(root, ".contributors/p/person-31", contributorFileName), "name: Tom Hanks\n")
+	writeFile(t, filepath.Join(root, ".contributors/pe/person-31", contributorFileName), "name: Tom Hanks\n")
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	work.scope = "The Signal (2014)"
 	client, fake := newPersonTMDb(t, map[string]string{

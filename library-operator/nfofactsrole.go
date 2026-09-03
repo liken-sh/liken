@@ -189,6 +189,9 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 	merged, names := mergeAnswers(fact, answers)
 	if fact == factCredits {
 		merged.Cast = unionCast(sidecarCast(document), merged.Cast)
+		directors, writers := sidecarCrew(document)
+		merged.Directors, _ = unionPeople(directors, merged.Directors)
+		merged.Writers, _ = unionPeople(writers, merged.Writers)
 	}
 	if !answersFact(fact, merged) {
 		e.recordNFO(folder, fact, nil, attemptNothing, nil)
@@ -227,7 +230,7 @@ func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem,
 	// actor elements, so a person the store has no entry for gains one on the
 	// same run the .nfo names them.
 	if fact == factCredits {
-		e.writeCredits(folder, merged.Cast)
+		e.writeCredits(folder, merged)
 	}
 	e.logf("wrote the %s of %s from %s", fact, item.path, strings.Join(names, ", "))
 	e.recordNFO(folder, fact, &likenItem{
@@ -237,11 +240,18 @@ func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem,
 }
 
 // Which facts write their group on every answer and which compare first. The
-// credits fact leaves the actor elements where the merged cast is what the
-// sidecar holds, because the union added nothing a player reads, and
-// credits.yaml and the .contributors/ entries are written either way.
+// credits fact leaves the actor, director, and writer elements where the
+// merged people are what the sidecar holds, because the union added nothing a
+// player reads, and credits.yaml and the .contributors/ entries are written
+// either way.
 func groupNeedsWrite(fact string, document []byte, merged factAnswer) bool {
-	return fact != factCredits || !sameCast(sidecarCast(document), merged.Cast)
+	if fact != factCredits {
+		return true
+	}
+	directors, writers := sidecarCrew(document)
+	return !sameCast(sidecarCast(document), merged.Cast) ||
+		!samePeople(directors, merged.Directors) ||
+		!samePeople(writers, merged.Writers)
 }
 
 // The fight check compares the group on disk with the hash the ledger holds.
@@ -303,6 +313,32 @@ func sidecarCast(document []byte) []creditedActor {
 		})
 	}
 	return cast
+}
+
+// The crew the sidecar holds, in its own order, which is where the union
+// starts. Kodi writes a writer into the credits element and Jellyfin into the
+// writer element, so the two read as one list of writers, the way the scanner
+// reads them.
+func sidecarCrew(document []byte) (directors, writers []creditedPerson) {
+	var read struct {
+		Directors []string `xml:"director"`
+		Writers   []string `xml:"writer"`
+		Credits   []string `xml:"credits"`
+	}
+	if err := lenientXML(document).Decode(&read); err != nil {
+		return nil, nil
+	}
+	return namedPeople(trimAll(read.Directors)), namedPeople(mergeDedup(read.Writers, read.Credits))
+}
+
+// The people one list of crew elements names. No element of the .nfo carries
+// an id, so these people carry none.
+func namedPeople(names []string) []creditedPerson {
+	var people []creditedPerson
+	for _, name := range names {
+		people = append(people, creditedPerson{Name: name})
+	}
+	return people
 }
 
 // The ids a fact asks with come off the sidecar itself, which is where the

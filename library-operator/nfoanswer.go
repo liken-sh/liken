@@ -21,6 +21,15 @@ type titleRef struct {
 	ids  providerIDs
 }
 
+// One person a title credits: the name, and the ids that name the person's
+// directory in .contributors/. The crew are people of this shape, with no
+// part and no billing order, because a director directs all of the title and
+// holds no place in the billing.
+type creditedPerson struct {
+	Name string
+	IDs  providerIDs
+}
+
 // One credited person as a fact writes them: the name, the part, the billing
 // order, and the provider's own picture of them, which the people wave reads.
 type creditedActor struct {
@@ -32,6 +41,12 @@ type creditedActor struct {
 	// in .contributors/ and tell two people of one name apart. They never reach
 	// the .nfo, because no player reads an id there.
 	IDs providerIDs
+}
+
+// The person behind one actor's credit, which is what the .contributors/
+// store holds.
+func (a creditedActor) person() creditedPerson {
+	return creditedPerson{Name: a.Name, IDs: a.IDs}
 }
 
 // One site's score and the count of votes behind it. A count of zero means
@@ -54,6 +69,8 @@ type factAnswer struct {
 	Certification  string
 	Rating         *titleRating
 	Cast           []creditedActor
+	Directors      []creditedPerson
+	Writers        []creditedPerson
 }
 
 // One provider block, asked for one fact of one title. It answers false where
@@ -105,7 +122,7 @@ func mergeAnswers(fact string, answers []providerAnswer) (factAnswer, providerNa
 				note(held.block)
 			}
 		case fact == factCredits:
-			mergeCast(&merged, held, note)
+			mergeCredits(&merged, held, note)
 		}
 	}
 	return merged, names
@@ -143,6 +160,19 @@ func unionOf(held, adding []string, block string, note func(string)) []string {
 		note(block)
 	}
 	return held
+}
+
+// The three lists of the credits fact are sets, and each merges by the union
+// rule. The crew carry no billing order, so a director's place is the order
+// the providers answered in.
+func mergeCredits(merged *factAnswer, held providerAnswer, note func(string)) {
+	mergeCast(merged, held, note)
+	directors, addedDirector := unionPeople(merged.Directors, held.answer.Directors)
+	writers, addedWriter := unionPeople(merged.Writers, held.answer.Writers)
+	merged.Directors, merged.Writers = directors, writers
+	if addedDirector || addedWriter {
+		note(held.block)
+	}
 }
 
 // The cast is a set keyed by the person's name, and the billing order is the
@@ -191,6 +221,52 @@ func unionCast(sidecar, provider []creditedActor) []creditedActor {
 	return cast
 }
 
+// The union of one crew list, keyed by the person's name, with the list it
+// starts from first. A name the sidecar holds keeps its place and gains the
+// ids the provider states for it. The second answer says whether the union
+// added a person the first list did not hold, which is what records the
+// provider that added them.
+func unionPeople(held, adding []creditedPerson) ([]creditedPerson, bool) {
+	added := false
+	for _, person := range adding {
+		name := strings.TrimSpace(person.Name)
+		if name == "" {
+			continue
+		}
+		at := personIndex(held, name)
+		if at < 0 {
+			held = append(held, creditedPerson{Name: name, IDs: person.IDs})
+			added = true
+			continue
+		}
+		held[at] = filledPerson(held[at], person)
+	}
+	return held, added
+}
+
+func personIndex(people []creditedPerson, name string) int {
+	for at, held := range people {
+		if strings.EqualFold(held.Name, name) {
+			return at
+		}
+	}
+	return -1
+}
+
+// What a person one list holds takes from the same person in the other list:
+// every id the second carries that the first lacks.
+func filledPerson(held, adding creditedPerson) creditedPerson {
+	for scheme, id := range adding.IDs {
+		if held.IDs == nil {
+			held.IDs = providerIDs{}
+		}
+		if held.IDs[scheme] == "" {
+			held.IDs[scheme] = id
+		}
+	}
+	return held
+}
+
 // What a person the sidecar holds takes from the provider that names them:
 // every id, which is what reaches .contributors/, and the part and the picture
 // where the sidecar carries none.
@@ -201,14 +277,7 @@ func filledActor(held, adding creditedActor) creditedActor {
 	if held.Thumb == "" {
 		held.Thumb = adding.Thumb
 	}
-	for scheme, id := range adding.IDs {
-		if held.IDs == nil {
-			held.IDs = providerIDs{}
-		}
-		if held.IDs[scheme] == "" {
-			held.IDs[scheme] = id
-		}
-	}
+	held.IDs = filledPerson(held.person(), adding.person()).IDs
 	return held
 }
 
@@ -221,6 +290,21 @@ func sameCast(sidecar, merged []creditedActor) bool {
 	}
 	for at, held := range sidecar {
 		if held.Name != merged[at].Name || held.Role != merged[at].Role || held.Thumb != merged[at].Thumb {
+			return false
+		}
+	}
+	return true
+}
+
+// Whether one crew list is what the sidecar already holds. The ids are out of
+// the comparison, as they are for the cast, because they never reach the
+// .nfo.
+func samePeople(sidecar, merged []creditedPerson) bool {
+	if len(sidecar) != len(merged) {
+		return false
+	}
+	for at, held := range sidecar {
+		if held.Name != merged[at].Name {
 			return false
 		}
 	}
