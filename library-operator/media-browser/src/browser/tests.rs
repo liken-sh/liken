@@ -15,11 +15,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
 use crate::catalog::{
-    Credit, Episode, LibraryEntry, MovieDetails, MovieSet, PlayItem, Presentation, SeriesDetails,
-    Title,
+    Credit, CreditSlot, Credits, Episode, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
+    Presentation, SeriesDetails, Title, Work,
 };
 use crate::posters::Art;
 use crate::screens::movie::Focus;
+use crate::screens::series::Focus as SeriesFocus;
 use crate::screens::wall::Wall;
 use crate::views::{band, wall};
 
@@ -47,7 +48,15 @@ struct Fake {
     // set and the art a page draws over.
     trailers: bool,
     sets: bool,
+    // Whether the movies credit anybody, so a page carries the
+    // stripes a walk to a person's page starts from.
+    people: bool,
 }
+
+// The one person the fake library credits, and the directory their
+// entry sits in.
+const PLAYER: &str = "A Player";
+const ENTRY: &str = ".contributors/A Player";
 
 // The number at the end of a fake id. It places a movie in the library's
 // one set.
@@ -187,6 +196,53 @@ impl Source for Fake {
         self.items.clone()
     }
 
+    fn credits(&mut self, _library: &str, _id: &str) -> Credits {
+        self.calls.push("credits");
+        if !self.people {
+            return Credits::default();
+        }
+        Credits {
+            directors: vec![CreditSlot {
+                name: PLAYER.into(),
+                role: String::new(),
+                contributor: ENTRY.into(),
+                headshot: true,
+            }],
+            ..Credits::default()
+        }
+    }
+
+    fn person(&mut self, library: &str, path: &str) -> Option<Person> {
+        self.calls.push("person");
+        if !self.people || path != ENTRY {
+            return None;
+        }
+        Some(Person {
+            library: library.to_string(),
+            path: path.to_string(),
+            name: PLAYER.into(),
+            ..Person::default()
+        })
+    }
+
+    fn works(&mut self, _library: &str, path: &str) -> Vec<Work> {
+        self.calls.push("works");
+        if !self.people || path != ENTRY {
+            return Vec::new();
+        }
+        (1..=self.movies)
+            .map(|number| Work {
+                library: "screening/films".into(),
+                kind: "movies".into(),
+                id: format!("movies:{number}"),
+                title: format!("Entry {number}"),
+                released: "1980".into(),
+                art: format!("{number}.jpg"),
+                parts: "Director".into(),
+            })
+            .collect()
+    }
+
     fn changed(&mut self) -> bool {
         std::mem::take(&mut self.changed)
     }
@@ -239,6 +295,14 @@ fn showing_page(browser: &Browser<Fake, NoPosters>) -> &screens::movie::Movie {
     match browser.top() {
         screens::Screen::Movie(page) => page,
         _ => panic!("the browser is not showing a page"),
+    }
+}
+
+// The person's page the browser is showing.
+fn showing_person(browser: &Browser<Fake, NoPosters>) -> &screens::person::Person {
+    match browser.top() {
+        screens::Screen::Person(page) => page,
+        _ => panic!("the browser is not showing a person's page"),
     }
 }
 

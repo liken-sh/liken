@@ -159,6 +159,92 @@ pub struct Episode {
     pub art: String,
 }
 
+/// One slot of a title's stripe: the person, what they did on this
+/// title, and where their entry lives.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CreditSlot {
+    /// The name a person reads, as the title's own credits name it.
+    pub name: String,
+    /// The character an actor played, empty for the crew and for an
+    /// actor the credits gave no role.
+    pub role: String,
+    /// The person's directory relative to the library volume, empty
+    /// where the library's store holds no entry for them.
+    pub contributor: String,
+    /// Whether `headshot.jpg` is beside that entry.
+    pub headshot: bool,
+}
+
+/// One title's credited people, split into the three stripes a page
+/// draws, each in billing order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Credits {
+    /// The directors, in billing order.
+    pub directors: Vec<CreditSlot>,
+    /// The writers, in billing order.
+    pub writers: Vec<CreditSlot>,
+    /// The cast, in billing order.
+    pub cast: Vec<CreditSlot>,
+}
+
+/// One person, as their own page draws them. `library` and `path` name
+/// the entry the page opened from. The headshot and the biography can
+/// each come from another library's entry for the same person, so the
+/// four fields after the flags say which library and which directory
+/// hold each file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Person {
+    /// The library the page opened from, as `namespace/name`.
+    pub library: String,
+    /// The person's directory in that library, relative to its
+    /// volume.
+    pub path: String,
+    /// The name a person reads.
+    pub name: String,
+    /// The date of birth the entry holds, empty where it holds
+    /// none.
+    pub born: String,
+    /// The date of death the entry holds, empty where it holds
+    /// none.
+    pub died: String,
+    /// Whether any library holding this person has `biography.txt`
+    /// beside the entry.
+    pub biography: bool,
+    /// Whether any library holding this person has `headshot.jpg`
+    /// beside the entry.
+    pub headshot: bool,
+    /// The library whose entry holds the biography, empty where no
+    /// library holds one.
+    pub biography_library: String,
+    /// The person's directory in that library.
+    pub biography_path: String,
+    /// The library whose entry holds the headshot, empty where no
+    /// library holds one.
+    pub headshot_library: String,
+    /// The person's directory in that library.
+    pub headshot_path: String,
+}
+
+/// One title a person is credited in, as one slot of their wall.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Work {
+    /// The library that holds the title, as `namespace/name`.
+    pub library: String,
+    /// That library's kind, `movies` or `series`.
+    pub kind: String,
+    /// The title's provider-scoped id inside its library.
+    pub id: String,
+    /// The name a person reads.
+    pub title: String,
+    /// The year or the date of release, as the catalog stores it.
+    pub released: String,
+    /// The path of the primary art, relative to the library root.
+    pub art: String,
+    /// What the person did on this title, joined with `, `:
+    /// `Director`, `Writer`, then `as <role>` for an actor.
+    pub parts: String,
+}
+
 /// What the views read. Every list comes back in the order the views draw
 /// it, so the views sort nothing: titles by the scanner's sort key, and
 /// episodes by their aired numbers.
@@ -200,6 +286,19 @@ pub trait Source {
     /// resolves to nothing, because a play that skipped what the person
     /// chose is worse than no play at all.
     fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem>;
+
+    /// One title's credited people, split by part and in billing
+    /// order within a part.
+    fn credits(&mut self, library: &str, id: &str) -> Credits;
+
+    /// One person by the library and the directory that name them,
+    /// or nothing where that library holds no such entry.
+    fn person(&mut self, library: &str, path: &str) -> Option<Person>;
+
+    /// Every title the person is credited in, across every library
+    /// that holds them under a shared id, newest release first and a title
+    /// with no release last.
+    fn works(&mut self, library: &str, path: &str) -> Vec<Work>;
 
     /// Whether anything changed since the last call.
     fn changed(&mut self) -> bool;

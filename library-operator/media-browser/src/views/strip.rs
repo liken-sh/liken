@@ -13,7 +13,7 @@ use crate::look;
 use crate::posters::Posters;
 
 /// The height of a poster in the strip.
-pub const POSTER: f32 = 210.0;
+pub const POSTER: f32 = 270.0;
 
 /// The height the heading and the posters take together.
 pub const HEIGHT: f32 = HEADING + POSTER;

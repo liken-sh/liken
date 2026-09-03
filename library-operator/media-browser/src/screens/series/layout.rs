@@ -4,9 +4,9 @@
 // reads them while moving across the wall. Every measure here is pure over
 // numbers, so the fit at 1080 and the scroll are tested without a window.
 
-use super::{COLUMNS, Season};
+use super::{COLUMNS, Focus, Season};
 use crate::look;
-use crate::views::{REACH, area, divider, scroll, stack, text, wall};
+use crate::views::{REACH, area, divider, people, scroll, stack, text, wall};
 use iced_winit::core::Rectangle;
 
 /// The space between the foot of the header and the first divider.
@@ -26,9 +26,12 @@ pub const GAP: f32 = 14.0;
 pub const LOGO_WIDTH: f32 = 460.0;
 pub const LOGO_HEIGHT: f32 = 96.0;
 
-/// The lines the header cuts the episode's plot and the cast to.
+/// The lines the header cuts the episode's plot to.
 pub const PLOT_LINES: usize = 2;
-pub const CAST_LINES: usize = 1;
+
+/// The space between the foot of the wall and the first stripe,
+/// and between two stripes.
+pub const STRIPE_GAP: f32 = 24.0;
 
 // How much of the row under the focused one the scroll keeps in view, as
 // a share of a row, so a person sees that there is more below.
@@ -63,8 +66,6 @@ pub fn head() -> f32 {
         + text::height(1, look::FACTS)
         + GAP
         + text::height(PLOT_LINES, look::PLOT)
-        + GAP
-        + text::height(CAST_LINES, look::CREDITS)
         + FOOT
 }
 
@@ -98,6 +99,8 @@ pub struct Layout {
     pub cells: wall::Cells,
     /// One band for each season, in aired order.
     pub bands: Vec<Band>,
+    /// The top of each stripe, in the wall's own space.
+    pub stripes: Vec<f32>,
     /// The length of the wall, the gap under the header included.
     pub content: f32,
 }
@@ -106,7 +109,7 @@ impl Layout {
     /// The wall for these seasons, with stills of this cell. The first
     /// divider starts a gap below the header, and the gap scrolls away
     /// with the rows.
-    pub fn of(seasons: &[Season], cells: wall::Cells) -> Self {
+    pub fn of(seasons: &[Season], cells: wall::Cells, stripes: usize) -> Self {
         let mut bands = Vec::with_capacity(seasons.len());
         let mut top = HEAD;
         for season in seasons {
@@ -123,9 +126,19 @@ impl Layout {
             });
             top += height;
         }
+        let mut tops = Vec::with_capacity(stripes);
+        for _ in 0..stripes {
+            top += STRIPE_GAP;
+            tops.push(top);
+            top += people::HEIGHT;
+        }
+        if stripes > 0 {
+            top += STRIPE_GAP;
+        }
         Self {
             cells,
             bands,
+            stripes: tops,
             content: top,
         }
     }
@@ -133,18 +146,32 @@ impl Layout {
     /// How far the wall has scrolled with focus on this still. The wall
     /// stands at its top until the focused row would leave the foot of the
     /// region, and the header above the region never moves.
-    pub fn scroll(&self, focus: usize, seasons: &[Season], height: f32) -> f32 {
-        let Some(band) = self.band(focus, seasons) else {
-            return 0.0;
+    pub fn scroll(&self, focus: Focus, seasons: &[Season], height: f32) -> f32 {
+        let (region, tail) = match focus {
+            Focus::Stripe(stripe, _) => match self.stripes.get(stripe) {
+                Some(top) => (
+                    area(0.0, *top, 0.0, people::HEIGHT),
+                    STRIPE_GAP.min(self.content - top - people::HEIGHT),
+                ),
+                None => return 0.0,
+            },
+            Focus::Still(index) => {
+                let Some(band) = self.band(index, seasons) else {
+                    return 0.0;
+                };
+                let row = (index - seasons[band].run.first) / COLUMNS;
+                (
+                    area(
+                        0.0,
+                        self.bands[band].rows_top + row as f32 * self.cells.height,
+                        0.0,
+                        self.cells.height,
+                    ),
+                    TRAIL * self.cells.height,
+                )
+            }
         };
-        let row = (focus - seasons[band].run.first) / COLUMNS;
-        let region = Rectangle {
-            x: 0.0,
-            y: self.bands[band].rows_top + row as f32 * self.cells.height,
-            width: 0.0,
-            height: self.cells.height,
-        };
-        stack::offset(region, TRAIL * self.cells.height, self.content, height)
+        stack::offset(region, tail, self.content, height)
     }
 
     // The band that holds this still, or nothing on a page with no
@@ -192,7 +219,13 @@ mod tests {
     }
 
     fn layout() -> Layout {
-        Layout::of(&seasons(), cells())
+        Layout::of(&seasons(), cells(), 0)
+    }
+
+    // The same wall with the three stripes of a title's credits
+    // after it.
+    fn with_stripes() -> Layout {
+        Layout::of(&seasons(), cells(), 3)
     }
 
     #[test]
@@ -234,6 +267,39 @@ mod tests {
     }
 
     #[test]
+    fn the_stripes_follow_the_last_season_of_the_wall() {
+        let plain = layout();
+        let layout = with_stripes();
+        assert_eq!(layout.bands, plain.bands);
+        assert_eq!(layout.stripes.len(), 3);
+        assert_eq!(layout.stripes[0], plain.content + STRIPE_GAP);
+        assert_eq!(
+            layout.stripes[1],
+            layout.stripes[0] + people::HEIGHT + STRIPE_GAP
+        );
+        assert_eq!(
+            layout.content,
+            layout.stripes[2] + people::HEIGHT + STRIPE_GAP
+        );
+    }
+
+    #[test]
+    fn the_wall_scrolls_the_focused_stripe_into_view() {
+        let layout = with_stripes();
+        let height = region(frame()).height;
+        let mut offsets = Vec::new();
+        for stripe in 0..3 {
+            let offset = layout.scroll(Focus::Stripe(stripe, 0), &seasons(), height);
+            assert!(layout.stripes[stripe] - offset >= 0.0);
+            assert!(layout.stripes[stripe] + people::HEIGHT - offset <= height);
+            offsets.push(offset);
+        }
+        assert!(offsets[0] > layout.scroll(Focus::Still(26), &seasons(), height));
+        assert!(offsets[2] > offsets[1]);
+        assert_eq!(offsets[2], layout.content - height);
+    }
+
+    #[test]
     fn the_rows_start_under_the_divider() {
         let layout = layout();
         assert_eq!(
@@ -246,8 +312,11 @@ mod tests {
     fn the_header_stands_still_while_the_wall_scrolls_under_it() {
         let layout = layout();
         let region = region(frame());
-        assert_eq!(layout.scroll(0, &seasons(), region.height), 0.0);
-        let deep = layout.scroll(20, &seasons(), region.height);
+        assert_eq!(
+            layout.scroll(Focus::Still(0), &seasons(), region.height),
+            0.0
+        );
+        let deep = layout.scroll(Focus::Still(20), &seasons(), region.height);
         assert!(deep > 0.0);
         assert_eq!(header(frame()), header(frame()));
         assert_eq!(super::region(frame()), region);
@@ -257,9 +326,9 @@ mod tests {
     fn the_wall_scrolls_as_focus_moves_down() {
         let layout = layout();
         let height = region(frame()).height;
-        assert_eq!(layout.scroll(0, &seasons(), height), 0.0);
-        let deep = layout.scroll(20, &seasons(), height);
-        let deeper = layout.scroll(26, &seasons(), height);
+        assert_eq!(layout.scroll(Focus::Still(0), &seasons(), height), 0.0);
+        let deep = layout.scroll(Focus::Still(20), &seasons(), height);
+        let deeper = layout.scroll(Focus::Still(26), &seasons(), height);
         assert!(deep > 0.0);
         assert!(deeper > deep);
     }
@@ -269,22 +338,22 @@ mod tests {
         let layout = layout();
         let height = region(frame()).height;
         assert_eq!(
-            layout.scroll(26, &seasons(), height),
+            layout.scroll(Focus::Still(26), &seasons(), height),
             layout.content - height
         );
     }
 
     #[test]
     fn a_wall_shorter_than_its_region_never_scrolls() {
-        let layout = Layout::of(&seasons()[..1], cells());
-        assert_eq!(layout.scroll(7, &seasons()[..1], 2000.0), 0.0);
+        let layout = Layout::of(&seasons()[..1], cells(), 0);
+        assert_eq!(layout.scroll(Focus::Still(7), &seasons()[..1], 2000.0), 0.0);
     }
 
     #[test]
     fn a_series_with_no_episodes_never_scrolls() {
-        let layout = Layout::of(&[], cells());
+        let layout = Layout::of(&[], cells(), 0);
         assert_eq!(layout.content, HEAD);
-        assert_eq!(layout.scroll(0, &[], 1080.0), 0.0);
+        assert_eq!(layout.scroll(Focus::Still(0), &[], 1080.0), 0.0);
     }
 
     #[test]

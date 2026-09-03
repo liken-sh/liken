@@ -2,8 +2,7 @@
 // backdrop and the scrim the page stacks under it. Every block is measured
 // before anything draws, so a movie with no tagline, no set, or no credits
 // leaves no hole where they would have been. The measure gives every block
-// its place, the focused block decides how far the stack has scrolled, and
-// the credits under the strip come into view with it.
+// its place, and the focused block decides how far the stack has scrolled.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -16,7 +15,7 @@ use super::{Focus, Movie};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::{self, Stack};
-use crate::views::{area, buttons, header, strip, text};
+use crate::views::{area, buttons, header, people, strip, text};
 
 // The margin at both sides of the page.
 const MARGIN: f32 = 120.0;
@@ -37,9 +36,17 @@ const GAP: f32 = 16.0;
 const LOGO_WIDTH: f32 = 460.0;
 const LOGO_HEIGHT: f32 = 128.0;
 
-// The lines the plot is cut to, and the lines the cast is cut to.
+// The lines the plot is cut to.
 const PLOT_LINES: usize = 4;
-const CAST_LINES: usize = 2;
+
+// How much of the block under the focused one the scroll keeps in
+// view, as a share of a stripe, so a person sees that there is more
+// below.
+const TRAIL: f32 = 0.2;
+
+// The space under the last stripe, so its caption lines sit clear of the
+// bottom edge of the frame when the page has scrolled to its end.
+const FOOT: f32 = 36.0;
 
 /// The page's front layer as one canvas.
 pub struct Page<'a, P> {
@@ -105,7 +112,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             blocks.buttons.at(offset),
             match movie.focus {
                 Focus::Buttons(index) => Some(index),
-                Focus::Strip(_) => None,
+                _ => None,
             },
         );
 
@@ -118,7 +125,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     current: set.current,
                     focus: match movie.focus {
                         Focus::Strip(index) => Some(index),
-                        Focus::Buttons(_) => None,
+                        _ => None,
                     },
                     heading: &set.heading,
                     library: &movie.library,
@@ -132,28 +139,33 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             );
         }
 
-        for (block, content) in [
-            (blocks.directed, &movie.directed),
-            (blocks.written, &movie.written),
-        ] {
-            text::line(
+        for (index, (band, block)) in movie
+            .stripes
+            .bands()
+            .iter()
+            .zip(&blocks.stripes)
+            .enumerate()
+        {
+            people::draw(
                 &mut frame,
-                content,
-                block.at(offset),
-                look::CREDITS,
-                look::muted(),
-                column,
+                posters,
+                &people::Stripe {
+                    people: &band.faces,
+                    focus: match movie.focus {
+                        Focus::Stripe(stripe, slot) if stripe == index => Some(slot),
+                        _ => None,
+                    },
+                    heading: band.heading,
+                    library: &movie.library,
+                    region: area(
+                        MARGIN,
+                        block.top - offset,
+                        bounds.width - 2.0 * MARGIN,
+                        people::HEIGHT,
+                    ),
+                },
             );
         }
-        text::block(
-            &mut frame,
-            &movie.cast,
-            blocks.cast.at(offset),
-            look::CREDITS,
-            look::muted(),
-            column,
-            CAST_LINES,
-        );
 
         vec![frame.into_geometry()]
     }
@@ -193,9 +205,7 @@ struct Blocks {
     plot: Block,
     buttons: Block,
     strip: Option<Block>,
-    directed: Block,
-    written: Block,
-    cast: Block,
+    stripes: Vec<Block>,
     content: f32,
 }
 
@@ -220,10 +230,17 @@ impl Blocks {
         let plot = place(lines(&movie.plot, look::PLOT, column, PLOT_LINES));
         let buttons = place(buttons::HEIGHT);
         let strip = movie.set.as_ref().map(|_| place(strip::HEIGHT));
-        let directed = place(lines(&movie.directed, look::CREDITS, column, 0));
-        let written = place(lines(&movie.written, look::CREDITS, column, 0));
-        let cast = place(lines(&movie.cast, look::CREDITS, column, CAST_LINES));
+        let stripes: Vec<Block> = movie
+            .stripes
+            .bands()
+            .iter()
+            .map(|_| place(people::HEIGHT))
+            .collect();
 
+        let content = match stripes.last() {
+            Some(last) => last.bottom() + FOOT,
+            None => strip.unwrap_or(buttons).bottom(),
+        };
         Self {
             title,
             facts,
@@ -231,31 +248,35 @@ impl Blocks {
             plot,
             buttons,
             strip,
-            directed,
-            written,
-            cast,
-            content: cast.bottom(),
+            stripes,
+            content,
         }
     }
 
-    // How far the page has scrolled. The credits take no focus, so they
-    // are the tail of the last block a press can reach.
+    // How far the page has scrolled: enough to hold the focused
+    // block and the head of the block under it, so a person sees that
+    // there is more below.
     fn scroll(&self, movie: &Movie, height: f32) -> f32 {
-        let (block, next) = match (movie.focus, self.strip) {
-            (Focus::Strip(_), Some(strip)) => (strip, self.content),
-            (_, Some(strip)) => (self.buttons, strip.top),
-            _ => (self.buttons, self.content),
-        };
-        stack::offset(block.region(), next - block.bottom(), self.content, height)
+        let block = match movie.focus {
+            Focus::Stripe(stripe, _) => self.stripes.get(stripe).copied(),
+            Focus::Strip(_) => self.strip,
+            Focus::Buttons(_) => None,
+        }
+        .unwrap_or(self.buttons);
+        let tail = (self.after(block) - block.bottom() + TRAIL * people::HEIGHT)
+            .min(self.content - block.bottom());
+        stack::offset(block.region(), tail, self.content, height)
     }
 
-    // The blocks from the strip down: the last row a press can reach and
-    // the credits under it, which come into view with it.
-    #[cfg(test)]
-    fn strip_and_under(&self) -> Vec<Block> {
-        let mut blocks = vec![self.directed, self.written, self.cast];
-        blocks.extend(self.strip);
-        blocks
+    // The top of the first block under this one, and the foot of
+    // the page where nothing follows it.
+    fn after(&self, block: Block) -> f32 {
+        self.strip
+            .into_iter()
+            .chain(self.stripes.iter().copied())
+            .map(|under| under.top)
+            .find(|top| *top > block.top)
+            .unwrap_or(self.content)
     }
 }
 
@@ -273,7 +294,9 @@ fn lines(content: &str, size: f32, width: f32, cap: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::{CreditSlot, Credits};
     use crate::screens::movie::Set;
+    use crate::screens::stripes::Stripes;
     use crate::screens::{Item, facts};
 
     const WIDTH: f32 = 1920.0;
@@ -283,9 +306,27 @@ mod tests {
     // has something to do.
     const SHORT: f32 = 720.0;
 
+    // The three stripes of an invented title, so a crowded page carries
+    // every rung a press can reach.
+    fn stripes() -> Stripes {
+        let slot = |name: &str| CreditSlot {
+            name: name.to_string(),
+            role: String::new(),
+            contributor: format!(".contributors/{name}"),
+            headshot: true,
+        };
+        Stripes::of(Credits {
+            directors: vec![slot("A Director")],
+            writers: vec![slot("A Writer")],
+            cast: (1..=12)
+                .map(|part| slot(&format!("Player {part}")))
+                .collect(),
+        })
+    }
+
     // A page with everything on it: a title that wraps onto a second
-    // line, a tagline, a plot of four lines, a set strip, a writers
-    // credit that wraps, and a cast of two lines.
+    // line, a tagline, a plot of four lines, a set strip, and three
+    // stripes of credited people.
     fn crowded(focus: Focus) -> Movie {
         Movie {
             library: "screening/films".into(),
@@ -297,9 +338,7 @@ mod tests {
             facts: "1994 · 1h 52m · PG · Drama, Mystery".into(),
             tagline: "One line of it, and a few more words after that.".into(),
             plot: "word ".repeat(120),
-            directed: "Directed by A Director".into(),
-            written: "Written by A Writer, Another Writer, A Third Writer, and A Fourth".into(),
-            cast: "A Player as The Part, ".repeat(12),
+            stripes: stripes(),
             set: Some(Set {
                 heading: "The Set".into(),
                 members: vec![Item {
@@ -324,15 +363,32 @@ mod tests {
     }
 
     #[test]
-    fn the_strip_and_the_credits_are_in_view_while_the_strip_has_focus() {
+    fn the_focused_stripe_is_in_view_and_the_page_scrolls_to_reach_it() {
+        let mut offsets = Vec::new();
+        for stripe in 0..3 {
+            let movie = crowded(Focus::Stripe(stripe, 0));
+            let blocks = blocks(&movie);
+            let offset = blocks.scroll(&movie, SHORT);
+            let block = blocks.stripes[stripe];
+            assert!(block.top - offset >= 0.0, "{block:?} at {offset}");
+            assert!(block.bottom() - offset <= SHORT, "{block:?} at {offset}");
+            offsets.push(offset);
+        }
+        assert!(offsets[0] > 0.0);
+        assert!(offsets[1] >= offsets[0]);
+        assert!(offsets[2] > offsets[1]);
+    }
+
+    #[test]
+    fn the_strip_and_the_first_stripe_are_in_view_while_the_strip_has_focus() {
         let movie = crowded(Focus::Strip(0));
         let blocks = blocks(&movie);
         let offset = blocks.scroll(&movie, SHORT);
-        assert!(offset > 0.0);
-        for block in blocks.strip_and_under() {
-            assert!(block.top - offset >= 0.0, "{block:?} at {offset}");
-            assert!(block.bottom() - offset <= SHORT, "{block:?} at {offset}");
-        }
+        let strip = blocks.strip.expect("the crowded page holds a set");
+        assert!(strip.top - offset >= 0.0);
+        assert!(strip.bottom() - offset <= SHORT);
+        assert!(blocks.stripes[0].top - offset < SHORT);
+        assert!(blocks.stripes[0].bottom() - offset > SHORT);
     }
 
     #[test]
@@ -342,13 +398,24 @@ mod tests {
     }
 
     #[test]
-    fn a_page_with_no_set_brings_its_credits_up_with_the_buttons() {
+    fn a_page_with_no_set_puts_its_first_stripe_where_the_strip_was() {
         let mut movie = crowded(Focus::Buttons(0));
         movie.set = None;
         let blocks = blocks(&movie);
         assert!(blocks.strip.is_none());
-        let offset = blocks.scroll(&movie, HEIGHT);
-        assert!(blocks.cast.bottom() - offset <= HEIGHT);
+        assert_eq!(blocks.stripes[0].top, blocks.buttons.bottom() + GAP);
+    }
+
+    #[test]
+    fn a_movie_that_credits_nobody_ends_at_its_strip() {
+        let mut movie = crowded(Focus::Buttons(0));
+        movie.stripes = Stripes::default();
+        let blocks = blocks(&movie);
+        assert!(blocks.stripes.is_empty());
+        assert_eq!(
+            blocks.content,
+            blocks.strip.expect("the crowded page holds a set").bottom()
+        );
     }
 
     #[test]

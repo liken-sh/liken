@@ -4,7 +4,8 @@
 
 use super::*;
 use crate::catalog::{
-    Credit, LibraryEntry, MovieDetails, MovieSet, PlayItem, SeriesDetails, Title,
+    Credit, CreditSlot, Credits, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
+    SeriesDetails, Title, Work,
 };
 use crate::harness::Waker;
 
@@ -22,6 +23,8 @@ struct Serials {
     // How many episodes the last season holds, so a re-read can shorten
     // the wall under the focus.
     last: Option<i64>,
+    // Whether the series credits anybody at all.
+    credits: bool,
 }
 
 impl Source for Serials {
@@ -92,11 +95,54 @@ impl Source for Serials {
         Vec::new()
     }
 
+    fn credits(&mut self, _library: &str, _id: &str) -> Credits {
+        if !self.credits {
+            return Credits::default();
+        }
+        Credits {
+            directors: vec![slot("A Director")],
+            writers: Vec::new(),
+            cast: vec![slot("A Player"), slot("Another")],
+        }
+    }
+
+    fn person(&mut self, library: &str, path: &str) -> Option<Person> {
+        Some(Person {
+            library: library.to_string(),
+            path: path.to_string(),
+            name: path.rsplit('/').next()?.to_string(),
+            ..Person::default()
+        })
+    }
+
+    fn works(&mut self, _library: &str, _path: &str) -> Vec<Work> {
+        Vec::new()
+    }
+
     fn changed(&mut self) -> bool {
         false
     }
 
     fn wake_by(&mut self, _wake: Waker) {}
+}
+
+// One credit of the invented series, with an entry in the
+// contributor store.
+fn slot(name: &str) -> CreditSlot {
+    CreditSlot {
+        name: name.to_string(),
+        role: String::new(),
+        contributor: format!(".contributors/{name}"),
+        headshot: true,
+    }
+}
+
+// A page whose series credits a director and two players.
+fn credited(serials: Serials) -> (Series, Serials) {
+    page(Serials {
+        credits: true,
+        ..serials
+    })
 }
 
 fn page(serials: Serials) -> (Series, Serials) {
@@ -107,19 +153,26 @@ fn page(serials: Serials) -> (Series, Serials) {
 }
 
 // One press on a page, with the source it reads from.
-fn pressed(page: &mut Series, source: &mut Serials, key: &str) -> usize {
+fn pressed(page: &mut Series, source: &mut Serials, key: &str) -> Focus {
     page.key(key, source);
     page.focus
+}
+
+// The focused still's index, for a press that stays on the wall.
+fn still(focus: Focus) -> usize {
+    match focus {
+        Focus::Still(index) => index,
+        Focus::Stripe(..) => panic!("focus left the wall"),
+    }
 }
 
 #[test]
 fn a_page_opens_on_the_first_episode_of_the_first_season() {
     let (page, _) = page(Serials::default());
-    assert_eq!(page.focus, 0);
+    assert_eq!(page.focus, Focus::Still(0));
     assert_eq!(page.title, "Serial One");
     assert_eq!(page.facts, "2004 · 3 seasons · TV-14");
     assert_eq!(page.tagline, "One line of it.");
-    assert_eq!(page.cast, "A Player as The Part");
     assert_eq!(page.stills.len(), 14);
 }
 
@@ -169,30 +222,30 @@ fn a_narrow_band_drops_a_still_s_runtime_before_its_name() {
 #[test]
 fn left_and_right_stay_inside_one_season() {
     let (mut page, mut source) = page(Serials::default());
-    assert_eq!(pressed(&mut page, &mut source, "left"), 0);
-    page.focus = 4;
-    assert_eq!(pressed(&mut page, &mut source, "right"), 4);
-    page.focus = 5;
-    assert_eq!(pressed(&mut page, &mut source, "left"), 5);
-    assert_eq!(pressed(&mut page, &mut source, "right"), 6);
+    assert_eq!(still(pressed(&mut page, &mut source, "left")), 0);
+    page.focus = Focus::Still(4);
+    assert_eq!(still(pressed(&mut page, &mut source, "right")), 4);
+    page.focus = Focus::Still(5);
+    assert_eq!(still(pressed(&mut page, &mut source, "left")), 5);
+    assert_eq!(still(pressed(&mut page, &mut source, "right")), 6);
 }
 
 #[test]
 fn down_and_up_cross_the_dividers() {
     let (mut page, mut source) = page(Serials::default());
-    assert_eq!(pressed(&mut page, &mut source, "down"), 4);
-    assert_eq!(pressed(&mut page, &mut source, "down"), 5);
-    assert_eq!(pressed(&mut page, &mut source, "down"), 8);
-    assert_eq!(pressed(&mut page, &mut source, "up"), 5);
-    assert_eq!(pressed(&mut page, &mut source, "up"), 4);
+    assert_eq!(still(pressed(&mut page, &mut source, "down")), 4);
+    assert_eq!(still(pressed(&mut page, &mut source, "down")), 5);
+    assert_eq!(still(pressed(&mut page, &mut source, "down")), 8);
+    assert_eq!(still(pressed(&mut page, &mut source, "up")), 5);
+    assert_eq!(still(pressed(&mut page, &mut source, "up")), 4);
 }
 
 #[test]
 fn the_first_and_the_last_row_of_a_page_hold_focus() {
     let (mut page, mut source) = page(Serials::default());
-    assert_eq!(pressed(&mut page, &mut source, "up"), 0);
-    page.focus = 13;
-    assert_eq!(pressed(&mut page, &mut source, "down"), 13);
+    assert_eq!(still(pressed(&mut page, &mut source, "up")), 0);
+    page.focus = Focus::Still(13);
+    assert_eq!(still(pressed(&mut page, &mut source, "down")), 13);
 }
 
 #[test]
@@ -200,15 +253,91 @@ fn the_header_shows_the_focused_episodes_plot_in_place_of_the_series() {
     let (mut page, mut source) = page(Serials::default());
     assert_eq!(page.plot, "The series' own plot.");
     pressed(&mut page, &mut source, "down");
-    let focused = &page.stills[page.focus];
+    let focused = page.focused().expect("a still holds focus");
     assert_eq!(focused.facts, "S1 E5 · Segment 5 · 46m");
     assert_eq!(focused.plot, "The plot of S1 E5.");
 }
 
 #[test]
+fn a_page_draws_a_stripe_for_every_part_the_series_credits() {
+    let (credited, _) = credited(Serials::default());
+    let headings: Vec<&str> = credited
+        .stripes
+        .bands()
+        .iter()
+        .map(|band| band.heading)
+        .collect();
+    assert_eq!(headings, ["Directed by", "Cast"]);
+
+    let (bare, _) = page(Serials::default());
+    assert!(bare.stripes.is_empty());
+}
+
+#[test]
+fn down_from_the_last_row_reaches_the_stripes_and_up_returns_to_it() {
+    let (mut page, mut source) = credited(Serials::default());
+    page.focus = Focus::Still(13);
+
+    assert_eq!(pressed(&mut page, &mut source, "down"), Focus::Stripe(0, 0));
+    assert_eq!(pressed(&mut page, &mut source, "down"), Focus::Stripe(1, 0));
+    assert_eq!(
+        pressed(&mut page, &mut source, "right"),
+        Focus::Stripe(1, 1)
+    );
+    assert_eq!(pressed(&mut page, &mut source, "up"), Focus::Stripe(0, 0));
+    assert_eq!(pressed(&mut page, &mut source, "up"), Focus::Still(13));
+}
+
+#[test]
+fn the_header_shows_the_series_own_plot_while_a_stripe_holds_focus() {
+    let (mut page, mut source) = credited(Serials::default());
+    page.focus = Focus::Stripe(0, 0);
+    assert!(page.focused().is_none());
+    assert_eq!(page.plot, "The series' own plot.");
+    assert_eq!(
+        pressed(&mut page, &mut source, "right"),
+        Focus::Stripe(0, 0)
+    );
+}
+
+#[test]
+fn a_select_on_a_headshot_opens_the_persons_page() {
+    let (mut page, mut source) = credited(Serials::default());
+    page.focus = Focus::Stripe(1, 1);
+
+    let Step::Open(Screen::Person(opened)) = page.key("enter", &mut source) else {
+        panic!("a select on a headshot opens the person");
+    };
+    assert_eq!(opened.path, ".contributors/Another");
+}
+
+#[test]
+fn a_series_with_no_episodes_reaches_its_stripes() {
+    let (mut page, mut source) = credited(Serials {
+        empty: true,
+        ..Serials::default()
+    });
+    assert!(page.stills.is_empty());
+
+    assert_eq!(pressed(&mut page, &mut source, "down"), Focus::Stripe(0, 0));
+    assert_eq!(pressed(&mut page, &mut source, "up"), Focus::Stripe(0, 0));
+}
+
+#[test]
+fn a_reread_whose_credits_left_returns_focus_to_the_wall() {
+    let (mut page, mut source) = credited(Serials::default());
+    page.focus = Focus::Stripe(1, 1);
+    source.credits = false;
+
+    page.reread(&mut source);
+
+    assert_eq!(page.focus, Focus::Still(0));
+}
+
+#[test]
 fn select_plays_the_episode_and_the_rest_of_its_season() {
     let (mut page, mut source) = page(Serials::default());
-    page.focus = 6;
+    page.focus = Focus::Still(6);
     let Step::Play { library, selection } = page.key("enter", &mut source) else {
         panic!("a select on a still plays it");
     };
@@ -236,17 +365,17 @@ fn a_series_with_no_episodes_draws_its_own_plot_and_plays_nothing() {
     let (mut page, mut source) = (page, Serials::default());
     source.empty = true;
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
-    assert_eq!(pressed(&mut page, &mut source, "down"), 0);
+    assert_eq!(still(pressed(&mut page, &mut source, "down")), 0);
 }
 
 #[test]
 fn a_reread_that_shortens_the_wall_clamps_the_focus() {
     let (mut page, mut source) = page(Serials::default());
-    page.focus = 13;
+    page.focus = Focus::Still(13);
     source.last = Some(1);
     page.reread(&mut source);
     assert_eq!(page.stills.len(), 9);
-    assert_eq!(page.focus, 8);
+    assert_eq!(page.focus, Focus::Still(8));
 }
 
 #[test]

@@ -8,7 +8,9 @@
 pub mod facts;
 pub mod libraries;
 pub mod movie;
+pub mod person;
 pub mod series;
+pub mod stripes;
 pub mod wall;
 
 use std::cell::RefCell;
@@ -32,6 +34,8 @@ pub enum Screen {
     Movie(Box<movie::Movie>),
     /// One series' page, boxed for the reason a movie's page is.
     Series(Box<series::Series>),
+    /// One person's page, boxed for the reason a movie's page is.
+    Person(Box<person::Person>),
 }
 
 /// What a press asks the browser to do. A screen reads the catalog and
@@ -63,6 +67,7 @@ impl Screen {
             Self::Wall(screen) => screen.key(key, source),
             Self::Movie(screen) => screen.key(key, source),
             Self::Series(screen) => screen.key(key, source),
+            Self::Person(screen) => screen.key(key, source),
         }
     }
 
@@ -75,6 +80,7 @@ impl Screen {
             Self::Wall(screen) => screen.reread(source),
             Self::Movie(screen) => screen.reread(source),
             Self::Series(screen) => screen.reread(source),
+            Self::Person(screen) => screen.reread(source),
         }
     }
 
@@ -84,6 +90,7 @@ impl Screen {
     pub fn prefetches(&self) -> bool {
         match self {
             Self::Wall(screen) => screen.prefetches(),
+            Self::Person(_) => true,
             _ => false,
         }
     }
@@ -95,7 +102,17 @@ impl Screen {
     pub fn resting(&self, source: &mut dyn Source) -> Option<(String, String)> {
         match self {
             Self::Wall(screen) => screen.resting(source),
+            Self::Person(screen) => screen.resting(source),
             _ => None,
+        }
+    }
+
+    /// Read the files this screen draws that live on a library
+    /// volume and not in the catalog. Only a person's page holds one, and
+    /// every other screen reads nothing.
+    pub fn volume<P: Posters>(&mut self, posters: &P) {
+        if let Self::Person(screen) = self {
+            screen.read_biography(posters);
         }
     }
 
@@ -109,6 +126,7 @@ impl Screen {
             Self::Wall(screen) => screen.view(posters),
             Self::Movie(screen) => screen.view(posters),
             Self::Series(screen) => screen.view(posters),
+            Self::Person(screen) => screen.view(posters),
         }
     }
 }

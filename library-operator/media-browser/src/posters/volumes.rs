@@ -109,6 +109,13 @@ impl Posters for Volumes {
         self.decoded(library, art, width, height, Fit::Contain)
     }
 
+    fn file(&self, library: &str, path: &str) -> Option<PathBuf> {
+        if !contained(path) {
+            return None;
+        }
+        Some(self.store.root(library)?.join(path))
+    }
+
     fn delivered(&mut self) -> bool {
         self.store.delivered()
     }
@@ -293,6 +300,18 @@ mod tests {
         }));
         assert!(volumes.poster("local/movies", "other.jpg", 8, 12).is_none());
         receiver.recv_timeout(DEADLINE).unwrap();
+    }
+
+    #[test]
+    fn a_file_beside_the_art_resolves_against_the_librarys_root() {
+        let dir = TempDir::new().unwrap();
+        let volumes = volume(&dir);
+        assert_eq!(
+            volumes.file("local/movies", ".contributors/One/biography.txt"),
+            Some(dir.path().join(".contributors/One/biography.txt"))
+        );
+        assert_eq!(volumes.file("local/movies", "../escape.txt"), None);
+        assert_eq!(volumes.file("local/none", "biography.txt"), None);
     }
 
     #[test]

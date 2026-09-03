@@ -58,9 +58,44 @@ fn a_press_on_a_series_page_crosses_its_dividers() {
 
     browser.key("down");
 
-    assert_eq!(showing_series(&browser).focus, 4);
+    assert_eq!(showing_series(&browser).focus, SeriesFocus::Still(4));
     browser.key("up");
-    assert_eq!(showing_series(&browser).focus, 0);
+    assert_eq!(showing_series(&browser).focus, SeriesFocus::Still(0));
+}
+
+#[test]
+fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
+    let mut browser = browser(3);
+    browser.source.people = true;
+
+    for _ in 0..2 {
+        browser.key("enter");
+        assert_eq!(showing_wall(&browser).items.len(), 3);
+
+        browser.key("enter");
+        assert_eq!(showing_page(&browser).id, "movies:1");
+
+        browser.key("down");
+        assert_eq!(showing_page(&browser).focus, Focus::Stripe(0, 0));
+
+        browser.key("enter");
+        assert_eq!(showing_person(&browser).name, "A Player");
+        assert_eq!(showing_person(&browser).works.len(), 3);
+
+        browser.key("right");
+        browser.key("enter");
+        assert_eq!(showing_page(&browser).id, "movies:2");
+        assert_eq!(browser.stack.len(), 4);
+
+        browser.key("escape");
+        assert_eq!(showing_person(&browser).focus, 1);
+        browser.key("escape");
+        assert_eq!(showing_page(&browser).id, "movies:1");
+        browser.key("escape");
+        assert_eq!(showing_wall(&browser).items.len(), 3);
+        browser.key("escape");
+        assert!(browser.stack.is_empty());
+    }
 }
 
 #[test]
@@ -301,7 +336,7 @@ fn a_change_rereads_the_series_page_that_is_shown() {
 
     browser.source.changed = true;
     assert!(browser.pump(1.0));
-    assert_eq!(browser.source.calls.last(), Some(&"episodes"));
+    assert_eq!(browser.source.calls.last(), Some(&"credits"));
     assert_eq!(showing_series(&browser).stills.len(), 8);
 }
 

@@ -178,7 +178,7 @@ pub fn draw<T: Card, P: Posters>(
         artwork(
             frame,
             posters,
-            grid.library,
+            library_of(item, grid.library),
             item.art(),
             slot,
             item.name(),
@@ -199,7 +199,7 @@ pub fn draw<T: Card, P: Posters>(
         let ahead = slot(&cells, index, grid.offset, grid.columns);
         if !item.art().is_empty() {
             let _ = posters.poster(
-                grid.library,
+                library_of(item, grid.library),
                 item.art(),
                 ahead.width as u32,
                 ahead.height as u32,
@@ -236,6 +236,15 @@ fn lowered(slot: Rectangle, top: f32) -> Rectangle {
     }
 }
 
+// The library one slot's art resolves against: the slot's own where it
+// names one, and the grid's otherwise.
+fn library_of<'a, T: Card>(item: &'a T, grid: &'a str) -> &'a str {
+    match item.library().is_empty() {
+        true => grid,
+        false => item.library(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +272,32 @@ mod tests {
                 false => NAME,
             }
         }
+    }
+
+    struct Elsewhere(&'static str);
+
+    impl Card for Elsewhere {
+        fn name(&self) -> &str {
+            "A Title"
+        }
+
+        fn library(&self) -> &str {
+            self.0
+        }
+    }
+
+    // A person's wall holds titles from more than one library, and a slot
+    // that names its own library resolves its poster there.
+    #[test]
+    fn a_slot_that_names_a_library_resolves_its_art_there() {
+        assert_eq!(
+            library_of(&Elsewhere("default/series"), "default/movies"),
+            "default/series"
+        );
+        assert_eq!(
+            library_of(&Elsewhere(""), "default/movies"),
+            "default/movies"
+        );
     }
 
     #[test]

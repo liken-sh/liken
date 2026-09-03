@@ -2,10 +2,6 @@
 // release, the runtime out of a duration, and the one line those join
 // into. Every function here is pure over the columns, so a screen builds
 // its lines once at a read, and the tests need no window.
-// The cast line is one of those words, built the same way for a movie's
-// page and a series' page.
-
-use crate::catalog::Credit;
 
 // The separator between two facts on one line.
 const BETWEEN: &str = " · ";
@@ -92,37 +88,9 @@ impl Line {
     }
 }
 
-/// The cast as one line: every name, with the part it played where the
-/// sidecar named one.
-pub fn cast(cast: &[Credit]) -> String {
-    cast.iter()
-        .map(|credit| match credit.role.is_empty() {
-            true => credit.name.clone(),
-            false => format!("{} as {}", credit.name, credit.role),
-        })
-        .collect::<Vec<String>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_cast_names_every_player_and_the_part_it_played() {
-        let cast = cast(&[
-            Credit {
-                name: "A Player".into(),
-                role: "The Part".into(),
-            },
-            Credit {
-                name: "Another".into(),
-                role: String::new(),
-            },
-        ]);
-        assert_eq!(cast, "A Player as The Part, Another");
-        assert_eq!(super::cast(&[]), "");
-    }
 
     #[test]
     fn a_year_and_a_date_both_give_the_year() {

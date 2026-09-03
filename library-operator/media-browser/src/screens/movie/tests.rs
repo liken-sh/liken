@@ -2,7 +2,10 @@
 // body, and where a press takes focus.
 
 use super::*;
-use crate::catalog::{Credit, Episode, LibraryEntry, PlayItem, SeriesDetails, Title};
+use crate::catalog::{
+    Credit, CreditSlot, Credits, Episode, LibraryEntry, Person, PlayItem, SeriesDetails, Title,
+    Work,
+};
 use crate::harness::Waker;
 
 // A catalog of one set of three films, so a page has siblings to move
@@ -11,6 +14,10 @@ use crate::harness::Waker;
 struct Films {
     trailer: bool,
     set: bool,
+    // Whether the movie credits anybody at all, and whether the
+    // one player it credits has an entry in the contributor store.
+    credits: bool,
+    stranger: bool,
     // The movie names a set that no sets row holds, which is what a page
     // reads between the scanner's movie write and its set write.
     lost: bool,
@@ -92,11 +99,60 @@ impl Source for Films {
         Vec::new()
     }
 
+    fn credits(&mut self, _library: &str, _id: &str) -> Credits {
+        if !self.credits {
+            return Credits::default();
+        }
+        Credits {
+            directors: vec![slot("A Director", "", true)],
+            writers: Vec::new(),
+            cast: vec![
+                slot("A Player", "The Part", !self.stranger),
+                slot("Another", "A Walk-on", true),
+            ],
+        }
+    }
+
+    fn person(&mut self, library: &str, path: &str) -> Option<Person> {
+        Some(Person {
+            library: library.to_string(),
+            path: path.to_string(),
+            name: path.rsplit('/').next()?.to_string(),
+            ..Person::default()
+        })
+    }
+
+    fn works(&mut self, _library: &str, _path: &str) -> Vec<Work> {
+        Vec::new()
+    }
+
     fn changed(&mut self) -> bool {
         false
     }
 
     fn wake_by(&mut self, _wake: Waker) {}
+}
+
+// One credit of the invented title, with or without an entry in
+// the contributor store.
+fn slot(name: &str, role: &str, entry: bool) -> CreditSlot {
+    CreditSlot {
+        name: name.to_string(),
+        role: role.to_string(),
+        contributor: match entry {
+            true => format!(".contributors/{name}"),
+            false => String::new(),
+        },
+        headshot: entry,
+    }
+}
+
+// A page whose title credits a director and two players.
+fn credited() -> (Movie, Films) {
+    page(Films {
+        credits: true,
+        ..Films::default()
+    })
 }
 
 fn page(films: Films) -> (Movie, Films) {
@@ -123,13 +179,29 @@ fn a_movie_with_a_trailer_file_gets_the_second_button() {
 }
 
 #[test]
-fn a_page_builds_its_facts_its_credits_and_its_cast() {
+fn a_page_builds_its_facts_and_its_title() {
     let (page, _) = page(Films::default());
     assert_eq!(page.facts, "1994 · 1h 52m · PG · Drama");
-    assert_eq!(page.directed, "Directed by A Director");
-    assert_eq!(page.written, "Written by A Writer, Another");
-    assert_eq!(page.cast, "A Player as The Part");
     assert_eq!(page.title, "Film two");
+}
+
+#[test]
+fn a_page_draws_a_stripe_for_every_part_the_title_credits() {
+    let (page, _) = credited();
+    let headings: Vec<&str> = page
+        .stripes
+        .bands()
+        .iter()
+        .map(|band| band.heading)
+        .collect();
+    assert_eq!(headings, ["Directed by", "Cast"]);
+    assert_eq!(page.stripes.bands()[1].faces.len(), 2);
+}
+
+#[test]
+fn a_title_that_credits_nobody_draws_no_stripe() {
+    let (page, _) = page(Films::default());
+    assert!(page.stripes.is_empty());
 }
 
 #[test]
@@ -213,9 +285,98 @@ fn down_reaches_the_strip_at_this_film_and_up_returns_to_play() {
 }
 
 #[test]
-fn down_with_no_strip_moves_nowhere() {
+fn down_with_no_strip_and_no_stripe_moves_nowhere() {
     let (mut page, mut source) = page(Films::default());
     page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Buttons(0));
+}
+
+#[test]
+fn down_from_the_buttons_reaches_the_stripes_where_the_movie_is_in_no_set() {
+    let (mut page, mut source) = credited();
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 0));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Buttons(0));
+}
+
+#[test]
+fn down_from_the_strip_reaches_the_stripes_and_up_returns_to_it() {
+    let (mut page, mut source) = page(Films {
+        set: true,
+        credits: true,
+        ..Films::default()
+    });
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Strip(1));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 0));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Strip(1));
+}
+
+#[test]
+fn the_arrows_move_within_a_stripe_and_between_the_stripes() {
+    let (mut page, mut source) = credited();
+    page.key("down", &mut source);
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(1, 0));
+    page.key("right", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(1, 1));
+    page.key("right", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(1, 1));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(1, 1));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 0));
+}
+
+#[test]
+fn a_select_on_a_headshot_opens_the_persons_page() {
+    let (mut page, mut source) = credited();
+    page.key("down", &mut source);
+
+    let Step::Open(Screen::Person(opened)) = page.key("enter", &mut source) else {
+        panic!("a select on a headshot opens the person");
+    };
+    assert_eq!(opened.path, ".contributors/A Director");
+    assert_eq!(opened.name, "A Director");
+}
+
+#[test]
+fn a_select_on_a_name_with_no_entry_opens_nothing() {
+    let (mut page, mut source) = page(Films {
+        credits: true,
+        stranger: true,
+        ..Films::default()
+    });
+    page.key("down", &mut source);
+    page.key("down", &mut source);
+
+    assert_eq!(page.focus, Focus::Stripe(1, 0));
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+}
+
+#[test]
+fn a_reread_keeps_the_rung_a_stripe_holds() {
+    let (mut page, mut source) = credited();
+    page.key("down", &mut source);
+    page.key("down", &mut source);
+    page.key("right", &mut source);
+
+    page.reread(&mut source);
+
+    assert_eq!(page.focus, Focus::Stripe(1, 1));
+}
+
+#[test]
+fn a_page_whose_credits_left_holds_focus_on_play() {
+    let (mut page, mut source) = credited();
+    page.key("down", &mut source);
+    source.credits = false;
+
+    page.reread(&mut source);
+
     assert_eq!(page.focus, Focus::Buttons(0));
 }
 

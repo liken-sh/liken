@@ -50,12 +50,13 @@ pub fn shade() -> Color {
 pub const DIM: f32 = 0.42;
 
 /// The width of the stroke that marks focus, in logical pixels, thick
-/// enough to read from a couch.
-pub const MARK: f32 = 6.0;
+/// enough to read from a couch and thin enough that the art it frames
+/// stays the larger thing.
+pub const MARK: f32 = 4.0;
 
 /// The space between the art and the inner edge of the focus stroke, so
 /// the stroke frames the art and does not touch it.
-pub const MARK_GAP: f32 = 2.0;
+pub const MARK_GAP: f32 = 4.0;
 
 /// The color of the focus stroke and of the underline that marks the
 /// current member of a strip: the accent, a little translucent, so the
@@ -83,6 +84,11 @@ pub const NAME: f32 = 23.0;
 
 /// The size of the one line under every slot of a wall.
 pub const CAPTION: f32 = 18.0;
+
+/// The size of the two lines under a headshot in a stripe. A headshot is
+/// narrower than a poster, so its lines are smaller than a wall's caption
+/// to fit a full name.
+pub const FACE: f32 = 16.0;
 
 /// The size of a page's title, where the item has no logo.
 pub const TITLE: f32 = 53.0;

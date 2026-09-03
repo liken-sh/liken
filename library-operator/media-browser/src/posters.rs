@@ -1,6 +1,8 @@
 // Posters live on the volume, not in the catalog, so the views ask for
 // them through this seam and draw a placeholder until one arrives.
 
+use std::path::PathBuf;
+
 use crate::harness::Waker;
 
 // Below the seam: a bounded cache that decodes art files into RGBA
@@ -55,6 +57,15 @@ pub trait Posters {
     /// source to read the rows again.
     fn delivered(&mut self) -> bool {
         false
+    }
+
+    /// The path of one file of a library's volume on this machine, or nothing where the store holds no root for that library
+    /// or the path leaves its root. A page reads a file the catalog names
+    /// but does not hold, such as a person's biography, through the same
+    /// roots the art resolves against. A store over no volume answers
+    /// nothing.
+    fn file(&self, _library: &str, _path: &str) -> Option<PathBuf> {
+        None
     }
 
     /// Take the handle that wakes the loop, for a store that decodes in

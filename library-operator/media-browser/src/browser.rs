@@ -144,10 +144,9 @@ impl<S: Source, P: Posters> Browser<S, P> {
     }
 
     fn reread_top(&mut self) {
-        match self.stack.last_mut() {
-            Some(top) => top.reread(&mut self.source),
-            None => self.libraries.reread(&mut self.source),
-        }
+        let top = self.stack.last_mut().unwrap_or(&mut self.libraries);
+        top.reread(&mut self.source);
+        top.volume(&*self.posters.borrow());
     }
 
     // Do what the screen that took the press asked for. Only the browser
@@ -156,13 +155,21 @@ impl<S: Source, P: Posters> Browser<S, P> {
     fn take(&mut self, step: Step) {
         match step {
             Step::Stay => {}
-            Step::Open(screen) => self.stack.push(screen),
+            Step::Open(screen) => self.opened(screen),
             Step::Replace(screen) => {
                 self.stack.pop();
-                self.stack.push(screen);
+                self.opened(screen);
             }
             Step::Play { library, selection } => self.request_play(&library, &selection),
         }
+    }
+
+    // Push a screen and read the files it draws off the volume,
+    // which the screen itself cannot reach: only the browser holds the
+    // store that resolves a library's root.
+    fn opened(&mut self, mut screen: screens::Screen) {
+        screen.volume(&*self.posters.borrow());
+        self.stack.push(screen);
     }
 
     // Ask the store for the backdrop of the page under the focused item,

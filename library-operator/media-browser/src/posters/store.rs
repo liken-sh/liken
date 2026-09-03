@@ -78,6 +78,12 @@ impl ArtStore {
         Self::with_workers(roots, budget, waker, workers)
     }
 
+    /// The root of one library's volume, or nothing where the store
+    /// holds none for it.
+    pub fn root(&self, library: &str) -> Option<&PathBuf> {
+        self.roots.get(library)
+    }
+
     pub fn with_workers(
         roots: HashMap<String, PathBuf>,
         budget: usize,

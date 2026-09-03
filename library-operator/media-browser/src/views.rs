@@ -18,6 +18,7 @@ pub mod divider;
 pub mod header;
 pub mod layers;
 pub mod list;
+pub mod people;
 pub mod scroll;
 pub mod stack;
 pub mod strip;
@@ -40,6 +41,13 @@ pub trait Card {
     /// The art path the poster store resolves, empty where the item has
     /// none.
     fn art(&self) -> &str {
+        ""
+    }
+
+    /// The library the art path resolves against, empty where every item
+    /// of the primitive is in the library the caller names. A person's
+    /// works span libraries, so each of those slots names its own.
+    fn library(&self) -> &str {
         ""
     }
 
@@ -112,12 +120,14 @@ fn artwork<P: Posters>(
         return;
     }
 
+    // The name in an empty frame shrinks with the frame, so a headshot
+    // slot fits a whole word per line where a poster slot fits several.
     frame.fill_rectangle(slot.position(), slot.size(), look::slot());
     if !name.is_empty() {
         frame.fill_text(label(
             name,
             Point::new(slot.center_x(), slot.center_y()),
-            look::DETAIL,
+            look::DETAIL.min(slot.width / 8.0),
             look::muted(),
             Alignment::Center,
             Vertical::Center,

@@ -3,11 +3,14 @@
 // resembles a real library.
 
 use crate::catalog::{
-    Credit, Episode, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection, SeriesDetails,
-    Source, Title,
+    Credit, Credits, Episode, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem, Selection,
+    SeriesDetails, Source, Title, Work,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
+
+// The invented people of the sample catalog.
+mod people;
 
 // Enough movies to exercise the wall's culling, near the
 // head-to-head's five thousand.
@@ -160,6 +163,18 @@ impl Source for Catalog {
             title: format!("The Specimen Cycle {set:02}"),
             members,
         })
+    }
+
+    fn credits(&mut self, _library: &str, id: &str) -> Credits {
+        people::credits(id)
+    }
+
+    fn person(&mut self, library: &str, path: &str) -> Option<Person> {
+        people::person(library, path)
+    }
+
+    fn works(&mut self, library: &str, path: &str) -> Vec<Work> {
+        people::works(library, path)
     }
 
     // The sample invents titles and no files, so a select on one starts

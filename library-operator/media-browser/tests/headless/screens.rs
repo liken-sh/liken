@@ -187,3 +187,30 @@ fn a_series_page_scrolls_into_its_second_season() {
     assert_eq!(run.exit, "0", "{}", run.log);
     drawn(&frames.join("002.70.png"), &run);
 }
+
+// A select on a headshot opens the person's page, which draws the
+// headshot, the words beside it, and the wall of their works.
+#[test]
+fn a_select_on_a_headshot_draws_the_persons_page() {
+    let dir = workspace("person");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.5:enter,1.0:enter,1.4:down,1.8:down,2.2:enter",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "2.6",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    drawn(&frames.join("002.60.png"), &run);
+}

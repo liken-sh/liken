@@ -15,11 +15,11 @@ use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::layout::{self, Layout};
-use super::{COLUMNS, Series};
+use super::{COLUMNS, Focus, Series};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::Stack;
-use crate::views::{area, divider, header, text, wall};
+use crate::views::{area, divider, header, people, text, wall};
 
 // The margin at both sides of the header's text.
 const MARGIN: f32 = 120.0;
@@ -56,7 +56,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 
         let region = layout::region(bounds);
         let cells = wall::cells(region.width, wall::STILL, COLUMNS);
-        let layout = Layout::of(&series.seasons, cells);
+        let layout = Layout::of(&series.seasons, cells, series.stripes.bands().len());
         let offset = layout.scroll(series.focus, &series.seasons, region.height);
 
         frame.with_clip(region, |frame| {
@@ -82,14 +82,49 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     posters,
                     &wall::Grid {
                         items: &series.stills[run.first..run.first + run.count],
-                        focus: (series.focus >= run.first && series.focus < run.first + run.count)
-                            .then(|| series.focus - run.first),
+                        focus: match series.focus {
+                            Focus::Still(index)
+                                if index >= run.first && index < run.first + run.count =>
+                            {
+                                Some(index - run.first)
+                            }
+                            _ => None,
+                        },
                         marked: true,
                         library: &series.library,
                         ratio: wall::STILL,
                         columns: COLUMNS,
                         region,
                         offset: offset - band.rows_top,
+                    },
+                );
+            }
+
+            let inset = (cells.width - cells.poster_width) / 2.0;
+            for (index, (band, top)) in series
+                .stripes
+                .bands()
+                .iter()
+                .zip(&layout.stripes)
+                .enumerate()
+            {
+                people::draw(
+                    frame,
+                    posters,
+                    &people::Stripe {
+                        people: &band.faces,
+                        focus: match series.focus {
+                            Focus::Stripe(stripe, slot) if stripe == index => Some(slot),
+                            _ => None,
+                        },
+                        heading: band.heading,
+                        library: &series.library,
+                        region: area(
+                            inset,
+                            region.y + top - offset,
+                            region.width - 2.0 * inset,
+                            people::HEIGHT,
+                        ),
                     },
                 );
             }
@@ -100,11 +135,12 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 }
 
 impl<P: Posters> Page<'_, P> {
-    // The header's blocks, from the logo down to the cast. Every block is
+    // The header's blocks, from the logo down to the plot. Every block is
     // cut to its own lines, so a long title, a long line, or a long plot
-    // never pushes the cast out of the header's fixed height. The focused
+    // never pushes the header past its fixed height. The focused
     // episode's line and plot stand in the place the series' plot takes on
-    // a series whose episodes have not landed.
+    // a series whose episodes have not landed, and while a stripe holds
+    // focus.
     fn header(&self, frame: &mut canvas::Frame<Renderer>, posters: &mut P, region: Rectangle) {
         let series = self.series;
         let column = region.width * COLUMN;
@@ -139,7 +175,7 @@ impl<P: Posters> Page<'_, P> {
         );
         stack.add(taken);
 
-        let (line, plot) = match series.stills.get(series.focus) {
+        let (line, plot) = match series.focused() {
             Some(still) => (still.facts.as_str(), still.plot.as_str()),
             None => ("", series.plot.as_str()),
         };
@@ -163,15 +199,5 @@ impl<P: Posters> Page<'_, P> {
             layout::PLOT_LINES,
         );
         stack.add(taken);
-
-        text::block(
-            frame,
-            &series.cast,
-            stack.at(),
-            look::CREDITS,
-            look::muted(),
-            column,
-            layout::CAST_LINES,
-        );
     }
 }

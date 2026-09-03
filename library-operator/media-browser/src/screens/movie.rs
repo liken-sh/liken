@@ -1,8 +1,8 @@
 // A movie's page. The backdrop draws full bleed under the text, and the
 // page reads down: the logo or the title, the facts, the tagline, the
-// plot, the buttons, the set strip, and the credits. Focus lands on
-// Play, so a film is two presses from the wall, as it was when the wall
-// played it on select.
+// plot, the buttons, the set strip, and the stripes of credited people.
+// Focus lands on Play, so a film is two presses from the wall, as it was
+// when the wall played it on select.
 
 mod page;
 
@@ -12,20 +12,21 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Theme};
 
-use super::{Item, Screen, Step, facts};
+use super::{Item, Screen, Step, facts, person, stripes};
 use crate::catalog::{MovieDetails, MovieSet, Selection, Source};
 use crate::focus;
 use crate::posters::Posters;
 use crate::views::layers;
 
-/// Where focus is on the page. The credits take no focus, because they
-/// are text until plan 14 gives a person a page of their own.
+/// Where focus is on the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     /// One button of the row.
     Buttons(usize),
     /// One member of the set strip.
     Strip(usize),
+    /// One headshot of one stripe: the stripe, and the slot in it.
+    Stripe(usize, usize),
 }
 
 /// The set the movie belongs to, as the strip draws it.
@@ -77,12 +78,8 @@ pub struct Movie {
     pub tagline: String,
     /// The plot. The page cuts it to four lines.
     pub plot: String,
-    /// The directors, as one line.
-    pub directed: String,
-    /// The writers, as one line.
-    pub written: String,
-    /// The cast, as names with the parts they played.
-    pub cast: String,
+    /// The credited people, as the stripes at the end of the page.
+    pub stripes: stripes::Stripes,
     /// The set the movie belongs to, or nothing where it belongs to none.
     pub set: Option<Set>,
     /// Where focus is.
@@ -105,9 +102,7 @@ impl Movie {
             facts: facts_of(&details),
             tagline: details.tagline.clone(),
             plot: details.plot.clone(),
-            directed: credited("Directed by", &details.directors),
-            written: credited("Written by", &details.writers),
-            cast: facts::cast(&details.cast),
+            stripes: stripes::Stripes::of(source.credits(library, id)),
             set,
             focus: Focus::Buttons(0),
         })
@@ -135,11 +130,13 @@ impl Movie {
     }
 
     /// Fold one press in. Left and right move across the row that holds
-    /// focus, down reaches the strip, and up returns to the buttons.
+    /// focus, down reaches the strip and then the stripes, and up climbs
+    /// back to the buttons.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self.focus {
             Focus::Buttons(index) => self.on_button(index, key),
             Focus::Strip(index) => self.on_strip(index, key, source),
+            Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
         }
     }
 
@@ -168,9 +165,7 @@ impl Movie {
                 selection: self.chosen(index),
             },
             "down" => {
-                if let Some(set) = &self.set {
-                    self.focus = Focus::Strip(set.current);
-                }
+                self.focus = self.below(index);
                 Step::Stay
             }
             _ => {
@@ -206,10 +201,60 @@ impl Movie {
                 self.focus = Focus::Buttons(0);
                 Step::Stay
             }
+            "down" => {
+                if let Some((stripe, slot)) = self.stripes.first() {
+                    self.focus = Focus::Stripe(stripe, slot);
+                }
+                Step::Stay
+            }
             _ => {
                 self.focus = Focus::Strip(focus::row(index, set.members.len(), key));
                 Step::Stay
             }
+        }
+    }
+
+    // One press on a stripe. Select opens the person's page, and a
+    // name the credits could not resolve opens nothing.
+    fn on_stripe(&mut self, rung: stripes::Rung, key: &str, source: &mut dyn Source) -> Step {
+        if key == "enter" {
+            let Some(face) = self.stripes.face(rung) else {
+                return Step::Stay;
+            };
+            if face.contributor.is_empty() {
+                return Step::Stay;
+            }
+            return match person::Person::open(&self.library, &face.contributor, source) {
+                Some(page) => Step::Open(Screen::Person(Box::new(page))),
+                None => Step::Stay,
+            };
+        }
+        self.focus = match self.stripes.key(rung, key) {
+            Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+            None => self.above(),
+        };
+        Step::Stay
+    }
+
+    // The rung under the buttons: the strip where the movie is in a
+    // set, the first stripe where it is not, and the buttons themselves
+    // where the page holds neither.
+    fn below(&self, index: usize) -> Focus {
+        if let Some(set) = &self.set {
+            return Focus::Strip(set.current);
+        }
+        match self.stripes.first() {
+            Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+            None => Focus::Buttons(index),
+        }
+    }
+
+    // The rung over the first stripe: the strip where the movie is
+    // in a set, and the buttons where it is not.
+    fn above(&self) -> Focus {
+        match &self.set {
+            Some(set) => Focus::Strip(set.current),
+            None => Focus::Buttons(0),
         }
     }
 
@@ -235,6 +280,10 @@ impl Movie {
                 Some(set) => Focus::Strip(index.min(set.members.len() - 1)),
                 None => Focus::Buttons(0),
             },
+            Focus::Stripe(stripe, slot) => match self.stripes.held((stripe, slot)) {
+                Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+                None => Focus::Buttons(0),
+            },
         }
     }
 }
@@ -253,13 +302,6 @@ fn facts_of(details: &MovieDetails) -> String {
         &details.rating,
         &details.genres.join(", "),
     ])
-}
-
-fn credited(what: &str, people: &[String]) -> String {
-    if people.is_empty() {
-        return String::new();
-    }
-    format!("{what} {}", people.join(", "))
 }
 
 #[cfg(test)]

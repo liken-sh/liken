@@ -1,5 +1,6 @@
 mod lists;
 mod pages;
+mod people;
 mod plays;
 mod series;
 
