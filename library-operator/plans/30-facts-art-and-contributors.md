@@ -193,6 +193,53 @@ from OMDb, and its ledger says so. The rate drill: a key past its limit
 ends the run with gaps left and no sleep. A stripped title, metadata
 only, comes back whole: ids, `.nfo` body, art, credits, and its people.
 
+## The drill, 2026-09-03
+
+Built in six waves by Opus agents and released as 2026.09.03-001 to
+-006, all rolled to `liken-1` the same day. The OMDb and Fanart.tv
+keys were not yet made, so those two providers read `NoSecret` and
+every number below is TMDb's and TVmaze's work.
+
+**The reporter stopped.** Release -001 added a gap query per fact,
+and two of them were slow enough to pass the reporter's thirty-second
+read: the title art queries read the library off their own derived
+table, so SQLite ran the subquery over the library's files once per
+title, seven seconds a fact; and the episode thumbnail query walked
+every file of the library once per episode, forty seconds. With no
+report there was no echo, and every scan and enrich `Job` failed for
+two hours. Releases -002 and -004 bind the library by number and build
+the imaged-episode list once, and both queries take a quarter of a
+second. The lesson for every gap query: no subquery reads the outer
+row.
+
+**A bare ampersand.** Jellyfin writes a source URL after the root
+element of a sidecar, in Kodi's scraper form, and a TVDB URL carries
+`&id=`. The strict XML reader stopped there, so 67 series recorded an
+error for every nfo fact. Release -006 reads every sidecar leniently,
+and the group edit keeps the URL where it was.
+
+**What the facts wrote.** On the movies library: the overview of
+1,407 titles, 10 certifications, 10 credits, 10 TMDb ratings, and
+1,373 logos, with 558 banners and 35 logos found nowhere at TMDb. On
+the series library: 154 TMDb ratings, 2 certifications, 2 credits, 9
+logos, and 3 episode thumbnails. After a rescan both libraries report
+no gap under any fact TMDb serves, and no fight. The ratings of the
+other three sites and the five Fanart.tv art types stay open until
+the keys exist, and 29 people wait for the next run of the
+contributors container.
+
+**The overview took over.** Every movie sidecar Jellyfin wrote counted
+as an overview gap on the first run, so the fact replaced the plot,
+tagline, genres, studios, premiere, and runtime of 1,407 titles with
+TMDb's, and left every other element. The next walk read the sidecars
+as answering, so it was one pass. The cause is not settled: the first
+walk under -001 may have left `nfo_facts` empty. It is an open item.
+
+**Not yet run.** The who-answered drill and the rate drill, which
+need the OMDb key; the Fanart.tv art types; the fight drill with a
+hand-edited plot; the rebuild drill; and trickplay, which is off by
+default and was not turned on.
+
 ## What is set aside
 
 Writing the person's ids into the `<actor>` element. Neither Kodi nor
