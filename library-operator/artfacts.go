@@ -184,7 +184,7 @@ func titleArtGapSQL(fact string) string {
 		branches = append(branches, branch("series", scopeSeries))
 	}
 	return `SELECT file, tmdb, 0, 0 FROM (` + strings.Join(branches, ` UNION ALL `) +
-		`) AS wanted WHERE library = ? AND ` + artFileClause() + ` AND ` + artAttemptClause(fact, "file")
+		`) AS wanted WHERE library = ?1 AND ` + artFileClause() + ` AND ` + artAttemptClause(fact, "file")
 }
 
 // One row per season a library holds episodes of, because the catalog keeps
@@ -200,7 +200,7 @@ func seasonArtGapSQL(fact string) string {
 		`JOIN series AS s ON s.library = e.library AND s.id = e.series ` +
 		`JOIN aliases AS a ON a.library = s.library AND a.item = s.id ` +
 		`AND a.alias LIKE '` + scopeSeries + `:tmdb:%'` +
-		`) AS wanted WHERE library = ? AND ` + artFileClause() + ` AND ` +
+		`) AS wanted WHERE library = ?1 AND ` + artFileClause() + ` AND ` +
 		artAttemptClause(fact, "file")
 }
 
@@ -217,10 +217,10 @@ func episodeThumbGapSQL() string {
 		`JOIN series AS s ON s.library = e.library AND s.id = e.series ` +
 		`JOIN aliases AS a ON a.library = s.library AND a.item = s.id ` +
 		`AND a.alias LIKE '` + scopeSeries + `:tmdb:%'` +
-		`) AS wanted WHERE library = ? ` +
+		`) AS wanted WHERE library = ?1 ` +
 		`AND NOT EXISTS (SELECT 1 FROM file_items AS fi ` +
 		`JOIN files AS f ON f.library = fi.library AND f.path = fi.path ` +
-		`WHERE fi.library = wanted.library AND fi.item = wanted.item ` +
+		`WHERE fi.library = ?1 AND fi.item = wanted.item ` +
 		`AND f.type = '` + fileTypeImage + `' ` +
 		`AND f.role IN ('` + fileRoleThumb + `', '` + fileRoleStill + `')) AND ` +
 		artAttemptClause(factEpisodeThumb, "video")
@@ -228,14 +228,17 @@ func episodeThumbGapSQL() string {
 
 // The file the fact would write is not in the catalog. This is the whole of
 // "written where none exists" as the catalog can answer it, and the container
-// checks the volume itself before it writes.
+// checks the volume itself before it writes. The library is the first bound
+// parameter by number, never the derived table's own column, because a
+// subquery that reads the outer row is run again for every title, and this
+// one over a library's files took seven seconds a fact.
 func artFileClause() string {
-	return `file NOT IN (SELECT path FROM files WHERE files.library = wanted.library)`
+	return `file NOT IN (SELECT path FROM files WHERE files.library = ?1)`
 }
 
 // The attempt window, as every gap query carries it: an item tried inside the
 // window is no gap, unless that attempt ended in an error.
 func artAttemptClause(fact, column string) string {
-	return column + ` NOT IN (SELECT item FROM attempts WHERE attempts.library = wanted.library ` +
-		`AND ` + attemptFactColumn + ` = '` + fact + `' AND result != 'error' AND at >= ?)`
+	return column + ` NOT IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
+		`AND ` + attemptFactColumn + ` = '` + fact + `' AND result != 'error' AND at >= ?2)`
 }

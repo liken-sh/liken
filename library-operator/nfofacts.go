@@ -75,10 +75,10 @@ func nfoGapQuery(fact string) string {
 	return `SELECT id FROM (` +
 		`SELECT library, id, nfo_facts FROM movies WHERE id NOT LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id, nfo_facts FROM series WHERE id NOT LIKE 'series:path:%') AS items ` +
-		`WHERE library = ? AND instr(nfo_facts, '` + nfoFactSeparator + fact + nfoFactSeparator + `') = 0 ` +
+		`WHERE library = ?1 AND instr(nfo_facts, '` + nfoFactSeparator + fact + nfoFactSeparator + `') = 0 ` +
 		`AND id NOT IN (SELECT item FROM attempts ` +
-		`WHERE attempts.library = items.library AND ` + attemptFactColumn + ` = '` + fact + `' ` +
-		`AND result != 'error' AND at >= ?)`
+		`WHERE attempts.library = ?1 AND ` + attemptFactColumn + ` = '` + fact + `' ` +
+		`AND result != 'error' AND at >= ?2)`
 }
 
 // The count of fights every fact of one library recorded. The reporter
