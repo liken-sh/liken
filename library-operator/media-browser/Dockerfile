@@ -35,6 +35,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --locked
 
 COPY src/ ./src/
+# The ratings marks are baked into the binary from this directory.
+COPY assets/ ./assets/
 
 # The touch marks the crate's own sources newer than the stub build, so cargo
 # compiles this crate again and leaves the dependencies as they are.
