@@ -8,6 +8,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,18 +36,23 @@ func fakeKey(parts ...string) string {
 }
 
 type fakeCatalog struct {
-	mu         sync.Mutex
-	movies     map[string]fakeRow
-	sets       map[string]fakeRow
-	series     map[string]fakeRow
-	episodes   map[string]fakeRow
-	files      map[string]fakeRow
-	attempts   map[string]fakeRow
-	aliases    map[string]string
-	fileItems  map[string]bool
-	seen       map[string]int64
-	statements []capturedStatement
-	failStatus int
+	mu       sync.Mutex
+	movies   map[string]fakeRow
+	sets     map[string]fakeRow
+	series   map[string]fakeRow
+	episodes map[string]fakeRow
+	files    map[string]fakeRow
+	attempts map[string]fakeRow
+	// The three tables of the people: one row per person, one per id of a person,
+	// and one per credited slot of a title.
+	contributors       map[string]fakeRow
+	contributorAliases map[string]fakeRow
+	credits            map[string]fakeRow
+	aliases            map[string]string
+	fileItems          map[string]bool
+	seen               map[string]int64
+	statements         []capturedStatement
+	failStatus         int
 	// seenLagReads models a real Corrosion agent right after CREATE
 	// TABLE seen: a query of seen can still miss the table for a short
 	// window. Each read of seen decrements it and answers "no such table"
@@ -72,15 +78,18 @@ type fakeCatalog struct {
 func newFakeCatalog(t *testing.T) (*Catalog, *fakeCatalog) {
 	t.Helper()
 	fake := &fakeCatalog{
-		movies:    map[string]fakeRow{},
-		sets:      map[string]fakeRow{},
-		series:    map[string]fakeRow{},
-		episodes:  map[string]fakeRow{},
-		files:     map[string]fakeRow{},
-		attempts:  map[string]fakeRow{},
-		aliases:   map[string]string{},
-		fileItems: map[string]bool{},
-		seen:      map[string]int64{},
+		movies:             map[string]fakeRow{},
+		sets:               map[string]fakeRow{},
+		series:             map[string]fakeRow{},
+		episodes:           map[string]fakeRow{},
+		files:              map[string]fakeRow{},
+		attempts:           map[string]fakeRow{},
+		contributors:       map[string]fakeRow{},
+		contributorAliases: map[string]fakeRow{},
+		credits:            map[string]fakeRow{},
+		aliases:            map[string]string{},
+		fileItems:          map[string]bool{},
+		seen:               map[string]int64{},
 	}
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
@@ -142,6 +151,18 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		f.attempts[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
 	case strings.HasPrefix(s.sql, "DELETE FROM attempts"):
 		delete(f.attempts, fakeKey(str(p[0]), str(p[1]), str(p[2])))
+	case strings.HasPrefix(s.sql, "INSERT INTO contributors"):
+		f.contributors[fakeKey(str(p[0]), str(p[1]))] = fakeRow{library: str(p[0]), path: str(p[1])}
+	case strings.HasPrefix(s.sql, "DELETE FROM contributors"):
+		delete(f.contributors, fakeKey(str(p[0]), str(p[1])))
+	case strings.HasPrefix(s.sql, "INSERT INTO contributor_aliases"):
+		f.contributorAliases[fakeKey(str(p[0]), str(p[1]), str(p[2]))] = fakeRow{library: str(p[0]), path: str(p[3])}
+	case strings.HasPrefix(s.sql, "DELETE FROM contributor_aliases"):
+		delete(f.contributorAliases, fakeKey(str(p[0]), str(p[1]), str(p[2])))
+	case strings.HasPrefix(s.sql, "INSERT INTO credits"):
+		f.credits[fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
+	case strings.HasPrefix(s.sql, "DELETE FROM credits"):
+		delete(f.credits, fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2])))
 	case strings.HasPrefix(s.sql, "INSERT INTO aliases"):
 		f.aliases[fakeKey(str(p[0]), str(p[1]))] = str(p[2])
 	case strings.HasPrefix(s.sql, "INSERT INTO seen"):
@@ -226,6 +247,10 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 		return f.setIDsUnder(p)
 	case strings.Contains(sql, "FROM file_items"):
 		return f.unmarkedLinks(sql, p)
+	case strings.Contains(sql, "FROM contributor_aliases"):
+		return f.unmarkedPairs(sql, p, f.contributorAliases)
+	case strings.Contains(sql, "FROM credits"):
+		return f.unmarkedPairs(sql, p, f.credits)
 	case strings.Contains(sql, "FROM aliases"):
 		return f.unmarkedAliases(sql, p)
 	default:
@@ -323,6 +348,27 @@ func (f *fakeCatalog) unmarkedAttempts(sql string, p []any) []any {
 		if !scoped || inScope(item, folder) || scope[item] {
 			keys = append(keys, item+linkKeySeparator+fact)
 		}
+	}
+	return keys
+}
+
+// UnmarkedPairs reads the rows of a table whose key after the library is two
+// columns, the way the people's ids and the credits are keyed. The key reads
+// back joined by the same separator the mark used, so one string is compared
+// against one string.
+func (f *fakeCatalog) unmarkedPairs(sql string, p []any, table map[string]fakeRow) []any {
+	library, epoch := str(p[0]), num(p[1])
+	var keys []any
+	for composite, row := range table {
+		parts := strings.SplitN(composite, "\x00", 3)
+		if row.library != library || len(parts) != 3 {
+			continue
+		}
+		key := parts[1] + linkKeySeparator + parts[2]
+		if f.seen[seenPrefix(sql)+key] == epoch {
+			continue
+		}
+		keys = append(keys, key)
 	}
 	return keys
 }
@@ -455,6 +501,8 @@ func (f *fakeCatalog) tableOf(sql string) map[string]fakeRow {
 		return f.series
 	case strings.Contains(sql, "FROM episodes"):
 		return f.episodes
+	case strings.Contains(sql, "FROM contributors"):
+		return f.contributors
 	default:
 		return f.files
 	}

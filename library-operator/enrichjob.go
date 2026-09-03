@@ -136,6 +136,14 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 		images.Resources.Limits = map[string]string{"memory": artMemoryLimit}
 		facts = append(facts, images)
 	}
+	// The contributors container, which fills the people the credits fact named.
+	// It runs after the art container, and it is an init container for the same
+	// reason the art container is: the enrich container must run last. Plan 30
+	// makes both of them regular containers that run at once.
+	if providers.servingContributors(library.Metadata.Namespace, library.Spec.Sources) != nil {
+		facts = append(facts, factsContainer(library, contributorsContainerName, contributorFactNames,
+			path, scannerImage, busAddress, topicBase))
+	}
 	// The same environment carries the source order, so a container asks its
 	// providers in the order spec.sources names them.
 	keys := providerEnv(library, providers)

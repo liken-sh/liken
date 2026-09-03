@@ -67,6 +67,12 @@ const (
 	// An attempt has a key space of its own, and its key is the item and the
 	// fact joined, so a mark on an attempt never touches an item.
 	seenAttempt = "attempt:"
+	// The three key spaces of the people. A person keys on the directory that
+	// holds them, an id on the scheme and the id joined, and a credit on the
+	// title and the billing order joined.
+	seenContributor      = "contributor:"
+	seenContributorAlias = "contributor-alias:"
+	seenCredit           = "credit:"
 )
 
 // The separator between a link key's two halves. A path and an item id can
@@ -183,6 +189,15 @@ func markKeys(result *walkResult) []string {
 	}
 	for _, row := range result.attempts {
 		add(seenAttempt, attemptSeenKey(row))
+	}
+	for _, row := range result.contributors {
+		add(seenContributor, row.Path)
+	}
+	for _, row := range result.contributorAliases {
+		add(seenContributorAlias, contributorAliasSeenKey(row))
+	}
+	for _, row := range result.credits {
+		add(seenCredit, creditSeenKey(row))
 	}
 	return keys
 }
@@ -305,6 +320,37 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	n, err = catalog.sweep(ctx, attemptPruneSQL(), []any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteAttempts(ctx, library, attemptKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The people, swept the way every other table is. The credits of a title that
+	// left the volume are unmarked with it, and a person whose directory left the
+	// store leaves with their ids.
+	n, err = catalog.sweep(ctx, creditPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteCredits(ctx, library, creditKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, contributorAliasPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributorAliases(ctx, library, contributorAliasKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, itemPruneSQL("contributors", "path", seenContributor),
+		[]any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteContributors(ctx, library, keys)
 		})
 	if err != nil {
 		return removed, err

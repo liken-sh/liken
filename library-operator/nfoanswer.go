@@ -28,6 +28,10 @@ type creditedActor struct {
 	Role  string
 	Order int
 	Thumb string
+	// The ids the provider gave for the person, which name the person's directory
+	// in .contributors/ and tell two people of one name apart. They never reach
+	// the .nfo, because no player reads an id there.
+	IDs providerIDs
 }
 
 // One site's score and the count of votes behind it. A count of zero means

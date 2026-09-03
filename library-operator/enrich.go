@@ -101,6 +101,10 @@ var gapQueries = map[string]string{
 	factSeasonPoster:         seasonArtGapSQL(factSeasonPoster),
 	factSeasonBanner:         seasonArtGapSQL(factSeasonBanner),
 	factEpisodeThumb:         episodeThumbGapSQL(),
+
+	factContributorIDs:       contributorIDsGapSQL(),
+	factContributorBiography: contributorFileGapSQL(factContributorBiography, "biography"),
+	factContributorHeadshot:  contributorFileGapSQL(factContributorHeadshot, "headshot"),
 }
 
 // The two counts a person reads on the Library beside the gaps. Waiting

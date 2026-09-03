@@ -217,6 +217,12 @@ func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem,
 		e.recordNFO(folder, fact, nil, attemptError, names)
 		return attemptError
 	}
+	// The credits fact writes credits.yaml and the people it names after the
+	// actor elements, so a person the store has no entry for gains one on the
+	// same run the .nfo names them.
+	if fact == factCredits {
+		e.writeCredits(folder, merged.Cast)
+	}
 	e.logf("wrote the %s of %s from %s", fact, item.path, strings.Join(names, ", "))
 	e.recordNFO(folder, fact, &likenItem{
 		Path: likenSelfPath, Provider: names, Wrote: hash, Written: time.Now().UTC(),

@@ -359,8 +359,8 @@ func TestTheEnrichContainerStillRunsLast(t *testing.T) {
 
 	spec := job.Spec.Template.Spec
 	last := spec.InitContainers[len(spec.InitContainers)-1]
-	if last.Name != artContainerName {
-		t.Errorf("the last init container is %q, want the art container", last.Name)
+	if last.Name != contributorsContainerName {
+		t.Errorf("the last init container is %q, want the contributors container", last.Name)
 	}
 	if len(spec.Containers) != 1 || spec.Containers[0].Name != enrichMode {
 		t.Fatalf("containers = %+v, want the one enrich container", spec.Containers)
@@ -419,7 +419,8 @@ func TestTheNFOContainerRunsAfterIdentityAndBeforeArt(t *testing.T) {
 	for _, container := range job.Spec.Template.Spec.InitContainers {
 		names = append(names, container.Name)
 	}
-	want := []string{catalogContainer, factProbe, factIdentity, nfoContainerName, artContainerName}
+	want := []string{catalogContainer, factProbe, factIdentity, nfoContainerName,
+		artContainerName, contributorsContainerName}
 	if len(names) != len(want) {
 		t.Fatalf("initContainers = %v, want %v", names, want)
 	}

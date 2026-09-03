@@ -369,6 +369,15 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		return err
 	}
 
+	// The people are read after the last title folder, because the walk of the
+	// titles skips every dot directory and this store is the one exception. A
+	// store the scanner cannot read marks the pass incomplete, as a title folder
+	// does, so a store that would not open never sweeps its people.
+	people := walkContributors(s.root, s.library)
+	if people.readError {
+		readError = true
+	}
+
 	// A cancelled walk read only part of the volume and wrote only part
 	// of its rows, so it prunes nothing, writes no counts, and leaves the
 	// last-walk time where it was.
@@ -391,6 +400,12 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 	// no set marked would sweep every set the catalog holds.
 	if err := flushWalk(ctx, s.catalog, &walkResult{sets: sets.rows()}, epoch); err != nil {
 		return s.walkFailed("write the sets", err)
+	}
+
+	// The people are written with the walk's own epoch, before the prune, so a
+	// person whose directory left the store is unmarked and the prune takes them.
+	if err := flushWalk(ctx, s.catalog, people, epoch); err != nil {
+		return s.walkFailed("write the contributors", err)
 	}
 
 	// The walk read the volume and wrote what it holds, so the count is

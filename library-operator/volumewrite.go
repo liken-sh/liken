@@ -137,6 +137,16 @@ func (w *volumeWriter) writeInto(directory, name string, data []byte) error {
 	return w.write(filepath.Join(directory, name), data)
 }
 
+// The create door for a directory that may not exist yet, which is what a
+// person's own directory under .contributors/ is on its first write. It is
+// createOnce and never write, so a file another writer put there is kept.
+func (w *volumeWriter) createInto(directory, name string, data []byte) (bool, error) {
+	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
+		return false, err
+	}
+	return w.createOnce(filepath.Join(directory, name), data)
+}
+
 // The element an edit inserts or replaces, and the attribute that tells one
 // uniqueid from another where a document holds several.
 type xmlElement struct {

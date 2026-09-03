@@ -18,10 +18,10 @@ const tmdbCertificationCountry = "US"
 
 // Where a TMDb image lives, and the size the profile picture of a credited
 // person takes.
-const (
-	tmdbImageBase   = "https://image.tmdb.org/t/p/"
-	tmdbProfileSize = "original"
-)
+const tmdbProfileSize = "original"
+
+// The host every image path hangs off, which only a test replaces.
+var tmdbImageBase = "https://image.tmdb.org/t/p/"
 
 // Why the cast is cut: a title carries a hundred credited people at TMDb, and
 // the sidecar is read on every walk, so the fact writes the billed cast and
@@ -165,6 +165,7 @@ func (c *tmdbClient) certification(ctx context.Context, kind string, id int) (st
 // a list of roles.
 type tmdbCredits struct {
 	Cast []struct {
+		ID          int    `json:"id"`
 		Name        string `json:"name"`
 		Character   string `json:"character"`
 		Order       int    `json:"order"`
@@ -195,6 +196,7 @@ func (c *tmdbClient) credits(ctx context.Context, kind string, id int) ([]credit
 			Role:  strings.TrimSpace(role),
 			Order: member.Order,
 			Thumb: tmdbImageURL(tmdbProfileSize, member.ProfilePath),
+			IDs:   creditedIDs(member.ID),
 		})
 	}
 	slices.SortStableFunc(cast, func(one, two creditedActor) int { return one.Order - two.Order })
@@ -202,6 +204,15 @@ func (c *tmdbClient) credits(ctx context.Context, kind string, id int) ([]credit
 		cast = cast[:tmdbCastLimit]
 	}
 	return cast, nil
+}
+
+// The ids one credit carries. A person TMDb states no id for carries none, and
+// the credits fact then keys that person on the name alone.
+func creditedIDs(id int) providerIDs {
+	if id <= 0 {
+		return nil
+	}
+	return providerIDs{contributorTMDbScheme: strconv.Itoa(id)}
 }
 
 // A path the provider left empty is no picture at all.

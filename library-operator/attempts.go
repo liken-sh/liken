@@ -130,6 +130,19 @@ type likenSidecar struct {
 	library string
 	item    string
 	items   map[string]string
+	// The facts whose ledgers this folder can hold. A title folder holds the
+	// title's own, which is the list below, and a person's directory holds the
+	// three contributor facts and no other.
+	facts []string
+}
+
+// The facts this folder is read for, which is the title list where the caller
+// names none.
+func (s likenSidecar) ledgerFacts() []string {
+	if s.facts != nil {
+		return s.facts
+	}
+	return likenFacts
 }
 
 // The facts the scanner lifts out of a folder. The file fact keys on a
@@ -145,12 +158,18 @@ var likenFacts = []string{factProbe, factIdentity,
 // Reads every .liken file the folder holds into attempts rows. A folder that
 // holds none reads as no rows and not as an error, because most folders hold
 // none.
-func (s likenSidecar) attempts() ([]attemptRow, error) {
+// One pass answers for both kinds of row, because the credits ledger the
+// credits fact wrote is one of the files this pass already opens.
+func (s likenSidecar) read() ([]attemptRow, []creditRow, error) {
 	var rows []attemptRow
-	for _, fact := range likenFacts {
+	var credits []creditRow
+	for _, fact := range s.ledgerFacts() {
 		ledger, err := readLikenLedger(s.dir, fact)
 		if err != nil {
-			return rows, err
+			return rows, credits, err
+		}
+		if fact == factCredits {
+			credits = append(credits, creditRows(s.library, s.item, ledger.Credits)...)
 		}
 		for _, attempt := range ledger.Attempts {
 			item := s.itemOf(fact, attempt.Path)
@@ -167,7 +186,7 @@ func (s likenSidecar) attempts() ([]attemptRow, error) {
 			})
 		}
 	}
-	return rows, nil
+	return rows, credits, nil
 }
 
 // How an entry's path resolves: a file fact names the file itself, and an
@@ -186,9 +205,10 @@ func (s likenSidecar) itemOf(fact, path string) string {
 // way an unreadable sidecar does, so the sweep never removes rows the volume
 // still holds.
 func readLikenSidecar(sidecar likenSidecar, result *walkResult) {
-	rows, err := sidecar.attempts()
+	rows, credits, err := sidecar.read()
 	result.noteReadError(err)
 	result.attempts = append(result.attempts, rows...)
+	result.credits = append(result.credits, credits...)
 }
 
 // The reporter counts a gap with the same query the container works from, so

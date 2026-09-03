@@ -42,6 +42,10 @@ var factRuns = map[string]factRun{
 	factSeasonPoster: artFactRun(factSeasonPoster),
 	factSeasonBanner: artFactRun(factSeasonBanner),
 	factEpisodeThumb: artFactRun(factEpisodeThumb),
+
+	factContributorIDs:       contributorFactRun(factContributorIDs),
+	factContributorBiography: contributorFactRun(factContributorBiography),
+	factContributorHeadshot:  contributorFactRun(factContributorHeadshot),
 }
 
 // The role's whole program. A failure is a non-zero exit, so the Job fails

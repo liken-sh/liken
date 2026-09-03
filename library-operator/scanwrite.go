@@ -36,6 +36,11 @@ func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) error
 		func() (int, error) { return catalog.UpsertFileItems(ctx, result.files) },
 		func() (int, error) { return catalog.UpsertAliases(ctx, result.aliases) },
 		func() (int, error) { return catalog.UpsertAttempts(ctx, result.attempts) },
+		func() (int, error) { return catalog.UpsertContributors(ctx, result.contributors) },
+		func() (int, error) {
+			return catalog.UpsertContributorAliases(ctx, result.contributorAliases)
+		},
+		func() (int, error) { return catalog.UpsertCredits(ctx, result.credits) },
 	}
 	for _, step := range steps {
 		if _, err := step(); err != nil {

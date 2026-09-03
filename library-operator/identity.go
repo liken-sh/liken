@@ -52,9 +52,15 @@ type walkResult struct {
 	aliases  []aliasRow
 	// The volume holds the attempts and the catalog only derives them, so a
 	// folder that left takes its attempts with it.
-	attempts     []attemptRow
-	titles       int
-	unidentified int
+	attempts []attemptRow
+	// The people, which no title folder holds. The credits of each title come off
+	// its own credits ledger, and the people themselves come off the walk of
+	// .contributors/ after the last title folder.
+	credits            []creditRow
+	contributors       []contributorRow
+	contributorAliases []contributorAliasRow
+	titles             int
+	unidentified       int
 	// the paths of the folders this walk could not identify, so a
 	// full walk names a sample of them in its log without holding every
 	// one. It carries one path per unidentified folder.
@@ -96,6 +102,9 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.files = append(buffer.files, folder.files...)
 	buffer.aliases = append(buffer.aliases, folder.aliases...)
 	buffer.attempts = append(buffer.attempts, folder.attempts...)
+	buffer.credits = append(buffer.credits, folder.credits...)
+	buffer.contributors = append(buffer.contributors, folder.contributors...)
+	buffer.contributorAliases = append(buffer.contributorAliases, folder.contributorAliases...)
 }
 
 // collectFolders reads a whole folder stream into one walkResult, with the

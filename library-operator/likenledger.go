@@ -76,7 +76,12 @@ func sortedKeys(ids providerIDs) []string {
 // One .liken/<fact>.yaml file: the ledger the identity fact keeps, and
 // the attempts every fact appends to.
 type likenLedger struct {
-	Items    []likenItem    `yaml:"items,omitempty"`
+	Items []likenItem `yaml:"items,omitempty"`
+	// The credits fact's own list, in the file that is its ledger: one entry per
+	// credited person, with the directory in .contributors/ that holds that
+	// person. Only the credits fact writes it, so the list, the answer, and the
+	// attempts are one write of one file.
+	Credits  []creditEntry  `yaml:"credits,omitempty"`
 	Attempts []likenAttempt `yaml:"attempts,omitempty"`
 }
 

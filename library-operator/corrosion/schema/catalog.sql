@@ -272,3 +272,60 @@ CREATE TABLE attempts (
     provider TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, item, concern)
 );
+
+-- One row per person a library's .contributors/ store holds. The path is the
+-- person's own directory, relative to the library root, which is the key
+-- credits.yaml names them by, so the join is one column against one column.
+-- born and died are the dates the contributor.ids fact wrote. biography and
+-- headshot are 1 where the file is beside the entry, and the gap query of each
+-- of those two facts reads its own column. Each library holds its own copy of
+-- a person, because two libraries may be separate volumes, and the ids below
+-- are what join the two copies.
+CREATE TABLE contributors (
+    library TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    born TEXT NOT NULL DEFAULT '',
+    died TEXT NOT NULL DEFAULT '',
+    biography INTEGER NOT NULL DEFAULT 0,
+    headshot INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (library, path)
+);
+
+-- The one order a media browser draws a library's people in.
+CREATE INDEX contributors_library_name ON contributors (library, name);
+
+-- One id of one person, in the shape the item aliases take: the scheme and the
+-- id name the person inside one library, and the path resolves to the row. One
+-- person joins across libraries by an id two of them share, which is the one
+-- thing a name cannot do.
+CREATE TABLE contributor_aliases (
+    library TEXT NOT NULL DEFAULT '',
+    scheme TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, scheme, id)
+);
+
+-- The reverse lookup, from one library's person to the ids that resolve to
+-- them. The contributor.ids gap query reads it.
+CREATE INDEX contributor_aliases_library_path ON contributor_aliases (library, path);
+
+-- One credited person on one title, lifted from the title's own credits.yaml.
+-- billing is the billing order, and it is the key beside the item because a
+-- title gives each of its people one slot; the column is not named order,
+-- which is a word SQL keeps for itself. contributor is the person's directory,
+-- empty for a person the store has no entry for.
+CREATE TABLE credits (
+    library TEXT NOT NULL DEFAULT '',
+    item TEXT NOT NULL DEFAULT '',
+    billing INTEGER NOT NULL DEFAULT 0,
+    contributor TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, item, billing)
+);
+
+-- The read a person's page makes: every title in this library that credits one
+-- person.
+CREATE INDEX credits_library_contributor ON credits (library, contributor);
