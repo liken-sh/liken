@@ -3,8 +3,8 @@
 // resembles a real library.
 
 use crate::catalog::{
-    Credit, Credits, Episode, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem, Selection,
-    SeriesDetails, Source, Title, Work,
+    Credit, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
+    Selection, SeriesDetails, Source, Title, Work,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
@@ -85,6 +85,8 @@ impl Source for Catalog {
                     role: format!("Part {part}"),
                 })
                 .collect(),
+            studios: vec![format!("Studio {number:02}")],
+            ratings: ratings(number),
             backdrop: format!("backdrops/serial-{number:02}.jpg"),
             logo: String::new(),
             seasons: seasons(number),
@@ -99,6 +101,7 @@ impl Source for Catalog {
         (1..=seasons(number))
             .flat_map(|season| {
                 (1..=6 + (number + season) % 5).map(move |episode| Episode {
+                    id: format!("episode:sample:{number:02}-{season:02}-{episode:02}"),
                     season,
                     episode,
                     title: format!("Segment {episode:02}"),
@@ -140,6 +143,8 @@ impl Source for Catalog {
                     role: format!("Part {part}"),
                 })
                 .collect(),
+            studios: vec![format!("Studio {number:04}"), "A Second Studio".into()],
+            ratings: ratings(number),
             set_id: set_of(number),
             backdrop: format!("backdrops/specimen-{number:04}.jpg"),
             logo: String::new(),
@@ -167,6 +172,36 @@ impl Source for Catalog {
 
     fn credits(&mut self, _library: &str, id: &str) -> Credits {
         people::credits(id)
+    }
+
+    // The invented files of one title: the video the page draws a line
+    // for, and two subtitle files beside it.
+    fn files(&mut self, _library: &str, item: &str) -> Vec<FileFacts> {
+        let number = trailing(item);
+        if number == 0 {
+            return Vec::new();
+        }
+        let mut files = vec![FileFacts {
+            role: "primary".into(),
+            kind: "video".into(),
+            container: "mkv".into(),
+            video_codec: "x265".into(),
+            audio_codec: "AC3".into(),
+            width: 1_920,
+            height: 804,
+            size_bytes: 4_200_000_000 + number * 1_000_000,
+            language: String::new(),
+        }];
+        for language in ["en", "fr"] {
+            files.push(FileFacts {
+                role: "subtitle".into(),
+                kind: "subtitle".into(),
+                container: "srt".into(),
+                language: language.into(),
+                ..FileFacts::default()
+            });
+        }
+        files
     }
 
     fn person(&mut self, library: &str, path: &str) -> Option<Person> {
@@ -205,6 +240,20 @@ fn movie(number: i64) -> Title {
         duration: 4_800 + (number % 47) * 60,
         rating: "PG-13".into(),
     }
+}
+
+// The invented scores of one title, on the three sites the page draws
+// and on TMDb, which it leaves off.
+fn ratings(number: i64) -> Vec<(String, f64)> {
+    [
+        ("imdb", 5.0 + (number % 50) as f64 / 10.0),
+        ("metacritic", (30 + number % 70) as f64),
+        ("themoviedb", 6.0 + (number % 40) as f64 / 10.0),
+        ("tomatometerallcritics", (20 + number % 80) as f64),
+    ]
+    .into_iter()
+    .map(|(name, score)| (name.to_string(), score))
+    .collect()
 }
 
 // How many seasons an invented serial holds.

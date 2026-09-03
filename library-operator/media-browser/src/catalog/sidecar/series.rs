@@ -23,6 +23,8 @@ pub fn series(
                       json_extract(item.body, '$.genres'), \
                       json_extract(item.body, '$.creators'), \
                       json_extract(item.body, '$.cast'), \
+                      json_extract(item.body, '$.studios'), \
+                      json_extract(item.body, '$.ratings'), \
                       (SELECT COUNT(DISTINCT episodes.season) FROM episodes \
                         WHERE episodes.library = item.library \
                         AND episodes.series = item.id) \
@@ -38,7 +40,9 @@ pub fn series(
             genres: item::strings(&item::text(row, 6)?),
             creators: item::strings(&item::text(row, 7)?),
             cast: item::credits(&item::text(row, 8)?),
-            seasons: row.get(9)?,
+            studios: item::strings(&item::text(row, 9)?),
+            ratings: item::ratings(&item::text(row, 10)?),
+            seasons: row.get(11)?,
             backdrop: String::new(),
             logo: String::new(),
         })
@@ -66,7 +70,7 @@ pub fn episodes(
     id: &str,
 ) -> rusqlite::Result<Vec<Episode>> {
     let sql = "SELECT season, episode, title, released, duration, \
-                      json_extract(body, '$.plot'), art \
+                      json_extract(body, '$.plot'), art, id \
                FROM episodes WHERE library = ? AND series = ? \
                ORDER BY season, episode";
     collect(connection, sql, &[&library, &id], |row| {
@@ -78,6 +82,7 @@ pub fn episodes(
             duration: row.get(4)?,
             plot: item::text(row, 5)?,
             art: row.get(6)?,
+            id: row.get(7)?,
         })
     })
 }

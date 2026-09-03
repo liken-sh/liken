@@ -59,14 +59,16 @@ already raises that energy while a `Play` starts.
   left, and the mark's energy eases to zero. The page is whole at the
   same focus, as plan 08 promises today.
 
-## What is not decided
+## Decided
 
-Whether the loading state needs a ceiling, and what the browser does
-when neither `Playing` nor `Idle` arrives. How `Starting` reaches the
-browser: the activity `media-screen` reads today, or a new signal the
-operator publishes when the `Play` exists. Whether a series page enters
-the state for one episode as a movie page does, or whether the season
-strip stays. Whether a back press during the state cancels the `Play`,
-and whose call that is. The lengths, which belong in `look.rs` with
-plan 23's constants; the return should be much shorter than the
-departure, and both need a number.
+Built and released in 2026.09.03-009. The state has no ceiling. The
+press enters it: a select on Play or on a still publishes the request
+and the page enters the state in the same frame, and it waits on no
+signal. The film covers the state, and either `Wake` or `Present`
+starts the exit, whether the film played through or the `Play` never
+started. A back press during the state exits it at once and cancels
+nothing; the `Play` is the operator's to run. A series page enters the
+state for an episode as a movie page does, with the series' logo and
+backdrop. The departure takes 0.35 s and the return 0.12 s, in
+`look.rs`. Plan 23 is still open; this state is the browser's first
+clock-driven drawing, and the volume row is its second.

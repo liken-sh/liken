@@ -105,13 +105,13 @@ pub struct Stripes {
 }
 
 impl Stripes {
-    /// The stripes of one title's credits: the crew, and the cast. A person
-    /// who both directed and wrote is one face of the crew, with both parts
-    /// under their name where an actor's character goes.
+    /// The stripes of one title's credits: the cast first, then the crew. A
+    /// person who both directed and wrote is one face of the crew, with
+    /// both parts under their name where an actor's character goes.
     pub fn of(credits: Credits) -> Self {
         let bands = [
-            ("Crew", crew(credits.directors, credits.writers)),
             ("Cast", credits.cast),
+            ("Crew", crew(credits.directors, credits.writers)),
         ]
         .into_iter()
         .filter(|(_, slots)| !slots.is_empty())
@@ -198,9 +198,9 @@ mod tests {
     fn a_title_draws_only_the_parts_it_credits() {
         let stripes = Stripes::of(credits());
         let headings: Vec<&str> = stripes.bands().iter().map(|band| band.heading).collect();
-        assert_eq!(headings, ["Crew", "Cast"]);
-        assert_eq!(stripes.bands()[0].faces[0].role, "Director");
-        assert_eq!(stripes.bands()[1].faces.len(), 2);
+        assert_eq!(headings, ["Cast", "Crew"]);
+        assert_eq!(stripes.bands()[0].faces.len(), 2);
+        assert_eq!(stripes.bands()[1].faces[0].role, "Director");
     }
 
     #[test]
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn a_headshot_sits_inside_the_persons_own_entry() {
         let stripes = Stripes::of(credits());
-        let face = stripes.face((0, 0)).expect("the title has a director");
+        let face = stripes.face((1, 0)).expect("the title has a director");
         assert_eq!(face.art, ".contributors/A Director/headshot.jpg");
         assert_eq!(face.name, "A Director");
         assert_eq!(face.detail(), "Director");
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn a_name_with_no_entry_carries_no_art_and_no_path() {
         let stripes = Stripes::of(credits());
-        let face = stripes.face((1, 1)).expect("the title has a second player");
+        let face = stripes.face((0, 1)).expect("the title has a second player");
         assert_eq!(face.art, "");
         assert_eq!(face.contributor, "");
         assert_eq!(face.detail(), "A Walk-on");
@@ -253,9 +253,9 @@ mod tests {
     #[test]
     fn left_and_right_move_inside_one_stripe() {
         let stripes = Stripes::of(credits());
-        assert_eq!(stripes.key((1, 0), "right"), Some((1, 1)));
-        assert_eq!(stripes.key((1, 1), "right"), Some((1, 1)));
-        assert_eq!(stripes.key((1, 1), "left"), Some((1, 0)));
+        assert_eq!(stripes.key((0, 0), "right"), Some((0, 1)));
+        assert_eq!(stripes.key((0, 1), "right"), Some((0, 1)));
+        assert_eq!(stripes.key((0, 1), "left"), Some((0, 0)));
     }
 
     #[test]
@@ -263,17 +263,17 @@ mod tests {
         let stripes = Stripes::of(credits());
         assert_eq!(stripes.first(), Some((0, 0)));
         assert_eq!(stripes.key((0, 0), "down"), Some((1, 0)));
-        assert_eq!(stripes.key((1, 1), "down"), Some((1, 1)));
-        assert_eq!(stripes.key((1, 1), "up"), Some((0, 0)));
+        assert_eq!(stripes.key((1, 0), "down"), Some((1, 0)));
+        assert_eq!(stripes.key((1, 0), "up"), Some((0, 0)));
         assert_eq!(stripes.key((0, 0), "up"), None);
     }
 
     #[test]
     fn a_reread_holds_the_rung_inside_what_the_title_still_credits() {
         let stripes = Stripes::of(credits());
-        assert_eq!(stripes.held((1, 1)), Some((1, 1)));
-        assert_eq!(stripes.held((1, 9)), Some((1, 1)));
-        assert_eq!(stripes.held((9, 9)), Some((1, 1)));
+        assert_eq!(stripes.held((0, 1)), Some((0, 1)));
+        assert_eq!(stripes.held((0, 9)), Some((0, 1)));
+        assert_eq!(stripes.held((9, 9)), Some((1, 0)));
         assert_eq!(Stripes::default().held((0, 0)), None);
     }
 }

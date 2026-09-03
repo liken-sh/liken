@@ -81,9 +81,6 @@ they share, and plans 28 to 31 build them in order.
 * [34, Every fact writes its rows](34-every-fact-writes-its-rows.md).
   Each fact writes its own catalog rows as it writes its files, only
   the columns it owns, and the phases that share no file run at once.
-* [35, The loading state](35-the-loading-state.md). Between select
-  and the film's first frame, the page steps back and the title's
-  backdrop and logo hold the screen with the mark beneath them.
 
 Plan 32 stands apart from the enrichment work.
 
@@ -230,6 +227,13 @@ that took a hearing-impaired flag for Hindi.
   in -006: the last scanner's retained Last Will republished onto a
   cleared topic, and a departure whose claim was deleted by hand
   released while survivors still held the rows.
+* [35, The loading state](completed/35-the-loading-state.md). Built
+  and released in 2026.09.03-009. Between select and the film's first
+  frame, the page steps back and the title's backdrop and logo hold the
+  screen with the mark beneath them, and the page returns when the
+  browser is presented again. The same release carries the ratings
+  line, the foot of studios and file lines, the volume row, and the
+  parts under a person's works.
 
 ## Open problems
 

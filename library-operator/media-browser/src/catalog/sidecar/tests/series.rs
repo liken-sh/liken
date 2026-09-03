@@ -5,7 +5,8 @@ use super::*;
 
 // The body a series page reads every field out of.
 const SERIES_BODY: &str = r#"{"plot":"A plot.","tagline":"One line.","contentRating":"TV-14",
-    "genres":["Drama","Mystery"],"creators":["A Creator"],
+    "genres":["Drama","Mystery"],"creators":["A Creator"],"studios":["A Studio"],
+    "ratings":{"imdb":8.3,"tomatometerallcritics":95},
     "cast":[{"name":"A Player","role":"The Part"}]}"#;
 
 #[test]
@@ -68,6 +69,8 @@ fn a_series_page_reads_its_body_its_seasons_and_its_art_by_role() {
                 name: "A Player".into(),
                 role: "The Part".into(),
             }],
+            studios: vec!["A Studio".into()],
+            ratings: vec![("imdb".into(), 8.3), ("tomatometerallcritics".into(), 95.0)],
             backdrop: "Serial one/fanart.jpg".into(),
             logo: "Serial one/clearlogo.png".into(),
             seasons: 2,
@@ -89,6 +92,8 @@ fn a_series_with_an_empty_body_reads_as_a_page_of_its_columns() {
     assert!(details.plot.is_empty());
     assert!(details.cast.is_empty());
     assert!(details.creators.is_empty());
+    assert!(details.studios.is_empty());
+    assert!(details.ratings.is_empty());
     assert!(details.backdrop.is_empty());
     assert!(details.logo.is_empty());
     assert_eq!(details.seasons, 0);
@@ -132,6 +137,7 @@ fn every_episode_carries_its_plot_its_runtime_and_its_still() {
     let mut source = SidecarSource::new(&path, NO_AGENT);
     let episodes = source.episodes("default/shows", "one");
     assert_eq!(episodes.len(), 2);
+    assert_eq!(episodes[0].id, "episode:1:1");
     assert_eq!(episodes[0].title, "Segment 1");
     assert_eq!(episodes[0].released, "2004-09-22");
     assert_eq!(episodes[0].duration, 2760);

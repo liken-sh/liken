@@ -30,6 +30,12 @@ impl Stack {
             self.at.y += taken + self.gap;
         }
     }
+
+    /// Move down by this much with no gap, for a block that wants more
+    /// room over it than the stack leaves between two blocks.
+    pub fn skip(&mut self, extra: f32) {
+        self.at.y += extra;
+    }
 }
 
 /// How far a page has scrolled. `region` is the block focus is on, in the

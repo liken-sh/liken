@@ -10,13 +10,14 @@ use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
-use iced_winit::core::{Element, Theme};
+use iced_winit::core::{Element, Rectangle, Theme};
 
-use super::{Item, Screen, Step, facts, person, stripes};
+use super::{Item, Screen, Step, facts, foot, person, stripes};
 use crate::catalog::{MovieDetails, MovieSet, Selection, Source};
 use crate::focus;
 use crate::posters::Posters;
-use crate::views::layers;
+use crate::views::curtain::{Curtain, Head, Layer};
+use crate::views::{layers, ratings};
 
 /// Where focus is on the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,12 +75,16 @@ pub struct Movie {
     /// The year, the runtime, the content rating, and the genres, on one
     /// line.
     pub facts: String,
+    /// The scores the ratings line draws, in the order it draws them.
+    pub ratings: Vec<ratings::Score>,
     /// The tagline, empty where the sidecar named none.
     pub tagline: String,
     /// The plot. The page cuts it to four lines.
     pub plot: String,
     /// The credited people, as the stripes at the end of the page.
     pub stripes: stripes::Stripes,
+    /// The studios and the files, as the block after the last stripe.
+    pub foot: foot::Foot,
     /// The set the movie belongs to, or nothing where it belongs to none.
     pub set: Option<Set>,
     /// Where focus is.
@@ -100,9 +105,11 @@ impl Movie {
             backdrop: details.backdrop.clone(),
             trailer: !details.trailer.is_empty(),
             facts: facts_of(&details),
+            ratings: ratings::scores(&details.ratings),
             tagline: details.tagline.clone(),
             plot: details.plot.clone(),
             stripes: stripes::Stripes::of(source.credits(library, id)),
+            foot: foot::Foot::of(&details.studios, &source.files(library, id)),
             set,
             focus: Focus::Buttons(0),
         })
@@ -140,10 +147,12 @@ impl Movie {
         }
     }
 
-    /// The view: the backdrop, the scrim over it, and the page over both.
+    /// The view: the backdrop, the scrim over it, the page over both, and
+    /// the loading state's curtain over the page while that state runs.
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
+        curtain: Option<Curtain>,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -153,7 +162,17 @@ impl Movie {
             front: page::Page {
                 movie: self,
                 posters,
+                lifted: curtain.is_some(),
             },
+            over: curtain.map(|curtain| Layer {
+                library: &self.library,
+                art: &self.backdrop,
+                logo: &self.logo,
+                name: &self.title,
+                posters,
+                head: self,
+                curtain,
+            }),
         }
         .view()
     }
@@ -285,6 +304,12 @@ impl Movie {
                 None => Focus::Buttons(0),
             },
         }
+    }
+}
+
+impl Head for Movie {
+    fn head(&self, bounds: Rectangle) -> Rectangle {
+        page::head(self, bounds)
     }
 }
 

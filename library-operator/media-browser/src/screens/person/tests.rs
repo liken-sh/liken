@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use super::*;
 use crate::catalog::Person as Entry;
 use crate::catalog::{
-    Credits, Episode, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection, SeriesDetails,
-    Title,
+    Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection,
+    SeriesDetails, Title,
 };
 use crate::harness::Waker;
 use crate::posters::Art;
@@ -118,6 +118,10 @@ impl Source for People {
         (1..=self.works).map(|number| self.work(number)).collect()
     }
 
+    fn files(&mut self, _library: &str, _item: &str) -> Vec<FileFacts> {
+        Vec::new()
+    }
+
     fn changed(&mut self) -> bool {
         false
     }
@@ -168,10 +172,8 @@ fn a_work_carries_its_title_its_year_and_its_parts() {
     let (page, _) = credited(3);
     assert_eq!(page.works.len(), 3);
     assert_eq!(page.works[0].caption(), "Title 1 · 1999");
-    assert_eq!(
-        page.works[0].line_fitting(80),
-        "Title 1 · 1999 · Director, as The Part"
-    );
+    assert_eq!(page.works[0].line_fitting(80), "Title 1 · 1999");
+    assert_eq!(page.works[0].under(), "Director, as The Part");
     assert_eq!(page.works[0].art(), "1.jpg");
     assert_eq!(page.works[0].name(), "Title 1");
 }

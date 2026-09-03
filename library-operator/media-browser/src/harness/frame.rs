@@ -30,6 +30,14 @@ impl<S: Screen> Ready<S> {
         if name == QUIT {
             return true;
         }
+        // The screen's clock moves before the key lands. A screen at rest
+        // draws no frames, so its clock stands at the last frame, which
+        // can be seconds old, and a motion the key starts would begin in
+        // the past and land fully run on its first frame. Before the first
+        // frame there is no clock, and the key waits on nothing.
+        if let Some(start) = self.start {
+            self.screen.tick(start.elapsed().as_secs_f64());
+        }
         // A key changes what the screen draws, so the frame on the glass is
         // stale and the second named before the press no longer holds.
         self.scheduled = None;
@@ -64,14 +72,14 @@ impl<S: Screen> Ready<S> {
 
         self.drawn = at;
 
+        self.screen.tick(at);
+
         for key in self.timeline.due(at) {
             if self.press(&key) {
                 self.stop(event_loop);
                 return;
             }
         }
-
-        self.screen.tick(at);
         self.stats.sample_rss(at);
 
         if self.resized {

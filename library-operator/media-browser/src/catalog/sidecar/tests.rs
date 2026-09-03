@@ -12,7 +12,8 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Credit, LibraryEntry, MovieDetails, PlayItem, Presentation, Selection, SeriesDetails, Source,
+    Credit, FileFacts, LibraryEntry, MovieDetails, PlayItem, Presentation, Selection,
+    SeriesDetails, Source,
 };
 
 // The tests build their fixture from the schema every agent loads, the
@@ -181,8 +182,30 @@ fn insert_page(path: &Path, library: &str, id: &str, released: &str, set_id: &st
 // The body a page reads every field out of.
 const BODY: &str = r#"{"plot":"A plot.","tagline":"One line.","contentRating":"PG",
     "genres":["Drama","Mystery"],"directors":["A Director"],
-    "writers":["A Writer","Another"],
+    "writers":["A Writer","Another"],"studios":["A Studio"],
+    "ratings":{"imdb":6.5,"metacritic":80,"themoviedb":7.1,"tomatometerallcritics":83},
     "cast":[{"name":"A Player","role":"The Part"}]}"#;
+
+// One file on the volume with the technical columns the foot of a page
+// draws, and the link that ties it to an item.
+fn insert_video_file(path: &Path, library: &str, file: &str, item: &str, language: &str) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO files (library, path, type, role, container, video_codec, \
+             audio_codec, width, height, size_bytes, language) \
+             VALUES (?, ?, 'video', 'primary', 'mkv', 'x265', 'AC3', 1920, 804, \
+             4200000000, ?)",
+            (library, file, language),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO file_items (library, path, item) VALUES (?, ?, ?)",
+            (library, file, item),
+        )
+        .unwrap();
+}
 
 // One series with everything its page reads: the release, the body in the
 // shape the scanner writes, and the title a person reads.

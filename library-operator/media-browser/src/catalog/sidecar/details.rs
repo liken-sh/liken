@@ -23,7 +23,9 @@ pub fn movie(
                       json_extract(body, '$.genres'), \
                       json_extract(body, '$.directors'), \
                       json_extract(body, '$.writers'), \
-                      json_extract(body, '$.cast') \
+                      json_extract(body, '$.cast'), \
+                      json_extract(body, '$.studios'), \
+                      json_extract(body, '$.ratings') \
                FROM movies WHERE library = ? AND id = ?";
     let mut found = collect(connection, sql, &[&library, &id], |row| {
         Ok(MovieDetails {
@@ -38,6 +40,8 @@ pub fn movie(
             directors: item::strings(&item::text(row, 8)?),
             writers: item::strings(&item::text(row, 9)?),
             cast: item::credits(&item::text(row, 10)?),
+            studios: item::strings(&item::text(row, 11)?),
+            ratings: item::ratings(&item::text(row, 12)?),
             backdrop: String::new(),
             logo: String::new(),
             trailer: String::new(),

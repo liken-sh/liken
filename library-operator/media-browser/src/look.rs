@@ -38,6 +38,12 @@ pub fn accent() -> Color {
     palette::dark().link
 }
 
+/// The track the volume row's fill runs over: the light scheme's `--link`,
+/// the darkest green of the family, so the fill over it reads at a glance.
+pub fn track() -> Color {
+    palette::light().link
+}
+
 /// The fill of a placeholder art slot and a focused row's ground: the
 /// dark scheme's `--page`, slightly lighter than the black ground.
 pub fn slot() -> Color {
@@ -116,9 +122,17 @@ pub const PLOT: f32 = 20.0;
 /// The size of the word in a button.
 pub const BUTTON: f32 = 21.0;
 
-/// The size of the heading over a strip, and of the controls in a wall's
-/// band.
-pub const HEADING: f32 = 18.0;
+/// The size of the heading over a strip, over a stripe, and over a season's
+/// divider.
+pub const HEADING: f32 = 20.0;
+
+/// The size of the word in a control of a wall's band.
+pub const CONTROL: f32 = 18.0;
+
+/// The size of a score on the ratings line, a step over the facts line
+/// it sits under, so the number reads first and the site's scale after
+/// it reads second.
+pub const SCORE: f32 = 24.0;
 
 /// The size of the credits and the cast on a page.
 pub const CREDITS: f32 = 18.0;
@@ -128,6 +142,14 @@ pub const ROW_NAME: f32 = 28.0;
 
 /// The size of secondary text: details and placeholder titles.
 pub const DETAIL: f32 = 20.0;
+
+/// How long the page takes to leave when a person chooses a title, in
+/// seconds.
+pub const DEPARTURE: f64 = 0.35;
+
+/// How long the page takes to return, in seconds: about a third of the
+/// departure, so the way back is quicker than the way out.
+pub const RETURN: f64 = 0.12;
 
 /// The one family the whole display draws in. The image installs the face, and
 /// the toolkit resolves it by name. With no installed match the toolkit falls
@@ -162,6 +184,12 @@ mod tests {
         assert_eq!(shade().b, 0.0);
         assert!(shade().a > CLEAR.a);
         assert_eq!(CLEAR.a, 0.0);
+    }
+
+    #[test]
+    fn the_way_back_is_shorter_than_the_way_out() {
+        const { assert!(RETURN > 0.0) };
+        const { assert!(RETURN * 2.0 < DEPARTURE) };
     }
 
     #[test]

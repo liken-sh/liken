@@ -60,14 +60,21 @@ pub struct Cells {
 }
 
 /// The cell measures for a viewport of this width, at this slot ratio,
-/// with this many slots across.
+/// with this many slots across and one caption line under each.
 pub fn cells(width: f32, ratio: f32, columns: usize) -> Cells {
+    lined(width, ratio, columns, 1)
+}
+
+/// The cell measures with this many caption lines under each slot: one
+/// on most walls, and two on a person's works, where the parts the
+/// person played stand under the title.
+pub fn lined(width: f32, ratio: f32, columns: usize, lines: usize) -> Cells {
     let width = width / columns as f32;
     let poster_width = width * POSTER_SHARE;
     let poster_height = poster_width * ratio;
     Cells {
         width,
-        height: poster_height + GAP + text::height(1, look::CAPTION) + FOOT,
+        height: poster_height + GAP + text::height(lines, look::CAPTION) + FOOT,
         poster_width,
         poster_height,
     }
@@ -94,6 +101,15 @@ pub fn caption(cells: &Cells, slot: Rectangle) -> Rectangle {
         cells.width,
         text::height(1, look::CAPTION),
     )
+}
+
+/// The band one slot's second line draws in, under its caption.
+pub fn under(cells: &Cells, slot: Rectangle) -> Rectangle {
+    let caption = caption(cells, slot);
+    Rectangle {
+        y: caption.y + caption.height,
+        ..caption
+    }
 }
 
 /// The words and the color one slot's caption draws in: the slot's own
@@ -140,6 +156,8 @@ pub struct Grid<'a, T> {
     pub ratio: f32,
     /// How many slots a row holds.
     pub columns: usize,
+    /// How many caption lines stand under each slot, one or two.
+    pub lines: usize,
     /// The part of the frame the grid draws in, under the band.
     pub region: Rectangle,
     /// How far the grid's first row has scrolled above the region's top.
@@ -159,7 +177,7 @@ pub fn draw<T: Card, P: Posters>(
     posters: &mut P,
     grid: &Grid<'_, T>,
 ) {
-    let cells = cells(grid.region.width, grid.ratio, grid.columns);
+    let cells = lined(grid.region.width, grid.ratio, grid.columns, grid.lines);
     let chars = caption_fits(&cells);
     let range = scroll::visible(
         grid.offset,
@@ -190,6 +208,9 @@ pub fn draw<T: Card, P: Posters>(
         }
         let (content, color) = captioned(item, focused, chars);
         written(frame, caption(&cells, slot), content, color);
+        if grid.lines > 1 {
+            written(frame, under(&cells, slot), item.under(), look::faint());
+        }
     }
 
     // One row past the viewport is asked for and not drawn, so a
@@ -307,6 +328,25 @@ mod tests {
         assert_eq!(cells.width, 320.0);
         assert_eq!(cells.poster_height, cells.poster_width * 1.5);
         assert!(cells.height > cells.poster_height);
+    }
+
+    #[test]
+    fn a_second_caption_line_makes_the_cell_one_line_taller() {
+        let one = cells(1920.0, POSTER, COLUMNS);
+        let two = lined(1920.0, POSTER, COLUMNS, 2);
+        assert!((two.height - one.height - text::height(1, look::CAPTION)).abs() < 1e-3);
+        assert_eq!(two.poster_height, one.poster_height);
+    }
+
+    #[test]
+    fn the_second_line_stands_right_under_the_caption() {
+        let cells = lined(1920.0, POSTER, COLUMNS, 2);
+        let slot = slot(&cells, 0, 0.0, COLUMNS);
+        let caption = caption(&cells, slot);
+        let under = under(&cells, slot);
+        assert_eq!(under.y, caption.y + caption.height);
+        assert_eq!(under.x, caption.x);
+        assert_eq!(under.width, caption.width);
     }
 
     #[test]

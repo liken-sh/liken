@@ -54,7 +54,7 @@ pub struct Credit {
 
 /// What a movie's page draws: the item's own columns, the fields of its
 /// body, and the three files the page reads by role.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MovieDetails {
     /// The name a person reads.
     pub title: String,
@@ -76,6 +76,11 @@ pub struct MovieDetails {
     pub writers: Vec<String>,
     /// The cast, in the order the sidecar named them.
     pub cast: Vec<Credit>,
+    /// The studios, in the order the sidecar names them.
+    pub studios: Vec<String>,
+    /// Each site's score of the movie, keyed by the sidecar's own name for
+    /// the site, on that site's own scale.
+    pub ratings: Vec<(String, f64)>,
     /// The id of the set the movie belongs to, empty where it belongs to
     /// none.
     pub set_id: String,
@@ -109,7 +114,7 @@ pub fn library_name(library: &str) -> &str {
 /// What a series' page draws: the item's own columns, the fields of its
 /// body, the two files it reads by role, and how many seasons its
 /// episodes fall into.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SeriesDetails {
     /// The name a person reads.
     pub title: String,
@@ -129,6 +134,11 @@ pub struct SeriesDetails {
     pub creators: Vec<String>,
     /// The cast, in the order the sidecar named them.
     pub cast: Vec<Credit>,
+    /// The studios, in the order the sidecar names them.
+    pub studios: Vec<String>,
+    /// Each site's score of the series, keyed by the sidecar's own name for
+    /// the site, on that site's own scale.
+    pub ratings: Vec<(String, f64)>,
     /// The path of the backdrop file, relative to the library root, or
     /// empty where the item has none.
     pub backdrop: String,
@@ -142,6 +152,8 @@ pub struct SeriesDetails {
 /// One episode of a series, as one still of the series page's wall.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Episode {
+    /// The episode's id inside its library, which its files are read by.
+    pub id: String,
     /// The aired season number that places the episode.
     pub season: i64,
     /// The aired episode number inside the season.
@@ -173,6 +185,30 @@ pub struct CreditSlot {
     pub contributor: String,
     /// Whether `headshot.jpg` is beside that entry.
     pub headshot: bool,
+}
+
+/// One file of a title, as the foot of a page reads it: what the file is,
+/// how it is encoded, and how large it is.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileFacts {
+    /// Which one of its kind the file is, such as `primary`.
+    pub role: String,
+    /// The file's category, such as `video` or `subtitle`.
+    pub kind: String,
+    /// The container the file is written in.
+    pub container: String,
+    /// The video codec, empty where the scanner read none.
+    pub video_codec: String,
+    /// The audio codec, empty where the scanner read none.
+    pub audio_codec: String,
+    /// The width in pixels, zero where the scanner read none.
+    pub width: i64,
+    /// The height in pixels, zero where the scanner read none.
+    pub height: i64,
+    /// The size in bytes, zero where the scanner read none.
+    pub size_bytes: i64,
+    /// The language tag the file name carries, empty where it carries none.
+    pub language: String,
 }
 
 /// One title's credited people, split into the three stripes a page
@@ -290,6 +326,10 @@ pub trait Source {
     /// One title's credited people, split by part and in billing
     /// order within a part.
     fn credits(&mut self, library: &str, id: &str) -> Credits;
+
+    /// Every file of one item, in path order, as the foot of a page reads
+    /// them.
+    fn files(&mut self, library: &str, item: &str) -> Vec<FileFacts>;
 
     /// One person by the library and the directory that name them,
     /// or nothing where that library holds no such entry.

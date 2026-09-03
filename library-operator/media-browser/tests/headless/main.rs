@@ -4,6 +4,7 @@
 // loop and the graphics setup toward the coverage floor. The test fails when
 // cage is missing; a skip would let a run pass under the floor.
 
+mod broker;
 mod flags;
 mod screens;
 

@@ -19,7 +19,7 @@ use super::{COLUMNS, Focus, Series};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::Stack;
-use crate::views::{area, divider, header, people, text, wall};
+use crate::views::{area, divider, header, people, ratings, text, wall};
 
 // The margin at both sides of the header's text.
 const MARGIN: f32 = 120.0;
@@ -35,6 +35,9 @@ pub struct Page<'a, P> {
     pub series: &'a Series,
     /// The store the logo and the stills come from.
     pub posters: &'a RefCell<P>,
+    /// Whether the loading state has lifted the logo off the page, so the
+    /// head leaves its box empty.
+    pub lifted: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
@@ -56,11 +59,17 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 
         let region = layout::region(bounds);
         let cells = wall::cells(region.width, wall::STILL, COLUMNS);
-        let layout = Layout::of(&series.seasons, cells, series.stripes.bands().len());
+        let inset = (cells.width - cells.poster_width) / 2.0;
+        let width = region.width - 2.0 * inset;
+        let layout = Layout::of(
+            &series.seasons,
+            cells,
+            series.stripes.bands().len(),
+            series.foot.height(width),
+        );
         let offset = layout.scroll(series.focus, &series.seasons, region.height);
 
         frame.with_clip(region, |frame| {
-            let inset = (cells.width - cells.poster_width) / 2.0;
             for (season, band) in series.seasons.iter().zip(&layout.bands) {
                 if !band.shows(offset, region.height) {
                     continue;
@@ -74,7 +83,6 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         divider::HEIGHT,
                     ),
                     &season.name,
-                    &season.year,
                 );
                 let run = season.run;
                 wall::draw(
@@ -94,13 +102,13 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         library: &series.library,
                         ratio: wall::STILL,
                         columns: COLUMNS,
+                        lines: 1,
                         region,
                         offset: offset - band.rows_top,
                     },
                 );
             }
 
-            let inset = (cells.width - cells.poster_width) / 2.0;
             for (index, (band, top)) in series
                 .stripes
                 .bands()
@@ -128,10 +136,41 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     },
                 );
             }
+
+            let mut at = Point::new(inset, region.y + layout.foot - offset);
+            for row in series.foot.rows() {
+                at.y += row.lead;
+                let color = match row.faint {
+                    true => look::faint(),
+                    false => look::text(),
+                };
+                text::line(frame, row.prefix, at, row.size, look::faint(), width);
+                let after = Point::new(at.x + row.indent(), at.y);
+                at.y += text::line(
+                    frame,
+                    row.content,
+                    after,
+                    row.size,
+                    color,
+                    width - row.indent(),
+                );
+            }
         });
 
         vec![frame.into_geometry()]
     }
+}
+
+/// The box the series' logo draws in at these bounds, which is where the
+/// loading state starts the logo's move. The header stands at the top of
+/// the frame whatever the wall under it has scrolled to.
+pub fn head(bounds: Rectangle) -> Rectangle {
+    area(
+        MARGIN,
+        bounds.y + layout::TOP,
+        layout::LOGO_WIDTH,
+        layout::LOGO_HEIGHT,
+    )
 }
 
 impl<P: Posters> Page<'_, P> {
@@ -159,6 +198,7 @@ impl<P: Posters> Page<'_, P> {
                     logo_box: (layout::LOGO_WIDTH, layout::LOGO_HEIGHT),
                     width: column,
                     size: look::HEAD_TITLE,
+                    lifted: self.lifted,
                 },
             );
         });
@@ -173,6 +213,9 @@ impl<P: Posters> Page<'_, P> {
             column,
             1,
         );
+        stack.add(taken);
+
+        let taken = ratings::draw(frame, &series.ratings, stack.at());
         stack.add(taken);
 
         let (line, plot) = match series.focused() {

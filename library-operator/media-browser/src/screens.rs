@@ -6,11 +6,14 @@
 // where it needs one, a primitive there. It adds no row to a table.
 
 pub mod facts;
+pub mod foot;
 pub mod libraries;
+pub mod loading;
 pub mod movie;
 pub mod person;
 pub mod series;
 pub mod stripes;
+pub mod volume;
 pub mod wall;
 
 use std::cell::RefCell;
@@ -22,6 +25,7 @@ use iced_winit::core::{Element, Theme};
 use crate::catalog::{Selection, Source, Title};
 use crate::posters::Posters;
 use crate::views::Card;
+use crate::views::curtain::Curtain;
 
 /// One entry of the navigation stack.
 pub enum Screen {
@@ -116,16 +120,19 @@ impl Screen {
         }
     }
 
-    /// The view of this screen, with its art drawn from the store.
+    /// The view of this screen, with its art drawn from the store. Only
+    /// the two screens a title plays from draw the loading state, and
+    /// every other screen ignores it.
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
+        curtain: Option<Curtain>,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
             Self::Libraries(screen) => screen.view(posters),
             Self::Wall(screen) => screen.view(posters),
-            Self::Movie(screen) => screen.view(posters),
-            Self::Series(screen) => screen.view(posters),
+            Self::Movie(screen) => screen.view(posters, curtain),
+            Self::Series(screen) => screen.view(posters, curtain),
             Self::Person(screen) => screen.view(posters),
         }
     }

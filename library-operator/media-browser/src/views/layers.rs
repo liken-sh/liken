@@ -11,7 +11,7 @@ use iced_wgpu::Renderer;
 use iced_widget::{Stack, canvas};
 use iced_winit::core::{Element, Length, Point, Rectangle, Theme, mouse};
 
-use super::{Tone, area, extent, paint};
+use super::{Tone, area, curtain, extent, paint};
 use crate::look;
 use crate::posters::Posters;
 
@@ -79,6 +79,9 @@ pub struct Page<'a, P, F> {
     /// The page itself: its fills, its art, and its text, in that draw
     /// order inside its own layer.
     pub front: F,
+    /// The loading state's layers over the page, where a press has put the
+    /// page into that state.
+    pub over: Option<curtain::Layer<'a, P>>,
 }
 
 impl<'a, P, F> Page<'a, P, F>
@@ -88,7 +91,7 @@ where
 {
     /// The page as one element, its layers in depth order.
     pub fn view(self) -> Element<'a, Infallible, Theme, Renderer> {
-        Stack::with_children([
+        let mut layers = vec![
             whole(Backdrop {
                 library: self.library,
                 art: self.art,
@@ -98,10 +101,15 @@ where
                 ground: self.ground,
             }),
             whole(self.front),
-        ])
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        ];
+        if let Some(over) = self.over {
+            layers.push(whole(over));
+            layers.push(whole(curtain::Front(over)));
+        }
+        Stack::with_children(layers)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 

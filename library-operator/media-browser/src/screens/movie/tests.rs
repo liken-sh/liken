@@ -3,8 +3,8 @@
 
 use super::*;
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, LibraryEntry, Person, PlayItem, SeriesDetails, Title,
-    Work,
+    Credit, CreditSlot, Credits, Episode, FileFacts, LibraryEntry, Person, PlayItem, SeriesDetails,
+    Title, Work,
 };
 use crate::harness::Waker;
 
@@ -39,6 +39,13 @@ impl Films {
                 name: "A Player".into(),
                 role: "The Part".into(),
             }],
+            studios: vec!["A Studio".into(), "Another Studio".into()],
+            ratings: vec![
+                ("imdb".into(), 6.5),
+                ("metacritic".into(), 80.0),
+                ("themoviedb".into(), 7.1),
+                ("tomatometerallcritics".into(), 83.0),
+            ],
             set_id: if self.set {
                 "set:one".into()
             } else {
@@ -126,6 +133,30 @@ impl Source for Films {
         Vec::new()
     }
 
+    fn files(&mut self, _library: &str, item: &str) -> Vec<FileFacts> {
+        if item != "two" {
+            return Vec::new();
+        }
+        vec![
+            FileFacts {
+                role: "primary".into(),
+                kind: "video".into(),
+                video_codec: "x265".into(),
+                audio_codec: "AC3".into(),
+                width: 1_920,
+                height: 804,
+                size_bytes: 4_200_000_000,
+                ..FileFacts::default()
+            },
+            FileFacts {
+                role: "subtitle".into(),
+                kind: "subtitle".into(),
+                language: "en".into(),
+                ..FileFacts::default()
+            },
+        ]
+    }
+
     fn changed(&mut self) -> bool {
         false
     }
@@ -186,6 +217,37 @@ fn a_page_builds_its_facts_and_its_title() {
 }
 
 #[test]
+fn a_page_carries_the_scores_its_body_holds_and_leaves_tmdb_off() {
+    let (page, _) = page(Films::default());
+    let marks: Vec<ratings::Mark> = page.ratings.iter().map(|score| score.mark).collect();
+    assert_eq!(
+        marks,
+        [
+            ratings::Mark::Imdb,
+            ratings::Mark::Tomato,
+            ratings::Mark::Metacritic
+        ]
+    );
+}
+
+#[test]
+fn the_foot_names_the_studios_and_the_files_the_movie_holds() {
+    let (page, _) = page(Films::default());
+    let rows: Vec<String> = page
+        .foot
+        .rows()
+        .map(|row| row.content.to_string())
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            "A Studio, Another Studio",
+            "1920×804 · x265 · AC3 · 4.2 GB · Subtitles: English",
+        ]
+    );
+}
+
+#[test]
 fn a_page_draws_a_stripe_for_every_part_the_title_credits() {
     let (page, _) = credited();
     let headings: Vec<&str> = page
@@ -194,8 +256,8 @@ fn a_page_draws_a_stripe_for_every_part_the_title_credits() {
         .iter()
         .map(|band| band.heading)
         .collect();
-    assert_eq!(headings, ["Crew", "Cast"]);
-    assert_eq!(page.stripes.bands()[1].faces.len(), 2);
+    assert_eq!(headings, ["Cast", "Crew"]);
+    assert_eq!(page.stripes.bands()[0].faces.len(), 2);
 }
 
 #[test]
@@ -319,14 +381,15 @@ fn down_from_the_strip_reaches_the_stripes_and_up_returns_to_it() {
 fn the_arrows_move_within_a_stripe_and_between_the_stripes() {
     let (mut page, mut source) = credited();
     page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 0));
+    page.key("right", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 1));
+    page.key("right", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 1));
     page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Stripe(1, 0));
-    page.key("right", &mut source);
-    assert_eq!(page.focus, Focus::Stripe(1, 1));
-    page.key("right", &mut source);
-    assert_eq!(page.focus, Focus::Stripe(1, 1));
     page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Stripe(1, 1));
+    assert_eq!(page.focus, Focus::Stripe(1, 0));
     page.key("up", &mut source);
     assert_eq!(page.focus, Focus::Stripe(0, 0));
 }
@@ -334,6 +397,7 @@ fn the_arrows_move_within_a_stripe_and_between_the_stripes() {
 #[test]
 fn a_select_on_a_headshot_opens_the_persons_page() {
     let (mut page, mut source) = credited();
+    page.key("down", &mut source);
     page.key("down", &mut source);
 
     let Step::Open(Screen::Person(opened)) = page.key("enter", &mut source) else {
@@ -351,9 +415,8 @@ fn a_select_on_a_name_with_no_entry_opens_nothing() {
         ..Films::default()
     });
     page.key("down", &mut source);
-    page.key("down", &mut source);
 
-    assert_eq!(page.focus, Focus::Stripe(1, 0));
+    assert_eq!(page.focus, Focus::Stripe(0, 0));
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
 }
 
@@ -361,12 +424,11 @@ fn a_select_on_a_name_with_no_entry_opens_nothing() {
 fn a_reread_keeps_the_rung_a_stripe_holds() {
     let (mut page, mut source) = credited();
     page.key("down", &mut source);
-    page.key("down", &mut source);
     page.key("right", &mut source);
 
     page.reread(&mut source);
 
-    assert_eq!(page.focus, Focus::Stripe(1, 1));
+    assert_eq!(page.focus, Focus::Stripe(0, 1));
 }
 
 #[test]

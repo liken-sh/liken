@@ -58,6 +58,19 @@ pub fn strings(json: &str) -> Vec<String> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
+/// The body's ratings, as pairs of the sidecar's own name for the site and
+/// the score on that site's scale. A score that is not a number is left
+/// out.
+pub fn ratings(json: &str) -> Vec<(String, f64)> {
+    let Ok(Value::Object(sites)) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    sites
+        .iter()
+        .filter_map(|(name, score)| Some((name.clone(), score.as_f64()?)))
+        .collect()
+}
+
 /// The body's cast. A member with no name is left out, because a role
 /// with no person in front of it reads as damage.
 pub fn credits(json: &str) -> Vec<Credit> {
@@ -109,6 +122,21 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_ratings_block_reads_as_one_pair_for_every_score() {
+        assert_eq!(
+            ratings(r#"{"imdb":6.5,"metacritic":80}"#),
+            [("imdb".to_string(), 6.5), ("metacritic".to_string(), 80.0)]
+        );
+    }
+
+    #[test]
+    fn a_ratings_block_the_body_does_not_hold_reads_as_nothing() {
+        assert!(ratings("").is_empty());
+        assert!(ratings("null").is_empty());
+        assert!(ratings(r#"{"imdb":"6.5"}"#).is_empty());
     }
 
     #[test]

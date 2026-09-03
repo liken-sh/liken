@@ -4,10 +4,12 @@
 // This file holds what every group of tests under it builds from: the
 // catalog they read, the store they draw from, and the bus they fold.
 
+mod loading;
 mod moments;
 mod paging;
 mod plays;
 mod prefetch;
+mod volume;
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -15,8 +17,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
-    Presentation, SeriesDetails, Title, Work,
+    Credit, CreditSlot, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person,
+    PlayItem, Presentation, SeriesDetails, Title, Work,
 };
 use crate::posters::Art;
 use crate::screens::movie::Focus;
@@ -134,6 +136,7 @@ impl Source for Fake {
         (1..=2)
             .flat_map(|season| {
                 (1..=4).map(move |episode| Episode {
+                    id: format!("episode:{season}:{episode}"),
                     season,
                     episode,
                     title: format!("Segment {episode}"),
@@ -241,6 +244,10 @@ impl Source for Fake {
                 parts: "Director".into(),
             })
             .collect()
+    }
+
+    fn files(&mut self, _library: &str, _item: &str) -> Vec<FileFacts> {
+        Vec::new()
     }
 
     fn changed(&mut self) -> bool {

@@ -1,7 +1,6 @@
-// The divider: one thin rule with a name at its left and a year at its
-// right. A series page draws one before each season's first row of
-// stills. It takes no focus, so a press crosses it as if it were not
-// there.
+// The divider: one thin rule with a heading at its left. A series page
+// draws one before each season's first row of stills. It takes no focus, so
+// a press crosses it as if it were not there.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -21,9 +20,9 @@ const RULE: f32 = 2.0;
 // The space between the words and the rule under them.
 const LIFT: f32 = 14.0;
 
-/// Draw one divider in this region: the name at the left, the year at
-/// the right, and the rule under both.
-pub fn draw(frame: &mut canvas::Frame<Renderer>, region: Rectangle, name: &str, year: &str) {
+/// Draw one divider in this region: the heading at the left, and the rule
+/// under it.
+pub fn draw(frame: &mut canvas::Frame<Renderer>, region: Rectangle, name: &str) {
     let baseline = region.y + region.height - LIFT - RULE;
     frame.fill_text(label(
         name,
@@ -31,15 +30,6 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, region: Rectangle, name: &str, 
         look::HEADING,
         look::text(),
         Alignment::Left,
-        Vertical::Bottom,
-        region.width,
-    ));
-    frame.fill_text(label(
-        year,
-        Point::new(region.x + region.width, baseline),
-        look::HEADING,
-        look::muted(),
-        Alignment::Right,
         Vertical::Bottom,
         region.width,
     ));

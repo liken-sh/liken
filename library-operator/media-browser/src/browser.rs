@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
-use iced_widget::Space;
+use iced_widget::{Space, Stack, canvas};
 use iced_winit::core::{Color, Element, Length, Theme};
 
 use media_screen::{Bus, Moment};
@@ -19,7 +19,7 @@ use crate::catalog::{Selection, Source};
 use crate::harness::{Screen, Waker};
 use crate::look;
 use crate::posters::Posters;
-use crate::screens::{self, Step, libraries};
+use crate::screens::{self, Step, libraries, loading, volume};
 
 /// The browsing screen, generic over where its rows and its posters
 /// come from, so one browser draws the sidecar's file, a test fixture, and
@@ -53,6 +53,12 @@ pub struct Browser<S: Source, P: Posters> {
     // The second at which the focused item's backdrop is asked for, or
     // nothing while focus moves or after the ask is spent.
     rest: Option<f64>,
+    // The loading state the page under a chosen title is in, or nothing
+    // while no title has been chosen.
+    loading: Option<loading::Loading>,
+    // The volume row's state, which the level moments the bus delivers fold
+    // into.
+    level: volume::Level,
 }
 
 // How long focus stands still before the browser asks the store for the
@@ -80,6 +86,8 @@ impl<S: Source, P: Posters> Browser<S, P> {
             page: PAGE,
             clock: 0.0,
             rest: None,
+            loading: None,
+            level: volume::Level::default(),
         }
     }
 
@@ -117,11 +125,20 @@ impl<S: Source, P: Posters> Browser<S, P> {
                 }
             }
             Moment::Sleep => self.asleep = true,
-            Moment::Wake => self.asleep = false,
-            Moment::Present => self.surface_due = true,
-            // The browser draws no identity block, no unit status, and
-            // no volume row, so these three change nothing here.
-            Moment::Focus { .. } | Moment::Status(_) | Moment::Level { .. } => {}
+            Moment::Wake => {
+                self.asleep = false;
+                self.presented();
+            }
+            Moment::Present => {
+                self.surface_due = true;
+                self.presented();
+            }
+            // A level brings up the volume row, which draws over every
+            // screen.
+            Moment::Level { volume, pressed } => self.level.fold(volume, pressed, self.clock),
+            // The browser draws no identity block and no unit status, so
+            // these two change nothing here.
+            Moment::Focus { .. } | Moment::Status(_) => {}
         }
     }
 
@@ -160,7 +177,25 @@ impl<S: Source, P: Posters> Browser<S, P> {
                 self.stack.pop();
                 self.opened(screen);
             }
-            Step::Play { library, selection } => self.request_play(&library, &selection),
+            Step::Play { library, selection } => {
+                // The press enters the state in the frame it lands in.
+                // Nothing downstream is awaited: the request crosses the
+                // bus, the operator creates the `Play`, and the pod
+                // starts, and none of the three reaches this browser. A
+                // choice with no film behind it enters nothing, because
+                // no film will ever cover the page.
+                if self.request_play(&library, &selection) {
+                    self.loading = Some(loading::Loading::entered(self.clock));
+                }
+            }
+        }
+    }
+
+    // The browser is on the screen again, whether the film played
+    // through or the `Play` never started, so the page comes back.
+    fn presented(&mut self) {
+        if let Some(state) = &mut self.loading {
+            state.leave(self.clock);
         }
     }
 
@@ -189,29 +224,34 @@ impl<S: Source, P: Posters> Browser<S, P> {
     // creates the `Play` because it holds the credential. A choice with
     // no main file starts nothing, and the line in the pod log is the
     // only sign of the gap.
-    fn request_play(&mut self, library: &str, selection: &Selection) {
+    //
+    // The answer is whether the catalog resolved a film, and not whether
+    // the request went out. A run with no bus browses the same way, and
+    // the page it draws while it waits is the same page.
+    fn request_play(&mut self, library: &str, selection: &Selection) -> bool {
         let items = self.source.play(library, selection);
         if items.is_empty() {
             eprintln!(
                 "media-browser: no file to play for {} in {library}",
                 selection.named()
             );
-            return;
+            return false;
         }
         let Some(bus) = &self.bus else {
-            return;
+            return true;
         };
         // An older library operator names no topic, and the browser
         // then browses and starts nothing. The line in the pod log is
         // the only sign of the gap.
         if self.play_topic.is_empty() {
             eprintln!("media-browser: no play topic, so this browser starts nothing");
-            return;
+            return true;
         }
         // A request is an event, so it is not retained: a broker that
         // held the last one would replay it to the operator on every
         // reconnect.
         bus.publish(&self.play_topic, play::payload(library, &items), false);
+        true
     }
 
     // Back pops one descent and re-reads the screen it uncovers,
@@ -249,6 +289,15 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     }
 
     fn key(&mut self, name: &str) {
+        // A press during the loading state reaches no screen under it.
+        // Back exits the state here and now, and cancels nothing: the
+        // `Play` this browser asked for is the operator's to run.
+        if self.loading.is_some() {
+            if name == "escape" || name == "backspace" {
+                self.presented();
+            }
+            return;
+        }
         if name == "escape" || name == "backspace" {
             self.back();
         } else {
@@ -265,7 +314,12 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     // A poster that landed changes the frame and not the rows, so a
     // delivery redraws what is already read and only a changed source
     // re-reads the screen.
-    fn pump(&mut self, _at: f64) -> bool {
+    fn pump(&mut self, at: f64) -> bool {
+        // The clock moves here as well as on a frame, because a covered
+        // browser draws none: a wake that arrived under a film would
+        // otherwise start the exit at the second of the last frame before
+        // the film, which is already spent.
+        self.clock = at;
         let folded = self.drain_bus();
         let delivered = self.posters.get_mut().delivered();
         if !self.source.changed() {
@@ -293,6 +347,9 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     // clock the harness drives every frame with.
     fn tick(&mut self, at: f64) {
         self.clock = at;
+        if self.loading.is_some_and(|state| state.done(at)) {
+            self.loading = None;
+        }
         if self.rest.is_some_and(|due| at >= due) {
             self.rest = None;
             self.prefetch();
@@ -306,15 +363,43 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
             return Space::new().width(Length::Fill).height(Length::Fill).into();
         }
 
-        self.top().view(&self.posters)
+        let screen = self.top().view(
+            &self.posters,
+            self.loading.map(|state| state.curtain(self.clock)),
+        );
+
+        // The row is the browser's own layer over whatever screen is on the
+        // stack, so a page change under it neither resets it nor covers it.
+        let Some(row) = self.level.row(self.clock) else {
+            return screen;
+        };
+        Stack::with_children(vec![
+            screen,
+            canvas(row).width(Length::Fill).height(Length::Fill).into(),
+        ])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
     // Every view here is still until something changes it, and the
     // source wakes the loop itself, so an idle browser schedules nothing
-    // and the loop waits on events. The one frame it schedules is the end
-    // of a rest, and that frame is spent the moment the clock reaches it.
-    fn next_frame(&self, _at: f64) -> Option<f64> {
-        self.rest
+    // and the loop waits on events.
+    //
+    // Three things schedule a frame: the end of a rest; every frame of the
+    // loading state, which answers now on every ask so the mark pulses at
+    // the loop's own floor rate; and the volume row, which asks for a frame
+    // through each of its fades and names the second it starts to leave
+    // through the hold between them. Nothing under a film schedules a
+    // frame, because those frames would draw a black shade nobody sees.
+    fn next_frame(&self, at: f64) -> Option<f64> {
+        let drawing = !self.asleep;
+        let loading = (drawing && self.loading.is_some()).then_some(at);
+        let level = drawing.then(|| self.level.next_frame(at)).flatten();
+        [loading, level, self.rest]
+            .into_iter()
+            .flatten()
+            .min_by(f64::total_cmp)
     }
 }
 

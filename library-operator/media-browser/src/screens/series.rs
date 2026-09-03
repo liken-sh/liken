@@ -12,13 +12,14 @@ use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
-use iced_winit::core::{Element, Theme};
+use iced_winit::core::{Element, Rectangle, Theme};
 
-use super::{Screen, Step, facts, person, stripes};
+use super::{Screen, Step, facts, foot, person, stripes};
 use crate::catalog::{Episode, Selection, SeriesDetails, Source};
 use crate::focus::{self, Run};
 use crate::posters::Posters;
-use crate::views::{Card, layers};
+use crate::views::curtain::{Curtain, Head, Layer};
+use crate::views::{Card, layers, ratings};
 
 /// How many stills a row of the episode wall holds. A still is wider
 /// than a poster, so the wall holds fewer across.
@@ -38,11 +39,9 @@ pub enum Focus {
 pub struct Season {
     /// The aired season number.
     pub number: i64,
-    /// The name at the divider's left.
+    /// The heading at the divider's left: the season, and its year where
+    /// the first episode of the season holds one.
     pub name: String,
-    /// The year at the divider's right: the year of the first episode
-    /// that aired in this season.
-    pub year: String,
     /// Where the season's episodes sit in the wall's one order.
     pub run: Run,
 }
@@ -51,6 +50,8 @@ pub struct Season {
 /// while that still has focus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Still {
+    /// The episode's id inside its library, which its files are read by.
+    pub id: String,
     /// The aired season number. A play request carries it.
     pub season: i64,
     /// The aired episode number. A play request carries it.
@@ -108,6 +109,9 @@ pub struct Series {
     pub backdrop: String,
     /// The year, the season count, and the content rating, on one line.
     pub facts: String,
+    /// The scores the ratings line draws, in the order it draws them. They
+    /// are the series' own, so the line stays while a still holds focus.
+    pub ratings: Vec<ratings::Score>,
     /// The tagline, empty where the sidecar named none.
     pub tagline: String,
     /// The series' plot. The header draws it while no still holds focus:
@@ -115,6 +119,12 @@ pub struct Series {
     pub plot: String,
     /// The credited people, as the stripes after the last season.
     pub stripes: stripes::Stripes,
+    /// The studios the series' body names. The foot draws them whatever
+    /// episode holds focus.
+    pub studios: Vec<String>,
+    /// The studios and the focused episode's files, as the block after the
+    /// last stripe.
+    pub foot: foot::Foot,
     /// The seasons, in aired order, one divider each.
     pub seasons: Vec<Season>,
     /// Every episode of the series, in aired order.
@@ -131,20 +141,35 @@ impl Series {
     pub fn open(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.series(library, id)?;
         let (stills, seasons) = wall_of(source.episodes(library, id));
-        Some(Self {
+        let mut page = Self {
             library: library.to_string(),
             id: id.to_string(),
             title: details.title.clone(),
             logo: details.logo.clone(),
             backdrop: details.backdrop.clone(),
             facts: facts_of(&details),
+            ratings: ratings::scores(&details.ratings),
             tagline: details.tagline.clone(),
             plot: details.plot.clone(),
             stripes: stripes::Stripes::of(source.credits(library, id)),
+            studios: details.studios.clone(),
+            foot: foot::Foot::default(),
             seasons,
             stills,
             focus: Focus::Still(0),
-        })
+        };
+        page.refoot(source);
+        Some(page)
+    }
+
+    // The foot follows the focused episode, so its lines change with focus
+    // as the header's do. Focus on a stripe keeps the lines of the episode
+    // the wall last held.
+    fn refoot(&mut self, source: &mut dyn Source) {
+        let Some(id) = self.focused().map(|still| still.id.clone()) else {
+            return;
+        };
+        self.foot = foot::Foot::of(&self.studios, &source.files(&self.library, &id));
     }
 
     /// Read the page again, because the scanner can write the series or
@@ -187,12 +212,12 @@ impl Series {
     /// its season.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self.focus {
-            Focus::Still(index) => self.on_still(index, key),
+            Focus::Still(index) => self.on_still(index, key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
         }
     }
 
-    fn on_still(&mut self, index: usize, key: &str) -> Step {
+    fn on_still(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
         if key != "enter" {
             let runs: Vec<Run> = self.seasons.iter().map(|season| season.run).collect();
             let moved = focus::sectioned(index, &runs, COLUMNS, key);
@@ -200,6 +225,7 @@ impl Series {
                 ("down", true, Some((stripe, slot))) => Focus::Stripe(stripe, slot),
                 _ => Focus::Still(moved),
             };
+            self.refoot(source);
             return Step::Stay;
         }
         let Some(still) = self.stills.get(index) else {
@@ -239,14 +265,17 @@ impl Series {
                 count => Focus::Still(count - 1),
             },
         };
+        self.refoot(source);
         Step::Stay
     }
 
-    /// The view: the backdrop behind the header, the scrim over it, and
-    /// the header and the wall over both.
+    /// The view: the backdrop behind the header, the scrim over it, the
+    /// header and the wall over both, and the loading state's curtain
+    /// over the page while that state runs.
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
+        curtain: Option<Curtain>,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -256,9 +285,25 @@ impl Series {
             front: page::Page {
                 series: self,
                 posters,
+                lifted: curtain.is_some(),
             },
+            over: curtain.map(|curtain| Layer {
+                library: &self.library,
+                art: &self.backdrop,
+                logo: &self.logo,
+                name: &self.title,
+                posters,
+                head: self,
+                curtain,
+            }),
         }
         .view()
+    }
+}
+
+impl Head for Series {
+    fn head(&self, bounds: Rectangle) -> Rectangle {
+        page::head(bounds)
     }
 }
 
@@ -274,8 +319,7 @@ fn wall_of(episodes: Vec<Episode>) -> (Vec<Still>, Vec<Season>) {
             Some(season) if season.number == episode.season => season.run.count += 1,
             _ => seasons.push(Season {
                 number: episode.season,
-                name: format!("Season {}", episode.season),
-                year: facts::year(&episode.released).to_string(),
+                name: named(episode.season, facts::year(&episode.released)),
                 run: Run {
                     first: index,
                     count: 1,
@@ -287,11 +331,21 @@ fn wall_of(episodes: Vec<Episode>) -> (Vec<Still>, Vec<Season>) {
     (stills, seasons)
 }
 
+// The divider's heading, with the year of the season's first episode where
+// the catalog holds one.
+fn named(season: i64, year: &str) -> String {
+    match year.is_empty() {
+        true => format!("Season {season}"),
+        false => format!("Season {season} ({year})"),
+    }
+}
+
 fn still_of(episode: Episode) -> Still {
     let numbers = format!("S{} E{}", episode.season, episode.episode);
     let runtime = facts::runtime(episode.duration);
     let caption = facts::joined(&[&format!("E{}", episode.episode), &episode.title]);
     Still {
+        id: episode.id,
         line: facts::Line::of(&[&caption, &runtime]),
         caption,
         facts: facts::joined(&[&numbers, &episode.title, &runtime]),

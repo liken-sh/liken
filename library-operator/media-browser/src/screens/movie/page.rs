@@ -15,7 +15,7 @@ use super::{Focus, Movie};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::{self, Stack};
-use crate::views::{area, buttons, header, people, strip, text};
+use crate::views::{area, buttons, header, people, ratings, strip, text};
 
 // The margin at both sides of the page.
 const MARGIN: f32 = 120.0;
@@ -48,12 +48,32 @@ const TRAIL: f32 = 0.2;
 // bottom edge of the frame when the page has scrolled to its end.
 const FOOT: f32 = 36.0;
 
+// The extra space over a stripe and over the foot, on top of the gap
+// between two blocks, so each stands clear of the block over it.
+const STRIPE_LEAD: f32 = 16.0;
+
+/// The box the movie's logo draws in at these bounds, scroll included,
+/// which is where the loading state starts the logo's move.
+pub fn head(movie: &Movie, bounds: Rectangle) -> Rectangle {
+    let blocks = Blocks::of(
+        movie,
+        bounds.width * COLUMN,
+        bounds.width - 2.0 * MARGIN,
+        bounds.height * TOP,
+    );
+    let offset = blocks.scroll(movie, bounds.height);
+    area(MARGIN, blocks.title.top - offset, LOGO_WIDTH, LOGO_HEIGHT)
+}
+
 /// The page's front layer as one canvas.
 pub struct Page<'a, P> {
     /// The movie the page is about.
     pub movie: &'a Movie,
     /// The store the logo and the strip's posters come from.
     pub posters: &'a RefCell<P>,
+    /// Whether the loading state has lifted the logo off the page, so the
+    /// head leaves its box empty.
+    pub lifted: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
@@ -72,7 +92,12 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         let posters = &mut *self.posters.borrow_mut();
 
         let column = bounds.width * COLUMN;
-        let blocks = Blocks::of(movie, column, bounds.height * TOP);
+        let blocks = Blocks::of(
+            movie,
+            column,
+            bounds.width - 2.0 * MARGIN,
+            bounds.height * TOP,
+        );
         let offset = blocks.scroll(movie, bounds.height);
 
         header::title(
@@ -86,6 +111,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 logo_box: (LOGO_WIDTH, LOGO_HEIGHT),
                 width: column,
                 size: look::TITLE,
+                lifted: self.lifted,
             },
         );
 
@@ -95,6 +121,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         ] {
             text::line(&mut frame, content, block.at(offset), size, color, column);
         }
+
+        ratings::draw(&mut frame, &movie.ratings, blocks.ratings.at(offset));
 
         text::block(
             &mut frame,
@@ -167,6 +195,26 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             );
         }
 
+        let mut at = Point::new(MARGIN, blocks.foot.top - offset);
+        let width = bounds.width - 2.0 * MARGIN;
+        for row in movie.foot.rows() {
+            at.y += row.lead;
+            let color = match row.faint {
+                true => look::faint(),
+                false => look::text(),
+            };
+            text::line(&mut frame, row.prefix, at, row.size, look::faint(), width);
+            let after = Point::new(at.x + row.indent(), at.y);
+            at.y += text::line(
+                &mut frame,
+                row.content,
+                after,
+                row.size,
+                color,
+                width - row.indent(),
+            );
+        }
+
         vec![frame.into_geometry()]
     }
 }
@@ -201,18 +249,21 @@ impl Block {
 struct Blocks {
     title: Block,
     facts: Block,
+    ratings: Block,
     tagline: Block,
     plot: Block,
     buttons: Block,
     strip: Option<Block>,
     stripes: Vec<Block>,
+    foot: Block,
     content: f32,
 }
 
 impl Blocks {
-    fn of(movie: &Movie, column: f32, top: f32) -> Self {
+    fn of(movie: &Movie, column: f32, width: f32, top: f32) -> Self {
         let mut cursor = Stack::new(Point::new(MARGIN, top), GAP);
-        let mut place = |height: f32| {
+        let mut place = |lead: f32, height: f32| {
+            cursor.skip(lead);
             let block = Block {
                 top: cursor.at().y,
                 height,
@@ -221,34 +272,48 @@ impl Blocks {
             block
         };
 
-        let title = place(match movie.logo.is_empty() {
-            true => lines(&movie.title, look::TITLE, column, 0),
-            false => LOGO_HEIGHT,
-        });
-        let facts = place(lines(&movie.facts, look::FACTS, column, 0));
-        let tagline = place(lines(&movie.tagline, look::TAGLINE, column, 0));
-        let plot = place(lines(&movie.plot, look::PLOT, column, PLOT_LINES));
-        let buttons = place(buttons::HEIGHT);
-        let strip = movie.set.as_ref().map(|_| place(strip::HEIGHT));
+        let title = place(
+            0.0,
+            match movie.logo.is_empty() {
+                true => lines(&movie.title, look::TITLE, column, 0),
+                false => LOGO_HEIGHT,
+            },
+        );
+        let facts = place(0.0, lines(&movie.facts, look::FACTS, column, 0));
+        let ratings = place(
+            0.0,
+            match movie.ratings.is_empty() {
+                true => 0.0,
+                false => ratings::HEIGHT,
+            },
+        );
+        let tagline = place(0.0, lines(&movie.tagline, look::TAGLINE, column, 0));
+        let plot = place(0.0, lines(&movie.plot, look::PLOT, column, PLOT_LINES));
+        let buttons = place(0.0, buttons::HEIGHT);
+        let strip = movie.set.as_ref().map(|_| place(0.0, strip::HEIGHT));
         let stripes: Vec<Block> = movie
             .stripes
             .bands()
             .iter()
-            .map(|_| place(people::HEIGHT))
+            .map(|_| place(STRIPE_LEAD, people::HEIGHT))
             .collect();
 
-        let content = match stripes.last() {
-            Some(last) => last.bottom() + FOOT,
-            None => strip.unwrap_or(buttons).bottom(),
+        let foot = place(STRIPE_LEAD, movie.foot.height(width));
+        let content = match (stripes.last(), foot.height > 0.0) {
+            (_, true) => foot.bottom() + FOOT,
+            (Some(last), false) => last.bottom() + FOOT,
+            (None, false) => strip.unwrap_or(buttons).bottom(),
         };
         Self {
             title,
             facts,
+            ratings,
             tagline,
             plot,
             buttons,
             strip,
             stripes,
+            foot,
             content,
         }
     }
@@ -292,144 +357,4 @@ fn lines(content: &str, size: f32, width: f32, cap: usize) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::catalog::{CreditSlot, Credits};
-    use crate::screens::movie::Set;
-    use crate::screens::stripes::Stripes;
-    use crate::screens::{Item, facts};
-
-    const WIDTH: f32 = 1920.0;
-    const HEIGHT: f32 = 1080.0;
-
-    // A 720p frame, which a crowded page is taller than, so the scroll
-    // has something to do.
-    const SHORT: f32 = 720.0;
-
-    // The two stripes of an invented title, so a crowded page carries
-    // every rung a press can reach.
-    fn stripes() -> Stripes {
-        let slot = |name: &str| CreditSlot {
-            name: name.to_string(),
-            role: String::new(),
-            contributor: format!(".contributors/{name}"),
-            headshot: true,
-        };
-        Stripes::of(Credits {
-            directors: vec![slot("A Director")],
-            writers: vec![slot("A Writer")],
-            cast: (1..=12)
-                .map(|part| slot(&format!("Player {part}")))
-                .collect(),
-        })
-    }
-
-    // A page with everything on it: a title that wraps onto a second
-    // line, a tagline, a plot of four lines, a set strip, and three
-    // stripes of credited people.
-    fn crowded(focus: Focus) -> Movie {
-        Movie {
-            library: "screening/films".into(),
-            id: "one".into(),
-            title: "A Long Title That Wraps Onto Two".into(),
-            logo: String::new(),
-            backdrop: "backdrop.jpg".into(),
-            trailer: true,
-            facts: "1994 · 1h 52m · PG · Drama, Mystery".into(),
-            tagline: "One line of it, and a few more words after that.".into(),
-            plot: "word ".repeat(120),
-            stripes: stripes(),
-            set: Some(Set {
-                heading: "The Set".into(),
-                members: vec![Item {
-                    id: "one".into(),
-                    name: "Film one".into(),
-                    line: facts::Line::of(&["Film one"]),
-                    art: String::new(),
-                }],
-                current: 0,
-            }),
-            focus,
-        }
-    }
-
-    fn blocks(movie: &Movie) -> Blocks {
-        Blocks::of(movie, WIDTH * COLUMN, HEIGHT * TOP)
-    }
-
-    #[test]
-    fn a_crowded_page_is_longer_than_a_short_frame() {
-        assert!(blocks(&crowded(Focus::Buttons(0))).content > SHORT);
-    }
-
-    #[test]
-    fn the_focused_stripe_is_in_view_and_the_page_scrolls_to_reach_it() {
-        let mut offsets = Vec::new();
-        for stripe in 0..2 {
-            let movie = crowded(Focus::Stripe(stripe, 0));
-            let blocks = blocks(&movie);
-            let offset = blocks.scroll(&movie, SHORT);
-            let block = blocks.stripes[stripe];
-            assert!(block.top - offset >= 0.0, "{block:?} at {offset}");
-            assert!(block.bottom() - offset <= SHORT, "{block:?} at {offset}");
-            offsets.push(offset);
-        }
-        assert!(offsets[0] > 0.0);
-        assert!(offsets[1] > offsets[0]);
-    }
-
-    #[test]
-    fn the_strip_and_the_first_stripe_are_in_view_while_the_strip_has_focus() {
-        let movie = crowded(Focus::Strip(0));
-        let blocks = blocks(&movie);
-        let offset = blocks.scroll(&movie, SHORT);
-        let strip = blocks.strip.expect("the crowded page holds a set");
-        assert!(strip.top - offset >= 0.0);
-        assert!(strip.bottom() - offset <= SHORT);
-        assert!(blocks.stripes[0].top - offset < SHORT);
-        assert!(blocks.stripes[0].bottom() - offset > SHORT);
-    }
-
-    #[test]
-    fn the_buttons_show_the_page_from_its_top() {
-        let movie = crowded(Focus::Buttons(0));
-        assert_eq!(blocks(&movie).scroll(&movie, HEIGHT), 0.0);
-    }
-
-    #[test]
-    fn a_page_with_no_set_puts_its_first_stripe_where_the_strip_was() {
-        let mut movie = crowded(Focus::Buttons(0));
-        movie.set = None;
-        let blocks = blocks(&movie);
-        assert!(blocks.strip.is_none());
-        assert_eq!(blocks.stripes[0].top, blocks.buttons.bottom() + GAP);
-    }
-
-    #[test]
-    fn a_movie_that_credits_nobody_ends_at_its_strip() {
-        let mut movie = crowded(Focus::Buttons(0));
-        movie.stripes = Stripes::default();
-        let blocks = blocks(&movie);
-        assert!(blocks.stripes.is_empty());
-        assert_eq!(
-            blocks.content,
-            blocks.strip.expect("the crowded page holds a set").bottom()
-        );
-    }
-
-    #[test]
-    fn a_movie_with_a_logo_reserves_the_box_it_draws_in() {
-        let mut movie = crowded(Focus::Buttons(0));
-        movie.logo = "logo.png".into();
-        assert_eq!(blocks(&movie).title.height, LOGO_HEIGHT);
-    }
-
-    #[test]
-    fn a_line_the_movie_does_not_carry_takes_no_height_and_no_gap() {
-        let mut movie = crowded(Focus::Buttons(0));
-        movie.tagline = String::new();
-        let blocks = blocks(&movie);
-        assert_eq!(blocks.tagline.height, 0.0);
-        assert_eq!(blocks.tagline.top, blocks.plot.top);
-    }
-}
+mod tests;

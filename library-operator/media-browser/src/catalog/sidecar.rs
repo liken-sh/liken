@@ -9,12 +9,13 @@ use std::sync::atomic::Ordering;
 use rusqlite::{Connection, OpenFlags, Row};
 
 use crate::catalog::{
-    Credits, Episode, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem, Selection,
+    Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem, Selection,
     SeriesDetails, Source, Title, Work,
 };
 use crate::harness::Waker;
 
 mod details;
+mod files;
 mod item;
 mod people;
 mod play;
@@ -181,6 +182,10 @@ impl Source for SidecarSource {
             .into_iter()
             .next()
             .unwrap_or_default()
+    }
+
+    fn files(&mut self, library: &str, item: &str) -> Vec<FileFacts> {
+        self.read(|connection| files::files(connection, library, item))
     }
 
     fn person(&mut self, library: &str, path: &str) -> Option<Person> {

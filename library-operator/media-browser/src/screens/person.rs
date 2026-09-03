@@ -40,9 +40,11 @@ pub struct Credited {
     pub name: String,
     /// The line under the slot: the title and its year.
     pub caption: String,
-    /// The line under the focused slot: the title, its year, and
-    /// the parts the person played.
+    /// The line under the focused slot: the title and its year, whole
+    /// where they fit.
     pub line: facts::Line,
+    /// The second line under the slot: the parts the person played.
+    pub parts: String,
     /// The path of the title's poster, relative to its library.
     pub art: String,
 }
@@ -54,7 +56,8 @@ impl Credited {
         let year = facts::year(&work.released);
         Self {
             caption: facts::joined(&[&work.title, year]),
-            line: facts::Line::of(&[&work.title, year, &work.parts]),
+            line: facts::Line::of(&[&work.title, year]),
+            parts: work.parts,
             library: work.library,
             kind: work.kind,
             id: work.id,
@@ -79,6 +82,10 @@ impl Card for Credited {
 
     fn caption(&self) -> &str {
         &self.caption
+    }
+
+    fn under(&self) -> &str {
+        &self.parts
     }
 
     fn line_fitting(&self, chars: usize) -> &str {

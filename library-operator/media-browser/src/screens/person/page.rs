@@ -35,6 +35,10 @@ const GAP: f32 = 12.0;
 // The lines the biography is cut to.
 const BIOGRAPHY_LINES: usize = 4;
 
+// The caption lines under each work: the title and its year, then the
+// parts the person played in it.
+const LINES: usize = 2;
+
 /// The width of the headshot: the height at the wall's poster
 /// ratio.
 pub fn headshot_width() -> f32 {
@@ -47,9 +51,11 @@ pub fn head() -> f32 {
     TOP + HEADSHOT + FOOT
 }
 
-/// The part of the frame the wall scrolls in, under the head.
+/// The part of the frame the wall scrolls in: under the head, and under
+/// the space that keeps the first row's mark off it. The scroll clamps
+/// to this region, so the last row's lines end inside it.
 pub fn region(bounds: Rectangle) -> Rectangle {
-    let top = head().min(bounds.height);
+    let top = (head() + wall::HEAD).min(bounds.height);
     area(bounds.x, bounds.y + top, bounds.width, bounds.height - top)
 }
 
@@ -92,8 +98,17 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         }
 
         let region = region(bounds);
-        let cells = wall::cells(region.width, wall::POSTER, wall::COLUMNS);
-        frame.with_clip(region, |frame| {
+        let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, LINES);
+        // The clip reaches up into the space over the first row, so the
+        // mark of a focused slot there draws whole and the head stays
+        // clear.
+        let clip = area(
+            region.x,
+            region.y - wall::HEAD,
+            region.width,
+            region.height + wall::HEAD,
+        );
+        frame.with_clip(clip, |frame| {
             wall::draw(
                 frame,
                 posters,
@@ -104,13 +119,14 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     library: &person.library,
                     ratio: wall::POSTER,
                     columns: wall::COLUMNS,
+                    lines: LINES,
                     offset: wall::scrolled(
                         person.focus,
                         person.works.len(),
                         wall::COLUMNS,
                         &cells,
                         region.height,
-                    ) - wall::HEAD,
+                    ),
                     region,
                 },
             );
@@ -160,7 +176,7 @@ mod tests {
     #[test]
     fn the_head_takes_the_top_of_the_frame_and_the_wall_takes_the_rest() {
         let region = region(frame());
-        assert_eq!(region.y, head());
+        assert_eq!(region.y, head() + wall::HEAD);
         assert_eq!(region.y + region.height, HEIGHT);
         assert!(head() < HEIGHT / 2.0, "{}", head());
     }
@@ -172,7 +188,19 @@ mod tests {
 
     #[test]
     fn a_row_of_posters_fits_under_the_head() {
-        let cells = wall::cells(WIDTH, wall::POSTER, wall::COLUMNS);
-        assert!(wall::HEAD + cells.height <= region(frame()).height);
+        let cells = wall::lined(WIDTH, wall::POSTER, wall::COLUMNS, LINES);
+        assert!(cells.height <= region(frame()).height);
+    }
+
+    #[test]
+    fn the_last_rows_second_line_ends_inside_the_region() {
+        let region = region(frame());
+        let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, LINES);
+        let count = 40;
+        let last = count - 1;
+        let offset = wall::scrolled(last, count, wall::COLUMNS, &cells, region.height);
+        let slot = wall::slot(&cells, last, offset, wall::COLUMNS);
+        let under = wall::under(&cells, slot);
+        assert!(under.y + under.height <= region.height, "{under:?}");
     }
 }

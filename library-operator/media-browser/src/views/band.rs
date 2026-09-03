@@ -60,7 +60,7 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, width: f32, heading: &str, focu
         frame.fill_text(label(
             name,
             Point::new(bounds.center_x(), bounds.center_y()),
-            look::HEADING,
+            look::CONTROL,
             look::muted(),
             Alignment::Center,
             Vertical::Center,

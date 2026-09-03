@@ -24,6 +24,12 @@ pub fn fits(size: f32, width: f32) -> usize {
     (width / (size * ADVANCE)).max(0.0) as usize
 }
 
+/// The width this content takes at this size, from the same average advance
+/// the line count uses.
+pub fn width(content: &str, size: f32) -> f32 {
+    content.chars().count() as f32 * size * ADVANCE
+}
+
 /// The content cut to what one line of this width holds at this size,
 /// with an ellipsis where it was cut. A caption band is one line tall,
 /// and a line the shaper wrapped would show the tops of its second line
@@ -156,6 +162,13 @@ mod tests {
         assert_eq!(fits(26.0, 320.0), 24);
         assert_eq!(fits(26.0, 640.0), 49);
         assert_eq!(fits(26.0, 0.0), 0);
+    }
+
+    #[test]
+    fn a_width_and_a_count_of_characters_agree() {
+        assert_eq!(width("abcd", 26.0), 4.0 * 26.0 * ADVANCE);
+        assert_eq!(width("", 26.0), 0.0);
+        assert_eq!(fits(26.0, width("abcd", 26.0)), 4);
     }
 
     #[test]

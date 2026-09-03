@@ -85,6 +85,13 @@ fn a_movie_page_reads_its_body_and_its_art_by_role() {
                 name: "A Player".into(),
                 role: "The Part".into(),
             }],
+            studios: vec!["A Studio".into()],
+            ratings: vec![
+                ("imdb".into(), 6.5),
+                ("metacritic".into(), 80.0),
+                ("themoviedb".into(), 7.1),
+                ("tomatometerallcritics".into(), 83.0),
+            ],
             set_id: "set:one".into(),
             backdrop: "Film one/fanart.jpg".into(),
             logo: "Film one/clearlogo.png".into(),
@@ -107,9 +114,63 @@ fn a_movie_with_an_empty_body_reads_as_a_page_of_its_columns() {
     assert!(details.plot.is_empty());
     assert!(details.genres.is_empty());
     assert!(details.cast.is_empty());
+    assert!(details.studios.is_empty());
+    assert!(details.ratings.is_empty());
     assert!(details.backdrop.is_empty());
     assert!(details.logo.is_empty());
     assert!(details.trailer.is_empty());
+}
+
+#[test]
+fn a_title_reads_the_files_it_holds_with_their_technical_columns() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_page(&path, "default/films", "one", "1994", "", BODY);
+    insert_video_file(&path, "default/films", "Film one/film.mkv", "one", "");
+    insert_file(
+        &path,
+        "default/films",
+        "Film one/film.en.srt",
+        "one",
+        "subtitle",
+        "subtitle",
+    );
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let files = source.files("default/films", "one");
+    assert_eq!(
+        files,
+        [
+            FileFacts {
+                role: "subtitle".into(),
+                kind: "subtitle".into(),
+                ..FileFacts::default()
+            },
+            FileFacts {
+                role: "primary".into(),
+                kind: "video".into(),
+                container: "mkv".into(),
+                video_codec: "x265".into(),
+                audio_codec: "AC3".into(),
+                width: 1_920,
+                height: 804,
+                size_bytes: 4_200_000_000,
+                language: String::new(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_title_another_library_holds_reads_none_of_its_files_here() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_page(&path, "default/films", "one", "1994", "", BODY);
+    insert_video_file(&path, "default/films", "Film one/film.mkv", "one", "");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    assert!(source.files("default/other", "one").is_empty());
+    assert!(source.files("default/films", "gone").is_empty());
 }
 
 #[test]

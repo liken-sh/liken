@@ -211,6 +211,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                 library: &self.wall.library,
                 ratio: wall::POSTER,
                 columns: wall::COLUMNS,
+                lines: 1,
                 offset: wall::scrolled(
                     self.wall.focus,
                     self.wall.items.len(),

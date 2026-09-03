@@ -28,6 +28,12 @@ pub struct Title<'a> {
     pub width: f32,
     /// The size the title draws at where the item has no logo.
     pub size: f32,
+    /// Whether the loading state has lifted the logo off the page. The
+    /// state draws the logo itself on its way to the centre, so the head
+    /// leaves the logo's box empty rather than draw a second one under
+    /// it. A head with no logo draws its title as it always does, and
+    /// the state fades that title under its own art.
+    pub lifted: bool,
 }
 
 /// Draw the head. The answer is the height it took, so the caller stacks
@@ -49,17 +55,19 @@ pub fn title<P: Posters>(
         // The logo keeps its own ratio, so it takes the height the fit
         // landed at and not the height of the box.
         let (width, height) = image.size();
-        paint(
-            frame,
-            &image,
-            Rectangle {
-                x: head.at.x,
-                y: head.at.y,
-                width: width as f32,
-                height: height as f32,
-            },
-            Tone::Full,
-        );
+        if !head.lifted {
+            paint(
+                frame,
+                &image,
+                Rectangle {
+                    x: head.at.x,
+                    y: head.at.y,
+                    width: width as f32,
+                    height: height as f32,
+                },
+                Tone::Full,
+            );
+        }
         return height as f32;
     }
 

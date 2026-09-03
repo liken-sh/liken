@@ -14,15 +14,18 @@
 
 pub mod band;
 pub mod buttons;
+pub mod curtain;
 pub mod divider;
 pub mod header;
 pub mod layers;
 pub mod list;
 pub mod people;
+pub mod ratings;
 pub mod scroll;
 pub mod stack;
 pub mod strip;
 pub mod text;
+pub mod volume;
 pub mod wall;
 
 use iced_wgpu::Renderer;
@@ -65,6 +68,13 @@ pub trait Card {
         self.name()
     }
 
+    /// The second line under a slot of a wall that draws two, faint under
+    /// the caption. A person's works put the parts the person played
+    /// here; every other wall leaves it empty.
+    fn under(&self) -> &str {
+        ""
+    }
+
     /// The line under the focused slot of a wall, drawn bright: the whole
     /// facts of the row that fit in this many characters.
     fn line_fitting(&self, _chars: usize) -> &str {
@@ -73,13 +83,15 @@ pub trait Card {
 }
 
 /// How bright a slot's art draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tone {
     /// The art as it is.
     Full,
     /// The art of a slot the screen drew but the person did not choose,
     /// such as a sibling in a set strip.
     Dimmed,
+    /// The art at an opacity a motion states, from 0 clear to 1 as it is.
+    At(f32),
 }
 
 impl Tone {
@@ -90,6 +102,7 @@ impl Tone {
         match self {
             Self::Full => 1.0,
             Self::Dimmed => look::DIM,
+            Self::At(opacity) => opacity,
         }
     }
 }
@@ -273,5 +286,6 @@ mod tests {
     fn art_the_person_chose_draws_at_full_opacity() {
         assert_eq!(Tone::Full.opacity(), 1.0);
         assert_eq!(Tone::Dimmed.opacity(), look::DIM);
+        assert_eq!(Tone::At(0.25).opacity(), 0.25);
     }
 }
