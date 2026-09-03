@@ -408,8 +408,8 @@ spec:
                     on. Sources reports spec.sources: True when every
                     name resolves to a MetadataProvider and one of them
                     serves each concern this library needs, and False
-                    with the reason ProviderNotFound or
-                    ConcernNotServed. A library that names no source
+                    with the reason ProviderNotFound, ProviderNotReady,
+                    or ConcernNotServed. A library that names no source
                     carries no Sources condition.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by

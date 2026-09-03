@@ -17,10 +17,10 @@ func enrichJob(t *testing.T, catalog *Catalog) (*enrichRun, <-chan *fakeBroker) 
 	shorterBackoff(t)
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
 	work.job = "movies-enrich-1"
+	work.statusTopic = libraryStatusTopic(defaultTopicBase, "house", "movies")
 
 	run := &enrichRun{
 		enricher:    work,
-		statusTopic: libraryStatusTopic(defaultTopicBase, "house", "movies"),
 		echoTimeout: scanTestTimeout,
 	}
 	run.echo = newEchoWaiter(run.statusTopic, workerEnrich, run.job)

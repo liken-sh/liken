@@ -27,11 +27,21 @@ func runIdentity() {
 		stop()
 		os.Exit(1)
 	}
-	if err := work.identityGap(stopped, newTMDbClient(tmdbAPIBase, token)); err != nil {
+	if err := work.identityConcern(stopped, newTMDbClient(tmdbAPIBase, token)); err != nil {
 		work.logf("the identity container failed: %v", err)
 		stop()
 		os.Exit(1)
 	}
+}
+
+// The container waits for its own copy of the catalog to hold what the
+// standing pod reports before it reads its gap, because a gap query against a
+// copy that has not synced names a fraction of the work.
+func (e *enricher) identityConcern(ctx context.Context, client *tmdbClient) error {
+	if err := e.awaitCatalogSync(ctx, concernIdentity); err != nil {
+		return err
+	}
+	return e.identityGap(ctx, client)
 }
 
 // A catalog read that fails ends the container, because the gap list is the

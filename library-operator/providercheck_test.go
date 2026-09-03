@@ -7,6 +7,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -175,6 +176,17 @@ func TestSourcesVerdictNamesWhatIsWrong(t *testing.T) {
 				{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
 			}},
 		},
+		libraryKey("house", "fanart"): {
+			Metadata: ObjectMeta{Name: "fanart", Namespace: "house"},
+			Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
+			Status: MetadataProviderStatus{Conditions: []Condition{
+				{Type: conditionReady, Status: ConditionFalse, Reason: reasonRefused},
+			}},
+		},
+		libraryKey("house", "unchecked"): {
+			Metadata: ObjectMeta{Name: "unchecked", Namespace: "house"},
+			Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
+		},
 	}
 	cases := []struct {
 		name    string
@@ -185,6 +197,10 @@ func TestSourcesVerdictNamesWhatIsWrong(t *testing.T) {
 		{name: "a source that does not exist", sources: []string{"tvdb"}, reason: reasonProviderNotFound},
 		{name: "sources that serve no concern this library needs",
 			sources: []string{"art"}, reason: reasonConcernNotServed},
+		{name: "the one source that serves identity is not Ready",
+			sources: []string{"art", "fanart"}, reason: reasonProviderNotReady},
+		{name: "the one source that serves identity has no check yet",
+			sources: []string{"unchecked"}, reason: reasonProviderNotReady},
 		{name: "a source that serves identity", sources: []string{"art", "tmdb"}, reason: reasonSourcesReady},
 	}
 	for _, one := range cases {
@@ -196,6 +212,32 @@ func TestSourcesVerdictNamesWhatIsWrong(t *testing.T) {
 				t.Errorf("reason = %q, want %q", got, one.reason)
 			}
 		})
+	}
+}
+
+// The Sources message names the provider that failed its own check and the
+// reason that check wrote, so a person repairs the Secret named on the
+// Library and reads no second object.
+func TestASourceThatIsNotReadyNamesTheProviderAndItsReason(t *testing.T) {
+	set := providerSet{
+		libraryKey("house", "tmdb"): {
+			Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"},
+			Spec:     MetadataProviderSpec{Concerns: []string{concernIdentity}},
+			Status: MetadataProviderStatus{Conditions: []Condition{
+				{Type: conditionReady, Status: ConditionFalse, Reason: reasonNoSecret},
+			}},
+		},
+	}
+	library := studioMovies()
+	library.Spec.Sources = []string{"tmdb"}
+
+	verdict := checkSources(library, set)
+
+	if verdict.reason != reasonProviderNotReady {
+		t.Errorf("reason = %q, want %q", verdict.reason, reasonProviderNotReady)
+	}
+	if !strings.Contains(verdict.message, "tmdb") || !strings.Contains(verdict.message, reasonNoSecret) {
+		t.Errorf("message = %q, want the provider and the reason its check wrote", verdict.message)
 	}
 }
 

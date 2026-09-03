@@ -134,6 +134,9 @@ func TestEnrichJobCarriesTheJobEnvironment(t *testing.T) {
 				if got[echoTimeoutVariable] != defaultEchoTimeout.String() {
 					t.Errorf("%s reads %s = %q", container.Name, echoTimeoutVariable, got[echoTimeoutVariable])
 				}
+				if got[syncTimeoutVariable] != defaultSyncTimeout.String() {
+					t.Errorf("%s reads %s = %q", container.Name, syncTimeoutVariable, got[syncTimeoutVariable])
+				}
 				if got[scanPathVariable] != one.path {
 					t.Errorf("%s reads %s = %q, want %q", container.Name,
 						scanPathVariable, got[scanPathVariable], one.path)

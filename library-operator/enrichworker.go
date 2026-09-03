@@ -30,6 +30,11 @@ type enricher struct {
 	// The folder this Job was narrowed to, relative to the library root, and
 	// empty where the Job covers the whole library.
 	scope string
+	// The status topic and the bound are what the wait for the synced copy
+	// needs: the topic the standing pod reports the library on, and how long a
+	// container waits for its own copy to hold what that report counts.
+	statusTopic string
+	syncTimeout time.Duration
 }
 
 // A container with no API credential learns everything from its environment,
@@ -47,16 +52,22 @@ func newEnricher(log io.Writer) *enricher {
 	}
 	mountRoot := path.Join(libraryMountPath, root)
 	job := os.Getenv(jobNameVariable)
+	base := os.Getenv(topicBaseVariable)
+	if base == "" {
+		base = defaultTopicBase
+	}
 
 	work := &enricher{
-		library:  libraryKey(namespace, name),
-		kind:     os.Getenv(libraryKindVariable),
-		root:     mountRoot,
-		scanPath: os.Getenv(scanPathVariable),
-		job:      job,
-		catalog:  NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
-		writer:   newVolumeWriter(job),
-		log:      log,
+		library:     libraryKey(namespace, name),
+		kind:        os.Getenv(libraryKindVariable),
+		root:        mountRoot,
+		scanPath:    os.Getenv(scanPathVariable),
+		job:         job,
+		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
+		writer:      newVolumeWriter(job),
+		log:         log,
+		statusTopic: libraryStatusTopic(base, namespace, name),
+		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
 	}
 	work.scope = work.narrowedScope()
 	return work

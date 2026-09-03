@@ -37,11 +37,21 @@ func runProbe() {
 	defer stop()
 
 	work := newEnricher(os.Stdout)
-	if err := work.probeGap(stopped, ffprobeFile); err != nil {
+	if err := work.probeConcern(stopped, ffprobeFile); err != nil {
 		work.logf("the probe container failed: %v", err)
 		stop()
 		os.Exit(1)
 	}
+}
+
+// The container waits for its own copy of the catalog to hold what the
+// standing pod reports before it reads its gap, because a gap query against a
+// copy that has not synced names a fraction of the work.
+func (e *enricher) probeConcern(ctx context.Context, probe mediaProbe) error {
+	if err := e.awaitCatalogSync(ctx, concernProbe); err != nil {
+		return err
+	}
+	return e.probeGap(ctx, probe)
 }
 
 // A catalog read that fails ends the container, because the gap list is the

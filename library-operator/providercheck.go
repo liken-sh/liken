@@ -173,12 +173,14 @@ func (o *operator) askProvider(ctx context.Context, token string) (int, error) {
 }
 
 // The Sources condition's reasons: every named provider resolves, one does
-// not exist, or none of them serves a concern this library needs.
+// not exist, the provider that serves a concern is not Ready, or no named
+// provider serves a concern this library needs.
 const (
 	conditionSources = "Sources"
 
 	reasonSourcesReady     = "SourcesReady"
 	reasonProviderNotFound = "ProviderNotFound"
+	reasonProviderNotReady = "ProviderNotReady"
 	reasonConcernNotServed = "ConcernNotServed"
 )
 
@@ -208,13 +210,33 @@ func checkSources(library *Library, providers providerSet) sourcesVerdict {
 		}
 	}
 	if providers.serving(namespace, library.Spec.Sources, concernIdentity) == nil {
-		return sourcesVerdict{
-			reason:  reasonConcernNotServed,
-			message: "no source serves the " + concernIdentity + " concern",
-		}
+		return unservedVerdict(namespace, library.Spec.Sources, providers, concernIdentity)
 	}
 	return sourcesVerdict{
 		reason:  reasonSourcesReady,
 		message: "the sources serve the concerns this library needs",
+	}
+}
+
+// A list that fills no gap has two reasons, because they call for two
+// repairs. A provider that lists the concern and failed its check is a key or
+// a Secret to repair, and a list where no provider lists the concern at all
+// is a source to add. The message names the provider and the reason its own
+// check wrote.
+func unservedVerdict(namespace string, sources []string, providers providerSet, concern string) sourcesVerdict {
+	for _, name := range sources {
+		provider, held := providers[libraryKey(namespace, name)]
+		if !held || !provider.serves(concern) {
+			continue
+		}
+		return sourcesVerdict{
+			reason: reasonProviderNotReady,
+			message: fmt.Sprintf("the MetadataProvider %s is not Ready, with the reason %s",
+				name, provider.readyReason()),
+		}
+	}
+	return sourcesVerdict{
+		reason:  reasonConcernNotServed,
+		message: "no source serves the " + concern + " concern",
 	}
 }

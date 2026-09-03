@@ -95,6 +95,18 @@ func (p *MetadataProvider) ready() bool {
 	return false
 }
 
+// The reason of the Ready condition, which the Library's Sources condition
+// repeats, so a person reads one answer on the Library and not two objects. A
+// provider no check has reported on yet has no reason.
+func (p *MetadataProvider) readyReason() string {
+	for _, condition := range p.Status.Conditions {
+		if condition.Type == conditionReady {
+			return condition.Reason
+		}
+	}
+	return ""
+}
+
 // A Secret as this operator reads it. The Data values arrive base64-encoded,
 // and a []byte field decodes them on the way in.
 type Secret struct {

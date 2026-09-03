@@ -32,6 +32,8 @@ func TestAnEnricherReadsItsWholeWiringOutOfTheEnvironment(t *testing.T) {
 	t.Setenv(catalogAPIVariable, "http://127.0.0.1:9999")
 	t.Setenv(jobNameVariable, "movies-enrich")
 	t.Setenv(scanPathVariable, "")
+	t.Setenv(topicBaseVariable, "")
+	t.Setenv(syncTimeoutVariable, "90s")
 
 	work := newEnricher(&bytes.Buffer{})
 
@@ -44,11 +46,18 @@ func TestAnEnricherReadsItsWholeWiringOutOfTheEnvironment(t *testing.T) {
 	if work.scope != "" {
 		t.Errorf("scope = %q, want the whole library", work.scope)
 	}
+	if work.statusTopic != libraryStatusTopic(defaultTopicBase, "house", "movies") {
+		t.Errorf("topic = %q, want the Library's status topic", work.statusTopic)
+	}
+	if work.syncTimeout != 90*time.Second {
+		t.Errorf("syncTimeout = %s, want the wait the environment names", work.syncTimeout)
+	}
 }
 
 func TestAnEnricherWithNoEnvironmentTakesTheDefaults(t *testing.T) {
 	for _, name := range []string{libraryNamespaceVariable, libraryNameVariable, libraryKindVariable,
-		libraryRootVariable, catalogAPIVariable, jobNameVariable, scanPathVariable} {
+		libraryRootVariable, catalogAPIVariable, jobNameVariable, scanPathVariable,
+		topicBaseVariable, syncTimeoutVariable} {
 		t.Setenv(name, "")
 	}
 
@@ -59,6 +68,9 @@ func TestAnEnricherWithNoEnvironmentTakesTheDefaults(t *testing.T) {
 	}
 	if work.writer.job != "job" {
 		t.Errorf("the writer names %q, want the fallback", work.writer.job)
+	}
+	if work.syncTimeout != defaultSyncTimeout {
+		t.Errorf("syncTimeout = %s, want the default", work.syncTimeout)
 	}
 }
 

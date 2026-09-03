@@ -18,7 +18,6 @@ import (
 // and the bus the echo arrives on.
 type enrichRun struct {
 	*enricher
-	statusTopic string
 	bus         *Bus
 	echo        *echoWaiter
 	echoTimeout time.Duration
@@ -51,14 +50,9 @@ func newEnrichRun(log io.Writer) (*enrichRun, error) {
 	}
 	namespace := os.Getenv(libraryNamespaceVariable)
 	name := os.Getenv(libraryNameVariable)
-	base := os.Getenv(topicBaseVariable)
-	if base == "" {
-		base = defaultTopicBase
-	}
 
 	run := &enrichRun{
 		enricher:    newEnricher(log),
-		statusTopic: libraryStatusTopic(base, namespace, name),
 		echoTimeout: echoTimeout(os.Getenv(echoTimeoutVariable)),
 	}
 	run.echo = newEchoWaiter(run.statusTopic, workerEnrich, run.job)

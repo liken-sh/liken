@@ -161,6 +161,7 @@ func enrichContainer(library *Library, role, path, image, busAddress, topicBase 
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: scanPathVariable, Value: path},
 			{Name: echoTimeoutVariable, Value: defaultEchoTimeout.String()},
+			{Name: syncTimeoutVariable, Value: defaultSyncTimeout.String()},
 			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
 				FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
 			}},
