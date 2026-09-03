@@ -120,7 +120,17 @@ one-gigabyte screen holds nothing more than it does today.
   both libraries' titles.
 - The text credits are gone from both pages.
 
-## What is not decided
+## Decided
+
+Built and released in 2026.09.03-008, and drilled on the testbed the
+same day. The drill found one gap: the enricher's wait for its synced
+copy compared item and file counts alone, and a walk after a refresh
+changes neither, so the enrich Job read its gap before the walk's
+rows had reached its copy and found most of the work missing until
+the next hourly pass. Since 2026.09.03-010 the wait also requires the
+copy's runs row to hold the walk the report names.
+
+## What is still open
 
 - Whether a person's page should list episodes for a guest who is in
   one episode of a series. The credits fact would have to write

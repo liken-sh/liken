@@ -214,7 +214,7 @@ is no rate limiter: a `429` is a cooldown inside the container. Plan
    trickplay.
 4. [Plan 31, franchises](31-franchises.md). The library kind, the
    file, the table, the join, and the page.
-5. [Plan 25, people on the screen](25-people-on-the-screen.md), which
+5. [Plan 25, people on the screen](completed/25-people-on-the-screen.md), which
    plan 30 unblocks.
 
 Plan 12, the organizer, stays apart. Imports and moves are a different

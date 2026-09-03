@@ -5,6 +5,14 @@ package main
 // rows have reached it, and a gap query against an empty copy reports work
 // that is not there. On the first drill the probe read zero files where the
 // reporter counted 24.
+//
+// The copy is synced when it holds the counts the report carries and the
+// walk the report names. The counts alone are not enough: a walk that
+// changes no item and no file, such as the one after a refresh, leaves the
+// counts as they were while its attempts and rows are still on their way,
+// and a container that read its gap then found most of the work missing.
+// The runs row is the walk's last write, so a copy that holds it holds
+// what came before it.
 
 import (
 	"context"
@@ -41,14 +49,21 @@ func syncTimeout(raw string) time.Duration {
 }
 
 // What a catalogSync holds: the topic the standing pod's report arrives on,
-// and the counts the newest report carried.
+// and what the newest report said the copy must hold.
 type catalogSync struct {
 	topic string
 
-	// The mutex covers the counts, because the bus handler runs on the bus
+	// The mutex covers the target, because the bus handler runs on the bus
 	// reader's goroutine and the poll runs on the caller's.
 	mutex    sync.Mutex
-	reported *libraryCounts
+	reported *syncTarget
+}
+
+// What a report says the copy must hold: its counts, and the finish of
+// the last walk, zero where the report names no finished walk.
+type syncTarget struct {
+	counts libraryCounts
+	walked time.Time
 }
 
 func newCatalogSync(topic string) *catalogSync {
@@ -66,12 +81,16 @@ func (s *catalogSync) note(topic string, payload []byte) {
 		return
 	}
 	s.mutex.Lock()
-	s.reported = &libraryCounts{items: report.Items, files: report.Files}
+	s.reported = &syncTarget{
+		counts: libraryCounts{items: report.Items, files: report.Files},
+		walked: lastScanFinish(report.Runs),
+	}
 	s.mutex.Unlock()
 }
 
-// A copy is synced when its own counts equal the ones the report carries. A
-// container that has heard no report yet is not synced.
+// A copy is synced when its own counts equal the ones the report carries
+// and its own runs hold a walk that finished no earlier than the one the
+// report names. A container that has heard no report yet is not synced.
 func (s *catalogSync) synced(ctx context.Context, catalog *Catalog, library string) (bool, error) {
 	s.mutex.Lock()
 	reported := s.reported
@@ -83,7 +102,17 @@ func (s *catalogSync) synced(ctx context.Context, catalog *Catalog, library stri
 	if err != nil {
 		return false, err
 	}
-	return counts == *reported, nil
+	if counts != reported.counts {
+		return false, nil
+	}
+	if reported.walked.IsZero() {
+		return true, nil
+	}
+	runs, err := catalog.Runs(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !lastScanFinish(runs[library]).Before(reported.walked), nil
 }
 
 // The wait runs the bus, subscribes to the retained report, and polls the
