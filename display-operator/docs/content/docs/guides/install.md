@@ -190,6 +190,30 @@ declarations:
 
 Now [put a window on a screen](/docs/guides/claim/).
 
+## Running a development build
+
+Every push to the operator's main branch publishes a development
+build. Its version is the most recent release plus a suffix:
+`2026.09.03-007-dev-003-abcdef01` is three commits past release
+`2026.09.03-007`, at commit `abcdef01`. Every image the repository
+builds carries the same version, and `:latest` still names the
+most recent release.
+
+A development build has no git tag, so the manifests pin to the
+commit's full sha, and the image pins to the version:
+
+```yaml
+resources:
+  - https://github.com/liken-sh/display-operator//deploy?ref=<full 40-character sha>
+images:
+  - name: ghcr.io/liken-sh/display-operator
+    newTag: 2026.09.03-007-dev-003-abcdef01
+```
+
+A git fetch by sha needs all forty characters; the eight in the
+version are not enough. The CI run for that commit prints both
+lines in its summary.
+
 ## Remove the operator
 
 Delete the manifests. Then delete the slice on each node that

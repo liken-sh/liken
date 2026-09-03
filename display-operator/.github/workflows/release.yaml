@@ -1,18 +1,22 @@
-# A pushed tag is the release act, the same model as the main liken
-# repository: pushing the tag 2026.08.18-001 tests the code, builds
-# both images, starts the compositor, and pushes the images to
-# ghcr.io tagged with that version and latest. A push to main
-# releases nothing; ci.yaml tests it and stops. The two are separate
-# so that main can take docs and intermediate work freely, and so
-# that every version in the registry is one a person chose to cut.
+# Every image this repository publishes goes through this workflow.
+# A pushed tag cuts a release: the tag names a version in liken's
+# calendar scheme, 2026.09.03-007, and the images ship under that
+# tag and :latest. A push to main cuts a development build: the
+# version is the most recent release tag plus a suffix,
+# 2026.09.03-007-dev-003-abcdef01, where 003 counts the commits since
+# that release and abcdef01 is this commit. The suffix sorts after
+# its release and before the next one, so a registry listing reads
+# in order. A development build never moves :latest, so a cluster
+# that pulls a release keeps pulling releases.
 #
-# The version is the tag, in liken's own scheme: the date and a
-# serial, 2026.08.18-001. The tag exists before this run starts, so
-# there is nothing here that computes a version or writes a tag back.
+# Both kinds run the tests first and build only when they pass. A
+# development build that skipped the tests would put a broken image
+# one pin away from a cluster.
 name: release
 
 on:
   push:
+    branches: [main]
     tags: ["**"]
 
 # Pushing images needs packages: write. Nothing here writes to the
@@ -30,31 +34,63 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      # The trigger accepts every tag, so this guard is what enforces
-      # the version scheme. A tag that is not a version fails loudly
-      # here; a filter on the trigger would skip the run instead, and
-      # a misspelled tag would release nothing and say nothing.
-      - name: Check the tag names a version
-        run: |
-          echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
-            echo "tag '$GITHUB_REF_NAME' does not name a version." \
-              "A release tag is the date and a serial: 2026.08.18-001."
-            exit 1
-          }
-          echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
-
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The version comes from the event. A tag names it, and a tag of
+      # any other shape stops the run before a build spends anything,
+      # so no image ships under a name no machine can order against
+      # the others. A push to main derives it: git describe finds the
+      # most recent release tag and counts the commits since it, and
+      # the first eight characters of the commit sha make the build
+      # traceable. The checkout fetches the whole history, because
+      # describe needs the tags.
+      - name: Name the version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
+              echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.20-001"
+              exit 1
+            }
+            echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+            echo "RELEASE=true" >> "$GITHUB_ENV"
+          else
+            described=$(git describe --tags --long --match '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-[0-9][0-9][0-9]')
+            release=${described%-*-g*}
+            count=${described#"$release"-}
+            count=${count%-g*}
+            echo "VERSION=$(printf '%s-dev-%03d-%s' "$release" "$count" "${GITHUB_SHA:0:8}")" >> "$GITHUB_ENV"
+            echo "RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
+      # A development build has no tag, so a kustomization that pins
+      # its manifests needs the full commit sha: a git fetch by sha
+      # wants all forty characters, and the eight in the version are
+      # not enough. The run's summary prints the two lines to paste,
+      # so a roll is a copy.
+      - name: Write the roll lines
+        run: |
+          {
+            echo '```yaml'
+            echo "resources:"
+            echo "  - https://github.com/$GITHUB_REPOSITORY//deploy?ref=$GITHUB_SHA"
+            echo "images:"
+            echo "  - name: ghcr.io/$GITHUB_REPOSITORY"
+            echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/liken-sh/weston"
+            echo "    newTag: $VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
-      # The tests gate the release. ci.yaml already ran them on the
-      # commit when it landed on main. They run again here so the
-      # gate holds on the tag itself. An image that reaches ghcr.io
-      # is one that passed them, so a rollback target is always a
-      # build that worked.
+      # The tests gate the release. An image that reaches ghcr.io is
+      # one that passed them, so a rollback target is always a build
+      # that worked.
       - run: go vet ./...
       - run: go test -race ./...
 
@@ -71,9 +107,10 @@ jobs:
       # push that happened first would leave a broken :latest behind
       # when the start failed.
       #
-      # The builds read and write the same :buildcache tags ci.yaml
-      # uses, so a release of a commit CI already built rebuilds
-      # nothing.
+      # The builds read and write the :buildcache tags beside each
+      # image. A tag's release of a commit whose development build
+      # already ran here rebuilds nothing, and a pull request's builds
+      # in ci.yaml read the same tags.
       - name: Build the compositor
         uses: docker/build-push-action@v6
         with:
@@ -123,9 +160,14 @@ jobs:
 
       # The operator image is built from the compositor image, so the
       # two share every layer and the second push sends one binary.
+      #
+      # :latest marks the newest release and nothing else. A
+      # development build pushes its own tag only.
       - name: Push both images
         run: |
           docker push "ghcr.io/liken-sh/weston:$VERSION"
-          docker push "ghcr.io/liken-sh/weston:latest"
           docker push "ghcr.io/liken-sh/display-operator:$VERSION"
-          docker push "ghcr.io/liken-sh/display-operator:latest"
+          if [ "$RELEASE" = true ]; then
+            docker push "ghcr.io/liken-sh/weston:latest"
+            docker push "ghcr.io/liken-sh/display-operator:latest"
+          fi
