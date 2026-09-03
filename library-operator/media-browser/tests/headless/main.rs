@@ -205,6 +205,16 @@ fn drawn(frame: &Path, run: &Run) {
     );
 }
 
+// The seconds a run took after its first frame. The script and --quit-after
+// both count from the first frame, so a timing assertion measures the
+// timeline it scripted and not the time the runner's software renderer needs
+// to draw that frame, which varies with the runner. A run that drew nothing
+// reports no startup and keeps the whole wall clock.
+fn after_the_first_frame(run: &Run, stats: &Path) -> f64 {
+    let measured = measurements(stats, run);
+    run.seconds - measured["seconds_to_first_frame"].as_f64().unwrap_or(0.0)
+}
+
 // The measurements the run wrote, parsed.
 fn measurements(path: &Path, run: &Run) -> serde_json::Value {
     let text = std::fs::read_to_string(path)

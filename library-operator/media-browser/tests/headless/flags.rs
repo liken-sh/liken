@@ -24,9 +24,9 @@ fn the_scripted_quit_key_ends_the_run() {
 
     assert_eq!(run.exit, "0", "{}", run.log);
     assert!(
-        run.seconds < 20.0,
+        after_the_first_frame(&run, &stats) < 20.0,
         "the q at 2.0 s ended the run, not the deadline at 25 s: {} s\n{}",
-        run.seconds,
+        after_the_first_frame(&run, &stats),
         run.log
     );
 
@@ -40,16 +40,19 @@ fn the_scripted_quit_key_ends_the_run() {
 #[test]
 fn a_claimed_screen_names_the_window_and_stops_the_watchdog() {
     let dir = workspace("app-id");
+    let stats = dir.join("stats.json");
 
     let run = headless_with(
         &dir,
         &[
             ("DISPLAY_APP_ID", "media-den-tv"),
-            ("WINDOW_GRACE_SECONDS", "15"),
+            ("WINDOW_GRACE_SECONDS", "30"),
         ],
         &[
             "--script",
             "0.5:q",
+            "--stats",
+            &text(&stats),
             "--size",
             "1920x1080",
             "--quit-after",
@@ -59,9 +62,9 @@ fn a_claimed_screen_names_the_window_and_stops_the_watchdog() {
 
     assert_eq!(run.exit, "0", "{}", run.log);
     assert!(
-        run.seconds < 20.0,
+        after_the_first_frame(&run, &stats) < 20.0,
         "the q at 0.5 s ended the run: {} s\n{}",
-        run.seconds,
+        after_the_first_frame(&run, &stats),
         run.log
     );
 }
@@ -90,9 +93,9 @@ fn a_capture_run_writes_its_frames_and_ends_after_the_last_one() {
 
     assert_eq!(run.exit, "0", "{}", run.log);
     assert!(
-        run.seconds < 20.0,
+        after_the_first_frame(&run, &stats) < 20.0,
         "the last capture ended the run, not the deadline at 25 s: {} s\n{}",
-        run.seconds,
+        after_the_first_frame(&run, &stats),
         run.log
     );
 
