@@ -76,6 +76,9 @@ they share, and plans 28 to 31 build them in order.
 * [34, Every fact writes its rows](34-every-fact-writes-its-rows.md).
   Each fact writes its own catalog rows as it writes its files, only
   the columns it owns, and the phases that share no file run at once.
+* [35, The loading state](35-the-loading-state.md). Between select
+  and the film's first frame, the page steps back and the title's
+  backdrop and logo hold the screen with the mark beneath them.
 
 Plan 32 stands apart from the enrichment work.
 
