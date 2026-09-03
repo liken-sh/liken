@@ -53,10 +53,14 @@ for a later agent to shape.
   history, and who was watching.
 * [23, Motion](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
-* [25, People on the screen](25-people-on-the-screen.md). Built on
-  2026-09-03; the drill on `liken-1` is owed. Three stripes of headshots
-  at the end of a movie's page and a series' page, and a page for each
-  person with a wall of their works across the libraries.
+* [25, People on the screen](25-people-on-the-screen.md). Built and
+  released in 2026.09.03-008, and drilled on `liken-1` on 2026-09-03.
+  Two stripes of headshots at the end of a movie's page and a series'
+  page, the crew and the cast, and a page for each person with a wall
+  of their works across the libraries. The same release adds
+  `spec.refresh` to `Library`, one time per fact from which a fact asks
+  its provider again, and makes a provider's cast and crew replace the
+  sidecar's.
 * [26, The home page](26-the-home-page.md). A first screen of rows that
   blends every kind, in place of the list of libraries.
 
