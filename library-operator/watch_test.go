@@ -26,9 +26,9 @@ const (
 // test ends.
 func useWatchRetryPause(t *testing.T) {
 	t.Helper()
-	pauseWas := watchRetryPause
-	t.Cleanup(func() { watchRetryPause = pauseWas })
-	watchRetryPause = 5 * time.Millisecond
+	pauseWas := watchRetryPause.get()
+	t.Cleanup(func() { watchRetryPause.set(pauseWas) })
+	watchRetryPause.set(5 * time.Millisecond)
 }
 
 // One watch request's answer: a status other than 200, or the event
@@ -135,9 +135,9 @@ func (a *watchAPI) serveList(w http.ResponseWriter, r *http.Request) {
 }
 
 // The server outlives the test on purpose. A watcher has no stop, so
-// every test ends with its watcher held in a watch request; a server
-// that closed would set that watcher reconnecting, and its next read
-// of watchRetryPause would race the write that restores it.
+// every test ends with its watcher held in a watch request, and a
+// server that closed would leave that watcher reconnecting for the rest
+// of the run.
 func startWatch(t *testing.T, api *watchAPI, watcher func(*Client, string, chan<- struct{}), from string) chan struct{} {
 	t.Helper()
 	server := httptest.NewServer(api.handler())

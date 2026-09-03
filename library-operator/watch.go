@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,8 +27,29 @@ func watchContext() context.Context {
 
 // WatchRetryPause is how long a watcher waits before it re-lists after
 // a dropped stream, and a variable so a test drives a reconnect in
-// milliseconds.
-var watchRetryPause = 2 * time.Second
+// milliseconds. It is an atomic because a watcher has no stop: the
+// watchers one test's operator started outlive that test and read the
+// pause while a later test writes it.
+var watchRetryPause = newPause(2 * time.Second)
+
+// A duration that goroutines read while a test writes it.
+type pause struct {
+	nanos atomic.Int64
+}
+
+func newPause(d time.Duration) *pause {
+	p := &pause{}
+	p.set(d)
+	return p
+}
+
+func (p *pause) get() time.Duration {
+	return time.Duration(p.nanos.Load())
+}
+
+func (p *pause) set(d time.Duration) {
+	p.nanos.Store(int64(d))
+}
 
 // WatchLibraries resumes each stream from a resourceVersion, so no
 // change is missed between reconnects. A 410 Gone and a routine stream
@@ -54,7 +76,7 @@ func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
 		// A failed watch is never fatal. The ticker keeps the passes
 		// running while this loop is down, and a relist is the whole
 		// recovery.
-		time.Sleep(watchRetryPause)
+		time.Sleep(watchRetryPause.get())
 		list, err := ListLibraries(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing libraries to resume the watch: %v\n", err)
@@ -81,7 +103,7 @@ func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}) {
 			drain(resp.Body)
 		}
 
-		time.Sleep(watchRetryPause)
+		time.Sleep(watchRetryPause.get())
 		list, err := ListCatalogs(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing catalogs to resume the watch: %v\n", err)
@@ -110,7 +132,7 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 			drain(resp.Body)
 		}
 
-		time.Sleep(watchRetryPause)
+		time.Sleep(watchRetryPause.get())
 		list, err := ListPlayers(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing players to resume the watch: %v\n", err)
@@ -137,7 +159,7 @@ func watchMetadataProviders(c *Client, resourceVersion string, wake chan<- struc
 			drain(resp.Body)
 		}
 
-		time.Sleep(watchRetryPause)
+		time.Sleep(watchRetryPause.get())
 		list, err := ListMetadataProviders(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing metadata providers to resume the watch: %v\n", err)
@@ -170,7 +192,7 @@ func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
 			drain(resp.Body)
 		}
 
-		time.Sleep(watchRetryPause)
+		time.Sleep(watchRetryPause.get())
 		list, err := ListCatalogMemberPods(watchContext(), c)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing catalog member pods to resume the watch: %v\n", err)
