@@ -1,6 +1,6 @@
 # Facts, art, and contributors
 
-Plan 30. The second enrichment build from [plan 27](27-enrichment.md),
+Plan 30. The second enrichment build from [plan 27](../27-enrichment.md),
 reshaped on 2026-09-03 after plan 29's drill. Once a title has an id,
 this plan fills everything else: the `.nfo` body, the art under Kodi's
 names, the credits with their people, and the people themselves in
@@ -80,7 +80,7 @@ first one answer.
 
   TVmaze's columns are from memory and the build checks them. The
   IMDb datasets are not here: they are bulk files with a store, and
-  [plan 33](33-the-imdb-datasets.md) has them.
+  [plan 33](../33-the-imdb-datasets.md) has them.
 - **Identity writes every id.** After the ladder finds a TMDb id, one
   call to TMDb's external ids gives the IMDb id, and for a series the
   TheTVDB id. Every one goes into the `.nfo` as its own `<uniqueid>`,
@@ -235,10 +235,24 @@ TMDb's, and left every other element. The next walk read the sidecars
 as answering, so it was one pass. The cause is not settled: the first
 walk under -001 may have left `nfo_facts` empty. It is an open item.
 
-**Not yet run.** The who-answered drill and the rate drill, which
-need the OMDb key; the Fanart.tv art types; the fight drill with a
-hand-edited plot; the rebuild drill; and trickplay, which is off by
-default and was not turned on.
+**With the keys.** Once the Fanart.tv key existed, one run wrote 363
+clearart, 392 disc, and 423 landscape files for the movies library,
+with the rest found nowhere at Fanart.tv. OMDb's key activated a few
+minutes after its provider read `Refused`, and the operator's next
+check turned it `Ready` with no other change. Trickplay turned on for
+the movies library decoded the four videos Jellyfin had no sheets for,
+and nothing else, because the scanner counts Jellyfin's `.trickplay`
+directories as answered; one of the four is a file ffmpeg refuses,
+which is an error attempt. The decode is silent for minutes, so -007
+logs the file and its length before ffmpeg opens it, and the two ends
+of the sync wait.
+
+**Left for later, as fixes and enhancements.** The who-answered and
+rate drills against OMDb over a full run; the fight drill with a
+hand-edited plot; the rebuild drill; the overview take-over's cause;
+and the open items the waves recorded: the nfo container reads a
+sidecar once per fact, a rescan does not walk `.contributors/`,
+TVmaze's identity rung, and a language field on the `Library`.
 
 ## What is set aside
 

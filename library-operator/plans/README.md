@@ -67,11 +67,6 @@ they share, and plans 28 to 31 build them in order.
   `.liken/` directory for what they cannot say, `.contributors/` for
   people, concerns as the unit of work, `MetadataProvider`, and the
   write rules.
-* [30, Facts, art, and contributors](30-facts-art-and-contributors.md).
-  Reshaped on 2026-09-03. The word "fact" replaces "concern", four
-  providers with one block each, the nfo, art, and people groups, a
-  container per phase, who answers, the fight check in the ledgers,
-  and the Jellyfin handover.
 * [31, Franchises](31-franchises.md). A library kind whose files hold a
   universe in story order, resolved across the namespace by provider
   id.
@@ -193,6 +188,14 @@ that took a hearing-impaired flag for Hindi.
   with its test, the `.liken/` reader, and the gap loop. Every stripped
   title came back with its original id, and the drill left six open
   items, none of which blocks plan 30.
+* [30, Facts, art, and contributors](completed/30-facts-art-and-contributors.md).
+  Built in six waves as 2026.09.03-001 to -007 and drilled on
+  `liken-1` on 2026-09-03. The word "fact", four providers with one
+  block each, the nfo, art, and people groups as phases of one Job,
+  who answers, the fight check in the ledgers, and trickplay behind an
+  opt-in. Every TMDb fact closed on both libraries, Fanart.tv filled
+  the art TMDb lacks, and the drill left the OMDb and fight drills for
+  later.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds

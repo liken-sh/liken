@@ -111,7 +111,7 @@ test enforces them.
 A fact is the unit of enrichment: one gap in the catalog, one ledger
 file it writes, one entry in a provider's list of what it serves. The
 word was "concern" until plan 30 renamed it, on 2026-09-03, because
-"concern" was too general. [Plan 30](30-facts-art-and-contributors.md)
+"concern" was too general. [Plan 30](completed/30-facts-art-and-contributors.md)
 holds the vocabulary in dependency order: the file group, `identity`,
 the nfo group, the art group, and the people group.
 
@@ -207,7 +207,7 @@ is no rate limiter: a `429` is a cooldown inside the container. Plan
 2. [Plan 29, identification](completed/29-identification.md). `MetadataProvider`,
    the enricher `Job`, the `probe` and `identity` facts, the write
    package and its test, the `.liken/` reader, and the gap loop.
-3. [Plan 30, facts, art, and contributors](30-facts-art-and-contributors.md).
+3. [Plan 30, facts, art, and contributors](completed/30-facts-art-and-contributors.md).
    The word "fact", four providers, the nfo and art and people groups,
    the Jellyfin handover, `credits.yaml`, `.contributors/`, and
    trickplay.

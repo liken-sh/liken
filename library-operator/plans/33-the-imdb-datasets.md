@@ -1,6 +1,6 @@
 # The IMDb datasets
 
-Plan 33. A stub from the 2026-09-03 shaping of [plan 30](30-facts-art-and-contributors.md).
+Plan 33. A stub from the 2026-09-03 shaping of [plan 30](completed/30-facts-art-and-contributors.md).
 IMDb has no free API, but it publishes daily datasets: ratings,
 basics, principals, and names, from a few megabytes to several hundred
 gzipped, at [datasets.imdbws.com](https://datasets.imdbws.com/). They
