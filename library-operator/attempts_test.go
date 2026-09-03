@@ -157,3 +157,47 @@ func TestAttemptKeysSplitBackIntoTheirColumns(t *testing.T) {
 		t.Errorf("key = %+v, want the item alone", keys[1])
 	}
 }
+
+// The probe records its attempt in the folder that holds the file it opened,
+// so an extras folder under a series holds a ledger of its own.
+func TestAnExtrasFolderLedgerKeysOnTheFilePath(t *testing.T) {
+	root := t.TempDir()
+	extras := filepath.Join(root, "Twin Peaks (1990)", "Extras")
+	writeFile(t, filepath.Join(extras, "Deleted Scene.mkv"), "video")
+	writeFile(t, filepath.Join(extras, likenDirectory, "probe.yaml"),
+		"attempts:\n    - path: Deleted Scene.mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
+
+	result := walkSeries(root, "house/series", nil)
+
+	if len(result.attempts) != 1 {
+		t.Fatalf("attempts = %+v, want the extras folder's own", result.attempts)
+	}
+	want := filepath.Join("Twin Peaks (1990)", "Extras", "Deleted Scene.mkv")
+	if got := result.attempts[0]; got.Item != want || got.Concern != concernProbe {
+		t.Errorf("attempt = %+v, want the file path under the probe concern", got)
+	}
+}
+
+// The next walk lifts the attempt into the catalog, and the gap query the
+// container works from no longer names the file, so the probe opens it once.
+func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
+	root := t.TempDir()
+	extras := filepath.Join(root, "Twin Peaks (1990)", "Extras")
+	writeFile(t, filepath.Join(extras, "Deleted Scene.mkv"), "video")
+	writeFile(t, filepath.Join(extras, likenDirectory, "probe.yaml"),
+		"attempts:\n    - path: Deleted Scene.mkv\n      at: 2026-09-02T14:00:00Z\n      result: found\n")
+	catalog, _ := newSQLiteCatalog(t)
+	if err := upsertWalk(t.Context(), catalog, walkSeries(root, "house/series", nil)); err != nil {
+		t.Fatal(err)
+	}
+
+	gaps, err := catalog.queryStrings(t.Context(), gapQueries[concernProbe],
+		[]any{"house/series", ledgerTime.Add(-defaultRetryInterval).Unix()})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gaps) != 0 {
+		t.Errorf("gaps = %v, want none for a file the probe already opened", gaps)
+	}
+}

@@ -367,3 +367,51 @@ func TestACommandThatFailsIsAnError(t *testing.T) {
 		t.Error("the command reported no error, want one")
 	}
 }
+
+// A sidecar with no root element holds nothing to keep, so the minimal
+// document takes its place and the concern's edit lands in it.
+func TestASidecarWithNoRootElementIsWrittenAsIfItWereAbsent(t *testing.T) {
+	cases := []struct {
+		name    string
+		sidecar string
+	}{
+		{name: "an empty file", sidecar: ""},
+		{name: "an XML declaration alone", sidecar: "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s01e01.nfo")
+			writeFile(t, path, test.sidecar)
+
+			err := newVolumeWriter("series-enrich").editNFO(path, nfoRootEpisode, "s01e01",
+				xmlElement{name: "fileinfo"}, []byte("<fileinfo/>"))
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<episodedetails>\n" +
+				"  <title>s01e01</title>\n  <fileinfo/>\n</episodedetails>\n"
+			if got := readFileString(t, path); got != want {
+				t.Errorf("wrote %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A sidecar whose root the parser stops on is an error, and the bytes stay as
+// they were, because the volume may hold facts no reader here models.
+func TestASidecarWithARootTheParserCannotReadFailsTheEdit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s01e01.nfo")
+	sidecar := "<episodedetails><title>Breakage</episodedetails>"
+	writeFile(t, path, sidecar)
+
+	err := newVolumeWriter("series-enrich").editNFO(path, nfoRootEpisode, "s01e01",
+		xmlElement{name: "fileinfo"}, []byte("<fileinfo/>"))
+
+	if err == nil {
+		t.Error("the edit reported no error, want one")
+	}
+	if got := readFileString(t, path); got != sidecar {
+		t.Errorf("the sidecar reads %q, want the bytes it held", got)
+	}
+}

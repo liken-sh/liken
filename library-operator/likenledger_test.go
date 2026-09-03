@@ -49,7 +49,7 @@ func TestAnIdentityLedgerHoldsAnIdAndItsReason(t *testing.T) {
 	folder := t.TempDir()
 
 	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, concernIdentity, func(ledger *likenLedger) {
-		ledger.noteItem(likenItem{Path: likenSelfPath, ID: providerIDs{"tmdb": "603"}, Reason: reasonTitleAndYear, Written: ledgerTime})
+		ledger.noteItem(likenItem{Path: likenSelfPath, ID: providerIDs{"tmdb": "603"}, Reason: reasonFrom(testTitle, testYear), Written: ledgerTime})
 		ledger.noteAttempt(likenAttempt{Path: likenSelfPath, At: ledgerTime, Result: attemptFound})
 	})
 	if err != nil {
@@ -118,7 +118,7 @@ func TestAnIdentityItemReplacesTheAnswerBeforeIt(t *testing.T) {
 	folder := t.TempDir()
 	writer := newVolumeWriter("movies-enrich")
 
-	for _, reason := range []string{"", reasonTitleAndYear} {
+	for _, reason := range []string{"", reasonFrom(testTitle, testYear)} {
 		err := writer.updateLikenLedger(folder, concernIdentity, func(ledger *likenLedger) {
 			ledger.noteItem(likenItem{Path: likenSelfPath, Reason: reason})
 		})
@@ -131,7 +131,7 @@ func TestAnIdentityItemReplacesTheAnswerBeforeIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Items) != 1 || ledger.Items[0].Reason != reasonTitleAndYear {
+	if len(ledger.Items) != 1 || ledger.Items[0].Reason != reasonFrom(testTitle, testYear) {
 		t.Errorf("read %+v, want one item with the second reason", ledger.Items)
 	}
 }

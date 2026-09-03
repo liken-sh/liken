@@ -264,15 +264,18 @@ func ffprobeFile(ctx context.Context, path string) ([]byte, error) {
 }
 
 // An absent sidecar becomes a minimal one and not an error, because the
-// sidecar-less title is the case this concern exists for. The edit never
+// sidecar-less title is the case this concern exists for. A sidecar with no
+// root element, an empty file or a declaration alone, is treated the same
+// way, because there is nothing in it to keep. Otherwise the edit never
 // rewrites the document it read. It replaces one element and keeps every
 // other byte.
 func (w *volumeWriter) editNFO(path, rootElement, title string, element xmlElement, replacement []byte) error {
 	document, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		document = minimalNFO(rootElement, title)
-	} else if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
+	}
+	if !hasRootElement(document) {
+		document = minimalNFO(rootElement, title)
 	}
 	edited, err := editElement(document, element, replacement)
 	if err != nil {

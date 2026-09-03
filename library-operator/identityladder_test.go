@@ -20,7 +20,7 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 			},
 			search:     identitySearch{kind: libraryKindMovies, title: "The Thing", year: 1982},
 			wantID:     1091,
-			wantReason: reasonTitleAndYear,
+			wantReason: reasonFrom(testTitle, testYear),
 		},
 		{
 			name: "the provider spells the title another way and the original matches",
@@ -29,7 +29,7 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 			},
 			search:     identitySearch{kind: libraryKindMovies, title: "Amelie", year: 2001},
 			wantID:     194,
-			wantReason: reasonTitleAndYear,
+			wantReason: reasonFrom(testTitle, testYear),
 		},
 		{
 			name: "a roman numeral and an article read the same on both sides",
@@ -38,7 +38,7 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 			},
 			search:     identitySearch{kind: libraryKindMovies, title: "The Godfather Part II", year: 1974},
 			wantID:     240,
-			wantReason: reasonTitleAndYear,
+			wantReason: reasonFrom(testTitle, testYear),
 		},
 		{
 			name: "the year is one off, so the search runs on either side",
@@ -48,7 +48,7 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 			},
 			search:     identitySearch{kind: libraryKindMovies, title: "Brazil", year: 1985},
 			wantID:     68,
-			wantReason: reasonTitleAndNearYear,
+			wantReason: reasonFrom(testTitle, testNearYear),
 		},
 		{
 			name: "two results on the year, and the runtime parts them",
@@ -61,7 +61,7 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 			},
 			search:     identitySearch{kind: libraryKindMovies, title: "The Thing", year: 1982, duration: 108 * time.Minute},
 			wantID:     1091,
-			wantReason: runtimeReasons[reasonTitleAndYear],
+			wantReason: reasonFrom(testTitle, testYear, testRuntime),
 		},
 		{
 			name: "the name carries no year, and one title matches",
@@ -70,7 +70,7 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 			},
 			search:     identitySearch{kind: libraryKindMovies, title: "Koyaanisqatsi"},
 			wantID:     9852,
-			wantReason: reasonTitle,
+			wantReason: reasonFrom(testTitle),
 		},
 		{
 			name: "a series matches on its first air date",
@@ -79,7 +79,7 @@ func TestTheLadderWritesAnIdOnEveryRungItCanClimb(t *testing.T) {
 			},
 			search:     identitySearch{kind: libraryKindSeries, title: "Twin Peaks", year: 1990},
 			wantID:     1920,
-			wantReason: reasonTitleAndYear,
+			wantReason: reasonFrom(testTitle, testYear),
 		},
 	}
 	for _, test := range cases {
@@ -284,6 +284,9 @@ func TestATitleNormalizesTheSameOnBothSides(t *testing.T) {
 		{name: "a roman numeral inside the title", title: "Rocky IV", want: "rocky 4"},
 		{name: "a title that is already plain", title: "Alien", want: "alien"},
 		{name: "an empty title", title: "", want: ""},
+		{name: "a trailing country qualifier", title: "Shameless (US)", want: "shameless"},
+		{name: "a trailing year qualifier", title: "The Office (2011)", want: "office"},
+		{name: "a title that is one parenthesized group", title: "(2011)", want: "2011"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -329,7 +332,77 @@ func TestAResultOnBothNeighbouringYearsIsOneCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if answer.id != 68 || answer.reason != reasonTitleAndNearYear {
+	if answer.id != 68 || answer.reason != reasonFrom(testTitle, testNearYear) {
 		t.Errorf("answer = %+v, want the one result both searches named", answer)
+	}
+}
+
+// The country a namer writes after a series title, as in Shameless (US), is a
+// test of its own. TMDb states the origin in origin_country, and the two shows
+// of one name carry different ones.
+func TestACountryQualifierPartsTwoSeriesOfOneName(t *testing.T) {
+	client, _ := newFakeTMDb(t, map[string]string{
+		tmdbKey("/3/search/tv", "Shameless", ""): `{"results":[` +
+			`{"id":2085,"name":"Shameless","original_name":"Shameless",` +
+			`"first_air_date":"2004-01-13","origin_country":["GB"]},` +
+			`{"id":34307,"name":"Shameless","original_name":"Shameless",` +
+			`"first_air_date":"2011-01-09","origin_country":["US"]}]}`,
+	})
+
+	answer, err := climbIdentityLadder(t.Context(), client,
+		identitySearch{kind: libraryKindSeries, title: "Shameless (US)"})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.id != 34307 {
+		t.Errorf("id = %d, want the show made for the country the name states", answer.id)
+	}
+	if answer.reason != reasonFrom(testTitle, testCountry) {
+		t.Errorf("reason = %q, want the country among the tests", answer.reason)
+	}
+}
+
+// A year in parentheses after the title is the year, where the name states it
+// nowhere else.
+func TestAYearQualifierIsTheYearTheSearchNarrowsOn(t *testing.T) {
+	client, _ := newFakeTMDb(t, map[string]string{
+		tmdbKey("/3/search/movie", "Fright Night", "2011"): `{"results":[` +
+			tmdbResultJSON(52520, "Fright Night", "2011-08-19") + `]}`,
+	})
+
+	answer, err := climbIdentityLadder(t.Context(), client,
+		identitySearch{kind: libraryKindMovies, title: "Fright Night (2011)"})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.id != 52520 {
+		t.Errorf("id = %d, want the film of the year the qualifier states", answer.id)
+	}
+	if answer.reason != reasonFrom(testTitle, testYear) {
+		t.Errorf("reason = %q, want the year among the tests", answer.reason)
+	}
+}
+
+// A qualifier that names neither a year nor a country is no test of its own.
+// The title still reaches the provider without it.
+func TestAQualifierThatNamesNeitherAYearNorACountryIsNoTest(t *testing.T) {
+	client, _ := newFakeTMDb(t, map[string]string{
+		tmdbKey("/3/search/tv", "The Bureau", ""): `{"results":[{"id":63333,"name":"The Bureau",` +
+			`"original_name":"The Bureau","first_air_date":"2015-04-27","origin_country":["FR"]}]}`,
+	})
+
+	answer, err := climbIdentityLadder(t.Context(), client,
+		identitySearch{kind: libraryKindSeries, title: "The Bureau (4K)"})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.id != 63333 {
+		t.Errorf("id = %d, want the one result the title matched", answer.id)
+	}
+	if answer.reason != reasonFrom(testTitle) {
+		t.Errorf("reason = %q, want the title alone", answer.reason)
 	}
 }

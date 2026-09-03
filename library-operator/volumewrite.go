@@ -132,14 +132,36 @@ func editElement(document []byte, element xmlElement, replacement []byte) ([]byt
 	return splice(document, spans.rootEnd, spans.rootEnd, spans.insertion(document, replacement)), nil
 }
 
+// hasRootElement reports whether a document holds an element to edit. An
+// empty file, or an XML declaration with nothing under it, holds none. A
+// document the parser stops on counts as holding one here, so the edit itself
+// names the error and the bytes stay as they were.
+func hasRootElement(document []byte) bool {
+	decoder := xml.NewDecoder(bytes.NewReader(document))
+	for {
+		token, err := decoder.Token()
+		if errors.Is(err, io.EOF) {
+			return false
+		}
+		if err != nil {
+			return true
+		}
+		if _, isStart := token.(xml.StartElement); isStart {
+			return true
+		}
+	}
+}
+
 // An inserted element takes the indentation the document's own children
-// carry, so the edit reads as the same hand wrote it.
+// carry, so the edit reads as the same hand wrote it. The indentation the
+// replacement already carries is dropped first, so the block is indented once
+// and not twice.
 func (s documentSpans) insertion(document, replacement []byte) []byte {
 	lead := trailingWhitespace(document[:s.rootEnd])
 	block := append([]byte{}, replacement...)
 	if len(afterLastNewline(lead)) == 0 && s.firstChild >= 0 {
 		indent := afterLastNewline(trailingWhitespace(document[:s.firstChild]))
-		block = append(append([]byte{}, indent...), block...)
+		block = append(append([]byte{}, indent...), bytes.TrimLeft(replacement, " \t")...)
 	}
 	return append(block, lead...)
 }

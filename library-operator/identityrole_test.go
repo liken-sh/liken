@@ -53,7 +53,7 @@ func TestTheIdentityConcernWritesTheIdIntoTheSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1091" || ledger.Items[0].Reason != reasonTitleAndYear {
+	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1091" || ledger.Items[0].Reason != reasonFrom(testTitle, testYear) {
 		t.Errorf("ledger items = %+v, want the id and the reason", ledger.Items)
 	}
 	if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
@@ -179,7 +179,7 @@ func TestTheRuntimeRungReadsTheSidecarTheProbeJustWrote(t *testing.T) {
 	if len(ledger.Items) != 1 || ledger.Items[0].ID["tmdb"] != "1091" {
 		t.Fatalf("items = %+v, want the runtime rung's answer", ledger.Items)
 	}
-	if ledger.Items[0].Reason != runtimeReasons[reasonTitleAndYear] {
+	if ledger.Items[0].Reason != reasonFrom(testTitle, testYear, testRuntime) {
 		t.Errorf("reason = %q, want the runtime rung's", ledger.Items[0].Reason)
 	}
 }

@@ -527,10 +527,11 @@ func (f folderFiles) row(name string, class fileClass) (fileRow, error) {
 }
 
 // The probe writes one video's stream details into the sidecar beside it,
-// under the same name with the .nfo extension. A video with no sidecar is not
-// an error and reads its name instead. A sidecar the scanner cannot read is
-// an error, because a row from the name would replace the details the volume
-// holds and the prune would act on it.
+// under the same name with the .nfo extension. The sidecar is read for its
+// streamdetails alone, so a movie sidecar and an episode sidecar both answer
+// here. A video with no sidecar is not an error and reads its name instead. A
+// sidecar the scanner cannot read is an error, because a row from the name
+// would replace the details the volume holds and the prune would act on it.
 func streamBeside(dir, file string) (*streamInfo, error) {
 	data, err := os.ReadFile(sidecarBeside(filepath.Join(dir, file)))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -539,11 +540,11 @@ func streamBeside(dir, file string) (*streamInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	meta, err := parseMovieNFO(data)
-	if err != nil || !meta.Stream.present() {
+	stream, err := parseStreamNFO(data)
+	if err != nil || !stream.present() {
 		return nil, nil
 	}
-	return &meta.Stream, nil
+	return &stream, nil
 }
 
 // constantItem answers with one item id for every file in a directory, the

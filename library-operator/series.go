@@ -93,54 +93,66 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 	// The episodes are read first, so the file pass has the two things it
 	// needs from them: the videos that already have a row, and the episode
 	// each of a season folder's files belongs to.
-	episodesByDirectory := map[string]map[string][]string{}
-	videosByDirectory := map[string]map[string]bool{}
-	// A season folder's .liken entries key on the episode file's own name, which
-	// is the item's path relative to that folder.
-	itemsByDirectory := map[string]map[string]string{}
+	folders := newSeriesFolders()
 	episodeFiles, err := collectEpisodeFiles(dir, ignore)
 	result.noteReadError(err)
 	for _, episode := range episodeFiles {
-		episodeItemIDs := scanEpisode(root, library, seriesID, episode, result)
-		if len(episodeItemIDs) == 0 {
-			continue
-		}
-		if videosByDirectory[episode.dir] == nil {
-			videosByDirectory[episode.dir] = map[string]bool{}
-			episodesByDirectory[episode.dir] = map[string][]string{}
-			itemsByDirectory[episode.dir] = map[string]string{}
-		}
-		videosByDirectory[episode.dir][episode.file] = true
-		episodesByDirectory[episode.dir][stripAnyExtension(episode.file)] = episodeItemIDs
-		itemsByDirectory[episode.dir][episode.file] = episodeItemIDs[0]
-	}
-	for _, seasonDir := range sortedDirectories(itemsByDirectory) {
-		if seasonDir == dir {
-			continue
-		}
-		readLikenSidecar(likenSidecar{
-			root: root, dir: seasonDir, library: library,
-			item: seriesID, items: itemsByDirectory[seasonDir],
-		}, result)
+		folders.note(episode, scanEpisode(root, library, seriesID, episode, result))
 	}
 
-	scanSeriesFiles(root, dir, library, seriesID, ignore, episodesByDirectory, videosByDirectory, result)
+	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, result)
 }
 
-// scanSeriesFiles reads the rest of a series folder: the tvshow.nfo and the art
-// beside it, then one level down for a season folder's own art, sidecars, and
-// subtitles, and for an extras folder's trailers and featurettes. A file
-// directly in the series folder links to the series. A file in a season folder
-// links to the episode whose own name it starts with, and to the series where
-// it matches no episode, which is where a season poster lands.
-func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, episodes map[string]map[string][]string, videos map[string]map[string]bool, result *walkResult) {
+// seriesFolders is what one series' episode pass leaves for its file pass,
+// one entry per directory that held an episode. The three maps travel
+// together because the file pass reads all three for every directory.
+type seriesFolders struct {
+	// episodes answers the episode a file in the directory belongs to, keyed by
+	// the episode file's name without its extension.
+	episodes map[string]map[string][]string
+	// videos is the episode files that already have a row from the episode
+	// pass, so the file pass writes no second one.
+	videos map[string]map[string]bool
+	// items keys on the episode file's own name, which is the item's path
+	// relative to the folder, the way a .liken entry names it.
+	items map[string]map[string]string
+}
+
+func newSeriesFolders() seriesFolders {
+	return seriesFolders{
+		episodes: map[string]map[string][]string{},
+		videos:   map[string]map[string]bool{},
+		items:    map[string]map[string]string{},
+	}
+}
+
+// note records one episode file under the directory that holds it. A file the
+// scanner could not number reports no id and is left for the file pass.
+func (f seriesFolders) note(episode episodeFile, episodeItemIDs []string) {
+	if len(episodeItemIDs) == 0 {
+		return
+	}
+	if f.videos[episode.dir] == nil {
+		f.videos[episode.dir] = map[string]bool{}
+		f.episodes[episode.dir] = map[string][]string{}
+		f.items[episode.dir] = map[string]string{}
+	}
+	f.videos[episode.dir][episode.file] = true
+	f.episodes[episode.dir][stripAnyExtension(episode.file)] = episodeItemIDs
+	f.items[episode.dir][episode.file] = episodeItemIDs[0]
+}
+
+// Every folder this pass reads files from has its .liken lifted here, because
+// the probe records an attempt beside every file it opens, an extras folder's
+// among them.
+func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, folders seriesFolders, result *walkResult) {
 	rows, subdirectories, err := folderFiles{
 		root:    root,
 		dir:     dir,
 		library: library,
 		place:   filePlace{kind: libraryKindSeries},
 		item:    constantItem(seriesID),
-		held:    videos[dir],
+		held:    folders.videos[dir],
 	}.read()
 	result.noteReadError(err)
 	result.files = append(result.files, rows...)
@@ -161,11 +173,15 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, epis
 			dir:     child,
 			library: library,
 			place:   place,
-			item:    episodeItem(episodes[child], seriesID),
-			held:    videos[child],
+			item:    episodeItem(folders.episodes[child], seriesID),
+			held:    folders.videos[child],
 		}.read()
 		result.noteReadError(err)
 		result.files = append(result.files, rows...)
+		readLikenSidecar(likenSidecar{
+			root: root, dir: child, library: library,
+			item: seriesID, items: folders.items[child],
+		}, result)
 	}
 }
 

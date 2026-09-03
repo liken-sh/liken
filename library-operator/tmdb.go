@@ -74,6 +74,9 @@ type tmdbResult struct {
 	Name          string `json:"name"`
 	OriginalName  string `json:"original_name"`
 	FirstAirDate  string `json:"first_air_date"`
+	// The ladder reads it because two shows of one name are told apart by the
+	// country a namer writes after the title.
+	OriginCountry []string `json:"origin_country"`
 }
 
 // One accessor answers for both kinds: a movie states title, and a series

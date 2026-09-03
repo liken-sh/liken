@@ -440,15 +440,17 @@ func TestAnUnreadableSidecarWritesNoRow(t *testing.T) {
 }
 
 // streamNFO is the sidecar the probe writes for one video: the root element
-// the scanner reads, and the stream details inside it.
-func streamNFO(title, videoCodec, audioCodec string, width, height, seconds int) string {
-	return `<movie><title>` + title + `</title><fileinfo><streamdetails>` +
+// the scanner reads, and the stream details inside it. The root is the
+// caller's, because the probe writes movie in a movies library and
+// episodedetails in a series library.
+func streamNFO(rootElement, title, videoCodec, audioCodec string, width, height, seconds int) string {
+	return `<` + rootElement + `><title>` + title + `</title><fileinfo><streamdetails>` +
 		`<video><codec>` + videoCodec + `</codec>` +
 		`<width>` + strconv.Itoa(width) + `</width>` +
 		`<height>` + strconv.Itoa(height) + `</height>` +
 		`<durationinseconds>` + strconv.Itoa(seconds) + `</durationinseconds></video>` +
 		`<audio><codec>` + audioCodec + `</codec></audio>` +
-		`</streamdetails></fileinfo></movie>`
+		`</streamdetails></fileinfo></` + rootElement + `>`
 }
 
 // partedMovieFolder holds every shape the sidecar rule covers: the first
@@ -458,15 +460,15 @@ func partedMovieFolder(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	dir := filepath.Join(root, "Solaris (1972)")
-	writeFile(t, filepath.Join(dir, "movie.nfo"), streamNFO("Solaris", "h264", "dts", 1920, 1080, 8000))
+	writeFile(t, filepath.Join(dir, "movie.nfo"), streamNFO(nfoRootMovie, "Solaris", "h264", "dts", 1920, 1080, 8000))
 	writeFile(t, filepath.Join(dir, "Solaris (1972) - part1.mkv"), "video")
 	writeFile(t, filepath.Join(dir, "Solaris (1972) - part2.mkv"), "video")
 	writeFile(t, filepath.Join(dir, "Solaris (1972) - part2.nfo"),
-		streamNFO("Solaris", "hevc", "eac3", 3840, 2160, 3000))
+		streamNFO(nfoRootMovie, "Solaris", "hevc", "eac3", 3840, 2160, 3000))
 	writeFile(t, filepath.Join(dir, "Solaris (1972) - part3.720p.mkv"), "video")
 	writeFile(t, filepath.Join(dir, "Extras", "Making Of.mkv"), "video")
 	writeFile(t, filepath.Join(dir, "Extras", "Making Of.nfo"),
-		streamNFO("Making Of", "mpeg4", "mp3", 640, 480, 600))
+		streamNFO(nfoRootMovie, "Making Of", "mpeg4", "mp3", 640, 480, 600))
 	return root
 }
 

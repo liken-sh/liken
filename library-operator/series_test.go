@@ -554,3 +554,36 @@ func TestAnUnreadableServiceDirectoryLeavesASeriesWalkComplete(t *testing.T) {
 		t.Errorf("episodes = %+v, want the one the readable season holds", result.episodes)
 	}
 }
+
+// A series library's per-file sidecar carries the episodedetails root, so a
+// video that is no episode reads the stream details the probe wrote beside it.
+func TestAVideoThatIsNoEpisodeReadsTheSidecarBesideIt(t *testing.T) {
+	cases := []struct {
+		name   string
+		folder string
+	}{
+		{name: "a video at the series root", folder: ""},
+		{name: "a video in a season folder", folder: "Season 01"},
+		{name: "a video in an extras folder", folder: "Extras"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "Twin Peaks (1990)", test.folder)
+			writeFile(t, filepath.Join(dir, "A Documentary.mkv"), "video")
+			writeFile(t, filepath.Join(dir, "A Documentary.nfo"),
+				streamNFO(nfoRootEpisode, "A Documentary", "hevc", "eac3", 3840, 2160, 3000))
+
+			path := filepath.Join("Twin Peaks (1990)", test.folder, "A Documentary.mkv")
+			row, held := filesByPath(walkSeries(root, "house/series", nil))[path]
+
+			if !held {
+				t.Fatalf("the walk read no row for %s", path)
+			}
+			if row.Width != 3840 || row.Height != 2160 || row.VideoCodec != "hevc" || row.DurationMs != 3000000 {
+				t.Errorf("attributes = %dx%d %s %dms, want the stream details the sidecar carries",
+					row.Width, row.Height, row.VideoCodec, row.DurationMs)
+			}
+		})
+	}
+}

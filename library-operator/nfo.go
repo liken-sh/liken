@@ -131,6 +131,25 @@ type episodeNFO struct {
 	FileInfo  nfoFileInfo   `xml:"fileinfo"`
 }
 
+// streamDetailsNFO is the one block a per-file sidecar is read for, under
+// whatever root the sidecar carries. It names no root element on purpose, so
+// encoding/xml takes the document's own: movie in a movies library,
+// episodedetails in a series library.
+type streamDetailsNFO struct {
+	FileInfo nfoFileInfo `xml:"fileinfo"`
+}
+
+// parseStreamNFO reads the stream details out of a sidecar of either root. It
+// reads that block alone, because a per-file sidecar has nothing else a file
+// row takes, and a movie and an episode sidecar answer the same way.
+func parseStreamNFO(data []byte) (streamInfo, error) {
+	var raw streamDetailsNFO
+	if err := xml.Unmarshal(data, &raw); err != nil {
+		return streamInfo{}, err
+	}
+	return streamFrom(raw.FileInfo), nil
+}
+
 // streamInfo is the technical attributes a file carries: the resolution, the
 // codecs, and the duration in milliseconds.
 type streamInfo struct {

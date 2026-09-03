@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,20 +18,23 @@ import (
 // same work. The plan leaves the number for the drill to settle.
 const runtimeMargin = 5 * time.Minute
 
-// The reason an id was written. The ledger records it, so a person reads what
-// the answer rested on.
+// The name of each test the ladder runs. The ledger records the tests an
+// answer passed as its reason, so a person reads what the answer rested on.
 const (
-	reasonTitle            = "title"
-	reasonTitleAndYear     = "title and year"
-	reasonTitleAndNearYear = "title and a year on either side"
+	testTitle    = "title"
+	testYear     = "year"
+	testNearYear = "a year on either side"
+	testCountry  = "country"
+	testRuntime  = "runtime"
 )
 
-// The runtime rung adds to the reason it climbed from, so the ledger says
-// every test the answer passed.
-var runtimeReasons = map[string]string{
-	reasonTitle:            "title and runtime",
-	reasonTitleAndYear:     "title, year, and runtime",
-	reasonTitleAndNearYear: "title, a year on either side, and runtime",
+// The reason is built from the tests the answer passed, so a new rung adds
+// one word and every reason still reads as a sentence.
+func reasonFrom(tests ...string) string {
+	if len(tests) < 3 {
+		return strings.Join(tests, " and ")
+	}
+	return strings.Join(tests[:len(tests)-1], ", ") + ", and " + tests[len(tests)-1]
 }
 
 // What the ladder is asked about: the kind, the clues the name gave, and the
@@ -62,13 +66,14 @@ type identityMatch struct {
 // to the runtime rung when the probe measured one, and anything else is a
 // candidate list.
 func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identitySearch) (identityAnswer, error) {
+	search, country := readQualifier(search)
 	matched, err := searchOnYear(ctx, client, search, search.year)
 	if err != nil {
 		return identityAnswer{}, err
 	}
-	reason := reasonTitleAndYear
+	tests := []string{testTitle, testYear}
 	if search.year == 0 {
-		reason = reasonTitle
+		tests = []string{testTitle}
 	}
 
 	if len(matched) == 0 && search.year > 0 {
@@ -76,10 +81,13 @@ func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identit
 		if err != nil {
 			return identityAnswer{}, err
 		}
-		reason = reasonTitleAndNearYear
+		tests = []string{testTitle, testNearYear}
+	}
+	if kept := fromCountry(matched, country); len(kept) > 0 {
+		matched, tests = kept, append(tests, testCountry)
 	}
 	if len(matched) == 1 {
-		return identityAnswer{id: matched[0].result.ID, reason: reason}, nil
+		return identityAnswer{id: matched[0].result.ID, reason: reasonFrom(tests...)}, nil
 	}
 	if len(matched) > 1 && search.duration > 0 {
 		matched, err = readRuntimes(ctx, client, search.kind, matched)
@@ -87,10 +95,86 @@ func climbIdentityLadder(ctx context.Context, client *tmdbClient, search identit
 			return identityAnswer{}, err
 		}
 		if near := withinRuntime(matched, search.duration); len(near) == 1 {
-			return identityAnswer{id: near[0].result.ID, reason: runtimeReasons[reason]}, nil
+			return identityAnswer{id: near[0].result.ID, reason: reasonFrom(append(tests, testRuntime)...)}, nil
 		}
 	}
 	return identityAnswer{candidates: candidatesFrom(matched, search)}, nil
+}
+
+// The qualifier a namer writes after a title to part it from another show of
+// the same name: a country, as in Shameless (US), or a year, as in The Office
+// (2011). The title reaches the provider without it, because the provider
+// names the show Shameless. A country is a test only for a series, where TMDb
+// states origin_country.
+func readQualifier(search identitySearch) (identitySearch, string) {
+	base, qualifier := partTitle(search.title)
+	search.title = base
+	if year := qualifiedYear(qualifier); year > 0 {
+		if search.year == 0 {
+			search.year = year
+		}
+		return search, ""
+	}
+	if search.kind != libraryKindSeries {
+		return search, ""
+	}
+	return search, countryCode(qualifier)
+}
+
+// partTitle cuts a trailing parenthesized qualifier off a title and answers
+// with both halves. A title that is one parenthesized group keeps it, because
+// the group is the whole name and not a qualifier.
+func partTitle(title string) (string, string) {
+	trimmed := strings.TrimSpace(title)
+	if !strings.HasSuffix(trimmed, ")") {
+		return trimmed, ""
+	}
+	open := strings.LastIndexByte(trimmed, '(')
+	if open <= 0 {
+		return trimmed, ""
+	}
+	return strings.TrimSpace(trimmed[:open]), strings.TrimSpace(trimmed[open+1 : len(trimmed)-1])
+}
+
+// qualifiedYear reads a four-digit qualifier as a year, and anything else as
+// no year.
+func qualifiedYear(qualifier string) int {
+	if len(qualifier) != 4 {
+		return 0
+	}
+	return leadingYear(qualifier)
+}
+
+// countryCode reads a two-letter qualifier as a country code, in the upper
+// case TMDb states origin_country in, and anything else as no country.
+func countryCode(qualifier string) string {
+	if len(qualifier) != 2 {
+		return ""
+	}
+	upper := strings.ToUpper(qualifier)
+	for _, letter := range upper {
+		if letter < 'A' || letter > 'Z' {
+			return ""
+		}
+	}
+	return upper
+}
+
+// The country test keeps the results the provider states that origin for. It
+// runs only where it keeps one, because a provider that states another origin
+// is a fact for a person to read on the candidate, and not a reason to answer
+// with nothing.
+func fromCountry(matched []identityMatch, country string) []identityMatch {
+	if country == "" {
+		return nil
+	}
+	var kept []identityMatch
+	for _, match := range matched {
+		if slices.Contains(match.result.OriginCountry, country) {
+			kept = append(kept, match)
+		}
+	}
+	return kept
 }
 
 // Rung one: the title as the provider spells it, or as it was first released,
@@ -230,8 +314,9 @@ var romanNumerals = map[string]int{
 // The one normalization both sides of a title test run through: case,
 // accents, punctuation, the leading article, and the roman numerals.
 func normalizeTitle(title string) string {
+	base, _ := partTitle(title)
 	var folded strings.Builder
-	for _, r := range strings.ToLower(title) {
+	for _, r := range strings.ToLower(base) {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			folded.WriteRune(r)

@@ -257,3 +257,35 @@ func namesIn(t *testing.T, dir string) []string {
 	}
 	return names
 }
+
+// The block the probe marshals already carries the indentation of its own
+// first line, so the edit indents it once and never twice.
+func TestAnInsertedBlockTakesTheSiblingIndentationOnce(t *testing.T) {
+	document := "<episodedetails>\n  <title>Breakage</title>\n</episodedetails>\n"
+	replacement := "  <fileinfo>\n    <streamdetails></streamdetails>\n  </fileinfo>"
+
+	edited, err := editElement([]byte(document), xmlElement{name: "fileinfo"}, []byte(replacement))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "<episodedetails>\n  <title>Breakage</title>\n" +
+		"  <fileinfo>\n    <streamdetails></streamdetails>\n  </fileinfo>\n</episodedetails>\n"
+	if string(edited) != want {
+		t.Errorf("edited to\n%q\nwant\n%q", edited, want)
+	}
+}
+
+func TestAnEditKeepsTheByteOrderMarkTheDocumentOpensWith(t *testing.T) {
+	document := byteOrderMark + "<movie>\n  <title>Solaris</title>\n</movie>\n"
+
+	edited, err := editElement([]byte(document), xmlElement{name: "fileinfo"}, []byte("<NEW/>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := byteOrderMark + "<movie>\n  <title>Solaris</title>\n  <NEW/>\n</movie>\n"
+	if string(edited) != want {
+		t.Errorf("edited to\n%q\nwant\n%q", edited, want)
+	}
+}

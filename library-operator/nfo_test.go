@@ -295,3 +295,70 @@ func TestParseMovieNFOReadsTheSet(t *testing.T) {
 		})
 	}
 }
+
+// byteOrderMark is the three bytes Jellyfin opens a sidecar it wrote with.
+const byteOrderMark = "\ufeff"
+
+func TestAMovieSidecarThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
+	data := []byte(byteOrderMark + streamNFO(nfoRootMovie, "Solaris", "h264", "dts", 1920, 1080, 8000))
+
+	meta, err := parseMovieNFO(data)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Title != "Solaris" || meta.Stream.Width != 1920 {
+		t.Errorf("meta = %q %dx%d, want the title and the stream the sidecar carries",
+			meta.Title, meta.Stream.Width, meta.Stream.Height)
+	}
+}
+
+func TestAnEpisodeSidecarThatOpensWithAByteOrderMarkIsRead(t *testing.T) {
+	data := []byte(byteOrderMark + streamNFO(nfoRootEpisode, "Breakage", "h264", "ac3", 1280, 720, 2700))
+
+	metas, err := parseEpisodeNFOs(data)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("metas = %+v, want the one block", metas)
+	}
+	if metas[0].Title != "Breakage" || metas[0].Stream.Width != 1280 {
+		t.Errorf("meta = %q %dx%d, want the title and the stream the sidecar carries",
+			metas[0].Title, metas[0].Stream.Width, metas[0].Stream.Height)
+	}
+}
+
+// A per-file sidecar is read for its stream details alone, so the root it
+// carries makes no difference to what a file row takes from it.
+func TestTheStreamDetailsReadTheSameUnderEitherRoot(t *testing.T) {
+	cases := []struct {
+		name        string
+		rootElement string
+	}{
+		{name: "a movies library's sidecar", rootElement: nfoRootMovie},
+		{name: "a series library's sidecar", rootElement: nfoRootEpisode},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			data := []byte(streamNFO(testCase.rootElement, "A Documentary", "hevc", "eac3", 3840, 2160, 3000))
+
+			stream, err := parseStreamNFO(data)
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := streamInfo{Width: 3840, Height: 2160, VideoCodec: "hevc", AudioCodec: "eac3", DurationMs: 3000000}
+			if stream != want {
+				t.Errorf("stream = %+v, want %+v", stream, want)
+			}
+		})
+	}
+}
+
+func TestASidecarThatIsNotXMLYieldsNoStreamDetails(t *testing.T) {
+	if _, err := parseStreamNFO([]byte("this is not xml <<<")); err == nil {
+		t.Error("the parse reported no error, want one")
+	}
+}

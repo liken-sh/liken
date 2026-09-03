@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
@@ -171,17 +170,6 @@ func readLikenSidecar(sidecar likenSidecar, result *walkResult) {
 	rows, err := sidecar.attempts()
 	result.noteReadError(err)
 	result.attempts = append(result.attempts, rows...)
-}
-
-// The season folders are read in name order, so a re-walk writes the same
-// rows in the same order.
-func sortedDirectories(items map[string]map[string]string) []string {
-	dirs := make([]string, 0, len(items))
-	for dir := range items {
-		dirs = append(dirs, dir)
-	}
-	slices.Sort(dirs)
-	return dirs
 }
 
 // The reporter counts a gap with the same query the container works from, so
