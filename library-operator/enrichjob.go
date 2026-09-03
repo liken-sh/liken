@@ -69,9 +69,10 @@ func (o *operator) standEnrichClaim(ctx context.Context, library *Library, catal
 
 // The enricher Job. The name is the caller's, because a Library runs the
 // standing enricher under the walk's name and a webhook's folder runs under
-// the chain's. A nil provider omits the identity container, which is how a
-// Library with no Ready provider still runs the probe.
-func buildEnrichJob(library *Library, provider *MetadataProvider, name, path string,
+// the chain's. Sources that reach no Ready provider of the identity fact omit
+// the identity container, which is how a Library with no Ready provider still
+// runs the probe.
+func buildEnrichJob(library *Library, providers providerSet, name, path string,
 	scannerImage, corrosionImage, busAddress, topicBase string) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	return &Job{
@@ -86,7 +87,7 @@ func buildEnrichJob(library *Library, provider *MetadataProvider, name, path str
 		Spec: JobSpec{
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,
-			Template: enrichPodTemplate(library, provider, path,
+			Template: enrichPodTemplate(library, providers, path,
 				scannerImage, corrosionImage, busAddress, topicBase),
 		},
 	}
@@ -95,7 +96,7 @@ func buildEnrichJob(library *Library, provider *MetadataProvider, name, path str
 // The pod the enricher Job runs. The facts that must run in order are init
 // containers, and the enrich container is the one regular container: it
 // writes the runs row last and waits for the echo.
-func enrichPodTemplate(library *Library, provider *MetadataProvider, path string,
+func enrichPodTemplate(library *Library, providers providerSet, path string,
 	scannerImage, corrosionImage, busAddress, topicBase string) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
 	// An enricher holds no Kubernetes credential. It reads its work through the
@@ -107,16 +108,20 @@ func enrichPodTemplate(library *Library, provider *MetadataProvider, path string
 	// the kubelet starts an init container only when the one before it is up.
 	// Both facts here edit the same sidecar file, so they must never run at
 	// once.
-	sequence := []Container{
-		catalogSidecar(corrosionImage),
+	facts := []Container{
 		factsContainer(library, factProbe, []string{factProbe}, path, scannerImage, busAddress, topicBase),
 	}
-	if provider != nil {
-		identity := factsContainer(library, factIdentity, []string{factIdentity}, path,
-			scannerImage, busAddress, topicBase)
-		identity.Env = append(identity.Env, providerKeyVariable(provider))
-		sequence = append(sequence, identity)
+	if providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity) != nil {
+		facts = append(facts, factsContainer(library, factIdentity, []string{factIdentity}, path,
+			scannerImage, busAddress, topicBase))
 	}
+	// Every facts container carries every key the sources reach, so a container
+	// that asks a second provider needs no wiring of its own.
+	keys := providerKeyEnv(library, providers)
+	for index := range facts {
+		facts[index].Env = append(facts[index].Env, keys...)
+	}
+	sequence := append([]Container{catalogSidecar(corrosionImage)}, facts...)
 
 	return PodTemplateSpec{
 		Metadata: ObjectMeta{
@@ -188,17 +193,4 @@ func factsContainer(library *Library, name string, facts []string,
 	container.Env = append(container.Env,
 		EnvVar{Name: libraryFactsVariable, Value: strings.Join(facts, ",")})
 	return container
-}
-
-// The provider key the identity container reads, from the Secret the
-// MetadataProvider names. The kubelet reads the key, so the value never
-// passes through this operator's status or logs.
-func providerKeyVariable(provider *MetadataProvider) EnvVar {
-	reference := provider.Spec.TMDb.SecretRef
-	return EnvVar{Name: tmdbTokenVariable, ValueFrom: &EnvVarSource{
-		SecretKeyRef: &SecretKeySelector{
-			Name: reference.Name,
-			Key:  reference.secretKey(),
-		},
-	}}
 }

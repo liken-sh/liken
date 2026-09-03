@@ -34,7 +34,15 @@ func providerOperator(t *testing.T, cluster *fakeCluster, handler http.Handler) 
 	provider := httptest.NewServer(handler)
 	t.Cleanup(provider.Close)
 	operator := testOperator(t, cluster)
-	operator.providerBase = provider.URL
+	return operatorOnProviderBase(operator, provider.URL)
+}
+
+// every provider block the operator holds calls the same test server, so a
+// check reaches no address of the internet.
+func operatorOnProviderBase(operator *operator, base string) *operator {
+	for block := range operator.providerBases {
+		operator.providerBases[block] = base
+	}
 	return operator
 }
 
@@ -81,6 +89,88 @@ func TestProviderCheckReadsEachAnswer(t *testing.T) {
 	}
 }
 
+// Each block answers its own check call, with the key in its own form, and
+// every answer maps to the same four reasons. TVmaze needs no Secret, so its
+// check reaches the provider with none.
+func TestTheCheckOfEachProviderBlock(t *testing.T) {
+	cases := []struct {
+		block  string
+		path   string
+		secret bool
+	}{
+		{block: providerBlockTMDb, path: tmdbConfigurationPath, secret: true},
+		{block: providerBlockOMDb, path: "/", secret: true},
+		{block: providerBlockFanart, path: fanartCheckPath, secret: true},
+		{block: providerBlockTVmaze, path: tvmazeCheckPath},
+	}
+	answers := []struct {
+		name   string
+		status int
+		want   ConditionStatus
+		reason string
+	}{
+		{name: "the provider answers", status: http.StatusOK,
+			want: ConditionTrue, reason: reasonReachable},
+		{name: "the provider refuses the key", status: http.StatusUnauthorized,
+			want: ConditionFalse, reason: reasonRefused},
+	}
+	for _, one := range cases {
+		for _, answer := range answers {
+			t.Run(one.block+", "+answer.name, func(t *testing.T) {
+				cluster := newFakeCluster()
+				provider := providerOfBlock(one.block, one.block)
+				cluster.providers[one.block] = provider
+				if one.secret {
+					cluster.secrets[one.block+"-key"] = &Secret{
+						Metadata: ObjectMeta{Name: one.block + "-key", Namespace: "house"},
+						Data:     map[string][]byte{defaultProviderSecretKey: []byte("the-key")},
+					}
+				}
+				asked := ""
+				operator := providerOperator(t, cluster,
+					http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						asked = r.URL.Path
+						w.WriteHeader(answer.status)
+					}))
+
+				operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+				written := cluster.heldProvider(one.block)
+				ready := conditionNamed(written.Status.Conditions, conditionReady)
+				if ready.Status != answer.want || ready.Reason != answer.reason {
+					t.Errorf("Ready = %s/%s, want %s/%s",
+						ready.Status, ready.Reason, answer.want, answer.reason)
+				}
+				if asked != one.path {
+					t.Errorf("the check asked for %s, want %s", asked, one.path)
+				}
+				if written.Status.Provider != one.block {
+					t.Errorf("status.provider = %q, want %q", written.Status.Provider, one.block)
+				}
+			})
+		}
+	}
+}
+
+// A spec that names no block serves nothing and reaches nothing, and the
+// check says so instead of calling an address of its own.
+func TestTheCheckOfASpecWithNoBlock(t *testing.T) {
+	cluster := newFakeCluster()
+	provider := providerOfBlock("empty", "")
+	cluster.providers["empty"] = provider
+	operator := providerOperator(t, cluster,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Errorf("the check called %s, want no call at all", r.URL.Path)
+		}))
+
+	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
+
+	ready := conditionNamed(cluster.heldProvider("empty").Status.Conditions, conditionReady)
+	if ready.Status != ConditionFalse || ready.Reason != reasonNoSecret {
+		t.Errorf("Ready = %s/%s, want %s/%s", ready.Status, ready.Reason, ConditionFalse, reasonNoSecret)
+	}
+}
+
 // the facts a provider reports are the operator's table for its block,
 // narrowed by the facts its spec names, and none at all while its check has
 // not reached it.
@@ -96,7 +186,7 @@ func TestProviderStatusReportsTheFactsItServesNow(t *testing.T) {
 		{name: "a spec narrows the table to what it names",
 			facts: []string{factIdentity}, status: http.StatusOK, want: []string{factIdentity}},
 		{name: "a spec that names a fact outside the table serves none",
-			facts: []string{"poster"}, status: http.StatusOK},
+			facts: []string{factDiscart}, status: http.StatusOK},
 		{name: "a provider the check cannot reach serves none",
 			facts: []string{factIdentity}, status: http.StatusUnauthorized},
 	}
@@ -166,8 +256,8 @@ func checkedProvider(name string, facts []string, reason string) *MetadataProvid
 func TestProviderSetServesTheFirstReadyProvider(t *testing.T) {
 	set := providerSet{
 		libraryKey("house", "tmdb"):   checkedProvider("tmdb", []string{factIdentity}, reasonReachable),
-		libraryKey("house", "fanart"): checkedProvider("fanart", []string{factIdentity}, reasonRefused),
-		libraryKey("house", "art"):    checkedProvider("art", []string{"poster"}, reasonReachable),
+		libraryKey("house", "second"): checkedProvider("second", []string{factIdentity}, reasonRefused),
+		libraryKey("house", "art"):    checkedProvider("art", []string{factPoster}, reasonReachable),
 	}
 
 	cases := []struct {
@@ -177,7 +267,7 @@ func TestProviderSetServesTheFirstReadyProvider(t *testing.T) {
 	}{
 		{name: "no sources at all"},
 		{name: "a source that does not exist", sources: []string{"tvdb"}},
-		{name: "a source that is not ready", sources: []string{"fanart"}},
+		{name: "a source that is not ready", sources: []string{"second"}},
 		{name: "a source that serves another fact", sources: []string{"art"}},
 		{name: "the first ready source that serves it", sources: []string{"art", "tmdb"}, want: "tmdb"},
 	}
@@ -367,8 +457,7 @@ func TestProviderCheckOnAProviderThatDoesNotAnswer(t *testing.T) {
 		Type: conditionReady, Status: ConditionFalse, Reason: reasonNoSecret,
 	}}
 	cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
-	operator := testOperator(t, cluster)
-	operator.providerBase = "http://127.0.0.1:1"
+	operator := operatorOnProviderBase(testOperator(t, cluster), "http://127.0.0.1:1")
 
 	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 

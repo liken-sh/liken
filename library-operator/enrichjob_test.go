@@ -18,16 +18,22 @@ func readyProvider(name, namespace string, facts ...string) *MetadataProvider {
 	return provider
 }
 
-// the enricher Job of one Library, built the way a pass builds it.
-func testEnrichJob(library *Library, provider *MetadataProvider, path string) *Job {
-	return buildEnrichJob(library, provider, enrichJobName(library.Metadata.Name), path,
+// the enricher Job of one Library, built the way a pass builds it. Every
+// provider named here is a source of the Library, in the order given.
+func testEnrichJob(library *Library, path string, providers ...*MetadataProvider) *Job {
+	set := providerSet{}
+	for _, provider := range providers {
+		set[libraryKey(provider.Metadata.Namespace, provider.Metadata.Name)] = provider
+		library.Spec.Sources = append(library.Spec.Sources, provider.Metadata.Name)
+	}
+	return buildEnrichJob(library, set, enrichJobName(library.Metadata.Name), path,
 		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 
 // the pod holds the catalog agent, then the two facts that edit the
 // sidecar in order, then the container that writes the runs row.
 func TestEnrichJobHoldsItsContainersInOrder(t *testing.T) {
-	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 
 	spec := job.Spec.Template.Spec
 	names := []string{}
@@ -51,7 +57,7 @@ func TestEnrichJobHoldsItsContainersInOrder(t *testing.T) {
 // each init container after the agent runs the facts role and names the one
 // fact it fills, and the enrich container runs its own role.
 func TestEnrichJobNamesTheFactsOfEachContainer(t *testing.T) {
-	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 
 	spec := job.Spec.Template.Spec
 	for _, container := range spec.InitContainers[1:] {
@@ -74,7 +80,7 @@ func TestEnrichJobNamesTheFactsOfEachContainer(t *testing.T) {
 // the enricher writes the volume, where a scanner reads it, and its
 // agent runs on a claim of the Library's own.
 func TestEnrichJobMountsTheVolumeReadWrite(t *testing.T) {
-	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 
 	spec := job.Spec.Template.Spec
 	for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
@@ -101,7 +107,7 @@ func TestEnrichJobMountsTheVolumeReadWrite(t *testing.T) {
 // the key reaches the identity container through a secretKeyRef, so no
 // container reads the API server.
 func TestEnrichJobPassesTheKeyThroughASecretKeyRef(t *testing.T) {
-	job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), "")
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 
 	identity := job.Spec.Template.Spec.InitContainers[2]
 	var reference *SecretKeySelector
@@ -118,10 +124,41 @@ func TestEnrichJobPassesTheKeyThroughASecretKeyRef(t *testing.T) {
 	}
 }
 
+// Every facts container carries every key the Library's sources reach, so a
+// container that asks a second provider needs no wiring of its own. The
+// catalog agent carries none, because it asks no provider.
+func TestEnrichJobCarriesEveryProviderKeyIntoEveryFactsContainer(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "",
+		readyProvider("tmdb", "house", factIdentity),
+		providerOfBlock("omdb", providerBlockOMDb))
+
+	spec := job.Spec.Template.Spec
+	for _, container := range spec.InitContainers[1:] {
+		keys := map[string]*SecretKeySelector{}
+		for _, variable := range container.Env {
+			if variable.ValueFrom != nil && variable.ValueFrom.SecretKeyRef != nil {
+				keys[variable.Name] = variable.ValueFrom.SecretKeyRef
+			}
+		}
+		if len(keys) != 2 || keys[tmdbTokenVariable] == nil {
+			t.Errorf("%s reads %v, want the key of each account", container.Name, keys)
+		}
+		if reference := keys[providerTokenVariable(providerBlockOMDb)]; reference == nil ||
+			reference.Name != "omdb-key" {
+			t.Errorf("%s reads %+v for OMDb, want the account's own Secret", container.Name, reference)
+		}
+	}
+	for _, variable := range spec.InitContainers[0].Env {
+		if variable.ValueFrom != nil && variable.ValueFrom.SecretKeyRef != nil {
+			t.Errorf("the catalog agent reads %s, want no provider key", variable.Name)
+		}
+	}
+}
+
 // a Library whose sources name no ready provider that serves identity
 // still runs the probe.
 func TestEnrichJobWithoutAProviderRunsTheProbeAlone(t *testing.T) {
-	job := testEnrichJob(studioMovies(), nil, "")
+	job := testEnrichJob(studioMovies(), "")
 
 	spec := job.Spec.Template.Spec
 	if len(spec.InitContainers) != 2 || spec.InitContainers[1].Name != factProbe {
@@ -138,7 +175,7 @@ func TestEnrichJobCarriesTheJobEnvironment(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			job := testEnrichJob(studioMovies(), readyProvider("tmdb", "house", factIdentity), one.path)
+			job := testEnrichJob(studioMovies(), one.path, readyProvider("tmdb", "house", factIdentity))
 
 			spec := job.Spec.Template.Spec
 			for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
@@ -182,7 +219,7 @@ func readsTheJobName(container Container) bool {
 // the Job belongs to its Library, runs to completion, and stays for an
 // hour after it finishes.
 func TestEnrichJobBelongsToItsLibrary(t *testing.T) {
-	job := testEnrichJob(studioMovies(), nil, "")
+	job := testEnrichJob(studioMovies(), "")
 
 	if job.Metadata.Name != "movies-enrich" || job.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Library's own enricher", job.Metadata)

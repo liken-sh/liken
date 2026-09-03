@@ -160,8 +160,7 @@ func (o *operator) createEnrichJob(ctx context.Context, library *Library, catalo
 	if err := o.standEnrichClaim(ctx, library, catalog); err != nil {
 		return err
 	}
-	provider := providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity)
-	job := buildEnrichJob(library, provider, name, path,
+	job := buildEnrichJob(library, providers, name, path,
 		o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
 	job.Metadata.Annotations = marks
 

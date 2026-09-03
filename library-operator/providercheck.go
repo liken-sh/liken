@@ -15,12 +15,40 @@ import (
 	"time"
 )
 
-// The endpoint the check calls. It is the cheapest authenticated read TMDb
-// serves, so the check costs one request and names no title.
-const (
-	defaultProviderBase   = "https://api.themoviedb.org"
-	tmdbConfigurationPath = "/3/configuration"
-)
+// The one call each provider answers for the check: the path, and how the key
+// travels on it. A provider that takes no key authorizes nothing. The call is
+// the cheapest read each provider serves, so a pass costs one request per
+// account.
+type providerReach struct {
+	path      string
+	authorize func(*http.Request, string)
+}
+
+var providerReaches = map[string]providerReach{
+	providerBlockTMDb:   {path: tmdbConfigurationPath, authorize: authorizeTMDb},
+	providerBlockOMDb:   {path: omdbCheckPath, authorize: authorizeParameter(omdbAPIKeyParameter)},
+	providerBlockFanart: {path: fanartCheckPath, authorize: authorizeParameter(fanartAPIKeyParam)},
+	providerBlockTVmaze: {path: tvmazeCheckPath},
+}
+
+// The address of each provider the check calls, which a test replaces with a
+// server of its own.
+func defaultProviderBases() map[string]string {
+	return map[string]string{
+		providerBlockTMDb:   tmdbAPIBase,
+		providerBlockOMDb:   omdbAPIBase,
+		providerBlockFanart: fanartAPIBase,
+		providerBlockTVmaze: tvmazeAPIBase,
+	}
+}
+
+// A key that travels as a query parameter, in the shape the check calls an
+// authorization in.
+func authorizeParameter(name string) func(*http.Request, string) {
+	return func(request *http.Request, key string) {
+		queryKey(name, key)(request)
+	}
+}
 
 // The check must not hold a pass open. It is a variable so a test drives a
 // short one.
@@ -94,7 +122,10 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 // serves right now, so a provider that is not Ready reports none, and the
 // list reads as what this provider can be asked for today.
 func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, now time.Time) MetadataProviderStatus {
-	status := MetadataProviderStatus{LastRefusal: provider.Status.LastRefusal}
+	status := MetadataProviderStatus{
+		LastRefusal: provider.Status.LastRefusal,
+		Provider:    provider.block(),
+	}
 	if verdict.reason == reasonRefused {
 		status.LastRefusal = now
 	}
@@ -117,55 +148,74 @@ func deriveProviderStatus(provider *MetadataProvider, verdict providerVerdict, n
 // refusing the key, no answer at all is Unreachable, and every other status
 // leaves the last verdict.
 func (o *operator) reachProvider(ctx context.Context, provider *MetadataProvider) (providerVerdict, error) {
-	if provider.Spec.TMDb == nil {
+	block := provider.block()
+	if block == "" {
 		return providerVerdict{reason: reasonNoSecret,
-			message: "the provider names no tmdb block"}, nil
+			message: "the provider names no block"}, nil
 	}
-	reference := provider.Spec.TMDb.SecretRef
-	secret, err := GetSecret(ctx, o.client, provider.Metadata.Namespace, reference.Name)
-	if errors.Is(err, ErrNotFound) {
-		return providerVerdict{reason: reasonNoSecret,
-			message: fmt.Sprintf("the Secret %s does not exist in namespace %s",
-				reference.Name, provider.Metadata.Namespace)}, nil
-	}
-	if err != nil {
-		return providerVerdict{}, err
-	}
-	key := string(secret.Data[reference.secretKey()])
-	if key == "" {
-		return providerVerdict{reason: reasonNoSecret,
-			message: fmt.Sprintf("the Secret %s holds no %s", reference.Name, reference.secretKey())}, nil
+	// A provider that takes no key skips the Secret, because TVmaze serves its
+	// free tier to anyone.
+	key, verdict, err := o.providerKey(ctx, provider)
+	if verdict.reason != "" || err != nil {
+		return verdict, err
 	}
 
-	status, err := o.askProvider(ctx, key)
+	status, err := o.askProvider(ctx, block, key)
 	if err != nil {
 		return providerVerdict{reason: reasonUnreachable, message: err.Error()}, nil
 	}
 	switch status {
 	case http.StatusOK:
 		return providerVerdict{reason: reasonReachable,
-			message: "the provider answered the configuration call"}, nil
+			message: "the provider answered the check call"}, nil
 	case http.StatusUnauthorized:
 		return providerVerdict{reason: reasonRefused,
-			message: "the provider refused the key in " + reference.Name}, nil
+			message: "the provider refused the key of " + block}, nil
 	}
 	return providerVerdict{}, fmt.Errorf("the provider answered %d", status)
+}
+
+// The key of one provider, out of the Secret its block names. An empty key
+// and an empty verdict together are a provider that needs none.
+func (o *operator) providerKey(ctx context.Context, provider *MetadataProvider) (string, providerVerdict, error) {
+	reference := provider.secretRef()
+	if reference == nil {
+		return "", providerVerdict{}, nil
+	}
+	secret, err := GetSecret(ctx, o.client, provider.Metadata.Namespace, reference.Name)
+	if errors.Is(err, ErrNotFound) {
+		return "", providerVerdict{reason: reasonNoSecret,
+			message: fmt.Sprintf("the Secret %s does not exist in namespace %s",
+				reference.Name, provider.Metadata.Namespace)}, nil
+	}
+	if err != nil {
+		return "", providerVerdict{}, err
+	}
+	key := string(secret.Data[reference.secretKey()])
+	if key == "" {
+		return "", providerVerdict{reason: reasonNoSecret,
+			message: fmt.Sprintf("the Secret %s holds no %s", reference.Name, reference.secretKey())}, nil
+	}
+	return key, providerVerdict{}, nil
 }
 
 // The request carries a timeout of its own, so a provider that stops
 // answering costs the pass its check and no more. The key travels in the form
 // its shape names.
-func (o *operator) askProvider(ctx context.Context, key string) (int, error) {
+func (o *operator) askProvider(ctx context.Context, block, key string) (int, error) {
 	asking, done := context.WithTimeout(ctx, providerCheckTimeout)
 	defer done()
 
+	reach := providerReaches[block]
 	request, err := http.NewRequestWithContext(asking, http.MethodGet,
-		o.providerBase+tmdbConfigurationPath, nil)
+		o.providerBases[block]+reach.path, nil)
 	if err != nil {
 		return 0, err
 	}
 	request.Header.Set("Accept", jsonContentType)
-	authorizeTMDb(request, key)
+	if reach.authorize != nil {
+		reach.authorize(request, key)
+	}
 
 	response, err := o.providerClient.Do(request)
 	if err != nil {

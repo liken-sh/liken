@@ -9,59 +9,26 @@ package main
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 )
 
 // The provider's own address, which only a test replaces.
 var tmdbAPIBase = "https://api.themoviedb.org"
 
-// The cooldown a 429 with no Retry-After header takes.
-const tmdbCooldown = 10 * time.Second
-
-// How many times one request goes out, so a provider that answers 429 without
-// end fails the attempt instead of holding the container.
-const tmdbAttempts = 3
-
-// One request's bound, so a provider that stops answering cannot hold the
-// container open.
-var tmdbRequestTimeout = 30 * time.Second
-
-// One account with TMDb, and the wait a cooldown takes, which a test replaces
-// so no test sleeps.
+// One account with TMDb.
 type tmdbClient struct {
-	base string
-	key  string
-	http *http.Client
-	wait func(context.Context, time.Duration) error
+	providerRequests
+	key string
 }
 
 func newTMDbClient(base, key string) *tmdbClient {
-	return &tmdbClient{
-		base: base,
-		key:  key,
-		http: &http.Client{Timeout: tmdbRequestTimeout},
-		wait: waitFor,
-	}
-}
-
-// The wait ends on the context as well as on the clock, so a container that
-// is told to stop does not sleep out its cooldown first.
-func waitFor(ctx context.Context, cooldown time.Duration) error {
-	timer := time.NewTimer(cooldown)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	client := &tmdbClient{key: key}
+	client.providerRequests = newProviderRequests(providerBlockTMDb, base,
+		func(request *http.Request) { authorizeTMDb(request, client.key) })
+	return client
 }
 
 // One search result, with the movie fields and the series fields together,
@@ -160,54 +127,6 @@ func (c *tmdbClient) runtime(ctx context.Context, kind string, id int) (time.Dur
 	return answer.runtime(), nil
 }
 
-// The whole retry rule: a 429 waits the header's own cooldown, or ten seconds
-// where it names none, and the request goes out again.
-func (c *tmdbClient) get(ctx context.Context, path string, query url.Values, into any) error {
-	for attempt := 1; ; attempt++ {
-		status, cooldown, body, err := c.send(ctx, path, query)
-		if err != nil {
-			return err
-		}
-		if status == http.StatusTooManyRequests && attempt < tmdbAttempts {
-			if err := c.wait(ctx, cooldown); err != nil {
-				return err
-			}
-			continue
-		}
-		if status < 200 || status > 299 {
-			return fmt.Errorf("tmdb %s: %d: %s", path, status, strings.TrimSpace(string(body)))
-		}
-		return json.Unmarshal(body, into)
-	}
-}
-
-// The send builds the request and lets the key's own shape decide the form it
-// travels in.
-func (c *tmdbClient) send(ctx context.Context, path string, query url.Values) (int, time.Duration, []byte, error) {
-	address := c.base + path
-	if len(query) > 0 {
-		address += "?" + query.Encode()
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	request.Header.Set("Accept", "application/json")
-	authorizeTMDb(request, c.key)
-
-	response, err := c.http.Do(request)
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	defer drain(response.Body)
-
-	body, err := io.ReadAll(io.LimitReader(response.Body, tmdbAnswerLimit))
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	return response.StatusCode, retryAfter(response.Header.Get("Retry-After")), body, nil
-}
-
 // TMDb takes two credential kinds. A v3 API key is 32 hex characters and
 // travels as the api_key query parameter. Anything else is a v4 read access
 // token and travels as a bearer token. TMDb refuses a v3 key sent as a bearer
@@ -217,23 +136,12 @@ const tmdbV3KeyLength = 32
 
 func authorizeTMDb(request *http.Request, key string) {
 	if _, err := hex.DecodeString(key); err == nil && len(key) == tmdbV3KeyLength {
-		query := request.URL.Query()
-		query.Set("api_key", key)
-		request.URL.RawQuery = query.Encode()
+		queryKey("api_key", key)(request)
 		return
 	}
 	request.Header.Set("Authorization", "Bearer "+key)
 }
 
-// One answer's bound, so a provider that streams without end cannot grow the
-// container.
-const tmdbAnswerLimit = 1 << 20
-
-// An unreadable or absent header takes the fixed cooldown.
-func retryAfter(header string) time.Duration {
-	seconds, err := strconv.Atoi(strings.TrimSpace(header))
-	if err != nil || seconds <= 0 {
-		return tmdbCooldown
-	}
-	return time.Duration(seconds) * time.Second
-}
+// The cheapest authenticated read TMDb serves, so the operator's check costs
+// one request and names no title.
+const tmdbConfigurationPath = "/3/configuration"

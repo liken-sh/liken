@@ -66,10 +66,10 @@ type operator struct {
 	bus            *Bus
 	reports        *reports
 
-	// The provider endpoint every reachability check calls and the client it
-	// calls through, as fields so a test points them at a server of its own and
-	// no test reaches the internet.
-	providerBase   string
+	// The provider endpoint every reachability check calls, one per provider
+	// block, and the client it calls through, as fields so a test points them
+	// at a server of its own and no test reaches the internet.
+	providerBases  map[string]string
 	providerClient *http.Client
 
 	// The namespace this operator runs in, which is what the
@@ -125,7 +125,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 		plays:          newPlayRequests(wake),
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
-		providerBase:   defaultProviderBase,
+		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
 	}
 	// The operator names no will. Its one publish is the empty

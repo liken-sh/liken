@@ -38,8 +38,11 @@ type MetadataProviderList struct {
 // operator's table holds for the block, so a person who wants all of one
 // provider names the block alone.
 type MetadataProviderSpec struct {
-	TMDb  *ProviderTMDb `json:"tmdb,omitempty"`
-	Facts []string      `json:"facts,omitempty"`
+	TMDb   *ProviderTMDb   `json:"tmdb,omitempty"`
+	OMDb   *ProviderOMDb   `json:"omdb,omitempty"`
+	Fanart *ProviderFanart `json:"fanart,omitempty"`
+	TVmaze *ProviderTVmaze `json:"tvmaze,omitempty"`
+	Facts  []string        `json:"facts,omitempty"`
 }
 
 // The TMDb block names the Secret alone. The endpoint is TMDb's own, and the
@@ -47,6 +50,20 @@ type MetadataProviderSpec struct {
 type ProviderTMDb struct {
 	SecretRef SecretKeyRef `json:"secretRef"`
 }
+
+// The OMDb block names the Secret that holds the key of an OMDb account.
+type ProviderOMDb struct {
+	SecretRef SecretKeyRef `json:"secretRef"`
+}
+
+// The Fanart.tv block names the Secret that holds the project key.
+type ProviderFanart struct {
+	SecretRef SecretKeyRef `json:"secretRef"`
+}
+
+// The TVmaze block is empty, because TVmaze serves its free tier with no
+// account. The block alone says that the operator may ask it.
+type ProviderTVmaze struct{}
 
 // One key in one Secret of the provider's own namespace.
 type SecretKeyRef struct {
@@ -66,11 +83,14 @@ func (r SecretKeyRef) secretKey() string {
 	return defaultProviderSecretKey
 }
 
-// What the operator reports on a provider: the Ready condition its one check
-// per pass produced, the facts the provider serves right now, and when the
-// provider last refused the key.
+// What the operator reports on a provider: the block this account names,
+// which the PROVIDER column shows because no printer column can read which
+// block a spec holds; the Ready condition its one check per pass produced;
+// the facts the provider serves right now; and when the provider last refused
+// the key.
 type MetadataProviderStatus struct {
 	Conditions  []Condition `json:"conditions,omitempty"`
+	Provider    string      `json:"provider,omitempty"`
 	Facts       []string    `json:"facts,omitempty"`
 	LastRefusal time.Time   `json:"lastRefusal,omitzero"`
 }

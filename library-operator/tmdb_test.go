@@ -155,8 +155,8 @@ func TestATooManyRequestsAnswerIsACooldownAndARetry(t *testing.T) {
 		want       time.Duration
 	}{
 		{name: "the header names the wait", retryAfter: "3", want: 3 * time.Second},
-		{name: "the header names none", retryAfter: "", want: tmdbCooldown},
-		{name: "the header is not a number", retryAfter: "Wed, 21 Oct 2026 07:28:00 GMT", want: tmdbCooldown},
+		{name: "the header names none", retryAfter: "", want: providerCooldown},
+		{name: "the header is not a number", retryAfter: "Wed, 21 Oct 2026 07:28:00 GMT", want: providerCooldown},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -181,12 +181,12 @@ func TestATooManyRequestsAnswerIsACooldownAndARetry(t *testing.T) {
 
 func TestAProviderThatOnlyAnswersTooManyRequestsFails(t *testing.T) {
 	client, fake := newFakeTMDb(t, nil)
-	fake.tooMany = tmdbAttempts + 1
+	fake.tooMany = providerAttempts + 1
 
 	if _, err := client.search(t.Context(), libraryKindMovies, "The Thing", 1982); err == nil {
 		t.Fatal("the search reported no error, want one")
 	}
-	if len(fake.cooldowns) != tmdbAttempts-1 {
+	if len(fake.cooldowns) != providerAttempts-1 {
 		t.Errorf("cooldowns = %d, want one less than the attempts", len(fake.cooldowns))
 	}
 }
