@@ -13,9 +13,9 @@ import (
 	"strings"
 )
 
-// PROSE: the art facts this image can fill, in the order the art container
-// names them in LIBRARY_FACTS: the title's own art first, then the season's,
-// then the episode's.
+// The art facts this image can fill, in the order the art container names
+// them in LIBRARY_FACTS: the title's own art first, then the season's, then
+// the episode's.
 var artFactNames = []string{
 	factPoster, factBackdrop, factLogo, factClearart, factBanner,
 	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
@@ -102,10 +102,9 @@ func episodeThumbName(video string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base)) + "-thumb.jpg"
 }
 
-// PROSE: the file one gap writes, relative to the folder that holds it. Say
-// that the facts of a title key on the file name itself, that the two season
-// facts key on the season number, and that the episode thumbnail keys on the
-// episode file it goes beside.
+// The file one gap writes, relative to the folder that holds it. The facts of
+// a title key on the file name itself, the two season facts key on the season
+// number, and the episode thumbnail keys on the episode file it goes beside.
 func (t artType) fileFor(gap artGap) string {
 	switch t.fact {
 	case factSeasonPoster, factSeasonBanner:

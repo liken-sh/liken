@@ -58,8 +58,8 @@ func (a *tvmazeArtAnswerer) candidates(ctx context.Context, fact string, gap art
 	return tvmazeCandidates(artworkOfType(images, kind)), nil
 }
 
-// PROSE: one list as the choice reads it. State the two things TVmaze does not
-// give: an image carries no language and no vote, so the order is the whole
+// One list as the choice reads it. TVmaze gives two things less than the
+// others: an image carries no language and no vote, so the order is the whole
 // choice, and the image TVmaze marks as the main one leads the list.
 func tvmazeCandidates(images []tvmazeArtwork) []artCandidate {
 	candidates := []artCandidate{}

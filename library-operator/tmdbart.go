@@ -45,10 +45,10 @@ func (a *tmdbArtAnswerer) settings(ctx context.Context) (tmdbConfiguration, erro
 	return configuration, nil
 }
 
-// PROSE: the images of one gap, from the endpoint its fact reads, with the
-// address of each one built from the size that fact asks for. State that a
-// fact TMDb keeps no list for answers nothing, and that the settings are read
-// after the images, so a title the provider has no image for costs one call.
+// The images of one gap, from the endpoint its fact reads, with the address
+// of each one built from the size that fact asks for. A fact TMDb keeps no
+// list for answers nothing. The settings are read after the images, so a
+// title the provider has no image for costs one call.
 func (a *tmdbArtAnswerer) candidates(ctx context.Context, fact string, gap artGap,
 	title titleRef) ([]artCandidate, error) {
 	art := artTypes[fact]
