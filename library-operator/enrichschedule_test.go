@@ -6,6 +6,7 @@ package main
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 )
@@ -225,24 +226,62 @@ func TestWebhookChainRunsScanEnrichRescan(t *testing.T) {
 		report, jobs, providers); err != nil {
 		t.Fatal(err)
 	}
-	if got := chainJobsHeld(cluster, chain); got != 2 {
-		t.Errorf("the chain stood %d Jobs of its own, want the enrich and the rescan", got)
+	if got := chainJobsStood(cluster, chain); len(got) != 2 {
+		t.Errorf("the chain stood %v, want the enrich and the rescan", got)
 	}
 	if cluster.heldJob("house", standingEnrichJobName("movies", report.Runs)) == nil {
 		t.Error("the open gap stood no enricher for the whole Library")
 	}
 }
 
-// how many Jobs of one chain the cluster holds, so a test reads that a
-// chain ran its stages once each.
-func chainJobsHeld(cluster *fakeCluster, chain string) int {
-	held := 0
+// the Jobs of one chain the cluster holds, in name order, so a test reads
+// which stages a pass stood.
+func chainJobsStood(cluster *fakeCluster, chain string) []string {
+	stood := []string{}
 	for _, job := range cluster.heldJobs() {
 		if job.Metadata.Annotations[chainAnnotation] == chain {
-			held++
+			stood = append(stood, job.Metadata.Name)
 		}
 	}
-	return held
+	return stood
+}
+
+// the TTL takes a chain's finished stages one at a time, and the pass reads
+// the stage that is left: an enrich with no scan behind it still gets its
+// rescan, and a rescan alone is a chain that is over.
+func TestChainReadsTheStageThatIsLeft(t *testing.T) {
+	folder := "/library/movies/Arrival (2016)"
+	chain := newChain(folder, testNow)
+	cases := []struct {
+		name   string
+		stage  string
+		worker string
+		want   []string
+	}{
+		{name: "the enricher alone", stage: chainStageEnrich, worker: workerEnrich,
+			want: []string{chainJobName("movies", chainStageRescan, chain)}},
+		{name: "the rescan alone", stage: chainStageRescan, worker: workerScan},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			library, providers := libraryWithProvider()
+			boundHouse(cluster)
+			operator := testOperator(t, cluster)
+			report := &libraryReport{Gaps: map[string]int{concernIdentity: 1}, Runs: walkedRuns(testNow)}
+			jobs := []Job{finishedJob(chainJobName("movies", one.stage, chain), "house",
+				workerLabels("movies", one.worker), chainMarks(chain, folder, one.stage))}
+
+			if err := operator.enrich(t.Context(), library, testNamespaceCatalog(),
+				report, jobs, providers); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := chainJobsStood(cluster, chain); !slices.Equal(got, one.want) {
+				t.Errorf("the chain stood %v, want %v", got, one.want)
+			}
+		})
+	}
 }
 
 // a folder whose scan filled every gap ends the chain there, with no

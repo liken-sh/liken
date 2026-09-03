@@ -11,7 +11,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"time"
 )
 
 // The group the Job and the CronJob belong to.
@@ -50,18 +53,20 @@ type JobSpec struct {
 	Template                PodTemplateSpec `json:"template"`
 }
 
-// The counts the Job controller keeps: pods running now, pods
-// that exited zero, and pods that failed.
-//
-// JobStatus is what the Job controller reports: the counts of pods in
-// each state, and the conditions, which are its verdict on the whole
-// Job. The counts alone cannot say whether a Job is over. A Job
+// JobStatus is what the Job controller reports: the counts of pods in each
+// state, the time it ended the Job, and the conditions, which are its verdict
+// on the whole Job. The counts alone cannot say whether a Job is over. A Job
 // between the pods of its backoff counts no active pod and is not over.
+//
+// The completion time is the controller's own stamp on a Job whose pod exited
+// zero. The early delete below measures its grace from that stamp, not from
+// the pod's exit, so the two clocks are the controller's.
 type JobStatus struct {
-	Active     int            `json:"active,omitempty"`
-	Succeeded  int            `json:"succeeded,omitempty"`
-	Failed     int            `json:"failed,omitempty"`
-	Conditions []JobCondition `json:"conditions,omitempty"`
+	Active         int            `json:"active,omitempty"`
+	Succeeded      int            `json:"succeeded,omitempty"`
+	Failed         int            `json:"failed,omitempty"`
+	CompletionTime time.Time      `json:"completionTime,omitzero"`
+	Conditions     []JobCondition `json:"conditions,omitempty"`
 }
 
 // JobCondition is one verdict of the Job controller, in the shape
@@ -84,11 +89,20 @@ func (j *Job) active() bool { return j.Status.Active > 0 }
 // finished is true when the controller has ended the Job, and not
 // before. A Job that waits out its backoff with no pod is unfinished.
 func (j *Job) finished() bool {
+	return j.holds(jobComplete) || j.holds(jobFailed)
+}
+
+// succeeded is true when the controller ended the Job on a pod that exited
+// zero. That is the one outcome the operator deletes early. A failed Job
+// stays for its TTL, because a person reads its logs.
+func (j *Job) succeeded() bool { return j.holds(jobComplete) }
+
+// holds is true when the Job carries one condition of the given type with
+// status True. That is how batch/v1 writes a verdict it stands behind. A
+// condition with status False or Unknown is not a verdict.
+func (j *Job) holds(conditionType string) bool {
 	for _, condition := range j.Status.Conditions {
-		if condition.Status != ConditionTrue {
-			continue
-		}
-		if condition.Type == jobComplete || condition.Type == jobFailed {
+		if condition.Type == conditionType && condition.Status == ConditionTrue {
 			return true
 		}
 	}
@@ -185,6 +199,36 @@ func DeleteJob(ctx context.Context, c *Client, namespace, name string) error {
 		return nil
 	}
 	return err
+}
+
+// How long a succeeded worker Job and its pod stay before the pass deletes
+// them. The Job's own TTL is the hour a failed Job keeps for a person to
+// read, and it is the backstop when the operator is down.
+const succeededJobGrace = 5 * time.Minute
+
+// retireSucceededJobs deletes every worker Job that exited zero longer than
+// the grace ago. The pass acts on the list it already read, so a Job it
+// deletes still decides this pass and is gone from the next one. A Job of a
+// webhook chain stays for its TTL, whatever its stage: the chain reads its
+// stages out of the Job list, and a rescan deleted while its enrich Job
+// stands would be created again every pass. A delete that fails is reported
+// and the pass carries on, because the next pass reads the Job again.
+func (o *operator) retireSucceededJobs(ctx context.Context, jobs []Job, now time.Time) {
+	cutoff := now.Add(-succeededJobGrace)
+	for index := range jobs {
+		job := &jobs[index]
+		if !job.succeeded() || job.Status.CompletionTime.IsZero() ||
+			!job.Status.CompletionTime.Before(cutoff) {
+			continue
+		}
+		if job.Metadata.Annotations[chainAnnotation] != "" {
+			continue
+		}
+		if err := DeleteJob(ctx, o.client, job.Metadata.Namespace, job.Metadata.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "retiring the finished job %s/%s: %v\n",
+				job.Metadata.Namespace, job.Metadata.Name, err)
+		}
+	}
 }
 
 func GetCronJob(ctx context.Context, c *Client, namespace, name string) (*CronJob, error) {

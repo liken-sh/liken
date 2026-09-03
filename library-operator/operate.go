@@ -335,6 +335,9 @@ func (o *operator) pass() {
 	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
 	now := time.Now().UTC()
+	// The succeeded Jobs of every namespace go first, so what a person sees in
+	// kubectl get pods is what runs now and what failed.
+	o.retireSucceededJobs(ctx, jobs.Items, now)
 	checked := o.checkProviders(ctx, providers.Items, now)
 
 	live := make(map[string]bool, len(libraries.Items))

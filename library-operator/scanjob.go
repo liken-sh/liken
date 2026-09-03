@@ -12,8 +12,11 @@ import (
 	"time"
 )
 
-// How many pods Kubernetes replaces before the Job itself fails,
-// and how long a finished Job stays for a person to read its logs.
+// How many pods Kubernetes replaces before the Job itself fails, and how long
+// a finished Job stays for a person to read its logs. The TTL is the hour a
+// failed Job keeps. A succeeded Job goes sooner, because the operator deletes
+// it after succeededJobGrace, and the TTL is the backstop when the operator
+// is down.
 const (
 	scanBackoffLimit = 2
 	scanJobTTL       = 3600

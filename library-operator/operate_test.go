@@ -646,3 +646,76 @@ func TestPassServesTheHeldWebhookPaths(t *testing.T) {
 		t.Error("a path is held for a Library the collection does not hold")
 	}
 }
+
+// the status the Job controller leaves on a Job whose pod exited zero, with
+// the time it stamped when it ended the Job.
+func succeededStatus(at time.Time) JobStatus {
+	return JobStatus{Succeeded: 1, CompletionTime: at,
+		Conditions: []JobCondition{{Type: jobComplete, Status: ConditionTrue}}}
+}
+
+// the status of a Job that gave up after its backoff, which is the outcome a
+// person reads the logs of.
+func failedStatus(at time.Time) JobStatus {
+	return JobStatus{Failed: 3, CompletionTime: at,
+		Conditions: []JobCondition{{Type: jobFailed, Status: ConditionTrue}}}
+}
+
+// a worker Job that exited zero goes once the grace is over. A Job inside the
+// grace, a Job that failed, and a Job of a webhook chain stay where a person
+// and the chain can read them.
+func TestPassRetiresTheJobsThatSucceeded(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name   string
+		status JobStatus
+		marks  map[string]string
+		want   bool
+	}{
+		{name: "succeeded before the grace", status: succeededStatus(now.Add(-10 * time.Minute))},
+		{name: "succeeded inside the grace", status: succeededStatus(now.Add(-time.Minute)), want: true},
+		{name: "failed before the grace", status: failedStatus(now.Add(-10 * time.Minute)), want: true},
+		{name: "a chain's stage before the grace", status: succeededStatus(now.Add(-10 * time.Minute)),
+			marks: chainMarks("c1", "/library/movies/Arrival (2016)", chainStageRescan), want: true},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			boundHouse(cluster)
+			job := houseJob("movies-scan-29380000", workerScan, one.status)
+			job.Metadata.Annotations = one.marks
+			cluster.holdJob(&job)
+			operator := testOperator(t, cluster)
+			// The report carries a scan run, so the pass starts no
+			// first walk and the Jobs it holds are this one alone.
+			operator.reports.fold("house", "movies", *scanRunReport())
+
+			operator.pass()
+
+			stands := cluster.heldJob("house", "movies-scan-29380000") != nil
+			if stands != one.want {
+				t.Errorf("the job stands: %v, want %v", stands, one.want)
+			}
+		})
+	}
+}
+
+// a delete the API server refuses is reported and costs the pass nothing
+// else, because the next pass reads the Job again.
+func TestPassCarriesOnPastAJobItCannotRetire(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	job := houseJob("movies-scan-29380000", workerScan,
+		succeededStatus(time.Now().UTC().Add(-10*time.Minute)))
+	cluster.holdJob(&job)
+	cluster.broken[http.MethodDelete+" "+jobsPath("house")+"/movies-scan-29380000"] =
+		http.StatusInternalServerError
+	operator := testOperator(t, cluster)
+	operator.reports.fold("house", "movies", *scanRunReport())
+
+	operator.pass()
+
+	if cluster.heldCronJob("house", "movies-scan") == nil {
+		t.Error("the pass stopped at the delete the API server refused")
+	}
+}
