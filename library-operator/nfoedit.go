@@ -45,7 +45,7 @@ type groupPlaces struct {
 // children of the named parent.
 func groupSpans(document []byte, group elementGroup) (groupPlaces, error) {
 	places := groupPlaces{parentEnd: -1, parentFirst: -1, parentIndentEnd: -1, rootEnd: -1, firstChild: -1}
-	decoder := xml.NewDecoder(bytes.NewReader(document))
+	decoder := lenientXML(document)
 	depth, target := 0, 2
 	inParent, parentRead := false, false
 	if group.parent != "" {

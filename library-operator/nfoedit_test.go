@@ -410,3 +410,23 @@ func TestAFactOfALaterWaveOwnsNoElement(t *testing.T) {
 		t.Error("a fact of a later wave reads an answer, want none")
 	}
 }
+
+// A sidecar Jellyfin wrote may hold a bare ampersand in a URL, and a strict
+// reader stops at it. The edit finds its group past that entity, and every
+// byte of the document outside the group stays, the entity included.
+func TestAGroupEditReadsPastABareAmpersand(t *testing.T) {
+	document := []byte("<tvshow>\n  <title>Harbor Lights</title>\n" +
+		"  <thumb>https://images.example/poster.jpg?size=large&id=42</thumb>\n" +
+		"  <plot>Old plot.</plot>\n</tvshow>\n")
+	edited, err := editElementGroup(document, nfoGroup(factOverview),
+		[][]byte{[]byte("<plot>New plot.</plot>")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(edited, []byte("&id=42</thumb>")) {
+		t.Errorf("the entity did not survive the edit:\n%s", edited)
+	}
+	if !bytes.Contains(edited, []byte("<plot>New plot.</plot>")) || bytes.Contains(edited, []byte("Old plot")) {
+		t.Errorf("the group was not replaced:\n%s", edited)
+	}
+}

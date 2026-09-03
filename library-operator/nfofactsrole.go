@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -275,7 +274,7 @@ func sidecarIDs(document []byte) providerIDs {
 		TVDBID    string        `xml:"tvdbid"`
 		ID        string        `xml:"id"`
 	}
-	if err := xml.Unmarshal(document, &read); err != nil {
+	if err := lenientXML(document).Decode(&read); err != nil {
 		return providerIDs{}
 	}
 	return providerIDs(collectProviders(read.UniqueIDs, read.IMDBID, read.TMDBID, read.TVDBID, read.ID))

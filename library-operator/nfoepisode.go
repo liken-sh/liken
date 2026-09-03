@@ -5,7 +5,6 @@ package main
 // so the reader streams the document and keeps every block it holds.
 
 import (
-	"bytes"
 	"encoding/xml"
 	"errors"
 	"io"
@@ -52,7 +51,7 @@ type episodeMeta struct {
 // first of those. A block that fails after one has been read keeps what was
 // read, so a truncated second block does not lose the first.
 func parseEpisodeNFOs(data []byte) ([]episodeMeta, error) {
-	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder := lenientXML(data)
 	var metas []episodeMeta
 	for {
 		var raw episodeNFO

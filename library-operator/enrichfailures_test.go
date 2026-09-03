@@ -150,7 +150,9 @@ func TestAnIdThatIsNotAMappingIsAnError(t *testing.T) {
 }
 
 func TestAnElementTheDecoderCannotSkipFailsTheEdit(t *testing.T) {
-	document := "<movie>\n  <fileinfo><a></fileinfo>\n</movie>\n"
+	// The document ends inside the element, which even a lenient reader
+	// cannot skip past.
+	document := "<movie>\n  <fileinfo><a>"
 
 	if _, err := editElement([]byte(document), xmlElement{name: "fileinfo"}, []byte("<NEW/>")); err == nil {
 		t.Error("the edit reported no error, want one")

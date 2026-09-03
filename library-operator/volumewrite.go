@@ -262,7 +262,7 @@ func editElement(document []byte, element xmlElement, replacement []byte) ([]byt
 // document the parser stops on counts as holding one here, so the edit itself
 // names the error and the bytes stay as they were.
 func hasRootElement(document []byte) bool {
-	decoder := xml.NewDecoder(bytes.NewReader(document))
+	decoder := lenientXML(document)
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
@@ -336,7 +336,7 @@ type documentSpans struct {
 // candidates, because every element the facts edit sits there.
 func elementSpans(document []byte, element xmlElement) (documentSpans, error) {
 	spans := documentSpans{start: -1, end: -1, rootEnd: -1, firstChild: -1}
-	decoder := xml.NewDecoder(bytes.NewReader(document))
+	decoder := lenientXML(document)
 	depth := 0
 	for {
 		before := int(decoder.InputOffset())

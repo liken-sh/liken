@@ -3,6 +3,7 @@ package main
 // The episode sidecar's reader is in nfoepisode.go.
 
 import (
+	"bytes"
 	"encoding/xml"
 	"strconv"
 	"strings"
@@ -174,7 +175,7 @@ type streamDetailsNFO struct {
 // row takes, and a movie and an episode sidecar answer the same way.
 func parseStreamNFO(data []byte) (streamInfo, error) {
 	var raw streamDetailsNFO
-	if err := xml.Unmarshal(data, &raw); err != nil {
+	if err := lenientXML(data).Decode(&raw); err != nil {
 		return streamInfo{}, err
 	}
 	return streamFrom(raw.FileInfo), nil
@@ -217,7 +218,7 @@ type movieMeta struct {
 // beside the sidecar.
 func parseMovieNFO(data []byte) (movieMeta, error) {
 	var raw movieNFO
-	if err := xml.Unmarshal(data, &raw); err != nil {
+	if err := lenientXML(data).Decode(&raw); err != nil {
 		return movieMeta{}, err
 	}
 	providers := collectProviders(raw.UniqueIDs, raw.IMDBID, raw.TMDBID, raw.TVDBID, raw.ID)
@@ -265,7 +266,7 @@ type seriesMeta struct {
 // parseSeriesNFO reads tvshow.nfo into a seriesMeta.
 func parseSeriesNFO(data []byte) (seriesMeta, error) {
 	var raw seriesNFO
-	if err := xml.Unmarshal(data, &raw); err != nil {
+	if err := lenientXML(data).Decode(&raw); err != nil {
 		return seriesMeta{}, err
 	}
 	providers := collectProviders(raw.UniqueIDs, raw.IMDBID, raw.TMDBID, raw.TVDBID, raw.ID)
@@ -445,4 +446,15 @@ func itemDuration(stream streamInfo, runtimeMinutes int) int64 {
 		return int64(runtimeMinutes) * 60
 	}
 	return 0
+}
+
+// Every read of a sidecar is lenient. Jellyfin writes a bare ampersand in a
+// URL, as in a thumb that names an image server's id, and the strict reader
+// stops at the first one, which failed a rating on a third of the series.
+// A lenient reader passes an unknown entity through as text, and every
+// element the facts read or edit is found the same way.
+func lenientXML(data []byte) *xml.Decoder {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.Strict = false
+	return decoder
 }
