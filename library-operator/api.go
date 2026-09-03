@@ -155,6 +155,14 @@ type LibrarySpec struct {
 	// anticipate every volume's layout.
 	Ignore []string `json:"ignore,omitempty"`
 
+	// One time per fact, by the names status.gaps uses: an attempt
+	// this fact made before that time does not count, so every title
+	// is in that fact's gap again and the fact asks a provider again
+	// and rewrites its own files and rows in place.
+	// Nothing is deleted, and a fact this map does not name is
+	// untouched.
+	Refresh map[string]time.Time `json:"refresh,omitempty"`
+
 	// How often the full walk runs.
 	Scan LibraryScan `json:"scan,omitzero"`
 

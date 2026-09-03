@@ -31,8 +31,8 @@ const (
 func trickplayGapSQL() string {
 	return `SELECT path, duration_ms FROM files ` +
 		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
-		`AND duration_ms > 0 AND video_codec != '' AND trickplay = '' ` +
-		`AND ` + attemptClause(factTrickplay, "path")
+		`AND duration_ms > 0 AND video_codec != '' ` +
+		`AND ` + gapClause(factTrickplay, "path", `trickplay = ''`)
 }
 
 // One gap: the file to open, and the length the probe wrote, which is what
@@ -44,22 +44,24 @@ type trickplayGap struct {
 
 // The work list, out of the local copy of the catalog, with the same query the
 // reporter counts the gap with.
-func (c *Catalog) trickplayGaps(ctx context.Context, library string, now time.Time) ([]trickplayGap, error) {
+func (c *Catalog) trickplayGaps(ctx context.Context, library string,
+	now, refresh time.Time) ([]trickplayGap, error) {
 	var gaps []trickplayGap
-	err := c.stream(ctx, gapQueries[factTrickplay], gapParams(library, now), func(cells []any) error {
-		if len(cells) < 2 {
+	err := c.stream(ctx, gapQueries[factTrickplay], gapParams(library, now, refresh),
+		func(cells []any) error {
+			if len(cells) < 2 {
+				return nil
+			}
+			path, _ := cells[0].(string)
+			if path == "" {
+				return nil
+			}
+			gaps = append(gaps, trickplayGap{
+				path:     path,
+				duration: time.Duration(cellNumber(cells[1])) * time.Millisecond,
+			})
 			return nil
-		}
-		path, _ := cells[0].(string)
-		if path == "" {
-			return nil
-		}
-		gaps = append(gaps, trickplayGap{
-			path:     path,
-			duration: time.Duration(cellNumber(cells[1])) * time.Millisecond,
 		})
-		return nil
-	})
 	if err != nil {
 		return nil, fmt.Errorf("reading the %s gap of %s: %w", factTrickplay, library, err)
 	}
@@ -71,7 +73,7 @@ func (c *Catalog) trickplayGaps(ctx context.Context, library string, now time.Ti
 // the run carries on to the next file. The files run one at a time, so one
 // ffmpeg holds the container's memory line.
 func (e *enricher) trickplayFact(ctx context.Context) error {
-	gaps, err := e.catalog.trickplayGaps(ctx, e.library, time.Now().UTC())
+	gaps, err := e.catalog.trickplayGaps(ctx, e.library, time.Now().UTC(), e.refresh[factTrickplay])
 	if err != nil {
 		return err
 	}

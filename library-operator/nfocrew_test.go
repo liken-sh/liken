@@ -5,15 +5,16 @@ package main
 // that names them.
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 )
 
-// The union of the crew the sidecar holds and the crew the provider names: the
-// sidecar's people keep their place, the writer Kodi's credits element names is
-// one of the writers, and the provider's own people follow.
-func TestTheCreditsFactKeepsTheCrewTheSidecarHolds(t *testing.T) {
+// The crew the provider names replaces the crew the sidecar holds: the
+// provider's directors are the directors, the provider's writers are
+// the writers, and a person only the sidecar names is dropped.
+func TestTheProvidersCrewReplacesTheCrewTheSidecarHolds(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	root := t.TempDir()
 	folder := "Winter Harbour (2011)"
@@ -44,9 +45,7 @@ func TestTheCreditsFactKeepsTheCrewTheSidecarHolds(t *testing.T) {
 			Contributor: ".contributors/ir/iris-kell"},
 		{Name: "Mira Solberg", Part: creditPartDirector, Order: 2,
 			Contributor: ".contributors/mi/mira-solberg"},
-		{Name: "Petra Lund", Part: creditPartWriter, Order: 3,
-			Contributor: ".contributors/pe/petra-lund"},
-		{Name: "Iris Kell", Part: creditPartWriter, Order: 4,
+		{Name: "Iris Kell", Part: creditPartWriter, Order: 3,
 			Contributor: ".contributors/ir/iris-kell"},
 	}
 	if !slices.Equal(ledger.Credits, want) {
@@ -56,9 +55,8 @@ func TestTheCreditsFactKeepsTheCrewTheSidecarHolds(t *testing.T) {
 		"name: Iris Kell\nids: {tmdb: 11}\n" {
 		t.Errorf("contributor.yaml = %q, want the ids the provider gave for the director", entry)
 	}
-	if entry := readFileString(t, filepath.Join(root, ".contributors/pe/petra-lund", contributorFileName)); entry !=
-		"name: Petra Lund\n" {
-		t.Errorf("contributor.yaml = %q, want the person the sidecar alone holds", entry)
+	if _, err := os.Stat(filepath.Join(root, ".contributors/pe/petra-lund")); !os.IsNotExist(err) {
+		t.Errorf("the store holds an entry for a person the provider's crew does not name")
 	}
 }
 
@@ -89,18 +87,11 @@ func TestTheCreditsGroupLeavesEveryOtherByteOfTheSidecar(t *testing.T) {
   <year>2011</year>
   <plot>A keeper watches the ice.</plot>
   <actor>
-    <name>Nora Vance</name>
-    <role>Captain</role>
-    <order>0</order>
-  </actor>
-  <actor>
     <name>Ada Ferris</name>
     <role>The Pilot</role>
-    <order>1</order>
+    <order>0</order>
   </actor>
-  <director>Iris Kell</director>
   <director>Mira Solberg</director>
-  <writer>Petra Lund</writer>
   <credits>Petra Lund</credits>
   <uniqueid type="tmdb" default="true">4242</uniqueid>
 </movie>
@@ -111,10 +102,10 @@ func TestTheCreditsGroupLeavesEveryOtherByteOfTheSidecar(t *testing.T) {
 	}
 }
 
-// What the union starts from: the crew the sidecar holds, in its own order,
-// with the writer Kodi's credits element names among the writers and a name
-// in both elements read once.
-func TestTheUnionStartsFromTheCrewTheSidecarHolds(t *testing.T) {
+// The crew the sidecar holds, in its own order, with the writer Kodi's
+// credits element names among the writers and a name in both elements
+// read once. They are the crew where no provider named one.
+func TestTheSidecarsCrewReadsInItsOwnOrder(t *testing.T) {
 	cases := []struct {
 		name      string
 		document  string
@@ -147,8 +138,9 @@ func TestTheUnionStartsFromTheCrewTheSidecarHolds(t *testing.T) {
 	}
 }
 
-// The crew elements are rewritten only where the union changed what a player
-// reads, which is the rule the actor elements follow.
+// The crew elements are rewritten only where the provider's crew is not
+// what a player already reads, which is the rule the actor elements
+// follow.
 func TestTheCreditsFactRewritesTheCrewOnlyWhenItDiffers(t *testing.T) {
 	cases := []struct {
 		name    string

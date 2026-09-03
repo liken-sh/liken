@@ -193,7 +193,7 @@ func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
 	}
 
 	gaps, err := catalog.queryStrings(t.Context(), gapQueries[factProbe],
-		gapParams("house/series", ledgerTime))
+		gapParams("house/series", ledgerTime, time.Time{}))
 
 	if err != nil {
 		t.Fatal(err)
@@ -311,5 +311,41 @@ func TestALedgerOfSeveralProvidersJoinsThemInTheRow(t *testing.T) {
 
 	if len(result.attempts) != 1 || result.attempts[0].Provider != "tmdb,omdb" {
 		t.Fatalf("attempts = %+v, want the two blocks joined", result.attempts)
+	}
+}
+
+// The oldest attempt of each fact, which is what says whether a
+// Library's refresh has titles left to ask about. A fact with no attempt
+// has no entry, and another library's attempts are not in the answer.
+func TestTheOldestAttemptPerFactAgainstTheRealSchema(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	first := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	later := first.Add(time.Hour)
+	if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{
+		{Library: "house/movies", Item: "movie:tmdb:1", Fact: factCredits,
+			At: later.Unix(), Result: attemptFound},
+		{Library: "house/movies", Item: "movie:tmdb:2", Fact: factCredits,
+			At: first.Unix(), Result: attemptFound},
+		{Library: "house/movies", Item: "movie:tmdb:1", Fact: factPoster,
+			At: later.Unix(), Result: attemptFound},
+		{Library: "house/series", Item: "series:tvdb:9", Fact: factCredits,
+			At: first.Add(-time.Hour).Unix(), Result: attemptFound},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	oldest, err := catalog.oldestAttempts(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]time.Time{factCredits: first, factPoster: later}
+	if len(oldest) != len(want) {
+		t.Fatalf("oldest = %v, want one entry per fact this library attempted", oldest)
+	}
+	for fact, at := range want {
+		if !oldest[fact].Equal(at) {
+			t.Errorf("oldest[%s] = %v, want %v", fact, oldest[fact], at)
+		}
 	}
 }

@@ -256,7 +256,7 @@ func lastScanFinish(runs []libraryRun) time.Time {
 // nothing to ask.
 func gapOpen(library *Library, report *libraryReport, providers providerSet) bool {
 	for fact, count := range report.Gaps {
-		if count <= 0 {
+		if count <= 0 && !refreshHasWork(library, report, fact) {
 			continue
 		}
 		// The trickplay gap counts only where the Library turned the fact on,
@@ -275,4 +275,18 @@ func gapOpen(library *Library, report *libraryReport, providers providerSet) boo
 		return true
 	}
 	return false
+}
+
+// Whether one fact's refresh time has titles left to ask about. The
+// reporter counts a gap with no refresh, so a title whose file and rows
+// are there counts as filled; the oldest attempt of the fact is what
+// says the refresh still has work, and the fact's own run moves that
+// attempt past the refresh, which is what ends the work.
+func refreshHasWork(library *Library, report *libraryReport, fact string) bool {
+	refresh, named := library.Spec.Refresh[fact]
+	if !named {
+		return false
+	}
+	oldest, held := report.OldestAttempts[fact]
+	return held && refresh.After(oldest) && !refresh.After(time.Now())
 }

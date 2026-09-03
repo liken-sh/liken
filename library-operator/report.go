@@ -44,6 +44,11 @@ type libraryReport struct {
 	// from gapQueries. The operator creates the enricher Job when any
 	// count is above zero, so a fact with no key here never runs.
 	Gaps map[string]int `json:"gaps,omitempty"`
+	// The oldest attempt this library holds for each fact. The operator
+	// reads it against the Library's spec.refresh: a refresh later than
+	// the oldest attempt is a fact with work left, whatever the gap
+	// count says, because the reporter counts with no refresh.
+	OldestAttempts map[string]time.Time `json:"oldestAttempts,omitempty"`
 	// Waiting is the titles whose identity ended in candidates for a
 	// person to choose from, and Unresolved the titles no provider could
 	// name. Both are folded into Library status.

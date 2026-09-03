@@ -30,6 +30,9 @@ type enricher struct {
 	// The folder names the walk skips. A fact reads its folder through the
 	// scan's reader after each write, and that reader takes the same set.
 	ignore ignoreSet
+	// The refresh time of every fact the Library named, which the gap
+	// query of that fact binds.
+	refresh refreshTimes
 	// The folder this Job was narrowed to, relative to the library root, and
 	// empty where the Job covers the whole library.
 	scope string
@@ -77,6 +80,7 @@ func newEnricher(log io.Writer) *enricher {
 		writer:      newVolumeWriter(job),
 		log:         log,
 		ignore:      parseIgnore(os.Getenv(libraryIgnoreVariable)),
+		refresh:     parseRefresh(os.Getenv(libraryRefreshVariable)),
 		statusTopic: libraryStatusTopic(base, namespace, name),
 		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
 	}
@@ -110,7 +114,8 @@ func (e *enricher) inScope(relative string) bool {
 // Reads one fact's work list out of the local copy of the catalog, with
 // the same query the reporter counts the gap with.
 func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]string, error) {
-	keys, err := e.catalog.queryStrings(ctx, gapQueries[fact], gapParams(e.library, now))
+	keys, err := e.catalog.queryStrings(ctx, gapQueries[fact],
+		gapParams(e.library, now, e.refresh[fact]))
 	if err != nil {
 		return nil, fmt.Errorf("reading the %s gap of %s: %w", fact, e.library, err)
 	}

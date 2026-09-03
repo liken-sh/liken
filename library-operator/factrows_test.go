@@ -65,7 +65,8 @@ func TestTheCreditsFactMakesItsPeopleVisibleToTheContributorGap(t *testing.T) {
 		{Name: "Tom Hanks", Role: "The Captain", IDs: providerIDs{"tmdb": "31"}},
 	}})
 
-	gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, factContributorIDs, time.Now())
+	gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, factContributorIDs,
+		time.Now(), time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

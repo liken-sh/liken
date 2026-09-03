@@ -337,6 +337,10 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 		return libraryReport{}, err
 	}
 	report.Gaps = gaps
+	report.OldestAttempts, err = r.catalog.oldestAttempts(ctx, library)
+	if err != nil {
+		return libraryReport{}, err
+	}
 	report.Waiting, report.Unresolved, err = r.catalog.identityCounts(ctx, library)
 	if err != nil {
 		return libraryReport{}, err

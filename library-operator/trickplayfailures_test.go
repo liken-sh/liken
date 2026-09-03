@@ -32,7 +32,7 @@ func TestARowTheTrickplayGapCannotUseIsNoGap(t *testing.T) {
 		`{"eoq":{"time":0.1}}` + "\n"
 
 	gaps, err := streamingServer(t, http.StatusOK, body).
-		trickplayGaps(t.Context(), trickplayLibrary, ledgerTime)
+		trickplayGaps(t.Context(), trickplayLibrary, ledgerTime, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

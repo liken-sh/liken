@@ -52,7 +52,7 @@ func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *t
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[test.fact],
-				gapParams("house/movies", now))
+				gapParams("house/movies", now, time.Time{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestTheCreditsGapIsATitleWithNoCreditsFileAgainstTheRealSchema(t *testing.T
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
-				gapParams("house/movies", now))
+				gapParams("house/movies", now, time.Time{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,7 +143,7 @@ func TestEveryAttemptKindGatesTheNFOGap(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
-				gapParams("house/movies", now))
+				gapParams("house/movies", now, time.Time{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -245,6 +245,63 @@ func TestASidecarSaysWhichFactsItAnswers(t *testing.T) {
 
 			if meta.NFOFacts != nfoFactList(test.want) {
 				t.Errorf("answers = %q, want %q", meta.NFOFacts, nfoFactList(test.want))
+			}
+		})
+	}
+}
+
+// A refresh later than a title's credits attempt puts that title in the
+// gap again, although credits.yaml is there and the catalog holds its
+// rows, and a refresh earlier than the attempt leaves it closed.
+func TestARefreshOpensTheCreditsGapAgainstTheRealSchema(t *testing.T) {
+	now := time.Now().UTC()
+	attempted := now.Add(-time.Hour)
+	cases := []struct {
+		name    string
+		refresh time.Time
+		want    []string
+	}{
+		{
+			name: "no refresh at all",
+			want: []string{"movie:tmdb:1", "series:tvdb:9"},
+		},
+		{
+			name:    "a refresh earlier than the attempt",
+			refresh: attempted.Add(-time.Minute),
+			want:    []string{"movie:tmdb:1", "series:tvdb:9"},
+		},
+		{
+			name:    "a refresh later than the attempt",
+			refresh: attempted.Add(time.Minute),
+			want:    []string{"movie:tmdb:1", "movie:tmdb:2", "series:tvdb:9"},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedNFOFactRows(t, catalog)
+			if _, err := catalog.UpsertCredits(t.Context(), []creditRow{{
+				Library: "house/movies", Item: "movie:tmdb:2", Billing: 0,
+				Name: "Nora Vance", Contributor: ".contributors/no/nora-vance",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:2", Fact: factCredits,
+				At: attempted.Unix(), Result: attemptFound, Provider: "tmdb",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
+				gapParams("house/movies", now, test.refresh))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			slices.Sort(ids)
+			if !slices.Equal(ids, test.want) {
+				t.Errorf("gap = %v, want %v", ids, test.want)
 			}
 		})
 	}

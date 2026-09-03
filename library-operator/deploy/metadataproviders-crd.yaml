@@ -28,11 +28,6 @@ spec:
         - name: Provider
           type: string
           jsonPath: .status.provider
-        # The list is wide, so it shows with -o wide alone.
-        - name: Facts
-          type: string
-          priority: 1
-          jsonPath: .status.facts
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status

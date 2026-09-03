@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 )
@@ -149,7 +150,7 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	// provider: the file alone answers it. It takes a memory line and a CPU
 	// request of its own because it decodes a video where every other container
 	// reads rows. It is an init container for the reason the art container is:
-	// the enrich container must run last. Plan 30 makes it a regular container
+	// The enrich container must run last. Plan 30 makes it a regular container
 	// once the fan-out exists.
 	if library.Spec.Trickplay.Enabled {
 		tiles := factsContainer(library, trickplayContainerName, []string{factTrickplay},
@@ -210,6 +211,7 @@ func enrichContainer(library *Library, name, role, path, image, busAddress, topi
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: libraryIgnoreVariable, Value: ignoreValue(library)},
+			{Name: libraryRefreshVariable, Value: refreshValue(library)},
 			{Name: scanPathVariable, Value: path},
 			{Name: echoTimeoutVariable, Value: defaultEchoTimeout.String()},
 			{Name: syncTimeoutVariable, Value: defaultSyncTimeout.String()},
@@ -237,4 +239,15 @@ func factsContainer(library *Library, name string, facts []string,
 	container.Env = append(container.Env,
 		EnvVar{Name: libraryFactsVariable, Value: strings.Join(facts, ",")})
 	return container
+}
+
+// The refresh times travel as one JSON value, the way the ignore list
+// does, so a fact of any name reaches the container whole. A Library
+// that names none writes an empty value.
+func refreshValue(library *Library) string {
+	if len(library.Spec.Refresh) == 0 {
+		return ""
+	}
+	refresh, _ := json.Marshal(library.Spec.Refresh)
+	return string(refresh)
 }

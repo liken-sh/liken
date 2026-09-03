@@ -64,7 +64,14 @@ func seedArtSeries(t *testing.T, catalog *Catalog, path string, seasons []int, f
 
 func artGapsOf(t *testing.T, catalog *Catalog, fact string) []artGap {
 	t.Helper()
-	gaps, err := catalog.artGaps(t.Context(), artLibrary, fact, time.Now().UTC())
+	return artGapsRefreshed(t, catalog, fact, time.Time{})
+}
+
+// The same list, with the refresh time the Library names for that
+// fact.
+func artGapsRefreshed(t *testing.T, catalog *Catalog, fact string, refresh time.Time) []artGap {
+	t.Helper()
+	gaps, err := catalog.artGaps(t.Context(), artLibrary, fact, time.Now().UTC(), refresh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,5 +367,43 @@ func TestASeriesIsNeverADiscartGap(t *testing.T) {
 	}
 	if !slices.Contains(served, factSeasonBanner) {
 		t.Errorf("facts = %v, want the season banner a series does carry", served)
+	}
+}
+
+// A refresh later than a file's attempt puts that file in the gap
+// again, although the catalog holds the file the fact wrote, and a
+// refresh earlier than the attempt leaves it closed.
+func TestARefreshOpensTheArtGap(t *testing.T) {
+	attempted := time.Now().UTC().Add(-time.Hour)
+	cases := []struct {
+		name    string
+		refresh time.Time
+		want    int
+	}{
+		{name: "no refresh at all"},
+		{name: "a refresh earlier than the attempt", refresh: attempted.Add(-time.Minute)},
+		{name: "a refresh later than the attempt", refresh: attempted.Add(time.Minute), want: 1},
+		{name: "a refresh still in the future", refresh: time.Now().Add(time.Hour)},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedArtMovie(t, catalog, "The Signal (2014)", fileRow{
+				Path: "The Signal (2014)/poster.jpg", Library: artLibrary, Present: true,
+				Type: fileTypeImage, Role: fileRolePoster, Items: []string{"movie:tmdb:603"},
+			})
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: artLibrary, Item: "The Signal (2014)/poster.jpg", Fact: factPoster,
+				At: attempted.Unix(), Result: attemptFound,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			gaps := artGapsRefreshed(t, catalog, factPoster, test.refresh)
+
+			if len(gaps) != test.want {
+				t.Errorf("gaps = %+v, want %d", gaps, test.want)
+			}
+		})
 	}
 }

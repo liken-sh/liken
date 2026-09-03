@@ -190,16 +190,29 @@ func (e *enricher) fillNFOFact(ctx context.Context, fact string, line *answerLin
 
 	merged, names := mergeAnswers(fact, answers)
 	if fact == factCredits {
-		merged.Cast = unionCast(sidecarCast(document), merged.Cast)
-		directors, writers := sidecarCrew(document)
-		merged.Directors, _ = unionPeople(directors, merged.Directors)
-		merged.Writers, _ = unionPeople(writers, merged.Writers)
+		merged = creditsOrSidecar(merged, document)
 	}
 	if !answersFact(fact, merged) {
 		e.recordNFO(folder, fact, nil, attemptNothing, nil)
 		return attemptNothing
 	}
 	return e.writeNFOFact(folder, sidecar, fact, item, group, document, merged, names)
+}
+
+// A provider that named any person is the whole cast and crew, and the
+// sidecar's people stand only where no provider named one.
+// Jellyfin writes a producer as an actor element whose role is
+// "Producer" and whose type element is absent, so a union keeps the
+// producer in the cast and names a person who acts and produces twice.
+// A word list on the role is wrong, because a library holds a character
+// named "Director".
+func creditsOrSidecar(merged factAnswer, document []byte) factAnswer {
+	if len(merged.Cast) > 0 || len(merged.Directors) > 0 || len(merged.Writers) > 0 {
+		return merged
+	}
+	merged.Cast = sidecarCast(document)
+	merged.Directors, merged.Writers = sidecarCrew(document)
+	return merged
 }
 
 // The write is the group edit and the ledger entry together. The hash the
@@ -242,10 +255,10 @@ func (e *enricher) writeNFOFact(folder, sidecar, fact string, item identityItem,
 }
 
 // Which facts write their group on every answer and which compare first. The
-// credits fact leaves the actor, director, and writer elements where the
-// merged people are what the sidecar holds, because the union added nothing a
-// player reads, and credits.yaml and the .contributors/ entries are written
-// either way.
+// credits fact leaves the actor, director, and writer elements where
+// credits.yaml and the .contributors/ entries are written either way.
+// The credits fact rewrites nothing where the people it holds are the
+// people the sidecar holds.
 func groupNeedsWrite(fact string, document []byte, merged factAnswer) bool {
 	if fact != factCredits {
 		return true
@@ -292,11 +305,12 @@ func (e *enricher) recordNFO(folder, fact string, entry *likenItem, result strin
 	e.writeRows(fact, folder, result == attemptFound)
 }
 
-// The actors the sidecar holds, in billing order, which is where the union
-// starts. An actor element with an order takes that place, and one without
+// The actors the sidecar holds, in billing order. An actor element with an
+// order takes that place, and one without
 // follows every actor that has one, in document order. A document this reader
 // cannot parse holds no cast, and the fill has already recorded that as an
 // error.
+// They are the cast where no provider named one.
 func sidecarCast(document []byte) []creditedActor {
 	var read struct {
 		Actors []nfoActor `xml:"actor"`
@@ -332,10 +346,11 @@ func billingOf(actor nfoActor) int {
 	return *actor.Order
 }
 
-// The crew the sidecar holds, in its own order, which is where the union
-// starts. Kodi writes a writer into the credits element and Jellyfin into the
+// The crew the sidecar holds, in its own order. Kodi writes a writer into the
+// credits element and Jellyfin into the
 // writer element, so the two read as one list of writers, the way the scanner
 // reads them.
+// They are the crew where no provider named one.
 func sidecarCrew(document []byte) (directors, writers []creditedPerson) {
 	var read struct {
 		Directors []string `xml:"director"`

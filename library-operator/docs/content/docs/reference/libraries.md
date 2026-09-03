@@ -52,6 +52,7 @@ The volume this library covers, the kind of media it holds, and the settings for
 | <span id="spec--scan"></span>`scan` | [object](#specscan) | no | When the full walk of this library runs. |
 | <span id="spec--trickplay"></span>`trickplay` | [object](#spectrickplay) | no | The thumbnail sheets and the WebVTT map a scrub bar reads, built beside each video from the file alone, with no provider. |
 | <span id="spec--ignore"></span>`ignore` | []string | no | Path components to skip. The scanner leaves out any folder whose name matches an entry, and everything under it, so a volume's non-media folders such as a recycle bin or a staging directory stay out of the catalog. |
+| <span id="spec--refresh"></span>`refresh` | map[string]string | no | One time per fact, by the names status.gaps uses. For that fact, an attempt whose time is before the refresh does not count: the title is in that fact's gap again although its file and its rows are there, the fact asks a provider again, and it rewrites its own files and rows in place. Nothing is deleted, and a fact this map does not name is untouched. A time that has not come yet waits, and the fact runs once when it arrives. |
 
 ### spec.storage
 

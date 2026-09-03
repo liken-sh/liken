@@ -77,8 +77,8 @@ func nfoGapQuery(fact string) string {
 	return `SELECT id FROM (` +
 		`SELECT library, id, nfo_facts FROM movies WHERE id NOT LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id, nfo_facts FROM series WHERE id NOT LIKE 'series:path:%') AS items ` +
-		`WHERE library = ?1 AND instr(nfo_facts, '` + nfoFactSeparator + fact + nfoFactSeparator + `') = 0 ` +
-		`AND ` + attemptClause(fact, "id")
+		`WHERE library = ?1 AND ` + gapClause(fact, "id",
+		`instr(nfo_facts, '`+nfoFactSeparator+fact+nfoFactSeparator+`') = 0`)
 }
 
 // The credits gap, which is the one nfo gap that does not read nfo_facts: a
@@ -89,9 +89,8 @@ func creditsGapQuery() string {
 	return `SELECT id FROM (` +
 		`SELECT library, id FROM movies WHERE id NOT LIKE 'movie:path:%' ` +
 		`UNION ALL SELECT library, id FROM series WHERE id NOT LIKE 'series:path:%') AS items ` +
-		`WHERE library = ?1 ` +
-		`AND id NOT IN (SELECT item FROM credits WHERE credits.library = ?1) ` +
-		`AND ` + attemptClause(factCredits, "id")
+		`WHERE library = ?1 AND ` + gapClause(factCredits, "id",
+		`id NOT IN (SELECT item FROM credits WHERE credits.library = ?1)`)
 }
 
 // The count of fights every fact of one library recorded. The reporter

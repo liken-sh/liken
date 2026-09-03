@@ -480,3 +480,58 @@ func TestChainsOfReadsOneLibrarysOwn(t *testing.T) {
 		t.Errorf("chains = %+v, want none of this Library's own", got)
 	}
 }
+
+// The reporter counts a gap with no refresh, so a refresh has work the
+// counts cannot show. The operator reads the Library's own refresh
+// against the oldest attempt the report carries per fact.
+func TestARefreshOpensTheEnricherWithNoGapCounted(t *testing.T) {
+	attempted := testNow.Add(-time.Hour)
+	cases := []struct {
+		name    string
+		refresh map[string]time.Time
+		oldest  map[string]time.Time
+		want    bool
+	}{
+		{name: "no refresh at all"},
+		{
+			name:    "a refresh earlier than the oldest attempt",
+			refresh: map[string]time.Time{factIdentity: attempted.Add(-time.Minute)},
+			oldest:  map[string]time.Time{factIdentity: attempted},
+		},
+		{
+			name:    "a refresh later than the oldest attempt",
+			refresh: map[string]time.Time{factIdentity: attempted.Add(time.Minute)},
+			oldest:  map[string]time.Time{factIdentity: attempted},
+			want:    true,
+		},
+		{
+			name:    "a refresh of a fact with no attempt at all",
+			refresh: map[string]time.Time{factIdentity: testNow},
+		},
+		{
+			name:    "a refresh still in the future",
+			refresh: map[string]time.Time{factIdentity: time.Now().Add(time.Hour)},
+			oldest:  map[string]time.Time{factIdentity: attempted},
+		},
+		{
+			name:    "a refresh of a fact no source serves",
+			refresh: map[string]time.Time{factOverview: attempted.Add(time.Minute)},
+			oldest:  map[string]time.Time{factOverview: attempted},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			library, providers := libraryWithProvider()
+			library.Spec.Refresh = test.refresh
+			report := &libraryReport{
+				Gaps:           map[string]int{factIdentity: 0, factOverview: 0},
+				OldestAttempts: test.oldest,
+				Runs:           walkedRuns(testNow),
+			}
+
+			if got := gapOpen(library, report, providers); got != test.want {
+				t.Errorf("gapOpen = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

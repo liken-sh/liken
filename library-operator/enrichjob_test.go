@@ -6,6 +6,7 @@ package main
 
 import (
 	"testing"
+	"time"
 )
 
 // the provider a Library's sources resolve to, as the pass would have
@@ -428,5 +429,67 @@ func TestTheNFOContainerRunsAfterIdentityAndBeforeArt(t *testing.T) {
 		if names[at] != name {
 			t.Errorf("initContainer %d = %q, want %q", at, names[at], name)
 		}
+	}
+}
+
+// The refresh times travel as one JSON value into every container of
+// the Job, so a fact of any name reaches the container whole, and a
+// Library that names none writes an empty value.
+func TestEnrichJobCarriesTheRefreshTimes(t *testing.T) {
+	library := studioMovies()
+	library.Spec.Refresh = map[string]time.Time{
+		factCredits: time.Date(2026, 9, 3, 21, 0, 0, 0, time.UTC),
+	}
+
+	job := testEnrichJob(library, "", readyProvider("tmdb", "house", factIdentity))
+
+	spec := job.Spec.Template.Spec
+	for _, container := range append(spec.InitContainers[1:], spec.Containers...) {
+		got := containerEnvironment(container)[libraryRefreshVariable]
+		if got != `{"credits":"2026-09-03T21:00:00Z"}` {
+			t.Errorf("%s reads %s = %q, want the JSON-encoded map",
+				container.Name, libraryRefreshVariable, got)
+		}
+	}
+	empty := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
+	got := containerEnvironment(empty.Spec.Template.Spec.Containers[0])
+	if got[libraryRefreshVariable] != "" {
+		t.Errorf("%s = %q, want no value for a Library that names no refresh",
+			libraryRefreshVariable, got[libraryRefreshVariable])
+	}
+}
+
+// What the container reads back out of that environment, and what it
+// reads out of a value it cannot parse: no refresh at all, because a
+// container that took a bad value for a refresh would ask a provider
+// about every title.
+func TestTheContainerReadsTheRefreshTimesItIsGiven(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want refreshTimes
+	}{
+		{name: "no value at all", want: refreshTimes{}},
+		{
+			name: "the map the operator writes",
+			raw:  `{"credits":"2026-09-03T21:00:00Z"}`,
+			want: refreshTimes{factCredits: time.Date(2026, 9, 3, 21, 0, 0, 0, time.UTC)},
+		},
+		{name: "a value that is not JSON", raw: "{", want: refreshTimes{}},
+		{name: "a time this image cannot read", raw: `{"credits":"soon"}`, want: refreshTimes{}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := parseRefresh(test.raw)
+
+			if len(got) != len(test.want) {
+				t.Fatalf("refresh = %v, want %v", got, test.want)
+			}
+			for fact, at := range test.want {
+				if !got[fact].Equal(at) {
+					t.Errorf("refresh[%s] = %v, want %v", fact, got[fact], at)
+				}
+			}
+		})
 	}
 }

@@ -189,43 +189,20 @@ func mergeCast(merged *factAnswer, held providerAnswer, note func(string)) {
 }
 
 func namedInCast(cast []creditedActor, name string) bool {
-	return castIndex(cast, name) >= 0
-}
-
-func castIndex(cast []creditedActor, name string) int {
-	for at, held := range cast {
+	for _, held := range cast {
 		if strings.EqualFold(held.Name, name) {
-			return at
+			return true
 		}
 	}
-	return -1
-}
-
-// The union with the cast the sidecar already holds. The sidecar's order comes
-// first, so a person another writer listed keeps their place and gains the ids
-// the provider gave for them, and the people the providers name and the
-// sidecar does not follow in the order the providers answered.
-func unionCast(sidecar, provider []creditedActor) []creditedActor {
-	cast := append(make([]creditedActor, 0, len(sidecar)+len(provider)), sidecar...)
-	for _, actor := range provider {
-		at := castIndex(cast, actor.Name)
-		if at < 0 {
-			cast = append(cast, actor)
-			continue
-		}
-		cast[at] = filledActor(cast[at], actor)
-	}
-	for at := range cast {
-		cast[at].Order = at
-	}
-	return cast
+	return false
 }
 
 // The union of one crew list, keyed by the person's name, with the list it
-// starts from first. A name the sidecar holds keeps its place and gains the
-// ids the provider states for it. The second answer says whether the union
+// starts from first. The second answer says whether the union
 // added a person the first list did not hold, which is what records the
 // provider that added them.
+// A name both lists hold keeps its place and gains the ids the second
+// states for it.
 func unionPeople(held, adding []creditedPerson) ([]creditedPerson, bool) {
 	added := false
 	for _, person := range adding {
@@ -254,7 +231,7 @@ func personIndex(people []creditedPerson, name string) int {
 }
 
 // What a person one list holds takes from the same person in the other list:
-// every id the second carries that the first lacks.
+// Every id the second carries that the first lacks.
 func filledPerson(held, adding creditedPerson) creditedPerson {
 	for scheme, id := range adding.IDs {
 		if held.IDs == nil {
@@ -264,20 +241,6 @@ func filledPerson(held, adding creditedPerson) creditedPerson {
 			held.IDs[scheme] = id
 		}
 	}
-	return held
-}
-
-// What a person the sidecar holds takes from the provider that names them:
-// every id, which is what reaches .contributors/, and the part and the picture
-// where the sidecar carries none.
-func filledActor(held, adding creditedActor) creditedActor {
-	if held.Role == "" {
-		held.Role = adding.Role
-	}
-	if held.Thumb == "" {
-		held.Thumb = adding.Thumb
-	}
-	held.IDs = filledPerson(held.person(), adding.person()).IDs
 	return held
 }
 

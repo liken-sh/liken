@@ -37,7 +37,7 @@ func (e *enricher) artGap(ctx context.Context, fact string, line *artLine) error
 	if !line.live(fact) {
 		return nil
 	}
-	gaps, err := e.catalog.artGaps(ctx, e.library, fact, time.Now().UTC())
+	gaps, err := e.catalog.artGaps(ctx, e.library, fact, time.Now().UTC(), e.refresh[fact])
 	if err != nil {
 		return err
 	}
@@ -153,9 +153,10 @@ func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
 // same query the reporter counts the gap with. Every row names the file to
 // write, the TMDb id to ask for, and the season and episode where the fact
 // needs them.
-func (c *Catalog) artGaps(ctx context.Context, library, fact string, now time.Time) ([]artGap, error) {
+func (c *Catalog) artGaps(ctx context.Context, library, fact string,
+	now, refresh time.Time) ([]artGap, error) {
 	var gaps []artGap
-	err := c.stream(ctx, gapQueries[fact], gapParams(library, now), func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(library, now, refresh), func(cells []any) error {
 		if len(cells) < 4 {
 			return nil
 		}

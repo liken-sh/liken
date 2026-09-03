@@ -50,7 +50,7 @@ func (e *enricher) contributorFact(ctx context.Context, fact string) error {
 // work. One person the provider refuses records an error attempt, and the run
 // carries on to the next.
 func (e *enricher) contributorGap(ctx context.Context, fact string, client *tmdbClient) error {
-	gaps, err := e.catalog.contributorGaps(ctx, e.library, fact, time.Now().UTC())
+	gaps, err := e.catalog.contributorGaps(ctx, e.library, fact, time.Now().UTC(), e.refresh[fact])
 	if err != nil {
 		return err
 	}
@@ -309,9 +309,10 @@ func (e *enricher) recordContributor(folder, fact, provider, result, wrote strin
 // One fact's work list, out of the local copy of the catalog, with the same
 // query the reporter counts the gap with. Every row names the person's
 // directory and the TMDb id to ask for.
-func (c *Catalog) contributorGaps(ctx context.Context, library, fact string, now time.Time) ([]contributorGap, error) {
+func (c *Catalog) contributorGaps(ctx context.Context, library, fact string,
+	now, refresh time.Time) ([]contributorGap, error) {
 	var gaps []contributorGap
-	err := c.stream(ctx, gapQueries[fact], gapParams(library, now), func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(library, now, refresh), func(cells []any) error {
 		if len(cells) < 2 {
 			return nil
 		}
@@ -337,8 +338,7 @@ func contributorGapSQL(fact, condition string) string {
 	return `SELECT c.path, a.id FROM contributors AS c ` +
 		`JOIN contributor_aliases AS a ON a.library = c.library AND a.path = c.path ` +
 		`AND a.scheme = '` + contributorTMDbScheme + `' ` +
-		`WHERE c.library = ?1 AND (` + condition + `) ` +
-		`AND ` + attemptClause(fact, "c.path")
+		`WHERE c.library = ?1 AND ` + gapClause(fact, "c.path", condition)
 }
 
 // The ids gap: a person with no birth date, or with no id under any scheme but

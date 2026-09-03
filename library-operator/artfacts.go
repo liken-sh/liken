@@ -184,7 +184,7 @@ func titleArtGapSQL(fact string) string {
 		branches = append(branches, branch("series", scopeSeries))
 	}
 	return `SELECT file, tmdb, 0, 0 FROM (` + strings.Join(branches, ` UNION ALL `) +
-		`) AS wanted WHERE library = ?1 AND ` + artFileClause() + ` AND ` + attemptClause(fact, "file")
+		`) AS wanted WHERE library = ?1 AND ` + gapClause(fact, "file", artFileClause())
 }
 
 // One row per season a library holds episodes of, because the catalog keeps
@@ -200,8 +200,7 @@ func seasonArtGapSQL(fact string) string {
 		`JOIN series AS s ON s.library = e.library AND s.id = e.series ` +
 		`JOIN aliases AS a ON a.library = s.library AND a.item = s.id ` +
 		`AND a.alias LIKE '` + scopeSeries + `:tmdb:%'` +
-		`) AS wanted WHERE library = ?1 AND ` + artFileClause() + ` AND ` +
-		attemptClause(fact, "file")
+		`) AS wanted WHERE library = ?1 AND ` + gapClause(fact, "file", artFileClause())
 }
 
 // One row per episode with no image of its own. The episode keys on its own
@@ -220,13 +219,12 @@ func episodeThumbGapSQL() string {
 		`JOIN series AS s ON s.library = e.library AND s.id = e.series ` +
 		`JOIN aliases AS a ON a.library = s.library AND a.item = s.id ` +
 		`AND a.alias LIKE '` + scopeSeries + `:tmdb:%'` +
-		`) AS wanted WHERE library = ?1 ` +
-		`AND item NOT IN (SELECT fi.item FROM file_items AS fi ` +
-		`JOIN files AS f ON f.library = fi.library AND f.path = fi.path ` +
-		`WHERE fi.library = ?1 ` +
-		`AND f.type = '` + fileTypeImage + `' ` +
-		`AND f.role IN ('` + fileRoleThumb + `', '` + fileRoleStill + `')) AND ` +
-		attemptClause(factEpisodeThumb, "video")
+		`) AS wanted WHERE library = ?1 AND ` + gapClause(factEpisodeThumb, "video",
+		`item NOT IN (SELECT fi.item FROM file_items AS fi `+
+			`JOIN files AS f ON f.library = fi.library AND f.path = fi.path `+
+			`WHERE fi.library = ?1 `+
+			`AND f.type = '`+fileTypeImage+`' `+
+			`AND f.role IN ('`+fileRoleThumb+`', '`+fileRoleStill+`'))`)
 }
 
 // The file the fact would write is not in the catalog. This is the whole of

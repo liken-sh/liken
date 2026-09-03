@@ -258,6 +258,41 @@ spec:
                   items:
                     type: string
                     minLength: 1
+                refresh:
+                  type: object
+                  maxProperties: 25
+                  additionalProperties:
+                    type: string
+                    format: date-time
+                    maxLength: 30
+                    description: >-
+                      The time to ask again from, as RFC 3339. An attempt
+                      this fact made before it does not count. A time
+                      that has not come yet waits, and the fact runs once
+                      when it arrives.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.all(fact, fact in ['probe', 'trickplay',
+                        'identity', 'overview', 'certification',
+                        'rating.tmdb', 'rating.imdb',
+                        'rating.rottentomatoes', 'rating.metacritic',
+                        'credits', 'poster', 'backdrop', 'logo',
+                        'clearart', 'banner', 'landscape', 'discart',
+                        'season-poster', 'season-banner',
+                        'episode-thumb', 'contributor.ids',
+                        'contributor.biography', 'contributor.headshot'])
+                      message: >-
+                        every key of spec.refresh must name a fact the
+                        operator runs
+                  description: >-
+                    One time per fact, by the names status.gaps uses. For that fact, an attempt whose time is before
+                    the refresh does not count: the title is in that
+                    fact's gap again although its file and its rows are
+                    there, the fact asks a provider again, and it
+                    rewrites its own files and rows in place. Nothing is
+                    deleted, and a fact this map does not name is
+                    untouched. A time that has not come yet waits, and
+                    the fact runs once when it arrives.
             status:
               type: object
               description: >-

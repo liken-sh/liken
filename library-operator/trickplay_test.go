@@ -162,7 +162,7 @@ func TestTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gaps, err := catalog.trickplayGaps(t.Context(), trickplayLibrary, ledgerTime)
+	gaps, err := catalog.trickplayGaps(t.Context(), trickplayLibrary, ledgerTime, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

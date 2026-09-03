@@ -216,16 +216,51 @@ func readLikenSidecar(sidecar likenSidecar, result *walkResult) {
 // The reporter counts a gap with the same query the container works from, so
 // the number the operator schedules on and the rows the container finds are
 // one set.
+//
+// The reporter runs in the catalog pod, which reads no Library, so it
+// counts with no refresh time and publishes the oldest attempt of each
+// fact beside the counts. The operator holds the Library and reads the
+// two together.
 func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time) (map[string]int, error) {
 	counts := map[string]int{}
 	for fact, query := range gapQueries {
-		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`, gapParams(library, now))
+		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`,
+			gapParams(library, now, time.Time{}))
 		if err != nil {
 			return nil, err
 		}
 		counts[fact] = count
 	}
 	return counts, nil
+}
+
+// The oldest attempt one library holds for each fact, which is what
+// says whether a refresh time has work left: an attempt older than the refresh
+// is a title that fact asks about again.
+// A fact with no attempt at all has no entry.
+const oldestAttemptQuery = `SELECT ` + attemptFactColumn + `, min(at) FROM attempts ` +
+	`WHERE library = ? GROUP BY ` + attemptFactColumn
+
+// The oldest attempt per fact, read with one statement, because a
+// statement per fact is one round trip per fact on every report.
+func (c *Catalog) oldestAttempts(ctx context.Context,
+	library string) (map[string]time.Time, error) {
+	oldest := map[string]time.Time{}
+	err := c.stream(ctx, oldestAttemptQuery, []any{library}, func(cells []any) error {
+		if len(cells) < 2 {
+			return nil
+		}
+		fact, _ := cells[0].(string)
+		if fact == "" {
+			return nil
+		}
+		oldest[fact] = time.Unix(int64(cellNumber(cells[1])), 0).UTC()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return oldest, nil
 }
 
 // The fights of one library: the attempts that found an element group another
