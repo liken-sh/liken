@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PROSE: the schema of the one version this CRD serves.
+// The schema of the one version this CRD serves.
 func providerSchema(t *testing.T) map[string]any {
 	t.Helper()
 	body, err := os.ReadFile("deploy/metadataproviders-crd.yaml")
@@ -29,7 +29,7 @@ func providerSchema(t *testing.T) map[string]any {
 	return versions[0].(map[string]any)
 }
 
-// PROSE: one nested field of a schema, by the path of its keys.
+// One nested field of a schema, by the path of its keys.
 func schemaField(t *testing.T, from map[string]any, keys ...string) any {
 	t.Helper()
 	var held any = from
@@ -43,9 +43,9 @@ func schemaField(t *testing.T, from map[string]any, keys ...string) any {
 	return held
 }
 
-// PROSE: the enum the CRD admits is the vocabulary the operator holds, so a
-// person cannot name a fact no container runs, and a fact the operator serves
-// is a fact a spec can narrow to.
+// The enum the CRD admits is the vocabulary the operator holds, so a person
+// cannot name a fact no container runs, and a fact the operator serves is a
+// fact a spec can narrow to.
 func TestTheFactsEnumIsTheOperatorsVocabulary(t *testing.T) {
 	schema := providerSchema(t)
 	enum := schemaField(t, schema, "schema", "openAPIV3Schema", "properties",
@@ -60,8 +60,8 @@ func TestTheFactsEnumIsTheOperatorsVocabulary(t *testing.T) {
 	}
 }
 
-// PROSE: the CRD holds one block per row of the operator's table, and a block
-// whose provider takes a key requires the Secret that holds it.
+// The CRD holds one block per row of the operator's table, and a block whose
+// provider takes a key requires the Secret that holds it.
 func TestTheCRDHoldsOneBlockPerProvider(t *testing.T) {
 	schema := providerSchema(t)
 	blocks := schemaField(t, schema, "schema", "openAPIV3Schema", "properties",
@@ -86,8 +86,8 @@ func TestTheCRDHoldsOneBlockPerProvider(t *testing.T) {
 	}
 }
 
-// PROSE: the API server admits one block and refuses none, two, or more,
-// which is what makes an account one account with one provider.
+// The API server admits one block and refuses none, two, or more, which is
+// what makes an account one account with one provider.
 func TestTheSpecAdmitsExactlyOneBlock(t *testing.T) {
 	schema := providerSchema(t)
 	rules := schemaField(t, schema, "schema", "openAPIV3Schema", "properties",
@@ -108,8 +108,8 @@ func TestTheSpecAdmitsExactlyOneBlock(t *testing.T) {
 	}
 }
 
-// PROSE: the PROVIDER column reads the block off the status, because no
-// printer column can read which block a spec holds.
+// The PROVIDER column reads the block off the status, because no printer
+// column can read which block a spec holds.
 func TestThePrinterColumnsShowTheProvider(t *testing.T) {
 	schema := providerSchema(t)
 	columns := schemaField(t, schema, "additionalPrinterColumns").([]any)

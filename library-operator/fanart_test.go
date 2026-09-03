@@ -1,8 +1,8 @@
 package main
 
-// PROSE: what these tests read: the art lists Fanart.tv answers for a movie
-// and for a series, the season art of one season, the key the request
-// carries, and the miss a title it does not hold answers.
+// What these tests read: the art lists Fanart.tv answers for a movie and for
+// a series, the season art of one season, the key the request carries, and
+// the miss a title it does not hold answers.
 
 import (
 	"io"
@@ -13,8 +13,7 @@ import (
 	"testing"
 )
 
-// PROSE: what one fake Fanart.tv recorded: the path and the query of every
-// request.
+// What one fake Fanart.tv recorded: the path and the query of every request.
 type fakeFanart struct {
 	mutex    sync.Mutex
 	paths    []string
@@ -40,7 +39,7 @@ func newFakeFanart(t *testing.T, status int, body string) (*fanartClient, *fakeF
 	return client, fake
 }
 
-// PROSE: one movie answer, with one image of every type the art facts write.
+// One movie answer, with one image of every type the art facts write.
 const fanartMovieAnswer = `{"name":"Fight Club","tmdb_id":"550","imdb_id":"tt0137523",
 	"movieposter":[{"id":"1","url":"https://assets.fanart.tv/fanart/movies/550/movieposter/a.jpg","lang":"en","likes":"7"}],
 	"moviebackground":[{"id":"2","url":"https://assets.fanart.tv/fanart/movies/550/moviebackground/b.jpg","lang":"","likes":"3"}],
@@ -50,8 +49,8 @@ const fanartMovieAnswer = `{"name":"Fight Club","tmdb_id":"550","imdb_id":"tt013
 	"moviethumb":[{"id":"6","url":"https://assets.fanart.tv/fanart/movies/550/moviethumb/f.jpg","lang":"en","likes":"1"}],
 	"moviedisc":[{"id":"7","url":"https://assets.fanart.tv/fanart/movies/550/moviedisc/g.png","lang":"en","likes":"1","disc":"1","disc_type":"bluray"}]}`
 
-// PROSE: the movie call reads every art type at once, and the key travels as
-// the api_key parameter.
+// The movie call reads every art type at once, and the key travels as the
+// api_key parameter.
 func TestTheFanartMovieCallReadsEveryArtType(t *testing.T) {
 	client, fake := newFakeFanart(t, http.StatusOK, fanartMovieAnswer)
 
@@ -78,7 +77,7 @@ func TestTheFanartMovieCallReadsEveryArtType(t *testing.T) {
 	}
 }
 
-// PROSE: one series answer, with art of the whole show and art of one season.
+// One series answer, with art of the whole show and art of one season.
 const fanartSeriesAnswer = `{"name":"Twin Peaks","thetvdb_id":"70533",
 	"tvposter":[{"id":"1","url":"https://assets.fanart.tv/fanart/tv/70533/tvposter/a.jpg","lang":"en","likes":"4"}],
 	"tvbanner":[{"id":"2","url":"https://assets.fanart.tv/fanart/tv/70533/tvbanner/b.jpg","lang":"en","likes":"2"}],
@@ -87,8 +86,8 @@ const fanartSeriesAnswer = `{"name":"Twin Peaks","thetvdb_id":"70533",
 	{"id":"5","url":"https://assets.fanart.tv/fanart/tv/70533/seasonposter/e.jpg","lang":"en","likes":"1","season":"all"}],
 	"seasonbanner":[{"id":"6","url":"https://assets.fanart.tv/fanart/tv/70533/seasonbanner/f.jpg","lang":"en","likes":"1","season":"1"}]}`
 
-// PROSE: the series call reads on the TheTVDB id, and the season art of one
-// season is that season's own art with the art that covers every season.
+// The series call reads on the TheTVDB id, and the season art of one season
+// is that season's own art plus the art that covers every season.
 func TestTheFanartSeriesCallReadsTheSeasonArt(t *testing.T) {
 	client, fake := newFakeFanart(t, http.StatusOK, fanartSeriesAnswer)
 
@@ -121,8 +120,8 @@ func TestTheFanartSeriesCallReadsTheSeasonArt(t *testing.T) {
 	}
 }
 
-// PROSE: a title Fanart.tv does not hold answers 404, which is a miss and not
-// an error, because a title with no art is the ordinary case.
+// A title Fanart.tv does not hold answers 404, which is a miss and not an
+// error, because a title with no art is the ordinary case.
 func TestAFanartTitleWithNoArt(t *testing.T) {
 	client, _ := newFakeFanart(t, http.StatusNotFound, `{"status":"error","error message":"Not found"}`)
 
@@ -136,7 +135,7 @@ func TestAFanartTitleWithNoArt(t *testing.T) {
 	}
 }
 
-// PROSE: an answer that is neither the art nor a miss is an error the attempt
+// An answer that is neither the art nor a miss is an error the attempt
 // records, so the next run tries again.
 func TestAFanartCallThatFails(t *testing.T) {
 	client, _ := newFakeFanart(t, http.StatusInternalServerError, "")

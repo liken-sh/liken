@@ -1,8 +1,8 @@
 package main
 
-// PROSE: what these tests read: the show TVmaze answers for an id another
-// provider gave, the cast and the images of that show, the miss an id it does
-// not hold answers, and that no request carries a key.
+// What these tests read: the show TVmaze answers for an id another provider
+// gave, the cast and the images of that show, the miss an id it does not hold
+// answers, and that no request carries a key.
 
 import (
 	"io"
@@ -12,8 +12,8 @@ import (
 	"testing"
 )
 
-// PROSE: what one fake TVmaze recorded: the path and the query of every
-// request, and the answer it holds for each path.
+// What one fake TVmaze recorded: the path and the query of every request, and
+// the answer it holds for each path.
 type fakeTVmaze struct {
 	mutex    sync.Mutex
 	requests []*http.Request
@@ -37,8 +37,8 @@ func newFakeTVmaze(t *testing.T, status int, answers map[string]string) (*tvmaze
 	return client, fake
 }
 
-// PROSE: one show, with the ids, the overview fields, and the poster TVmaze
-// carries on the show itself.
+// One show, with the ids, the overview fields, and the poster TVmaze carries
+// on the show itself.
 const tvmazeShowAnswer = `{"id":1371,"name":"Twin Peaks","premiered":"1990-04-08",
 	"genres":["Drama","Mystery"],"runtime":60,"averageRuntime":47,
 	"summary":"<p>An FBI agent arrives in a small town.</p>",
@@ -46,9 +46,9 @@ const tvmazeShowAnswer = `{"id":1371,"name":"Twin Peaks","premiered":"1990-04-08
 	"image":{"medium":"https://static.tvmaze.com/uploads/m.jpg","original":"https://static.tvmaze.com/uploads/o.jpg"},
 	"externals":{"imdb":"tt0098936","thetvdb":70533,"tvrage":6293}}`
 
-// PROSE: a lookup on an id another provider gave answers the show, with the
-// ids the identity fact writes and the fields the overview fact reads. TVmaze
-// takes no account, so the request carries no key at all.
+// A lookup on an id another provider gave answers the show, with the ids the
+// identity fact writes and the fields the overview fact reads. TVmaze takes
+// no account, so the request carries no key.
 func TestTheTVmazeLookupReadsOneShow(t *testing.T) {
 	client, fake := newFakeTVmaze(t, http.StatusOK,
 		map[string]string{tvmazeLookupPath: tvmazeShowAnswer})
@@ -76,8 +76,7 @@ func TestTheTVmazeLookupReadsOneShow(t *testing.T) {
 	}
 }
 
-// PROSE: an id TVmaze does not hold answers 404, which is a miss and not an
-// error.
+// An id TVmaze does not hold answers 404, which is a miss and not an error.
 func TestATVmazeLookupThatFindsNoShow(t *testing.T) {
 	client, _ := newFakeTVmaze(t, http.StatusNotFound, nil)
 
@@ -87,8 +86,8 @@ func TestATVmazeLookupThatFindsNoShow(t *testing.T) {
 	}
 }
 
-// PROSE: the show, the cast, and the images of one TVmaze id, which are the
-// three calls the series facts make.
+// The show, the cast, and the images of one TVmaze id, which are the three
+// calls the series facts make.
 func TestTheTVmazeShowCallsReadWhatTheFactsWrite(t *testing.T) {
 	client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
 		tvmazeShowsPath + "1371": tvmazeShowAnswer,
@@ -143,7 +142,7 @@ func TestTheTVmazeShowCallsReadWhatTheFactsWrite(t *testing.T) {
 	}
 }
 
-// PROSE: an answer that is neither a show nor a miss is an error the attempt
+// An answer that is neither a show nor a miss is an error the attempt
 // records.
 func TestATVmazeCallThatFails(t *testing.T) {
 	client, _ := newFakeTVmaze(t, http.StatusInternalServerError, nil)

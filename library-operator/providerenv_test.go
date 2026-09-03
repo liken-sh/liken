@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// PROSE: the set a pass would answer with, from the providers of one
-// namespace.
+// The set a pass would answer with, from the providers of one namespace.
 func providersOf(providers ...*MetadataProvider) providerSet {
 	set := providerSet{}
 	for _, provider := range providers {
@@ -17,14 +16,14 @@ func providersOf(providers ...*MetadataProvider) providerSet {
 	return set
 }
 
-// PROSE: the Library that names those providers as its sources, in order.
+// The Library that names those providers as its sources, in order.
 func libraryWithSources(sources ...string) *Library {
 	library := studioMovies()
 	library.Spec.Sources = sources
 	return library
 }
 
-// PROSE: the variable one block's key travels in. The identity fact reads
+// The variable one block's key travels in. The identity fact reads
 // TMDB_TOKEN, which is that rule for tmdb.
 func TestTheVariableOfEachProviderKey(t *testing.T) {
 	cases := []struct {
@@ -101,8 +100,8 @@ func TestTheProviderKeysOfALibrary(t *testing.T) {
 	}
 }
 
-// PROSE: the key names the Secret of its own provider and the key inside it,
-// so the kubelet reads the credential and this operator never holds it.
+// The key names the Secret of its own provider and the key inside it, so the
+// kubelet reads the credential and this operator never holds it.
 func TestAProviderKeyNamesItsOwnSecret(t *testing.T) {
 	omdb := providerOfBlock("omdb", providerBlockOMDb)
 
