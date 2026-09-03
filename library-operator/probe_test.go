@@ -402,7 +402,9 @@ func TestASidecarWithNoRootElementIsWrittenAsIfItWereAbsent(t *testing.T) {
 // they were, because the volume may hold facts no reader here models.
 func TestASidecarWithARootTheParserCannotReadFailsTheEdit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s01e01.nfo")
-	sidecar := "<episodedetails><title>Breakage</episodedetails>"
+	// The document ends inside the root, which even a lenient reader cannot
+	// read past.
+	sidecar := "<episodedetails><title>Breakage"
 	writeFile(t, path, sidecar)
 
 	err := newVolumeWriter("series-enrich").editNFO(path, nfoRootEpisode, "s01e01",
