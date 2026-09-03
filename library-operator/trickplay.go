@@ -30,10 +30,10 @@ const (
 // gap on the next walk.
 func trickplayGapSQL() string {
 	return `SELECT path, duration_ms FROM files ` +
-		`WHERE library = ? AND type = '` + fileTypeVideo + `' AND present = 1 ` +
-		`AND duration_ms > 0 AND trickplay = '' ` +
-		`AND path NOT IN (SELECT item FROM attempts WHERE library = files.library AND ` +
-		attemptFactColumn + ` = '` + factTrickplay + `' AND result != 'error' AND at >= ?)`
+		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +
+		`AND duration_ms > 0 AND video_codec != '' AND trickplay = '' ` +
+		`AND path NOT IN (SELECT item FROM attempts WHERE library = ?1 AND ` +
+		attemptFactColumn + ` = '` + factTrickplay + `' AND result != 'error' AND at >= ?2)`
 }
 
 // One gap: the file to open, and the length the probe wrote, which is what
@@ -156,8 +156,15 @@ func (e *enricher) stageTrickplay(ctx context.Context, input, staging string,
 		e.logf("could not stage the trickplay of %s: %v", filepath.Base(input), err)
 		return 0, attemptError
 	}
+	// A decode ffmpeg refuses is the file's own state, and not a fault of
+	// the run, so it is a miss with a date and the window applies: a file
+	// that will not decode today will not decode tomorrow. A run a signal
+	// ended is an error, and the next run tries the file again.
 	if err := ffmpegSheets(ctx, input, tiles); err != nil {
 		e.logf("could not tile %s: %v", filepath.Base(input), err)
+		if ffmpegRefused(err) {
+			return 0, attemptNothing
+		}
 		return 0, attemptError
 	}
 	sheets, err := sheetsIn(tiles)

@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 
@@ -87,6 +88,14 @@ func ffmpegSheets(ctx context.Context, input, directory string) error {
 		return fmt.Errorf("ffmpeg %s: %w: %s", filepath.Base(input), err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// Whether ffmpeg ended the run itself, with an exit code, which is what it
+// does for a file it cannot read. A run a signal ended, such as a kill for
+// memory, has no exit code, and it says nothing about the file.
+func ffmpegRefused(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() >= 0
 }
 
 // The sheets one run left, in the order ffmpeg numbered them. A name that is

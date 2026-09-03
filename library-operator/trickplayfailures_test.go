@@ -181,7 +181,7 @@ func TestAnErrorAttemptLeavesTheTrickplayGapOpenAgainstTheRealSchema(t *testing.
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
 		files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
-			Type: fileTypeVideo, DurationMs: 6540000}},
+			Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"}},
 		attempts: []attemptRow{{Library: trickplayLibrary, Item: "A/a.mkv", Fact: factTrickplay,
 			At: ledgerTime.Unix(), Result: attemptError}},
 	}
@@ -195,5 +195,26 @@ func TestAnErrorAttemptLeavesTheTrickplayGapOpenAgainstTheRealSchema(t *testing.
 	}
 	if gaps[factTrickplay] != 1 {
 		t.Errorf("trickplay gap = %d, want the file the run could not tile", gaps[factTrickplay])
+	}
+}
+
+// A file the probe found no video stream in has nothing to tile, so it is no
+// gap, whatever length its container states.
+func TestAFileWithNoVideoStreamIsNoTrickplayGap(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seed := &walkResult{
+		files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
+			Type: fileTypeVideo, DurationMs: 200585000}},
+	}
+	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gaps[factTrickplay] != 0 {
+		t.Errorf("trickplay gap = %d, want none for a file with no video stream", gaps[factTrickplay])
 	}
 }

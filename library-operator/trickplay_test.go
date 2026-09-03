@@ -85,7 +85,7 @@ func standInFFmpegFailingAfterASheet(t *testing.T) {
 	seed := filepath.Join(dir, "sheet.jpg")
 	seedSheet(t, seed)
 	writeFile(t, filepath.Join(dir, "ffmpeg"),
-		"#!/bin/sh\nfor last; do :; done\ncp \""+seed+"\" \"$(dirname \"$last\")/0.jpg\"\nexit 1\n")
+		"#!/bin/sh\nfor last; do :; done\ncp \""+seed+"\" \"$(dirname \"$last\")/0.jpg\"\nkill -KILL $$\n")
 	if err := os.Chmod(filepath.Join(dir, "ffmpeg"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func seedTrickplayGap(t *testing.T, catalog *Catalog, root string, duration time
 		movies: []movieRow{{Id: "movie:path:x", Library: trickplayLibrary, Kind: libraryKindMovies,
 			Path: trickplayFolder, Title: trickplayFolder}},
 		files: []fileRow{{Path: filepath.Join(trickplayFolder, trickplayFile), Library: trickplayLibrary,
-			Present: true, Type: fileTypeVideo, DurationMs: duration.Milliseconds(),
+			Present: true, Type: fileTypeVideo, DurationMs: duration.Milliseconds(), VideoCodec: "h264",
 			Items: []string{"movie:path:x"}}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
@@ -152,9 +152,9 @@ func trickplayTilesUnder(root string) string {
 func TestTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{files: []fileRow{
-		{Path: "A/a.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 6540000},
+		{Path: "A/a.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"},
 		{Path: "B/b.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo},
-		{Path: "C/c.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 100,
+		{Path: "C/c.mkv", Library: trickplayLibrary, Present: true, Type: fileTypeVideo, DurationMs: 100, VideoCodec: "h264",
 			Trickplay: "C/c.trickplay"},
 		{Path: "D/d.srt", Library: trickplayLibrary, Present: true, Type: fileTypeSubtitle, DurationMs: 100},
 	}}
@@ -180,7 +180,7 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
 		files: []fileRow{{Path: "A/a.mkv", Library: trickplayLibrary, Present: true,
-			Type: fileTypeVideo, DurationMs: 6540000}},
+			Type: fileTypeVideo, DurationMs: 6540000, VideoCodec: "h264"}},
 		attempts: []attemptRow{{Library: trickplayLibrary, Item: "A/a.mkv", Fact: factTrickplay,
 			At: ledgerTime.Unix(), Result: attemptFound}},
 	}
@@ -307,7 +307,7 @@ func TestWhatOneTrickplayAttemptRecords(t *testing.T) {
 	}{
 		{name: "the sheets landed", sheets: 2, want: attemptFound},
 		{name: "ffmpeg read no frame", sheets: 0, want: attemptNothing},
-		{name: "ffmpeg could not read the file", sheets: -1, want: attemptError},
+		{name: "ffmpeg could not read the file", sheets: -1, want: attemptNothing},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
