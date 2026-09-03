@@ -1,9 +1,8 @@
-# Every push to main and every pull request runs the tests. Nothing
-# here releases: a push to main is ordinary work landing, and the
-# release act is a pushed tag (release.yaml). That separation lets
-# docs and intermediate commits land on main without cutting a
-# version, and it means main's history records a test verdict for
-# every commit a release could later tag.
+# Every pull request runs the tests and builds every image, and
+# pushes nothing. A push to main runs release.yaml instead, which
+# runs the same tests and then publishes a development build, so
+# this workflow does not run there: two workflows that test one push
+# would spend twice the runners for one answer.
 #
 # There is no path filter. The tests are cheap next to the image
 # builds, and a filter that guessed wrong would leave a commit with
@@ -14,16 +13,13 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
   contents: read
-  # The image builds write their layer cache to ghcr, which needs
-  # this permission even though no run of this workflow pushes an
-  # image.
-  packages: write
+  # The image builds read their layer cache from ghcr. No run of this
+  # workflow writes an image or the cache, so read is enough.
+  packages: read
 
 jobs:
   go:
@@ -66,15 +62,15 @@ jobs:
       # the site build.
       - run: make test-docs
 
-  # Every image builds on every change, and none is pushed, so a
-  # Dockerfile that stopped building fails here and not at the tag.
+  # Every image builds on every pull request, and none is pushed, so
+  # a Dockerfile that stopped building fails here and not on main.
   #
   # The layer cache lives in ghcr, as a :buildcache tag beside each
   # image, not in the GitHub Actions cache. A registry cache has no
-  # 10 GB ceiling, it outlives a branch, and CI and release share it,
-  # so a release of a commit CI already built rebuilds nothing. A pull
-  # request from a fork holds a read-only token, so it reads the cache
-  # and writes none.
+  # 10 GB ceiling, and it outlives a branch. release.yaml writes it
+  # on every push to main and every tag, and this workflow only reads
+  # it, so a pull request's builds start from the layers the last
+  # build on main left.
   images:
     runs-on: ubuntu-latest
     # One job per image, so the three build at once and the run is as
@@ -107,4 +103,3 @@ jobs:
           file: ${{ matrix.file }}
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref=ghcr.io/liken-sh/{0}:buildcache,mode=max', matrix.image) || '' }}

@@ -1,9 +1,17 @@
-# A pushed tag cuts a release. The tag is the release act, as in the
-# main liken repository: a push to main only runs the tests
-# (ci.yaml), so docs and intermediate work land freely, and a person
-# chooses the commit a version names by tagging it. The version is
-# the tag's name, in liken's own scheme: 2026.08.03-001, the date and
-# a counter.
+# Every image this repository publishes goes through this workflow.
+# A pushed tag cuts a release: the tag names a version in liken's
+# calendar scheme, 2026.09.03-007, and the images ship under that
+# tag and :latest. A push to main cuts a development build: the
+# version is the most recent release tag plus a suffix,
+# 2026.09.03-007-dev-003-abcdef01, where 003 counts the commits since
+# that release and abcdef01 is this commit. The suffix sorts after
+# its release and before the next one, so a registry listing reads
+# in order. A development build never moves :latest, so a cluster
+# that pulls a release keeps pulling releases.
+#
+# Both kinds run the tests first and build only when they pass. A
+# development build that skipped the tests would put a broken image
+# one pin away from a cluster.
 #
 # The three images share one version, because they are three
 # parts of one pod and a deployment that mixes versions is a
@@ -14,11 +22,11 @@ name: release
 
 on:
   push:
-    tags: ['*']
+    branches: [main]
+    tags: ["**"]
 
 # The registry pushes need packages: write. Nothing here writes to
-# the repository: the tag exists before the run, so the workflow
-# only reads the commit it names.
+# the repository.
 permissions:
   contents: read
   packages: write
@@ -32,18 +40,56 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      # Every tag reaches this workflow, so the first step tests
-      # whether the tag is a version. A tag of any other shape fails
-      # here, before anything builds, and the log says why.
-      - name: check the tag shape
-        run: |
-          echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
-            echo "tag '$GITHUB_REF_NAME' is not a version: a release tag looks like 2026.08.03-001"
-            exit 1
-          }
-          echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
-
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The version comes from the event. A tag names it, and a tag of
+      # any other shape stops the run before a build spends anything,
+      # so no image ships under a name no machine can order against
+      # the others. A push to main derives it: git describe finds the
+      # most recent release tag and counts the commits since it, and
+      # the first eight characters of the commit sha make the build
+      # traceable. The checkout fetches the whole history, because
+      # describe needs the tags.
+      - name: Name the version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
+              echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.20-001"
+              exit 1
+            }
+            echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+            echo "RELEASE=true" >> "$GITHUB_ENV"
+          else
+            described=$(git describe --tags --long --match '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-[0-9][0-9][0-9]')
+            release=${described%-*-g*}
+            count=${described#"$release"-}
+            count=${count%-g*}
+            echo "VERSION=$(printf '%s-dev-%03d-%s' "$release" "$count" "${GITHUB_SHA:0:8}")" >> "$GITHUB_ENV"
+            echo "RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
+      # A development build has no tag, so a kustomization that pins
+      # its manifests needs the full commit sha: a git fetch by sha
+      # wants all forty characters, and the eight in the version are
+      # not enough. The run's summary prints the two lines to paste,
+      # so a roll is a copy.
+      - name: Write the roll lines
+        run: |
+          {
+            echo '```yaml'
+            echo "resources:"
+            echo "  - https://github.com/$GITHUB_REPOSITORY//deploy?ref=$GITHUB_SHA"
+            echo "images:"
+            echo "  - name: ghcr.io/liken-sh/bluetooth-operator"
+            echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/liken-sh/bluetoothd"
+            echo "    newTag: $VERSION"
+            echo "  - name: ghcr.io/liken-sh/bluetooth-bondfetch"
+            echo "    newTag: $VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-go@v6
         with:
@@ -68,9 +114,10 @@ jobs:
       # that fails then leaves no half-released version behind, where
       # a push per image could leave two of three on :latest.
       #
-      # The builds read and write the same :buildcache tags ci.yaml
-      # uses, so a release of a commit CI already built rebuilds
-      # nothing.
+      # The builds read and write the :buildcache tags beside each
+      # image. A tag's release of a commit whose development build
+      # already ran here rebuilds nothing, and a pull request's builds
+      # in ci.yaml read the same tags.
       - name: Build the operator
         uses: docker/build-push-action@v6
         with:
@@ -109,11 +156,15 @@ jobs:
             ghcr.io/liken-sh/bluetoothd:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetoothd:latest
 
+      # :latest marks the newest release and nothing else. A
+      # development build pushes its own tag only.
       - name: Push the images
         run: |
           docker push "ghcr.io/liken-sh/bluetooth-operator:$VERSION"
-          docker push "ghcr.io/liken-sh/bluetooth-operator:latest"
           docker push "ghcr.io/liken-sh/bluetooth-bondfetch:$VERSION"
-          docker push "ghcr.io/liken-sh/bluetooth-bondfetch:latest"
           docker push "ghcr.io/liken-sh/bluetoothd:$VERSION"
-          docker push "ghcr.io/liken-sh/bluetoothd:latest"
+          if [ "$RELEASE" = true ]; then
+            docker push "ghcr.io/liken-sh/bluetooth-operator:latest"
+            docker push "ghcr.io/liken-sh/bluetooth-bondfetch:latest"
+            docker push "ghcr.io/liken-sh/bluetoothd:latest"
+          fi
