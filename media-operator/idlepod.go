@@ -11,11 +11,12 @@ package main
 //
 // Who draws is a choice. spec.idle.controller names the operator that
 // draws, and under this operator's own name spec.idle.image names the
-// client. A Player that names no image runs the image the operator
-// reads from IDLE_IMAGE. Every client starts with its image's own
-// entrypoint and reads the unit's state off the bus, so one contract
-// serves the client this project ships and any other a household
-// states.
+// client.
+// A Player that names no image runs the idle client at the
+// operator's own version.
+// Every client starts with its image's own entrypoint and reads the
+// unit's state off the bus, so one contract serves the client this
+// project ships and any other a household states.
 
 import (
 	"strconv"

@@ -37,27 +37,16 @@ spec:
         - name: operator
           image: ghcr.io/liken-sh/media-operator:latest
           env:
-            # The image the playback pods run: mpv under this same
-            # binary as the argument shim. The operator stamps it into
-            # every pod it creates. It is an environment variable
-            # rather than a constant so a cluster pins the three
-            # images together with one patch.
-            - name: PLAYER_IMAGE
-              value: ghcr.io/liken-sh/media-operator-player:latest
-            # The image every idle screen runs: the client that reads a
-            # unit's state off the bus and draws the clock while
-            # nothing plays. The operator stamps it into every idle pod
-            # whose Player names no image of its own, and it is set
-            # here for the reason the player image is.
-            - name: IDLE_IMAGE
-              value: ghcr.io/liken-sh/media-operator-idle:latest
-            # The image every sidecar container runs: the same binary
-            # alone, with none of the player image's mpv, drivers, or
-            # fonts. The operator stamps it into every sidecar it
-            # creates, and it is set here for the reason the player
-            # image is.
-            - name: SIDECAR_IMAGE
-              value: ghcr.io/liken-sh/media-operator-sidecar:latest
+            # The operator reads its own pod to learn its image, and
+            # derives every companion image from it at the same tag.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             # The broker the operator and every pod reach: the bus
             # Service in this namespace. The operator cannot derive the
             # Service name, so the manifest states it, and the operator

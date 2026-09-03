@@ -315,8 +315,9 @@ const (
 // are set on the idle pod as plain values, and the off mode stays
 // with the operator, which writes the override.
 type resolvedIdle struct {
-	// The image the idle client runs, always set, because the operator's
-	// own IDLE_IMAGE is the floor under both tiers.
+	// The image the idle client runs, always set.
+	// The idle client at the operator's own version is the floor
+	// under both tiers.
 	Image string
 
 	// The name of the operator that draws this unit's idle
@@ -334,9 +335,9 @@ type resolvedIdle struct {
 
 // resolveIdle settles each idle field on its own: the Player's block,
 // then the household default, then the built-in. Field by field, so a
-// Player that states one field still inherits the rest. image is the
-// client the operator reads from IDLE_IMAGE, the last tier under the
-// two the cluster states.
+// Player that states one field still inherits the rest.
+// image is the idle client at the operator's own version, the last
+// tier under the two the cluster states.
 func resolveIdle(player, defaults *IdlePolicy, image string) resolvedIdle {
 	var fade, off []*int64
 	var mode, images, controllers []string

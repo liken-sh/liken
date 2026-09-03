@@ -213,8 +213,9 @@ type PlayerSpec struct {
 type IdlePolicy struct {
 	// Image is the container image the idle screen runs. The image
 	// starts with its own entrypoint and reads the unit's state off the
-	// bus. Empty defers to the next tier, and a tier that states none
-	// runs the client the operator reads from IDLE_IMAGE.
+	// bus. Empty defers to the next tier.
+	// A tier that states none runs the idle client at the operator's
+	// own version.
 	Image string `json:"image,omitempty"`
 
 	// FadeAfterSeconds is the quiet stretch before the idle screen

@@ -21,10 +21,10 @@ import (
 	"time"
 )
 
-// The operator's own environment: the three images it stamps into
-// pods, the broker, and the topic base. The Deployment sets each image,
-// because an image is a release decision a pod cannot discover, and
-// only MEDIA_TOPIC_BASE has a default.
+// The operator's own environment: three image overrides, the broker,
+// and the topic base. Only MEDIA_TOPIC_BASE has a default. An image
+// variable that is set wins over the image images.go derives from
+// the operator's own pod, and one that is unset derives.
 const (
 	playerImageVariable = "PLAYER_IMAGE"
 
@@ -216,21 +216,6 @@ func operate() {
 	// Setup failures end the process on purpose. The kubelet restarts
 	// the pod with backoff, and the failure shows in kubectl instead of
 	// hiding in a retry loop.
-	image := os.Getenv(playerImageVariable)
-	if image == "" {
-		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the player image\n", playerImageVariable)
-		os.Exit(1)
-	}
-	idleImage := os.Getenv(idleImageVariable)
-	if idleImage == "" {
-		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the idle image\n", idleImageVariable)
-		os.Exit(1)
-	}
-	sidecarImage := os.Getenv(sidecarImageVariable)
-	if sidecarImage == "" {
-		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the sidecar image\n", sidecarImageVariable)
-		os.Exit(1)
-	}
 	busAddress := os.Getenv(busAddressVariable)
 	if busAddress == "" {
 		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the broker\n", busAddressVariable)
@@ -251,6 +236,12 @@ func operate() {
 		os.Exit(1)
 	}
 
+	images, err := resolveImages(client)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	// One wake channel serves the two watches and the bus handler,
 	// because a wake carries no information beyond "read the collection
 	// again".
@@ -261,9 +252,9 @@ func operate() {
 	panels := newPanelDesk(wake)
 	media := &operator{
 		client:                client,
-		image:                 image,
-		idleImage:             idleImage,
-		sidecarImage:          sidecarImage,
+		image:                 images.player,
+		idleImage:             images.idle,
+		sidecarImage:          images.sidecar,
 		busAddress:            busAddress,
 		topicBase:             topicBase,
 		idleDisplayClass:      idleDisplayClass,
