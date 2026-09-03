@@ -189,7 +189,7 @@ and a walk proves it rather than trusting every path into the catalog to
 have remembered.
 
 It names the cost of the derived id in a way the design did not.
-[Writing ids back to the volume](../open-problems/writing-ids-back-to-the-volume.md)
+[Plan 29](29-identification.md), which writes ids back to the volume,
 covers the sidecar-less case. This is the opposite case, a sidecar that
 is present and wrong, and the catalog has no defence against it. A later
 plan could report a collision rather than absorb it: two folders that

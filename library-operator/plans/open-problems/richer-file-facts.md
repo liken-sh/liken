@@ -1,8 +1,10 @@
 # Richer file facts
 
-[Plan 29](../29-identification.md) answers this with the `probe`
+[Plan 29](../completed/29-identification.md) built the `probe`
 concern, which opens the file once and writes `<streamdetails>` into
-the `.nfo`. The note stays until that plan is built.
+the `.nfo`: the duration, the codecs, the resolution, and the audio
+channel layout. The bitrate, the HDR format, and the encode's quality
+settings are still unread, and the note stays for them.
 
 A `file` row carries its container, its video and audio codec, its
 resolution, its size in bytes, and a duration. The resolution and the

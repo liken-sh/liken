@@ -203,7 +203,7 @@ is no rate limiter: a `429` is a cooldown inside the container. Plan
    pod and its reporter, the `runs` table and the echo a `Job` waits
    for, scan `Job`s, the `CronJob`, and the webhook that creates a
    `Job`.
-2. [Plan 29, identification](29-identification.md). `MetadataProvider`,
+2. [Plan 29, identification](completed/29-identification.md). `MetadataProvider`,
    the enricher `Job`, the `probe` and `identity` concerns, the write
    package and its test, the `.liken/` reader, and the gap loop.
 3. [Plan 30, facts, art, and contributors](30-facts-art-and-contributors.md).

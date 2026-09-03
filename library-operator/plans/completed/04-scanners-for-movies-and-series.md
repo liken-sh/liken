@@ -198,8 +198,8 @@ Writing a cleaner id back to the volume. The provider-scoped id is
 stable for a title with a sidecar, but a sidecar-less folder's id rests
 on its path, and a move breaks it. Writing a minted id back to the
 volume as a durable fact would fix that. The project trusts the public
-databases' ids for now and defers writing its own, recorded in
-[`open-problems/`](../open-problems/writing-ids-back-to-the-volume.md).
+databases' ids for now and deferred writing its own until
+[plan 29](29-identification.md).
 
 ## Proof
 

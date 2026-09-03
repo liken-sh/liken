@@ -1,6 +1,6 @@
 # Identification
 
-Plan 29. The first enrichment build from [plan 27](27-enrichment.md).
+Plan 29. The first enrichment build from [plan 27](../27-enrichment.md).
 It answers one question for a fresh piece of media: what is it? A
 title with a sidecar answers from the sidecar. A title with none gets
 its answer from a provider search over the clues the volume holds, or
@@ -271,15 +271,66 @@ seconds for either library, most of it the sidecar's exit. The
 standing enricher started within a minute of the walk that followed
 the roll, and again within a minute of the next top-of-hour walk.
 
-Not yet run: a write onto the volume, the identity ladder against
-TMDb, and the webhook chain. They wait on the export rule and the
-`Secret`.
+**The write path opened.** With the export rule and the `Secret` in
+place, the first real run showed three faults, fixed in -012. A v3 key
+travels as a query parameter and a v4 token as a bearer header, and the
+code now reads the form from the key's shape. The image had no CA
+bundle, so every TLS call failed, and the provider check read that as
+`NoSecret`; it now says `Unreachable`, which names a check that got no
+HTTP answer at all. And the per-file sidecars the probe writes were
+never read back, because the movie walk read `movie.nfo` alone. Release
+-013 taught the series walk the same lessons: a sidecar under either
+root element, `.liken/` lifted from every folder the walk reads files
+from, a `.nfo` with no root element treated as absent, and a country
+qualifier such as `(US)` on a series folder, which becomes a rung that
+reads the origin country of each result.
+
+**The ladder's numbers.** Of the 6 movies with a path id, 2 identified
+by title and year, 1 became a list of 4 candidates, and 3 found nothing.
+A hand check found every outcome right: the 3 with nothing were a folder
+with a part number after its year, a special that belongs in a series
+library, and a title the provider does not hold. Then 10 movies had
+their sidecars stripped, with copies kept aside, and every one came
+back with its original id by title and year. The one series stripped
+carried a country qualifier and came back only with the -013 rung,
+with its original id, by title and country. Two more series stripped
+after the roll came back by title alone, with their original ids, and
+their ledgers survived the rescan. The copies went back onto the volume
+after the drill.
+
+**The loop closes.** For the movies library the report reads no video
+without a duration, no gap under either concern, one title waiting on a
+person, and two with no id after the provider was asked. For the
+series library, after the -014 roll, no video without a duration, no
+gap, none waiting, and one with no id after the ask. The walk, the
+enricher, and the rescan take about a minute together for either
+library, and the operator deletes a succeeded worker `Job` five minutes
+after it completes, so `kubectl get pods` shows what runs and what
+failed.
+
+Open items, none of which blocks plan 30:
+
+- A search of TMDb's TV endpoint for a movie-library title that finds
+  nothing, offered as candidates only, so a special filed under movies
+  points a person at the series it belongs to.
+- An IMDb rung: `[imdbid-tt…]` in a name goes to TMDb's `find` endpoint
+  and comes back with the id under either kind.
+- A corpus test for the name parser, built from real release names,
+  because `.part N` after the year defeats the year parse today.
+- A video in a season folder with no episode marker, which the series
+  walk skips, so neither concern reaches it.
+- The provider keys on the testbed are hand-made `Secret`s, because the
+  1Password operator does not run there.
+- One identity ledger went missing once: the series with the country
+  qualifier got its `uniqueid` and its log line, and its `.liken/`
+  directory was empty afterwards. Its ledger had been deleted by hand
+  minutes before the run, on the same NFS export. Two later series runs
+  left their ledgers in place, so this is unexplained and not
+  reproduced.
 
 ## What is not decided
 
-How many minutes count as "close" on the runtime rung. Whether the
-probe should read every file in a big series library on its first run
-or take them in bounded batches per `Job`. How a person confirms from
-the screen, which is a later browser plan that writes the same
-`uniqueid`. Whether the `ffprobe` binary rides in the operator image
-or in one of its own.
+Whether the probe should read every file in a big series library on
+its first run or take them in bounded batches per `Job`. How a person
+confirms a candidate from the screen, which is a later browser plan
+that writes the same `uniqueid`.

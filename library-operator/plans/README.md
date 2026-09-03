@@ -67,10 +67,6 @@ they share, and plans 28 to 31 build them in order.
   `.liken/` directory for what they cannot say, `.contributors/` for
   people, concerns as the unit of work, `MetadataProvider`, and the
   write rules.
-* [29, Identification](29-identification.md). `MetadataProvider`, the
-  enricher `Job` with its concerns as containers, the `probe` and
-  `identity` concerns, the write package with its test, and the gap
-  loop.
 * [30, Facts, art, and contributors](30-facts-art-and-contributors.md).
   The `.nfo` and its write record, the art concerns, `credits.yaml`,
   `.contributors/`, and trickplay.
@@ -185,6 +181,13 @@ that took a hearing-impaired flag for Hindi.
   scan is a `Job` that exits on the reporter's echo of its run and its
   counts, the webhook is on the operator, and departure is a `Job`.
   The drill found four gaps, fixed the same day, and one open problem.
+* [29, Identification](completed/29-identification.md). Built in
+  2026.09.02-010 to -014 and drilled on `liken-1` on 2026-09-02 and
+  2026-09-03. `MetadataProvider`, the enricher `Job` with its concerns
+  as containers, the `probe` and `identity` concerns, the write package
+  with its test, the `.liken/` reader, and the gap loop. Every stripped
+  title came back with its original id, and the drill left six open
+  items, none of which blocks plan 30.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds
@@ -227,19 +230,15 @@ that took a hearing-impaired flag for Hindi.
 * [Clients that cannot run an
   agent](open-problems/clients-that-cannot-run-an-agent.md). Phones and
   laptops have no path to the catalog.
-* [Writing ids back to the
-  volume](open-problems/writing-ids-back-to-the-volume.md). The
-  sidecar-less fifth rest their id on a path a move breaks. Plan 29's
-  `identity.yaml` answers it.
 * [A fresh agent's first version arrives
   late](open-problems/a-fresh-agents-first-version-arrives-late.md).
   A `Job` on a fresh claim pays one echo timeout on its first run,
   because its first write reaches the catalog pod minutes after the
   rest.
-* [Richer file facts](open-problems/richer-file-facts.md). A future
-  enhancement reads a file's container metadata for a measured duration,
-  the bitrate, the HDR format, and the encode's quality. Plan 29's
-  `probe` concern answers it.
+* [Richer file facts](open-problems/richer-file-facts.md). Plan 29's
+  `probe` concern measures the duration, the codecs, the resolution,
+  and the audio channel layout. The bitrate, the HDR format, and the
+  encode's quality settings are still unread.
 
 ## Rejected
 
