@@ -13,50 +13,86 @@ import (
 	"strings"
 )
 
-// The art facts this image can fill, in the order the art container names
-// them in LIBRARY_FACTS: the title's own art first, then the season's, then
-// the episode's. The other five art types are Fanart.tv's alone, and a later
-// wave asks for them.
-var artFactNames = []string{factPoster, factBackdrop, factLogo, factSeasonPoster, factEpisodeThumb}
+// PROSE: the art facts this image can fill, in the order the art container
+// names them in LIBRARY_FACTS: the title's own art first, then the season's,
+// then the episode's.
+var artFactNames = []string{
+	factPoster, factBackdrop, factLogo, factClearart, factBanner,
+	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
+}
+
+// The art facts the Library's own sources serve, in the order the group runs
+// them. A Library whose sources hold one provider asks for what that provider
+// serves and no more.
+func servedArtFacts(library *Library, providers providerSet) []string {
+	var served []string
+	for _, fact := range artFactNames {
+		if !artTypes[fact].holds(library.Spec.Kind) {
+			continue
+		}
+		if providers.serving(library.Metadata.Namespace, library.Spec.Sources, fact) != nil {
+			served = append(served, fact)
+		}
+	}
+	return served
+}
 
 // One art type. The file is the name Kodi and Jellyfin read beside the title,
 // from https://kodi.wiki/view/Artwork and
 // https://jellyfin.org/docs/general/server/media/movies/, both read on
-// 2026-09-03. The season poster and the episode thumbnail carry no fixed
-// name, because each is named for its season or its episode file, so their
-// file is empty and the two functions below name them. The list is the TMDb
-// array the fact reads, and the size is the one it fetches.
+// 2026-09-03. For the two season facts the file is the last part of the name
+// alone, because the season number leads it, and the episode thumbnail carries
+// no file at all, because it is named for its episode file. The kind is the
+// one kind of library that carries this art, and empty for the art both kinds
+// carry. The list is the TMDb array the fact reads, and the size is the one it
+// fetches.
 type artType struct {
 	fact string
 	file string
+	kind string
 	list string
 	size string
 }
 
-// The five types, with the sizes this project fetches. These sizes and not
-// the original, because the browser of plan 22 draws on a 1080p panel and
-// holds every decoded image in memory, and a raster over 2 MiB draws in
+// Whether a library of this kind carries this art at all. A disc is a
+// movie's, so a series is never a discart gap, and a series library never
+// names the fact in its container.
+func (t artType) holds(kind string) bool {
+	return t.kind == "" || t.kind == kind
+}
+
+// The ten types, with the sizes this project fetches from TMDb. The five
+// names this wave adds come from the Kodi forum's artwork naming thread at
+// https://forum.kodi.tv/showthread.php?tid=248825 and from
+// https://kodi.wiki/view/Artwork/Season, both read on 2026-09-03. These sizes
+// and not the original, because the browser of plan 22 draws on a 1080p panel
+// and holds every decoded image in memory, and a raster over 2 MiB draws in
 // bands. The sizes are the open decision plan 30 lists under what is not
 // decided.
 var artTypes = map[string]artType{
 	factPoster:       {fact: factPoster, file: "poster.jpg", list: tmdbPosters, size: "w780"},
 	factBackdrop:     {fact: factBackdrop, file: "fanart.jpg", list: tmdbBackdrops, size: "w1280"},
 	factLogo:         {fact: factLogo, file: "clearlogo.png", list: tmdbLogos, size: "w500"},
-	factSeasonPoster: {fact: factSeasonPoster, list: tmdbPosters, size: "w780"},
+	factClearart:     {fact: factClearart, file: "clearart.png"},
+	factBanner:       {fact: factBanner, file: "banner.jpg"},
+	factLandscape:    {fact: factLandscape, file: "landscape.jpg"},
+	factDiscart:      {fact: factDiscart, file: "disc.png", kind: libraryKindMovies},
+	factSeasonPoster: {fact: factSeasonPoster, file: "poster.jpg", list: tmdbPosters, size: "w780"},
+	factSeasonBanner: {fact: factSeasonBanner, file: "banner.jpg"},
 	factEpisodeThumb: {fact: factEpisodeThumb, list: tmdbStills, size: "w300"},
 }
 
-// The name Kodi reads for the poster of season zero, which holds the
-// specials.
-const specialsPosterName = "season-specials-poster.jpg"
+// The start of the name Kodi reads for the art of season zero, which holds
+// the specials.
+const specialsSeasonPrefix = "season-specials-"
 
-// The name of one season's poster. Kodi reads it in the series folder beside
+// The name of one season's art. Kodi reads it in the series folder beside
 // tvshow.nfo, not in the season folder.
-func seasonPosterName(season int) string {
+func seasonArtName(season int, suffix string) string {
 	if season == 0 {
-		return specialsPosterName
+		return specialsSeasonPrefix + suffix
 	}
-	return fmt.Sprintf("season%02d-poster.jpg", season)
+	return fmt.Sprintf("season%02d-%s", season, suffix)
 }
 
 // The name of one episode's thumbnail: the episode file's own name with the
@@ -66,13 +102,14 @@ func episodeThumbName(video string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base)) + "-thumb.jpg"
 }
 
-// The file one gap writes, relative to the folder that holds it. Four of the
-// facts key on the file itself, and the episode thumbnail keys on the episode
-// file it goes beside.
+// PROSE: the file one gap writes, relative to the folder that holds it. Say
+// that the facts of a title key on the file name itself, that the two season
+// facts key on the season number, and that the episode thumbnail keys on the
+// episode file it goes beside.
 func (t artType) fileFor(gap artGap) string {
 	switch t.fact {
-	case factSeasonPoster:
-		return seasonPosterName(gap.season)
+	case factSeasonPoster, factSeasonBanner:
+		return seasonArtName(gap.season, t.file)
 	case factEpisodeThumb:
 		return episodeThumbName(gap.key)
 	default:
@@ -124,12 +161,6 @@ func artFactRun(fact string) factRun {
 	return func(ctx context.Context, e *enricher) error { return e.artFact(ctx, fact) }
 }
 
-// The provider one Library's sources hold for the art: the first of them that
-// is Ready and serves any art fact.
-func (s providerSet) servingArt(namespace string, sources []string) *MetadataProvider {
-	return s.servingAny(namespace, sources, artFactNames)
-}
-
 // The gap query of the title's own art, over the movies and the series of one
 // library. A gap is a title with a TMDb id and no file of that name in the
 // catalog, outside the retry window. The query asks for the id because a gap
@@ -137,33 +168,41 @@ func (s providerSet) servingArt(namespace string, sources []string) *MetadataPro
 // title no provider can name is no gap. The join onto aliases is what reads
 // the TMDb id of a series or a movie whose own id is under another scheme.
 func titleArtGapSQL(fact string) string {
-	file := artTypes[fact].file
+	art := artTypes[fact]
 	branch := func(table, scope string) string {
-		return `SELECT t.library AS library, t.path || '/` + file + `' AS file, ` +
+		return `SELECT t.library AS library, t.path || '/` + art.file + `' AS file, ` +
 			`substr(a.alias, length('` + scope + `:tmdb:') + 1) AS tmdb ` +
 			`FROM ` + table + ` AS t JOIN aliases AS a ` +
 			`ON a.library = t.library AND a.item = t.id AND a.alias LIKE '` + scope + `:tmdb:%'`
 	}
-	return `SELECT file, tmdb, 0, 0 FROM (` +
-		branch("movies", scopeMovie) + ` UNION ALL ` + branch("series", scopeSeries) +
+	// The branches are the kinds this art belongs to, so the disc art reads
+	// the movies and never the series.
+	branches := []string{}
+	if art.holds(libraryKindMovies) {
+		branches = append(branches, branch("movies", scopeMovie))
+	}
+	if art.holds(libraryKindSeries) {
+		branches = append(branches, branch("series", scopeSeries))
+	}
+	return `SELECT file, tmdb, 0, 0 FROM (` + strings.Join(branches, ` UNION ALL `) +
 		`) AS wanted WHERE library = ? AND ` + artFileClause() + ` AND ` + artAttemptClause(fact, "file")
 }
 
 // One row per season a library holds episodes of, because the catalog keeps
-// no season item. The poster lands in the series folder under Kodi's own
-// name.
-func seasonPosterGapSQL() string {
+// no season item. The art lands in the series folder under Kodi's own name.
+func seasonArtGapSQL(fact string) string {
+	suffix := artTypes[fact].file
 	return `SELECT file, tmdb, season, 0 FROM (` +
 		`SELECT DISTINCT s.library AS library, ` +
-		`s.path || '/' || CASE WHEN e.season = 0 THEN '` + specialsPosterName + `' ` +
-		`ELSE printf('season%02d-poster.jpg', e.season) END AS file, ` +
+		`s.path || '/' || CASE WHEN e.season = 0 THEN '` + specialsSeasonPrefix + suffix + `' ` +
+		`ELSE printf('season%02d-` + suffix + `', e.season) END AS file, ` +
 		`substr(a.alias, length('` + scopeSeries + `:tmdb:') + 1) AS tmdb, e.season AS season ` +
 		`FROM episodes AS e ` +
 		`JOIN series AS s ON s.library = e.library AND s.id = e.series ` +
 		`JOIN aliases AS a ON a.library = s.library AND a.item = s.id ` +
 		`AND a.alias LIKE '` + scopeSeries + `:tmdb:%'` +
 		`) AS wanted WHERE library = ? AND ` + artFileClause() + ` AND ` +
-		artAttemptClause(factSeasonPoster, "file")
+		artAttemptClause(fact, "file")
 }
 
 // One row per episode with no image of its own. The episode keys on its own

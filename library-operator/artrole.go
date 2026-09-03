@@ -14,30 +14,30 @@ import (
 	"time"
 )
 
-// A container with no key fails before it writes anything, so the Job says
-// what the pod is missing.
+// The line is built once for the container, so the settings one provider
+// states are read once for every art fact the container runs. A container with
+// no answerer at all is a manifest to repair, because the operator creates it
+// only where a source serves one of its facts.
 func (e *enricher) artFact(ctx context.Context, fact string) error {
-	token := os.Getenv(tmdbTokenVariable)
-	if token == "" {
-		return fmt.Errorf("%s is empty, and the %s fact cannot ask a provider without it",
-			tmdbTokenVariable, fact)
+	if e.art == nil {
+		e.art = newArtLine(commaNames(os.Getenv(librarySourcesVariable)), os.Getenv)
 	}
-	return e.artGap(ctx, fact, newTMDbClient(tmdbAPIBase, token))
+	if len(e.art.answerers) == 0 {
+		return fmt.Errorf("no provider key reached this container, and the %s fact cannot ask without one", fact)
+	}
+	return e.artGap(ctx, fact, e.art)
 }
 
 // A catalog read that fails ends the container, because the gap list is the
-// work. The configuration is read once, after the gap, so a library with
-// every file in place makes no call at all. A provider that refuses one image
-// records an error attempt, and the run carries on to the next.
-func (e *enricher) artGap(ctx context.Context, fact string, client *tmdbClient) error {
-	gaps, err := e.catalog.artGaps(ctx, e.library, fact, time.Now().UTC())
-	if err != nil {
-		return err
-	}
-	if len(gaps) == 0 {
+// work. A fact no answerer in the line serves reads no gap at all, so a
+// Library whose sources hold one provider costs nothing for the art that
+// provider does not serve. A provider that refuses one image records an error
+// attempt, and the run carries on to the next.
+func (e *enricher) artGap(ctx context.Context, fact string, line *artLine) error {
+	if !line.live(fact) {
 		return nil
 	}
-	configuration, err := client.configuration(ctx)
+	gaps, err := e.catalog.artGaps(ctx, e.library, fact, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (e *enricher) artGap(ctx context.Context, fact string, client *tmdbClient) 
 		if !e.inScope(gap.key) {
 			continue
 		}
-		if e.artOne(ctx, client, configuration, artTypes[fact], gap) {
+		if e.artOne(ctx, line, artTypes[fact], gap) {
 			written++
 		}
 	}
@@ -61,8 +61,7 @@ func (e *enricher) artGap(ctx context.Context, fact string, client *tmdbClient) 
 // that landed since the last walk is the answer already and costs no call.
 // Then one image is chosen, downloaded, and created, and the ledger records
 // which provider answered.
-func (e *enricher) artOne(ctx context.Context, client *tmdbClient,
-	configuration tmdbConfiguration, art artType, gap artGap) bool {
+func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap artGap) bool {
 	folder := filepath.Join(e.root, gap.folder())
 	target := filepath.Join(folder, art.fileFor(gap))
 	if held, err := fileExists(target); err != nil {
@@ -74,30 +73,43 @@ func (e *enricher) artOne(ctx context.Context, client *tmdbClient,
 		return false
 	}
 
-	answer, err := client.images(ctx, e.kind, art.fact, gap)
+	answerer, candidates, err := line.ask(ctx, art.fact, gap, e.artTitle(gap))
 	if err != nil {
 		e.logf("could not read the %s of %s: %v", art.fact, gap.key, err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
 	}
-	image, held := chooseImage(answer.list(art.list), artLanguage)
-	if !held {
-		e.logf("the provider has no %s for %s", art.fact, gap.key)
+	image, held := chooseArt(candidates, artLanguage)
+	if answerer == nil || !held {
+		e.logf("no provider holds the %s of %s", art.fact, gap.key)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptNothing)
 		return false
 	}
-	return e.writeArt(ctx, client, configuration, art, gap, folder, target, image)
+	return e.writeArt(ctx, answerer, art, gap, folder, target, image)
+}
+
+// The ids a fact asks with come off the sidecar itself, which is where the
+// identity fact wrote every one of them. The art phase reads them because the
+// gap carries the TMDb id alone and two of the three providers key on another
+// id. A folder with no sidecar carries no id, which leaves those two providers
+// no answer and is not an error.
+func (e *enricher) artTitle(gap artGap) titleRef {
+	sidecar, _ := identitySidecar(e.kind, filepath.Join(e.root, gap.folder()))
+	document, err := os.ReadFile(sidecar)
+	if err != nil {
+		return titleRef{kind: e.kind}
+	}
+	return titleRef{kind: e.kind, ids: sidecarIDs(document)}
 }
 
 // The download and the write. The bytes live from the answer to the rename
 // and no longer. A create that finds the file there answers as the read above
 // does, because another writer reached it first.
-func (e *enricher) writeArt(ctx context.Context, client *tmdbClient, configuration tmdbConfiguration,
-	art artType, gap artGap, folder, target string, image tmdbImage) bool {
-	address := configuration.imageURL(configuration.sizeFor(art), image.FilePath)
-	data, err := client.fetchFile(ctx, address)
+func (e *enricher) writeArt(ctx context.Context, answerer artAnswerer, art artType, gap artGap,
+	folder, target string, image artCandidate) bool {
+	data, err := answerer.fetchFile(ctx, image.URL)
 	if err != nil {
-		e.logf("could not read %s: %v", address, err)
+		e.logf("could not read %s: %v", image.URL, err)
 		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
 		return false
 	}
@@ -111,13 +123,10 @@ func (e *enricher) writeArt(ctx context.Context, client *tmdbClient, configurati
 		e.recordArt(folder, art.fact, gap.entry(), artProviderExisting, attemptFound)
 		return false
 	}
-	e.logf("wrote the %s of %s from tmdb %s", art.fact, gap.key, gap.tmdb)
-	e.recordArt(folder, art.fact, gap.entry(), providerTMDb, attemptFound)
+	e.logf("wrote the %s of %s from %s", art.fact, gap.key, answerer.providerBlock())
+	e.recordArt(folder, art.fact, gap.entry(), answerer.providerBlock(), attemptFound)
 	return true
 }
-
-// The name the ledger records for the provider that answered.
-const providerTMDb = "tmdb"
 
 // The item entry and the attempt are one write of one file, so a reader never
 // sees an answer without its attempt. A provider name of nothing is a miss or

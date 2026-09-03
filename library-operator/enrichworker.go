@@ -39,6 +39,9 @@ type enricher struct {
 	// that spends its day in one fact is not asked again in the next fact of the
 	// same container.
 	providers *answerLine
+	// The providers the art container can ask, built once and held here, so
+	// the settings one of them states are read once for the whole container.
+	art *artLine
 }
 
 // A container with no API credential learns everything from its environment,

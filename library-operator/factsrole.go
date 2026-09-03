@@ -35,7 +35,12 @@ var factRuns = map[string]factRun{
 	factPoster:       artFactRun(factPoster),
 	factBackdrop:     artFactRun(factBackdrop),
 	factLogo:         artFactRun(factLogo),
+	factClearart:     artFactRun(factClearart),
+	factBanner:       artFactRun(factBanner),
+	factLandscape:    artFactRun(factLandscape),
+	factDiscart:      artFactRun(factDiscart),
 	factSeasonPoster: artFactRun(factSeasonPoster),
+	factSeasonBanner: artFactRun(factSeasonBanner),
 	factEpisodeThumb: artFactRun(factEpisodeThumb),
 }
 

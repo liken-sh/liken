@@ -130,8 +130,8 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	// enrich container must run last, and a regular container beside it would
 	// let the run end before the art is written. Plan 30 makes it a regular
 	// container once a second fan-out container exists.
-	if providers.servingArt(library.Metadata.Namespace, library.Spec.Sources) != nil {
-		images := factsContainer(library, artContainerName, artFactNames, path,
+	if served := servedArtFacts(library, providers); len(served) > 0 {
+		images := factsContainer(library, artContainerName, served, path,
 			scannerImage, busAddress, topicBase)
 		images.Resources.Limits = map[string]string{"memory": artMemoryLimit}
 		facts = append(facts, images)

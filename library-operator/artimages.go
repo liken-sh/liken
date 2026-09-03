@@ -1,10 +1,10 @@
 package main
 
 // What the art facts ask TMDb: the image lists of a title, a season, and an
-// episode, the configuration that names the image host and the sizes, and the
-// rule that picks one image out of a list. The download itself is the shared
-// one in providerhttp.go, so a 429 from the image host waits the way a 429
-// from the API does.
+// episode, and the configuration that names the image host and the sizes.
+// The answerer in tmdbart.go turns them into candidates, and the choice among
+// those candidates is in artanswer.go. The download itself is the shared one in providerhttp.go, so a 429 from the
+// image host waits the way a 429 from the API does.
 
 import (
 	"context"
@@ -138,35 +138,4 @@ func tmdbImagesPath(kind, fact string, gap artGap) string {
 		return series + "/images"
 	}
 	return "/3/movie/" + gap.tmdb + "/images"
-}
-
-// The choice: the highest-voted image in the library's own language, then the
-// highest-voted image with no language, then the highest-voted image of any
-// language. Art with the title's own text is what a person reads on the
-// screen, and art with no text reads in every language.
-func chooseImage(images []tmdbImage, language string) (tmdbImage, bool) {
-	for _, want := range []string{language, ""} {
-		if image, held := bestImage(images, func(image tmdbImage) bool {
-			return image.Language == want
-		}); held {
-			return image, true
-		}
-	}
-	return bestImage(images, func(tmdbImage) bool { return true })
-}
-
-// The highest-voted image the test admits. The first of two equal votes wins,
-// which keeps TMDb's own order.
-func bestImage(images []tmdbImage, admits func(tmdbImage) bool) (tmdbImage, bool) {
-	best := tmdbImage{}
-	held := false
-	for _, image := range images {
-		if image.FilePath == "" || !admits(image) {
-			continue
-		}
-		if !held || image.VoteAverage > best.VoteAverage {
-			best, held = image, true
-		}
-	}
-	return best, held
 }

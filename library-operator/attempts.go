@@ -139,7 +139,8 @@ var likenFacts = []string{factProbe, factIdentity,
 	factOverview, factCertification,
 	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
 	factCredits,
-	factPoster, factBackdrop, factLogo, factSeasonPoster, factEpisodeThumb}
+	factPoster, factBackdrop, factLogo, factClearart, factBanner,
+	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb}
 
 // Reads every .liken file the folder holds into attempts rows. A folder that
 // holds none reads as no rows and not as an error, because most folders hold

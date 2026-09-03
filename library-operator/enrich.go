@@ -94,7 +94,12 @@ var gapQueries = map[string]string{
 	factPoster:               titleArtGapSQL(factPoster),
 	factBackdrop:             titleArtGapSQL(factBackdrop),
 	factLogo:                 titleArtGapSQL(factLogo),
-	factSeasonPoster:         seasonPosterGapSQL(),
+	factClearart:             titleArtGapSQL(factClearart),
+	factBanner:               titleArtGapSQL(factBanner),
+	factLandscape:            titleArtGapSQL(factLandscape),
+	factDiscart:              titleArtGapSQL(factDiscart),
+	factSeasonPoster:         seasonArtGapSQL(factSeasonPoster),
+	factSeasonBanner:         seasonArtGapSQL(factSeasonBanner),
 	factEpisodeThumb:         episodeThumbGapSQL(),
 }
 

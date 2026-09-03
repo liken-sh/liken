@@ -84,6 +84,10 @@ func TestTheTitleArtGapNamesTheFileTheLibraryHasNone(t *testing.T) {
 		{fact: factPoster, want: "The Signal (2014)/poster.jpg"},
 		{fact: factBackdrop, want: "The Signal (2014)/fanart.jpg"},
 		{fact: factLogo, want: "The Signal (2014)/clearlogo.png"},
+		{fact: factClearart, want: "The Signal (2014)/clearart.png"},
+		{fact: factBanner, want: "The Signal (2014)/banner.jpg"},
+		{fact: factLandscape, want: "The Signal (2014)/landscape.jpg"},
+		{fact: factDiscart, want: "The Signal (2014)/disc.png"},
 	}
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
@@ -170,26 +174,40 @@ func TestAnArtAttemptInsideTheWindowClosesTheGap(t *testing.T) {
 
 // One gap per season the library holds episodes of, named the way Kodi reads
 // it in the series folder, and season zero named for the specials.
-func TestTheSeasonPosterGapNamesOneFilePerSeason(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	seedArtSeries(t, catalog, "Quiet Harbor (2008)", []int{0, 1, 2})
+func TestTheSeasonArtGapNamesOneFilePerSeason(t *testing.T) {
+	cases := []struct {
+		fact string
+		want []string
+	}{
+		{fact: factSeasonPoster, want: []string{
+			"Quiet Harbor (2008)/season-specials-poster.jpg",
+			"Quiet Harbor (2008)/season01-poster.jpg",
+			"Quiet Harbor (2008)/season02-poster.jpg",
+		}},
+		{fact: factSeasonBanner, want: []string{
+			"Quiet Harbor (2008)/season-specials-banner.jpg",
+			"Quiet Harbor (2008)/season01-banner.jpg",
+			"Quiet Harbor (2008)/season02-banner.jpg",
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.fact, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedArtSeries(t, catalog, "Quiet Harbor (2008)", []int{0, 1, 2})
 
-	gaps := artGapsOf(t, catalog, factSeasonPoster)
-	keys := []string{}
-	for _, gap := range gaps {
-		keys = append(keys, gap.key)
-		if gap.tmdb != "1396" {
-			t.Errorf("gap = %+v, want the TMDb id the alias holds", gap)
-		}
-	}
-	slices.Sort(keys)
-	want := []string{
-		"Quiet Harbor (2008)/season-specials-poster.jpg",
-		"Quiet Harbor (2008)/season01-poster.jpg",
-		"Quiet Harbor (2008)/season02-poster.jpg",
-	}
-	if !slices.Equal(keys, want) {
-		t.Errorf("gaps = %v, want %v", keys, want)
+			gaps := artGapsOf(t, catalog, test.fact)
+			keys := []string{}
+			for _, gap := range gaps {
+				keys = append(keys, gap.key)
+				if gap.tmdb != "1396" {
+					t.Errorf("gap = %+v, want the TMDb id the alias holds", gap)
+				}
+			}
+			slices.Sort(keys)
+			if !slices.Equal(keys, test.want) {
+				t.Errorf("gaps = %v, want %v", keys, test.want)
+			}
+		})
 	}
 }
 
@@ -256,11 +274,22 @@ func TestTheArtFactsJoinTheEnricherMaps(t *testing.T) {
 			if !slices.Contains(likenFacts, fact) {
 				t.Error("the scanner lifts no ledger for the fact")
 			}
-			if !slices.Contains(providerFacts[providerBlockTMDb], fact) {
-				t.Error("TMDb's row in the provider table does not hold the fact")
+			if !servedByAnyProvider(fact) {
+				t.Error("no row in the provider table holds the fact")
 			}
 		})
 	}
+}
+
+// Whether any provider block can serve the fact, because an art fact no
+// provider serves is a file nothing can write.
+func servedByAnyProvider(fact string) bool {
+	for _, facts := range providerFacts {
+		if slices.Contains(facts, fact) {
+			return true
+		}
+	}
+	return false
 }
 
 // The name each fact writes, which is what Kodi and Jellyfin read.
@@ -273,8 +302,14 @@ func TestEachArtFactNamesItsFile(t *testing.T) {
 		{fact: factPoster, want: "poster.jpg"},
 		{fact: factBackdrop, want: "fanart.jpg"},
 		{fact: factLogo, want: "clearlogo.png"},
+		{fact: factClearart, want: "clearart.png"},
+		{fact: factBanner, want: "banner.jpg"},
+		{fact: factLandscape, want: "landscape.jpg"},
+		{fact: factDiscart, want: "disc.png"},
 		{fact: factSeasonPoster, gap: artGap{season: 2}, want: "season02-poster.jpg"},
 		{fact: factSeasonPoster, gap: artGap{season: 0}, want: "season-specials-poster.jpg"},
+		{fact: factSeasonBanner, gap: artGap{season: 2}, want: "season02-banner.jpg"},
+		{fact: factSeasonBanner, gap: artGap{season: 0}, want: "season-specials-banner.jpg"},
 		{fact: factEpisodeThumb, gap: artGap{key: "Season 01/Quiet Harbor - S01E05.mkv"},
 			want: "Quiet Harbor - S01E05-thumb.jpg"},
 	}
@@ -296,5 +331,43 @@ func TestTheScannerKeysAnArtAttemptOnTheFile(t *testing.T) {
 	}
 	if got := sidecar.itemOf(factPoster, "poster.jpg"); got != "The Signal (2014)/poster.jpg" {
 		t.Errorf("item = %q, want the file the fact writes", got)
+	}
+}
+
+// A disc is a movie's, so a series is never a discart gap and a series library
+// never names the fact in its art container.
+func TestASeriesIsNeverADiscartGap(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedArtSeries(t, catalog, "Quiet Harbor (2008)", []int{1})
+	seedArtMovie(t, catalog, "The Signal (2014)")
+
+	gaps := artGapsOf(t, catalog, factDiscart)
+	if len(gaps) != 1 || gaps[0].key != "The Signal (2014)/disc.png" {
+		t.Errorf("gaps = %+v, want the movie alone", gaps)
+	}
+
+	shows := &Library{
+		Metadata: ObjectMeta{Name: "shows", Namespace: "house"},
+		Spec: LibrarySpec{
+			Kind:    libraryKindSeries,
+			Sources: []string{"fanart"},
+		},
+	}
+	art := &MetadataProvider{
+		Metadata: ObjectMeta{Name: "fanart", Namespace: "house"},
+		Spec: MetadataProviderSpec{
+			Fanart: &ProviderFanart{SecretRef: SecretKeyRef{Name: "fanart-key", Key: "token"}},
+		},
+		Status: MetadataProviderStatus{Conditions: []Condition{
+			{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
+		}},
+	}
+	served := servedArtFacts(shows, providerSet{"house/fanart": art})
+
+	if slices.Contains(served, factDiscart) {
+		t.Errorf("facts = %v, want no disc art in a series library", served)
+	}
+	if !slices.Contains(served, factSeasonBanner) {
+		t.Errorf("facts = %v, want the season banner a series does carry", served)
 	}
 }

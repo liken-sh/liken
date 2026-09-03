@@ -61,62 +61,6 @@ func TestEachArtFactReadsItsOwnEndpoint(t *testing.T) {
 	}
 }
 
-// The choice takes the highest-voted image of the library's own language,
-// then the highest-voted image with no language, then any.
-func TestTheChoiceFollowsTheLanguageOrder(t *testing.T) {
-	cases := []struct {
-		name   string
-		images []tmdbImage
-		want   string
-	}{
-		{
-			name: "the language wins over a higher vote",
-			images: []tmdbImage{
-				{FilePath: "/de.jpg", Language: "de", VoteAverage: 9},
-				{FilePath: "/en.jpg", Language: "en", VoteAverage: 4},
-			},
-			want: "/en.jpg",
-		},
-		{
-			name: "the highest vote of that language",
-			images: []tmdbImage{
-				{FilePath: "/low.jpg", Language: "en", VoteAverage: 2},
-				{FilePath: "/high.jpg", Language: "en", VoteAverage: 8},
-			},
-			want: "/high.jpg",
-		},
-		{
-			name: "no language comes before another language",
-			images: []tmdbImage{
-				{FilePath: "/de.jpg", Language: "de", VoteAverage: 9},
-				{FilePath: "/none.jpg", Language: "", VoteAverage: 1},
-			},
-			want: "/none.jpg",
-		},
-		{
-			name:   "any language where there is nothing else",
-			images: []tmdbImage{{FilePath: "/de.jpg", Language: "de", VoteAverage: 3}},
-			want:   "/de.jpg",
-		},
-		{
-			name:   "an image with no path is no image",
-			images: []tmdbImage{{FilePath: "", Language: "en", VoteAverage: 9}},
-			want:   "",
-		},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			image, held := chooseImage(test.images, artLanguage)
-			if held != (test.want != "") {
-				t.Fatalf("chose %+v, want %q", image, test.want)
-			}
-			if image.FilePath != test.want {
-				t.Errorf("chose %q, want %q", image.FilePath, test.want)
-			}
-		})
-	}
-}
-
 // The fetch asks for the size this project picked where TMDb serves it, and
 // for the original where it does not.
 func TestTheFetchAsksForTheSizeTMDbServes(t *testing.T) {

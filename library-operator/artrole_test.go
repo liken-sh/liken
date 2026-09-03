@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,18 @@ func languageJSON(language string) string {
 		return "null"
 	}
 	return `"` + language + `"`
+}
+
+// The line one test asks, which is the answerers it names and no others, in
+// the order it names them.
+func artLineOf(answerers ...artAnswerer) *artLine {
+	return &artLine{answerers: answerers}
+}
+
+// The line of one TMDb account, which is what the art phase ran on before a
+// second provider joined it.
+func tmdbArtLine(client *tmdbClient) *artLine {
+	return artLineOf(newTMDbArtAnswerer(client))
 }
 
 // The ledger one art fact left in a folder.
@@ -95,7 +108,7 @@ func TestEachArtFactWritesItsFileWhereNoneExists(t *testing.T) {
 				tmdbKey("/t/p/"+test.size+"/quiet.jpg", "", ""): testImage,
 			})
 
-			if err := work.artGap(t.Context(), test.fact, client); err != nil {
+			if err := work.artGap(t.Context(), test.fact, tmdbArtLine(client)); err != nil {
 				t.Fatal(err)
 			}
 
@@ -106,7 +119,7 @@ func TestEachArtFactWritesItsFileWhereNoneExists(t *testing.T) {
 				t.Errorf("log = %q, want the line that names the file", log.String())
 			}
 			ledger := artLedger(t, filepath.Join(root, filepath.Dir(test.want)), test.fact)
-			if len(ledger.Items) != 1 || !ledger.Items[0].Provider.is(providerTMDb) {
+			if len(ledger.Items) != 1 || !ledger.Items[0].Provider.is(providerBlockTMDb) {
 				t.Errorf("ledger items = %+v, want the provider that answered", ledger.Items)
 			}
 			if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptFound {
@@ -130,7 +143,7 @@ func TestAnArtFileThatExistsIsLeftAsItIs(t *testing.T) {
 		tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
 	})
 
-	if err := work.artGap(t.Context(), factPoster, client); err != nil {
+	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,6 +183,12 @@ func TestWhatAnArtFactRecordsWhenItWritesNothing(t *testing.T) {
 			wantResult: attemptError,
 		},
 		{
+			name:       "the provider refuses its settings",
+			answers:    map[string]string{tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage)},
+			statuses:   map[string]int{tmdbKey(tmdbConfigurationPath, "", ""): http.StatusUnauthorized},
+			wantResult: attemptError,
+		},
+		{
 			name: "the download fails",
 			answers: map[string]string{
 				tmdbKey("/3/movie/603/images", "", ""): imagesAnswer(tmdbPosters, "/quiet.jpg", artLanguage),
@@ -191,7 +210,7 @@ func TestWhatAnArtFactRecordsWhenItWritesNothing(t *testing.T) {
 				fake.statuses[key] = status
 			}
 
-			if err := work.artGap(t.Context(), factPoster, client); err != nil {
+			if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
 				t.Fatal(err)
 			}
 
@@ -216,7 +235,7 @@ func TestAnArtFactWithNoGapMakesNoCall(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
 	client, fake := newArtTMDb(t, map[string]string{})
 
-	if err := work.artGap(t.Context(), factPoster, client); err != nil {
+	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -225,8 +244,21 @@ func TestAnArtFactWithNoGapMakesNoCall(t *testing.T) {
 	}
 }
 
+// A fact no answerer in the line serves reads no gap at all, so a Library
+// whose sources hold one provider costs nothing for the art that provider does
+// not serve.
+func TestAnArtFactNoProviderServesReadsNoGap(t *testing.T) {
+	work, _ := testEnricher(t, libraryKindSeries, t.TempDir(), nil)
+	client, _ := newArtFanart(t, map[string]string{})
+
+	if err := work.artGap(t.Context(), factEpisodeThumb, artLineOf(fanartArtAnswerer{client: client})); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A container with no key fails before it writes anything.
 func TestTheArtFactNeedsAProviderKey(t *testing.T) {
+	t.Setenv(librarySourcesVariable, providerBlockTMDb)
 	t.Setenv(tmdbTokenVariable, "")
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), nil)
 
@@ -249,7 +281,7 @@ func TestAnArtFactOutsideTheScopeIsLeftAlone(t *testing.T) {
 		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
 	})
 
-	if err := work.artGap(t.Context(), factPoster, client); err != nil {
+	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,7 +296,7 @@ func TestAnArtFactEndsWhenTheCatalogFails(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), NewCatalog("http://127.0.0.1:1", http.DefaultClient))
 	client, _ := newArtTMDb(t, map[string]string{})
 
-	if err := work.artGap(t.Context(), factPoster, client); err == nil {
+	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err == nil {
 		t.Error("the fact reported no error, want one")
 	}
 }
@@ -325,6 +357,7 @@ func TestTheWriteDoorAnswersAFolderThatIsNotThere(t *testing.T) {
 func TestTheFactMapRunsTheArtFact(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
+	t.Setenv(librarySourcesVariable, providerBlockTMDb)
 	t.Setenv(tmdbTokenVariable, "the-key")
 
 	if err := factRuns[factPoster](t.Context(), work); err != nil {
@@ -344,14 +377,11 @@ func TestAnArtFactKeepsAFileThatArrivedBeforeTheWrite(t *testing.T) {
 	client, _ := newArtTMDb(t, map[string]string{
 		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
 	})
-	configuration, err := client.configuration(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	gap := artGap{key: "The Signal (2014)/poster.jpg", tmdb: "603"}
-	if work.writeArt(t.Context(), client, configuration, artTypes[factPoster],
-		gap, folder, target, tmdbImage{FilePath: "/quiet.jpg"}) {
+	image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
+	if work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
+		gap, folder, target, image) {
 		t.Error("the fact reported a write, want none")
 	}
 
@@ -374,14 +404,11 @@ func TestAWriteTheVolumeRefusesIsAnErrorAttempt(t *testing.T) {
 	client, _ := newArtTMDb(t, map[string]string{
 		tmdbKey("/t/p/w780/quiet.jpg", "", ""): testImage,
 	})
-	configuration, err := client.configuration(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	gap := artGap{key: "The Signal (2014)/poster.jpg", tmdb: "603"}
-	if work.writeArt(t.Context(), client, configuration, artTypes[factPoster],
-		gap, folder, filepath.Join(folder, "poster.jpg"), tmdbImage{FilePath: "/quiet.jpg"}) {
+	image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
+	if work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
+		gap, folder, filepath.Join(folder, "poster.jpg"), image) {
 		t.Error("the fact reported a write into a folder that is not there")
 	}
 
@@ -401,7 +428,7 @@ func TestAPathTheVolumeCannotAnswerForIsAnErrorAttempt(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
 	client, _ := newArtTMDb(t, map[string]string{})
 
-	if err := work.artGap(t.Context(), factPoster, client); err != nil {
+	if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -424,12 +451,16 @@ func TestNoProviderServesArt(t *testing.T) {
 		{Type: conditionReady, Status: ConditionTrue, Reason: reasonReachable},
 	}
 	set := providerSet{"house/tmdb": identityOnly}
+	library := &Library{
+		Metadata: ObjectMeta{Name: "movies", Namespace: "house"},
+		Spec:     LibrarySpec{Sources: []string{"tmdb"}},
+	}
 
-	if provider := set.servingArt("house", []string{"tmdb"}); provider != nil {
-		t.Errorf("provider = %+v, want none, because it serves no art fact", provider)
+	if served := servedArtFacts(library, set); len(served) != 0 {
+		t.Errorf("facts = %v, want none, because the provider serves no art fact", served)
 	}
 	identityOnly.Spec.Facts = []string{factIdentity, factLogo}
-	if provider := set.servingArt("house", []string{"tmdb"}); provider == nil {
-		t.Error("provider = none, want the one that serves the logo")
+	if served := servedArtFacts(library, set); !slices.Equal(served, []string{factLogo}) {
+		t.Errorf("facts = %v, want the logo alone", served)
 	}
 }
