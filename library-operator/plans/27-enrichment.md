@@ -36,10 +36,9 @@ items inside it, holds one file per writer:
 
 | File | Writer | Holds |
 |---|---|---|
-| `identity.yaml` | the identity concern | the provider ids of each item, or the candidates that wait for a person |
-| `credits.yaml` | the credits concern | the link from each name in the `.nfo` to its entry in `.contributors/` |
-| `nfo.yaml` | the facts concern | the time `liken` wrote the `.nfo`, and the size and mtime it left |
-| `<concern>.yaml` | that concern | its attempts: provider, time, and result, per item |
+| `identity.yaml` | the identity fact | the provider ids of each item, or the candidates that wait for a person |
+| `credits.yaml` | the credits fact | the link from each name in the `.nfo` to its entry in `.contributors/` |
+| `<fact>.yaml` | that fact | what it wrote, which provider answered, and its attempts: time and result, per item |
 
 One file per writer is what lets many small enrichers run at once on a
 network mount with no locks. No two of them ever open the same file for
@@ -48,7 +47,7 @@ write. The scanner reads the whole directory the way it reads the
 can exclude a title that was tried.
 
 **A miss is a fact with a date.** An attempt that found nothing is
-recorded with its time. A concern asks again only after its retry
+recorded with its time. A fact asks again only after its retry
 interval, because providers gain art and ids over time. So a missing
 logo is "not found before this date", and never a hole an enricher
 falls into every night.
@@ -107,28 +106,25 @@ test enforces them.
   `os.RemoveAll`, `os.Truncate`, or a rename onto an existing path
   anywhere else in the enricher code.
 
-## Concerns
+## Facts
 
-A concern is the unit of enrichment: one gap in the catalog, one pod
-that fills it, one attempts file it writes. The vocabulary, in
-dependency order:
+A fact is the unit of enrichment: one gap in the catalog, one ledger
+file it writes, one entry in a provider's list of what it serves. The
+word was "concern" until plan 30 renamed it, on 2026-09-03, because
+"concern" was too general. [Plan 30](30-facts-art-and-contributors.md)
+holds the vocabulary in dependency order: the file group, `identity`,
+the nfo group, the art group, and the people group.
 
-| Group | Concerns | Reads | Writes |
-|---|---|---|---|
-| file | `probe`, `trickplay` | the media file itself | `<streamdetails>` in the `.nfo`, and the sprite files |
-| identity | `identity` | name, year, and the probe's runtime | `identity.yaml` |
-| facts | `facts`, `credits` | the providers | the `.nfo` body, `credits.yaml` |
-| art | `poster`, `fanart`, `clearlogo`, `clearart`, `banner`, `landscape`, `discart`, `keyart`, `characterart`, `season-poster`, `episode-thumb`, `artist-thumb`, `artist-logo`, `album-cover`, `cdart` | the providers | one art file under Kodi's name |
-| people | `contributors` | the providers | `.contributors/` |
-
-Art is one concern per type so that a `Library` can take logos from one
-provider and posters from another. The file group needs no provider and
-no id, so it runs first, and the identity concern uses the runtime it
-measured as a matching signal. Embedded tags in a music file are the
-file group's facts as well, and for music they are the truth itself.
+Art is one fact per type so that a `Library` can take logos from one
+provider and posters from another. A rating is one fact per site, so
+two providers may serve the same site's rating and the first one
+answer. The file group needs no provider and no id, so it runs first,
+and the identity fact uses the runtime it measured as a matching
+signal. Embedded tags in a music file are the file group's facts as
+well, and for music they are the truth itself.
 
 The scanner still opens no video file. A video probe over a whole
-library is slow, so the `probe` concern opens the file once and writes
+library is slow, so the `probe` fact opens the file once and writes
 the answer into the `.nfo`, and a rebuild reads the `.nfo` and probes
 nothing. A music scanner reads tags itself, because the ecosystem keeps
 no per-track sidecar to write them into.
@@ -136,10 +132,14 @@ no per-track sidecar to write them into.
 ## Providers
 
 A `MetadataProvider` is one account with one provider, with the same
-discriminator-and-block shape as `Library`. It holds the `Secret` for
-the key and states the concerns it serves. The `Library`'s ordered
+discriminator-and-block shape as `Library`: exactly one of `tmdb`,
+`omdb`, `fanart`, or `tvmaze`, each holding what that provider needs,
+which is a `secretRef` for the three with keys and nothing for TVmaze.
+`spec.facts` is optional and narrows what the provider serves; absent,
+the provider serves everything the operator's table says it can, and
+`status.facts` lists what it serves right now. The `Library`'s ordered
 `sources` list, in the schema since plan 02, orders the providers and
-may narrow one to some concerns:
+may narrow one to some facts:
 
 ```yaml
 kind: MetadataProvider
@@ -147,31 +147,32 @@ metadata: {name: tmdb}
 spec:
   tmdb:
     secretRef: {name: tmdb-key}
-  concerns: [identity, facts, credits, poster, fanart, clearlogo, contributors]
+---
+kind: MetadataProvider
+metadata: {name: fanart}
+spec:
+  fanart:
+    secretRef: {name: fanart-key}
+  facts: [logo, clearart, discart, banner]
 ---
 kind: Library
 spec:
   sources:
     - provider: tmdb
     - provider: fanart
-      concerns: [clearlogo, clearart, discart, banner]
-    - provider: tvdb
+    - provider: omdb
 ```
 
-For each concern, the first provider in the list that serves it is
-asked first. The schema refuses a concern a provider does not list. The
-order is on the `Library` and never on the provider, because two
-libraries may disagree, and a children's library may want a different
-art source.
+A single value comes from the first provider in the list that answers,
+and a set is the union of every provider that answers; the ledger
+names the provider each time. The order is on the `Library` and never
+on the provider, because two libraries may disagree, and a children's
+library may want a different art source.
 
-What each provider serves, as checked on 2026-09-02: TMDb serves
-posters, backdrops, and logos for a title, and a profile image, a
-biography, and an `imdb_id` for a person. TVDB v4 serves a person with
-an image, biographies, and `remoteIds` to other sites. TheAudioDB
-serves artist thumb, fanart, and logo, and album cover and CD art, by
-MusicBrainz id. Fanart.tv serves the clearlogo, clearart, discart,
-banner, and landscape types that TMDb lacks, and the music art; that
-one is from memory, because its documentation refused the fetch.
+What each provider serves is plan 30's table, checked as it is built.
+The IMDb datasets are bulk files with a store and have
+[plan 33](33-the-imdb-datasets.md) of their own. Music providers wait
+for a music library.
 
 ## Execution
 
@@ -181,16 +182,16 @@ its own on a claim of its own. Plan 28 builds it. No agent answers on
 the network: Corrosion's API stays on loopback, and a `Job` writes
 through its own sidecar. A scan `Job` runs on its `Library`'s claim.
 An enricher `Job` runs on one claim per `Library`, and holds every
-concern as a container: the concerns that must run in order as init
-containers, and the rest as regular containers that run at once. So
-the sequence is in the pod, the catalog syncs once per run, and the
-two concerns that edit the `.nfo` never do so together. A `Job` writes
+fact in a container that is a phase: the phases that must run in order
+as init containers, and the rest as regular containers that run at
+once. So the sequence is in the pod, the catalog syncs once per phase,
+and the facts that edit the `.nfo` run in one container, in order. A `Job` writes
 a row to the `runs` table last and exits only when the standing pod's
 report on the bus echoes it, because a Corrosion agent drops unsent
 broadcasts on `SIGTERM`. Screens keep their own gossip copies.
 
 The standing pod's reporter publishes counts, runs, and one gap count
-per concern over the bus, and the operator is the only scheduler. It
+per fact over the bus, and the operator is the only scheduler. It
 creates a scan `Job` for a folder on a webhook, and one enricher `Job`
 per `Library` when a gap is open, no run is in flight, and a scan has
 finished since the last enricher run. Full walks are `CronJob`s. There
@@ -204,11 +205,12 @@ is no rate limiter: a `429` is a cooldown inside the container. Plan
    for, scan `Job`s, the `CronJob`, and the webhook that creates a
    `Job`.
 2. [Plan 29, identification](completed/29-identification.md). `MetadataProvider`,
-   the enricher `Job`, the `probe` and `identity` concerns, the write
+   the enricher `Job`, the `probe` and `identity` facts, the write
    package and its test, the `.liken/` reader, and the gap loop.
 3. [Plan 30, facts, art, and contributors](30-facts-art-and-contributors.md).
-   The `.nfo` and its write record, the Jellyfin handover, the art
-   concerns, `credits.yaml`, `.contributors/`, and trickplay.
+   The word "fact", four providers, the nfo and art and people groups,
+   the Jellyfin handover, `credits.yaml`, `.contributors/`, and
+   trickplay.
 4. [Plan 31, franchises](31-franchises.md). The library kind, the
    file, the table, the join, and the page.
 5. [Plan 25, people on the screen](25-people-on-the-screen.md), which
@@ -227,7 +229,7 @@ from the sidecars, release order, movies only.
   can corrupt under a node loss.
 - How often the identity ladder guesses wrong on a real library. Plan
   29's drill measures it before the ladder ships as a default.
-- The retry interval per concern. Thirty days for a miss is a guess.
+- The retry interval per fact. Thirty days for a miss is a guess.
 - Which row the screen shows when two libraries hold one film. The
   franchise join and the movies wall face the same question.
 - Whether a franchise may reach another namespace. The

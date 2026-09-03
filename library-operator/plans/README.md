@@ -68,11 +68,16 @@ they share, and plans 28 to 31 build them in order.
   people, concerns as the unit of work, `MetadataProvider`, and the
   write rules.
 * [30, Facts, art, and contributors](30-facts-art-and-contributors.md).
-  The `.nfo` and its write record, the art concerns, `credits.yaml`,
-  `.contributors/`, and trickplay.
+  Reshaped on 2026-09-03. The word "fact" replaces "concern", four
+  providers with one block each, the nfo, art, and people groups, a
+  container per phase, who answers, the fight check in the ledgers,
+  and the Jellyfin handover.
 * [31, Franchises](31-franchises.md). A library kind whose files hold a
   universe in story order, resolved across the namespace by provider
   id.
+* [33, The IMDb datasets](33-the-imdb-datasets.md). A stub: a provider
+  with a store, because the datasets are bulk files and not a call per
+  title. OMDb serves `rating.imdb` until then.
 
 Plan 32 stands apart from the enrichment work.
 
