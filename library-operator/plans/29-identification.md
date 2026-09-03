@@ -229,6 +229,52 @@ on the next scan. The write test fails on a planted `os.Remove`. A
 `.nfo` edited by the probe keeps every element it held before, by a
 diff. A webhook for one folder ends with that folder identified.
 
+## The drill, 2026-09-02
+
+Built by two Opus agents on one seam and rolled to `liken-1` as
+2026.09.02-010, with the first fix in -011.
+
+**The plan's premise was stale.** The catalog on the testbed holds 6
+movies and 1 series with a path id, not a fifth of the library, and 24
+movie files and 36 episode files with no `<streamdetails>`. Jellyfin had
+written sidecars for the rest since plan 27 measured. So the first
+probe run touches sixty sidecars, and identity has seven titles to try.
+
+**The enricher read an empty copy.** The Corrosion sidecar's
+`startupProbe` answers `SELECT 1` long before a fresh claim holds the
+catalog, so the probe container ran its gap query at once, reported
+"probed 0 of the 0 files" while the reporter counted 24, and the enrich
+container then waited two minutes for an echo its empty counts could
+never match. The `Job` failed and its retry, on the now-synced claim,
+found all 24. Release -011 adds the wait: every concern container
+subscribes to the library's retained report and polls its own copy
+until the item and file counts match, bounded by `SYNC_TIMEOUT`, before
+it reads its gap.
+
+**The volume was read-only twice over.** The lab's claims were
+`ReadOnlyMany` with a `ro` mount option, which the kubelet honours
+whatever the pod asks. Both volumes and claims became `ReadWriteMany`,
+which meant deleting and recreating them, since access modes are
+immutable once bound. With that done a pod's mount reads `rw` and a
+touch still fails, because the NAS export rule for the cluster's
+address is read-only. That rule is a change on the NAS, outside this
+repository.
+
+**The `Sources` condition said the wrong thing.** With the provider
+declared and no `Secret` yet, the condition read `ConcernNotServed`,
+which sends a person to add a source when the repair is the key.
+Release -011 adds `ProviderNotReady`, naming the provider and the
+reason its own check wrote.
+
+Timings: the enricher `Job` on a synced claim completes in 24 to 27
+seconds for either library, most of it the sidecar's exit. The
+standing enricher started within a minute of the walk that followed
+the roll, and again within a minute of the next top-of-hour walk.
+
+Not yet run: a write onto the volume, the identity ladder against
+TMDb, and the webhook chain. They wait on the export rule and the
+`Secret`.
+
 ## What is not decided
 
 How many minutes count as "close" on the runtime rung. Whether the
