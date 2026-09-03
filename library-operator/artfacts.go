@@ -208,6 +208,9 @@ func seasonArtGapSQL(fact string) string {
 // file, because the thumbnail is named for that file. The check reads the
 // link table, so an image another tool named differently still counts as the
 // episode's.
+// The episodes that hold an image are one list built once from the library's
+// files, never a subquery that reads the outer row, because that form walked
+// every file of the library once per episode and took forty seconds.
 func episodeThumbGapSQL() string {
 	return `SELECT video, tmdb, season, episode FROM (` +
 		`SELECT e.library AS library, e.path AS video, e.id AS item, ` +
@@ -218,9 +221,9 @@ func episodeThumbGapSQL() string {
 		`JOIN aliases AS a ON a.library = s.library AND a.item = s.id ` +
 		`AND a.alias LIKE '` + scopeSeries + `:tmdb:%'` +
 		`) AS wanted WHERE library = ?1 ` +
-		`AND NOT EXISTS (SELECT 1 FROM file_items AS fi ` +
+		`AND item NOT IN (SELECT fi.item FROM file_items AS fi ` +
 		`JOIN files AS f ON f.library = fi.library AND f.path = fi.path ` +
-		`WHERE fi.library = ?1 AND fi.item = wanted.item ` +
+		`WHERE fi.library = ?1 ` +
 		`AND f.type = '` + fileTypeImage + `' ` +
 		`AND f.role IN ('` + fileRoleThumb + `', '` + fileRoleStill + `')) AND ` +
 		artAttemptClause(factEpisodeThumb, "video")
