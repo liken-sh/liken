@@ -218,16 +218,33 @@ impl<P: Posters> Page<'_, P> {
         let taken = ratings::draw(frame, &series.ratings, stack.at());
         stack.add(taken);
 
-        let (line, plot) = match series.focused() {
-            Some(still) => (still.facts.as_str(), still.plot.as_str()),
-            None => ("", series.plot.as_str()),
+        let (line, aired, plot) = match series.focused() {
+            Some(still) => (
+                still.facts.as_str(),
+                still.aired.as_str(),
+                still.plot.as_str(),
+            ),
+            None => ("", "", series.plot.as_str()),
         };
+        // The episode's name is cut to one line with an ellipsis, and the
+        // runtime and the air date take a line of their own under it, so
+        // a long name never pushes the date out of the header.
         let taken = text::block(
             frame,
-            line,
+            &text::cut(line, look::FACTS, column),
             stack.at(),
             look::FACTS,
             look::text(),
+            column,
+            1,
+        );
+        stack.add(taken);
+        let taken = text::block(
+            frame,
+            aired,
+            stack.at(),
+            look::FACTS,
+            look::muted(),
             column,
             1,
         );

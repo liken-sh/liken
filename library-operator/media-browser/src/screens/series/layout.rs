@@ -65,7 +65,7 @@ pub fn head() -> f32 {
         + GAP
         + ratings::HEIGHT
         + GAP
-        + text::height(1, look::FACTS)
+        + text::height(2, look::FACTS)
         + GAP
         + text::height(PLOT_LINES, look::PLOT)
         + FOOT

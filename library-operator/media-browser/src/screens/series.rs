@@ -64,8 +64,12 @@ pub struct Still {
     /// the runtime.
     pub line: facts::Line,
     /// The header's line while this still has focus: the season and
-    /// episode numbers, the name, and the runtime.
+    /// episode numbers and the name. The header cuts it to one line.
     pub facts: String,
+    /// The header's second line while this still has focus: the runtime
+    /// and the air date. It is a line of its own so a long name never
+    /// pushes the date out of the header.
+    pub aired: String,
     /// The episode's plot. The header draws it in place of the series'
     /// plot while this still has focus.
     pub plot: String,
@@ -375,12 +379,8 @@ fn still_of(episode: Episode) -> Still {
         id: episode.id,
         line: facts::Line::of(&[&caption, &runtime]),
         caption,
-        facts: facts::joined(&[
-            &numbers,
-            &episode.title,
-            &runtime,
-            &facts::date(&episode.released),
-        ]),
+        facts: facts::joined(&[&numbers, &episode.title]),
+        aired: facts::joined(&[&runtime, &facts::date(&episode.released)]),
         season: episode.season,
         episode: episode.episode,
         name: episode.title,
