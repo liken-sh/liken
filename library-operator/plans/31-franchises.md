@@ -3,7 +3,7 @@
 Plan 31. The third enrichment build from [plan 27](completed/27-enrichment.md).
 A franchise is the films and series of one story in story order, a
 home of its own on the screen, and a file a person or an agent writes
-on the volume.
+in a public repository.
 
 ## The problem
 
@@ -23,18 +23,35 @@ is the truth, not a cache of a source, and research writes it.
 
 ## The contract
 
-- **A library kind.** A `Library` of kind `franchises` names a folder
-  with one directory per franchise. Each holds `franchise.yaml` and
-  the franchise's art under Kodi's names. Its scanner is small: it
-  reads the files and writes a `franchises` table and a
-  `franchise_members` table, keyed by library like every other table.
+- **A library kind.** A `Library` of kind `franchises` names a git
+  repository, not a volume: `storage.git` holds a `url` and a `ref`,
+  and the `storage` block becomes one of `claim` or `git` under the
+  same CEL shape the kind blocks use. The files are a few hundred
+  kilobytes, so nothing keeps a checkout. Each scan Job does a shallow
+  clone of `ref` into an `emptyDir`, reads every `*/franchise.yaml`
+  against the schema, writes a `franchises` table and a
+  `franchise_members` table keyed by library like every other table,
+  and exits with the checkout. `status.commit` holds the commit the
+  last scan read, and a scan that finds the same commit skips the
+  write. `spec.refresh` sets the period, as it does for the other
+  kinds.
+- **A failed fetch keeps the tables.** The other kinds scan a volume
+  that is always there. This kind scans a server that is not. If the
+  clone fails, the scan reports `Failed` on the `Library` and leaves
+  the tables as they were. It never runs mark-and-sweep on an empty
+  checkout, because a forge outage must not empty every franchise
+  page for a day.
 - **The files are public.** They live in a repository of their own,
   `tangled.org/guid.foo/fiction-franchises`, outside the `liken`
   organization, because a franchise is an opinion about a story and
   not a part of this operator. That repository carries its own copy
   of the schema and a README that defines the format with no
-  reference to `liken`. The folder a `Library` names is a checkout of
-  it, so the volume holds nothing the repository does not.
+  reference to `liken`. Anyone may fork it or write their own, and a
+  fork is a second `Library` with another `url`. Two libraries that
+  both define one franchise are two rows, and the page draws both,
+  the same way two movie libraries that hold one film do. The clone
+  is anonymous over HTTPS, which tangled.org and GitHub both serve.
+  A `secretRef` for a private repository waits until someone asks.
 - **The file** holds the story order and nothing about release order,
   because release order comes from the members' own dates. The
   schema below is the whole contract between the file's author and
@@ -50,20 +67,42 @@ is the truth, not a cache of a source, and research writes it.
   namespace. A gap whose `title` year is ahead of today draws as
   coming, and any other gap draws as missing, so the wall is also
   the list of what to go find.
-- **The page**, from plan 22's primitives: a header over the
-  franchise's art, then the order as a wall, with a film and a series
-  side by side and a season or an episode range as one slot.
-  A series entry draws as one slot that says
-  how many episodes it holds, so The Clone Wars in story order is one
-  slot between two films and not thirty. The wall follows the list
-  order, never the times. When the file declares a calendar, the eras
-  head the stretches of the wall, and a time axis draws each member
-  as a bar over its span, one era at a time, because Eyes of Wakanda
-  spans three thousand years and every modern film is a dot on one
-  axis. A toggle shows release order, sorted on the
-  members' dates.
-- **The way in.** A strip under a film's set strip names the franchise
-  the film belongs to. The home page of plan 26 gets a franchises row.
+- **The page**, from plan 22's primitives, is a vertical wall in
+  story order: one row per entry, first to last, top to bottom. The
+  rows follow the list and never the times, because the Marvel file
+  runs from 1260 BC to 2028 with 120 of its 124 entries in the last
+  twenty years, so a time scale is one dot and an empty rail. Time
+  is a label on the row. A series run draws as one slot that says how
+  many episodes it holds, so The Clone Wars in story order is one
+  slot between two films and not thirty.
+- **Universes are columns.** The franchise's own universe is the
+  first column, and every other universe the file names is a column
+  after it. An entry draws in the column of its universe. Two
+  consecutive entries in different universes whose times overlap pack
+  onto one row, so concurrent stories sit side by side. An entry
+  whose `universes` names more than one draws as a banner across
+  those columns, which is how No Way Home holds three Spider-Men.
+- **Eras are a rail** on the left of the wall, one rotated bar per
+  era over the rows it spans. The row an era covers comes from each
+  row's `time` against the era's span, so the rail is derived and
+  the author never writes a row. Eras overlap on purpose: a saga
+  holds phases. Overlapping eras draw as nested rails, the wider one
+  outer and the narrower one inner.
+- **The remote.** Up and down move a row. Left and right move within
+  a row when it holds more than one item. Left from the first column
+  lands on the era rail, where up and down move an era and right
+  returns to the first row of that era, which is how a person crosses
+  124 rows. A press opens the film or the series. A toggle shows
+  release order, sorted on the members' dates, as a plain list. The
+  rail is a jump rail, and the wall's sort names it. Story order is
+  the one sort a franchise has, so eras are its one rail. A later
+  plan gives every long wall the rail its sort names: seasons on a
+  series, years or letters on a movie wall, so a person jumps to 2011
+  or to M the same way.
+- **The way in.** A strip under a film's set strip draws the whole
+  franchise in story order, centered on the current item, the way the
+  set strip does, and a press on the strip's header opens the page.
+  The home page of plan 26 gets a franchises row.
 - **The manual.** The file's contract is a page on the docs site,
   `docs/content/docs/reference/franchises.md`, and a JSON Schema the
   site serves at `/franchise.schema.json`, the same schema the public
@@ -73,12 +112,13 @@ is the truth, not a cache of a source, and research writes it.
   schema. Each franchise directory also holds an `AGENTS.md` with the
   author's method, sources, and judgment calls, which the scanner
   ignores and the next author reads first.
-- **Art** comes from the folder, and where the folder holds none, the
-  enrichers of plan 30 copy it from the first member's art.
+- **Art** comes from the franchise directory in the repository, and
+  where the directory holds none, the enrichers of plan 30 copy it
+  from the first member's art.
 - **The author.** The first files are written by hand, from research.
-  Later, an agent writes the same file on a schedule through a claim
-  on the share, and the file is the only contract between the two.
-  The author never removes a member. It adds and reorders, so a bad
+  Later, an agent writes the same file on a schedule and pushes it
+  to the repository, and the file is the only contract between the
+  two. The author never removes a member. It adds and reorders, so a bad
   run leaves a wrong order and never a lost film.
 
 ## The schema
@@ -104,12 +144,13 @@ calendar:
   after: ABY           # the label after a positive time
 
 # The universe the story happens in. Optional. An entry with no
-# universe is in this one, and an entry with another one draws in a
-# side lane on the axis.
+# universes is in this one, and each other universe an entry names
+# is a column of its own on the page.
 universe: Earth-616
 
 # Named stretches of the timeline. Optional, and only with a
-# calendar. Spans may overlap. The page heads the wall with them.
+# calendar. Spans may overlap. The page draws them as a rail beside
+# the wall.
 eras:
   - name: The High Republic
     from: -500
@@ -142,9 +183,14 @@ order:
     time: { from: 0, to: 0 }
   - movie: tmdb:557
     title: "Spider-Man (2002)"
-    universe: Earth-96283
+    universes: [Earth-96283]
     time: { from: 2002, to: 2002 }
     note: An example from another franchise, since Star Wars has one universe.
+  - movie: tmdb:634649
+    title: "Spider-Man: No Way Home (2021)"
+    universes: [Earth-616, Earth-96283, Earth-120703]
+    time: { from: 2024, to: 2024 }
+    note: One film in three universes draws as a banner across three columns.
 ```
 
 The rules:
@@ -176,29 +222,38 @@ The rules:
 - `time` needs a calendar. `from` and `to` are numbers in the
   calendar's unit, and they are equal for a story that stays in one
   year. A `time` on a level is the span of everything under it, and a
-  lower level overrides it. A flashback inside one film does not widen its span; the span
-  is the film's main setting.
-- `universe` on an entry names where the story happens, and it is
-  the franchise's own universe when absent. The axis draws the
-  franchise's universe as the line and every other universe as a
-  short side lane, so a story from another world sits beside the
-  year it meets the main story, not among that year's films. An
-  entry with no `time` draws on the wall and not on the axis.
+  lower level overrides it. A flashback inside one film does not
+  widen its span. The span is the film's main setting.
+- `universes` on an entry names every universe whose story the entry
+  continues or joins, whether or not the camera goes there, and it is
+  the franchise's own universe when absent. No Way Home names three,
+  because it brings two other Spider-Man stories into the main one.
+  An entry in one other universe draws in that universe's column. An
+  entry that names several draws across their columns. The franchise's own `universe`
+  stays one name, because a franchise has one home. An entry with no
+  `time` draws in its row and joins no era on the rail.
 - `note` is free text for the next author and never reaches the page.
 
 ## Proof
 
-On `liken-1`, a checkout of the public repository as the franchises
-folder, across the lab's movies and series libraries. The
-page draws the order with its gaps and its eras, a film opens from it,
-back returns to it, and a member added to a library fills its gap on
-the next scan.
+On `liken-1`, a `Library` of kind `franchises` over the public
+repository, across the lab's movies and series libraries. The page
+draws the order with its gaps and its eras, a film opens from it,
+back returns to it, a member added to a library fills its gap on the
+next scan, and a commit pushed to the repository reaches the page on
+the next refresh. A scan with the forge unreachable leaves the page
+as it was and reports `Failed`.
 
 ## What is set aside
 
 A cluster-owner resource for a franchise, which plan 24 proposed. It
-puts a truth in the cluster that the volume does not hold, and a
-catalog rebuilt from the volume would lose it.
+puts a truth in the cluster that no repository holds, and a catalog
+rebuilt from the repositories would lose it. A `Library` holds only
+the pointer, and the repository holds the truth.
+
+A checkout on a volume that a person keeps by hand. The files are
+small enough to fetch on every scan, and a volume adds a step the
+operator can do itself.
 
 Two orders in one file. Release order is derived, and a second
 hand-written order can be a second franchise directory.
@@ -212,7 +267,9 @@ one edit.
 Which row the page shows when two libraries hold one film. Whether a
 franchise may name a book or a game, which waits on those kinds.
 Whether a franchise may reach another namespace, which the
-one-cluster-per-namespace rule says no to today. Whether a film
-with chapters set centuries apart, like Predator: Killer of Killers,
-may carry more than one span; today it holds one, and the bar is
-wide.
+one-cluster-per-namespace rule says no to today. Whether the scanner
+fetches a tarball instead of a clone, which would drop `git` from its
+image; today the archive URL differs per forge and carries no commit
+id, so the clone wins. Whether a film with chapters set centuries
+apart, like Predator: Killer of Killers, may carry more than one
+span; today it holds one, and it joins every era the span crosses.
