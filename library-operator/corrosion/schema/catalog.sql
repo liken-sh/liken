@@ -372,3 +372,158 @@ CREATE TABLE genres (
 -- The two reads the home page makes: the titles of one genre as one range,
 -- and every genre with its count as one grouped read.
 CREATE INDEX genres_library_genre ON genres (library, genre);
+
+-- The franchises item table: the item header, with the franchise's
+-- clock in the body. A franchise is one story across films and series
+-- in story order, read from a franchise.yaml in a git repository that a
+-- Library of kind franchises names, so a row's library is that Library
+-- and never the library of any member. The id is
+-- franchise:name:<slug of the directory name>, because the file carries
+-- no provider id. path is the directory inside the repository. released
+-- is empty, because the scanner reads no member's date, and a wall of
+-- franchises sorts on sort_key. art and arts are the files beside the
+-- yaml under Kodi's names, and the enrichers fill art from the first
+-- member where the directory holds none.
+--
+-- body holds what the page draws around the wall, as JSON with the
+-- file's own names: universe (the home universe), calendar (unit, zero,
+-- before, after), eras (name, from, to), and sources. Eras are JSON and
+-- not a table because the page reads every era of one franchise at
+-- once and never one era across franchises.
+CREATE TABLE franchises (
+    library TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    sort_key TEXT NOT NULL DEFAULT '',
+    released TEXT NOT NULL DEFAULT '',
+    added INTEGER NOT NULL DEFAULT 0,
+    art TEXT NOT NULL DEFAULT '',
+    arts TEXT NOT NULL DEFAULT '[]',
+    duration INTEGER NOT NULL DEFAULT 0,
+    body TEXT NOT NULL DEFAULT '{}',
+    slug TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, id)
+);
+
+-- The one order a wall of franchises draws.
+CREATE INDEX franchises_library_sort_key ON franchises (library, sort_key);
+
+-- One entry of one franchise's order: a film, or one run of a series.
+-- position is the entry's place in story order, first to last, and it
+-- is the key beside the franchise because the order is the whole point
+-- of the row. A series that the story cuts into runs is several rows
+-- with the same alias at different positions.
+--
+--   kind       movie or series
+--   alias      the member as the provider alias the member's own
+--              library writes: movie:tmdb:1893 or series:tvdb:83268.
+--              The join to the catalog is this column against
+--              aliases.alias, across every library of the namespace.
+--   title      the name from the file, drawn only when no library
+--              holds the member
+--   timed      1 where the file gives the entry a time, else 0
+--   time_from  the entry's span in the calendar's unit; both 0 when
+--   time_to    timed is 0
+--   universes  the universes the entry belongs to, as a JSON list of
+--              names, and [] where it is in the home universe alone.
+--              This is JSON and not a table because the page reads
+--              every universe of one wall at once.
+--
+-- A series run's seasons and episodes are the franchise_runs rows
+-- below, and a series row with no runs is the whole show.
+CREATE TABLE franchise_members (
+    library TEXT NOT NULL DEFAULT '',
+    franchise TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT '',
+    alias TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    timed INTEGER NOT NULL DEFAULT 0,
+    time_from REAL NOT NULL DEFAULT 0,
+    time_to REAL NOT NULL DEFAULT 0,
+    universes TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (library, franchise, position)
+);
+
+-- The read a film's or a series' page makes to find its franchises:
+-- the member rows whose alias is one of the item's own aliases.
+CREATE INDEX franchise_members_library_alias ON franchise_members (library, alias);
+
+-- One season, or one episode, of one series run. A row with episode 0
+-- is the whole season. An episodes range in the file, S03E03-S03E22,
+-- is one row per episode here, because the file expands with no
+-- catalog and a held-episode count is then one join. A run with no rows
+-- is the whole show, and it counts every episode the catalog holds, so
+-- an airing show fills in with no edit to the file.
+CREATE TABLE franchise_runs (
+    library TEXT NOT NULL DEFAULT '',
+    franchise TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0,
+    season INTEGER NOT NULL DEFAULT 0,
+    episode INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (library, franchise, position, season, episode)
+);
+
+-- The franchise join is the first read that resolves an alias across
+-- every library of the namespace, with no library in hand, so the
+-- alias needs an index of its own beside the primary key.
+CREATE INDEX aliases_alias ON aliases (alias);
+
+-- The two reads a media browser makes of a franchise. Both are one
+-- statement, and they differ in one join.
+--
+-- The strip on a film's or a series' page: the whole franchise in
+-- story order, with only the members some library holds, so the strip
+-- draws what a person can play. The item's own aliases find the
+-- franchises, and an INNER JOIN through aliases to the item tables
+-- keeps the held members. Where two libraries hold one member, the
+-- read keeps the first library by name, which is the undecided rule
+-- from plan 31 made deterministic.
+--
+--   WITH mine AS (
+--     SELECT alias FROM aliases WHERE library = ?1 AND item = ?2
+--   ), found AS (
+--     SELECT DISTINCT library, franchise FROM franchise_members
+--     WHERE alias IN (SELECT alias FROM mine)
+--   ), items AS (
+--     SELECT library, id, title, art, released, slug, 'movies' AS kind FROM movies
+--     UNION ALL
+--     SELECT library, id, title, art, released, slug, 'series' AS kind FROM series
+--   )
+--   SELECT m.library, m.franchise, m.position, m.kind, m.alias, m.title,
+--          m.timed, m.time_from, m.time_to, m.universes,
+--          MIN(i.library) AS held_library, i.id, i.title, i.art, i.released, i.slug
+--   FROM franchise_members m
+--   JOIN found f ON f.library = m.library AND f.franchise = m.franchise
+--   JOIN aliases a ON a.alias = m.alias
+--   JOIN items i ON i.library = a.library AND i.id = a.item
+--   GROUP BY m.library, m.franchise, m.position
+--   ORDER BY m.library, m.franchise, m.position;
+--
+-- The wall on the franchise's own page: every entry in story order,
+-- held or not, so a gap draws with the file's title as missing or as
+-- coming. The same statement with LEFT JOIN on aliases and items, found
+-- replaced by the one franchise, and one more column: the episodes the
+-- catalog holds for a series run, which is the count over episodes
+-- joined through the same alias and filtered by franchise_runs, or
+-- every episode of the show where the run has no rows.
+--
+--   SELECT m.position, ..., MIN(i.library) AS held_library, i.id, ...,
+--          (SELECT count(*) FROM episodes e
+--           JOIN aliases sa ON sa.library = e.library AND sa.item = e.series
+--           WHERE sa.alias = m.alias
+--             AND (NOT EXISTS (SELECT 1 FROM franchise_runs r
+--                              WHERE r.library = m.library AND r.franchise = m.franchise
+--                                AND r.position = m.position)
+--                  OR EXISTS (SELECT 1 FROM franchise_runs r
+--                             WHERE r.library = m.library AND r.franchise = m.franchise
+--                               AND r.position = m.position AND r.season = e.season
+--                               AND r.episode IN (0, e.episode)))) AS held_episodes
+--   FROM franchise_members m
+--   LEFT JOIN aliases a ON a.alias = m.alias
+--   LEFT JOIN items i ON i.library = a.library AND i.id = a.item
+--   WHERE m.library = ?1 AND m.franchise = ?2
+--   GROUP BY m.position
+--   ORDER BY m.position;

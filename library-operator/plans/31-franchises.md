@@ -205,10 +205,13 @@ The rules:
 - An episode code names the provider's numbering, which is not
   always aired order. TheTVDB numbers Firefly in aired order, so its
   pilot is `S01E11`. A file names one provider's codes.
-- The scanner expands the tree into one `franchise_members` row per
-  film or episode, with a position. A whole show or a whole season
-  expands to the episodes the catalog holds today, so an airing show
-  fills in with no edit to the file.
+- The scanner writes one `franchise_members` row per entry, with a
+  position, and one `franchise_runs` row per season or episode a
+  series run names, with a range expanded to its episodes. A run with
+  no rows is the whole show, and the page counts the episodes the
+  catalog holds today, so an airing show fills in with no edit to the
+  file. The two reads the page makes are in `catalog.sql` beside the
+  tables.
 - A provider id is `scheme:id`. Films use `tmdb` and series use
   `tvdb`, because those are the schemes the movies and series
   libraries write to `aliases`. Another scheme is legal and resolves
