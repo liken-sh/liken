@@ -8,6 +8,7 @@ use super::Strip;
 use crate::catalog::Source;
 use crate::focus;
 use crate::screens::{Item, Step, movie, series, slots};
+use crate::views::ratings;
 
 /// The most titles the banner holds. Four drawn strips and two recency
 /// strips feed it, and a longer row of indicators reads as noise.
@@ -15,7 +16,7 @@ pub const MOST: usize = 6;
 
 /// One title of the banner: the item a select opens, and the words and
 /// art paths the frame draws.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Title {
     /// The slot the title came from, which a select opens the page for.
     pub item: Item,
@@ -26,8 +27,14 @@ pub struct Title {
     pub logo: String,
     /// The backdrop path, never empty in the banner.
     pub backdrop: String,
-    /// The facts line, as the title's page draws it.
+    /// The facts line under the head: the date, the runtime, and the
+    /// content rating of a movie, or the year, the season count, and the
+    /// content rating of a series. The genres take the line under it.
     pub facts: String,
+    /// The genres on one line, empty where the sidecar named none.
+    pub genres: String,
+    /// The scores the ratings row draws, in the order it draws them.
+    pub ratings: Vec<ratings::Score>,
     /// The tagline, empty where the sidecar named none.
     pub tagline: String,
 }
@@ -42,41 +49,44 @@ impl Title {
             ("series", _) => Some(item.id.as_str()),
             _ => None,
         };
-        let (name, logo, backdrop, facts, tagline) = match series {
+        let title = match series {
             Some(id) => {
                 let details = source.series(&item.library, id)?;
                 let facts = series::facts_of(&details);
-                (
-                    details.title,
-                    details.logo,
-                    details.backdrop,
+                let genres = details.genres.join(", ");
+                let ratings = ratings::scores(&details.ratings);
+                Self {
+                    item: item.clone(),
+                    name: details.title,
+                    logo: details.logo,
+                    backdrop: details.backdrop,
                     facts,
-                    details.tagline,
-                )
+                    genres,
+                    ratings,
+                    tagline: details.tagline,
+                }
             }
             None => {
                 let details = source.movie(&item.library, &item.id)?;
-                let facts = movie::facts_of(&details);
-                (
-                    details.title,
-                    details.logo,
-                    details.backdrop,
+                let facts = movie::facts_without_genres(&details);
+                let genres = details.genres.join(", ");
+                let ratings = ratings::scores(&details.ratings);
+                Self {
+                    item: item.clone(),
+                    name: details.title,
+                    logo: details.logo,
+                    backdrop: details.backdrop,
                     facts,
-                    details.tagline,
-                )
+                    genres,
+                    ratings,
+                    tagline: details.tagline,
+                }
             }
         };
-        if backdrop.is_empty() {
+        if title.backdrop.is_empty() {
             return None;
         }
-        Some(Self {
-            item: item.clone(),
-            name,
-            logo,
-            backdrop,
-            facts,
-            tagline,
-        })
+        Some(title)
     }
 
     // The library and the id of the page a select opens. An episode and its

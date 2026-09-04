@@ -321,7 +321,9 @@ impl Source for Fake {
             title: "The Serial".into(),
             released: "1980".into(),
             rating: "TV-14".into(),
+            genres: vec!["Adventure".into(), "Mystery".into()],
             plot: "A plot.".into(),
+            ratings: vec![("imdb".into(), 8.1), ("themoviedb".into(), 7.0)],
             seasons: 2,
             backdrop: self.backdrop(id),
             ..SeriesDetails::default()
@@ -360,7 +362,9 @@ impl Source for Fake {
             released: "1980".into(),
             duration: 5_400,
             rating: "PG".into(),
+            genres: vec!["Drama".into(), "Western".into()],
             plot: "A plot.".into(),
+            ratings: vec![("imdb".into(), 6.5), ("tomatometerallcritics".into(), 83.0)],
             cast: vec![Credit {
                 name: "A Player".into(),
                 role: "The Part".into(),

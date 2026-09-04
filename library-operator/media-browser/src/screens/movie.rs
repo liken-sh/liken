@@ -334,14 +334,19 @@ fn set_of(library: &str, id: &str, details: &MovieDetails, source: &mut dyn Sour
     Set::of(source.set(library, &details.set_id)?, &query, id)
 }
 
-/// The facts line of one title. The banner reads it too, because it
-/// draws a title the way the page's header does.
+/// The facts line of one movie's page: the date, the runtime, the
+/// content rating, and the genres, on one line.
 pub(crate) fn facts_of(details: &MovieDetails) -> String {
+    facts::joined(&[&facts_without_genres(details), &details.genres.join(", ")])
+}
+
+/// The date, the runtime, and the content rating. The banner reads this
+/// line, because it draws the genres on a line of their own.
+pub(crate) fn facts_without_genres(details: &MovieDetails) -> String {
     facts::joined(&[
         &facts::date(&details.released),
         &facts::runtime(details.duration),
         &details.rating,
-        &details.genres.join(", "),
     ])
 }
 

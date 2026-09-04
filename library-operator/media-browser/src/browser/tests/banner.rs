@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::screens::home::banner::Banner;
+use crate::views::ratings::{Mark, Score};
 
 // A browser whose recency strips hold an episode, a serial, and a
 // movie, each with a backdrop.
@@ -49,6 +50,40 @@ fn the_page_opens_on_the_banner_with_the_newest_release_and_the_newest_arrival()
     assert_eq!(banner.titles[1].backdrop, "movies:1.backdrop.jpg");
     assert_eq!(banner.titles[1].facts, "1980 · 1h 30m · PG");
     assert_eq!(banner.titles[1].item.library, "screening/films");
+}
+
+#[test]
+fn a_title_carries_its_genres_and_its_scores_apart_from_its_facts() {
+    let browser = with_banner();
+    let banner = banner(&browser);
+
+    let serial = &banner.titles[0];
+    assert_eq!(serial.facts, "1980 · 2 seasons · TV-14");
+    assert_eq!(serial.genres, "Adventure, Mystery");
+    assert_eq!(
+        serial.ratings,
+        [Score {
+            mark: Mark::Imdb,
+            value: 8.1,
+        }]
+    );
+
+    let movie = &banner.titles[1];
+    assert_eq!(movie.facts, "1980 · 1h 30m · PG");
+    assert_eq!(movie.genres, "Drama, Western");
+    assert_eq!(
+        movie.ratings,
+        [
+            Score {
+                mark: Mark::Imdb,
+                value: 6.5,
+            },
+            Score {
+                mark: Mark::Tomato,
+                value: 83.0,
+            }
+        ]
+    );
 }
 
 #[test]

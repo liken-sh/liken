@@ -596,6 +596,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                                 logo: &title.logo,
                                 name: &title.name,
                                 facts: &title.facts,
+                                genres: &title.genres,
+                                ratings: &title.ratings,
                                 tagline: &title.tagline,
                                 count: banner.titles.len(),
                                 current: banner.focus,

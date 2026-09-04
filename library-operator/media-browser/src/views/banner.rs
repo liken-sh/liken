@@ -2,14 +2,15 @@
 // draws under every image of that layer, so the scrim over the backdrop
 // needs the backdrop on a layer of its own. This module holds the
 // frame's geometry, the backdrop under it, and the scrim, the head, the
-// facts, the tagline, the indicators, and the mark over it.
+// facts, the genres, the scores, the tagline, the indicators, and the
+// mark over it.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle};
 
 use super::stack::Stack;
-use super::{Tone, area, extent, header, layers, mark, paint, text};
+use super::{Tone, area, extent, header, layers, mark, paint, ratings, text};
 use crate::look;
 use crate::posters::Posters;
 
@@ -46,7 +47,26 @@ const FOOT: f32 = 28.0;
 
 /// The height the frame takes on a page this tall.
 pub fn height(page: f32) -> f32 {
-    (page * SHARE).round()
+    (page * SHARE).max(least()).round()
+}
+
+// The least the frame can be: the space over the head, the head, the
+// facts line, the genres line, the ratings row, the tagline, the gaps
+// between them, and the indicator row over the foot. Every size here is
+// a fixed number of pixels, so a page under about 925 pixels tall takes
+// this and not the share, and the column never runs into the indicators.
+fn least() -> f32 {
+    TOP + LOGO_HEIGHT
+        + GAP
+        + text::height(1, look::FACTS)
+        + GAP
+        + text::height(1, look::FACTS)
+        + GAP
+        + ratings::HEIGHT
+        + GAP
+        + text::height(TAGLINE_LINES, look::TAGLINE)
+        + INDICATOR_HEIGHT
+        + FOOT
 }
 
 /// The indicator of one title, inside the frame's foot.
@@ -86,6 +106,12 @@ pub struct Banner<'a> {
     pub name: &'a str,
     /// The facts line under the head.
     pub facts: &'a str,
+    /// The genres on one line, cut with an ellipsis where they run past
+    /// the column.
+    pub genres: &'a str,
+    /// The scores the ratings row draws. An empty slice draws no row and
+    /// takes no height.
+    pub ratings: &'a [ratings::Score],
     /// The tagline, empty where the title has none.
     pub tagline: &'a str,
     /// How many titles the banner holds.
@@ -142,6 +168,23 @@ pub fn draw<P: Posters>(frame: &mut canvas::Frame<Renderer>, posters: &mut P, ba
         1,
     );
     stack.add(taken);
+
+    // The genres are cut to one line with an ellipsis, so a title with
+    // many of them never pushes the blocks under it down.
+    let taken = text::block(
+        frame,
+        &text::cut(banner.genres, look::FACTS, column),
+        stack.at(),
+        look::FACTS,
+        look::muted(),
+        column,
+        1,
+    );
+    stack.add(taken);
+
+    let taken = ratings::draw(frame, banner.ratings, stack.at());
+    stack.add(taken);
+
     text::block(
         frame,
         banner.tagline,
@@ -177,7 +220,12 @@ mod tests {
     #[test]
     fn the_frame_takes_about_four_tenths_of_the_page() {
         assert_eq!(height(1080.0), 432.0);
-        assert_eq!(height(720.0), 288.0);
+    }
+
+    #[test]
+    fn a_short_page_gives_the_frame_the_height_its_text_needs() {
+        assert_eq!(height(720.0), 370.0);
+        assert!(height(720.0) > 720.0 * SHARE);
     }
 
     #[test]
@@ -192,16 +240,31 @@ mod tests {
         assert!(first.y > region.y + region.height / 2.0);
     }
 
-    #[test]
-    fn the_text_and_the_indicators_stay_clear_of_each_other() {
-        let region = region();
-        let text_foot = region.y
-            + TOP
-            + LOGO_HEIGHT
+    // The tallest the text column gets: the head, the facts line, the
+    // genres line, the ratings row, the tagline, and a gap between each
+    // two of them.
+    fn column() -> f32 {
+        TOP + LOGO_HEIGHT
             + GAP
             + text::height(1, look::FACTS)
             + GAP
-            + text::height(TAGLINE_LINES, look::TAGLINE);
-        assert!(text_foot < indicator(region, 0).y);
+            + text::height(1, look::FACTS)
+            + GAP
+            + ratings::HEIGHT
+            + GAP
+            + text::height(TAGLINE_LINES, look::TAGLINE)
+    }
+
+    // The room the frame leaves between the foot of the text column and
+    // the indicator row on a page this tall.
+    fn room(page: f32) -> f32 {
+        let region = area(32.0, 104.0, 1856.0, height(page));
+        indicator(region, 0).y - (region.y + column())
+    }
+
+    #[test]
+    fn the_text_and_the_indicators_stay_clear_of_each_other() {
+        assert!(room(1080.0) >= 0.0, "at 1080p: {}", room(1080.0));
+        assert!(room(720.0) >= 0.0, "at 720p: {}", room(720.0));
     }
 }
