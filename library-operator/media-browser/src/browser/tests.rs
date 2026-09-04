@@ -88,6 +88,20 @@ fn days_ago(days: i64) -> String {
     Date::from_seconds(Date::today().seconds() - days * 86_400).iso()
 }
 
+// The serial as a wall answers it. The recency queries and the genre
+// query both hold it, so a genre wall counts a kind other than a movie.
+fn serial() -> Slot {
+    Slot {
+        library: SERIALS.into(),
+        kind: "series".into(),
+        id: SERIAL.into(),
+        title: "The Serial".into(),
+        released: days_ago(14),
+        art: "serial.jpg".into(),
+        ..Slot::default()
+    }
+}
+
 // The number at the end of a fake id. It places a movie in the library's
 // one set.
 fn numbered(id: &str) -> usize {
@@ -121,21 +135,12 @@ impl Fake {
             }),
             ..Slot::default()
         };
-        let serial = Slot {
-            library: SERIALS.into(),
-            kind: "series".into(),
-            id: SERIAL.into(),
-            title: "The Serial".into(),
-            released: days_ago(14),
-            art: "serial.jpg".into(),
-            ..Slot::default()
-        };
         let movie = Slot::of("screening/films", "movies", self.member(1));
         Answer {
             name: String::new(),
             slots: match fold {
-                Fold::Titles => vec![serial, movie],
-                _ => vec![episode, serial, movie],
+                Fold::Titles => vec![serial(), movie],
+                _ => vec![episode, serial(), movie],
             },
         }
     }
@@ -242,6 +247,7 @@ impl Source for Fake {
                 name: name.clone(),
                 slots: (1..=self.movies)
                     .map(|number| Slot::of("screening/films", "movies", self.member(number)))
+                    .chain(std::iter::once(serial()))
                     .collect(),
             },
         }

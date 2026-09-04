@@ -11,7 +11,8 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::Rectangle;
 
-use super::{Item, Screen, Step, movie, series};
+use super::wall::Wall;
+use super::{Item, Screen, Step, movie, person, series};
 use crate::catalog::{Query, Source};
 use crate::focus;
 use crate::posters::Posters;
@@ -116,6 +117,21 @@ impl Slots {
     }
 }
 
+/// The screen a "see all" on this query opens. A person opens their own
+/// page, which draws the headshot and the dates over the same works.
+/// Every other query opens the wall of everything it answers, and a
+/// query with a page of its own is that page, because the wall carries
+/// its head. Nothing where the catalog no longer holds the person.
+pub fn see_all(query: &Query, source: &mut dyn Source) -> Step {
+    if let Query::Person { library, path } = query {
+        return match person::Person::open(library, path, source) {
+            Some(page) => Step::Open(Screen::Person(Box::new(page))),
+            None => Step::Stay,
+        };
+    }
+    Step::Open(Screen::Wall(Wall::open(query.all_titles(), source)))
+}
+
 /// The page a select on one item opens, by the item's kind: a series
 /// page for a series, the series page focused on the episode for an
 /// episode, and a movie page for everything else. Nothing where the
@@ -153,4 +169,33 @@ pub fn backdrop(item: &Item, source: &mut dyn Source) -> Option<(String, String)
         return None;
     }
     Some((item.library.clone(), backdrop))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sample::Catalog;
+
+    const LIBRARY: &str = "sample/features";
+
+    #[test]
+    fn see_all_on_an_unknown_person_opens_nothing() {
+        let query = Query::Person {
+            library: LIBRARY.into(),
+            path: "nobody".into(),
+        };
+        assert!(matches!(see_all(&query, &mut Catalog), Step::Stay));
+    }
+
+    #[test]
+    fn see_all_on_a_library_opens_a_wall_with_no_head() {
+        let query = Query::Library {
+            library: LIBRARY.into(),
+        };
+        let Step::Open(Screen::Wall(wall)) = see_all(&query, &mut Catalog) else {
+            panic!("a library opens a wall");
+        };
+        assert_eq!(wall.slots.query, query);
+        assert_eq!(wall.head, None);
+    }
 }

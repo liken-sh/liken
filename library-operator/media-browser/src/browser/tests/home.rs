@@ -252,6 +252,7 @@ fn a_select_on_a_library_opens_its_wall() {
 
     let wall = showing_wall(&browser);
     assert_eq!(wall.heading, "serials · 2");
+    assert_eq!(wall.head, None);
     assert_eq!(
         wall.slots.query,
         Query::Library {
@@ -425,24 +426,31 @@ fn a_drawn_strip_captions_a_title_with_its_facts_and_a_persons_with_the_parts() 
     assert_eq!(set.items[0].under, "1980 · 1h 30m · PG");
 }
 
-#[test]
-fn see_all_on_a_drawn_strip_opens_its_query_as_a_wall() {
+// The browser after a "see all" on the drawn strip under this heading.
+// The presses go down to the strip and right to its "see all" slot,
+// which right stops on.
+fn see_all_on(heading: &str) -> Browser<Fake, NoPosters> {
     let mut browser = with_draw();
     let index = headings(&browser)
         .iter()
-        .position(|heading| *heading == "Western")
-        .expect("the page drew Western");
+        .position(|found| *found == heading)
+        .unwrap_or_else(|| panic!("the page drew {heading}"));
     for _ in 0..=index {
         browser.key("down");
     }
-    for _ in 0..4 {
+    for _ in 0..6 {
         browser.key("right");
     }
-
     browser.key("enter");
+    browser
+}
+
+#[test]
+fn see_all_on_a_genre_strip_opens_the_genre_page() {
+    let browser = see_all_on("Western");
 
     let wall = showing_wall(&browser);
-    assert_eq!(wall.heading, "Western · 3");
+    assert_eq!(wall.heading, "Genre");
     assert_eq!(
         wall.slots.query,
         Query::Genre {
@@ -450,6 +458,34 @@ fn see_all_on_a_drawn_strip_opens_its_query_as_a_wall() {
             order: Order::Released,
         }
     );
+    let head = wall.head.as_ref().expect("the genre page carries a head");
+    assert_eq!(head.name, "Western");
+    assert_eq!(head.facts, "3 movies · 1 series");
+}
+
+#[test]
+fn a_reread_of_a_genre_page_counts_its_slots_again() {
+    let mut browser = see_all_on("Western");
+
+    browser.source.movies = 1;
+    browser.source.changed = true;
+    browser.pump(1.0);
+
+    let head = showing_wall(&browser)
+        .head
+        .as_ref()
+        .expect("the genre page carries a head");
+    assert_eq!(head.facts, "1 movie · 1 series");
+}
+
+#[test]
+fn see_all_on_a_persons_strip_opens_their_page() {
+    let browser = see_all_on(PLAYER);
+
+    let page = showing_person(&browser);
+    assert_eq!(page.name, PLAYER);
+    assert_eq!(page.path, ENTRY);
+    assert_eq!(page.works.items.len(), 3);
 }
 
 #[test]

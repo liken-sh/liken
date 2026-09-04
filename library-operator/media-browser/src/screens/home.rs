@@ -156,15 +156,14 @@ impl Strip {
         self.items.get(self.focus)
     }
 
-    // What a select opens. "See all" opens the wall of the strip's query
-    // with every episode folded to its series, a library opens its wall, and
-    // a title opens its page by its kind.
+    // What a select opens. "See all" opens the page the strip is about:
+    // a person's own page for a person's strip, and the wall of everything
+    // the query answers for every other. A library opens its wall, and a
+    // title opens its page by its kind.
     fn select(&self, source: &mut dyn Source) -> Step {
         let Some(item) = self.focused() else {
             return match &self.row {
-                Row::Query(query) if self.see_all => {
-                    Step::Open(Screen::Wall(Wall::open(query.all_titles(), source)))
-                }
+                Row::Query(query) if self.see_all => slots::see_all(query, source),
                 _ => Step::Stay,
             };
         };

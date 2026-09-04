@@ -70,6 +70,16 @@ impl Query {
         }
     }
 
+    /// The word for what the query is about, where the query has a page
+    /// of its own. The band over that page carries the word, and the head
+    /// under the band carries the name, so the name reads once.
+    pub fn kind_word(&self) -> Option<&'static str> {
+        match self {
+            Self::Genre { .. } => Some("Genre"),
+            _ => None,
+        }
+    }
+
     /// The query a "see all" slot opens. A recency query opens itself with
     /// every episode folded to its series, so the wall stays all posters at
     /// one ratio and no wall ever holds a still. Every other query opens
@@ -193,6 +203,23 @@ mod tests {
         assert_eq!(query.name("ignored"), "Western");
         assert_eq!(query.heading("ignored", 7), "Western · 7");
         assert_eq!(query.all_titles(), query);
+    }
+
+    #[test]
+    fn only_a_genre_carries_a_kind_word() {
+        let genre = Query::Genre {
+            name: "Western".into(),
+            order: Order::Released,
+        };
+        assert_eq!(genre.kind_word(), Some("Genre"));
+        assert_eq!(
+            Query::Library {
+                library: "screening/features".into()
+            }
+            .kind_word(),
+            None
+        );
+        assert_eq!(Query::Released { fold: Fold::Titles }.kind_word(), None);
     }
 
     #[test]
