@@ -15,8 +15,9 @@ pub const HEAD: f32 = 20.0;
 /// The space over the header's first block.
 pub const TOP: f32 = 28.0;
 
-/// The space under the header's last block, before the wall's region.
-pub const FOOT: f32 = 12.0;
+/// The space between the plot's last line and the first row of stills,
+/// so the header's text never touches the wall.
+pub const FOOT: f32 = 28.0;
 
 /// The space between two blocks of the header.
 pub const GAP: f32 = 14.0;
@@ -61,9 +62,7 @@ pub fn region(bounds: Rectangle) -> Rectangle {
 pub fn head() -> f32 {
     TOP + LOGO_HEIGHT
         + GAP
-        + text::height(1, look::FACTS)
-        + GAP
-        + ratings::HEIGHT
+        + ratings::HEIGHT.max(text::height(1, look::FACTS))
         + GAP
         + text::height(2, look::FACTS)
         + GAP
