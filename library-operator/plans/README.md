@@ -58,6 +58,10 @@ for a later agent to shape.
   and arrivals, strips the day draws, and the libraries. Every screen of
   titles becomes one `Query` and one wall, the catalog gains a `genres`
   table, and an arrival ledger in `.liken/` feeds `added`.
+* [36, Genres on the home page](36-genres-on-the-home-page.md). Shaped
+  on 2026-09-04. The home page reads off the frame thread, every genre
+  gets a strip and a page, and "see all" opens the page a strip is
+  about.
 
 Enrichment is one design in five plans. Plan 27 states the contracts
 they share, and plans 28 to 31 build them in order.
