@@ -35,14 +35,14 @@ const SLACK: f32 = 1.5;
 // well as over the band, so the shade keeps the reading legible over art
 // of any brightness. On the band it lies on the band's own black and
 // shows nothing.
-const SIDE: f32 = 240.0;
+const SIDE: f32 = 200.0;
 const HOLDS_TO: f32 = 0.32;
 const CLEARS_AT: f32 = 0.5;
 
 // The shade at the corner itself. The surface blends in linear space, so
 // this reads as a mid grey over white art and not as black, and the
 // reading draws in the bright ink so it stays legible on that grey.
-const SHADE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.7);
+const SHADE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.55);
 
 /// The room the clock takes at the right edge of a frame.
 pub fn room() -> f32 {
