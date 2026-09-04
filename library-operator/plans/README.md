@@ -53,8 +53,11 @@ for a later agent to shape.
   history, and who was watching.
 * [23, Motion](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
-* [26, The home page](26-the-home-page.md). A first screen of rows that
-  blends every kind, in place of the list of libraries.
+* [26, The home page](26-the-home-page.md). Shaped on 2026-09-03. A
+  first screen that blends every library: a banner, the newest releases
+  and arrivals, strips the day draws, and the libraries. Every screen of
+  titles becomes one `Query` and one wall, the catalog gains a `genres`
+  table, and an arrival ledger in `.liken/` feeds `added`.
 
 Enrichment is one design in five plans. Plan 27 states the contracts
 they share, and plans 28 to 31 build them in order.
