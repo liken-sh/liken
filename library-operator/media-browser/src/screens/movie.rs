@@ -336,7 +336,7 @@ fn set_of(library: &str, id: &str, details: &MovieDetails, source: &mut dyn Sour
 
 fn facts_of(details: &MovieDetails) -> String {
     facts::joined(&[
-        facts::year(&details.released),
+        &facts::date(&details.released),
         &facts::runtime(details.duration),
         &details.rating,
         &details.genres.join(", "),

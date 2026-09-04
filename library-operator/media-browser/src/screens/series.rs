@@ -375,7 +375,12 @@ fn still_of(episode: Episode) -> Still {
         id: episode.id,
         line: facts::Line::of(&[&caption, &runtime]),
         caption,
-        facts: facts::joined(&[&numbers, &episode.title, &runtime]),
+        facts: facts::joined(&[
+            &numbers,
+            &episode.title,
+            &runtime,
+            &facts::date(&episode.released),
+        ]),
         season: episode.season,
         episode: episode.episode,
         name: episode.title,

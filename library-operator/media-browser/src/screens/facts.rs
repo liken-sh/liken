@@ -16,6 +16,41 @@ pub fn year(released: &str) -> &str {
     }
 }
 
+/// A release or air date as a person reads it, "September 22, 2004",
+/// where the catalog holds a full date. A year alone reads as the year,
+/// and anything else reads as nothing. A page header shows the full date
+/// because the day a film came out or an episode aired is a fact a
+/// person asks the header for, and a wall's caption keeps the year
+/// because a caption has one line.
+pub fn date(released: &str) -> String {
+    let year = year(released);
+    let mut parts = released
+        .split('-')
+        .skip(1)
+        .map(|part| part.parse::<usize>().ok());
+    match (parts.next().flatten(), parts.next().flatten()) {
+        (Some(month), Some(day)) if (1..=12).contains(&month) && (1..=31).contains(&day) => {
+            format!("{} {day}, {year}", MONTHS[month - 1])
+        }
+        _ => year.to_string(),
+    }
+}
+
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
 /// A duration in seconds as hours and minutes, or nothing where the
 /// catalog holds none.
 pub fn runtime(seconds: i64) -> String {
@@ -91,6 +126,21 @@ impl Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_date_reads_in_full_and_a_year_reads_alone() {
+        let cases = [
+            ("2004-09-22", "September 22, 2004"),
+            ("1999-03-31", "March 31, 1999"),
+            ("2004", "2004"),
+            ("2004-13-01", "2004"),
+            ("soon", ""),
+            ("", ""),
+        ];
+        for (released, want) in cases {
+            assert_eq!(date(released), want, "{released}");
+        }
+    }
 
     #[test]
     fn a_year_and_a_date_both_give_the_year() {

@@ -262,7 +262,10 @@ fn a_still_carries_its_caption_and_the_facts_the_header_draws() {
     let (page, _) = page(Serials::default());
     assert_eq!(page.stills[1].caption, "E2 · Segment 2");
     assert_eq!(page.stills[1].line.words(), "E2 · Segment 2 · 46m");
-    assert_eq!(page.stills[1].facts, "S1 E2 · Segment 2 · 46m");
+    assert_eq!(
+        page.stills[1].facts,
+        "S1 E2 · Segment 2 · 46m · March 2, 2004"
+    );
     assert_eq!(page.stills[1].plot, "The plot of S1 E2.");
     assert_eq!(page.stills[1].art, "s1e2.jpg");
 }
@@ -311,7 +314,7 @@ fn the_header_shows_the_focused_episodes_plot_in_place_of_the_series() {
     assert_eq!(page.plot, "The series' own plot.");
     pressed(&mut page, &mut source, "down");
     let focused = page.focused().expect("a still holds focus");
-    assert_eq!(focused.facts, "S1 E5 · Segment 5 · 46m");
+    assert_eq!(focused.facts, "S1 E5 · Segment 5 · 46m · March 5, 2004");
     assert_eq!(focused.plot, "The plot of S1 E5.");
 }
 

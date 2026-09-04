@@ -48,10 +48,6 @@ impl Query {
     }
 
     /// The heading the band draws over this query's slots. A library's
-    /// heading carries its count. A person's and a set's carry the name
-    /// alone, and that name comes with the answer, because only the catalog
-    /// holds it.
-    /// The heading the band draws over this query's slots. A library's
     /// heading and a recency query's carry the count. A person's and a set's
     /// carry the name alone.
     pub fn heading(&self, name: &str, count: usize) -> String {
@@ -90,10 +86,6 @@ pub struct InSeries {
 /// and kind, because no wall fixes up front what a select opens, and a
 /// person's works span libraries. `parts` is empty on every read but a
 /// person's.
-/// One title as a read answers it. Every slot carries its own library
-/// and kind, because no wall fixes up front what a select opens, and a
-/// person's works span libraries. `parts` is empty on every read but a
-/// person's. `episode` is set on an episode slot alone, which the recency
 /// queries answer with under the `Episodes` and `Airing` folds.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Slot {

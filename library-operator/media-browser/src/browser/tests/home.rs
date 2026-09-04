@@ -40,7 +40,7 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
 
     let released = &home.strips[0];
     assert!(released.see_all);
-    assert_eq!(released.lines, 1);
+    assert_eq!(released.lines, 2);
     assert_eq!(released.items.len(), 3);
     assert_eq!(released.items[0].caption, "S01E02 · The Serial");
     assert_eq!(released.items[0].art, "s1e2.jpg");

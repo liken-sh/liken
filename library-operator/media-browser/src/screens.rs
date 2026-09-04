@@ -153,12 +153,6 @@ impl Screen {
 /// the slot's kind and a wall may span libraries. The id is what a descent
 /// carries. The caption is the line under every slot, the line is what the
 /// focused slot shows, and `under` is the second caption line, empty on
-/// every wall but a person's.
-/// One title, as a wall slot or a strip poster draws it. Every item
-/// carries its own library and kind, because a select opens the page for
-/// the slot's kind and a wall may span libraries. The id is what a descent
-/// carries. The caption is the line under every slot, the line is what the
-/// focused slot shows, and `under` is the second caption line, empty on
 /// every wall but a person's and the libraries strip. `episode` is what an
 /// episode slot carries: the series a select opens and the numbers it
 /// opens on, and an item that holds one draws as a still.
@@ -178,15 +172,14 @@ pub struct Item {
 impl Item {
     /// One slot as an item. The query decides the caption: a person's works
     /// are read by year, so their caption carries it, and every other wall
-    /// captions the name alone. Both lines are built once here, at the read,
-    /// and not on every frame.
-    /// One slot as an item. The query decides the caption: a person's works
-    /// are read by year, so their caption carries it, and every other wall
     /// captions the name alone. An episode slot, whatever the query, is
     /// captioned with its numbers and its series' name, because the still
-    /// alone does not say which series it is from, and its focused line leads
-    /// with the same two. Both lines are built once here, at the read, and not
-    /// on every frame.
+    /// alone does not say which series it is from, and its focused line is
+    /// the same two, bright. A recency strip draws a second line under every
+    /// slot: an episode's title and runtime, or a title's year, runtime, and
+    /// rating, because a strip's caption band holds one short line and an
+    /// episode's title would otherwise be dropped from the end. Every line is
+    /// built once here, at the read, and not on every frame.
     pub fn of(query: &Query, slot: Slot) -> Self {
         let year = facts::year(&slot.released);
         let numbers = slot
@@ -204,14 +197,20 @@ impl Item {
             (None, Query::Person { .. }) => facts::joined(&[&slot.title, year]),
             (None, _) => slot.title.clone(),
         };
-        let line = facts::Line::of(&[
-            &numbers,
-            series,
-            &slot.title,
-            year,
-            &facts::runtime(slot.duration),
-            &slot.rating,
-        ]);
+        let runtime = facts::runtime(slot.duration);
+        let line = match slot.episode.is_some() {
+            true => facts::Line::of(&[series, &numbers]),
+            false => facts::Line::of(&[&slot.title, year, &runtime, &slot.rating]),
+        };
+        let under = match (query, &slot.episode) {
+            (Query::Released { .. } | Query::Added { .. }, Some(_)) => {
+                facts::joined(&[&slot.title, &runtime])
+            }
+            (Query::Released { .. } | Query::Added { .. }, None) => {
+                facts::joined(&[year, &runtime, &slot.rating])
+            }
+            _ => slot.parts.clone(),
+        };
         Self {
             library: slot.library,
             kind: slot.kind,
@@ -219,7 +218,7 @@ impl Item {
             name: slot.title,
             caption,
             line,
-            under: slot.parts,
+            under,
             art: slot.art,
             episode: slot.episode,
         }
@@ -262,6 +261,7 @@ impl Card for Item {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Fold;
 
     const LIBRARY: &str = "sample/features";
 
@@ -322,10 +322,8 @@ mod tests {
             },
         );
         assert_eq!(item.caption(), "S03E04 · Serial 03");
-        assert_eq!(
-            item.line.words(),
-            "S03E04 · Serial 03 · Segment 04 · 2026 · 46m · PG-13"
-        );
+        assert_eq!(item.line.words(), "Serial 03 · S03E04");
+        assert_eq!(item.under(), "Segment 04 · 46m");
         assert_eq!(item.ratio(), STILL);
         assert_eq!(item.kind, "episodes");
     }
@@ -356,6 +354,13 @@ mod tests {
         assert_eq!(item.caption(), "Specimen 0001 · 1987");
         assert_eq!(item.line_fitting(80), "Specimen 0001 · 1987");
         assert_eq!(item.under(), "Director, as The Part");
+    }
+
+    #[test]
+    fn a_title_on_a_recency_strip_carries_its_facts_under_it() {
+        let item = Item::of(&Query::Added { fold: Fold::Airing }, specimen());
+        assert_eq!(item.caption(), "Specimen 0001");
+        assert_eq!(item.under(), "1987 · 1h 37m · PG-13");
     }
 
     #[test]

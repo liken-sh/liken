@@ -33,8 +33,7 @@ const FOOT: f32 = 12.0;
 pub const SEE_ALL: &str = "See all";
 
 /// The height a strip takes with this many caption lines under each
-/// slot: none on a set strip, one on a home strip of titles, two on the
-/// libraries strip.
+/// slot: none on a set strip, and two on every strip of the home page.
 pub fn height(lines: usize) -> f32 {
     match lines {
         0 => HEADING + POSTER,

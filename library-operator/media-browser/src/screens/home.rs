@@ -80,10 +80,7 @@ impl Strip {
             items: Vec::new(),
             focus: 0,
             see_all: matches!(row, Row::Query(_)),
-            lines: match row {
-                Row::Query(_) => 1,
-                Row::Libraries => 2,
-            },
+            lines: 2,
             row,
         };
         strip.reread(source);

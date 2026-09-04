@@ -209,7 +209,7 @@ fn a_movie_with_a_trailer_file_gets_the_second_button() {
 #[test]
 fn a_page_builds_its_facts_and_its_title() {
     let (page, _) = page(Films::default());
-    assert_eq!(page.facts, "1994 · 1h 52m · PG · Drama");
+    assert_eq!(page.facts, "May 2, 1994 · 1h 52m · PG · Drama");
     assert_eq!(page.title, "Film two");
 }
 
