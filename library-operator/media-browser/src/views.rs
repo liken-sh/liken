@@ -16,6 +16,7 @@
 pub mod band;
 pub mod banner;
 pub mod buttons;
+pub mod clock;
 pub mod curtain;
 pub mod divider;
 pub mod header;
@@ -246,6 +247,17 @@ fn label(
         max_width,
         shaping: Shaping::Advanced,
     }
+}
+
+// One rounded rectangle. A radius wider than half the shape has no meaning,
+// so a bar with a few pixels of fill rounds by what it has.
+pub(crate) fn rounded(shape: Rectangle, radius: f32) -> canvas::Path {
+    let radius = radius.min(shape.width / 2.0).min(shape.height / 2.0);
+    canvas::Path::rounded_rectangle(
+        shape.position(),
+        Size::new(shape.width, shape.height),
+        radius.into(),
+    )
 }
 
 // A rectangle from its corner and its size, the shape every primitive

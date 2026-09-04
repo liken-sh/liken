@@ -184,6 +184,7 @@ fn a_rest_on_the_banner_asks_for_the_titles_page_backdrop() {
     let mut browser = with_banner();
     browser.tick(0.0);
     browser.key("right");
+    browser.minute = Some(MINUTE);
     assert_eq!(browser.next_frame(0.0), Some(REST));
 
     browser.tick(REST);

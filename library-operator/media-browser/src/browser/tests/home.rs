@@ -114,10 +114,12 @@ fn up_from_the_first_strip_reaches_the_banner_then_the_band_and_down_returns() {
 
     assert_eq!(showing_home(&browser).control, Some(0));
     browser.key("right");
-    assert_eq!(showing_home(&browser).control, Some(1));
+    assert_eq!(showing_home(&browser).control, Some(0));
+    browser.key("left");
+    assert_eq!(showing_home(&browser).control, Some(0));
     browser.key("enter");
     assert!(browser.stack.is_empty());
-    assert_eq!(showing_home(&browser).control, Some(1));
+    assert_eq!(showing_home(&browser).control, Some(0));
 
     browser.key("down");
 
@@ -309,6 +311,7 @@ fn a_rest_on_a_title_asks_for_its_backdrop_and_on_a_library_for_nothing() {
     let mut browser = on_strips(3);
     browser.tick(0.0);
     browser.key("right");
+    browser.minute = Some(MINUTE);
     assert_eq!(browser.next_frame(0.0), Some(REST));
     browser.tick(REST);
     assert!(browser.posters.get_mut().asked.contains(&(
@@ -320,7 +323,8 @@ fn a_rest_on_a_title_asks_for_its_backdrop_and_on_a_library_for_nothing() {
 
     browser.key("down");
     browser.key("down");
-    assert!(browser.next_frame(REST).is_none());
+    browser.minute = Some(MINUTE);
+    assert_eq!(browser.next_frame(REST), Some(MINUTE));
 }
 
 #[test]
@@ -344,10 +348,11 @@ fn a_rest_on_see_all_and_in_the_band_asks_for_nothing() {
     for _ in 0..3 {
         browser.key("right");
     }
-    assert!(browser.next_frame(0.0).is_none());
+    browser.minute = Some(MINUTE);
+    assert_eq!(browser.next_frame(0.0), Some(MINUTE));
     browser.key("up");
     browser.key("up");
-    assert!(browser.next_frame(0.0).is_none());
+    assert_eq!(browser.next_frame(0.0), Some(MINUTE));
 }
 
 #[test]
@@ -572,14 +577,15 @@ fn a_select_on_a_genre_opens_the_genres_page() {
 }
 
 #[test]
-fn a_rest_on_a_genre_asks_for_nothing() {
+fn a_rest_on_a_genre_asks_for_the_clocks_frame_alone() {
     let mut browser = on_strips(3);
     browser.tick(0.0);
+    browser.minute = Some(MINUTE);
     for _ in 0..3 {
         browser.key("down");
     }
 
-    assert!(browser.next_frame(REST).is_none());
+    assert_eq!(browser.next_frame(REST), Some(MINUTE));
 }
 
 #[test]

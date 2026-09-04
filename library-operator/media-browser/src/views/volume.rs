@@ -10,12 +10,12 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
-use iced_winit::core::{Color, Point, Rectangle, Size, Theme, mouse};
+use iced_winit::core::{Color, Point, Rectangle, Theme, mouse};
 use std::convert::Infallible;
 
 use media_screen::volume::{UNITY_LEVEL, Volume};
 
-use super::{area, label, text};
+use super::{area, label, rounded, text};
 use crate::look;
 
 // The margins the row hangs off, the same measures a page sets its own
@@ -203,17 +203,6 @@ fn places(bounds: Rectangle) -> Places {
         glyph: Point::new(glyph_x, middle - GLYPH_HEIGHT / 2.0),
         number: Point::new(right, top),
     }
-}
-
-// One rounded rectangle. A radius wider than half the shape has no meaning,
-// so a bar with a few pixels of fill rounds by what it has.
-fn rounded(shape: Rectangle, radius: f32) -> canvas::Path {
-    let radius = radius.min(shape.width / 2.0).min(shape.height / 2.0);
-    canvas::Path::rounded_rectangle(
-        shape.position(),
-        Size::new(shape.width, shape.height),
-        radius.into(),
-    )
 }
 
 // One closed polygon in the glyph's own box, placed at a point.

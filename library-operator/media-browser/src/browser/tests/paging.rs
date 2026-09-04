@@ -292,8 +292,12 @@ fn the_wake_reaches_the_source() {
 }
 
 #[test]
-fn a_still_browser_schedules_no_frame() {
-    assert!(browser(3).next_frame(4.2).is_none());
+fn a_still_browser_schedules_the_clocks_frame_alone() {
+    let mut browser = browser(3);
+    browser.tick(4.2);
+    browser.minute = Some(MINUTE);
+
+    assert_eq!(browser.next_frame(4.2), Some(MINUTE));
 }
 
 #[test]

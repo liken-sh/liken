@@ -100,6 +100,69 @@ fn the_band_takes_focus_on_a_wall() {
     drawn(&frames.join("001.40.png"), &run);
 }
 
+// The clock is the browser's own layer over whatever screen is on the
+// stack, so the home page, a wall, and a movie page all carry it in the
+// same box. The box holds the reading alone: the band's controls end a
+// margin to the left of it, and a page draws nothing there.
+#[test]
+fn the_clock_draws_at_the_top_right_of_every_screen() {
+    let dir = workspace("clock");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.5:enter,1.0:enter",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "0.3,0.8,1.5",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    for (at, screen) in [
+        ("000.30.png", "the home page"),
+        ("000.80.png", "a wall"),
+        ("001.50.png", "a movie page"),
+    ] {
+        let frame = frames.join(at);
+        drawn(&frame, &run);
+        lights_up(&frame, &run, screen);
+    }
+}
+
+// The box the clock's reading draws in at 1920 by 1080. The reading
+// hangs off the band's own margin at the right edge and centers on the
+// band's middle line, and nothing else draws inside the box.
+const CLOCK: (u32, u32, u32, u32) = (1800, 28, 1890, 56);
+
+// The reading draws in the muted ink over a ground of its own, so a box
+// with no pixel brighter than that ground carries no reading.
+fn lights_up(frame: &Path, run: &Run, screen: &str) {
+    let pixels = image::open(frame)
+        .unwrap_or_else(|error| panic!("{}: {error}\n{}", frame.display(), run.log))
+        .to_rgb8();
+
+    let (left, top, right, bottom) = CLOCK;
+    let brightest = (left..right)
+        .flat_map(|x| (top..bottom).map(move |y| (x, y)))
+        .flat_map(|(x, y)| pixels.get_pixel(x, y).0)
+        .max()
+        .expect("the box holds pixels");
+    assert!(
+        brightest > 64,
+        "{screen}: {} reaches {brightest} of 255 inside {CLOCK:?}\n{}",
+        frame.display(),
+        run.log
+    );
+}
+
 // A select on a movie opens its page, which draws the backdrop, the
 // text, the buttons, and the set strip on one frame.
 #[test]

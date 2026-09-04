@@ -162,22 +162,28 @@ impl Wall {
         self.slots.resting(source)
     }
 
-    /// The view: the band, and the wall of posters under it.
+    /// The view: the head and the wall of posters, and the band as a layer
+    /// over them.
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
     ) -> Element<'a, Infallible, Theme, Renderer> {
-        canvas(Program {
+        let grid = canvas(Program {
             wall: self,
             posters,
         })
         .width(Length::Fill)
         .height(Length::Fill)
-        .into()
+        .into();
+        let band = band::layer(&self.heading, &band::CONTROLS, self.control);
+        iced_widget::Stack::with_children(vec![grid, band])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
-// The wall's drawing: the band over the grid, on one frame.
+// The wall's drawing under the band: the head and the grid, on one frame.
 struct Program<'a, P> {
     wall: &'a Wall,
     posters: &'a RefCell<P>,
@@ -195,12 +201,6 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        band::draw(
-            &mut frame,
-            bounds.width,
-            &self.wall.heading,
-            self.wall.control,
-        );
         if let Some(head) = &self.wall.head {
             words(&mut frame, head, bounds.width);
         }

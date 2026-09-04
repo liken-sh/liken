@@ -143,14 +143,16 @@ fn a_press_during_the_state_reaches_no_screen() {
 fn the_loop_draws_the_state_and_goes_quiet_after_it() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
+    browser.minute = Some(MINUTE);
 
     assert_eq!(browser.next_frame(PRESS + 0.1), Some(PRESS + 0.1));
 
     *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
     browser.pump(PRESS + 5.0);
     browser.tick(PRESS + 5.0 + look::RETURN);
+    browser.minute = Some(MINUTE);
 
-    assert_eq!(browser.next_frame(PRESS + 6.0), None);
+    assert_eq!(browser.next_frame(PRESS + 6.0), Some(MINUTE));
 }
 
 // A state held under a film would draw a black frame sixty times a

@@ -4,6 +4,7 @@
 pub mod browser;
 pub mod bus;
 pub mod catalog;
+pub mod clock;
 pub mod focus;
 pub mod harness;
 pub mod look;

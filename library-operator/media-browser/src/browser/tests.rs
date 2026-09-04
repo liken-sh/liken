@@ -5,6 +5,7 @@
 // catalog they read, the store they draw from, and the bus they fold.
 
 mod banner;
+mod clock;
 mod home;
 mod loading;
 mod moments;
@@ -36,6 +37,11 @@ use crate::views::{band, wall};
 // The topic the operator names on a screen pod, so a test reads what the
 // browser published on the topic a cluster would give it.
 const PLAY_TOPIC: &str = "liken/library/players/house/den-tv/play";
+
+// The second the clock's own frame falls on. The minute turns on the
+// wall clock, and no test may depend on it, so a case that measures a
+// schedule states the second itself, past every other second it names.
+const MINUTE: f64 = 600.0;
 
 // The set the first three movies of the fake library belong to.
 const SET: &str = "set:films";

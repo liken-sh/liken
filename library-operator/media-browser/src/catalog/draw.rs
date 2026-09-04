@@ -19,14 +19,10 @@ pub struct Date {
 }
 
 impl Date {
-    /// Today's date in the process's zone. The standard library has no
-    /// zones, and glibc's `localtime_r` reads `TZ` and `/etc/localtime`, which
-    /// the operator sets on the pod, so this is one libc call and not a date
-    /// crate.
+    /// Today's date in the process's zone, through the crate's one read of
+    /// the local time.
     pub fn today() -> Self {
-        let now = unsafe { libc::time(std::ptr::null_mut()) };
-        let mut local: libc::tm = unsafe { std::mem::zeroed() };
-        unsafe { libc::localtime_r(&now, &mut local) };
+        let local = crate::clock::local();
         Self {
             year: i64::from(local.tm_year) + 1900,
             month: (local.tm_mon + 1) as u8,

@@ -17,10 +17,12 @@ use media_screen::{Bus, Moment};
 use crate::bus::play;
 use crate::catalog::draw::Date;
 use crate::catalog::{Selection, Source};
+use crate::clock;
 use crate::harness::{Screen, Waker};
 use crate::look;
 use crate::posters::Posters;
 use crate::screens::{self, Step, home, loading, volume};
+use crate::views;
 
 mod reader;
 
@@ -75,6 +77,12 @@ pub struct Browser<S: Source, P: Posters> {
     // The volume row's state, which the level moments the bus delivers fold
     // into.
     level: volume::Level,
+    // The reading the clock layer draws, read at every tick.
+    time: clock::Time,
+    // The second on the loop's own clock at which the minute turns, or
+    // nothing before the first tick. The clock draws a reading to the
+    // minute, so this is the one frame it asks for.
+    minute: Option<f64>,
 }
 
 // How long focus stands still before the browser asks the store for the
@@ -110,6 +118,8 @@ impl<S: Source, P: Posters> Browser<S, P> {
             rest: None,
             loading: None,
             level: volume::Level::default(),
+            time: clock::now(),
+            minute: None,
         }
     }
 
@@ -326,6 +336,13 @@ impl<S: Source, P: Posters> Browser<S, P> {
         true
     }
 
+    // The clock the browser draws over whatever screen is on the stack,
+    // and nothing while the shade is down. No screen knows about it, so
+    // every screen carries it in the same place.
+    fn face(&self) -> Option<views::clock::Face> {
+        (!self.asleep).then_some(views::clock::Face { time: self.time })
+    }
+
     // Back pops one descent and re-reads the screen it uncovers,
     // because a change that landed while that screen was covered was
     // folded into the screen that was shown at the time and not into
@@ -427,6 +444,8 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     // clock the harness drives every frame with.
     fn tick(&mut self, at: f64) {
         self.clock = at;
+        self.time = clock::now();
+        self.minute = Some(at + clock::seconds_to_next_minute());
         if self.loading.is_some_and(|state| state.done(at)) {
             self.loading = None;
         }
@@ -439,44 +458,48 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer> {
         // The shade is down, so the frame is the clear color and nothing over
         // it. The screen and its focus are held for the wake.
-        if self.asleep {
+        let Some(face) = self.face() else {
             return Space::new().width(Length::Fill).height(Length::Fill).into();
-        }
+        };
 
         let screen = self.top().view(
             &self.posters,
             self.loading.map(|state| state.curtain(self.clock)),
         );
 
-        // The row is the browser's own layer over whatever screen is on the
-        // stack, so a page change under it neither resets it nor covers it.
-        let Some(row) = self.level.row(self.clock) else {
-            return screen;
-        };
-        Stack::with_children(vec![
+        // The clock and the row are the browser's own layers over whatever
+        // screen is on the stack, so a page change under them neither
+        // resets them nor covers them.
+        let mut layers = vec![
             screen,
-            canvas(row).width(Length::Fill).height(Length::Fill).into(),
-        ])
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+            canvas(face).width(Length::Fill).height(Length::Fill).into(),
+        ];
+        if let Some(row) = self.level.row(self.clock) {
+            layers.push(canvas(row).width(Length::Fill).height(Length::Fill).into());
+        }
+        Stack::with_children(layers)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     // Every view here is still until something changes it, and the
     // source wakes the loop itself, so an idle browser schedules nothing
     // and the loop waits on events.
     //
-    // Three things schedule a frame: the end of a rest; every frame of the
+    // Four things schedule a frame: the end of a rest; every frame of the
     // loading state, which answers now on every ask so the mark pulses at
-    // the loop's own floor rate; and the volume row, which asks for a frame
+    // the loop's own floor rate; the volume row, which asks for a frame
     // through each of its fades and names the second it starts to leave
-    // through the hold between them. Nothing under a film schedules a
-    // frame, because those frames would draw a black shade nobody sees.
+    // through the hold between them; and the clock, which asks for the
+    // second the minute turns. Nothing under a film schedules a frame,
+    // because those frames would draw a black shade nobody sees.
     fn next_frame(&self, at: f64) -> Option<f64> {
         let drawing = !self.asleep;
         let loading = (drawing && self.loading.is_some()).then_some(at);
         let level = drawing.then(|| self.level.next_frame(at)).flatten();
-        [loading, level, self.rest]
+        let minute = drawing.then_some(self.minute).flatten();
+        [loading, level, minute, self.rest]
             .into_iter()
             .flatten()
             .min_by(f64::total_cmp)

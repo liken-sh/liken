@@ -5,7 +5,8 @@ use super::*;
 
 #[test]
 fn a_press_on_a_wall_schedules_the_rest() {
-    let browser = resting(3);
+    let mut browser = resting(3);
+    browser.minute = Some(MINUTE);
     assert_eq!(browser.next_frame(0.0), Some(REST));
 }
 
@@ -14,8 +15,9 @@ fn a_rest_on_a_wall_asks_for_the_backdrop_at_page_size() {
     let mut browser = resting(3);
 
     browser.tick(REST);
+    browser.minute = Some(MINUTE);
 
-    assert!(browser.next_frame(REST).is_none());
+    assert_eq!(browser.next_frame(REST), Some(MINUTE));
     assert!(browser.posters.get_mut().asked.contains(&(
         "screening/films".into(),
         "movies:1.backdrop.jpg".into(),
@@ -54,14 +56,16 @@ fn a_press_before_the_rest_moves_the_ask_to_the_item_it_lands_on() {
 fn a_page_schedules_no_rest() {
     let mut browser = resting(3);
     browser.key("enter");
-    assert!(browser.next_frame(1.0).is_none());
+    browser.minute = Some(MINUTE);
+    assert_eq!(browser.next_frame(1.0), Some(MINUTE));
 }
 
 #[test]
 fn the_band_schedules_no_rest() {
     let mut browser = resting(3);
     browser.key("up");
-    assert!(browser.next_frame(1.0).is_none());
+    browser.minute = Some(MINUTE);
+    assert_eq!(browser.next_frame(1.0), Some(MINUTE));
 }
 
 #[test]
@@ -70,6 +74,7 @@ fn a_series_wall_rests_on_the_backdrop_of_the_page_it_opens() {
     browser.tick(0.0);
     browser.key("right");
     browser.key("enter");
+    browser.minute = Some(MINUTE);
     assert_eq!(browser.next_frame(0.0), Some(REST));
 
     browser.tick(REST);
