@@ -125,3 +125,29 @@ strip at the end of the home page, the genre page a select opens, and
 the person's page "see all" opens. Then on `liken-1`, from the X6: back
 from a page lands on the home page with no pause, the genres strip is
 there, and its posters open genre pages.
+
+## The drill, 2026-09-04
+
+Built the same day it was shaped, in dev builds off main and not a
+tagged release, and drilled on `liken-1` from the lab portable and on
+this workstation from `local/browse`. Back from a page lands on the
+home page at once. The genres strip closes the page, and a select on
+it opens the genre's page with its head and counts. "See all" on a
+person's strip opens the person's page.
+
+Three things the drill added the same day. The home page's band shows
+Search alone, because sort and filter act on a query it does not
+have. A clock sits top-right on every screen, drawn from one layer of
+the browser's own, in the household's zone: the screen pod carries
+`TZ` from the default `MediaPreferences`, the same field media-operator
+stamps on its own pods. The clock's reading draws over a halo of dark
+ink and not over a shade, because any shape in the corner showed
+against bright art. And a strip ends in "see all" only where its read
+answered more than the strip shows.
+
+Two things the drill found. The canvas clip cuts geometry and not text
+or images, so a row that scrolled up under the band showed through it;
+the band is a layer of its own now, over the screen. And inside one
+layer the renderer draws every fill, then every image, then every
+text, whatever the order they were drawn in, so a ground that must
+cover what is under it is a layer too.

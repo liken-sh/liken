@@ -53,15 +53,6 @@ for a later agent to shape.
   history, and who was watching.
 * [23, Motion](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
-* [26, The home page](26-the-home-page.md). Shaped on 2026-09-03. A
-  first screen that blends every library: a banner, the newest releases
-  and arrivals, strips the day draws, and the libraries. Every screen of
-  titles becomes one `Query` and one wall, the catalog gains a `genres`
-  table, and an arrival ledger in `.liken/` feeds `added`.
-* [36, Genres on the home page](36-genres-on-the-home-page.md). Shaped
-  on 2026-09-04. The home page reads off the frame thread, every genre
-  gets a strip and a page, and "see all" opens the page a strip is
-  about.
 
 Enrichment is one design in five plans. Plan 27 states the contracts
 they share, and plans 28 to 31 build them in order.
@@ -203,6 +194,20 @@ that took a hearing-impaired flag for Hindi.
   opt-in. Every TMDb fact closed on both libraries, Fanart.tv filled
   the art TMDb lacks, and the drill left the OMDb and fight drills for
   later.
+* [26, The home page](completed/26-the-home-page.md). Built in
+  2026.09.04-001 to -003 and drilled on `liken-1` on 2026-09-03 and
+  2026-09-04. A first screen that blends every library: a banner, the
+  newest releases and arrivals, strips the day draws, and the
+  libraries. Every screen of titles is one `Query` and one wall, the
+  catalog holds a `genres` table, and an arrival ledger in `.liken/`
+  feeds `added`.
+* [36, Genres on the home page](completed/36-genres-on-the-home-page.md).
+  Shaped, built in dev builds off main, and drilled on `liken-1` on
+  2026-09-04. The home page reads off the frame thread, every genre
+  gets a strip and a page, "see all" opens the page a strip is about
+  and only where there is more to see, the home band shows Search
+  alone, and a clock in the household's zone sits top-right on every
+  screen.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds

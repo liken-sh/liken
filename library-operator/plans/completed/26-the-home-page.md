@@ -304,3 +304,26 @@ fold, "see all" opens the wall and back returns to the same slot, the
 day's strips draw and draw the same after a restart of the screen pod,
 and the banner opens a page. The resident memory on the box is written
 beside plan 22's 216 MiB.
+
+## The drill, 2026-09-03 and 2026-09-04
+
+Built in five waves as 2026.09.04-001 to -003, and drilled on `liken-1`
+from the lab portable on both days. The scanners walked on the new
+schema and every title gained its genres rows. The arrival ledger is
+written by the arrival fact and not by the walk, because the scan Job
+mounts the volume read-only; its first run stamped every video file
+in both libraries. The `Added` strip shows the last arrivals as
+episodes and series by the fold, and a 30-day window on `Released`
+with a subtraction on `Added` keeps the two strips from showing the
+same airing episodes. "See all" opens the wall and back returns to the
+same slot. The day's strips draw the same after a restart. The banner
+opens a page.
+
+Two things the drill changed. Back to the home page took a second or
+two, because every read ran in series on the frame thread; plan 36
+took the reads off it. And the strips came up short when a season
+drop folded a hundred rows to one slot; the recency read now pages
+until it has filled twice what a strip shows.
+
+The resident memory was not measured on either box. The numbers this
+plan asked for are still owed beside plan 22's.

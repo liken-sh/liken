@@ -22,7 +22,7 @@ configuration at all or code with one field for the ceiling, and whether
 "continue watching" belongs here or in plan 14. It waits for the first
 screen that needs it.
 
-[Plan 26](../26-the-home-page.md) builds the first view as strips, each
+[Plan 26](../completed/26-the-home-page.md) builds the first view as strips, each
 one a `Query` from a closed set of shapes, and draws the same strips on
 every screen. It settles nothing here. When the resource arrives, it
 names a screen's libraries and its rows in those shapes.
