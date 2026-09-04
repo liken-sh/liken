@@ -44,6 +44,19 @@ func (c *Catalog) UpdateFileTrickplay(ctx context.Context, rows []fileRow) (int,
 	return c.apply(ctx, statements)
 }
 
+// The arrived column, the arrival fact's own, from the ledger the fact
+// wrote.
+func (c *Catalog) UpdateFileArrived(ctx context.Context, rows []fileRow) (int, error) {
+	statements := make([]statement, 0, len(rows))
+	for _, row := range rows {
+		statements = append(statements, statement{
+			sql:    `UPDATE files SET arrived = ? WHERE library = ? AND path = ?`,
+			params: []any{row.Arrived, row.Library, row.Path},
+		})
+	}
+	return c.apply(ctx, statements)
+}
+
 // One item's update: the key, and one value per column the caller names.
 type itemUpdate struct {
 	Library string
@@ -77,6 +90,12 @@ func (c *Catalog) updateItems(ctx context.Context, table string, columns []strin
 // runtime of its own.
 func (c *Catalog) UpdateItemDurations(ctx context.Context, table string, rows []itemUpdate) (int, error) {
 	return c.updateItems(ctx, table, []string{"duration"}, rows)
+}
+
+// The added column of the items a folder holds, the arrival fact's column,
+// from a re-read of the ledger it wrote.
+func (c *Catalog) UpdateItemAdded(ctx context.Context, table string, rows []itemUpdate) (int, error) {
+	return c.updateItems(ctx, table, []string{"added"}, rows)
 }
 
 // The body and the nfo_facts of a title, the nfo phase's columns, from a

@@ -144,7 +144,7 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 		t.Errorf("sql = %q, want no values concatenated in", got.sql)
 	}
 	if len(got.params) != 15 {
-		t.Fatalf("params = %d, want 15", len(got.params))
+		t.Fatalf("params = %d, want 16", len(got.params))
 	}
 	if got.params[14] != "[]" {
 		t.Errorf("params[14] = %v, want an empty arts list", got.params[14])
@@ -265,8 +265,8 @@ func TestUpsertFilesCarriesPresentAsAnInteger(t *testing.T) {
 			if !strings.Contains(got.sql, "INSERT INTO files") {
 				t.Errorf("sql = %q, want an upsert on files", got.sql)
 			}
-			if len(got.params) != 15 {
-				t.Fatalf("params = %d, want 15", len(got.params))
+			if len(got.params) != 16 {
+				t.Fatalf("params = %d, want 16", len(got.params))
 			}
 			if got.params[10].(float64) != testCase.want {
 				t.Errorf("present param = %v, want %v", got.params[10], testCase.want)

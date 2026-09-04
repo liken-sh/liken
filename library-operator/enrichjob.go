@@ -111,6 +111,10 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	// once.
 	facts := []Container{
 		factsContainer(library, factProbe, []string{factProbe}, path, scannerImage, busAddress, topicBase),
+		// The arrival container runs on every Library, because the fact asks no
+		// provider. It runs after the probe, because the probe container writes the
+		// run's started mark.
+		factsContainer(library, arrivalContainerName, []string{factArrival}, path, scannerImage, busAddress, topicBase),
 	}
 	if providers.serving(library.Metadata.Namespace, library.Spec.Sources, factIdentity) != nil {
 		facts = append(facts, factsContainer(library, factIdentity, []string{factIdentity}, path,

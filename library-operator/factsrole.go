@@ -23,6 +23,7 @@ type factRun func(ctx context.Context, e *enricher) error
 // for work this image cannot do is a manifest to repair.
 var factRuns = map[string]factRun{
 	factProbe:     func(ctx context.Context, e *enricher) error { return e.probeFact(ctx) },
+	factArrival:   func(ctx context.Context, e *enricher) error { return e.arrivalFact(ctx) },
 	factIdentity:  func(ctx context.Context, e *enricher) error { return e.identityFact(ctx) },
 	factTrickplay: func(ctx context.Context, e *enricher) error { return e.trickplayFact(ctx) },
 

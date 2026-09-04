@@ -8,6 +8,7 @@ package main
 // group. A fact is one gap in the catalog, one name in a container's
 // LIBRARY_FACTS, and one ledger file in .liken/.
 const (
+	factArrival   = "arrival"
 	factTrickplay = "trickplay"
 
 	factOverview             = "overview"
@@ -39,6 +40,7 @@ const (
 // cannot name a fact the operator does not hold.
 var factVocabulary = []string{
 	factProbe,
+	factArrival,
 	factTrickplay,
 	factIdentity,
 	factOverview,

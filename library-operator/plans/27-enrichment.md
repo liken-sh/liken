@@ -38,7 +38,7 @@ items inside it, holds one file per writer:
 |---|---|---|
 | `identity.yaml` | the identity fact | the provider ids of each item, or the candidates that wait for a person |
 | `credits.yaml` | the credits fact | the link from each name in the `.nfo` to its entry in `.contributors/` |
-| `arrival.yaml` | the walk | the time the walk first saw each video file in the folder |
+| `arrival.yaml` | the arrival fact | the time each video file in the folder arrived, from its inode change time, and the fact's attempts |
 | `<fact>.yaml` | that fact | what it wrote, which provider answered, and its attempts: time and result, per item |
 
 One file per writer is what lets many small enrichers run at once on a

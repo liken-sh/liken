@@ -94,11 +94,11 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 
 	files, err := listVideoFiles(dir)
 	result.noteReadError(err)
-	arrivals, err := scan.arrivals.arrivals(dir, files)
+	arrivals, err := folderArrivals(dir, files)
 	result.noteReadError(err)
 	var added int64
 	if len(files) > 0 {
-		added = arrivals[files[0]]
+		added = arrivals[files[0]].added
 	}
 
 	result.movies = append(result.movies, movieRow{
@@ -128,7 +128,7 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 		if err != nil {
 			continue
 		}
-		row, err := movieFileRow(root, dir, video, library, id, stream)
+		row, err := movieFileRow(root, dir, video, library, id, stream, arrivals[video].arrived)
 		result.noteReadError(err)
 		if err != nil {
 			continue
@@ -202,7 +202,7 @@ func movieFileStream(dir, file string, index int, folder streamInfo) (*streamInf
 // movieFileRow reads one video file into a file row linked to its movie. The
 // technical attributes come from the sidecar's streamdetails where one was
 // present, and from the file name where none was.
-func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo) (fileRow, error) {
+func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo, arrived int64) (fileRow, error) {
 	container, videoCodec, audioCodec, width, height, durationMs := fileAttributes(file, stream)
 	absolute := filepath.Join(dir, file)
 	size, modified, err := statFile(absolute)
@@ -225,6 +225,7 @@ func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo) (
 		Type:       class.Type,
 		Role:       class.Role,
 		Modified:   modified,
+		Arrived:    arrived,
 		Items:      []string{itemID},
 	}, nil
 }

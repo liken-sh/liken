@@ -272,7 +272,7 @@ spec:
                       when it arrives.
                   x-kubernetes-validations:
                     - rule: >-
-                        self.all(fact, fact in ['probe', 'trickplay',
+                        self.all(fact, fact in ['probe', 'arrival', 'trickplay',
                         'identity', 'overview', 'certification',
                         'rating.tmdb', 'rating.imdb',
                         'rating.rottentomatoes', 'rating.metacritic',

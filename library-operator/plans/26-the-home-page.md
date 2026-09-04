@@ -62,15 +62,20 @@ A query is never a string of SQL. A string cannot be named in a
 heading, cannot promise an indexed read, and cannot be a value in a
 resource later. The closed set grows by one variant per plan.
 
-**The arrival ledger.** The scanner writes one file per folder,
-`.liken/arrival.yaml`, with one entry per video file it holds: the
-file's path relative to the folder and the time the walk first saw it.
-The file is in a movie's folder and in a season folder, beside the
-ledgers the facts keep there. A path that has an entry is never
-written again, so a re-walk leaves the file as it is, and the walk
-writes the file only when it adds an entry. The scanner is the writer
-because the walk is the only thing that sees a file first. A fact that
-runs after the walk would stamp one walk late.
+**The arrival ledger.** An arrival fact, an enricher concern like
+identity or credits, writes one file per folder, `.liken/arrival.yaml`,
+with one entry per video file the folder holds: the file's path
+relative to the folder and the time the file arrived. The file is in a
+movie's folder and in a season folder, beside the ledgers the other
+facts keep there. A path that has an entry is never written again. The
+fact is the writer and not the walk, because the scan Job mounts the
+volume read-only by plan 04's rule that the scanner writes nothing to
+the volume, and the enrich Jobs already mount it read-write. The walk
+reads the ledger, and the catalog's `files` table carries `arrived`,
+the ledger's time for each file and zero where the ledger holds none,
+so the fact's gap is every file with no entry. The fact runs minutes
+after the walk that found the file, and it stamps the same change time
+the walk read, so nothing a person sees moves between the two.
 
 ```yaml
 # .liken/arrival.yaml
@@ -94,9 +99,9 @@ file.
 its main file, and an episode's is the arrival of its file. A series'
 `added` is the earliest arrival among its episodes, and a set's is the
 earliest among its members, the way each one's `released` is its
-earliest today. The modification time feeds nothing. Where the volume
-refuses the write, the walk logs it and uses the change time for that
-pass, so a read-only mount still catalogs.
+earliest today. The modification time feeds nothing. A file with no
+entry yet takes its change time for the pass, so a walk that runs
+before the fact still catalogs, and a read-only mount catalogs too.
 
 **The genres table.** The scan writes a `genres` table with one row per
 title and genre, in the order the sidecar lists them:
@@ -213,8 +218,9 @@ Five changes, each a release, in this order. Each one leaves the
 browser as fast as it is today and drills on `liken-1` before the next.
 
 1. **The catalog.** The `genres` table, the arrival ledger, and
-   `added` from the ledger. The scan writes the rows and the ledger;
-   the sweep covers the rows. Nothing in the browser changes.
+   `added` from the ledger. The scan writes the rows, the arrival fact
+   writes the ledger, and the sweep covers the rows. Nothing in the
+   browser changes.
 2. **One wall.** The `Query` type and one wall screen fed by it. The
    library wall and the person page's works wall move onto it, and the
    band carries the query's heading. Every slot carries its library
@@ -231,9 +237,11 @@ browser as fast as it is today and drills on `liken-1` before the next.
 ## The local harness
 
 `local/scan` walks a directory into the local three-agent catalog
-through a read-only mount, so a walk from this workstation never writes
-a ledger, and it takes the read-only path above. The ledger write is
-proved by the Go tests on a temporary directory. The schema change
+through a read-only mount, so a run of the arrival fact from this
+workstation records an error attempt and writes nothing. The ledger
+write is
+proved by the Go tests on a temporary directory, for the walk and for
+the fact both. The schema change
 needs `local/catalog` restarted, because the agents read the schema
 directory at start. `local/browse` runs the
 browser against that catalog and the real art, and its headless mode
@@ -244,10 +252,10 @@ to five iterate with a build and a restart, and no commit.
 
 A query as a string of SQL, for the reasons above.
 
-An arrival fact that runs after the walk, in place of the scanner as
-the writer. It keeps the scanner a reader of the volume, and it stamps
-every arrival one walk late. The walk is the one thing that sees a
-file first.
+The scanner as the ledger's writer. The walk is the first thing that
+sees a file, and it was the writer at first. The scan Job mounts the
+volume read-only, and that rule is worth more than the minutes the
+fact runs behind the walk.
 
 Genres as an array column. Corrosion's schema cannot index inside one.
 
@@ -280,9 +288,9 @@ own.
 ## Proof
 
 On this workstation first. A walk of a copy of a few titles writes
-`.liken/arrival.yaml` beside each one and `genres` rows for each, a
-second walk rewrites neither, and `added` in the catalog is the file's
-change time and not its modification time. Then captures at 1920x1080
+`genres` rows for each and `added` from the file's change time, the
+arrival fact writes `.liken/arrival.yaml` beside each one, and a second
+run of either rewrites nothing. Then captures at 1920x1080
 from `local/browse` of the library wall on the one wall, a person's
 works on it, the home page with a strip that mixes posters and stills,
 the wall a "see all" opens, and the banner. The resident memory during

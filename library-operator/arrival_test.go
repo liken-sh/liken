@@ -1,35 +1,22 @@
 package main
 
-// arrival_test.go proves the arrival ledger the walk keeps beside a title,
-// the added column it feeds, and the pass over a volume that refuses the
-// write.
+// arrival_test.go proves the walk's read of the arrival ledger beside a
+// title: the added column it feeds, the arrived column it writes from the
+// ledger alone, the change time it falls back on, and that it writes
+// nothing.
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
 
-// A recorder over the test's own log, so a test reads the one line a refused
-// write leaves.
-func ledgerRecorder(t *testing.T) (*arrivalRecorder, *bytes.Buffer) {
-	t.Helper()
-	log := &bytes.Buffer{}
-	logf := func(format string, args ...any) {
-		fmt.Fprintf(log, format+"\n", args...)
-	}
-	return newArrivalRecorder(newVolumeWriter("scan-1"), logf), log
-}
-
-// The reader's context over a movies root that keeps the ledger.
-func movieScan(root string, arrivals *arrivalRecorder) folderScan {
-	return folderScan{root: root, library: "house/movies", kind: libraryKindMovies, arrivals: arrivals}
+// The reader's context over a movies root.
+func movieScan(root string) folderScan {
+	return folderScan{root: root, library: "house/movies", kind: libraryKindMovies}
 }
 
 // The change time read the way the test proves it, apart from the code under
@@ -53,52 +40,35 @@ func arrivalFile(t *testing.T, folder string) []byte {
 	return data
 }
 
-func TestTheWalkWritesAnArrivalLedgerBesideAMovie(t *testing.T) {
+// The one file row of a walk at a given path.
+func fileRowAt(t *testing.T, result *walkResult, path string) fileRow {
+	t.Helper()
+	for _, row := range result.files {
+		if row.Path == path {
+			return row
+		}
+	}
+	t.Fatalf("no file row at %s in %+v", path, result.files)
+	return fileRow{}
+}
+
+func TestAMovieWithNoLedgerIsAddedAtItsChangeTime(t *testing.T) {
 	root := t.TempDir()
 	folder := filepath.Join(root, "The Matrix (1999)")
 	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
-	recorder, log := ledgerRecorder(t)
 
 	result := &walkResult{}
-	scanMovieFolder(movieScan(root, recorder), folder, result)
+	scanMovieFolder(movieScan(root), folder, result)
 
 	changed := changeTimeOf(t, filepath.Join(folder, "The Matrix (1999).mkv"))
 	if result.movies[0].Added != changed {
 		t.Errorf("added = %d, want the change time %d", result.movies[0].Added, changed)
 	}
-	ledger := string(arrivalFile(t, folder))
-	want := "at: " + time.Unix(changed, 0).UTC().Format(time.RFC3339)
-	if !strings.Contains(ledger, "path: The Matrix (1999).mkv") || !strings.Contains(ledger, want) {
-		t.Errorf("arrival.yaml = %q, want the file's path and %q", ledger, want)
+	if got := fileRowAt(t, result, "The Matrix (1999)/The Matrix (1999).mkv").Arrived; got != 0 {
+		t.Errorf("arrived = %d, want 0 where the ledger holds no entry", got)
 	}
-	if log.Len() != 0 {
-		t.Errorf("log = %q, want nothing from a write that landed", log.String())
-	}
-}
-
-func TestASecondWalkLeavesTheArrivalLedgerAsItIs(t *testing.T) {
-	root := t.TempDir()
-	folder := filepath.Join(root, "The Matrix (1999)")
-	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
-	recorder, _ := ledgerRecorder(t)
-
-	scanMovieFolder(movieScan(root, recorder), folder, &walkResult{})
-	first := arrivalFile(t, folder)
-	info, err := os.Stat(filepath.Join(folder, likenDirectory, arrivalLedgerName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	scanMovieFolder(movieScan(root, recorder), folder, &walkResult{})
-
-	if second := arrivalFile(t, folder); !bytes.Equal(first, second) {
-		t.Errorf("arrival.yaml changed on a re-walk:\n%s\nwas:\n%s", second, first)
-	}
-	again, err := os.Stat(filepath.Join(folder, likenDirectory, arrivalLedgerName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !again.ModTime().Equal(info.ModTime()) {
-		t.Error("the re-walk wrote arrival.yaml again, want the file left alone")
+	if arrivalFile(t, folder) != nil {
+		t.Error("the walk wrote arrival.yaml, want the volume left alone")
 	}
 }
 
@@ -108,14 +78,16 @@ func TestAnArrivalEntryKeepsItsTimeWhenTheChangeTimeMoves(t *testing.T) {
 	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
 	held := "files:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n"
 	writeFile(t, filepath.Join(folder, likenDirectory, arrivalLedgerName), held)
-	recorder, _ := ledgerRecorder(t)
 
 	result := &walkResult{}
-	scanMovieFolder(movieScan(root, recorder), folder, result)
+	scanMovieFolder(movieScan(root), folder, result)
 
 	want := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC).Unix()
 	if result.movies[0].Added != want {
 		t.Errorf("added = %d, want the ledger's %d", result.movies[0].Added, want)
+	}
+	if got := fileRowAt(t, result, "The Matrix (1999)/The Matrix (1999).mkv").Arrived; got != want {
+		t.Errorf("arrived = %d, want the ledger's %d", got, want)
 	}
 	if got := string(arrivalFile(t, folder)); got != held {
 		t.Errorf("arrival.yaml = %q, want it left as %q", got, held)
@@ -132,7 +104,7 @@ func TestAMovieArrivesWithItsMainFile(t *testing.T) {
 			"  - path: Long Film (1999) - part2.mkv\n    at: 2000-01-01T00:00:00Z\n")
 
 	result := &walkResult{}
-	scanMovieFolder(movieScan(root, nil), folder, result)
+	scanMovieFolder(movieScan(root), folder, result)
 
 	want := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
 	if result.movies[0].Added != want {
@@ -153,40 +125,45 @@ func seriesWithASeason(t *testing.T) (string, string) {
 	return root, series
 }
 
-func TestTheWalkWritesAnArrivalLedgerInASeasonFolder(t *testing.T) {
+func TestTheWalkReadsAnArrivalLedgerInASeasonFolder(t *testing.T) {
 	root, series := seriesWithASeason(t)
 	season := filepath.Join(series, "Season 01")
-	writeFile(t, filepath.Join(season, likenDirectory, arrivalLedgerName),
-		"files:\n  - path: A Show S01E01.mkv\n    at: 2001-02-03T04:05:06Z\n")
-	recorder, _ := ledgerRecorder(t)
+	held := "files:\n  - path: A Show S01E01.mkv\n    at: 2001-02-03T04:05:06Z\n"
+	writeFile(t, filepath.Join(season, likenDirectory, arrivalLedgerName), held)
 
 	result := &walkResult{}
-	scanSeriesFolder(folderScan{root: root, library: "house/series", kind: libraryKindSeries, arrivals: recorder}, series, result)
+	scanSeriesFolder(folderScan{root: root, library: "house/series", kind: libraryKindSeries}, series, result)
 
 	first := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC).Unix()
 	episodes := episodesByID(result)
 	cases := []struct {
-		id   string
-		want int64
+		id      string
+		path    string
+		want    int64
+		arrived int64
 	}{
-		{"episode:path:a-show-2005:s01e01", first},
-		{"episode:path:a-show-2005:s01e02", changeTimeOf(t, filepath.Join(season, "A Show S01E02.mkv"))},
-		{"episode:path:a-show-2005:s02e01", changeTimeOf(t, filepath.Join(series, "A Show S02E01.mkv"))},
+		{"episode:path:a-show-2005:s01e01", "A Show (2005)/Season 01/A Show S01E01.mkv", first, first},
+		{"episode:path:a-show-2005:s01e02", "A Show (2005)/Season 01/A Show S01E02.mkv",
+			changeTimeOf(t, filepath.Join(season, "A Show S01E02.mkv")), 0},
+		{"episode:path:a-show-2005:s02e01", "A Show (2005)/A Show S02E01.mkv",
+			changeTimeOf(t, filepath.Join(series, "A Show S02E01.mkv")), 0},
 	}
 	for _, testCase := range cases {
 		if got := episodes[testCase.id].Added; got != testCase.want {
 			t.Errorf("%s added = %d, want %d", testCase.id, got, testCase.want)
 		}
+		if got := fileRowAt(t, result, testCase.path).Arrived; got != testCase.arrived {
+			t.Errorf("%s arrived = %d, want %d", testCase.path, got, testCase.arrived)
+		}
 	}
 	if result.series[0].Added != first {
 		t.Errorf("series added = %d, want the earliest episode's %d", result.series[0].Added, first)
 	}
-	if ledger := string(arrivalFile(t, season)); !strings.Contains(ledger, "path: A Show S01E02.mkv") ||
-		!strings.Contains(ledger, "at: 2001-02-03T04:05:06Z") {
-		t.Errorf("season arrival.yaml = %q, want the held entry and the new one", ledger)
+	if got := string(arrivalFile(t, season)); got != held {
+		t.Errorf("season arrival.yaml = %q, want it left as %q", got, held)
 	}
-	if ledger := string(arrivalFile(t, series)); !strings.Contains(ledger, "path: A Show S02E01.mkv") {
-		t.Errorf("series arrival.yaml = %q, want the loose episode", ledger)
+	if arrivalFile(t, series) != nil {
+		t.Error("the walk wrote arrival.yaml beside the loose episode, want the volume left alone")
 	}
 }
 
@@ -194,55 +171,12 @@ func TestASeriesWithNoEpisodesHasNoArrival(t *testing.T) {
 	root := t.TempDir()
 	series := filepath.Join(root, "A Show (2005)")
 	writeFile(t, filepath.Join(series, "tvshow.nfo"), "<tvshow><title>A Show</title></tvshow>")
-	recorder, _ := ledgerRecorder(t)
 
 	result := &walkResult{}
-	scanSeriesFolder(folderScan{root: root, library: "house/series", kind: libraryKindSeries, arrivals: recorder}, series, result)
+	scanSeriesFolder(folderScan{root: root, library: "house/series", kind: libraryKindSeries}, series, result)
 
 	if result.series[0].Added != 0 {
 		t.Errorf("added = %d, want 0 for a series with no episode", result.series[0].Added)
-	}
-	if arrivalFile(t, series) != nil {
-		t.Error("the walk wrote arrival.yaml for a folder with no video")
-	}
-}
-
-func TestAReadOnlyVolumeStillCatalogsWithTheChangeTime(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root writes into a read-only directory")
-	}
-	root := t.TempDir()
-	folders := []string{"One (2001)", "Two (2002)"}
-	for _, name := range folders {
-		folder := filepath.Join(root, name)
-		writeFile(t, filepath.Join(folder, name+".mkv"), "video")
-		if err := os.Chmod(folder, 0o555); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
-	}
-	recorder, log := ledgerRecorder(t)
-
-	result := &walkResult{}
-	for _, name := range folders {
-		scanMovieFolder(movieScan(root, recorder), filepath.Join(root, name), result)
-	}
-
-	if result.readError {
-		t.Error("a refused ledger write marked the pass incomplete, want the rows to stand")
-	}
-	for i, name := range folders {
-		changed := changeTimeOf(t, filepath.Join(root, name, name+".mkv"))
-		if result.movies[i].Added != changed {
-			t.Errorf("%s added = %d, want the change time %d", name, result.movies[i].Added, changed)
-		}
-		if arrivalFile(t, filepath.Join(root, name)) != nil {
-			t.Errorf("%s holds an arrival.yaml the volume should have refused", name)
-		}
-	}
-	lines := strings.Count(log.String(), "\n")
-	if lines != 1 || !strings.Contains(log.String(), "arrival") {
-		t.Errorf("log = %q, want one line about the arrival ledger", log.String())
 	}
 }
 
@@ -251,10 +185,9 @@ func TestAnUnreadableArrivalLedgerMarksThePassIncomplete(t *testing.T) {
 	folder := filepath.Join(root, "The Matrix (1999)")
 	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
 	writeFile(t, filepath.Join(folder, likenDirectory, arrivalLedgerName), "files: [not: valid")
-	recorder, _ := ledgerRecorder(t)
 
 	result := &walkResult{}
-	scanMovieFolder(movieScan(root, recorder), folder, result)
+	scanMovieFolder(movieScan(root), folder, result)
 
 	if !result.readError {
 		t.Error("a ledger the walk cannot read left the pass complete, want the incomplete mark")
@@ -268,7 +201,7 @@ func TestAnUnreadableArrivalLedgerMarksThePassIncomplete(t *testing.T) {
 	}
 }
 
-func TestTheArrivalLedgerIsNeverAnAttempt(t *testing.T) {
+func TestAnArrivalEntryAloneIsNoAttempt(t *testing.T) {
 	root := t.TempDir()
 	folder := filepath.Join(root, "The Matrix (1999)")
 	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
@@ -276,45 +209,45 @@ func TestTheArrivalLedgerIsNeverAnAttempt(t *testing.T) {
 		"files:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n")
 
 	result := &walkResult{}
-	scanMovieFolder(movieScan(root, nil), folder, result)
+	scanMovieFolder(movieScan(root), folder, result)
 
 	if result.readError {
 		t.Error("the walk marked the pass incomplete over arrival.yaml")
 	}
 	if len(result.attempts) != 0 {
-		t.Errorf("attempts = %+v, want none from arrival.yaml", result.attempts)
+		t.Errorf("attempts = %+v, want none from an entry with no attempt", result.attempts)
 	}
 }
 
-func TestAFullWalkAndARescanKeepTheArrivalLedger(t *testing.T) {
+func TestTheWalkLiftsTheArrivalFactsAttempts(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, "The Matrix (1999)")
+	writeFile(t, filepath.Join(folder, "The Matrix (1999).mkv"), "video")
+	writeFile(t, filepath.Join(folder, likenDirectory, arrivalLedgerName),
+		"files:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n"+
+			"attempts:\n  - path: The Matrix (1999).mkv\n    at: 2001-02-03T04:05:06Z\n    result: found\n")
+
+	result := &walkResult{}
+	scanMovieFolder(movieScan(root), folder, result)
+
+	want := attemptRow{Library: "house/movies", Item: "The Matrix (1999)/The Matrix (1999).mkv",
+		Fact: factArrival, At: time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC).Unix(), Result: attemptFound}
+	if len(result.attempts) != 1 || result.attempts[0] != want {
+		t.Errorf("attempts = %+v, want %+v", result.attempts, want)
+	}
+}
+
+func TestAFullWalkWritesNoArrivalLedger(t *testing.T) {
 	root := titleTree(t, "One (2001)", "Two (2002)")
 	scan, _ := fakeScanner(t, root, libraryKindMovies)
-	scan.arrivals = newArrivalRecorder(newVolumeWriter("scan-1"), scan.logf)
 
 	if err := scan.fullWalk(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if arrivalFile(t, filepath.Join(root, "One (2001)")) == nil {
-		t.Error("the full walk wrote no arrival.yaml beside One (2001)")
-	}
 
-	writeFile(t, filepath.Join(root, "Three (2003)", "movie.mkv"), "video")
-	if err := scan.rescan(context.Background(), filepath.Join(root, "Three (2003)")); err != nil {
-		t.Fatal(err)
-	}
-	if arrivalFile(t, filepath.Join(root, "Three (2003)")) == nil {
-		t.Error("the rescan wrote no arrival.yaml beside Three (2003)")
-	}
-}
-
-func TestTheScannerKeepsTheLedgerUnderItsJobName(t *testing.T) {
-	t.Setenv(busAddressVariable, "tcp://127.0.0.1:1")
-	t.Setenv(jobNameVariable, "movies-scan-7")
-	scan, err := newScanner(time.Now().UTC(), &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scan.arrivals == nil || scan.arrivals.writer == nil || scan.arrivals.writer.job != "movies-scan-7" {
-		t.Errorf("arrivals = %+v, want a recorder that writes under the Job's name", scan.arrivals)
+	for _, folder := range []string{"One (2001)", "Two (2002)"} {
+		if arrivalFile(t, filepath.Join(root, folder)) != nil {
+			t.Errorf("the full walk wrote arrival.yaml beside %s", folder)
+		}
 	}
 }

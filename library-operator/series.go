@@ -103,7 +103,7 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 	folders := newSeriesFolders()
 	episodeFiles, err := collectEpisodeFiles(dir, ignore)
 	result.noteReadError(err)
-	arrivals := episodeArrivals(scan.arrivals, episodeFiles, result)
+	arrivals := episodeArrivals(episodeFiles, result)
 	for _, episode := range episodeFiles {
 		before := len(result.episodes)
 		folders.note(episode, scanEpisode(root, library, seriesID, episode, arrivals[episode], result))
@@ -115,11 +115,10 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, result)
 }
 
-// The arrival of every episode file. There is one ledger per folder that
-// holds episodes: a season folder, or the series folder for a file kept there.
-// The files are grouped by folder in the order the collect read them, so a
-// ledger's entries land in that order.
-func episodeArrivals(recorder *arrivalRecorder, episodes []episodeFile, result *walkResult) map[episodeFile]int64 {
+// The arrival of every episode file, read from one ledger per folder that
+// holds episodes: a season folder, or the series folder for a file kept
+// there.
+func episodeArrivals(episodes []episodeFile, result *walkResult) map[episodeFile]fileArrival {
 	byDir := map[string][]string{}
 	var dirs []string
 	for _, episode := range episodes {
@@ -128,9 +127,9 @@ func episodeArrivals(recorder *arrivalRecorder, episodes []episodeFile, result *
 		}
 		byDir[episode.dir] = append(byDir[episode.dir], episode.file)
 	}
-	arrivals := map[episodeFile]int64{}
+	arrivals := map[episodeFile]fileArrival{}
 	for _, dir := range dirs {
-		held, err := recorder.arrivals(dir, byDir[dir])
+		held, err := folderArrivals(dir, byDir[dir])
 		result.noteReadError(err)
 		for file, at := range held {
 			arrivals[episodeFile{dir: dir, file: file}] = at
@@ -302,7 +301,7 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, err
 // episode .nfo beside the file where there is one, and from the season folder and
 // the file name where none does. An episode the scanner cannot number is left
 // out and reports no id, because it has no place under the series.
-func scanEpisode(root, library, seriesID string, episode episodeFile, arrival int64, result *walkResult) []string {
+func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fileArrival, result *walkResult) []string {
 	metas, err := episodeIdentity(episode)
 	// An episode whose sidecar could not be read has no numbers this
 	// pass, and a row read from the file name alone could carry another
@@ -341,7 +340,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival in
 			SortKey:  sortKey(title),
 			Slug:     slug(title, 0),
 			Released: meta.Released,
-			Added:    arrival,
+			Added:    arrival.added,
 			Art:      thumb,
 			Arts:     arts,
 			Duration: meta.Duration,
@@ -383,6 +382,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival in
 		Type:       class.Type,
 		Role:       class.Role,
 		Modified:   modified,
+		Arrived:    arrival.arrived,
 		Items:      episodeItemIDs,
 	})
 	return episodeItemIDs

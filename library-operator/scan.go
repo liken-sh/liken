@@ -114,10 +114,6 @@ type scanner struct {
 	job         string
 	scanPath    string
 	echoTimeout time.Duration
-	// The writer of the arrival ledgers, one per Job, so a refused write is
-	// logged once per walk. A scanner built without one, as a test over a
-	// checked-in tree is, reads the ledgers and writes none.
-	arrivals *arrivalRecorder
 	// log is where the scanner writes a walk that could not finish a catalog
 	// step, so a swallowed error shows in the pod log instead of a gap in
 	// the report. A scanner built without one writes nowhere.
@@ -208,7 +204,6 @@ func newScanner(started time.Time, log io.Writer) (*scanner, error) {
 		scanPath:    os.Getenv(scanPathVariable),
 		echoTimeout: echoTimeout(os.Getenv(echoTimeoutVariable)),
 	}
-	scan.arrivals = newArrivalRecorder(newVolumeWriter(scan.job), scan.logf)
 	// The Job holds no will and publishes nothing. Its one use of
 	// the bus is the subscription that carries the reporter's echo back.
 	scan.echo = newEchoWaiter(scan.statusTopic, scan.worker(), scan.job)
@@ -296,10 +291,10 @@ func (s *scanner) walkFolders(ctx context.Context) iter.Seq[*walkResult] {
 	return func(yield func(*walkResult) bool) {}
 }
 
-// The reader's view of this scanner's library, with the arrival recorder, so
-// the full walk and a rescan keep the ledger the same way.
+// The reader's view of this scanner's library, which the full walk and a
+// rescan share. Nothing here writes the volume.
 func (s *scanner) folderScan() folderScan {
-	return folderScan{root: s.root, library: s.library, kind: s.kind, ignore: s.ignore, arrivals: s.arrivals}
+	return folderScan{root: s.root, library: s.library, kind: s.kind, ignore: s.ignore}
 }
 
 // FullWalk is the walk's one collector. A pool of workers reads the
@@ -608,15 +603,15 @@ func (s *scanner) rescan(ctx context.Context, absolute string) error {
 	return nil
 }
 
-// What a reader of one folder needs beside the folder: the root, the library
-// and kind the rows belong to, the folder names the walk skips, and the
-// arrival recorder, nil for a reader that keeps no ledger.
+// What a reader of one folder needs beside the folder: the root, the
+// library and kind the rows belong to, and the folder names the walk skips.
+// There is no writer, because the walk and a fact's re-read both only
+// read.
 type folderScan struct {
-	root     string
-	library  string
-	kind     string
-	ignore   ignoreSet
-	arrivals *arrivalRecorder
+	root    string
+	library string
+	kind    string
+	ignore  ignoreSet
 }
 
 // Reads one title or series folder into rows, upserts them, and prunes the

@@ -188,6 +188,12 @@ CREATE INDEX episodes_library_added ON episodes (library, added);
 --   role      which one of its kind the file is, in Jellyfin's and Kodi's words
 --   language  the two-letter or three-letter tag the file name carries
 --   modified  the time the file was last written, in Unix seconds
+--
+-- arrived is the time the arrival ledger beside the file holds for it, in
+-- Unix seconds, and 0 where the ledger holds no entry. The walk writes it
+-- from the ledger alone and never from the change time, so the arrival
+-- fact's gap is every video with 0 here. The column is last because
+-- Corrosion adds a column to a table that exists at its end.
 CREATE TABLE files (
     library TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
@@ -204,8 +210,14 @@ CREATE TABLE files (
     role TEXT NOT NULL DEFAULT '',
     language TEXT NOT NULL DEFAULT '',
     modified INTEGER NOT NULL DEFAULT 0,
+    arrived INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (library, path)
 );
+
+-- The one read the arrival fact and the reporter make of files: every
+-- video of one library with no arrival, led by the library column as every
+-- index in this schema is.
+CREATE INDEX files_library_arrived ON files (library, arrived);
 
 -- The many-to-many link between a file and the items it holds, within
 -- one library: a multi-episode file names more than one item, and an

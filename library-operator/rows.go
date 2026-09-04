@@ -178,7 +178,10 @@ type fileRow struct {
 	Role       string
 	Language   string
 	Modified   int64
-	Items      []string
+	// The time the arrival ledger holds for the file, and zero where the ledger
+	// holds no entry, which is the arrival fact's gap.
+	Arrived int64
+	Items   []string
 }
 
 // fileItemKey names one row of the link table: the file's path, and the id of

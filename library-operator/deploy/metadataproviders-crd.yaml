@@ -132,6 +132,7 @@ spec:
                     # it writes.
                     enum:
                       - probe
+                      - arrival
                       - trickplay
                       - identity
                       - overview

@@ -247,14 +247,14 @@ func (c *Catalog) UpsertFiles(ctx context.Context, rows []fileRow) (int, error) 
 			present = 1
 		}
 		statements[i] = statement{
-			sql: `INSERT INTO files (library, path, container, video_codec, audio_codec, width, height, size_bytes, duration_ms, trickplay, present, type, role, language, modified) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO files (library, path, container, video_codec, audio_codec, width, height, size_bytes, duration_ms, trickplay, present, type, role, language, modified, arrived) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, path) DO UPDATE SET ` +
 				`container = excluded.container, video_codec = excluded.video_codec, ` +
 				`audio_codec = excluded.audio_codec, width = excluded.width, height = excluded.height, ` +
 				`size_bytes = excluded.size_bytes, duration_ms = excluded.duration_ms, trickplay = excluded.trickplay, present = excluded.present, ` +
-				`type = excluded.type, role = excluded.role, language = excluded.language, modified = excluded.modified`,
-			params: []any{row.Library, row.Path, row.Container, row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.SizeBytes, row.DurationMs, row.Trickplay, present, row.Type, row.Role, row.Language, row.Modified},
+				`type = excluded.type, role = excluded.role, language = excluded.language, modified = excluded.modified, arrived = excluded.arrived`,
+			params: []any{row.Library, row.Path, row.Container, row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.SizeBytes, row.DurationMs, row.Trickplay, present, row.Type, row.Role, row.Language, row.Modified, row.Arrived},
 		}
 	}
 	return c.apply(ctx, statements)

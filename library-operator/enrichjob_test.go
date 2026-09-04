@@ -41,7 +41,7 @@ func TestEnrichJobHoldsItsContainersInOrder(t *testing.T) {
 	for _, container := range spec.InitContainers {
 		names = append(names, container.Name)
 	}
-	want := []string{catalogContainer, factProbe, factIdentity}
+	want := []string{catalogContainer, factProbe, arrivalContainerName, factIdentity}
 	if len(names) != len(want) {
 		t.Fatalf("initContainers = %v, want %v", names, want)
 	}
@@ -110,7 +110,7 @@ func TestEnrichJobMountsTheVolumeReadWrite(t *testing.T) {
 func TestEnrichJobPassesTheKeyThroughASecretKeyRef(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
 
-	identity := job.Spec.Template.Spec.InitContainers[2]
+	identity := job.Spec.Template.Spec.InitContainers[3]
 	var reference *SecretKeySelector
 	for _, variable := range identity.Env {
 		if variable.Name == tmdbTokenVariable && variable.ValueFrom != nil {
@@ -156,14 +156,16 @@ func TestEnrichJobCarriesEveryProviderKeyIntoEveryFactsContainer(t *testing.T) {
 	}
 }
 
-// a Library whose sources name no ready provider that serves identity
-// still runs the probe.
-func TestEnrichJobWithoutAProviderRunsTheProbeAlone(t *testing.T) {
+// A Library whose sources name no ready provider that serves identity
+// still runs the probe and the arrival fact, the two that ask no
+// provider.
+func TestEnrichJobWithoutAProviderRunsTheProviderFreeFactsAlone(t *testing.T) {
 	job := testEnrichJob(studioMovies(), "")
 
 	spec := job.Spec.Template.Spec
-	if len(spec.InitContainers) != 2 || spec.InitContainers[1].Name != factProbe {
-		t.Fatalf("initContainers = %+v, want the agent and the probe", spec.InitContainers)
+	if len(spec.InitContainers) != 3 || spec.InitContainers[1].Name != factProbe ||
+		spec.InitContainers[2].Name != arrivalContainerName {
+		t.Fatalf("initContainers = %+v, want the agent, the probe, and the arrival fact", spec.InitContainers)
 	}
 }
 
@@ -420,7 +422,7 @@ func TestTheNFOContainerRunsAfterIdentityAndBeforeArt(t *testing.T) {
 	for _, container := range job.Spec.Template.Spec.InitContainers {
 		names = append(names, container.Name)
 	}
-	want := []string{catalogContainer, factProbe, factIdentity, nfoContainerName,
+	want := []string{catalogContainer, factProbe, arrivalContainerName, factIdentity, nfoContainerName,
 		artContainerName, contributorsContainerName}
 	if len(names) != len(want) {
 		t.Fatalf("initContainers = %v, want %v", names, want)

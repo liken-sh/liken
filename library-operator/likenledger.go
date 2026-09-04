@@ -81,7 +81,11 @@ type likenLedger struct {
 	// credited person, with the directory in .contributors/ that holds that
 	// person. Only the credits fact writes it, so the list, the answer, and the
 	// attempts are one write of one file.
-	Credits  []creditEntry  `yaml:"credits,omitempty"`
+	Credits []creditEntry `yaml:"credits,omitempty"`
+	// The arrival fact's own list, in the file that is its ledger: one entry
+	// per video file with the time it arrived. Only the arrival fact writes it,
+	// and the walk reads it for the added and arrived columns.
+	Files    []arrivalEntry `yaml:"files,omitempty"`
 	Attempts []likenAttempt `yaml:"attempts,omitempty"`
 }
 

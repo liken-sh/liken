@@ -17,10 +17,9 @@ import (
 	"strings"
 )
 
-// The reader's view of this library: what the scan's per-folder readers take
-// beside the folder. It carries no arrival recorder, because only the walk
-// writes the arrival ledger. A fact's re-read still reads the ledger, so the
-// added column it writes back is the ledger's.
+// The reader's view of this library: what the scan's per-folder readers
+// take beside the folder. A fact's re-read reads the arrival ledger the way
+// the walk does, so the added column it writes back is the ledger's.
 func (e *enricher) folderScan() folderScan {
 	return folderScan{root: e.root, library: e.library, kind: e.kind, ignore: e.ignore}
 }
@@ -82,6 +81,8 @@ func (e *enricher) writeOwnedRows(ctx context.Context, fact string, result *walk
 	case fact == factTrickplay:
 		_, err := e.catalog.UpdateFileTrickplay(ctx, filesOfType(result.files, fileTypeVideo))
 		return err
+	case fact == factArrival:
+		return e.writeArrivalRows(ctx, result)
 	case fact == factCredits:
 		if err := e.writeBodyRows(ctx, result); err != nil {
 			return err
@@ -133,6 +134,31 @@ func (e *enricher) writeProbeRows(ctx context.Context, result *walkResult) error
 		return err
 	}
 	_, err := e.catalog.UpdateItemDurations(ctx, "episodes", episodes)
+	return err
+}
+
+// The arrival fact owns the arrived column of every video and the added
+// column of every item the folder holds, because added derives from the
+// ledger the fact wrote. A set's added derives from its members at the next
+// walk, because the fold that makes a set is the walk's.
+func (e *enricher) writeArrivalRows(ctx context.Context, result *walkResult) error {
+	if _, err := e.catalog.UpdateFileArrived(ctx, filesOfType(result.files, fileTypeVideo)); err != nil {
+		return err
+	}
+	var titles, episodes []itemUpdate
+	for _, row := range result.movies {
+		titles = append(titles, itemUpdate{Library: row.Library, Id: row.Id, Values: []any{row.Added}})
+	}
+	for _, row := range result.series {
+		titles = append(titles, itemUpdate{Library: row.Library, Id: row.Id, Values: []any{row.Added}})
+	}
+	for _, row := range result.episodes {
+		episodes = append(episodes, itemUpdate{Library: row.Library, Id: row.Id, Values: []any{row.Added}})
+	}
+	if _, err := e.catalog.UpdateItemAdded(ctx, itemTable(e.kind), titles); err != nil {
+		return err
+	}
+	_, err := e.catalog.UpdateItemAdded(ctx, "episodes", episodes)
 	return err
 }
 

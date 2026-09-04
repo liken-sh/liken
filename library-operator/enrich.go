@@ -172,6 +172,8 @@ func gapClause(fact, column, missing string) string {
 var gapQueries = map[string]string{
 	// A video with a length and no tiles beside it.
 	factTrickplay: trickplayGapSQL(),
+	// A present video the arrival ledger holds no entry for.
+	factArrival: arrivalGapSQL(),
 	factProbe: `SELECT path FROM files ` +
 		`WHERE library = ?1 AND type = 'video' AND present = 1 ` +
 		`AND ` + gapClause(factProbe, "path", `duration_ms = 0`),

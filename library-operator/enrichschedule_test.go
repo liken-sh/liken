@@ -129,8 +129,8 @@ func TestEnrichJobTakesTheProviderTheSourcesName(t *testing.T) {
 	if job == nil {
 		t.Fatal("the pass stood no enricher")
 	}
-	if len(job.Spec.Template.Spec.InitContainers) != 3 {
-		t.Errorf("initContainers = %+v, want the agent, the probe, and identity",
+	if len(job.Spec.Template.Spec.InitContainers) != 4 {
+		t.Errorf("initContainers = %+v, want the agent, the probe, the arrival fact, and identity",
 			job.Spec.Template.Spec.InitContainers)
 	}
 	if cluster.heldClaim("movies-enrich-catalog") == nil {
