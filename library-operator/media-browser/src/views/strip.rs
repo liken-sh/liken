@@ -53,11 +53,21 @@ pub fn width_at(ratio: f32) -> f32 {
     POSTER / ratio
 }
 
+/// The slot that ends a strip and opens what the strip is about: its
+/// words, and the art it draws as with the library that art resolves
+/// against, both empty where it draws its words alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Last<'a> {
+    pub words: &'a str,
+    pub library: &'a str,
+    pub art: &'a str,
+}
+
 /// One strip to draw. `current` is the member the page is about, and
-/// nothing on a strip that is about no member. `last` is the words on a
-/// slot that ends the row and opens what the strip is about, or nothing
-/// where the row ends with its members, and `lines` is the caption lines
-/// under each slot.
+/// nothing on a strip that is about no member. `last` is the slot that
+/// ends the row and opens what the strip is about, or nothing where the
+/// row ends with its members, and `lines` is the caption lines under
+/// each slot.
 pub struct Strip<'a, T> {
     /// The members in the order the catalog answered them.
     pub members: &'a [T],
@@ -71,7 +81,7 @@ pub struct Strip<'a, T> {
     pub heading: &'a str,
     /// The library the art paths resolve against.
     pub library: &'a str,
-    pub last: Option<&'a str>,
+    pub last: Option<Last<'a>>,
     pub lines: usize,
     /// The part of the frame the strip draws in.
     pub region: Rectangle,
@@ -164,15 +174,25 @@ pub fn draw<T: Card, P: Posters>(
                     captioned(frame, member, slot, focused, strip.lines);
                 }
             }
-            None => artwork(
-                frame,
-                posters,
-                "",
-                "",
-                slot,
-                strip.last.unwrap_or_default(),
-                Tone::Full,
-            ),
+            // The last slot draws its art with its words as the caption,
+            // or its words alone in the slot where it has no art.
+            None => {
+                let Some(last) = strip.last else {
+                    continue;
+                };
+                artwork(
+                    frame,
+                    posters,
+                    last.library,
+                    last.art,
+                    slot,
+                    last.words,
+                    Tone::Full,
+                );
+                if !last.art.is_empty() && strip.lines > 0 {
+                    wall::written(frame, caption_band(slot), last.words, look::muted());
+                }
+            }
         }
         if strip.current == Some(index) {
             underline(frame, slot);
@@ -181,6 +201,17 @@ pub fn draw<T: Card, P: Posters>(
             mark(frame, slot);
         }
     }
+}
+
+// The band the first caption line of a slot draws in, a gap wider than
+// the slot so a caption may run a little past its edges.
+fn caption_band(slot: Rectangle) -> Rectangle {
+    area(
+        slot.center_x() - (slot.width + GAP) / 2.0,
+        slot.y + slot.height + FOOT,
+        slot.width + GAP,
+        text::height(1, look::CAPTION),
+    )
 }
 
 // The caption lines under one slot, in the wall's own words and colors:
@@ -193,12 +224,7 @@ fn captioned<T: Card>(
     focused: bool,
     lines: usize,
 ) {
-    let band = area(
-        slot.center_x() - (slot.width + GAP) / 2.0,
-        slot.y + slot.height + FOOT,
-        slot.width + GAP,
-        text::height(1, look::CAPTION),
-    );
+    let band = caption_band(slot);
     let chars = text::fits(look::CAPTION, band.width);
     let (content, color) = wall::captioned(member, focused, chars);
     wall::written(frame, band, content, color);

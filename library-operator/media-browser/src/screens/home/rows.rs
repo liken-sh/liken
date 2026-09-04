@@ -8,7 +8,7 @@ use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
 use crate::catalog::{Fold, GenreEntry, LibraryEntry, Order, Query, Source, library_name};
 use crate::screens::wall::Wall;
-use crate::screens::{Item, Screen, Step, facts, slots};
+use crate::screens::{Item, Screen, Step, facts, person, slots};
 use crate::views::strip;
 
 // The kind an item of the libraries strip carries, so a select on it
@@ -61,6 +61,50 @@ pub(super) fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
     rows
 }
 
+/// The slot that ends a strip: its words, and the art it draws as with
+/// the library that art resolves against, both empty where it draws its
+/// words alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Last {
+    pub words: String,
+    pub library: String,
+    pub art: String,
+}
+
+impl Last {
+    // A slot of words alone.
+    fn words(words: String) -> Self {
+        Self {
+            words,
+            library: String::new(),
+            art: String::new(),
+        }
+    }
+
+    // The slot about a person: their name in the words, and their
+    // headshot as the art, where a library holds one.
+    fn about(library: &str, path: &str, name: &str, source: &mut dyn Source) -> Self {
+        let (library, art) = source
+            .person(library, path)
+            .map(|entry| person::headshot(&entry))
+            .unwrap_or_default();
+        Self {
+            words: format!("About {name}"),
+            library,
+            art,
+        }
+    }
+
+    /// The slot as the strip view draws it.
+    pub fn view(&self) -> strip::Last<'_> {
+        strip::Last {
+            words: &self.words,
+            library: &self.library,
+            art: &self.art,
+        }
+    }
+}
+
 /// One strip of the page: the row it reads, the heading over it, the
 /// items in the read's order, the focused index, the words on a slot that
 /// ends it, or nothing, and the caption lines under each slot.
@@ -70,7 +114,7 @@ pub struct Strip {
     pub heading: String,
     pub items: Vec<Item>,
     pub focus: usize,
-    pub last: Option<String>,
+    pub last: Option<Last>,
     pub lines: usize,
 }
 
@@ -108,8 +152,10 @@ impl Strip {
                     _ => answer.slots.into_iter().take(SHOWN).collect(),
                 };
                 self.last = match query {
-                    Query::Person { .. } => Some(format!("About {}", answer.name)),
-                    _ => (slots.len() < answered).then(|| strip::SEE_ALL.to_string()),
+                    Query::Person { library, path } => {
+                        Some(Last::about(library, path, &answer.name, source))
+                    }
+                    _ => (slots.len() < answered).then(|| Last::words(strip::SEE_ALL.to_string())),
                 };
                 self.items = slots
                     .into_iter()

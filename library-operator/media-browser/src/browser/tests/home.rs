@@ -58,7 +58,10 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
 
     let strips = strips(&browser);
     let released = strips[0];
-    assert_eq!(released.last.as_deref(), Some("See all"));
+    assert_eq!(
+        released.last.as_ref().map(|last| last.words.as_str()),
+        Some("See all")
+    );
     assert_eq!(released.lines, 2);
     assert_eq!(released.items.len(), 2);
     assert_eq!(released.items[0].caption, "S01E02 · The Serial");
@@ -416,7 +419,12 @@ fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     assert!(first_three.contains(&"The Entries"));
     let last: Vec<(&str, Option<&str>)> = strips(&browser)[2..6]
         .iter()
-        .map(|strip| (strip.heading.as_str(), strip.last.as_deref()))
+        .map(|strip| {
+            (
+                strip.heading.as_str(),
+                strip.last.as_ref().map(|last| last.words.as_str()),
+            )
+        })
         .collect();
     for (heading, last) in last {
         let want = match heading {
@@ -664,4 +672,18 @@ fn back_from_a_page_after_a_change_reads_the_home_page_again() {
 
     assert!(browser.source.calls.contains(&"pool"));
     assert_eq!(at(&browser), (1, 0));
+}
+
+#[test]
+fn the_slot_about_a_person_draws_their_headshot() {
+    let browser = with_draw();
+    let player = strips(&browser)
+        .into_iter()
+        .find(|strip| strip.heading == PLAYER)
+        .expect("the page drew the person's strip");
+
+    let last = player.last.as_ref().expect("the strip ends in a slot");
+    assert_eq!(last.words, format!("About {PLAYER}"));
+    assert_eq!(last.library, "screening/films");
+    assert_eq!(last.art, format!("{ENTRY}/headshot.jpg"));
 }

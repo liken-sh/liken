@@ -442,6 +442,9 @@ impl Source for Fake {
             library: library.to_string(),
             path: path.to_string(),
             name: PLAYER.into(),
+            headshot: true,
+            headshot_library: library.to_string(),
+            headshot_path: path.to_string(),
             ..Person::default()
         })
     }

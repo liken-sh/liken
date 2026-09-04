@@ -14,7 +14,7 @@ use iced_winit::core::{Element, Length, Theme};
 
 use super::slots::Slots;
 use super::{Step, facts};
-use crate::catalog::{Query, Source};
+use crate::catalog::{self, Query, Source};
 use crate::posters::Posters;
 
 // The file every contributor entry holds their headshot in, and
@@ -139,6 +139,15 @@ impl Person {
         .height(Length::Fill)
         .into()
     }
+}
+
+/// The library and the path of a person's headshot, both empty where no
+/// library holds one. A person's strip draws it on the slot about them.
+pub fn headshot(entry: &catalog::Person) -> (String, String) {
+    (
+        entry.headshot_library.clone(),
+        beside(&entry.headshot_library, &entry.headshot_path, HEADSHOT),
+    )
 }
 
 // The path of one file inside a person's entry, and nothing where

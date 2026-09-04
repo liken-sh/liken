@@ -22,7 +22,7 @@ use self::banner::Banner;
 use self::layout::Layout;
 pub use self::page::{Page, read};
 use self::rows::{GENRE, LIBRARY, rows};
-pub use self::rows::{Row, Strip};
+pub use self::rows::{Last, Row, Strip};
 use super::{Step, slots};
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
@@ -398,7 +398,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                             focus: focused.then_some(strip.focus),
                             heading: &strip.heading,
                             library: "",
-                            last: strip.last.as_deref(),
+                            last: strip.last.as_ref().map(Last::view),
                             lines: strip.lines,
                             region,
                         },
