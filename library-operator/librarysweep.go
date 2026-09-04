@@ -43,13 +43,18 @@ func (c *Catalog) SweepLibrary(ctx context.Context, library string) (int, error)
 	return removed, nil
 }
 
-// librarySweepSteps is the sweep in the order it runs: the aliases
-// and the links that point at an item go before the item rows, and
-// the files go last, the same order pruneLibrary deletes in.
+// librarySweepSteps is the sweep in the order it runs. The aliases, the
+// credits, and the links that point at an item go before the item rows,
+// the files and the attempts follow, and the people go last, the
+// contributor aliases before the contributors they resolve to. No step
+// leaves a row whose parent is gone.
 func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 	return []librarySweepStep{
 		{librarySweepSQL("aliases", "alias"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteAliases(ctx, library, keys)
+		}},
+		{librarySweepCreditSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteCredits(ctx, library, creditKeys(keys))
 		}},
 		{librarySweepSQL("movies", "id"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteMovies(ctx, library, keys)
@@ -74,6 +79,12 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		}},
 		{librarySweepGenreSQL(), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteGenres(ctx, library, genreKeys(keys))
+		}},
+		{librarySweepContributorAliasSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteContributorAliases(ctx, library, contributorAliasKeys(keys))
+		}},
+		{librarySweepSQL("contributors", "path"), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteContributors(ctx, library, keys)
 		}},
 	}
 }

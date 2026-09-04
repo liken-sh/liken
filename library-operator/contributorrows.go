@@ -305,3 +305,14 @@ func creditPruneSQL() string {
 		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
 		` LIMIT ?`
 }
+
+// One bounded batch of one library's credits, and one of its contributor
+// aliases, for the whole-library sweep. Each joins its two key columns
+// the way the prune reads join them.
+func librarySweepCreditSQL() string {
+	return `SELECT item || char(31) || billing FROM credits WHERE library = ? LIMIT ?`
+}
+
+func librarySweepContributorAliasSQL() string {
+	return `SELECT scheme || char(31) || id FROM contributor_aliases WHERE library = ? LIMIT ?`
+}

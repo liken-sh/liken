@@ -1,7 +1,8 @@
 package main
 
-// what these tests run: the whole-library sweep against real SQLite,
-// beside the prune tests; six tables.
+// sweep_test.go runs the whole-library sweep against real SQLite,
+// beside the prune tests, over every table the sweep reaches, the people
+// tables included.
 
 import (
 	"bytes"
@@ -9,8 +10,8 @@ import (
 	"testing"
 )
 
-// the rows one season folder makes in a series library; with
-// walkOfOneTitle it fills all six tables.
+// The rows one season folder makes in a series library. With
+// walkOfOneTitle and walkOfOnePerson it fills every table.
 func walkOfOneEpisode(library, series, episode, path string) *walkResult {
 	file := path + "/s01e01.mkv"
 	return &walkResult{
@@ -32,14 +33,32 @@ func walkOfOneEpisode(library, series, episode, path string) *walkResult {
 	}
 }
 
-// writes a movie and a series into two libraries at the same ids and
-// paths, filling all six tables.
+// The rows one entry in .contributors/ and one credit on a title make:
+// the three people tables a sweep must take with the library.
+func walkOfOnePerson(library, item, slug string) *walkResult {
+	directory := contributorDirectory(slug)
+	return &walkResult{
+		contributors: []contributorRow{{Library: library, Path: directory, Name: slug}},
+		contributorAliases: []contributorAliasRow{{
+			Library: library, Scheme: contributorTMDbScheme, ID: slug, Path: directory,
+		}},
+		credits: []creditRow{{
+			Library: library, Item: item, Contributor: directory, Name: slug,
+			Part: creditPartActor, Billing: 0,
+		}},
+	}
+}
+
+// seedTwoLibrariesInEveryTable writes a movie, a series, and a person
+// into two libraries at the same ids and paths, so every table the sweep
+// reaches holds rows of both.
 func seedTwoLibrariesInEveryTable(t *testing.T, catalog *Catalog) {
 	t.Helper()
 	for _, library := range []string{"house/movies", "house/series"} {
 		for _, walk := range []*walkResult{
 			walkOfOneTitle(library, "movie:tmdb:1", "One (2001)", "movie:path:one-2001"),
 			walkOfOneEpisode(library, "series:tvdb:5", "episode:tvdb:5:1:1", "A Show (2005)"),
+			walkOfOnePerson(library, "movie:tmdb:1", "someone-1"),
 		} {
 			if err := upsertWalk(t.Context(), catalog, walk); err != nil {
 				t.Fatal(err)
@@ -48,11 +67,12 @@ func seedTwoLibrariesInEveryTable(t *testing.T, catalog *Catalog) {
 	}
 }
 
-// the six tables a whole-library sweep deletes from, the same list the
-// library-keys read is built from.
-var everyCatalogTable = []string{"aliases", "movies", "series", "episodes", "file_items", "files", "genres"}
+// The tables a whole-library sweep deletes from, the item tables and
+// the people tables both.
+var everyCatalogTable = []string{"aliases", "movies", "series", "episodes", "file_items", "files", "genres",
+	"credits", "contributors", "contributor_aliases"}
 
-// the sweep takes every row of the departing library in all six tables and
+// The sweep takes every row of the departing library in every table and
 // leaves the survivor whole.
 func TestSweepLibraryAgainstTheRealSchema(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
@@ -135,9 +155,13 @@ func TestSweepLibraryChunksALargeDelete(t *testing.T) {
 	catalog, agent := newSQLiteCatalog(t)
 	for number := range 10 {
 		title := strconv.Itoa(number)
-		walk := walkOfOneTitle("house/movies", "movie:tmdb:"+title, "Title "+title, "movie:path:title-"+title)
-		if err := upsertWalk(t.Context(), catalog, walk); err != nil {
-			t.Fatal(err)
+		for _, walk := range []*walkResult{
+			walkOfOneTitle("house/movies", "movie:tmdb:"+title, "Title "+title, "movie:path:title-"+title),
+			walkOfOnePerson("house/movies", "movie:tmdb:"+title, "someone-"+title),
+		} {
+			if err := upsertWalk(t.Context(), catalog, walk); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	agent.largestBatch = 0
@@ -147,9 +171,10 @@ func TestSweepLibraryChunksALargeDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Ten titles, each one movie row, one file row, one link, two aliases, and a genre.
-	if removed != 60 {
-		t.Errorf("removed = %d, want the 60 rows the ten titles hold", removed)
+	// Ten titles, each one movie row, one file row, one link, two aliases,
+	// a genre, a credit, a contributor, and a contributor alias.
+	if removed != 90 {
+		t.Errorf("removed = %d, want the 90 rows the ten titles hold", removed)
 	}
 	if agent.largestBatch > pruneBatch {
 		t.Errorf("one transaction carried %d statements, want no more than %d", agent.largestBatch, pruneBatch)
