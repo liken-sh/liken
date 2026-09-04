@@ -9,7 +9,7 @@ fn a_press_on_the_bus_moves_focus_like_the_keyboard() {
 
     assert!(browser.pump(1.0));
 
-    assert_eq!(showing_home(&browser).strips[2].focus, 1);
+    assert_eq!(strip_at(&browser, 3).focus, 1);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn a_press_that_arrives_asleep_keeps_the_focus() {
     browser.pump(1.0);
 
     assert!(browser.asleep());
-    assert_eq!(showing_home(&browser).strips[2].focus, 1);
+    assert_eq!(strip_at(&browser, 3).focus, 1);
 }
 
 #[test]

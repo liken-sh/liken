@@ -160,6 +160,23 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Backdrop<'_, P
     }
 }
 
+/// One panel of shade over these bounds, dark at the left and clear
+/// toward the right. One function draws every scrim, because a page and
+/// the home page's banner shade their art the same way.
+pub fn scrim(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle) {
+    frame.fill_rectangle(
+        bounds.position(),
+        extent(bounds),
+        canvas::gradient::Linear::new(
+            Point::new(bounds.x, bounds.y),
+            Point::new(bounds.x + bounds.width * CLEARS_AT, bounds.y),
+        )
+        .add_stop(0.0, look::shade())
+        .add_stop(HOLDS_TO, look::shade())
+        .add_stop(1.0, look::CLEAR),
+    );
+}
+
 // The middle layer: one panel of shade that clears toward the right, so
 // every line of the page reads over the art whatever the art holds, and
 // the ground under the page's own art where the page has one.
@@ -179,17 +196,7 @@ impl canvas::Program<Infallible, Theme, Renderer> for Scrim {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        frame.fill_rectangle(
-            bounds.position(),
-            extent(bounds),
-            canvas::gradient::Linear::new(
-                Point::new(bounds.x, bounds.y),
-                Point::new(bounds.x + bounds.width * CLEARS_AT, bounds.y),
-            )
-            .add_stop(0.0, look::shade())
-            .add_stop(HOLDS_TO, look::shade())
-            .add_stop(1.0, look::CLEAR),
-        );
+        scrim(&mut frame, bounds);
         if let (Some(fade), Some(ground)) = (self.ground.fade(bounds), self.ground.of(bounds)) {
             frame.fill_rectangle(
                 fade.position(),

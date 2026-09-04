@@ -389,7 +389,9 @@ fn still_of(episode: Episode) -> Still {
     }
 }
 
-fn facts_of(details: &SeriesDetails) -> String {
+/// The facts line of one series. The banner reads it too, because it
+/// draws a title the way the page's header does.
+pub(crate) fn facts_of(details: &SeriesDetails) -> String {
     facts::joined(&[
         facts::year(&details.released),
         &seasons_of(details.seasons),

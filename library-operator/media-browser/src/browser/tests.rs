@@ -4,6 +4,7 @@
 // This file holds what every group of tests under it builds from: the
 // catalog they read, the store they draw from, and the bus they fold.
 
+mod banner;
 mod home;
 mod loading;
 mod moments;
@@ -17,6 +18,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
+use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
     Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, InSeries, LibraryEntry,
@@ -65,6 +67,9 @@ struct Fake {
     // the one set, so every draw takes all four and only their order is the
     // date's.
     pool: bool,
+    // Whether no title carries a backdrop. A bare catalog exists because
+    // the banner holds nothing without backdrops.
+    bare: bool,
 }
 
 // The library the fake serial is in, and the serial's id.
@@ -75,6 +80,13 @@ const SERIAL: &str = "series:1";
 // entry sits in.
 const PLAYER: &str = "A Player";
 const ENTRY: &str = ".contributors/A Player";
+
+// The catalog's date this many days before today. A date is named by
+// its distance from today because the released strip keeps a window of
+// today, and no test may depend on the wall clock.
+fn days_ago(days: i64) -> String {
+    Date::from_seconds(Date::today().seconds() - days * 86_400).iso()
+}
 
 // The number at the end of a fake id. It places a movie in the library's
 // one set.
@@ -98,7 +110,7 @@ impl Fake {
             kind: "episodes".into(),
             id: "episode:1:2".into(),
             title: "Segment 2".into(),
-            released: "2026-09-01".into(),
+            released: days_ago(2),
             art: "s1e2.jpg".into(),
             duration: 2_760,
             episode: Some(InSeries {
@@ -114,7 +126,7 @@ impl Fake {
             kind: "series".into(),
             id: SERIAL.into(),
             title: "The Serial".into(),
-            released: "2026-08-20".into(),
+            released: days_ago(14),
             art: "serial.jpg".into(),
             ..Slot::default()
         };
@@ -125,6 +137,14 @@ impl Fake {
                 Fold::Titles => vec![serial, movie],
                 _ => vec![episode, serial, movie],
             },
+        }
+    }
+
+    // The backdrop of one title's page, empty on a bare catalog.
+    fn backdrop(&self, id: &str) -> String {
+        match self.bare {
+            true => String::new(),
+            false => format!("{id}.backdrop.jpg"),
         }
     }
 
@@ -279,7 +299,7 @@ impl Source for Fake {
             rating: "TV-14".into(),
             plot: "A plot.".into(),
             seasons: 2,
-            backdrop: format!("{id}.backdrop.jpg"),
+            backdrop: self.backdrop(id),
             ..SeriesDetails::default()
         })
     }
@@ -326,7 +346,7 @@ impl Source for Fake {
             } else {
                 String::new()
             },
-            backdrop: format!("{id}.backdrop.jpg"),
+            backdrop: self.backdrop(id),
             trailer: if self.trailers {
                 format!("{id}.trailer.mkv")
             } else {
@@ -441,6 +461,14 @@ fn showing_wall(browser: &Browser<Fake, NoPosters>) -> &Wall {
         screens::Screen::Wall(wall) => wall,
         _ => panic!("the browser is not showing a wall"),
     }
+}
+
+// One strip of the home page by its row index, which a test reads a
+// strip's focus through.
+fn strip_at(browser: &Browser<Fake, NoPosters>, index: usize) -> &crate::screens::home::Strip {
+    showing_home(browser).blocks[index]
+        .strip()
+        .expect("the row is a strip")
 }
 
 // The movie page the browser is showing.

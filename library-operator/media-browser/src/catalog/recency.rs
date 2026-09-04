@@ -12,6 +12,11 @@ use crate::catalog::Fold;
 /// the other numbers here.
 pub const WINDOW_DAYS: i64 = 14;
 
+/// The window, in days, inside which a release date counts as current.
+/// The released strip shows what is new in the world and nothing older
+/// than this, and the wall behind it shows everything.
+pub const CURRENT_DAYS: i64 = 30;
+
 /// How many candidate rows a read takes, newest first, before the fold.
 /// The bound keeps the read small on a catalog of thousands.
 pub const CANDIDATES: usize = 120;
@@ -111,6 +116,13 @@ fn episode_slot(library: &str, episode: Title, season: i64, number: i64, series:
     slot
 }
 
+/// Whether a release date falls inside the window of today, in seconds.
+/// The window is measured both ways, because a date a day ahead by zone
+/// is still current. A title with no full date is never current.
+pub fn current(released: &str, today: i64) -> bool {
+    date_seconds(released).is_some_and(|aired| (today - aired).abs() <= CURRENT_DAYS * DAY)
+}
+
 /// A `released` column as Unix seconds at midnight UTC, or nothing
 /// where it holds less than a full date. The civil-to-days arithmetic is
 /// Howard Hinnant's, so no date crate is pulled in for one
@@ -186,6 +198,22 @@ mod tests {
 
     fn ids(slots: &[Slot]) -> Vec<&str> {
         slots.iter().map(|slot| slot.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_date_inside_the_window_of_today_is_current_and_a_year_alone_never_is() {
+        let today = date_seconds("2026-09-03").expect("a full date");
+        for (released, expected) in [
+            ("2026-09-03", true),
+            ("2026-08-04", true),
+            ("2026-08-03", false),
+            ("2026-09-10", true),
+            ("2026-10-04", false),
+            ("2026", false),
+            ("", false),
+        ] {
+            assert_eq!(current(released, today), expected, "{released}");
+        }
     }
 
     #[test]

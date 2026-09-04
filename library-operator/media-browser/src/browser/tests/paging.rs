@@ -7,15 +7,15 @@ use super::*;
 fn the_first_screen_is_the_home_page_and_its_libraries_strip() {
     let browser = browser(3);
     let home = showing_home(&browser);
-    let libraries = &home.strips[2];
+    let libraries = strip_at(&browser, 3);
     assert_eq!(libraries.heading, "Libraries");
     assert_eq!(libraries.items[0].name, "films");
     assert_eq!(libraries.items[0].under, "movies · 3");
     assert_eq!(libraries.items[0].art, "1.jpg");
     assert_eq!(libraries.items[1].name, "serials");
     assert_eq!(libraries.items[1].under, "series · 2");
-    assert_eq!(home.focus, 2);
-    assert!(home.strips[0].items.is_empty());
+    assert_eq!(home.focus, 3);
+    assert!(strip_at(&browser, 1).items.is_empty());
 }
 
 #[test]
@@ -150,9 +150,9 @@ fn back_from_a_page_returns_to_the_wall_at_the_same_focus() {
 fn arrows_move_focus_on_a_strip_and_a_wall() {
     let mut browser = browser(20);
     browser.key("right");
-    assert_eq!(showing_home(&browser).strips[2].focus, 1);
+    assert_eq!(strip_at(&browser, 3).focus, 1);
     browser.key("left");
-    assert_eq!(showing_home(&browser).strips[2].focus, 0);
+    assert_eq!(strip_at(&browser, 3).focus, 0);
     browser.key("enter");
     browser.key("right");
     assert_eq!(showing_wall(&browser).slots.focus, 1);

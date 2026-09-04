@@ -14,6 +14,7 @@
 // backdrop is a layer of its own under everything a screen draws.
 
 pub mod band;
+pub mod banner;
 pub mod buttons;
 pub mod curtain;
 pub mod divider;
@@ -201,7 +202,7 @@ pub fn underlined(slot: Rectangle) -> Rectangle {
 
 // The one mark focus takes everywhere on this screen: a stroke of the
 // accent outside the chosen slot.
-fn mark(frame: &mut canvas::Frame<Renderer>, slot: Rectangle) {
+pub(crate) fn mark(frame: &mut canvas::Frame<Renderer>, slot: Rectangle) {
     let around = marked(slot);
     frame.stroke_rectangle(
         around.position(),

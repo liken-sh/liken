@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use super::pool::{Candidate, Kind};
-use super::recency::DRAWN;
+use super::recency::{self, DRAWN};
 
 /// A civil date in the process's own zone: the year, the month from one,
 /// and the day of the month.
@@ -31,6 +31,43 @@ impl Date {
             year: i64::from(local.tm_year) + 1900,
             month: (local.tm_mon + 1) as u8,
             day: local.tm_mday as u8,
+        }
+    }
+
+    /// The date as the catalog writes one, yyyy-mm-dd.
+    pub fn iso(self) -> String {
+        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+
+    /// The date as Unix seconds at midnight UTC, through the same reader the
+    /// catalog's dates go through, so there is one arithmetic and one
+    /// midnight.
+    pub fn seconds(self) -> i64 {
+        recency::date_seconds(&self.iso()).unwrap_or(0)
+    }
+
+    /// The civil date of Unix seconds, Howard Hinnant's civil-from-days. A
+    /// test names a date by its distance from today with it, so no test
+    /// depends on the wall clock.
+    pub fn from_seconds(seconds: i64) -> Self {
+        let days = seconds.div_euclid(86_400) + 719_468;
+        let era = days.div_euclid(146_097);
+        let day_of_era = days - era * 146_097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let month_index = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+        let month = if month_index < 10 {
+            month_index + 3
+        } else {
+            month_index - 9
+        };
+        let year = year_of_era + era * 400 + i64::from(month <= 2);
+        Self {
+            year,
+            month: month as u8,
+            day: day as u8,
         }
     }
 
@@ -249,6 +286,22 @@ mod tests {
         assert_ne!(date(2026, 9, 3).seed(), date(2026, 9, 4).seed());
         assert_ne!(date(2026, 9, 3).seed(), date(2026, 10, 3).seed());
         assert_eq!(date(2026, 9, 3).seed(), 20_260_903);
+    }
+
+    #[test]
+    fn a_date_reads_as_seconds_and_back() {
+        for (date, seconds) in [
+            (date(1970, 1, 1), 0),
+            (date(2000, 3, 1), 951_868_800),
+            (date(2024, 2, 29), 1_709_164_800),
+            (date(2026, 9, 3), 1_788_393_600),
+            (date(2026, 12, 31), 1_798_675_200),
+        ] {
+            assert_eq!(date.seconds(), seconds);
+            assert_eq!(Date::from_seconds(seconds), date);
+            assert_eq!(Date::from_seconds(seconds + 3_600), date);
+        }
+        assert_eq!(date(2026, 9, 3).iso(), "2026-09-03");
     }
 
     #[test]

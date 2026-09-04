@@ -334,7 +334,9 @@ fn set_of(library: &str, id: &str, details: &MovieDetails, source: &mut dyn Sour
     Set::of(source.set(library, &details.set_id)?, &query, id)
 }
 
-fn facts_of(details: &MovieDetails) -> String {
+/// The facts line of one title. The banner reads it too, because it
+/// draws a title the way the page's header does.
+pub(crate) fn facts_of(details: &MovieDetails) -> String {
     facts::joined(&[
         &facts::date(&details.released),
         &facts::runtime(details.duration),
