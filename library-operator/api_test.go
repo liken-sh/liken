@@ -326,3 +326,28 @@ func TestPlayerIdleStatusWithoutABusReadsNone(t *testing.T) {
 		t.Errorf("bus = %+v, want none", status.Idle.Bus)
 	}
 }
+
+// The household zone is the default MediaPreferences' own, and nothing
+// where the cluster holds none or holds one under another name.
+func TestTheHouseholdZoneIsTheDefaultPreferencesOwn(t *testing.T) {
+	cases := []struct {
+		name string
+		list MediaPreferencesList
+		want string
+	}{
+		{"none", MediaPreferencesList{}, ""},
+		{"default", MediaPreferencesList{Items: []MediaPreferences{{
+			Metadata: ObjectMeta{Name: "default"},
+			Spec:     MediaPreferencesSpec{TimeZone: "America/New_York"},
+		}}}, "America/New_York"},
+		{"another name", MediaPreferencesList{Items: []MediaPreferences{{
+			Metadata: ObjectMeta{Name: "other"},
+			Spec:     MediaPreferencesSpec{TimeZone: "Europe/Paris"},
+		}}}, ""},
+	}
+	for _, c := range cases {
+		if got := householdZone(&c.list); got != c.want {
+			t.Errorf("%s: zone = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

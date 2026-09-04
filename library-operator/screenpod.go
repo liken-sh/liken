@@ -55,7 +55,10 @@ const displayClaimName = "devices"
 // sets none and waits forever.
 const (
 	windowGraceVariable = "WINDOW_GRACE_SECONDS"
-	windowGraceSeconds  = "15"
+	// The zone the browser's clock and its day's draw read, the standard
+	// name and not a LIBRARY_ one, because glibc reads it.
+	timeZoneVariable   = "TZ"
+	windowGraceSeconds = "15"
 )
 
 // The variables that carry status.idle into the browser. They are the
@@ -130,7 +133,7 @@ func playerOwner(player *Player) OwnerReference {
 // settings alone, so two passes over an unchanged namespace build the same
 // pod, which is what makes the template hash mean anything. The Libraries are
 // read in name order for the same reason.
-func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatalog, browserImage, corrosionImage, topicBase string) *Pod {
+func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatalog, browserImage, corrosionImage, topicBase, timeZone string) *Pod {
 	grace := int64(scannerGracePeriod)
 	// The browser holds no Kubernetes credential. It reads the catalog
 	// from the agent beside it, and nothing in the pod speaks to the API
@@ -182,7 +185,7 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 				catalogSidecar(corrosionImage),
 			},
 			Containers: []Container{
-				browserSidecar(player, shown, browserImage, topicBase),
+				browserSidecar(player, shown, browserImage, topicBase, timeZone),
 			},
 			Volumes: volumes,
 			// The display claim media-operator stood for this Player.
@@ -211,7 +214,7 @@ func screenCatalogVolume(player *Player, catalog *NamespaceCatalog) Volume {
 // alone, because it holds no API credential to look one up with. Each library
 // claim is mounted read-only, so the browser cannot write to a media volume
 // whatever it does.
-func browserSidecar(player *Player, libraries []Library, image, topicBase string) Container {
+func browserSidecar(player *Player, libraries []Library, image, topicBase, timeZone string) Container {
 	args := []string{
 		"--catalog", path.Join(catalogStatePath, catalogStateFile),
 		"--updates", defaultCatalogAPI,
@@ -250,6 +253,13 @@ func browserSidecar(player *Player, libraries []Library, image, topicBase string
 	idle := player.idle()
 	environment := []EnvVar{
 		{Name: windowGraceVariable, Value: windowGraceSeconds},
+	}
+	// The clock reads TZ against the image's tz database. Set it only
+	// when the household stated a zone, so an unset zone leaves the pod
+	// on UTC, the way media-operator's own pods do. The template hash
+	// rolls the pod when the zone changes.
+	if timeZone != "" {
+		environment = append(environment, EnvVar{Name: timeZoneVariable, Value: timeZone})
 	}
 	// A Player whose status names a bus gets the wiring, and its browser
 	// takes the room's remotes. A Player under an older media-operator
@@ -388,7 +398,7 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, catal
 				continue
 			}
 		}
-		desired := buildScreenPod(player, inNamespace, catalog, o.browserImage, o.corrosionImage, o.topicBase)
+		desired := buildScreenPod(player, inNamespace, catalog, o.browserImage, o.corrosionImage, o.topicBase, o.timeZone)
 		if _, err := o.standPod(ctx, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the screen of %s/%s: %v\n", namespace, name, err)
 		}

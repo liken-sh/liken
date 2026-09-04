@@ -92,6 +92,13 @@ rules:
   - apiGroups: [media.liken.sh]
     resources: [players]
     verbs: [get, list, watch]
+  # The household defaults, cluster-scoped and read-only, for one field:
+  # the wall-clock zone every screen pod carries as TZ, so the browser's
+  # clock shows the house's own hour. The watch is the wake signal, so a
+  # zone the household sets rolls the screens on the next pass.
+  - apiGroups: [media.liken.sh]
+    resources: [mediapreferences]
+    verbs: [get, list, watch]
   # The Plays this operator creates, one per request a screen publishes
   # on the bus. Create alone: the operator never reads, edits, or
   # deletes a Play, because media-operator owns its whole life once it

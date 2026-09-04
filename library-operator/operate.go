@@ -60,10 +60,13 @@ type operator struct {
 	scannerImage   string
 	corrosionImage string
 	browserImage   string
-	busAddress     string
-	topicBase      string
-	bus            *Bus
-	reports        *reports
+	// The household wall-clock zone the pass read last, which every screen
+	// pod it stands carries as TZ. Empty where the cluster states none.
+	timeZone   string
+	busAddress string
+	topicBase  string
+	bus        *Bus
+	reports    *reports
 
 	// The provider endpoint every reachability check calls, one per provider
 	// block, and the client it calls through, as fields so a test points them
@@ -229,6 +232,13 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
 		players = &PlayerList{}
 	}
+	// The household defaults are read on the same terms as the Players,
+	// because the same operator owns both.
+	preferences, err := ListMediaPreferences(startup, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing media preferences: %v\n", err)
+		preferences = &MediaPreferencesList{}
+	}
 	// The providers are read on the same terms as the Players: a cluster that
 	// has not applied the CRD serves no such collection, and its libraries are
 	// still scanned and still reported.
@@ -244,6 +254,7 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	go watchCatalogs(o.client, catalogs.Metadata.ResourceVersion, o.wake)
 	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake)
 	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake)
+	go watchMediaPreferences(o.client, preferences.Metadata.ResourceVersion, o.wake)
 	go watchMetadataProviders(o.client, providers.Metadata.ResourceVersion, o.wake)
 
 	// The webhook endpoint runs for the life of the operator. A
@@ -305,6 +316,15 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", err)
 		players = &PlayerList{}
 	}
+	// The household zone is one setting per cluster, read once for the
+	// pass and stamped on every screen pod it stands. A list that fails
+	// reads as no zone, and the screens stay on UTC until the next pass.
+	preferences, err := ListMediaPreferences(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing media preferences: %v\n", err)
+		preferences = &MediaPreferencesList{}
+	}
+	o.timeZone = householdZone(preferences)
 	// The Jobs and the member pods are read once for the whole
 	// pass, because a Library's status reads both and the catalog step
 	// reads the pods again. A list that fails ends the pass: without the

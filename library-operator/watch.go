@@ -143,6 +143,32 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
+// This watcher wakes the loop on every MediaPreferences change, so a zone
+// the household just set rolls the screen pods without a backstop tick's
+// delay. The recovery is watchPlayers's, and so is the list that fails on a
+// cluster with no media-operator.
+func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := mediaPreferencesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause.get())
+		list, err := ListMediaPreferences(watchContext(), c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing media preferences to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // This watcher wakes the loop on every MetadataProvider change, so a key a
 // person has just declared is checked without a backstop tick's delay. The
 // recovery is watchLibraries's. A list that fails leaves the resume point

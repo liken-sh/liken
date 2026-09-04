@@ -342,6 +342,24 @@ func TestTheCatalogWatchListsAndWakes(t *testing.T) {
 // A Player change wakes the loop, so a screen that was delegated to
 // this operator stands without a backstop tick's delay. The watcher
 // lists the Players to resume and wakes on the list.
+func TestTheMediaPreferencesWatchListsAndWakes(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{})
+	api.answersLists(listTurn{version: "150"})
+
+	wake := startWatch(t, api, watchMediaPreferences, "42")
+
+	nextWatchRequest(t, api)
+	if got := nextListRequest(t, api); got != mediaPreferencesPath {
+		t.Errorf("listed %q, want %q", got, mediaPreferencesPath)
+	}
+	waitForWatchWake(t, wake)
+	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
+		t.Errorf("the second watch resumed from %q, want the list's 150", got)
+	}
+}
+
 func TestThePlayerWatchListsAndWakes(t *testing.T) {
 	useWatchRetryPause(t)
 	api := newWatchAPI()

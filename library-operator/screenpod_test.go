@@ -50,7 +50,7 @@ func houseLibraries() []Library {
 
 func testScreenPod(player *Player, libraries []Library) *Pod {
 	return buildScreenPod(player, libraries, testNamespaceCatalog(),
-		testBrowserImage, testCorrosionImage, defaultTopicBase)
+		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
 }
 
 // The pod's name, namespace, owner, and marks are what tie it to the
@@ -610,6 +610,50 @@ func TestScreenPodKeepsTheRemoteListsPairedByPosition(t *testing.T) {
 
 // A Player under an older media-operator publishes no bus block,
 // and its browser opens no connection and takes the keyboard alone.
+// The pass reads the household zone once and stamps it on the screen
+// pod it stands, so a cluster that states a zone shows local time on
+// every screen.
+func TestPassStampsTheHouseholdZoneOnTheScreen(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	cluster.preferences = &MediaPreferences{
+		Metadata: ObjectMeta{Name: mediaPreferencesName},
+		Spec:     MediaPreferencesSpec{TimeZone: "America/New_York"},
+	}
+
+	testOperator(t, cluster).pass()
+
+	pod := cluster.heldPod("den-tv-media-browser")
+	if pod == nil {
+		t.Fatal("no screen pod was created")
+	}
+	for _, variable := range pod.Spec.Containers[0].Env {
+		if variable.Name == timeZoneVariable && variable.Value == "America/New_York" {
+			return
+		}
+	}
+	t.Errorf("the screen pod carries no TZ: %v", pod.Spec.Containers[0].Env)
+}
+
+// The household zone reaches the browser as TZ, the name glibc reads,
+// so the clock and the day's draw follow the house. A cluster that states
+// none leaves the variable out, and the pod reads UTC.
+func TestScreenPodCarriesTheHouseholdZoneAsTZ(t *testing.T) {
+	pod := buildScreenPod(denScreen(), houseLibraries(), testNamespaceCatalog(),
+		testBrowserImage, testCorrosionImage, defaultTopicBase, "America/New_York")
+	environment := map[string]string{}
+	for _, variable := range pod.Spec.Containers[0].Env {
+		environment[variable.Name] = variable.Value
+	}
+	if environment[timeZoneVariable] != "America/New_York" {
+		t.Errorf("TZ = %q, want America/New_York", environment[timeZoneVariable])
+	}
+	if _, set := browserEnvironment(denScreen())[timeZoneVariable]; set {
+		t.Error("a cluster with no zone set TZ")
+	}
+}
+
 func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
 	environment := browserEnvironment(denScreen())
 

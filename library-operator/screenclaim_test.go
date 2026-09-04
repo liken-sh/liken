@@ -172,7 +172,7 @@ func shortUnschedulableGrace(t *testing.T) {
 // A screen pod as the scheduler left it, with the PodScheduled
 // condition the API server wrote and the time it wrote it.
 func unschedulableScreenPod(player *Player, catalog *NamespaceCatalog, since time.Time) *Pod {
-	pod := buildScreenPod(player, nil, catalog, testBrowserImage, testCorrosionImage, defaultTopicBase)
+	pod := buildScreenPod(player, nil, catalog, testBrowserImage, testCorrosionImage, defaultTopicBase, "")
 	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
 		panic(err)
 	}

@@ -338,6 +338,47 @@ type PlayerList struct {
 	Items    []Player `json:"items"`
 }
 
+// The one name a MediaPreferences may take. media-operator's CRD pins it,
+// and this operator reads the singleton by this name.
+const mediaPreferencesName = "default"
+
+// The household defaults media-operator owns, read here for one field:
+// the wall-clock zone every screen shows. Nothing is written back, so
+// the type carries that field alone.
+type MediaPreferences struct {
+	APIVersion string               `json:"apiVersion,omitempty"`
+	Kind       string               `json:"kind,omitempty"`
+	Metadata   ObjectMeta           `json:"metadata"`
+	Spec       MediaPreferencesSpec `json:"spec"`
+}
+
+// The one field of the household defaults this operator reads.
+type MediaPreferencesSpec struct {
+	// The household wall-clock zone, an IANA name like America/New_York.
+	// The browser pod reads it as TZ, so its clock and its day's draw
+	// follow the house and not UTC.
+	TimeZone string `json:"timeZone,omitempty"`
+}
+
+// The collection ListMediaPreferences answers. Its resourceVersion is
+// where the watch begins.
+type MediaPreferencesList struct {
+	Metadata ListMeta           `json:"metadata"`
+	Items    []MediaPreferences `json:"items"`
+}
+
+// The household zone the list holds: the default MediaPreferences' own,
+// or nothing where the cluster states none. A pod with no TZ reads UTC,
+// the way media-operator's own pods do.
+func householdZone(list *MediaPreferencesList) string {
+	for _, preferences := range list.Items {
+		if preferences.Metadata.Name == mediaPreferencesName {
+			return preferences.Spec.TimeZone
+		}
+	}
+	return ""
+}
+
 // The half of a Player's status this operator acts on. The idle block
 // is absent on a Player that stands no idle screen.
 type PlayerStatus struct {

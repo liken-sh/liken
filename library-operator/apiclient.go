@@ -210,6 +210,9 @@ const (
 	// read-only. A Player is media-operator's object, and this operator
 	// reads the collection to find the screens delegated to it.
 	playersPath = "/apis/" + playerAPIVersion + "/players"
+	// The MediaPreferences, cluster-scoped and read-only here, for the
+	// household zone the screen pods carry.
+	mediaPreferencesPath = "/apis/" + playerAPIVersion + "/mediapreferences"
 
 	libraryPrefix = "/apis/" + libraryAPIVersion + "/namespaces/"
 	corePrefix    = "/api/v1/namespaces/"
@@ -333,6 +336,18 @@ func PatchLibraryFinalizers(ctx context.Context, c *Client, namespace, name, res
 func ListPlayers(ctx context.Context, c *Client) (*PlayerList, error) {
 	list := &PlayerList{}
 	if err := c.RequestJSON(ctx, http.MethodGet, playersPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// ListMediaPreferences reads the household defaults with one request, on
+// the same terms as the Players: a cluster with no media-operator serves no
+// such collection, and the failure is the caller's to report and carry on
+// from.
+func ListMediaPreferences(ctx context.Context, c *Client) (*MediaPreferencesList, error) {
+	list := &MediaPreferencesList{}
+	if err := c.RequestJSON(ctx, http.MethodGet, mediaPreferencesPath, nil, list); err != nil {
 		return nil, err
 	}
 	return list, nil

@@ -180,12 +180,12 @@ func TestStandingCatalogStatusReportsTheNamespacesMembers(t *testing.T) {
 func TestStandingCatalogStatusReportsTheScreens(t *testing.T) {
 	catalog := testNamespaceCatalog()
 	onAClaim := buildScreenPod(denScreen(), nil, catalog,
-		testBrowserImage, testCorrosionImage, defaultTopicBase)
+		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
 	onAClaim.Spec.NodeName = "nuc-2"
 	onAClaim.Status.Phase = podRunning
 	kitchen := &Player{Metadata: ObjectMeta{Name: "kitchen-tv", Namespace: "house", UID: "kitchen-tv-uid"}}
 	onAnEmptyDir := buildScreenPod(kitchen, nil, nil,
-		testBrowserImage, testCorrosionImage, defaultTopicBase)
+		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
 	onAnEmptyDir.Status.Phase = podPending
 
 	status := standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), []Pod{

@@ -32,6 +32,8 @@ type fakeCluster struct {
 	// The Players media-operator would publish, which the operator reads
 	// and never writes.
 	players map[string]*Player
+	// The household defaults media-operator would publish, or nothing.
+	preferences *MediaPreferences
 	// The MetadataProviders the operator reads and writes the status of,
 	// and the Secrets it reads the keys out of.
 	providers map[string]*MetadataProvider
@@ -146,6 +148,12 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		list := PlayerList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.players) {
 			list.Items = append(list.Items, *f.players[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == mediaPreferencesPath:
+		list := MediaPreferencesList{Metadata: ListMeta{ResourceVersion: "1"}}
+		if f.preferences != nil {
+			list.Items = append(list.Items, *f.preferences)
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	case r.URL.Path == metadataProvidersPath:
