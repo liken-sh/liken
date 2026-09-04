@@ -13,7 +13,7 @@ use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::{Item, Screen, Step, facts, foot, person, stripes};
-use crate::catalog::{MovieDetails, MovieSet, Selection, Source};
+use crate::catalog::{MovieDetails, MovieSet, Query, Selection, Slot, Source};
 use crate::focus;
 use crate::posters::Posters;
 use crate::views::curtain::{Curtain, Head, Layer};
@@ -42,8 +42,18 @@ pub struct Set {
 }
 
 impl Set {
-    fn of(set: MovieSet, id: &str) -> Option<Self> {
-        let members: Vec<Item> = set.members.into_iter().map(Item::of).collect();
+    // The members are the slots of a `Set` query, so the strip draws the
+    // same slots a wall of the set would. `id` names the member this page is
+    // about.
+    fn of(set: MovieSet, query: &Query, id: &str) -> Option<Self> {
+        let Query::Set { library, .. } = query else {
+            return None;
+        };
+        let members: Vec<Item> = set
+            .members
+            .into_iter()
+            .map(|member| Item::of(query, Slot::of(library, "movies", member)))
+            .collect();
         let current = members.iter().position(|member| member.id == id)?;
         Some(Self {
             heading: set.title,
@@ -317,7 +327,11 @@ fn set_of(library: &str, id: &str, details: &MovieDetails, source: &mut dyn Sour
     if details.set_id.is_empty() {
         return None;
     }
-    Set::of(source.set(library, &details.set_id)?, id)
+    let query = Query::Set {
+        library: library.to_string(),
+        id: details.set_id.clone(),
+    };
+    Set::of(source.set(library, &details.set_id)?, &query, id)
 }
 
 fn facts_of(details: &MovieDetails) -> String {

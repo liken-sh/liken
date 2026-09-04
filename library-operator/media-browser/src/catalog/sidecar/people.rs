@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 
 use super::{collect, item_table};
-use crate::catalog::{CreditSlot, Credits, Person, Work};
+use crate::catalog::{CreditSlot, Credits, Person, Slot, Title};
 
 /// One title's credits, split into the three stripes, as a list of one.
 /// The join to contributors is what says whether a slot has a headshot,
@@ -114,13 +114,25 @@ pub fn person(connection: &Connection, library: &str, path: &str) -> rusqlite::R
     Ok(found)
 }
 
+/// The person's name as a list of one, or an empty list where the
+/// library holds no entry under that path. It is the name a wall's heading
+/// carries.
+pub fn name(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<String>> {
+    collect(
+        connection,
+        "SELECT name FROM contributors WHERE library = ? AND path = ?",
+        &[&library, &path],
+        |row| row.get(0),
+    )
+}
+
 /// Every title the person is credited in, across every library that holds
 /// them, newest release first and a title with no release last. A title
 /// the person holds more than one credit on is one row, with the parts
 /// joined.
-pub fn works(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Work>> {
+pub fn works(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Slot>> {
     let kinds = kinds(connection)?;
-    let mut works: Vec<Work> = Vec::new();
+    let mut works: Vec<Slot> = Vec::new();
     let mut parts: Vec<Vec<(u8, String)>> = Vec::new();
     let mut placed: HashMap<(String, String), usize> = HashMap::new();
 
@@ -159,15 +171,17 @@ pub fn works(connection: &Connection, library: &str, path: &str) -> rusqlite::Re
             let slot = *placed
                 .entry((other.clone(), id.clone()))
                 .or_insert_with(|| {
-                    works.push(Work {
-                        library: other.clone(),
-                        kind: kind.clone(),
-                        id,
-                        title,
-                        released,
-                        art,
-                        parts: String::new(),
-                    });
+                    works.push(Slot::of(
+                        &other,
+                        kind,
+                        Title {
+                            id,
+                            title,
+                            released,
+                            art,
+                            ..Title::default()
+                        },
+                    ));
                     parts.push(Vec::new());
                     works.len() - 1
                 });

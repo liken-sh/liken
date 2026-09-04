@@ -12,6 +12,7 @@ pub mod loading;
 pub mod movie;
 pub mod person;
 pub mod series;
+pub mod slots;
 pub mod stripes;
 pub mod volume;
 pub mod wall;
@@ -22,7 +23,7 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Theme};
 
-use crate::catalog::{Selection, Source, Title};
+use crate::catalog::{Query, Selection, Slot, Source};
 use crate::posters::Posters;
 use crate::views::Card;
 use crate::views::curtain::Curtain;
@@ -31,7 +32,8 @@ use crate::views::curtain::Curtain;
 pub enum Screen {
     /// Every library in the catalog. The browser opens on this screen.
     Libraries(libraries::Libraries),
-    /// One library's titles, as a wall of art under a band.
+    /// The slots one query answers, as a wall of art under a band that
+    /// carries the query's heading.
     Wall(wall::Wall),
     /// One movie's page. It is boxed because it is much the largest
     /// variant, and every stack entry would otherwise carry its size.
@@ -138,37 +140,50 @@ impl Screen {
     }
 }
 
-/// One title, as a wall slot or a strip poster draws it.
+/// One title, as a wall slot or a strip poster draws it. Every item
+/// carries its own library and kind, because a select opens the page for
+/// the slot's kind and a wall may span libraries. The id is what a descent
+/// carries. The caption is the line under every slot, the line is what the
+/// focused slot shows, and `under` is the second caption line, empty on
+/// every wall but a person's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
-    /// The item's provider-scoped id, which a descent carries.
+    pub library: String,
+    pub kind: String,
     pub id: String,
-    /// The name a person reads, which is the caption under every slot.
     pub name: String,
-    /// The line under the focused slot: the title, the year, the
-    /// runtime, and the content rating, each only where the row carries
-    /// it.
+    pub caption: String,
     pub line: facts::Line,
-    /// The art path the poster store resolves, empty where the item has
-    /// none.
+    pub under: String,
     pub art: String,
 }
 
 impl Item {
-    /// One title as a slot. The line is built once here, at the read,
+    /// One slot as an item. The query decides the caption: a person's works
+    /// are read by year, so their caption carries it, and every other wall
+    /// captions the name alone. Both lines are built once here, at the read,
     /// and not on every frame.
-    pub fn of(title: Title) -> Self {
+    pub fn of(query: &Query, slot: Slot) -> Self {
+        let year = facts::year(&slot.released);
+        let caption = match query {
+            Query::Person { .. } => facts::joined(&[&slot.title, year]),
+            Query::Library { .. } | Query::Set { .. } => slot.title.clone(),
+        };
         let line = facts::Line::of(&[
-            &title.title,
-            facts::year(&title.released),
-            &facts::runtime(title.duration),
-            &title.rating,
+            &slot.title,
+            year,
+            &facts::runtime(slot.duration),
+            &slot.rating,
         ]);
         Self {
-            id: title.id,
-            name: title.title,
+            library: slot.library,
+            kind: slot.kind,
+            id: slot.id,
+            name: slot.title,
+            caption,
             line,
-            art: title.art,
+            under: slot.parts,
+            art: slot.art,
         }
     }
 }
@@ -178,8 +193,20 @@ impl Card for Item {
         &self.art
     }
 
+    fn library(&self) -> &str {
+        &self.library
+    }
+
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn caption(&self) -> &str {
+        &self.caption
+    }
+
+    fn under(&self) -> &str {
+        &self.under
     }
 
     fn line_fitting(&self, chars: usize) -> &str {
@@ -191,31 +218,63 @@ impl Card for Item {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_slot_carries_the_facts_its_row_holds() {
-        let item = Item::of(Title {
+    const LIBRARY: &str = "sample/features";
+
+    fn library() -> Query {
+        Query::Library {
+            library: LIBRARY.into(),
+        }
+    }
+
+    fn specimen() -> Slot {
+        Slot {
+            library: LIBRARY.into(),
+            kind: "movies".into(),
             id: "movie:sample:1".into(),
             title: "Specimen 0001".into(),
             released: "1987-04-02".into(),
             art: "posters/1.jpg".into(),
             duration: 5_820,
             rating: "PG-13".into(),
-        });
+            parts: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_slot_carries_the_facts_its_row_holds() {
+        let item = Item::of(&library(), specimen());
         assert_eq!(item.line.words(), "Specimen 0001 · 1987 · 1h 37m · PG-13");
         assert_eq!(item.name, "Specimen 0001");
+        assert_eq!(item.caption(), "Specimen 0001");
+        assert_eq!(item.under(), "");
         assert_eq!(item.art, "posters/1.jpg");
+        assert_eq!(item.library(), LIBRARY);
+        assert_eq!(item.kind, "movies");
+    }
+
+    #[test]
+    fn a_persons_work_is_captioned_with_its_year_and_its_parts() {
+        let query = Query::Person {
+            library: LIBRARY.into(),
+            path: ".contributors/A Player".into(),
+        };
+        let item = Item::of(
+            &query,
+            Slot {
+                parts: "Director, as The Part".into(),
+                duration: 0,
+                rating: String::new(),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "Specimen 0001 · 1987");
+        assert_eq!(item.line_fitting(80), "Specimen 0001 · 1987");
+        assert_eq!(item.under(), "Director, as The Part");
     }
 
     #[test]
     fn a_narrow_band_drops_a_slot_s_facts_from_the_end() {
-        let item = Item::of(Title {
-            id: "movie:sample:1".into(),
-            title: "Specimen 0001".into(),
-            released: "1987-04-02".into(),
-            art: "posters/1.jpg".into(),
-            duration: 5_820,
-            rating: "PG-13".into(),
-        });
+        let item = Item::of(&library(), specimen());
         assert_eq!(
             item.line_fitting(37),
             "Specimen 0001 · 1987 · 1h 37m · PG-13"
@@ -228,11 +287,14 @@ mod tests {
 
     #[test]
     fn a_slot_leaves_out_what_its_row_does_not_hold() {
-        let item = Item::of(Title {
-            id: "movie:sample:2".into(),
-            title: "Specimen 0002".into(),
-            ..Title::default()
-        });
+        let item = Item::of(
+            &library(),
+            Slot {
+                id: "movie:sample:2".into(),
+                title: "Specimen 0002".into(),
+                ..Slot::default()
+            },
+        );
         assert_eq!(item.line.words(), "Specimen 0002");
         assert_eq!(item.line_fitting(4), "Specimen 0002");
     }

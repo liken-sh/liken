@@ -12,9 +12,16 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Credit, FileFacts, LibraryEntry, MovieDetails, PlayItem, Presentation, Selection,
-    SeriesDetails, Source,
+    Credit, FileFacts, LibraryEntry, MovieDetails, PlayItem, Presentation, Query, Selection,
+    SeriesDetails, Slot, Source,
 };
+
+// One library's wall, as the libraries screen opens it.
+fn library(name: &str) -> Query {
+    Query::Library {
+        library: name.into(),
+    }
+}
 
 // The tests build their fixture from the schema every agent loads, the
 // one file in corrosion/schema, so a schema change tests the reads

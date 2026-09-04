@@ -3,7 +3,15 @@
 // is credited in across the libraries that share their ids.
 
 use super::*;
-use crate::catalog::{CreditSlot, Credits, Work};
+use crate::catalog::{Answer, CreditSlot, Credits};
+
+// One person's wall, as their page opens it.
+fn person_wall(library: &str, path: &str) -> Query {
+    Query::Person {
+        library: library.into(),
+        path: path.into(),
+    }
+}
 
 // One person's entry in one library's store. `files` is the biography and
 // the headshot, in that order, as the contributor facts write them.
@@ -320,11 +328,12 @@ fn a_persons_works_gather_every_library_newest_first() {
     a_worked_person(&path);
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    let works = source.works("default/films", ".contributors/first");
+    let answer = source.wall(&person_wall("default/films", ".contributors/first"));
+    assert_eq!(answer.name, "A First");
     assert_eq!(
-        works,
+        answer.slots,
         [
-            Work {
+            Slot {
                 library: "default/shows".into(),
                 kind: "series".into(),
                 id: "three".into(),
@@ -332,8 +341,9 @@ fn a_persons_works_gather_every_library_newest_first() {
                 released: "2004".into(),
                 art: "three.jpg".into(),
                 parts: "Actor".into(),
+                ..Slot::default()
             },
-            Work {
+            Slot {
                 library: "default/films".into(),
                 kind: "movies".into(),
                 id: "one".into(),
@@ -341,8 +351,9 @@ fn a_persons_works_gather_every_library_newest_first() {
                 released: "1994".into(),
                 art: "one.jpg".into(),
                 parts: "Director, Writer".into(),
+                ..Slot::default()
             },
-            Work {
+            Slot {
                 library: "default/films".into(),
                 kind: "movies".into(),
                 id: "two".into(),
@@ -350,6 +361,7 @@ fn a_persons_works_gather_every_library_newest_first() {
                 released: String::new(),
                 art: "two.jpg".into(),
                 parts: "as Tony".into(),
+                ..Slot::default()
             },
         ]
     );
@@ -362,9 +374,49 @@ fn a_person_credited_in_nothing_has_an_empty_wall() {
     a_person_in_two_libraries(&path);
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    assert!(
-        source
-            .works("default/films", ".contributors/first")
-            .is_empty()
+    let answer = source.wall(&person_wall("default/films", ".contributors/first"));
+    assert_eq!(answer.name, "A First");
+    assert!(answer.slots.is_empty());
+}
+
+#[test]
+fn a_person_the_library_does_not_hold_answers_nothing() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_worked_person(&path);
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    assert_eq!(
+        source.wall(&person_wall("default/films", ".contributors/nobody")),
+        Answer::default()
+    );
+}
+
+#[test]
+fn a_sets_wall_is_headed_by_its_title_and_holds_its_members_in_release_order() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_set(&path, "default/films", "set:one", "The Set");
+    insert_page(&path, "default/films", "two", "1999", "set:one", BODY);
+    insert_page(&path, "default/films", "one", "1994", "set:one", BODY);
+    insert_page(&path, "default/films", "three", "2003", "", BODY);
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let set = Query::Set {
+        library: "default/films".into(),
+        id: "set:one".into(),
+    };
+    let answer = source.wall(&set);
+    assert_eq!(answer.name, "The Set");
+    let ids: Vec<&str> = answer.slots.iter().map(|slot| slot.id.as_str()).collect();
+    assert_eq!(ids, ["one", "two"]);
+    assert_eq!(answer.slots[0].kind, "movies");
+    assert_eq!(answer.slots[0].library, "default/films");
+    assert_eq!(
+        source.wall(&Query::Set {
+            library: "default/films".into(),
+            id: "set:none".into(),
+        }),
+        Answer::default()
     );
 }

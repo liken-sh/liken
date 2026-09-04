@@ -42,7 +42,7 @@ fn libraries_come_back_counted_and_ordered_by_name() {
 }
 
 #[test]
-fn titles_come_back_in_sort_key_order() {
+fn a_library_wall_comes_back_in_sort_key_order() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_movie(
@@ -68,35 +68,26 @@ fn titles_come_back_in_sort_key_order() {
     );
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    let titles = source.titles("default/films", "movies");
-    let ids: Vec<&str> = titles.iter().map(|title| title.id.as_str()).collect();
+    let answer = source.wall(&library("default/films"));
+    assert_eq!(answer.name, "films");
+    let ids: Vec<&str> = answer.slots.iter().map(|slot| slot.id.as_str()).collect();
     assert_eq!(ids, ["movie:tmdb:603", "movie:tmdb:604"]);
-    assert_eq!(titles[0].title, "The Matrix");
-    assert_eq!(titles[0].released, "1999");
-    assert_eq!(titles[0].art, "movie:tmdb:603.jpg");
-}
-
-#[test]
-fn titles_read_the_table_the_kind_names() {
-    let dir = TempDir::new().unwrap();
-    let path = fixture(&dir);
-    insert_movie(
-        &path,
-        "default/mixed",
-        "movie:tmdb:603",
-        "The Matrix",
-        "matrix",
+    assert_eq!(
+        answer.slots[0],
+        Slot {
+            library: "default/films".into(),
+            kind: "movies".into(),
+            id: "movie:tmdb:603".into(),
+            title: "The Matrix".into(),
+            released: "1999".into(),
+            art: "movie:tmdb:603.jpg".into(),
+            ..Slot::default()
+        }
     );
-    insert_series(&path, "default/mixed", "series:tvdb:73739", "Lost", "lost");
-
-    let mut source = SidecarSource::new(&path, NO_AGENT);
-    let series = source.titles("default/mixed", "series");
-    assert_eq!(series.len(), 1);
-    assert_eq!(series[0].id, "series:tvdb:73739");
 }
 
 #[test]
-fn titles_refuse_a_kind_that_names_no_item_table() {
+fn a_series_library_wall_stamps_every_slot_with_its_kind() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_movie(
@@ -106,15 +97,15 @@ fn titles_refuse_a_kind_that_names_no_item_table() {
         "The Matrix",
         "matrix",
     );
+    insert_series(&path, "default/shows", "series:tvdb:73739", "Lost", "lost");
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    assert!(source.titles("default/films", "episodes").is_empty());
-    assert!(
-        source
-            .titles("default/films", "movies; DROP TABLE movies")
-            .is_empty()
-    );
-    assert!(source.titles("default/films", "").is_empty());
+    let slots = source.wall(&library("default/shows")).slots;
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].id, "series:tvdb:73739");
+    assert_eq!(slots[0].kind, "series");
+    assert_eq!(slots[0].library, "default/shows");
+    assert!(source.wall(&library("default/empty")).slots.is_empty());
 }
 
 #[test]
@@ -153,7 +144,7 @@ fn a_missing_file_reads_as_empty_until_the_sidecar_writes_it() {
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
     assert!(source.libraries().is_empty());
-    assert!(source.titles("default/films", "movies").is_empty());
+    assert!(source.wall(&library("default/films")).slots.is_empty());
     assert!(
         source
             .episodes("default/shows", "series:tvdb:73739")
@@ -189,7 +180,7 @@ fn a_file_without_the_schema_reads_as_empty() {
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
     assert!(source.libraries().is_empty());
-    assert!(source.titles("default/films", "movies").is_empty());
+    assert!(source.wall(&library("default/films")).slots.is_empty());
 }
 
 #[test]

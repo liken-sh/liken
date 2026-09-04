@@ -98,7 +98,6 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         }
 
         let region = region(bounds);
-        let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, LINES);
         // The clip reaches up into the space over the first row, so the
         // mark of a focused slot there draws whole and the head stays
         // clear.
@@ -109,27 +108,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             region.height + wall::HEAD,
         );
         frame.with_clip(clip, |frame| {
-            wall::draw(
-                frame,
-                posters,
-                &wall::Grid {
-                    items: &person.works,
-                    focus: Some(person.focus),
-                    marked: true,
-                    library: &person.library,
-                    ratio: wall::POSTER,
-                    columns: wall::COLUMNS,
-                    lines: LINES,
-                    offset: wall::scrolled(
-                        person.focus,
-                        person.works.len(),
-                        wall::COLUMNS,
-                        &cells,
-                        region.height,
-                    ),
-                    region,
-                },
-            );
+            person.works.draw(frame, posters, region, true, LINES);
         });
 
         vec![frame.into_geometry()]

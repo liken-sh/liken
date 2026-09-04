@@ -3,8 +3,8 @@
 // resembles a real library.
 
 use crate::catalog::{
-    Credit, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
-    Selection, SeriesDetails, Source, Title, Work,
+    Answer, Credit, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person,
+    PlayItem, Query, Selection, SeriesDetails, Slot, Source, Title, library_name,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
@@ -46,20 +46,29 @@ impl Source for Catalog {
         ]
     }
 
-    fn titles(&mut self, _library: &str, kind: &str) -> Vec<Title> {
-        if kind == "movies" {
-            (1..=MOVIES).map(movie).collect()
-        } else {
-            (1..=SERIALS)
-                .map(|number| Title {
-                    id: format!("series:sample:{number:02}"),
-                    title: format!("Serial {number:02}"),
-                    released: (1960 + number * 5).to_string(),
-                    art: format!("art/serial-{number:02}.jpg"),
-                    duration: 0,
-                    rating: "TV-14".into(),
-                })
-                .collect()
+    fn wall(&mut self, query: &Query) -> Answer {
+        match query {
+            Query::Library { library } => Answer {
+                name: library_name(library).to_string(),
+                slots: titles(library),
+            },
+            Query::Person { library, path } => Answer {
+                name: people::person(library, path)
+                    .map(|person| person.name)
+                    .unwrap_or_default(),
+                slots: people::works(library, path),
+            },
+            Query::Set { library, id } => match self.set(library, id) {
+                Some(set) => Answer {
+                    name: set.title,
+                    slots: set
+                        .members
+                        .into_iter()
+                        .map(|member| Slot::of(library, "movies", member))
+                        .collect(),
+                },
+                None => Answer::default(),
+            },
         }
     }
 
@@ -208,10 +217,6 @@ impl Source for Catalog {
         people::person(library, path)
     }
 
-    fn works(&mut self, library: &str, path: &str) -> Vec<Work> {
-        people::works(library, path)
-    }
-
     // The sample invents titles and no files, so a select on one starts
     // nothing. A workstation run browses and plays nothing.
     fn play(&mut self, _library: &str, _selection: &Selection) -> Vec<PlayItem> {
@@ -229,6 +234,33 @@ impl Source for Catalog {
 const PLOT: &str = "A survey party reaches the coppice at dusk and finds the ground already \
      turned. What they take for a season of quiet work becomes a study of the \
      people who left the marks, and of the reason the marks were left at all. ";
+
+// One library's invented slots: the movies for the features library,
+// and the serials for any other, each slot stamped with that library and
+// its kind.
+fn titles(library: &str) -> Vec<Slot> {
+    if library == "sample/features" {
+        return (1..=MOVIES)
+            .map(|number| Slot::of(library, "movies", movie(number)))
+            .collect();
+    }
+    (1..=SERIALS)
+        .map(|number| {
+            Slot::of(
+                library,
+                "series",
+                Title {
+                    id: format!("series:sample:{number:02}"),
+                    title: format!("Serial {number:02}"),
+                    released: (1960 + number * 5).to_string(),
+                    art: format!("art/serial-{number:02}.jpg"),
+                    duration: 0,
+                    rating: "TV-14".into(),
+                },
+            )
+        })
+        .collect()
+}
 
 // One invented movie, the same row every time.
 fn movie(number: i64) -> Title {
@@ -295,22 +327,85 @@ impl Posters for NoArt {
 mod tests {
     use super::*;
 
+    fn library(name: &str) -> Query {
+        Query::Library {
+            library: name.into(),
+        }
+    }
+
     #[test]
     fn the_counts_match_the_entries() {
         let mut catalog = Catalog;
         let libraries = catalog.libraries();
-        let movies = catalog.titles("sample/features", "movies");
-        let serials = catalog.titles("sample/serials", "series");
-        assert_eq!(movies.len() as u64, libraries[0].items);
-        assert_eq!(serials.len() as u64, libraries[1].items);
+        let movies = catalog.wall(&library("sample/features"));
+        let serials = catalog.wall(&library("sample/serials"));
+        assert_eq!(movies.slots.len() as u64, libraries[0].items);
+        assert_eq!(serials.slots.len() as u64, libraries[1].items);
+        assert_eq!(movies.name, "features");
+        assert_eq!(serials.name, "serials");
+    }
+
+    #[test]
+    fn every_slot_of_a_library_wall_names_its_library_and_kind() {
+        let mut catalog = Catalog;
+        let movies = catalog.wall(&library("sample/features")).slots;
+        assert!(
+            movies
+                .iter()
+                .all(|slot| slot.library == "sample/features" && slot.kind == "movies")
+        );
+        let serials = catalog.wall(&library("sample/serials")).slots;
+        assert!(
+            serials
+                .iter()
+                .all(|slot| slot.library == "sample/serials" && slot.kind == "series")
+        );
+    }
+
+    #[test]
+    fn a_persons_wall_is_headed_by_their_name() {
+        let mut catalog = Catalog;
+        let answer = catalog.wall(&Query::Person {
+            library: "sample/features".into(),
+            path: ".contributors/Player 0001-1".into(),
+        });
+        assert_eq!(answer.name, "Player 0001-1");
+        assert_eq!(answer.slots.len(), 3);
+        assert_eq!(
+            catalog.wall(&Query::Person {
+                library: "sample/features".into(),
+                path: "nonsense".into(),
+            }),
+            Answer::default()
+        );
+    }
+
+    #[test]
+    fn a_sets_wall_is_headed_by_its_title_and_holds_its_members() {
+        let mut catalog = Catalog;
+        let answer = catalog.wall(&Query::Set {
+            library: "sample/features".into(),
+            id: "set:sample:01".into(),
+        });
+        assert!(answer.name.starts_with("The Specimen Cycle"));
+        assert_eq!(answer.slots.len() as i64, PER_SET);
+        assert_eq!(answer.slots[0].id, "movie:sample:0001");
+        assert_eq!(answer.slots[0].kind, "movies");
+        assert_eq!(
+            catalog.wall(&Query::Set {
+                library: "sample/features".into(),
+                id: "set:sample:77".into(),
+            }),
+            Answer::default()
+        );
     }
 
     #[test]
     fn the_catalog_is_deterministic() {
         let mut catalog = Catalog;
         assert_eq!(
-            catalog.titles("sample/features", "movies"),
-            catalog.titles("sample/features", "movies")
+            catalog.wall(&library("sample/features")),
+            catalog.wall(&library("sample/features"))
         );
         assert_eq!(
             catalog.episodes("sample/serials", "series:sample:03"),
@@ -321,18 +416,14 @@ mod tests {
     #[test]
     fn every_name_is_invented() {
         let mut catalog = Catalog;
-        let movies = catalog.titles("sample/features", "movies");
+        let movies = catalog.wall(&library("sample/features")).slots;
         assert!(
             movies
                 .iter()
-                .all(|title| title.title.starts_with("Specimen "))
+                .all(|slot| slot.title.starts_with("Specimen "))
         );
-        let serials = catalog.titles("sample/serials", "series");
-        assert!(
-            serials
-                .iter()
-                .all(|title| title.title.starts_with("Serial "))
-        );
+        let serials = catalog.wall(&library("sample/serials")).slots;
+        assert!(serials.iter().all(|slot| slot.title.starts_with("Serial ")));
     }
 
     #[test]

@@ -12,11 +12,10 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Length, Theme};
 
-use super::{Screen, Step, facts, movie, series};
-use crate::catalog::{Source, Work};
-use crate::focus;
+use super::slots::Slots;
+use super::{Step, facts};
+use crate::catalog::{Query, Source};
 use crate::posters::Posters;
-use crate::views::{Card, wall};
 
 // The file every contributor entry holds their headshot in, and
 // the file it holds their biography in.
@@ -26,72 +25,6 @@ const BIOGRAPHY: &str = "biography.txt";
 // How much of a biography file the page reads. The page draws a
 // few lines of it, so a file longer than this is cut before it is held.
 const BIOGRAPHY_CHARS: usize = 2_000;
-
-/// One title the person is credited in, as one slot of the wall.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Credited {
-    /// The library that holds the title, as `namespace/name`.
-    pub library: String,
-    /// That library's kind, `movies` or `series`.
-    pub kind: String,
-    /// The title's provider-scoped id inside its library.
-    pub id: String,
-    /// The name a person reads.
-    pub name: String,
-    /// The line under the slot: the title and its year.
-    pub caption: String,
-    /// The line under the focused slot: the title and its year, whole
-    /// where they fit.
-    pub line: facts::Line,
-    /// The second line under the slot: the parts the person played.
-    pub parts: String,
-    /// The path of the title's poster, relative to its library.
-    pub art: String,
-}
-
-impl Credited {
-    // One work as a slot. Both lines are built once here, at the
-    // read, and not on every frame.
-    fn of(work: Work) -> Self {
-        let year = facts::year(&work.released);
-        Self {
-            caption: facts::joined(&[&work.title, year]),
-            line: facts::Line::of(&[&work.title, year]),
-            parts: work.parts,
-            library: work.library,
-            kind: work.kind,
-            id: work.id,
-            name: work.title,
-            art: work.art,
-        }
-    }
-}
-
-impl Card for Credited {
-    fn art(&self) -> &str {
-        &self.art
-    }
-
-    fn library(&self) -> &str {
-        &self.library
-    }
-
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn caption(&self) -> &str {
-        &self.caption
-    }
-
-    fn under(&self) -> &str {
-        &self.parts
-    }
-
-    fn line_fitting(&self, chars: usize) -> &str {
-        self.line.fitting(chars)
-    }
-}
 
 /// The person's page: the entry the page opened from, the files it
 /// draws, the wall of works, and where focus is on that wall.
@@ -121,11 +54,9 @@ pub struct Person {
     /// The biography, once the page read it off the volume. The
     /// page cuts it to a few lines.
     pub biography: String,
-    /// The titles the person is credited in, in the order the
-    /// catalog answered them.
-    pub works: Vec<Credited>,
-    /// The focused work's index.
-    pub focus: usize,
+    /// The person's works as the slots of a `Person` query, drawn through
+    /// the same code path as the library wall, with the focus inside it.
+    pub works: Slots,
 }
 
 impl Person {
@@ -133,11 +64,13 @@ impl Person {
     /// no entry under that directory. Focus lands on the first work.
     pub fn open(library: &str, path: &str, source: &mut dyn Source) -> Option<Self> {
         let entry = source.person(library, path)?;
-        let works = source
-            .works(library, path)
-            .into_iter()
-            .map(Credited::of)
-            .collect();
+        let works = Slots::open(
+            Query::Person {
+                library: library.to_string(),
+                path: path.to_string(),
+            },
+            source,
+        );
         Some(Self {
             library: library.to_string(),
             path: path.to_string(),
@@ -149,7 +82,6 @@ impl Person {
             biography_library: entry.biography_library,
             biography: String::new(),
             works,
-            focus: 0,
         })
     }
 
@@ -160,9 +92,9 @@ impl Person {
         let Some(fresh) = Self::open(&self.library, &self.path, source) else {
             return;
         };
-        let focus = self.focus;
+        let focus = self.works.focus;
         *self = fresh;
-        self.focus = focus.min(self.works.len().saturating_sub(1));
+        self.works.focus = focus.min(self.works.items.len().saturating_sub(1));
     }
 
     /// Read the biography off the library's volume. It is a file
@@ -185,37 +117,13 @@ impl Person {
     /// Fold one press in. The arrows move across the wall, and
     /// select opens the title's own page.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
-        if key != "enter" {
-            self.focus = focus::wall(self.focus, self.works.len(), wall::COLUMNS, key);
-            return Step::Stay;
-        }
-        let Some(work) = self.works.get(self.focus) else {
-            return Step::Stay;
-        };
-        match work.kind.as_str() {
-            "series" => match series::Series::open(&work.library, &work.id, source) {
-                Some(page) => Step::Open(Screen::Series(Box::new(page))),
-                None => Step::Stay,
-            },
-            _ => match movie::Movie::open(&work.library, &work.id, source) {
-                Some(page) => Step::Open(Screen::Movie(Box::new(page))),
-                None => Step::Stay,
-            },
-        }
+        self.works.key(key, source)
     }
 
     /// The library and the backdrop the focused work's page draws
     /// over, so the store decodes it while focus rests.
     pub fn resting(&self, source: &mut dyn Source) -> Option<(String, String)> {
-        let work = self.works.get(self.focus)?;
-        let backdrop = match work.kind.as_str() {
-            "series" => source.series(&work.library, &work.id)?.backdrop,
-            _ => source.movie(&work.library, &work.id)?.backdrop,
-        };
-        if backdrop.is_empty() {
-            return None;
-        }
-        Some((work.library.clone(), backdrop))
+        self.works.resting(source)
     }
 
     /// The view: the head and the wall of works, on one canvas.

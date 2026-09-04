@@ -88,7 +88,7 @@ fn a_sibling_in_the_strip_replaces_the_page_and_back_reaches_the_wall() {
 
     browser.key("escape");
 
-    assert_eq!(showing_wall(&browser).focus, 0);
+    assert_eq!(showing_wall(&browser).slots.focus, 0);
 }
 
 #[test]

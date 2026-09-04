@@ -10,9 +10,9 @@ fn a_title_carries_the_duration_and_the_rating_its_row_holds() {
     insert_page(&path, "default/films", "one", "1994", "", BODY);
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    let titles = source.titles("default/films", "movies");
-    assert_eq!(titles[0].duration, 6720);
-    assert_eq!(titles[0].rating, "PG");
+    let slots = source.wall(&library("default/films")).slots;
+    assert_eq!(slots[0].duration, 6720);
+    assert_eq!(slots[0].rating, "PG");
 }
 
 #[test]
@@ -22,9 +22,9 @@ fn a_title_whose_body_names_no_rating_carries_none() {
     insert_movie(&path, "default/films", "one", "Film one", "film one");
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    let titles = source.titles("default/films", "movies");
-    assert_eq!(titles[0].rating, "");
-    assert_eq!(titles[0].duration, 0);
+    let slots = source.wall(&library("default/films")).slots;
+    assert_eq!(slots[0].rating, "");
+    assert_eq!(slots[0].duration, 0);
 }
 
 #[test]

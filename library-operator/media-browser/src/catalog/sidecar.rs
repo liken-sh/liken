@@ -9,8 +9,8 @@ use std::sync::atomic::Ordering;
 use rusqlite::{Connection, OpenFlags, Row};
 
 use crate::catalog::{
-    Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem, Selection,
-    SeriesDetails, Source, Title, Work,
+    Answer, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
+    Query, Selection, SeriesDetails, Slot, Source, library_name,
 };
 use crate::harness::Waker;
 
@@ -97,6 +97,26 @@ fn item_table(kind: &str) -> Option<&'static str> {
     }
 }
 
+// One library's slots come off both item tables in one read. A library
+// has one kind, so one half of the union is empty and the whole is that
+// kind's rows, each stamped with its kind. The library binds once as
+// `?1` for both halves, and the sort key is selected only to order the
+// union.
+fn library_slots(connection: &Connection, library: &str) -> rusqlite::Result<Vec<Slot>> {
+    let sql = format!(
+        "SELECT * FROM (\
+           SELECT {columns}, 'movies' AS kind, sort_key FROM movies WHERE library = ?1 \
+           UNION ALL \
+           SELECT {columns}, 'series' AS kind, sort_key FROM series WHERE library = ?1\
+         ) ORDER BY sort_key",
+        columns = item::COLUMNS
+    );
+    collect(connection, &sql, &[&library], |row| {
+        let kind: String = row.get(6)?;
+        Ok(Slot::of(library, &kind, item::title(row)?))
+    })
+}
+
 fn collect<T>(
     connection: &Connection,
     sql: &str,
@@ -129,15 +149,34 @@ impl Source for SidecarSource {
         })
     }
 
-    fn titles(&mut self, library: &str, kind: &str) -> Vec<Title> {
-        let Some(table) = item_table(kind) else {
-            return Vec::new();
-        };
-        let sql = format!(
-            "SELECT {} FROM {table} WHERE library = ? ORDER BY sort_key",
-            item::COLUMNS
-        );
-        self.read(|connection| collect(connection, &sql, &[&library], item::title))
+    fn wall(&mut self, query: &Query) -> Answer {
+        match query {
+            Query::Library { library } => Answer {
+                name: library_name(library).to_string(),
+                slots: self.read(|connection| library_slots(connection, library)),
+            },
+            Query::Person { library, path } => Answer {
+                name: self
+                    .read(|connection| people::name(connection, library, path))
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default(),
+                slots: self.read(|connection| people::works(connection, library, path)),
+            },
+            Query::Set { library, id } => {
+                let Some(set) = self.set(library, id) else {
+                    return Answer::default();
+                };
+                Answer {
+                    name: set.title,
+                    slots: set
+                        .members
+                        .into_iter()
+                        .map(|member| Slot::of(library, "movies", member))
+                        .collect(),
+                }
+            }
+        }
     }
 
     fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails> {
@@ -192,10 +231,6 @@ impl Source for SidecarSource {
         self.read(|connection| people::person(connection, library, path))
             .into_iter()
             .next()
-    }
-
-    fn works(&mut self, library: &str, path: &str) -> Vec<Work> {
-        self.read(|connection| people::works(connection, library, path))
     }
 
     fn changed(&mut self) -> bool {

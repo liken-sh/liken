@@ -2,7 +2,7 @@
 // person's page, and the wall of what they are credited in.
 
 use super::{movie, trailing};
-use crate::catalog::{CreditSlot, Credits, Person, Work};
+use crate::catalog::{CreditSlot, Credits, Person, Slot};
 
 // The directory every invented person's entry sits under, the way a
 // library's contributor store names them.
@@ -58,22 +58,21 @@ pub fn person(library: &str, path: &str) -> Option<Person> {
     })
 }
 
-// Every invented person acts in the first three movies, so a person's
-// page opens on a wall of three.
-pub fn works(library: &str, path: &str) -> Vec<Work> {
+/// Every invented person acts in the first three movies, so a person's
+/// page opens on a wall of three. The slots carry no duration and no
+/// rating, because the sidecar's works read carries neither, and the
+/// sample answers the same shape.
+pub fn works(library: &str, path: &str) -> Vec<Slot> {
     if !path.starts_with(CONTRIBUTORS) {
         return Vec::new();
     }
-    let mut works: Vec<Work> = (1..=3)
+    let mut works: Vec<Slot> = (1..=3)
         .map(movie)
-        .map(|title| Work {
-            library: library.to_string(),
-            kind: "movies".into(),
-            id: title.id,
-            title: title.title,
-            released: title.released,
-            art: title.art,
+        .map(|title| Slot {
             parts: "as Part 1".into(),
+            duration: 0,
+            rating: String::new(),
+            ..Slot::of(library, "movies", title)
         })
         .collect();
     works.sort_by(|one, other| other.released.cmp(&one.released));

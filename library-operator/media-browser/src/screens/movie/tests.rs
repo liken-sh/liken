@@ -2,9 +2,10 @@
 // body, and where a press takes focus.
 
 use super::*;
+use crate::catalog::Answer;
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, FileFacts, LibraryEntry, Person, PlayItem, SeriesDetails,
-    Title, Work,
+    Credit, CreditSlot, Credits, Episode, FileFacts, LibraryEntry, Person, PlayItem, Query,
+    SeriesDetails, Title,
 };
 use crate::harness::Waker;
 
@@ -67,8 +68,8 @@ impl Source for Films {
         Vec::new()
     }
 
-    fn titles(&mut self, _library: &str, _kind: &str) -> Vec<Title> {
-        Vec::new()
+    fn wall(&mut self, _query: &Query) -> Answer {
+        Answer::default()
     }
 
     fn series(&mut self, _library: &str, _id: &str) -> Option<SeriesDetails> {
@@ -127,10 +128,6 @@ impl Source for Films {
             name: path.rsplit('/').next()?.to_string(),
             ..Person::default()
         })
-    }
-
-    fn works(&mut self, _library: &str, _path: &str) -> Vec<Work> {
-        Vec::new()
     }
 
     fn files(&mut self, _library: &str, item: &str) -> Vec<FileFacts> {

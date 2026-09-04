@@ -20,7 +20,7 @@ fn enter_opens_a_movies_wall() {
     let mut browser = browser(3);
     browser.key("enter");
     let wall = showing_wall(&browser);
-    assert_eq!(wall.items.len(), 3);
+    assert_eq!(wall.slots.items.len(), 3);
     assert_eq!(wall.heading, "films · 3");
 }
 
@@ -70,7 +70,7 @@ fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
 
     for _ in 0..2 {
         browser.key("enter");
-        assert_eq!(showing_wall(&browser).items.len(), 3);
+        assert_eq!(showing_wall(&browser).slots.items.len(), 3);
 
         browser.key("enter");
         assert_eq!(showing_page(&browser).id, "movies:1");
@@ -80,7 +80,7 @@ fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
 
         browser.key("enter");
         assert_eq!(showing_person(&browser).name, "A Player");
-        assert_eq!(showing_person(&browser).works.len(), 3);
+        assert_eq!(showing_person(&browser).works.items.len(), 3);
 
         browser.key("right");
         browser.key("enter");
@@ -88,11 +88,11 @@ fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
         assert_eq!(browser.stack.len(), 4);
 
         browser.key("escape");
-        assert_eq!(showing_person(&browser).focus, 1);
+        assert_eq!(showing_person(&browser).works.focus, 1);
         browser.key("escape");
         assert_eq!(showing_page(&browser).id, "movies:1");
         browser.key("escape");
-        assert_eq!(showing_wall(&browser).items.len(), 3);
+        assert_eq!(showing_wall(&browser).slots.items.len(), 3);
         browser.key("escape");
         assert!(browser.stack.is_empty());
     }
@@ -140,7 +140,7 @@ fn back_from_a_page_returns_to_the_wall_at_the_same_focus() {
     browser.key("enter");
     browser.key("escape");
 
-    assert_eq!(showing_wall(&browser).focus, 2);
+    assert_eq!(showing_wall(&browser).slots.focus, 2);
 }
 
 #[test]
@@ -154,9 +154,9 @@ fn arrows_move_focus_on_a_list_and_a_wall() {
     browser.key("up");
     browser.key("enter");
     browser.key("right");
-    assert_eq!(showing_wall(&browser).focus, 1);
+    assert_eq!(showing_wall(&browser).slots.focus, 1);
     browser.key("down");
-    assert_eq!(showing_wall(&browser).focus, 1 + wall::COLUMNS);
+    assert_eq!(showing_wall(&browser).slots.focus, 1 + wall::COLUMNS);
 }
 
 #[test]
@@ -185,7 +185,7 @@ fn up_from_the_first_row_reaches_the_band_and_down_gives_the_focus_back() {
     browser.key("down");
 
     assert_eq!(showing_wall(&browser).control, None);
-    assert_eq!(showing_wall(&browser).focus, 1);
+    assert_eq!(showing_wall(&browser).slots.focus, 1);
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn up_from_a_later_row_stays_on_the_wall() {
     browser.key("up");
 
     assert_eq!(showing_wall(&browser).control, None);
-    assert_eq!(showing_wall(&browser).focus, 0);
+    assert_eq!(showing_wall(&browser).slots.focus, 0);
 }
 
 #[test]
@@ -231,7 +231,7 @@ fn the_focused_line_carries_the_facts_the_row_holds() {
     let mut browser = browser(3);
     browser.key("enter");
     assert_eq!(
-        showing_wall(&browser).items[0].line.words(),
+        showing_wall(&browser).slots.items[0].line.words(),
         "Entry 1 · 1980"
     );
 }
@@ -251,7 +251,7 @@ fn pump_rereads_what_is_shown() {
     browser.source.movies = 2;
     browser.source.changed = true;
     assert!(browser.pump(1.0));
-    assert_eq!(showing_wall(&browser).items.len(), 2);
+    assert_eq!(showing_wall(&browser).slots.items.len(), 2);
     assert_eq!(showing_wall(&browser).heading, "films · 2");
     let libraries = browser
         .source
@@ -281,7 +281,7 @@ fn a_reread_that_shrinks_clamps_the_focus() {
     browser.source.movies = 1;
     browser.source.changed = true;
     assert!(browser.pump(1.0));
-    assert_eq!(showing_wall(&browser).focus, 0);
+    assert_eq!(showing_wall(&browser).slots.focus, 0);
 }
 
 #[test]

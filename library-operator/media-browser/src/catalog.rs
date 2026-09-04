@@ -8,6 +8,12 @@ use crate::harness::Waker;
 // read-only open of the sidecar's file, and its update stream.
 pub mod sidecar;
 
+// The query module: the closed set of queries a wall is fed by, and the
+// slots a source answers one with.
+pub mod query;
+
+pub use query::{Answer, Query, Slot};
+
 /// One library, as the first screen lists it: the name, the kind, and the
 /// count of items it holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,9 +21,9 @@ pub struct LibraryEntry {
     /// The catalog's `library` column: the `Library`'s namespace and name,
     /// joined as `namespace/name`.
     pub library: String,
-    /// The `Library`'s kind, `movies` or `series`. The kind names the item
-    /// table the titles come from, so the views carry it back into every
-    /// later call for this library.
+    /// The library's kind, `movies` or `series`. The first screen draws it in
+    /// the row's detail line. The wall it opens reads by the library alone, and
+    /// every slot names its own kind.
     pub kind: String,
     /// How many items the library holds.
     pub items: u64,
@@ -261,26 +267,6 @@ pub struct Person {
     pub headshot_path: String,
 }
 
-/// One title a person is credited in, as one slot of their wall.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Work {
-    /// The library that holds the title, as `namespace/name`.
-    pub library: String,
-    /// That library's kind, `movies` or `series`.
-    pub kind: String,
-    /// The title's provider-scoped id inside its library.
-    pub id: String,
-    /// The name a person reads.
-    pub title: String,
-    /// The year or the date of release, as the catalog stores it.
-    pub released: String,
-    /// The path of the primary art, relative to the library root.
-    pub art: String,
-    /// What the person did on this title, joined with `, `:
-    /// `Director`, `Writer`, then `as <role>` for an actor.
-    pub parts: String,
-}
-
 /// What the views read. Every list comes back in the order the views draw
 /// it, so the views sort nothing: titles by the scanner's sort key, and
 /// episodes by their aired numbers.
@@ -296,9 +282,12 @@ pub trait Source {
     /// first screen lists them all.
     fn libraries(&mut self) -> Vec<LibraryEntry>;
 
-    /// One library's top list, ordered by sort key: its movies for the
-    /// kind `movies`, its series for the kind `series`.
-    fn titles(&mut self, library: &str, kind: &str) -> Vec<Title>;
+    /// The one read behind every wall. Every slot carries its library and
+    /// its kind, so one wall draws a library, a person's works, and a set from
+    /// the same answer. The answer names what the query is about and holds
+    /// its slots in the query's order. It is empty where the query names
+    /// nothing the catalog holds.
+    fn wall(&mut self, query: &Query) -> Answer;
 
     /// One movie's details, or nothing where the library holds no movie
     /// under that id.
@@ -334,11 +323,6 @@ pub trait Source {
     /// One person by the library and the directory that name them,
     /// or nothing where that library holds no such entry.
     fn person(&mut self, library: &str, path: &str) -> Option<Person>;
-
-    /// Every title the person is credited in, across every library
-    /// that holds them under a shared id, newest release first and a title
-    /// with no release last.
-    fn works(&mut self, library: &str, path: &str) -> Vec<Work>;
 
     /// Whether anything changed since the last call.
     fn changed(&mut self) -> bool;

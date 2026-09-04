@@ -3,9 +3,10 @@
 // dividers, and what a select asks the browser to play.
 
 use super::*;
+use crate::catalog::Answer;
 use crate::catalog::{
     Credit, CreditSlot, Credits, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
-    SeriesDetails, Title, Work,
+    Query, SeriesDetails,
 };
 use crate::harness::Waker;
 
@@ -35,8 +36,8 @@ impl Source for Serials {
         Vec::new()
     }
 
-    fn titles(&mut self, _library: &str, _kind: &str) -> Vec<Title> {
-        Vec::new()
+    fn wall(&mut self, _query: &Query) -> Answer {
+        Answer::default()
     }
 
     fn movie(&mut self, _library: &str, _id: &str) -> Option<MovieDetails> {
@@ -123,10 +124,6 @@ impl Source for Serials {
             name: path.rsplit('/').next()?.to_string(),
             ..Person::default()
         })
-    }
-
-    fn works(&mut self, _library: &str, _path: &str) -> Vec<Work> {
-        Vec::new()
     }
 
     // Every episode holds one video file of its own size, so the foot

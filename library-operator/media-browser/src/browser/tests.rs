@@ -16,9 +16,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
+use crate::catalog::Answer;
 use crate::catalog::{
     Credit, CreditSlot, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person,
-    PlayItem, Presentation, SeriesDetails, Title, Work,
+    PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
 };
 use crate::posters::Art;
 use crate::screens::movie::Focus;
@@ -99,17 +100,55 @@ impl Source for Fake {
         ]
     }
 
-    fn titles(&mut self, _library: &str, kind: &str) -> Vec<Title> {
-        self.calls.push("titles");
-        let count = if kind == "movies" { self.movies } else { 2 };
-        (1..=count)
-            .map(|number| Title {
-                id: format!("{kind}:{number}"),
-                title: format!("Entry {number}"),
-                released: "1980".into(),
-                ..Title::default()
-            })
-            .collect()
+    fn wall(&mut self, query: &Query) -> Answer {
+        self.calls.push("wall");
+        match query {
+            Query::Library { library } => {
+                let kind = match library.as_str() {
+                    "screening/films" => "movies",
+                    _ => "series",
+                };
+                let count = if kind == "movies" { self.movies } else { 2 };
+                Answer {
+                    name: library.rsplit('/').next().unwrap_or_default().to_string(),
+                    slots: (1..=count)
+                        .map(|number| {
+                            Slot::of(
+                                library,
+                                kind,
+                                Title {
+                                    id: format!("{kind}:{number}"),
+                                    title: format!("Entry {number}"),
+                                    released: "1980".into(),
+                                    ..Title::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                }
+            }
+            Query::Person { path, .. } => {
+                if !self.people || path != ENTRY {
+                    return Answer::default();
+                }
+                Answer {
+                    name: PLAYER.into(),
+                    slots: (1..=self.movies)
+                        .map(|number| Slot {
+                            library: "screening/films".into(),
+                            kind: "movies".into(),
+                            id: format!("movies:{number}"),
+                            title: format!("Entry {number}"),
+                            released: "1980".into(),
+                            art: format!("{number}.jpg"),
+                            parts: "Director".into(),
+                            ..Slot::default()
+                        })
+                        .collect(),
+                }
+            }
+            Query::Set { .. } => Answer::default(),
+        }
     }
 
     fn series(&mut self, _library: &str, id: &str) -> Option<SeriesDetails> {
@@ -226,24 +265,6 @@ impl Source for Fake {
             name: PLAYER.into(),
             ..Person::default()
         })
-    }
-
-    fn works(&mut self, _library: &str, path: &str) -> Vec<Work> {
-        self.calls.push("works");
-        if !self.people || path != ENTRY {
-            return Vec::new();
-        }
-        (1..=self.movies)
-            .map(|number| Work {
-                library: "screening/films".into(),
-                kind: "movies".into(),
-                id: format!("movies:{number}"),
-                title: format!("Entry {number}"),
-                released: "1980".into(),
-                art: format!("{number}.jpg"),
-                parts: "Director".into(),
-            })
-            .collect()
     }
 
     fn files(&mut self, _library: &str, _item: &str) -> Vec<FileFacts> {

@@ -10,7 +10,7 @@ use iced_widget::canvas;
 use iced_winit::core::{Element, Length, Theme};
 
 use super::{Screen, Step, wall};
-use crate::catalog::{LibraryEntry, Source, library_name};
+use crate::catalog::{LibraryEntry, Query, Source, library_name};
 use crate::focus;
 use crate::posters::Posters;
 use crate::views::Card;
@@ -21,7 +21,8 @@ use crate::views::list::List;
 pub struct Entry {
     /// The catalog's library column, `namespace/name`.
     pub library: String,
-    /// The library's kind, which decides the screen a descent opens.
+    /// The library's kind, drawn in the row's detail line. The wall a
+    /// descent opens reads by the library alone.
     pub kind: String,
     /// The name half of the library column.
     pub name: String,
@@ -86,8 +87,9 @@ impl Libraries {
             return Step::Stay;
         };
         Step::Open(Screen::Wall(wall::Wall::open(
-            &entry.library,
-            &entry.kind,
+            Query::Library {
+                library: entry.library.clone(),
+            },
             source,
         )))
     }

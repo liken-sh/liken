@@ -8,11 +8,13 @@ use std::path::PathBuf;
 use super::*;
 use crate::catalog::Person as Entry;
 use crate::catalog::{
-    Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection,
-    SeriesDetails, Title,
+    Answer, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection,
+    SeriesDetails, Slot,
 };
 use crate::harness::Waker;
 use crate::posters::Art;
+use crate::screens::{Screen, Step};
+use crate::views::Card;
 
 const LIBRARY: &str = "screening/films";
 const PATH: &str = ".contributors/A Player";
@@ -31,9 +33,9 @@ struct People {
 }
 
 impl People {
-    fn work(&self, number: usize) -> Work {
+    fn work(&self, number: usize) -> Slot {
         let series = number == 3;
-        Work {
+        Slot {
             library: LIBRARY.to_string(),
             kind: match series {
                 true => "series".into(),
@@ -44,6 +46,7 @@ impl People {
             released: format!("{}-05-02", 2000 - number),
             art: format!("{number}.jpg"),
             parts: "Director, as The Part".into(),
+            ..Slot::default()
         }
     }
 }
@@ -53,8 +56,17 @@ impl Source for People {
         Vec::new()
     }
 
-    fn titles(&mut self, _library: &str, _kind: &str) -> Vec<Title> {
-        Vec::new()
+    fn wall(&mut self, query: &Query) -> Answer {
+        let Query::Person { path, .. } = query else {
+            return Answer::default();
+        };
+        if path != PATH || self.gone {
+            return Answer::default();
+        }
+        Answer {
+            name: "A Player".into(),
+            slots: (1..=self.works).map(|number| self.work(number)).collect(),
+        }
     }
 
     fn movie(&mut self, _library: &str, id: &str) -> Option<MovieDetails> {
@@ -111,13 +123,6 @@ impl Source for People {
         })
     }
 
-    fn works(&mut self, _library: &str, path: &str) -> Vec<Work> {
-        if path != PATH || self.gone {
-            return Vec::new();
-        }
-        (1..=self.works).map(|number| self.work(number)).collect()
-    }
-
     fn files(&mut self, _library: &str, _item: &str) -> Vec<FileFacts> {
         Vec::new()
     }
@@ -150,7 +155,7 @@ fn a_page_carries_the_name_the_dates_and_the_files() {
     assert_eq!(page.headshot, ".contributors/A Player/headshot.jpg");
     assert_eq!(page.headshot_library, LIBRARY);
     assert_eq!(page.biography_path, "");
-    assert_eq!(page.focus, 0);
+    assert_eq!(page.works.focus, 0);
 }
 
 #[test]
@@ -170,26 +175,29 @@ fn the_dates_read_as_the_entry_holds_them() {
 #[test]
 fn a_work_carries_its_title_its_year_and_its_parts() {
     let (page, _) = credited(3);
-    assert_eq!(page.works.len(), 3);
-    assert_eq!(page.works[0].caption(), "Title 1 · 1999");
-    assert_eq!(page.works[0].line_fitting(80), "Title 1 · 1999");
-    assert_eq!(page.works[0].under(), "Director, as The Part");
-    assert_eq!(page.works[0].art(), "1.jpg");
-    assert_eq!(page.works[0].name(), "Title 1");
+    let works = &page.works.items;
+    assert_eq!(works.len(), 3);
+    assert_eq!(works[0].caption(), "Title 1 · 1999");
+    assert_eq!(works[0].line_fitting(80), "Title 1 · 1999");
+    assert_eq!(works[0].under(), "Director, as The Part");
+    assert_eq!(works[0].art(), "1.jpg");
+    assert_eq!(works[0].name(), "Title 1");
+    assert_eq!(works[0].library(), LIBRARY);
+    assert_eq!(page.works.heading(), "A Player");
 }
 
 #[test]
 fn the_arrows_move_across_the_wall_of_works() {
     let (mut page, mut source) = credited(3);
     page.key("right", &mut source);
-    assert_eq!(page.focus, 1);
+    assert_eq!(page.works.focus, 1);
     page.key("down", &mut source);
-    assert_eq!(page.focus, 1);
+    assert_eq!(page.works.focus, 1);
     page.key("right", &mut source);
     page.key("right", &mut source);
-    assert_eq!(page.focus, 2);
+    assert_eq!(page.works.focus, 2);
     page.key("left", &mut source);
-    assert_eq!(page.focus, 1);
+    assert_eq!(page.works.focus, 1);
 }
 
 #[test]
@@ -204,7 +212,7 @@ fn a_select_opens_the_movie_the_slot_names() {
 #[test]
 fn a_select_opens_the_series_the_slot_names() {
     let (mut page, mut source) = credited(3);
-    page.focus = 2;
+    page.works.focus = 2;
     let Step::Open(Screen::Series(opened)) = page.key("enter", &mut source) else {
         panic!("a select on a series opens its page");
     };
@@ -214,10 +222,10 @@ fn a_select_opens_the_series_the_slot_names() {
 #[test]
 fn a_page_with_no_works_opens_nothing() {
     let (mut page, mut source) = credited(0);
-    assert!(page.works.is_empty());
+    assert!(page.works.items.is_empty());
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
     assert!(matches!(page.key("right", &mut source), Step::Stay));
-    assert_eq!(page.focus, 0);
+    assert_eq!(page.works.focus, 0);
 }
 
 #[test]
@@ -232,11 +240,11 @@ fn the_focused_work_names_the_backdrop_the_store_decodes_next() {
 #[test]
 fn a_reread_that_shortens_the_wall_clamps_the_focus() {
     let (mut page, mut source) = credited(3);
-    page.focus = 2;
+    page.works.focus = 2;
     source.works = 1;
     page.reread(&mut source);
-    assert_eq!(page.works.len(), 1);
-    assert_eq!(page.focus, 0);
+    assert_eq!(page.works.items.len(), 1);
+    assert_eq!(page.works.focus, 0);
 }
 
 #[test]
@@ -244,7 +252,7 @@ fn a_reread_of_a_person_that_left_the_store_keeps_the_page() {
     let (mut page, mut source) = credited(3);
     source.gone = true;
     page.reread(&mut source);
-    assert_eq!(page.works.len(), 3);
+    assert_eq!(page.works.items.len(), 3);
 }
 
 // A store over one volume, so a test reads the biography the way
