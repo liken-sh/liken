@@ -142,7 +142,7 @@ fn the_clock_draws_at_the_top_right_of_every_screen() {
 // band's middle line, and nothing else draws inside the box.
 const CLOCK: (u32, u32, u32, u32) = (1800, 28, 1890, 56);
 
-// The reading draws in the muted ink over a ground of its own, so a box
+// The reading draws in the bright ink over a shade of its own, so a box
 // with no pixel brighter than that ground carries no reading.
 fn lights_up(frame: &Path, run: &Run, screen: &str) {
     let pixels = image::open(frame)
