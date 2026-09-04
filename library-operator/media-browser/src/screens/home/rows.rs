@@ -82,26 +82,29 @@ impl Strip {
             heading: String::new(),
             items: Vec::new(),
             focus: 0,
-            see_all: matches!(row, Row::Query(_)),
+            see_all: false,
             lines: 2,
             row,
         }
     }
 
     // Read the strip's row again and keep focus in range. A query strip
-    // shows the first `SHOWN` slots and leaves the rest to the wall. The
-    // released strip keeps the window of today, and the added strip drops
-    // what the released strip shows.
+    // shows the first `SHOWN` slots and leaves the rest to the wall, and
+    // it ends in a "see all" slot only where the read answered more than
+    // the strip shows. The released strip keeps the window of today, and
+    // the added strip drops what the released strip shows.
     pub(super) fn reread(&mut self, source: &mut dyn Source, today: i64, released: &[Item]) {
         match &self.row {
             Row::Query(query) => {
                 let answer = source.wall(query);
                 self.heading = query.name(&answer.name);
+                let answered = answer.slots.len();
                 let slots = match query {
                     Query::Released { .. } => super::recent::released(answer.slots, today),
                     Query::Added { .. } => super::recent::added(answer.slots, released),
                     _ => answer.slots.into_iter().take(SHOWN).collect(),
                 };
+                self.see_all = slots.len() < answered;
                 self.items = slots
                     .into_iter()
                     .map(|slot| Item::of(query, slot))

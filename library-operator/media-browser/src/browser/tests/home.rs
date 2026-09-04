@@ -5,6 +5,9 @@ use super::*;
 
 // A browser whose recency strips hold an airing episode, a folded
 // serial, and a movie.
+// More movies than a strip shows, so a strip of them has more to see.
+const MORE_THAN_SHOWN: usize = crate::catalog::recency::SHOWN + 6;
+
 fn with_recent(movies: usize) -> Browser<Fake, NoPosters> {
     Browser::new(
         Fake {
@@ -372,10 +375,13 @@ fn the_view_builds_with_strips_and_with_the_band_in_focus() {
 
 // A browser whose pool holds every kind, so the page draws four strips
 // between the recency strips and the libraries.
+// A browser whose pool holds every kind and whose library holds more
+// movies than a strip shows, so a genre's and a person's strip end in
+// "see all" and the set's strip, of three, does not.
 fn with_draw() -> Browser<Fake, NoPosters> {
     Browser::new(
         Fake {
-            movies: 3,
+            movies: MORE_THAN_SHOWN,
             recent: true,
             people: true,
             sets: true,
@@ -408,7 +414,13 @@ fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     let first_three = &headings[2..5];
     assert!(first_three.contains(&"A Player"));
     assert!(first_three.contains(&"The Entries"));
-    assert!(strips(&browser)[2..6].iter().all(|strip| strip.see_all));
+    let see_all: Vec<(&str, bool)> = strips(&browser)[2..6]
+        .iter()
+        .map(|strip| (strip.heading.as_str(), strip.see_all))
+        .collect();
+    for (heading, ends_in_see_all) in see_all {
+        assert_eq!(ends_in_see_all, heading != "The Entries", "{heading}");
+    }
 }
 
 #[test]
@@ -447,7 +459,7 @@ fn see_all_on(heading: &str) -> Browser<Fake, NoPosters> {
     for _ in 0..=index {
         browser.key("down");
     }
-    for _ in 0..6 {
+    for _ in 0..=MORE_THAN_SHOWN {
         browser.key("right");
     }
     browser.key("enter");
@@ -469,7 +481,7 @@ fn see_all_on_a_genre_strip_opens_the_genre_page() {
     );
     let head = wall.head.as_ref().expect("the genre page carries a head");
     assert_eq!(head.name, "Western");
-    assert_eq!(head.facts, "3 movies · 1 series");
+    assert_eq!(head.facts, format!("{MORE_THAN_SHOWN} movies · 1 series"));
 }
 
 #[test]
@@ -494,7 +506,7 @@ fn see_all_on_a_persons_strip_opens_their_page() {
     let page = showing_person(&browser);
     assert_eq!(page.name, PLAYER);
     assert_eq!(page.path, ENTRY);
-    assert_eq!(page.works.items.len(), 3);
+    assert_eq!(page.works.items.len(), MORE_THAN_SHOWN);
 }
 
 #[test]
