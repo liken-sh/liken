@@ -76,7 +76,7 @@ if [ -z "$(docker images --quiet "$image")" ]; then
   docker build "$repo" --tag "$image" >&2
 fi
 
-# PROSE: --network host puts the Job on loopback, where the catalog API
+# `--network host` puts the Job on loopback, where the catalog API
 # port and the broker port are the addresses it uses. --user runs it as the
 # person at the keyboard, so it reads a media directory they own.
 #
