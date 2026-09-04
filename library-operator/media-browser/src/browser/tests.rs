@@ -11,6 +11,7 @@ mod moments;
 mod paging;
 mod plays;
 mod prefetch;
+mod reader;
 mod volume;
 
 use std::sync::Arc;
@@ -39,7 +40,7 @@ const PLAY_TOPIC: &str = "liken/library/players/house/den-tv/play";
 // The set the first three movies of the fake library belong to.
 const SET: &str = "set:films";
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Fake {
     movies: usize,
     changed: bool,
@@ -70,6 +71,12 @@ struct Fake {
     // Whether no title carries a backdrop. A bare catalog exists because
     // the banner holds nothing without backdrops.
     bare: bool,
+    // Whether the catalog answers a second source of its own, so the home
+    // page reads on a thread.
+    threaded: bool,
+    // How many home pages this catalog read, which every clone of it
+    // counts into.
+    reads: Arc<AtomicUsize>,
 }
 
 // The library the fake serial is in, and the serial's id.
@@ -273,6 +280,7 @@ impl Source for Fake {
 
     fn pool(&mut self) -> Vec<Candidate> {
         self.calls.push("pool");
+        self.reads.fetch_add(1, Ordering::SeqCst);
         if !self.pool {
             return Vec::new();
         }
@@ -442,6 +450,11 @@ impl Source for Fake {
 
     fn wake_by(&mut self, _wake: Waker) {
         self.woken = true;
+    }
+
+    fn reader(&mut self) -> Option<Box<dyn Source + Send>> {
+        self.threaded
+            .then(|| Box::new(self.clone()) as Box<dyn Source + Send>)
     }
 }
 

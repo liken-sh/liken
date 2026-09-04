@@ -583,7 +583,7 @@ fn a_rest_on_a_genre_asks_for_nothing() {
 }
 
 #[test]
-fn a_wake_and_a_present_read_the_home_page_and_its_pool_again() {
+fn a_wake_with_nothing_changed_reads_the_home_page_no_further() {
     let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
     browser.pump(1.0);
     browser.source.calls.clear();
@@ -591,11 +591,54 @@ fn a_wake_and_a_present_read_the_home_page_and_its_pool_again() {
 
     browser.pump(2.0);
 
-    assert!(browser.source.calls.contains(&"pool"));
-    assert!(browser.source.calls.contains(&"libraries"));
+    assert!(browser.source.calls.is_empty());
 
-    browser.source.calls.clear();
     *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
     browser.pump(3.0);
+    assert!(browser.source.calls.is_empty());
+}
+
+// The day after today, so a test moves the day without the wall clock.
+fn tomorrow() -> Date {
+    Date::from_seconds(Date::today().seconds() + 86_400)
+}
+
+#[test]
+fn a_wake_on_a_new_day_reads_the_home_page_and_its_pool_again() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    browser.source.calls.clear();
+    browser.today = tomorrow;
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+
+    browser.pump(2.0);
+
     assert!(browser.source.calls.contains(&"pool"));
+    assert!(browser.source.calls.contains(&"libraries"));
+}
+
+#[test]
+fn back_from_a_page_with_nothing_changed_reads_the_home_page_no_further() {
+    let mut browser = on_strips(3);
+    browser.key("enter");
+    browser.source.calls.clear();
+
+    browser.key("escape");
+
+    assert!(browser.source.calls.is_empty());
+    assert_eq!(at(&browser), (1, 0));
+}
+
+#[test]
+fn back_from_a_page_after_a_change_reads_the_home_page_again() {
+    let mut browser = on_strips(3);
+    browser.key("enter");
+    browser.source.changed = true;
+    browser.pump(1.0);
+    browser.source.calls.clear();
+
+    browser.key("escape");
+
+    assert!(browser.source.calls.contains(&"pool"));
+    assert_eq!(at(&browser), (1, 0));
 }

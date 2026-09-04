@@ -124,13 +124,12 @@ fn backspace_goes_back_too() {
 fn back_rereads_the_screen_it_uncovers() {
     let mut browser = browser(3);
     browser.key("enter");
+    browser.key("enter");
+    browser.source.calls.clear();
+
     browser.key("escape");
-    let libraries = browser
-        .source
-        .calls
-        .iter()
-        .filter(|call| **call == "libraries");
-    assert_eq!(libraries.count(), 2);
+
+    assert!(browser.source.calls.contains(&"wall"));
 }
 
 #[test]

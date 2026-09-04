@@ -374,6 +374,15 @@ pub trait Source {
     /// Whether anything changed since the last call.
     fn changed(&mut self) -> bool;
 
+    /// A second source over the same catalog, for a reader thread of its
+    /// own, so a read runs off the frame thread. A source that has no
+    /// second read to give answers nothing, and the caller then reads in
+    /// place. The second source reports no changes and wakes no loop: the
+    /// first one carries the stream.
+    fn reader(&mut self) -> Option<Box<dyn Source + Send>> {
+        None
+    }
+
     /// Take the handle that wakes the loop, for a source with a stream of
     /// its own. A source with no stream takes it and does nothing.
     fn wake_by(&mut self, wake: Waker);

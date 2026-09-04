@@ -33,6 +33,10 @@ pub struct SidecarSource {
     database: PathBuf,
     connection: Option<Connection>,
     shared: Arc<updates::Shared>,
+    // Whether this source owns the update streams. The source the browser
+    // holds owns them and stops them when it drops. The second source over
+    // the same file reads alone and stops nothing.
+    streams: bool,
 }
 
 impl SidecarSource {
@@ -49,6 +53,7 @@ impl SidecarSource {
             database: database.into(),
             connection: None,
             shared,
+            streams: true,
         }
     }
 
@@ -86,7 +91,9 @@ impl SidecarSource {
 
 impl Drop for SidecarSource {
     fn drop(&mut self) {
-        self.shared.stop.store(true, Ordering::Release);
+        if self.streams {
+            self.shared.stop.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -271,11 +278,24 @@ impl Source for SidecarSource {
     }
 
     fn changed(&mut self) -> bool {
-        self.shared.changed.swap(false, Ordering::AcqRel)
+        self.streams && self.shared.changed.swap(false, Ordering::AcqRel)
     }
 
     fn wake_by(&mut self, wake: Waker) {
-        *self.shared.wake.lock().unwrap() = Some(wake);
+        if self.streams {
+            *self.shared.wake.lock().unwrap() = Some(wake);
+        }
+    }
+
+    // The second source over the same file: its own read-only connection,
+    // opened on its first read, and no claim on the streams.
+    fn reader(&mut self) -> Option<Box<dyn Source + Send>> {
+        Some(Box::new(Self {
+            database: self.database.clone(),
+            connection: None,
+            shared: self.shared.clone(),
+            streams: false,
+        }))
     }
 }
 

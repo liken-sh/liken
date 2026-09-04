@@ -220,3 +220,30 @@ fn a_fresh_source_reports_no_change() {
     let mut source = SidecarSource::new(&path, NO_AGENT);
     assert!(!source.changed());
 }
+
+#[test]
+fn a_reader_reads_the_same_file_and_leaves_the_streams_running() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:603",
+        "The Matrix",
+        "matrix",
+    );
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let mut reader = source.reader().expect("the sidecar answers a reader");
+    reader.wake_by(Arc::new(|| {}));
+
+    assert_eq!(reader.libraries(), source.libraries());
+    assert!(!reader.changed());
+    assert_eq!(reader.wall(&library("default/films")).slots.len(), 1);
+
+    let shared = source.shared.clone();
+    drop(reader);
+    assert!(!shared.stop.load(Ordering::Acquire));
+    drop(source);
+    assert!(shared.stop.load(Ordering::Acquire));
+}

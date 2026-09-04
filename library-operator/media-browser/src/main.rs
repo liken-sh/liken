@@ -87,6 +87,7 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
         return harness::run(
             Browser::new(sample::Catalog, sample::NoArt)
                 .with_page(options.size)
+                .with_timing(options.stats.is_some())
                 .with_bus(bus, play_topic),
             options,
         );
@@ -102,6 +103,7 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     harness::run(
         Browser::new(source, posters)
             .with_page(options.size)
+            .with_timing(options.stats.is_some())
             .with_bus(bus, play_topic),
         options,
     )

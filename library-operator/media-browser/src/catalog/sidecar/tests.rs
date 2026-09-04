@@ -8,6 +8,8 @@ mod series;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use rusqlite::Connection;
 use tempfile::TempDir;

@@ -15,11 +15,14 @@ use iced_winit::core::{Color, Element, Length, Theme};
 use media_screen::{Bus, Moment};
 
 use crate::bus::play;
+use crate::catalog::draw::Date;
 use crate::catalog::{Selection, Source};
 use crate::harness::{Screen, Waker};
 use crate::look;
 use crate::posters::Posters;
 use crate::screens::{self, Step, home, loading, volume};
+
+mod reader;
 
 /// The browsing screen, generic over where its rows and its posters
 /// come from, so one browser draws the sidecar's file, a test fixture, and
@@ -33,6 +36,19 @@ pub struct Browser<S: Source, P: Posters> {
     // screen to draw; the stack holds only descents.
     home: screens::Screen,
     stack: Vec<screens::Screen>,
+    // Where the home page's reads run. Every read after the first goes
+    // through here, so the frame thread draws while the read runs.
+    reader: reader::Reader,
+    // Whether the home page is behind the catalog. A change the source
+    // reports marks it, whether or not a page covers the home page,
+    // because back pops to the home page with no read of its own.
+    home_stale: bool,
+    // The date the home page was read on. The day's draw is seeded by
+    // the date, so a page read yesterday is behind today.
+    home_date: Date,
+    // Where the date comes from. It is a field so a test moves the day
+    // without the wall clock.
+    today: fn() -> Date,
     // The connection to the room's remotes, or nothing on a run that takes
     // the keyboard alone.
     bus: Option<Box<dyn Bus>>,
@@ -73,12 +89,18 @@ const PAGE: (u32, u32) = (1920, 1080);
 impl<S: Source, P: Posters> Browser<S, P> {
     /// Open the browser on its first screen, the home page.
     pub fn new(mut source: S, posters: P) -> Self {
+        let home_date = Date::today();
         let home = screens::Screen::Home(home::Home::open(&mut source));
+        let reader = reader::Reader::new(source.reader());
         Self {
             source,
             posters: RefCell::new(posters),
             home,
             stack: Vec::new(),
+            reader,
+            home_stale: false,
+            home_date,
+            today: Date::today,
             bus: None,
             play_topic: String::new(),
             asleep: false,
@@ -96,6 +118,13 @@ impl<S: Source, P: Posters> Browser<S, P> {
     /// draws.
     pub fn with_page(mut self, page: (u32, u32)) -> Self {
         self.page = page;
+        self
+    }
+
+    /// The browser that prints the milliseconds each home read takes,
+    /// which the measured run asks for.
+    pub fn with_timing(self, timed: bool) -> Self {
+        self.reader.timed(timed);
         self
     }
 
@@ -162,10 +191,42 @@ impl<S: Source, P: Posters> Browser<S, P> {
         self.stack.last().unwrap_or(&self.home)
     }
 
+    // Read the screen on top again. The home page goes through the
+    // reader, so the read that uncovers it never holds the frame thread.
     fn reread_top(&mut self) {
-        let top = self.stack.last_mut().unwrap_or(&mut self.home);
+        let Some(top) = self.stack.last_mut() else {
+            self.refresh_home();
+            return;
+        };
         top.reread(&mut self.source);
         top.volume(&*self.posters.borrow());
+    }
+
+    // Ask the reader for the home page, but only where the page is
+    // behind: a change the source reported, or a day other than the one
+    // it was read on. A read in place lands on this call, and a read on
+    // the thread lands on a later pass.
+    fn refresh_home(&mut self) {
+        let today = (self.today)();
+        if !self.home_stale && self.home_date == today {
+            return;
+        }
+        self.reader.ask(&mut self.source, today);
+        self.landed_home();
+    }
+
+    // Take the page the reader answered, where one landed. The answer is
+    // whether the home page changed, which is a frame to draw.
+    fn landed_home(&mut self) -> bool {
+        let Some(page) = self.reader.take() else {
+            return false;
+        };
+        self.home_date = page.date;
+        self.home_stale = false;
+        if let screens::Screen::Home(home) = &mut self.home {
+            home.apply(page);
+        }
+        true
     }
 
     // Do what the screen that took the press asked for. Only the browser
@@ -201,13 +262,13 @@ impl<S: Source, P: Posters> Browser<S, P> {
         }
     }
 
-    // The home page rereads when the shade lifts, because the day's draw is
-    // seeded by the date, and a shade that lifts on a new day must show
-    // that day's strips without a restart. The home page is read whether or
-    // not a screen covers it, because back pops to it with no draw of its
-    // own.
+    // The shade lifted, so the home page is read again where it is
+    // behind: a change the source reported while the shade was down, or a
+    // shade that lifts on a new day, whose draw is another day's. The home
+    // page is read whether or not a screen covers it, because back pops to
+    // it with no draw of its own.
     fn lifted(&mut self) {
-        self.home.reread(&mut self.source);
+        self.refresh_home();
     }
 
     // Push a screen and read the files it draws off the volume,
@@ -268,7 +329,8 @@ impl<S: Source, P: Posters> Browser<S, P> {
     // Back pops one descent and re-reads the screen it uncovers,
     // because a change that landed while that screen was covered was
     // folded into the screen that was shown at the time and not into
-    // this one.
+    // this one. The home page is the one screen that is read only where
+    // it is behind, so back to it draws the page a person left at once.
     //
     // At the home page there is nowhere to climb, so a browser on a bus
     // asks for the shade. Only the browser knows whether back has
@@ -324,7 +386,8 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
 
     // A poster that landed changes the frame and not the rows, so a
     // delivery redraws what is already read and only a changed source
-    // re-reads the screen.
+    // re-reads the screen. A home page the reader answered lands here too,
+    // and it is a frame to draw.
     fn pump(&mut self, at: f64) -> bool {
         // The clock moves here as well as on a frame, because a covered
         // browser draws none: a wake that arrived under a film would
@@ -333,20 +396,26 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         self.clock = at;
         let folded = self.drain_bus();
         let delivered = self.posters.get_mut().delivered();
+        let landed = self.landed_home();
         if !self.source.changed() {
-            return folded || delivered;
+            return folded || delivered || landed;
         }
+        // A change marks the home page behind whether or not a page covers
+        // it, because back pops to the home page with no read of its own.
+        self.home_stale = true;
         self.reread_top();
         true
     }
 
-    // The source, the poster store, and the bus deliver on threads of
-    // their own, so all three take the handle that wakes the loop.
+    // The source, the poster store, the home page's reader, and the bus
+    // deliver on threads of their own, so all four take the handle that
+    // wakes the loop.
     fn wake_by(&mut self, wake: Waker) {
         self.source.wake_by(wake.clone());
         if let Some(bus) = &self.bus {
             bus.wake_on_delivery(wake.clone());
         }
+        self.reader.wake_by(wake.clone());
         self.posters.get_mut().wake_by(wake);
     }
 

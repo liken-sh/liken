@@ -7,6 +7,7 @@
 
 pub mod banner;
 mod layout;
+mod page;
 mod recent;
 
 use std::cell::RefCell;
@@ -18,9 +19,10 @@ use iced_winit::core::{Element, Length, Rectangle, Theme, mouse};
 
 use self::banner::Banner;
 use self::layout::Layout;
+pub use self::page::{Page, read};
 use super::wall::Wall;
 use super::{Item, Screen, Step, facts, slots};
-use crate::catalog::draw::{self, Date};
+use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
 use crate::catalog::{Fold, GenreEntry, LibraryEntry, Order, Query, Source, library_name};
@@ -81,13 +83,6 @@ fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
     rows.push(Row::Libraries);
     rows.push(Row::Genres);
     rows
-}
-
-// The day's rows: the pool read now and drawn on today's date, so a
-// reread on a new day draws a new page and a reread on the same day
-// draws the same one.
-fn todays_rows(source: &mut dyn Source) -> Vec<Row> {
-    rows(draw::draw(Date::today(), &source.pool()))
 }
 
 /// One strip of the page: the row it reads, the heading over it, the
@@ -294,11 +289,10 @@ impl Home {
         let mut home = Self {
             heading: HEADING.to_string(),
             control: None,
-            blocks: todays_rows(source).into_iter().map(Block::new).collect(),
+            blocks: Vec::new(),
             focus: 0,
         };
-        home.reread_rows(source);
-        home.settle();
+        home.apply(read(source, Date::today()));
         home
     }
 
@@ -308,62 +302,46 @@ impl Home {
     /// keeps its focus. Focus follows the row it was on where that row
     /// stays.
     pub fn reread(&mut self, source: &mut dyn Source) {
+        self.apply(read(source, Date::today()));
+    }
+
+    /// Take a page the reader answered. A row the page holds and the
+    /// screen already has keeps its focus, focus follows the row it was on
+    /// where that row stays, and a strip the day no longer draws goes.
+    pub fn apply(&mut self, page: Page) {
         let focused = self.blocks.get(self.focus).map(Block::row);
-        let mut kept: Vec<Block> = std::mem::take(&mut self.blocks);
-        for row in todays_rows(source) {
-            let block = match kept.iter().position(|block| block.row() == row) {
-                Some(index) => kept.remove(index),
-                None => Block::new(row),
-            };
-            self.blocks.push(block);
+        let mut banner: Option<Banner> = None;
+        let mut kept: Vec<Strip> = Vec::new();
+        for block in std::mem::take(&mut self.blocks) {
+            match block {
+                Block::Banner(held) => banner = Some(held),
+                Block::Strip(strip) => kept.push(strip),
+            }
         }
-        self.reread_rows(source);
+        self.blocks = page
+            .blocks
+            .into_iter()
+            .map(|block| match block {
+                Block::Banner(fresh) => {
+                    let mut held = banner.take().unwrap_or_default();
+                    held.reread(fresh.titles);
+                    Block::Banner(held)
+                }
+                Block::Strip(mut fresh) => {
+                    if let Some(index) = kept.iter().position(|strip| strip.row == fresh.row) {
+                        let held = kept.remove(index);
+                        fresh.focus = held.focus.min(fresh.count().saturating_sub(1));
+                    }
+                    Block::Strip(fresh)
+                }
+            })
+            .collect();
         if let Some(index) =
             focused.and_then(|row| self.blocks.iter().position(|block| block.row() == row))
         {
             self.focus = index;
         }
         self.settle();
-    }
-
-    // Read every strip in the page's order, then the banner. The released
-    // strip's items are in hand while the added strip reads, because the
-    // added strip drops what the released strip shows, and the released
-    // strip stands before it.
-    fn reread_rows(&mut self, source: &mut dyn Source) {
-        let today = Date::today().seconds();
-        for index in 0..self.blocks.len() {
-            let released: Vec<Item> = self
-                .blocks
-                .iter()
-                .filter_map(Block::strip)
-                .find(|strip| matches!(strip.row, Row::Query(Query::Released { .. })))
-                .map(|strip| strip.items.clone())
-                .unwrap_or_default();
-            if let Block::Strip(strip) = &mut self.blocks[index] {
-                strip.reread(source, today, &released);
-            }
-        }
-        self.reread_banner(source);
-    }
-
-    // The banner's titles from the drawn strips, then the two recency
-    // strips. The banner is read after the strips because it holds one
-    // title from each of them.
-    fn reread_banner(&mut self, source: &mut dyn Source) {
-        let strips: Vec<&Strip> = self.blocks.iter().filter_map(Block::strip).collect();
-        let (recency, drawn): (Vec<&Strip>, Vec<&Strip>) = strips
-            .into_iter()
-            .filter(|strip| !matches!(strip.row, Row::Libraries | Row::Genres))
-            .partition(|strip| strip.row.recency());
-        let titles = Banner::read(drawn.into_iter().chain(recency), source);
-        if let Some(Block::Banner(banner)) = self
-            .blocks
-            .iter_mut()
-            .find(|block| matches!(block, Block::Banner(_)))
-        {
-            banner.reread(titles);
-        }
     }
 
     /// The banner the page holds, or nothing where the rows name none.

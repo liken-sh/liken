@@ -656,8 +656,9 @@ mod tests {
     }
 
     #[test]
-    fn the_sample_reports_no_changes() {
+    fn the_sample_reports_no_changes_and_answers_no_reader() {
         assert!(!Catalog.changed());
+        assert!(Catalog.reader().is_none());
     }
 
     #[test]
