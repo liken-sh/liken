@@ -58,7 +58,7 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
 
     let strips = strips(&browser);
     let released = strips[0];
-    assert!(released.see_all);
+    assert_eq!(released.last.as_deref(), Some("See all"));
     assert_eq!(released.lines, 2);
     assert_eq!(released.items.len(), 2);
     assert_eq!(released.items[0].caption, "S01E02 · The Serial");
@@ -67,7 +67,7 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
     let added = strips[1];
     assert_eq!(added.items.len(), 1);
     assert_eq!(added.items[0].caption, "Entry 1");
-    assert!(!strips[2].see_all);
+    assert!(strips[2].last.is_none());
     assert_eq!(strips[2].lines, 2);
 }
 
@@ -414,12 +414,17 @@ fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     let first_three = &headings[2..5];
     assert!(first_three.contains(&"A Player"));
     assert!(first_three.contains(&"The Entries"));
-    let see_all: Vec<(&str, bool)> = strips(&browser)[2..6]
+    let last: Vec<(&str, Option<&str>)> = strips(&browser)[2..6]
         .iter()
-        .map(|strip| (strip.heading.as_str(), strip.see_all))
+        .map(|strip| (strip.heading.as_str(), strip.last.as_deref()))
         .collect();
-    for (heading, ends_in_see_all) in see_all {
-        assert_eq!(ends_in_see_all, heading != "The Entries", "{heading}");
+    for (heading, last) in last {
+        let want = match heading {
+            "The Entries" => None,
+            "A Player" => Some("About A Player"),
+            _ => Some("See all"),
+        };
+        assert_eq!(last, want, "{heading}");
     }
 }
 
@@ -555,7 +560,7 @@ fn the_genres_strip_ends_the_page_and_holds_every_genre() {
     let genres = strips.last().expect("the page ends with the genres");
     assert_eq!((row, slot), (4, 0));
     assert_eq!(genres.heading, "Genres");
-    assert!(!genres.see_all);
+    assert!(genres.last.is_none());
     let names: Vec<&str> = genres.items.iter().map(|item| item.name.as_str()).collect();
     assert_eq!(names, ["Drama", "Western"]);
     assert_eq!(genres.items[0].under, "2 titles");

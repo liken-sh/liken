@@ -9,6 +9,7 @@ use crate::catalog::recency::SHOWN;
 use crate::catalog::{Fold, GenreEntry, LibraryEntry, Order, Query, Source, library_name};
 use crate::screens::wall::Wall;
 use crate::screens::{Item, Screen, Step, facts, slots};
+use crate::views::strip;
 
 // The kind an item of the libraries strip carries, so a select on it
 // opens the library's wall and never a page.
@@ -61,15 +62,15 @@ pub(super) fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
 }
 
 /// One strip of the page: the row it reads, the heading over it, the
-/// items in the read's order, the focused index, whether a "see all"
-/// slot ends it, and the caption lines under each slot.
+/// items in the read's order, the focused index, the words on a slot that
+/// ends it, or nothing, and the caption lines under each slot.
 #[derive(Debug)]
 pub struct Strip {
     pub row: Row,
     pub heading: String,
     pub items: Vec<Item>,
     pub focus: usize,
-    pub see_all: bool,
+    pub last: Option<String>,
     pub lines: usize,
 }
 
@@ -82,7 +83,7 @@ impl Strip {
             heading: String::new(),
             items: Vec::new(),
             focus: 0,
-            see_all: false,
+            last: None,
             lines: 2,
             row,
         }
@@ -91,7 +92,9 @@ impl Strip {
     // Read the strip's row again and keep focus in range. A query strip
     // shows the first `SHOWN` slots and leaves the rest to the wall, and
     // it ends in a "see all" slot only where the read answered more than
-    // the strip shows. The released strip keeps the window of today, and
+    // the strip shows. A person's strip always ends in a slot about them,
+    // because their page holds the headshot and the biography and not
+    // only the works. The released strip keeps the window of today, and
     // the added strip drops what the released strip shows.
     pub(super) fn reread(&mut self, source: &mut dyn Source, today: i64, released: &[Item]) {
         match &self.row {
@@ -104,7 +107,10 @@ impl Strip {
                     Query::Added { .. } => super::recent::added(answer.slots, released),
                     _ => answer.slots.into_iter().take(SHOWN).collect(),
                 };
-                self.see_all = slots.len() < answered;
+                self.last = match query {
+                    Query::Person { .. } => Some(format!("About {}", answer.name)),
+                    _ => (slots.len() < answered).then(|| strip::SEE_ALL.to_string()),
+                };
                 self.items = slots
                     .into_iter()
                     .map(|slot| Item::of(query, slot))
@@ -130,7 +136,7 @@ impl Strip {
     // The slots a press can reach: the items, and the "see all" slot
     // after them.
     pub(super) fn count(&self) -> usize {
-        self.items.len() + usize::from(self.see_all)
+        self.items.len() + usize::from(self.last.is_some())
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -149,7 +155,7 @@ impl Strip {
     pub(super) fn select(&self, source: &mut dyn Source) -> Step {
         let Some(item) = self.focused() else {
             return match &self.row {
-                Row::Query(query) if self.see_all => slots::see_all(query, source),
+                Row::Query(query) if self.last.is_some() => slots::see_all(query, source),
                 _ => Step::Stay,
             };
         };

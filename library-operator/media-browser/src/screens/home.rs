@@ -398,7 +398,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                             focus: focused.then_some(strip.focus),
                             heading: &strip.heading,
                             library: "",
-                            see_all: strip.see_all,
+                            last: strip.last.as_deref(),
                             lines: strip.lines,
                             region,
                         },

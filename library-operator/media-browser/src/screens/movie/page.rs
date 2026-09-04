@@ -157,7 +157,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     },
                     heading: &set.heading,
                     library: &movie.library,
-                    see_all: false,
+                    last: None,
                     lines: 0,
                     region: area(
                         MARGIN,

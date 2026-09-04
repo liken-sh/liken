@@ -29,7 +29,8 @@ const GAP: f32 = 26.0;
 // the mark reaches.
 const FOOT: f32 = 12.0;
 
-/// The words on the last slot of a strip that ends in one.
+/// The words on the last slot of a strip whose read answered more than
+/// the strip shows.
 pub const SEE_ALL: &str = "See all";
 
 /// The height a strip takes with this many caption lines under each
@@ -52,12 +53,11 @@ pub fn width_at(ratio: f32) -> f32 {
     POSTER / ratio
 }
 
-/// One strip to draw: the members, the one the page is about, the focus,
-/// and the region under the buttons.
 /// One strip to draw. `current` is the member the page is about, and
-/// nothing on a strip that is about no member. `see_all` ends the row
-/// with a slot that opens the wall, and `lines` is the caption lines under
-/// each slot.
+/// nothing on a strip that is about no member. `last` is the words on a
+/// slot that ends the row and opens what the strip is about, or nothing
+/// where the row ends with its members, and `lines` is the caption lines
+/// under each slot.
 pub struct Strip<'a, T> {
     /// The members in the order the catalog answered them.
     pub members: &'a [T],
@@ -71,7 +71,7 @@ pub struct Strip<'a, T> {
     pub heading: &'a str,
     /// The library the art paths resolve against.
     pub library: &'a str,
-    pub see_all: bool,
+    pub last: Option<&'a str>,
     pub lines: usize,
     /// The part of the frame the strip draws in.
     pub region: Rectangle,
@@ -139,7 +139,7 @@ pub fn draw<T: Card, P: Posters>(
         strip.region.width,
     ));
 
-    let slots = placed(strip.members, strip.see_all);
+    let slots = placed(strip.members, strip.last.is_some());
     let offset = offset(&slots, strip.focus.or(strip.current), strip.region.width);
     let right = strip.region.x + strip.region.width;
 
@@ -164,7 +164,15 @@ pub fn draw<T: Card, P: Posters>(
                     captioned(frame, member, slot, focused, strip.lines);
                 }
             }
-            None => artwork(frame, posters, "", "", slot, SEE_ALL, Tone::Full),
+            None => artwork(
+                frame,
+                posters,
+                "",
+                "",
+                slot,
+                strip.last.unwrap_or_default(),
+                Tone::Full,
+            ),
         }
         if strip.current == Some(index) {
             underline(frame, slot);
@@ -259,7 +267,7 @@ mod tests {
             focus,
             heading: "The Set",
             library: "screening/films",
-            see_all: false,
+            last: None,
             lines: 1,
             region: area(0.0, 0.0, 1000.0, height(1)),
         }
