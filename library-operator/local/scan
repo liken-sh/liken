@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PROSE: local/scan runs one scan Job against a directory of media on this
+# Local/scan runs one scan Job against a directory of media on this
 # workstation, into the local Corrosion cluster local/catalog starts, so a
 # parser change shows in the catalog without a cluster. The Job exits when
 # the harness reporter publishes its run back, the same wait a Job makes in
@@ -25,12 +25,12 @@ image="library-operator:local"
 # so a read against any of them shows the walk.
 catalog_api="http://127.0.0.1:20081"
 
-# PROSE: the broker the harness reporter publishes over, which is where the
-# Job hears its own run come back.
+# The broker the harness reporter publishes over. The Job hears its own
+# run come back on it.
 bus_address="127.0.0.1:20883"
 
-# PROSE: the cap on the run, because the walk and the echo end the run and
-# this number only bounds a Job that never reaches its last line.
+# The cap on the run. The walk and the echo end the run, so this number
+# bounds only a Job that never reaches its last line.
 run_seconds="${RUN_SECONDS:-600}"
 
 # The mount point inside the container, the path the pod mounts the claim
@@ -62,7 +62,7 @@ if ! curl --silent --fail --max-time 2 \
   exit 1
 fi
 
-# PROSE: the Job waits for the reporter's message before it exits, so the
+# The Job waits for the reporter's message before it exits, so the
 # broker has to be up as well as the agents.
 if ! (exec 3<>"/dev/tcp/${bus_address%:*}/${bus_address##*:}") 2>/dev/null; then
   echo "local/scan: no broker answers on $bus_address; run 'local/catalog up' first" >&2
@@ -98,14 +98,14 @@ docker run --detach --name "$container" \
   --env ECHO_TIMEOUT=2m \
   "$image" scan >/dev/null
 
-# PROSE: the Job exits on its own, and every way out of this script removes
+# The Job exits on its own, and every way out of this script removes
 # what is left of its container.
 cleanup() {
   docker rm --force "$container" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-# PROSE: the Job logs one line for the end of its walk, and that line
+# The Job logs one line for the end of its walk, and that line
 # reports the prune as well. The log runs to the end of the container,
 # because the Job holds the container open until it hears its own run.
 walk="capped"
@@ -124,7 +124,7 @@ while IFS= read -r line; do
   esac
 done < <(timeout --signal=TERM "$run_seconds" docker logs --follow "$container" 2>&1)
 
-# PROSE: a container still running at the cap is a Job that did not finish,
+# A container still running at the cap is a Job that did not finish,
 # and one that left carries the exit code the Job ended with: zero once the
 # reporter has echoed its run, and non-zero on a failed walk or an echo
 # that never came.
@@ -164,6 +164,6 @@ count="$(curl --silent --fail --max-time 5 \
   "$catalog_api/v1/queries" 2>/dev/null | grep -o '\[[0-9]*\]' | head -1 || true)"
 echo "local/scan: the $kind table holds ${count:-an unknown number of} rows" >&2
 
-# PROSE: the script ends with what the Job ended with, so a failed walk or
+# The script ends with what the Job ended with, so a failed walk or
 # an echo that never came fails the run here too.
 exit "$job"

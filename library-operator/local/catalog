@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PROSE: local/catalog runs a three-agent Corrosion cluster, a broker, and
+# Local/catalog runs a three-agent Corrosion cluster, a broker, and
 # the reporter on this workstation, so a schema change, a scan Job, or a
 # media browser can be seen without a cluster. The reporter is what a Job
 # waits for: it publishes the runs table back over the broker, and a Job
@@ -30,7 +30,7 @@ name_prefix="library-catalog"
 api_ports=(20081 20082 20083)
 gossip_ports=(20871 20872 20873)
 
-# PROSE: the broker every pod on this workstation publishes to, and the
+# The broker every pod on this workstation publishes to, and the
 # reporter that reads the first agent and publishes every library's report
 # over it. The reporter runs from the operator image, the same bytes the
 # cluster runs.
@@ -129,7 +129,7 @@ peers() {
     jq --slurp 'length' 2>/dev/null || echo 0
 }
 
-# PROSE: the broker's own configuration, which listens on the harness port
+# The broker's own configuration, which listens on the harness port
 # and takes an unauthenticated client, because nothing outside this
 # workstation reaches it.
 render_broker_config() {
@@ -140,7 +140,7 @@ allow_anonymous true
 EOF
 }
 
-# PROSE: the broker runs on loopback, where the port above is the address
+# The broker runs on loopback, where the port above is the address
 # a Job and the reporter dial.
 start_broker() {
   render_broker_config
@@ -151,7 +151,7 @@ start_broker() {
     eclipse-mosquitto:2 >/dev/null
 }
 
-# PROSE: one reporter for the local namespace, reading the first agent and
+# One reporter for the local namespace, reading the first agent and
 # publishing over the broker, which is the one process a scan Job waits on.
 start_reporter() {
   docker run --detach --rm \
@@ -164,7 +164,7 @@ start_reporter() {
     "$operator_image" report >/dev/null
 }
 
-# PROSE: whether the broker takes a connection, which is all a Job and the
+# Whether the broker takes a connection, which is all a Job and the
 # reporter need of it.
 broker_answers() {
   (exec 3<>"/dev/tcp/127.0.0.1/$broker_port") 2>/dev/null
@@ -217,7 +217,7 @@ up() {
       fi
     done
     if [ "$ready" -eq 3 ] && broker_answers; then
-      # PROSE: the reporter starts once the agents answer, because it reads
+      # The reporter starts once the agents answer, because it reads
       # the first agent the moment it comes up.
       start_reporter
       local port
