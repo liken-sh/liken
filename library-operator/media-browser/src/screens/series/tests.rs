@@ -5,8 +5,8 @@
 use super::*;
 use crate::catalog::Answer;
 use crate::catalog::{
-    Credit, CreditSlot, Credits, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
-    Query, SeriesDetails,
+    Credit, CreditSlot, Credits, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
+    Person, PlayItem, Query, SeriesDetails,
 };
 use crate::harness::Waker;
 
@@ -33,6 +33,10 @@ struct Serials {
 
 impl Source for Serials {
     fn libraries(&mut self) -> Vec<LibraryEntry> {
+        Vec::new()
+    }
+
+    fn genres(&mut self) -> Vec<GenreEntry> {
         Vec::new()
     }
 

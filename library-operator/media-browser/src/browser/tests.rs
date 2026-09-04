@@ -21,9 +21,9 @@ use super::*;
 use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, InSeries, LibraryEntry,
-    MovieDetails, MovieSet, Order, Person, PlayItem, Presentation, Query, SeriesDetails, Slot,
-    Title,
+    Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, GenreEntry, InSeries,
+    LibraryEntry, MovieDetails, MovieSet, Order, Person, PlayItem, Presentation, Query,
+    SeriesDetails, Slot, Title,
 };
 use crate::posters::Art;
 use crate::screens::home::Home;
@@ -179,6 +179,24 @@ impl Source for Fake {
                 library: SERIALS.into(),
                 kind: "series".into(),
                 items: 2,
+                art: "serial.jpg".into(),
+            },
+        ]
+    }
+
+    fn genres(&mut self) -> Vec<GenreEntry> {
+        self.calls.push("genres");
+        vec![
+            GenreEntry {
+                name: "Drama".into(),
+                titles: 2,
+                library: "screening/films".into(),
+                art: "1.jpg".into(),
+            },
+            GenreEntry {
+                name: "Western".into(),
+                titles: 1,
+                library: SERIALS.into(),
                 art: "serial.jpg".into(),
             },
         ]

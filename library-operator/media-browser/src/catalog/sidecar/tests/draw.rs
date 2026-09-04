@@ -4,7 +4,7 @@
 use super::*;
 use crate::catalog::pool::{Candidate, Kind};
 use crate::catalog::recency::{WORKS_FLOOR, date_seconds};
-use crate::catalog::{Answer, Order};
+use crate::catalog::{Answer, GenreEntry, Order};
 
 const FILMS: &str = "default/films";
 const SHOWS: &str = "default/shows";
@@ -115,6 +115,91 @@ fn a_genre_no_title_carries_answers_nothing() {
 
     assert_eq!(answer.name, "Musical");
     assert!(answer.slots.is_empty());
+}
+
+#[test]
+fn every_genre_carries_its_count_and_the_poster_of_its_newest_title() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    westerns(&path);
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    assert_eq!(
+        source.genres(),
+        [
+            GenreEntry {
+                name: "Crime".into(),
+                titles: 1,
+                library: FILMS.into(),
+                art: "streak.jpg".into(),
+            },
+            GenreEntry {
+                name: "Drama".into(),
+                titles: 2,
+                library: FILMS.into(),
+                art: "apart.jpg".into(),
+            },
+            GenreEntry {
+                name: "Western".into(),
+                titles: 4,
+                library: FILMS.into(),
+                art: "streak.jpg".into(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_genres_poster_is_the_newest_title_that_has_one_in_any_library() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    westerns(&path);
+    insert_added_movie(
+        &path,
+        FILMS,
+        "bare",
+        "2020",
+        date_seconds("2026-10-01").unwrap(),
+    );
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute("UPDATE movies SET art = '' WHERE id = 'bare'", ())
+        .unwrap();
+    insert_genre(&path, FILMS, "bare", 0, "Western");
+    insert_genre(&path, FILMS, "bare", 1, "Silent");
+    insert_genre(&path, SHOWS, "serial", 1, "Drama");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let entries = source.genres();
+
+    assert_eq!(
+        entries.iter().find(|entry| entry.name == "Western"),
+        Some(&GenreEntry {
+            name: "Western".into(),
+            titles: 5,
+            library: FILMS.into(),
+            art: "streak.jpg".into(),
+        })
+    );
+    assert_eq!(
+        entries.iter().find(|entry| entry.name == "Drama"),
+        Some(&GenreEntry {
+            name: "Drama".into(),
+            titles: 3,
+            library: SHOWS.into(),
+            art: "serial.jpg".into(),
+        })
+    );
+    assert_eq!(
+        entries.iter().find(|entry| entry.name == "Silent"),
+        Some(&GenreEntry {
+            name: "Silent".into(),
+            titles: 1,
+            library: String::new(),
+            art: String::new(),
+        })
+    );
 }
 
 // A person over the works floor, one at it, a set of two, and a set of

@@ -4,8 +4,8 @@
 use super::*;
 use crate::catalog::Answer;
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, FileFacts, LibraryEntry, Person, PlayItem, Query,
-    SeriesDetails, Title,
+    Credit, CreditSlot, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, Person, PlayItem,
+    Query, SeriesDetails, Title,
 };
 use crate::harness::Waker;
 
@@ -65,6 +65,10 @@ impl Films {
 
 impl Source for Films {
     fn libraries(&mut self) -> Vec<LibraryEntry> {
+        Vec::new()
+    }
+
+    fn genres(&mut self) -> Vec<GenreEntry> {
         Vec::new()
     }
 

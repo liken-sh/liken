@@ -48,7 +48,7 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
     let home = showing_home(&browser);
     assert_eq!(
         headings(&browser),
-        ["Recently released", "Recently added", "Libraries"]
+        ["Recently released", "Recently added", "Libraries", "Genres"]
     );
     assert_eq!(home.focus, 1);
     assert_eq!(home.control, None);
@@ -80,8 +80,12 @@ fn up_and_down_move_between_the_strips_and_each_remembers_its_focus() {
     browser.key("down");
     assert_eq!(at(&browser), (3, 0));
     browser.key("down");
-    assert_eq!(at(&browser), (3, 0));
+    assert_eq!(at(&browser), (4, 0));
+    browser.key("down");
+    assert_eq!(at(&browser), (4, 0));
 
+    browser.key("up");
+    assert_eq!(at(&browser), (3, 0));
     browser.key("up");
     assert_eq!(at(&browser), (2, 1));
     browser.key("up");
@@ -297,8 +301,7 @@ fn a_change_that_empties_every_strip_leaves_focus_in_the_band() {
     assert_eq!(strips(&browser)[2].items.len(), 2);
 
     browser.key("down");
-    browser.key("down");
-    assert_eq!(at(&browser), (3, 0));
+    assert_eq!(at(&browser), (4, 0));
 }
 
 #[test]
@@ -389,10 +392,11 @@ fn headings(browser: &Browser<Fake, NoPosters>) -> Vec<&str> {
 fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     let browser = with_draw();
     let headings = headings(&browser);
-    assert_eq!(headings.len(), 7);
+    assert_eq!(headings.len(), 8);
     assert_eq!(headings[0], "Recently released");
     assert_eq!(headings[1], "Recently added");
     assert_eq!(headings[6], "Libraries");
+    assert_eq!(headings[7], "Genres");
     let mut drawn: Vec<&str> = headings[2..6].to_vec();
     drawn.sort_unstable();
     assert_eq!(drawn, ["A Player", "Drama", "The Entries", "Western"]);
@@ -517,9 +521,65 @@ fn a_pool_that_empties_takes_its_strips_with_it() {
 
     assert_eq!(
         headings(&browser),
-        ["Recently released", "Recently added", "Libraries"]
+        ["Recently released", "Recently added", "Libraries", "Genres"]
     );
-    assert_eq!(at(&browser), (3, 0));
+    assert_eq!(at(&browser), (4, 0));
+}
+
+#[test]
+fn the_genres_strip_ends_the_page_and_holds_every_genre() {
+    let mut browser = on_strips(3);
+    browser.key("down");
+    browser.key("down");
+    browser.key("down");
+
+    let (row, slot) = at(&browser);
+    let strips = strips(&browser);
+    let genres = strips.last().expect("the page ends with the genres");
+    assert_eq!((row, slot), (4, 0));
+    assert_eq!(genres.heading, "Genres");
+    assert!(!genres.see_all);
+    let names: Vec<&str> = genres.items.iter().map(|item| item.name.as_str()).collect();
+    assert_eq!(names, ["Drama", "Western"]);
+    assert_eq!(genres.items[0].under, "2 titles");
+    assert_eq!(genres.items[0].art, "1.jpg");
+    assert_eq!(genres.items[1].under, "1 title");
+}
+
+#[test]
+fn a_select_on_a_genre_opens_the_genres_page() {
+    let mut browser = on_strips(3);
+    for _ in 0..3 {
+        browser.key("down");
+    }
+    browser.key("right");
+
+    browser.key("enter");
+
+    let wall = showing_wall(&browser);
+    assert_eq!(wall.heading, "Genre");
+    assert_eq!(
+        wall.head.as_ref().map(|head| head.name.as_str()),
+        Some("Western")
+    );
+    assert_eq!(
+        wall.slots.query,
+        Query::Genre {
+            name: "Western".into(),
+            order: Order::Released,
+        }
+    );
+}
+
+#[test]
+fn a_rest_on_a_genre_asks_for_nothing() {
+    let mut browser = on_strips(3);
+    browser.tick(0.0);
+    for _ in 0..3 {
+        browser.key("down");
+    }
+
+    assert!(browser.next_frame(REST).is_none());
 }
 
 #[test]

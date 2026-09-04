@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use super::*;
 use crate::catalog::Person as Entry;
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, PlayItem, Selection,
-    SeriesDetails, Slot,
+    Answer, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
+    PlayItem, Selection, SeriesDetails, Slot,
 };
 use crate::harness::Waker;
 use crate::posters::Art;
@@ -53,6 +53,10 @@ impl People {
 
 impl Source for People {
     fn libraries(&mut self) -> Vec<LibraryEntry> {
+        Vec::new()
+    }
+
+    fn genres(&mut self) -> Vec<GenreEntry> {
         Vec::new()
     }
 

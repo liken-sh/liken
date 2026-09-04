@@ -1,8 +1,9 @@
 // The home page: the screen the shade lifts to, and the bottom of the
 // stack. It draws the band across the top, then the rows top to bottom:
 // the banner, what was released, what arrived, the strips the day drew
-// from the pool, and the libraries as the floor the page never loses. A
-// row that holds nothing draws nothing, and focus skips it.
+// from the pool, the libraries as the floor the page never loses, and
+// every genre to close the page. A row that holds nothing draws nothing,
+// and focus skips it.
 
 pub mod banner;
 mod layout;
@@ -22,7 +23,7 @@ use super::{Item, Screen, Step, facts, slots};
 use crate::catalog::draw::{self, Date};
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
-use crate::catalog::{Fold, LibraryEntry, Query, Source, library_name};
+use crate::catalog::{Fold, GenreEntry, LibraryEntry, Order, Query, Source, library_name};
 use crate::focus;
 use crate::posters::Posters;
 use crate::views::{self, area, band, strip};
@@ -36,13 +37,18 @@ const HEADING: &str = "Home";
 // opens the library's wall and never a page.
 const LIBRARY: &str = "library";
 
+// The kind an item of the genres strip carries, so a select on it opens
+// the genre's page and never a title's.
+const GENRE: &str = "genre";
+
 /// One row of the page as a read: the banner, the slots of one query,
-/// or the libraries themselves.
+/// the libraries themselves, or the genres themselves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Banner,
     Query(Query),
     Libraries,
+    Genres,
 }
 
 impl Row {
@@ -59,8 +65,8 @@ impl Row {
 
 // The rows of the page, top to bottom: the banner, the two recency
 // strips under the `Airing` fold because the home page shows what is
-// new, the strips the day drew in the drawn order, and the libraries to
-// close the page.
+// new, the strips the day drew in the drawn order, the libraries, and
+// the genres to close the page.
 fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
     let mut rows = vec![
         Row::Banner,
@@ -73,6 +79,7 @@ fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
             .map(|candidate| Row::Query(candidate.query)),
     );
     rows.push(Row::Libraries);
+    rows.push(Row::Genres);
     rows
 }
 
@@ -130,6 +137,12 @@ impl Strip {
                     .map(|slot| Item::of(query, slot))
                     .collect();
             }
+            // The genres row reads every genre. It has no "see all", because
+            // it is all of them and not a draw.
+            Row::Genres => {
+                self.heading = "Genres".to_string();
+                self.items = source.genres().into_iter().map(genre_item).collect();
+            }
             // The libraries row reads the libraries. The banner row is here only
             // because the match is exhaustive: a strip never carries it, because
             // the banner is read off the strips and not from a row of its own.
@@ -173,6 +186,13 @@ impl Strip {
             };
             return Step::Open(Screen::Wall(Wall::open(query, source)));
         }
+        if item.kind == GENRE {
+            let query = Query::Genre {
+                name: item.id.clone(),
+                order: Order::Released,
+            };
+            return slots::see_all(&query, source);
+        }
         slots::opened(item, source)
     }
 }
@@ -190,6 +210,27 @@ fn library_item(entry: LibraryEntry) -> Item {
         line: facts::Line::of(&[&name]),
         name,
         under: format!("{} · {}", entry.kind, entry.items),
+        art: entry.art,
+        episode: None,
+    }
+}
+
+// One genre as a slot of the genres strip: the genre as the caption,
+// the count of its titles under it, and the poster of its newest-released
+// title as the art. Two genres may share one poster.
+fn genre_item(entry: GenreEntry) -> Item {
+    let titles = match entry.titles {
+        1 => "1 title".to_string(),
+        titles => format!("{titles} titles"),
+    };
+    Item {
+        id: entry.name.clone(),
+        library: entry.library,
+        kind: GENRE.to_string(),
+        caption: entry.name.clone(),
+        line: facts::Line::of(&[&entry.name]),
+        name: entry.name,
+        under: titles,
         art: entry.art,
         episode: None,
     }
@@ -313,7 +354,7 @@ impl Home {
         let strips: Vec<&Strip> = self.blocks.iter().filter_map(Block::strip).collect();
         let (recency, drawn): (Vec<&Strip>, Vec<&Strip>) = strips
             .into_iter()
-            .filter(|strip| strip.row != Row::Libraries)
+            .filter(|strip| !matches!(strip.row, Row::Libraries | Row::Genres))
             .partition(|strip| strip.row.recency());
         let titles = Banner::read(drawn.into_iter().chain(recency), source);
         if let Some(Block::Banner(banner)) = self
@@ -405,9 +446,9 @@ impl Home {
         self.control.is_none()
             && match self.blocks.get(self.focus) {
                 Some(Block::Banner(banner)) => !banner.is_empty(),
-                Some(Block::Strip(strip)) => {
-                    strip.focused().is_some_and(|item| item.kind != LIBRARY)
-                }
+                Some(Block::Strip(strip)) => strip
+                    .focused()
+                    .is_some_and(|item| item.kind != LIBRARY && item.kind != GENRE),
                 None => false,
             }
     }
@@ -589,7 +630,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_page_reads_the_banner_the_two_recency_rows_then_the_draw_then_the_libraries() {
+    fn the_page_reads_the_banner_the_recency_rows_the_draw_the_libraries_then_the_genres() {
         let western = Query::Genre {
             name: "Western".into(),
             order: crate::catalog::Order::Released,
@@ -607,9 +648,10 @@ mod tests {
                 Row::Query(Query::Added { fold: Fold::Airing }),
                 Row::Query(western),
                 Row::Libraries,
+                Row::Genres,
             ]
         );
-        assert_eq!(rows(Vec::new()).len(), 4);
+        assert_eq!(rows(Vec::new()).len(), 5);
     }
 
     #[test]
@@ -618,6 +660,7 @@ mod tests {
         assert!(Row::Query(Query::Added { fold: Fold::Titles }).recency());
         assert!(!Row::Banner.recency());
         assert!(!Row::Libraries.recency());
+        assert!(!Row::Genres.recency());
         assert!(
             !Row::Query(Query::Library {
                 library: "sample/features".into()
@@ -643,5 +686,36 @@ mod tests {
         assert_eq!(item.under, "movies · 42");
         assert_eq!(item.art, "posters/newest.jpg");
         assert_eq!(item.episode, None);
+    }
+
+    #[test]
+    fn a_genre_is_a_slot_with_its_name_its_count_and_its_newest_poster() {
+        let item = genre_item(GenreEntry {
+            name: "Western".into(),
+            titles: 42,
+            library: "screening/features".into(),
+            art: "posters/newest.jpg".into(),
+        });
+        assert_eq!(item.kind, GENRE);
+        assert_eq!(item.id, "Western");
+        assert_eq!(item.library, "screening/features");
+        assert_eq!(item.name, "Western");
+        assert_eq!(item.caption, "Western");
+        assert_eq!(item.line.words(), "Western");
+        assert_eq!(item.under, "42 titles");
+        assert_eq!(item.art, "posters/newest.jpg");
+        assert_eq!(item.episode, None);
+    }
+
+    #[test]
+    fn a_genre_one_title_carries_counts_it_in_the_singular() {
+        let item = genre_item(GenreEntry {
+            name: "Silent".into(),
+            titles: 1,
+            library: String::new(),
+            art: String::new(),
+        });
+        assert_eq!(item.under, "1 title");
+        assert_eq!(item.art, "");
     }
 }

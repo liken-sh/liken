@@ -6,7 +6,7 @@ use super::{
     SERIALS_LIBRARY, movie, movie_arrival, people, serial,
 };
 use crate::catalog::pool::Candidate;
-use crate::catalog::{Order, Query, Slot};
+use crate::catalog::{GenreEntry, Order, Query, Slot};
 
 // The invented genres. Every movie carries one or two of them by its
 // number, so every genre has titles that lead with it and titles that
@@ -64,6 +64,30 @@ pub fn titles(name: &str, order: Order) -> Vec<Slot> {
             .then_with(|| slot.id.cmp(&other.id))
     });
     found.into_iter().map(|(_, _, slot)| slot).collect()
+}
+
+/// Every invented genre as the genres strip draws it, in name order: the
+/// count of the titles that carry it, and the poster of the newest-released
+/// of them.
+pub fn genres() -> Vec<GenreEntry> {
+    let mut names = GENRES;
+    names.sort_unstable();
+    names
+        .into_iter()
+        .map(|name| {
+            let slots = titles(name, Order::Released);
+            let newest = slots
+                .iter()
+                .filter(|slot| !slot.art.is_empty())
+                .max_by(|slot, other| slot.released.cmp(&other.released));
+            GenreEntry {
+                name: name.to_string(),
+                titles: slots.len() as u64,
+                library: newest.map(|slot| slot.library.clone()).unwrap_or_default(),
+                art: newest.map(|slot| slot.art.clone()).unwrap_or_default(),
+            }
+        })
+        .collect()
 }
 
 /// The invented pool: every genre weighed as the catalog weighs it, the
@@ -212,6 +236,30 @@ mod tests {
         assert_eq!(sets.len() as i64, IN_SETS / PER_SET);
         assert_eq!(sets[0].name, "The Specimen Cycle 01");
         assert_eq!(Catalog.wall(&sets[0].query).name, sets[0].name);
+    }
+
+    #[test]
+    fn every_invented_genre_carries_its_count_and_a_poster() {
+        let entries = Catalog.genres();
+        let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+        let mut sorted = GENRES;
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
+        assert!(entries.iter().all(|entry| !entry.art.is_empty()));
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.library == FEATURES || entry.library == SERIALS_LIBRARY)
+        );
+        let western = entries
+            .iter()
+            .find(|entry| entry.name == "Western")
+            .expect("the sample invents Western");
+        assert_eq!(
+            western.titles,
+            titles("Western", Order::Released).len() as u64
+        );
+        assert_eq!(western.library, FEATURES);
     }
 
     #[test]

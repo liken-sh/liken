@@ -46,6 +46,24 @@ pub struct LibraryEntry {
     pub art: String,
 }
 
+/// One genre as the home page's genres strip draws it: the name, how
+/// many titles carry it, and the art it draws as, with the library that
+/// art resolves against.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GenreEntry {
+    /// The genre, as the catalog's genres table spells it.
+    pub name: String,
+    /// How many movies and series carry the genre at any rank, across
+    /// every library.
+    pub titles: u64,
+    /// The library the art resolves against, empty where no title that
+    /// carries the genre has art.
+    pub library: String,
+    /// The poster of the newest-released title that carries the genre and
+    /// has one, empty where none has.
+    pub art: String,
+}
+
 /// One title in a kind's top list: a movie, or a series.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Title {
@@ -298,6 +316,11 @@ pub trait Source {
     /// screen shows is an open problem, so until that resource exists the
     /// home page's libraries strip shows them all.
     fn libraries(&mut self) -> Vec<LibraryEntry>;
+
+    /// Every genre the catalog holds, in name order, each with its count
+    /// of titles and the art the strip draws it as. One read, because the
+    /// genres strip is a row of every home page.
+    fn genres(&mut self) -> Vec<GenreEntry>;
 
     /// The one read behind every wall. Every slot carries its library and
     /// its kind, so one wall draws a library, a person's works, and a set from

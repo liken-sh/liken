@@ -4,8 +4,8 @@
 
 use crate::catalog::recency::{self, CANDIDATES, Candidate};
 use crate::catalog::{
-    Answer, Credit, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person,
-    PlayItem, Query, Selection, SeriesDetails, Slot, Source, Title, library_name, pool,
+    Answer, Credit, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
+    Person, PlayItem, Query, Selection, SeriesDetails, Slot, Source, Title, library_name, pool,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
@@ -71,6 +71,10 @@ impl Source for Catalog {
                 art: serial(SERIALS).art,
             },
         ]
+    }
+
+    fn genres(&mut self) -> Vec<GenreEntry> {
+        draw::genres()
     }
 
     fn wall(&mut self, query: &Query) -> Answer {

@@ -10,8 +10,8 @@ use rusqlite::{Connection, OpenFlags, Row};
 
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Order, Person,
-    PlayItem, Query, Selection, SeriesDetails, Slot, Source, library_name, recency,
+    Answer, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet, Order,
+    Person, PlayItem, Query, Selection, SeriesDetails, Slot, Source, library_name, recency,
 };
 use crate::harness::Waker;
 
@@ -160,6 +160,10 @@ impl Source for SidecarSource {
                 })
             })
         })
+    }
+
+    fn genres(&mut self) -> Vec<GenreEntry> {
+        self.read(genres::entries)
     }
 
     fn wall(&mut self, query: &Query) -> Answer {
