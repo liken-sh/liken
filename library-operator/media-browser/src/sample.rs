@@ -5,13 +5,16 @@
 use crate::catalog::recency::{self, CANDIDATES, Candidate};
 use crate::catalog::{
     Answer, Credit, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person,
-    PlayItem, Query, Selection, SeriesDetails, Slot, Source, Title, library_name,
+    PlayItem, Query, Selection, SeriesDetails, Slot, Source, Title, library_name, pool,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
 
 // The invented people of the sample catalog.
 mod people;
+
+// The invented genres and the invented pool the day's draw reads.
+mod draw;
 
 // Enough movies to exercise the wall's culling, near the
 // head-to-head's five thousand.
@@ -104,7 +107,15 @@ impl Source for Catalog {
                 name: String::new(),
                 slots: recency::fold(recent(added_of), *fold),
             },
+            Query::Genre { name, order } => Answer {
+                name: name.clone(),
+                slots: draw::titles(name, *order),
+            },
         }
+    }
+
+    fn pool(&mut self) -> Vec<pool::Candidate> {
+        draw::pool()
     }
 
     // The invented details of one series, so a run with no catalog opens
@@ -119,7 +130,7 @@ impl Source for Catalog {
             released: serial_year(number).to_string(),
             duration: 0,
             rating: "TV-14".into(),
-            genres: vec!["Drama".into(), "Mystery".into()],
+            genres: draw::serial_genres(),
             tagline: format!("Serial {number:02}, in its own seasons."),
             plot: PLOT.repeat(2),
             creators: vec![format!("Creator {number:02}")],
@@ -176,7 +187,7 @@ impl Source for Catalog {
             released: title.released,
             duration: title.duration,
             rating: title.rating,
-            genres: vec!["Drama".into(), "Mystery".into()],
+            genres: draw::movie_genres(number),
             tagline: format!("The {number:04}th of its kind."),
             plot: PLOT.repeat(2),
             directors: vec![format!("Director {number:04}")],

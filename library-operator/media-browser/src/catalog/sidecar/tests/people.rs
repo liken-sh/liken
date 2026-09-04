@@ -13,26 +13,6 @@ fn person_wall(library: &str, path: &str) -> Query {
     }
 }
 
-// One person's entry in one library's store. `files` is the biography and
-// the headshot, in that order, as the contributor facts write them.
-fn insert_contributor(
-    path: &Path,
-    library: &str,
-    contributor: &str,
-    name: &str,
-    files: (i64, i64),
-) {
-    let (biography, headshot) = files;
-    let connection = Connection::open(path).unwrap();
-    connection
-        .execute(
-            "INSERT INTO contributors (library, path, name, born, died, biography, headshot) \
-             VALUES (?, ?, ?, '1950-01-02', '', ?, ?)",
-            (library, contributor, name, biography, headshot),
-        )
-        .unwrap();
-}
-
 // One id of one person, which is the only thing that joins two libraries'
 // copies of them.
 fn insert_alias(path: &Path, library: &str, scheme: &str, id: &str, contributor: &str) {
@@ -41,28 +21,6 @@ fn insert_alias(path: &Path, library: &str, scheme: &str, id: &str, contributor:
         .execute(
             "INSERT INTO contributor_aliases (library, scheme, id, path) VALUES (?, ?, ?, ?)",
             (library, scheme, id, contributor),
-        )
-        .unwrap();
-}
-
-// One credited person on one title. `billing` is the key beside the item,
-// and the crew hold the billing after the cast.
-fn insert_credit(
-    path: &Path,
-    library: &str,
-    item: &str,
-    billing: i64,
-    person: (&str, &str),
-    part: (&str, &str),
-) {
-    let (contributor, name) = person;
-    let (part, role) = part;
-    let connection = Connection::open(path).unwrap();
-    connection
-        .execute(
-            "INSERT INTO credits (library, item, billing, contributor, name, part, role) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (library, item, billing, contributor, name, part, role),
         )
         .unwrap();
 }

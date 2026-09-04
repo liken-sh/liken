@@ -20,6 +20,15 @@ pub const CANDIDATES: usize = 120;
 /// behind "see all" shows the rest.
 pub const SHOWN: usize = 20;
 
+/// A person enters the pool with more works than this. A person
+/// credited in one or two titles makes a strip of one or two slots.
+pub const WORKS_FLOOR: u64 = 3;
+
+/// How many candidates the day draws from the pool. Four is enough for
+/// one of each of the three kinds and one more, and a guess to live with
+/// beside the other numbers here.
+pub const DRAWN: usize = 4;
+
 const DAY: i64 = 86_400;
 
 /// One row a recency read answers with before the fold: a movie as its

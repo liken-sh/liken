@@ -7,22 +7,14 @@ use rusqlite::{Connection, Row};
 
 use super::{collect, item};
 use crate::catalog::recency::{CANDIDATES, Candidate};
-use crate::catalog::{Slot, Title};
+use crate::catalog::{Order, Slot, Title};
 
-/// The column a recency read orders by. The closed match is the whole
-/// of what may reach the SQL text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Order {
-    Released,
-    Added,
-}
-
-impl Order {
-    fn column(self) -> &'static str {
-        match self {
-            Self::Released => "released",
-            Self::Added => "added",
-        }
+/// The column an order names. The closed match is the whole of what may
+/// reach the SQL text.
+pub fn column(order: Order) -> &'static str {
+    match order {
+        Order::Released => "released",
+        Order::Added => "added",
     }
 }
 
@@ -48,7 +40,7 @@ pub fn candidates(connection: &Connection, order: Order) -> rusqlite::Result<Vec
          ) ORDER BY {key} DESC, library, id LIMIT ?1",
         columns = item::COLUMNS,
         episode_columns = EPISODE_COLUMNS,
-        key = order.column(),
+        key = column(order),
     );
     collect(connection, &sql, &[&(CANDIDATES as i64)], candidate)
 }

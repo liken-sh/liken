@@ -8,6 +8,13 @@ use crate::catalog::{CreditSlot, Credits, Person, Slot};
 // library's contributor store names them.
 const CONTRIBUTORS: &str = ".contributors/";
 
+// The one invented person credited in more works than the pool's
+// floor: the second writer of every movie, whose wall holds the first
+// six.
+pub const PROLIFIC_NAME: &str = "A Second Writer";
+pub const PROLIFIC: &str = ".contributors/A Second Writer";
+const PROLIFIC_WORKS: i64 = 6;
+
 // One invented slot of a stripe. Every sample person has an entry and a
 // headshot, so every slot draws one.
 fn slot(name: &str, role: &str) -> CreditSlot {
@@ -59,17 +66,23 @@ pub fn person(library: &str, path: &str) -> Option<Person> {
 }
 
 /// Every invented person acts in the first three movies, so a person's
-/// page opens on a wall of three. The slots carry no duration and no
+/// page opens on a wall of three, and the prolific writer's wall holds
+/// the first `PROLIFIC_WORKS` movies as their writer, so the sample's pool
+/// has one person over the floor. The slots carry no duration and no
 /// rating, because the sidecar's works read carries neither, and the
 /// sample answers the same shape.
 pub fn works(library: &str, path: &str) -> Vec<Slot> {
     if !path.starts_with(CONTRIBUTORS) {
         return Vec::new();
     }
-    let mut works: Vec<Slot> = (1..=3)
+    let (count, parts) = match path == PROLIFIC {
+        true => (PROLIFIC_WORKS, "Writer"),
+        false => (3, "as Part 1"),
+    };
+    let mut works: Vec<Slot> = (1..=count)
         .map(movie)
         .map(|title| Slot {
-            parts: "as Part 1".into(),
+            parts: parts.into(),
             duration: 0,
             rating: String::new(),
             ..Slot::of(library, "movies", title)
@@ -104,6 +117,17 @@ mod tests {
         let released: Vec<&str> = works.iter().map(|work| work.released.as_str()).collect();
         assert_eq!(released, ["2011", "1974", "1937"]);
         assert_eq!(works[0].parts, "as Part 1");
+    }
+
+    #[test]
+    fn the_prolific_writer_wrote_more_than_three() {
+        let works = works("sample/features", PROLIFIC);
+        assert_eq!(works.len() as i64, PROLIFIC_WORKS);
+        assert!(works.iter().all(|work| work.parts == "Writer"));
+        assert_eq!(
+            person("sample/features", PROLIFIC).map(|person| person.name),
+            Some(PROLIFIC_NAME.to_string())
+        );
     }
 
     #[test]

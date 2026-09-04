@@ -16,7 +16,15 @@ pub mod query;
 // and the constants that bound them.
 pub mod recency;
 
-pub use query::{Answer, Fold, InSeries, Query, Slot};
+// The pool module: the candidate strips the home page draws from, each
+// with its weight.
+pub mod pool;
+
+// The draw module: the date seed and the weighted draw of the day's
+// strips from the pool.
+pub mod draw;
+
+pub use query::{Answer, Fold, InSeries, Order, Query, Slot};
 
 /// One library as the home page's libraries strip draws it: the name,
 /// the kind, the count of items it holds, and the art of its newest-added
@@ -297,6 +305,13 @@ pub trait Source {
     /// its slots in the query's order. It is empty where the query names
     /// nothing the catalog holds.
     fn wall(&mut self, query: &Query) -> Answer;
+
+    /// Every candidate strip the day may draw, with its weight: every
+    /// genre, every person with more than `WORKS_FLOOR` works, and every set
+    /// with at least two members. The pool is one read because the draw is a
+    /// pure function of the date and the pool, so the draw needs nothing
+    /// else.
+    fn pool(&mut self) -> Vec<pool::Candidate>;
 
     /// One movie's details, or nothing where the library holds no movie
     /// under that id.

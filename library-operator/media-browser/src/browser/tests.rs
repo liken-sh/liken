@@ -17,10 +17,11 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
-use crate::catalog::Answer;
+use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails,
-    MovieSet, Person, PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
+    Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, InSeries, LibraryEntry,
+    MovieDetails, MovieSet, Order, Person, PlayItem, Presentation, Query, SeriesDetails, Slot,
+    Title,
 };
 use crate::posters::Art;
 use crate::screens::home::Home;
@@ -60,6 +61,10 @@ struct Fake {
     // series with a back catalog, and a movie, newest first. Without it
     // the home page is the libraries strip alone.
     recent: bool,
+    // Whether the pool holds candidates: two genres, the one person, and
+    // the one set, so every draw takes all four and only their order is the
+    // date's.
+    pool: bool,
 }
 
 // The library the fake serial is in, and the serial's id.
@@ -201,9 +206,66 @@ impl Source for Fake {
                         .collect(),
                 }
             }
-            Query::Set { .. } => Answer::default(),
+            Query::Set { id, .. } => match self.set("screening/films", id) {
+                Some(set) => Answer {
+                    name: set.title,
+                    slots: set
+                        .members
+                        .into_iter()
+                        .map(|member| Slot::of("screening/films", "movies", member))
+                        .collect(),
+                },
+                None => Answer::default(),
+            },
             Query::Released { fold } | Query::Added { fold } => self.recency(*fold),
+            Query::Genre { name, .. } => Answer {
+                name: name.clone(),
+                slots: (1..=self.movies)
+                    .map(|number| Slot::of("screening/films", "movies", self.member(number)))
+                    .collect(),
+            },
         }
+    }
+
+    fn pool(&mut self) -> Vec<Candidate> {
+        self.calls.push("pool");
+        if !self.pool {
+            return Vec::new();
+        }
+        vec![
+            Candidate {
+                query: Query::Genre {
+                    name: "Western".into(),
+                    order: Order::Released,
+                },
+                name: "Western".into(),
+                weight: 200,
+            },
+            Candidate {
+                query: Query::Genre {
+                    name: "Drama".into(),
+                    order: Order::Released,
+                },
+                name: "Drama".into(),
+                weight: 40,
+            },
+            Candidate {
+                query: Query::Person {
+                    library: "screening/films".into(),
+                    path: ENTRY.into(),
+                },
+                name: PLAYER.into(),
+                weight: 4,
+            },
+            Candidate {
+                query: Query::Set {
+                    library: "screening/films".into(),
+                    id: SET.into(),
+                },
+                name: "The Entries".into(),
+                weight: 3,
+            },
+        ]
     }
 
     fn series(&mut self, _library: &str, id: &str) -> Option<SeriesDetails> {

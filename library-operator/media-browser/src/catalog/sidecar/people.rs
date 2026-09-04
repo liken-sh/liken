@@ -251,7 +251,7 @@ fn entries(
 
 // Each library's kind, from the same union the libraries strip reads:
 // the item table a library has rows in is its kind.
-fn kinds(connection: &Connection) -> rusqlite::Result<HashMap<String, String>> {
+pub fn kinds(connection: &Connection) -> rusqlite::Result<HashMap<String, String>> {
     let sql = "SELECT library, 'movies' AS kind FROM movies GROUP BY library \
                UNION ALL \
                SELECT library, 'series' AS kind FROM series GROUP BY library";

@@ -1,9 +1,10 @@
 // The home page: the screen the shade lifts to, and the bottom of the
 // stack. It draws the band across the top, then one strip per row of the
-// page, top to bottom: what was released, what arrived, and the libraries
-// as the floor the page never loses. A strip whose read answers nothing
-// draws nothing, and focus skips it. The day's draw and the banner take
-// their places in the rows when their plans land.
+// page, top to bottom: what was released, what arrived, the strips the
+// day drew from the pool, and the libraries as the floor the page never
+// loses. A strip whose read answers nothing draws nothing, and focus
+// skips it. The banner takes its place in the rows when its plan
+// lands.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -14,6 +15,8 @@ use iced_winit::core::{Element, Length, Rectangle, Theme, mouse};
 
 use super::wall::Wall;
 use super::{Item, Screen, Step, facts, slots};
+use crate::catalog::draw::{self, Date};
+use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
 use crate::catalog::{Fold, LibraryEntry, Query, Source, library_name};
 use crate::focus;
@@ -41,23 +44,36 @@ const GAP: f32 = 28.0;
 const TRAIL: f32 = 70.0;
 
 /// One row of the page as a read: the slots of one query, or the
-/// libraries themselves. The day's draw adds query rows here, and the
-/// banner is a row of its own when its plan lands.
+/// libraries themselves. The day's draw adds query rows, and the banner
+/// is a row of its own when its plan lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Query(Query),
     Libraries,
 }
 
-// The rows of the page, top to bottom. The two recency strips use the
-// `Airing` fold because the home page shows what is new, and the
-// libraries close the page.
-fn rows() -> Vec<Row> {
-    vec![
+// The rows of the page, top to bottom: the two recency strips under the
+// `Airing` fold because the home page shows what is new, the strips the
+// day drew in the drawn order, and the libraries to close the page.
+fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
+    let mut rows = vec![
         Row::Query(Query::Released { fold: Fold::Airing }),
         Row::Query(Query::Added { fold: Fold::Airing }),
-        Row::Libraries,
-    ]
+    ];
+    rows.extend(
+        drawn
+            .into_iter()
+            .map(|candidate| Row::Query(candidate.query)),
+    );
+    rows.push(Row::Libraries);
+    rows
+}
+
+// The day's rows: the pool read now and drawn on today's date, so a
+// reread on a new day draws a new page and a reread on the same day
+// draws the same one.
+fn todays_rows(source: &mut dyn Source) -> Vec<Row> {
+    rows(draw::draw(Date::today(), &source.pool()))
 }
 
 /// One strip of the page: the row it reads, the heading over it, the
@@ -161,7 +177,7 @@ impl Home {
         let mut home = Self {
             heading: HEADING.to_string(),
             control: None,
-            strips: rows()
+            strips: todays_rows(source)
                 .into_iter()
                 .map(|row| Strip::read(row, source))
                 .collect(),
@@ -171,11 +187,28 @@ impl Home {
         home
     }
 
-    /// Read every strip again and keep focus where it was, because a
-    /// change can empty the strip that held it.
+    /// Read every strip again and keep focus where it was, because a change
+    /// can empty the strip that held it. The draw runs again, so a strip the
+    /// day no longer draws goes, a new one is read, and a strip that stays
+    /// keeps its focus. Focus follows the row it was on where that row
+    /// stays.
     pub fn reread(&mut self, source: &mut dyn Source) {
+        let focused = self.strips.get(self.focus).map(|strip| strip.row.clone());
+        let mut kept: Vec<Strip> = std::mem::take(&mut self.strips);
+        for row in todays_rows(source) {
+            let strip = match kept.iter().position(|strip| strip.row == row) {
+                Some(index) => kept.remove(index),
+                None => Strip::read(row, source),
+            };
+            self.strips.push(strip);
+        }
         for strip in &mut self.strips {
             strip.reread(source);
+        }
+        if let Some(index) =
+            focused.and_then(|row| self.strips.iter().position(|strip| strip.row == row))
+        {
+            self.focus = index;
         }
         self.settle();
     }
@@ -415,15 +448,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_page_reads_the_two_recency_rows_and_then_the_libraries() {
+    fn the_page_reads_the_two_recency_rows_then_the_draw_then_the_libraries() {
+        let western = Query::Genre {
+            name: "Western".into(),
+            order: crate::catalog::Order::Released,
+        };
+        let drawn = vec![Candidate {
+            query: western.clone(),
+            name: "Western".into(),
+            weight: 7,
+        }];
         assert_eq!(
-            rows(),
+            rows(drawn),
             [
                 Row::Query(Query::Released { fold: Fold::Airing }),
                 Row::Query(Query::Added { fold: Fold::Airing }),
+                Row::Query(western),
                 Row::Libraries,
             ]
         );
+        assert_eq!(rows(Vec::new()).len(), 3);
     }
 
     #[test]

@@ -19,12 +19,23 @@ pub enum Fold {
     Airing,
 }
 
+/// The column a read orders by: the release date or the arrival. It is
+/// a closed pair and not a column name, because the sidecar formats it
+/// into SQL, and the genre read and the recency read share it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Order {
+    Released,
+    Added,
+}
+
 /// The queries a wall can be fed. The set is closed and grows by one
 /// variant per plan. `Library` is one library in sort order. `Person` is
 /// every work of one person across the libraries. `Set` is the members of
 /// one set in release order. `Released` is movies and episodes newest
 /// release first, and `Added` is the same newest arrival first, both
-/// across every library and both folded by their `Fold`.
+/// across every library and both folded by their `Fold`. `Genre` is every
+/// movie and series across every library that carries the genre, the
+/// titles that lead with it first, then newest by the order's column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
     Library { library: String },
@@ -32,6 +43,7 @@ pub enum Query {
     Set { library: String, id: String },
     Released { fold: Fold },
     Added { fold: Fold },
+    Genre { name: String, order: Order },
 }
 
 impl Query {
@@ -44,6 +56,7 @@ impl Query {
             Self::Person { .. } | Self::Set { .. } => name.to_string(),
             Self::Released { .. } => "Recently released".to_string(),
             Self::Added { .. } => "Recently added".to_string(),
+            Self::Genre { name, .. } => name.clone(),
         }
     }
 
@@ -169,6 +182,17 @@ mod tests {
         let added = Query::Added { fold: Fold::Titles };
         assert_eq!(added.name("ignored"), "Recently added");
         assert_eq!(added.heading("ignored", 3), "Recently added · 3");
+    }
+
+    #[test]
+    fn a_genre_is_headed_by_its_own_name_and_the_wall_adds_the_count() {
+        let query = Query::Genre {
+            name: "Western".into(),
+            order: Order::Released,
+        };
+        assert_eq!(query.name("ignored"), "Western");
+        assert_eq!(query.heading("ignored", 7), "Western · 7");
+        assert_eq!(query.all_titles(), query);
     }
 
     #[test]

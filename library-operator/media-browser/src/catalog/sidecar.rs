@@ -8,17 +8,20 @@ use std::sync::atomic::Ordering;
 
 use rusqlite::{Connection, OpenFlags, Row};
 
+use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
-    Query, Selection, SeriesDetails, Slot, Source, library_name, recency,
+    Answer, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Order, Person,
+    PlayItem, Query, Selection, SeriesDetails, Slot, Source, library_name, recency,
 };
 use crate::harness::Waker;
 
 mod details;
 mod files;
+mod genres;
 mod item;
 mod people;
 mod play;
+mod pool;
 mod recent;
 mod series;
 mod updates;
@@ -189,18 +192,26 @@ impl Source for SidecarSource {
             Query::Released { fold } => Answer {
                 name: String::new(),
                 slots: recency::fold(
-                    self.read(|connection| recent::candidates(connection, recent::Order::Released)),
+                    self.read(|connection| recent::candidates(connection, Order::Released)),
                     *fold,
                 ),
             },
             Query::Added { fold } => Answer {
                 name: String::new(),
                 slots: recency::fold(
-                    self.read(|connection| recent::candidates(connection, recent::Order::Added)),
+                    self.read(|connection| recent::candidates(connection, Order::Added)),
                     *fold,
                 ),
             },
+            Query::Genre { name, order } => Answer {
+                name: name.clone(),
+                slots: self.read(|connection| genres::titles(connection, name, *order)),
+            },
         }
+    }
+
+    fn pool(&mut self) -> Vec<Candidate> {
+        self.read(pool::candidates)
     }
 
     fn movie(&mut self, library: &str, id: &str) -> Option<MovieDetails> {

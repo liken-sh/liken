@@ -149,6 +149,10 @@ impl Source for Serials {
         }]
     }
 
+    fn pool(&mut self) -> Vec<crate::catalog::pool::Candidate> {
+        Vec::new()
+    }
+
     fn changed(&mut self) -> bool {
         false
     }

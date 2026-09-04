@@ -128,10 +128,12 @@ impl<S: Source, P: Posters> Browser<S, P> {
             Moment::Wake => {
                 self.asleep = false;
                 self.presented();
+                self.lifted();
             }
             Moment::Present => {
                 self.surface_due = true;
                 self.presented();
+                self.lifted();
             }
             // A level brings up the volume row, which draws over every
             // screen.
@@ -197,6 +199,15 @@ impl<S: Source, P: Posters> Browser<S, P> {
         if let Some(state) = &mut self.loading {
             state.leave(self.clock);
         }
+    }
+
+    // The home page rereads when the shade lifts, because the day's draw is
+    // seeded by the date, and a shade that lifts on a new day must show
+    // that day's strips without a restart. The home page is read whether or
+    // not a screen covers it, because back pops to it with no draw of its
+    // own.
+    fn lifted(&mut self) {
+        self.home.reread(&mut self.source);
     }
 
     // Push a screen and read the files it draws off the volume,

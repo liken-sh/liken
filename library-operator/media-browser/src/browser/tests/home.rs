@@ -287,3 +287,154 @@ fn the_view_builds_with_strips_and_with_the_band_in_focus() {
     let _ = browser.view();
     let _ = super::browser(0).view();
 }
+
+// A browser whose pool holds every kind, so the page draws four strips
+// between the recency strips and the libraries.
+fn with_draw() -> Browser<Fake, NoPosters> {
+    Browser::new(
+        Fake {
+            movies: 3,
+            recent: true,
+            people: true,
+            sets: true,
+            pool: true,
+            ..Fake::default()
+        },
+        NoPosters::default(),
+    )
+}
+
+fn headings(browser: &Browser<Fake, NoPosters>) -> Vec<&str> {
+    showing_home(browser)
+        .strips
+        .iter()
+        .map(|strip| strip.heading.as_str())
+        .collect()
+}
+
+#[test]
+fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
+    let browser = with_draw();
+    let headings = headings(&browser);
+    assert_eq!(headings.len(), 7);
+    assert_eq!(headings[0], "Recently released");
+    assert_eq!(headings[1], "Recently added");
+    assert_eq!(headings[6], "Libraries");
+    let mut drawn: Vec<&str> = headings[2..6].to_vec();
+    drawn.sort_unstable();
+    assert_eq!(drawn, ["A Player", "Drama", "The Entries", "Western"]);
+    let first_three = &headings[2..5];
+    assert!(first_three.contains(&"A Player"));
+    assert!(first_three.contains(&"The Entries"));
+    assert!(
+        showing_home(&browser).strips[2..6]
+            .iter()
+            .all(|strip| strip.see_all)
+    );
+}
+
+#[test]
+fn a_drawn_strip_captions_a_title_with_its_facts_and_a_persons_with_the_parts() {
+    let browser = with_draw();
+    let home = showing_home(&browser);
+    let western = home
+        .strips
+        .iter()
+        .find(|strip| strip.heading == "Western")
+        .expect("the page drew Western");
+    assert_eq!(western.items[0].caption, "Entry 1");
+    assert_eq!(western.items[0].under, "1980 · 1h 30m · PG");
+    let player = home
+        .strips
+        .iter()
+        .find(|strip| strip.heading == PLAYER)
+        .expect("the page drew the player");
+    assert_eq!(player.items[0].caption, "Entry 1 · 1980");
+    assert_eq!(player.items[0].under, "Director");
+    let set = home
+        .strips
+        .iter()
+        .find(|strip| strip.heading == "The Entries")
+        .expect("the page drew the set");
+    assert_eq!(set.items.len(), 3);
+    assert_eq!(set.items[0].under, "1980 · 1h 30m · PG");
+}
+
+#[test]
+fn see_all_on_a_drawn_strip_opens_its_query_as_a_wall() {
+    let mut browser = with_draw();
+    let index = headings(&browser)
+        .iter()
+        .position(|heading| *heading == "Western")
+        .expect("the page drew Western");
+    for _ in 0..index {
+        browser.key("down");
+    }
+    for _ in 0..4 {
+        browser.key("right");
+    }
+
+    browser.key("enter");
+
+    let wall = showing_wall(&browser);
+    assert_eq!(wall.heading, "Western · 3");
+    assert_eq!(
+        wall.slots.query,
+        Query::Genre {
+            name: "Western".into(),
+            order: Order::Released,
+        }
+    );
+}
+
+#[test]
+fn a_reread_keeps_focus_on_the_drawn_strip_it_was_on() {
+    let mut browser = with_draw();
+    browser.key("down");
+    browser.key("down");
+    browser.key("down");
+    browser.key("right");
+    let before = headings(&browser)[3].to_string();
+
+    browser.source.changed = true;
+    browser.pump(1.0);
+
+    assert_eq!(at(&browser), (3, 1));
+    assert_eq!(headings(&browser)[3], before);
+}
+
+#[test]
+fn a_pool_that_empties_takes_its_strips_with_it() {
+    let mut browser = with_draw();
+    browser.key("down");
+    browser.key("down");
+    browser.key("down");
+
+    browser.source.pool = false;
+    browser.source.changed = true;
+    browser.pump(1.0);
+
+    assert_eq!(
+        headings(&browser),
+        ["Recently released", "Recently added", "Libraries"]
+    );
+    assert_eq!(at(&browser), (2, 0));
+}
+
+#[test]
+fn a_wake_and_a_present_read_the_home_page_and_its_pool_again() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    browser.source.calls.clear();
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+
+    browser.pump(2.0);
+
+    assert!(browser.source.calls.contains(&"pool"));
+    assert!(browser.source.calls.contains(&"libraries"));
+
+    browser.source.calls.clear();
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    browser.pump(3.0);
+    assert!(browser.source.calls.contains(&"pool"));
+}

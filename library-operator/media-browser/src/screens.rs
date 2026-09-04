@@ -175,11 +175,12 @@ impl Item {
     /// captions the name alone. An episode slot, whatever the query, is
     /// captioned with its numbers and its series' name, because the still
     /// alone does not say which series it is from, and its focused line is
-    /// the same two, bright. A recency strip draws a second line under every
-    /// slot: an episode's title and runtime, or a title's year, runtime, and
-    /// rating, because a strip's caption band holds one short line and an
-    /// episode's title would otherwise be dropped from the end. Every line is
-    /// built once here, at the read, and not on every frame.
+    /// the same two, bright. A recency, genre, or set strip draws a second
+    /// line under every slot, an episode's title and runtime or a title's
+    /// year, runtime, and rating, because a strip's caption band holds one
+    /// short line and an episode's title would otherwise be dropped from the
+    /// end. A person's strip draws the parts there. Every line is built once
+    /// here, at the read, and not on every frame.
     pub fn of(query: &Query, slot: Slot) -> Self {
         let year = facts::year(&slot.released);
         let numbers = slot
@@ -203,13 +204,9 @@ impl Item {
             false => facts::Line::of(&[&slot.title, year, &runtime, &slot.rating]),
         };
         let under = match (query, &slot.episode) {
-            (Query::Released { .. } | Query::Added { .. }, Some(_)) => {
-                facts::joined(&[&slot.title, &runtime])
-            }
-            (Query::Released { .. } | Query::Added { .. }, None) => {
-                facts::joined(&[year, &runtime, &slot.rating])
-            }
-            _ => slot.parts.clone(),
+            (Query::Person { .. } | Query::Library { .. }, _) => slot.parts.clone(),
+            (_, Some(_)) => facts::joined(&[&slot.title, &runtime]),
+            (_, None) => facts::joined(&[year, &runtime, &slot.rating]),
         };
         Self {
             library: slot.library,
@@ -361,6 +358,22 @@ mod tests {
         let item = Item::of(&Query::Added { fold: Fold::Airing }, specimen());
         assert_eq!(item.caption(), "Specimen 0001");
         assert_eq!(item.under(), "1987 · 1h 37m · PG-13");
+    }
+
+    #[test]
+    fn a_title_on_a_genre_or_a_set_strip_carries_its_facts_under_it() {
+        let genre = Query::Genre {
+            name: "Western".into(),
+            order: crate::catalog::Order::Released,
+        };
+        let item = Item::of(&genre, specimen());
+        assert_eq!(item.caption(), "Specimen 0001");
+        assert_eq!(item.under(), "1987 · 1h 37m · PG-13");
+        let set = Query::Set {
+            library: LIBRARY.into(),
+            id: "set:sample:01".into(),
+        };
+        assert_eq!(Item::of(&set, specimen()).under(), "1987 · 1h 37m · PG-13");
     }
 
     #[test]
