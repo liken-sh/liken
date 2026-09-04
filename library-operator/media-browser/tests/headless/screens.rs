@@ -142,22 +142,32 @@ fn the_clock_draws_at_the_top_right_of_every_screen() {
 // band's middle line, and nothing else draws inside the box.
 const CLOCK: (u32, u32, u32, u32) = (1800, 28, 1890, 56);
 
-// The reading draws in the bright ink over a shade of its own, so a box
-// with no pixel brighter than that ground carries no reading.
+// The reading draws in the bright ink over a halo of dark ink, so the
+// box carries a reading only where it holds both a bright pixel and a
+// dark one, whatever the art behind it.
 fn lights_up(frame: &Path, run: &Run, screen: &str) {
     let pixels = image::open(frame)
         .unwrap_or_else(|error| panic!("{}: {error}\n{}", frame.display(), run.log))
         .to_rgb8();
 
     let (left, top, right, bottom) = CLOCK;
-    let brightest = (left..right)
-        .flat_map(|x| (top..bottom).map(move |y| (x, y)))
-        .flat_map(|(x, y)| pixels.get_pixel(x, y).0)
-        .max()
-        .expect("the box holds pixels");
+    let channels = || {
+        (left..right)
+            .flat_map(|x| (top..bottom).map(move |y| (x, y)))
+            .flat_map(|(x, y)| pixels.get_pixel(x, y).0)
+    };
+    let brightest = channels().max().expect("the box holds pixels");
     assert!(
         brightest > 64,
         "{screen}: {} reaches {brightest} of 255 inside {CLOCK:?}\n{}",
+        frame.display(),
+        run.log
+    );
+
+    let darkest = channels().min().expect("the box holds pixels");
+    assert!(
+        darkest < 64,
+        "{screen}: {} falls to {darkest} of 255 inside {CLOCK:?}\n{}",
         frame.display(),
         run.log
     );

@@ -1,9 +1,9 @@
 // The clock at the top right of every screen: the reading the browser
 // draws over whatever screen is on the stack, on the band's own middle
-// line and inside its margin. It is a layer of its own for the reason
-// the volume row is one: inside one layer the renderer draws every mesh,
-// then every image, then every text, so a layer under a page's images
-// would lose its ground.
+// line and inside its margin. It is the browser's own layer, so no screen
+// knows about it and every screen carries it in the same place. The
+// reading draws over a halo of dark ink, the way a subtitle does, so it
+// reads over art of any brightness and nothing shows around it.
 
 use std::convert::Infallible;
 
@@ -13,7 +13,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle, Theme, mouse};
 
-use super::{area, band, extent, label, text};
+use super::{band, label, text};
 use crate::clock::Time;
 use crate::look;
 
@@ -27,22 +27,33 @@ const WIDEST: &str = "12:00 pm";
 // second line.
 const SLACK: f32 = 1.5;
 
-// The corner's scrim: a square on the corner, shaded along its diagonal
-// from the corner in, held across the reading, and clear at half the
-// diagonal. Every edge of a square lies at or past the half of its
-// diagonal from the corner, so the fade ends inside the square and no
-// edge of it shows on the art. The clock draws over a page's backdrop as
-// well as over the band, so the shade keeps the reading legible over art
-// of any brightness. On the band it lies on the band's own black and
-// shows nothing.
-const SIDE: f32 = 200.0;
-const HOLDS_TO: f32 = 0.32;
-const CLEARS_AT: f32 = 0.5;
+// How far the dark copies of the reading draw from the bright one, in
+// logical pixels: far enough to edge every glyph over white art, near
+// enough that the copies stay behind the reading.
+const HALO: f32 = 2.0;
 
-// The shade at the corner itself. The surface blends in linear space, so
-// this reads as a mid grey over white art and not as black, and the
-// reading draws in the bright ink so it stays legible on that grey.
-const SHADE: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.55);
+// The eight directions the halo draws in, as unit vectors, so every
+// copy lies the same distance from the reading and the ring around a
+// glyph has no gap.
+const AROUND: [(f32, f32); 8] = [
+    (1.0, 0.0),
+    (-1.0, 0.0),
+    (0.0, 1.0),
+    (0.0, -1.0),
+    (DIAGONAL, DIAGONAL),
+    (DIAGONAL, -DIAGONAL),
+    (-DIAGONAL, DIAGONAL),
+    (-DIAGONAL, -DIAGONAL),
+];
+
+// The length of each leg of a diagonal unit vector.
+const DIAGONAL: f32 = std::f32::consts::FRAC_1_SQRT_2;
+
+// Where the eight dark copies of the reading draw, around the point the
+// bright reading draws at.
+fn halo(at: Point) -> [Point; 8] {
+    AROUND.map(|(x, y)| Point::new(at.x + x * HALO, at.y + y * HALO))
+}
 
 /// The room the clock takes at the right edge of a frame.
 pub fn room() -> f32 {
@@ -78,27 +89,25 @@ impl canvas::Program<Infallible, Theme, Renderer> for Face {
         let right = bounds.x + bounds.width - band::PAD;
         let middle = bounds.y + band::HEIGHT / 2.0;
 
-        let corner = area(bounds.x + bounds.width - SIDE, bounds.y, SIDE, SIDE);
-        frame.fill_rectangle(
-            corner.position(),
-            extent(corner),
-            canvas::gradient::Linear::new(
-                Point::new(corner.x + corner.width, corner.y),
-                Point::new(corner.x, corner.y + corner.height),
+        // The dark copies draw first and the bright reading over them, so
+        // the reading reads over art of any brightness and no shape shows
+        // around it.
+        let at = Point::new(right, middle);
+        let ink = |point: Point, color: Color| {
+            label(
+                &reading,
+                point,
+                look::CONTROL,
+                color,
+                Alignment::Right,
+                Vertical::Center,
+                room(),
             )
-            .add_stop(0.0, SHADE)
-            .add_stop(HOLDS_TO, SHADE)
-            .add_stop(CLEARS_AT, look::CLEAR),
-        );
-        frame.fill_text(label(
-            &reading,
-            Point::new(right, middle),
-            look::CONTROL,
-            look::text(),
-            Alignment::Right,
-            Vertical::Center,
-            room(),
-        ));
+        };
+        for point in halo(at) {
+            frame.fill_text(ink(point, look::BACKGROUND));
+        }
+        frame.fill_text(ink(at, look::text()));
         vec![frame.into_geometry()]
     }
 }
@@ -111,6 +120,29 @@ mod tests {
     fn the_clock_hangs_off_the_right_edge() {
         assert_eq!(left(1920.0) + room() + band::PAD, 1920.0);
         assert_eq!(left(1280.0) + room() + band::PAD, 1280.0);
+    }
+
+    #[test]
+    fn every_copy_of_the_halo_lies_the_same_distance_from_the_reading() {
+        let at = Point::new(100.0, 50.0);
+        let distances =
+            halo(at).map(|point| ((point.x - at.x).hypot(point.y - at.y) * 100.0).round());
+        assert_eq!(distances, [(HALO * 100.0).round(); 8]);
+    }
+
+    #[test]
+    fn the_halo_draws_in_eight_directions() {
+        let mut directions = halo(Point::new(0.0, 0.0))
+            .map(|point| {
+                (
+                    (point.x * 100.0).round() as i32,
+                    (point.y * 100.0).round() as i32,
+                )
+            })
+            .to_vec();
+        directions.sort_unstable();
+        directions.dedup();
+        assert_eq!(directions.len(), 8);
     }
 
     #[test]
