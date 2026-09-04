@@ -230,11 +230,12 @@ browser as fast as it is today and drills on `liken-1` before the next.
 
 ## The local harness
 
-`local/scan` walks a directory into the local three-agent catalog, and
-the ledger it writes lands under `.liken/` in that directory, so the
-first change iterates against a copy of a few titles and never against
-the volume. The schema change needs `local/catalog` restarted, because
-the agents read the schema directory at start. `local/browse` runs the
+`local/scan` walks a directory into the local three-agent catalog
+through a read-only mount, so a walk from this workstation never writes
+a ledger, and it takes the read-only path above. The ledger write is
+proved by the Go tests on a temporary directory. The schema change
+needs `local/catalog` restarted, because the agents read the schema
+directory at start. `local/browse` runs the
 browser against that catalog and the real art, and its headless mode
 captures each screen with `--script` and `--capture-at`, so changes two
 to five iterate with a build and a restart, and no commit.
