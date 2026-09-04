@@ -258,6 +258,7 @@ func walkOfOneTitle(library, id, path, folderKey string) *walkResult {
 			{Alias: id, Library: library, Item: id, Source: aliasSourceProvider},
 			{Alias: folderKey, Library: library, Item: id, Source: aliasSourceFolder},
 		},
+		genres: []genreRow{{Library: library, Item: id, Rank: 0, Genre: "Western"}},
 		titles: 1,
 	}
 }
@@ -298,9 +299,9 @@ func TestPruneLibraryAgainstTheRealSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The departed title's item, its file, its link, and its two aliases.
-	if removed != 5 {
-		t.Errorf("removed = %d, want the departed title's five rows", removed)
+	// The departed title's item, its file, its link, its two aliases, and its genre.
+	if removed != 6 {
+		t.Errorf("removed = %d, want the departed title's six rows", removed)
 	}
 	if !agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
 		t.Error("the marked title was swept")
@@ -322,7 +323,7 @@ func TestPruneLibraryAgainstTheRealSchema(t *testing.T) {
 	}
 	// The prune cleans the marks behind the current epoch, so the seen
 	// table tracks the live catalog.
-	if got := agent.rowCount(t, "seen"); got != 5 {
+	if got := agent.rowCount(t, "seen"); got != 6 {
 		t.Errorf("seen = %d, want only the marks of the current epoch", got)
 	}
 	// Every prune query reads the ids of one epoch, so the seen table
@@ -370,8 +371,8 @@ func TestPruneScopeAgainstTheRealSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 5 {
-		t.Errorf("removed = %d, want the folder's five rows", removed)
+	if removed != 6 {
+		t.Errorf("removed = %d, want the folder's six rows", removed)
 	}
 	if agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
 		t.Error("the departed folder's title stands")
@@ -511,8 +512,8 @@ func TestPruneLibraryLeavesTheOtherLibrarysIdenticalRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 5 {
-		t.Errorf("removed = %d, want the departed title's five rows", removed)
+	if removed != 6 {
+		t.Errorf("removed = %d, want the departed title's six rows", removed)
 	}
 	if !agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
 		t.Error("the marked title was swept")
@@ -545,8 +546,8 @@ func TestPruneScopeLeavesTheOtherLibrarysFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 5 {
-		t.Errorf("removed = %d, want the folder's five rows", removed)
+	if removed != 6 {
+		t.Errorf("removed = %d, want the folder's six rows", removed)
 	}
 	if agent.holdsItem(t, "movies", "house/movies", "movie:tmdb:1") {
 		t.Error("the departed folder's title stands")

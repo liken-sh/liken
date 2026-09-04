@@ -72,6 +72,9 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		{librarySweepAttemptSQL(), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteAttempts(ctx, library, attemptKeys(keys))
 		}},
+		{librarySweepGenreSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteGenres(ctx, library, genreKeys(keys))
+		}},
 	}
 }
 

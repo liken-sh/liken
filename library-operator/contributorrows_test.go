@@ -63,7 +63,7 @@ func TestTheScannerLiftsThePeopleIntoTheCatalog(t *testing.T) {
 	})
 
 	result := collectFolders(walkContributors(root, contributorLibrary))
-	scanMovieFolder(root, filepath.Join(root, "The Signal (2014)"), contributorLibrary, result)
+	scanMovieFolder(folderScan{root: root, library: contributorLibrary, kind: libraryKindMovies}, filepath.Join(root, "The Signal (2014)"), result)
 	if result.readError {
 		t.Fatal("the walk reported a read error, want none")
 	}
@@ -108,7 +108,7 @@ func TestACreditNamesItsTitle(t *testing.T) {
 		[]creditEntry{{Name: "Tom Hanks", Contributor: ".contributors/to/tom-hanks"}})
 
 	result := &walkResult{}
-	scanMovieFolder(root, filepath.Join(root, "The Signal (2014)"), contributorLibrary, result)
+	scanMovieFolder(folderScan{root: root, library: contributorLibrary, kind: libraryKindMovies}, filepath.Join(root, "The Signal (2014)"), result)
 
 	if len(result.movies) != 1 {
 		t.Fatalf("movies = %+v, want the one title", result.movies)

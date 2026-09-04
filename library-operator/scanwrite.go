@@ -41,6 +41,7 @@ func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) error
 			return catalog.UpsertContributorAliases(ctx, result.contributorAliases)
 		},
 		func() (int, error) { return catalog.UpsertCredits(ctx, result.credits) },
+		func() (int, error) { return catalog.UpsertGenres(ctx, result.genres) },
 	}
 	for _, step := range steps {
 		if _, err := step(); err != nil {

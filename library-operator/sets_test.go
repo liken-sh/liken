@@ -83,6 +83,66 @@ func TestASetIsDerivedFromItsEarliestMember(t *testing.T) {
 	}
 }
 
+// A set arrives with its first member to arrive, which is not always the
+// first one released, whatever order the walk read them in.
+func TestASetArrivesWithItsEarliestMemberToArrive(t *testing.T) {
+	cases := []struct {
+		name    string
+		members []movieRow
+		want    int64
+	}{
+		{"the later film arrived first", []movieRow{
+			memberOf("movie:tmdb:1", "set:tmdb:1570", "Quiet Harbor Collection", "1998-06-12", "Harbor/folder.jpg", 500),
+			memberOf("movie:tmdb:2", "set:tmdb:1570", "Quiet Harbor Collection", "2004-09-22", "Deep Water/poster.jpg", 100),
+		}, 100},
+		{"the earlier film arrived first", []movieRow{
+			memberOf("movie:tmdb:2", "set:tmdb:1570", "Quiet Harbor Collection", "2004-09-22", "Deep Water/poster.jpg", 500),
+			memberOf("movie:tmdb:1", "set:tmdb:1570", "Quiet Harbor Collection", "1998-06-12", "Harbor/folder.jpg", 100),
+		}, 100},
+		{"a member with no known arrival", []movieRow{
+			memberOf("movie:tmdb:1", "set:tmdb:1570", "Quiet Harbor Collection", "1998-06-12", "Harbor/folder.jpg", 0),
+			memberOf("movie:tmdb:2", "set:tmdb:1570", "Quiet Harbor Collection", "2004-09-22", "Deep Water/poster.jpg", 100),
+		}, 100},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fold := setFold{}
+			fold.add(testCase.members)
+			rows := fold.rows()
+			if len(rows) != 1 || rows[0].Added != testCase.want {
+				t.Errorf("rows = %+v, want one set added at %d", rows, testCase.want)
+			}
+		})
+	}
+}
+
+// The rescan's read of a set answers the same arrival the fold does.
+func TestARescanDerivesASetsArrivalFromEveryMember(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	ctx := t.Context()
+	members := []movieRow{
+		memberOf("movie:tmdb:1", "set:tmdb:1570", "Quiet Harbor Collection", "1998-06-12", "Harbor/folder.jpg", 500),
+		memberOf("movie:tmdb:2", "set:tmdb:1570", "Quiet Harbor Collection", "2004-09-22", "Deep Water/poster.jpg", 100),
+	}
+	if _, err := catalog.UpsertMovies(ctx, members); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reconcileSets(ctx, catalog, "house/movies", []string{"set:tmdb:1570"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var added int64
+	err := agent.db.QueryRow(`SELECT added FROM sets WHERE library = ? AND id = ?`,
+		"house/movies", "set:tmdb:1570").Scan(&added)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 100 {
+		t.Errorf("added = %d, want the earliest arrival among the members", added)
+	}
+}
+
 // Two members released on the same date resolve on the member's id, so a
 // re-walk derives the same row whatever order it read them in.
 func TestASetWithTwoMembersOfOneDateResolvesOnTheMemberID(t *testing.T) {

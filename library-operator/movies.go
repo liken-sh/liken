@@ -18,9 +18,12 @@ import (
 )
 
 // walkMovies reads a whole movies root into one walkResult by collecting the
-// folder stream. The tests and a small library use this whole-root read.
+// folder stream. The tests and a small library use this whole-root read. It
+// keeps no arrival ledger, so a walk of a checked-in tree writes nothing into
+// it.
 func walkMovies(root, library string, ignore ignoreSet) *walkResult {
-	return collectFolders(walkTree(context.Background(), root, movieFolderRule(root, library, ignore)))
+	scan := folderScan{root: root, library: library, kind: libraryKindMovies, ignore: ignore}
+	return collectFolders(walkTree(context.Background(), root, movieFolderRule(scan)))
 }
 
 // movieGroupingDepth bounds how deep the walk descends through grouping
@@ -33,13 +36,13 @@ const movieGroupingDepth = 8
 // directory that holds a movie.nfo or a video file is a title folder. A
 // directory with neither is a grouping folder to descend into, down to the
 // depth cap.
-func movieFolderRule(root, library string, ignore ignoreSet) folderRule {
+func movieFolderRule(scan folderScan) folderRule {
 	return folderRule{
 		isTitle: isMovieTitleFolder,
 		scan: func(dir string, result *walkResult) {
-			scanMovieFolder(root, dir, library, result)
+			scanMovieFolder(scan, dir, result)
 		},
-		ignore:   ignore,
+		ignore:   scan.ignore,
 		maxDepth: movieGroupingDepth,
 	}
 }
@@ -56,12 +59,14 @@ func isMovieTitleFolder(dir string) bool {
 }
 
 // scanMovieFolder reads one title folder into the result: a movie row, a file
-// row per video file, and the alias rows. The identity comes from movie.nfo
-// where the folder holds one, and from the folder name where it does not. A
-// folder that yields neither a sidecar nor a year is counted unidentified and
-// cataloged by its folder name, so it is still browsable and the count is
-// accurate.
-func scanMovieFolder(root, dir, library string, result *walkResult) {
+// row per video file, a genre row per genre, and the alias rows. The identity
+// comes from movie.nfo where the folder holds one, and from the folder name
+// where it does not. A folder that yields neither a sidecar nor a year is
+// counted unidentified and cataloged by its folder name, so it is still
+// browsable and the count is accurate. The added column is the arrival of the
+// folder's first video, the one movie.nfo describes.
+func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
+	root, library := scan.root, scan.library
 	name := filepath.Base(dir)
 	meta, identified, err := movieIdentity(dir, name)
 	// A folder whose sidecar could not be read has no identity this
@@ -87,6 +92,15 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 	body := meta.Body
 	body.ProviderIDs = meta.ProviderIDs
 
+	files, err := listVideoFiles(dir)
+	result.noteReadError(err)
+	arrivals, err := scan.arrivals.arrivals(dir, files)
+	result.noteReadError(err)
+	var added int64
+	if len(files) > 0 {
+		added = arrivals[files[0]]
+	}
+
 	result.movies = append(result.movies, movieRow{
 		Id:       id,
 		Library:  library,
@@ -96,7 +110,7 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 		SortKey:  sortKey(title),
 		Slug:     slug(title, meta.Year),
 		Released: meta.Released,
-		Added:    addedTime(dir),
+		Added:    added,
 		Art:      primaryArt,
 		Arts:     allArt,
 		Duration: meta.Duration,
@@ -104,10 +118,9 @@ func scanMovieFolder(root, dir, library string, result *walkResult) {
 		SetID:    meta.SetID,
 		NFOFacts: meta.NFOFacts,
 	})
+	result.genres = append(result.genres, genreRows(library, id, body.Genres)...)
 
 	videos := map[string]bool{}
-	files, err := listVideoFiles(dir)
-	result.noteReadError(err)
 	for i, video := range files {
 		videos[video] = true
 		stream, err := movieFileStream(dir, video, i, meta.Stream)

@@ -48,6 +48,7 @@ type fakeCatalog struct {
 	contributors       map[string]fakeRow
 	contributorAliases map[string]fakeRow
 	credits            map[string]fakeRow
+	genres             map[string]fakeRow
 	aliases            map[string]string
 	fileItems          map[string]bool
 	seen               map[string]int64
@@ -90,6 +91,7 @@ func newFakeCatalog(t *testing.T) (*Catalog, *fakeCatalog) {
 		contributors:       map[string]fakeRow{},
 		contributorAliases: map[string]fakeRow{},
 		credits:            map[string]fakeRow{},
+		genres:             map[string]fakeRow{},
 		aliases:            map[string]string{},
 		fileItems:          map[string]bool{},
 		seen:               map[string]int64{},
@@ -171,6 +173,10 @@ func (f *fakeCatalog) apply(s capturedStatement) {
 		f.credits[fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
 	case strings.HasPrefix(s.sql, "DELETE FROM credits"):
 		delete(f.credits, fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2])))
+	case strings.HasPrefix(s.sql, "INSERT INTO genres"):
+		f.genres[fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2]))] = fakeRow{library: str(p[0]), path: str(p[1])}
+	case strings.HasPrefix(s.sql, "DELETE FROM genres"):
+		delete(f.genres, fakeKey(str(p[0]), str(p[1]), fmt.Sprint(p[2])))
 	case strings.HasPrefix(s.sql, "INSERT INTO aliases"):
 		f.aliases[fakeKey(str(p[0]), str(p[1]))] = str(p[2])
 	case strings.HasPrefix(s.sql, "INSERT INTO seen"):
@@ -241,6 +247,10 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	switch {
 	case strings.Contains(sql, "|| concern"):
 		return f.unmarkedAttempts(sql, p)
+	// The genre read routes before the UNION case, because its scope subquery
+	// holds a UNION of the item tables.
+	case strings.Contains(sql, "FROM genres"):
+		return f.unmarkedPairs(sql, p, f.genres)
 	case strings.Contains(sql, "UNION"):
 		return f.libraryKeys()
 	case strings.Contains(sql, "count(*) FROM seen"):

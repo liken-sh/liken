@@ -488,14 +488,3 @@ func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-
-// addedTime reads the time a path was last written, in Unix seconds, the value
-// the item's added column carries. It is stable across a re-walk, so a re-walk
-// does not rewrite the column.
-func addedTime(path string) int64 {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return info.ModTime().Unix()
-}

@@ -22,30 +22,35 @@ import (
 )
 
 // walkSeries reads a whole series root into one walkResult by collecting the
-// folder stream. The tests and a small library use this whole-root read.
+// folder stream. The tests and a small library use this whole-root read. It
+// keeps no arrival ledger, so a walk of a checked-in tree writes nothing into
+// it.
 func walkSeries(root, library string, ignore ignoreSet) *walkResult {
-	return collectFolders(walkTree(context.Background(), root, seriesFolderRule(root, library, ignore)))
+	scan := folderScan{root: root, library: library, kind: libraryKindSeries, ignore: ignore}
+	return collectFolders(walkTree(context.Background(), root, seriesFolderRule(scan)))
 }
 
 // seriesFolderRule is what the pool in walk.go needs to walk a series volume.
 // Every directory under the root is one series, so the rule answers yes to all
 // of them and the walk descends no further. A series folder's own season
 // folders are read by the folder scan, not by the pool.
-func seriesFolderRule(root, library string, ignore ignoreSet) folderRule {
+func seriesFolderRule(scan folderScan) folderRule {
 	return folderRule{
 		isTitle: func(string) bool { return true },
 		scan: func(dir string, result *walkResult) {
-			scanSeriesFolder(root, dir, library, ignore, result)
+			scanSeriesFolder(scan, dir, result)
 		},
-		ignore: ignore,
+		ignore: scan.ignore,
 	}
 }
 
-// scanSeriesFolder reads one series folder into the result: the series item,
-// and an episode item and a file for every episode under it. The identity comes
-// from tvshow.nfo where the folder holds one, and from the folder name where it
-// does not.
-func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkResult) {
+// scanSeriesFolder reads one series folder into the result: the series item
+// with its genre rows, and an episode item and a file for every episode under
+// it. The identity comes from tvshow.nfo where the folder holds one, and from
+// the folder name where it does not. The series' added is the earliest arrival
+// among its episodes, and zero where it has none.
+func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
+	root, library, ignore := scan.root, scan.library, scan.ignore
 	name := filepath.Base(dir)
 	meta, identified, err := seriesIdentity(dir, name)
 	// The same rule the movies walk follows: a folder whose sidecar could
@@ -68,6 +73,7 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 	body := meta.Body
 	body.ProviderIDs = meta.ProviderIDs
 
+	series := len(result.series)
 	result.series = append(result.series, seriesRow{
 		Id:       seriesID,
 		Library:  library,
@@ -77,12 +83,12 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 		SortKey:  sortKey(title),
 		Slug:     slug(title, meta.Year),
 		Released: meta.Released,
-		Added:    addedTime(dir),
 		Art:      primaryArt,
 		Arts:     allArt,
 		Body:     body,
 		NFOFacts: meta.NFOFacts,
 	})
+	result.genres = append(result.genres, genreRows(library, seriesID, body.Genres)...)
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeSeries, meta.ProviderIDs, key, seriesID)...)
 	readLikenSidecar(likenSidecar{root: root, dir: dir, library: library, item: seriesID}, result)
 	result.titles++
@@ -97,11 +103,40 @@ func scanSeriesFolder(root, dir, library string, ignore ignoreSet, result *walkR
 	folders := newSeriesFolders()
 	episodeFiles, err := collectEpisodeFiles(dir, ignore)
 	result.noteReadError(err)
+	arrivals := episodeArrivals(scan.arrivals, episodeFiles, result)
 	for _, episode := range episodeFiles {
-		folders.note(episode, scanEpisode(root, library, seriesID, episode, result))
+		before := len(result.episodes)
+		folders.note(episode, scanEpisode(root, library, seriesID, episode, arrivals[episode], result))
+		for _, row := range result.episodes[before:] {
+			result.series[series].Added = earliestArrival(result.series[series].Added, row.Added)
+		}
 	}
 
 	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, result)
+}
+
+// The arrival of every episode file. There is one ledger per folder that
+// holds episodes: a season folder, or the series folder for a file kept there.
+// The files are grouped by folder in the order the collect read them, so a
+// ledger's entries land in that order.
+func episodeArrivals(recorder *arrivalRecorder, episodes []episodeFile, result *walkResult) map[episodeFile]int64 {
+	byDir := map[string][]string{}
+	var dirs []string
+	for _, episode := range episodes {
+		if _, held := byDir[episode.dir]; !held {
+			dirs = append(dirs, episode.dir)
+		}
+		byDir[episode.dir] = append(byDir[episode.dir], episode.file)
+	}
+	arrivals := map[episodeFile]int64{}
+	for _, dir := range dirs {
+		held, err := recorder.arrivals(dir, byDir[dir])
+		result.noteReadError(err)
+		for file, at := range held {
+			arrivals[episodeFile{dir: dir, file: file}] = at
+		}
+	}
+	return arrivals
 }
 
 // seriesFolders is what one series' episode pass leaves for its file pass,
@@ -267,7 +302,7 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, err
 // episode .nfo beside the file where there is one, and from the season folder and
 // the file name where none does. An episode the scanner cannot number is left
 // out and reports no id, because it has no place under the series.
-func scanEpisode(root, library, seriesID string, episode episodeFile, result *walkResult) []string {
+func scanEpisode(root, library, seriesID string, episode episodeFile, arrival int64, result *walkResult) []string {
 	metas, err := episodeIdentity(episode)
 	// An episode whose sidecar could not be read has no numbers this
 	// pass, and a row read from the file name alone could carry another
@@ -306,7 +341,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, result *wa
 			SortKey:  sortKey(title),
 			Slug:     slug(title, 0),
 			Released: meta.Released,
-			Added:    addedTime(absolute),
+			Added:    arrival,
 			Art:      thumb,
 			Arts:     arts,
 			Duration: meta.Duration,

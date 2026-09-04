@@ -59,8 +59,11 @@ type walkResult struct {
 	credits            []creditRow
 	contributors       []contributorRow
 	contributorAliases []contributorAliasRow
-	titles             int
-	unidentified       int
+	// The genres of each movie and series, in the sidecar's order, derived
+	// from the sidecar the way the attempts are derived from the ledgers.
+	genres       []genreRow
+	titles       int
+	unidentified int
 	// the paths of the folders this walk could not identify, so a
 	// full walk names a sample of them in its log without holding every
 	// one. It carries one path per unidentified folder.
@@ -105,6 +108,7 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.credits = append(buffer.credits, folder.credits...)
 	buffer.contributors = append(buffer.contributors, folder.contributors...)
 	buffer.contributorAliases = append(buffer.contributorAliases, folder.contributorAliases...)
+	buffer.genres = append(buffer.genres, folder.genres...)
 }
 
 // collectFolders reads a whole folder stream into one walkResult, with the

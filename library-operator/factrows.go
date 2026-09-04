@@ -18,7 +18,9 @@ import (
 )
 
 // The reader's view of this library: what the scan's per-folder readers take
-// beside the folder.
+// beside the folder. It carries no arrival recorder, because only the walk
+// writes the arrival ledger. A fact's re-read still reads the ledger, so the
+// added column it writes back is the ledger's.
 func (e *enricher) folderScan() folderScan {
 	return folderScan{root: e.root, library: e.library, kind: e.kind, ignore: e.ignore}
 }

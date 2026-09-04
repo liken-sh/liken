@@ -50,7 +50,7 @@ func seedTwoLibrariesInEveryTable(t *testing.T, catalog *Catalog) {
 
 // the six tables a whole-library sweep deletes from, the same list the
 // library-keys read is built from.
-var everyCatalogTable = []string{"aliases", "movies", "series", "episodes", "file_items", "files"}
+var everyCatalogTable = []string{"aliases", "movies", "series", "episodes", "file_items", "files", "genres"}
 
 // the sweep takes every row of the departing library in all six tables and
 // leaves the survivor whole.
@@ -147,9 +147,9 @@ func TestSweepLibraryChunksALargeDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Ten titles, each one movie row, one file row, one link, and two aliases.
-	if removed != 50 {
-		t.Errorf("removed = %d, want the 50 rows the ten titles hold", removed)
+	// Ten titles, each one movie row, one file row, one link, two aliases, and a genre.
+	if removed != 60 {
+		t.Errorf("removed = %d, want the 60 rows the ten titles hold", removed)
 	}
 	if agent.largestBatch > pruneBatch {
 		t.Errorf("one transaction carried %d statements, want no more than %d", agent.largestBatch, pruneBatch)

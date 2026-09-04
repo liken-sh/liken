@@ -337,3 +337,20 @@ CREATE TABLE credits (
 -- The read a person's page makes: every title in this library that credits one
 -- person.
 CREATE INDEX credits_library_contributor ON credits (library, contributor);
+
+-- One genre of one title, lifted from the sidecar in its order. The rank is
+-- the key beside the item because the first genre is the title's main genre,
+-- and a genre strip puts the titles that lead with it first. This is a table
+-- and not an array column because Corrosion indexes nothing inside JSON. The
+-- walk writes it, and the prune sweeps it the way it sweeps credits.
+CREATE TABLE genres (
+    library TEXT NOT NULL DEFAULT '',
+    item TEXT NOT NULL DEFAULT '',
+    rank INTEGER NOT NULL DEFAULT 0,
+    genre TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (library, item, rank)
+);
+
+-- The two reads the home page makes: the titles of one genre as one range,
+-- and every genre with its count as one grouped read.
+CREATE INDEX genres_library_genre ON genres (library, genre);

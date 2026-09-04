@@ -56,7 +56,8 @@ func setID(collectionID, name string) string {
 // setMember is the one movie a set derives its row from: the earliest
 // released of its members. The movie's own id breaks a tie on the date, so
 // the fold and the catalog read below pick the same member whatever order the
-// walk's workers read the folders in.
+// walk's workers read the folders in. The added field is the earliest arrival
+// among every member, which is not always the earliest-released one's.
 type setMember struct {
 	set      string
 	movie    string
@@ -114,8 +115,14 @@ func (f setFold) add(movies []movieRow) {
 			art:      movie.Art,
 			added:    movie.Added,
 		}
-		if held, exists := f[movie.SetID]; exists && !candidate.earlier(held) {
-			continue
+		held, exists := f[movie.SetID]
+		if exists {
+			candidate.added = earliestArrival(held.added, candidate.added)
+			if !candidate.earlier(held) {
+				held.added = candidate.added
+				f[movie.SetID] = held
+				continue
+			}
 		}
 		f[movie.SetID] = candidate
 	}
@@ -221,10 +228,13 @@ func (c *Catalog) earliestSetMember(ctx context.Context, library, set string) (s
 }
 
 // earliestSetMemberSQL reads one set's earliest member through the
-// movies_library_set_id index.
+// movies_library_set_id index, and beside it the earliest arrival over every
+// member, where an arrival of zero means none is known.
 func earliestSetMemberSQL() string {
-	return `SELECT released, art, added, body FROM movies` +
-		` WHERE library = ? AND set_id = ? ORDER BY released, id LIMIT 1`
+	return `SELECT released, art,` +
+		` (SELECT min(CASE WHEN added > 0 THEN added END) FROM movies WHERE library = ?1 AND set_id = ?2),` +
+		` body FROM movies` +
+		` WHERE library = ?1 AND set_id = ?2 ORDER BY released, id LIMIT 1`
 }
 
 // setIDsUnder reads the sets the movies of one title folder name, before a

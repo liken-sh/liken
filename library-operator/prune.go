@@ -74,6 +74,9 @@ const (
 	seenContributor      = "contributor:"
 	seenContributorAlias = "contributor-alias:"
 	seenCredit           = "credit:"
+	// A genre keys on the title and the rank joined, in a key space of its own,
+	// the way a credit does.
+	seenGenre = "genre:"
 )
 
 // The separator between a link key's two halves. A path and an item id can
@@ -199,6 +202,9 @@ func markKeys(result *walkResult) []string {
 	}
 	for _, row := range result.credits {
 		add(seenCredit, creditSeenKey(row))
+	}
+	for _, row := range result.genres {
+		add(seenGenre, genreSeenKey(row))
 	}
 	return keys
 }
@@ -348,6 +354,18 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 	}
 	removed += n
 
+	// The genres of a title that left the volume are unmarked with it, and a
+	// sidecar that lists fewer genres than before leaves its higher ranks
+	// unmarked.
+	n, err = catalog.sweep(ctx, genrePruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteGenres(ctx, library, genreKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
 	n, err = catalog.sweep(ctx, itemPruneSQL("contributors", "path", seenContributor),
 		[]any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
@@ -438,6 +456,17 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	n, err = catalog.sweep(ctx, scopedAttemptPruneSQL(), scopedAttemptPruneParams(library, folder, epoch),
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteAttempts(ctx, library, attemptKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The genre sweep scopes itself through the folder's title row, so it runs
+	// here, before the item sweeps, like the two above it.
+	n, err = catalog.sweep(ctx, scopedGenrePruneSQL(), scopedGenrePruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteGenres(ctx, library, genreKeys(keys))
 		})
 	if err != nil {
 		return removed, err

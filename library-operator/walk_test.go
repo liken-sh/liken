@@ -109,16 +109,20 @@ func TestThePoolAndOneWorkerReadTheSameTree(t *testing.T) {
 		wantUnidentified int
 	}{
 		{
-			name:             "movies",
-			tree:             moviesTree,
-			rule:             func(root string) folderRule { return movieFolderRule(root, "house/movies", nil) },
+			name: "movies",
+			tree: moviesTree,
+			rule: func(root string) folderRule {
+				return movieFolderRule(folderScan{root: root, library: "house/movies", kind: libraryKindMovies})
+			},
 			wantTitles:       8,
 			wantUnidentified: 2,
 		},
 		{
-			name:       "series",
-			tree:       seriesTree,
-			rule:       func(root string) folderRule { return seriesFolderRule(root, "house/series", nil) },
+			name: "series",
+			tree: seriesTree,
+			rule: func(root string) folderRule {
+				return seriesFolderRule(folderScan{root: root, library: "house/series", kind: libraryKindSeries})
+			},
 			wantTitles: 3,
 		},
 	}
@@ -145,7 +149,9 @@ func TestThePoolAndOneWorkerReadTheSameTree(t *testing.T) {
 func TestThePoolAndOneWorkerSkipTheSameIgnoredFolders(t *testing.T) {
 	root := moviesTree(t)
 	writeFile(t, filepath.Join(root, "#recycle", "Old Movie (2001)", "old.mkv"), "video")
-	rule := func() folderRule { return movieFolderRule(root, "house/movies", ignoreSet{"#recycle": true}) }
+	rule := func() folderRule {
+		return movieFolderRule(folderScan{root: root, library: "house/movies", kind: libraryKindMovies, ignore: ignoreSet{"#recycle": true}})
+	}
 
 	alone := collectWalk(t, root, rule(), 1)
 	pooled := collectWalk(t, root, rule(), 8)
@@ -211,7 +217,7 @@ func TestTheWalkStopsOnACancelledContext(t *testing.T) {
 	for i := range titles {
 		writeFile(t, filepath.Join(root, "Title", string(rune('A'+i)), "movie.mkv"), "video")
 	}
-	rule := movieFolderRule(root, "house/movies", nil)
+	rule := movieFolderRule(folderScan{root: root, library: "house/movies", kind: libraryKindMovies})
 
 	cases := []struct {
 		name         string
@@ -252,7 +258,7 @@ func TestTheWalkEndsWhenTheCollectorStops(t *testing.T) {
 	running := runtime.NumGoroutine()
 
 	read := 0
-	for range walkTree(context.Background(), root, movieFolderRule(root, "house/movies", nil)) {
+	for range walkTree(context.Background(), root, movieFolderRule(folderScan{root: root, library: "house/movies", kind: libraryKindMovies})) {
 		read++
 		break
 	}
@@ -278,7 +284,7 @@ func TestAFolderRuleReadsOneDirectory(t *testing.T) {
 	writeFile(t, filepath.Join(root, "Genre", "The Beacon (2019)", "movie.mkv"), "video")
 	writeFile(t, filepath.Join(root, "readme.txt"), "not a folder")
 	writeFile(t, filepath.Join(root, "#recycle", "old.mkv"), "video")
-	rule := movieFolderRule(root, "house/movies", ignoreSet{"#recycle": true})
+	rule := movieFolderRule(folderScan{root: root, library: "house/movies", kind: libraryKindMovies, ignore: ignoreSet{"#recycle": true}})
 
 	cases := []struct {
 		name         string

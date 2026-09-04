@@ -350,9 +350,6 @@ func TestFileHelpersOnMissingPaths(t *testing.T) {
 	if exists || err != nil {
 		t.Errorf("fileExists = %v %v, want false and no error for a missing file", exists, err)
 	}
-	if added := addedTime("testdata/nowhere/x.mkv"); added != 0 {
-		t.Errorf("addedTime = %d, want 0 for a missing file", added)
-	}
 }
 
 func TestANameStatesAProviderIdInJellyfinsForm(t *testing.T) {
