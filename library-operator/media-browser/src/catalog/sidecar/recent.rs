@@ -18,11 +18,16 @@ pub fn column(order: Order) -> &'static str {
     }
 }
 
-/// The candidates, newest first. A movie row pads the series columns
+/// One page of candidates, newest first, `CANDIDATES` rows from the
+/// page's offset. A movie row pads the series columns
 /// with nothing, and an episode row carries its series' title, art,
 /// release, duration, and rating from the join. The library and the id
 /// break ties, so the order is the same on every read.
-pub fn candidates(connection: &Connection, order: Order) -> rusqlite::Result<Vec<Candidate>> {
+pub fn candidates(
+    connection: &Connection,
+    order: Order,
+    page: usize,
+) -> rusqlite::Result<Vec<Candidate>> {
     let sql = format!(
         "SELECT * FROM (\
            SELECT {columns}, library, added, 'movies' AS kind, \
@@ -37,12 +42,18 @@ pub fn candidates(connection: &Connection, order: Order) -> rusqlite::Result<Vec
                   json_extract(series.body, '$.contentRating') \
            FROM episodes JOIN series ON series.library = episodes.library \
            AND series.id = episodes.series\
-         ) ORDER BY {key} DESC, library, id LIMIT ?1",
+         ) ORDER BY {key} DESC, library, id LIMIT ?1 OFFSET ?2",
         columns = item::COLUMNS,
         episode_columns = EPISODE_COLUMNS,
         key = column(order),
     );
-    collect(connection, &sql, &[&(CANDIDATES as i64)], candidate)
+    let offset = (page * CANDIDATES) as i64;
+    collect(
+        connection,
+        &sql,
+        &[&(CANDIDATES as i64), &offset],
+        candidate,
+    )
 }
 
 // The episode half of the union, in the order item::COLUMNS takes them.

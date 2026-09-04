@@ -191,17 +191,15 @@ impl Source for SidecarSource {
             }
             Query::Released { fold } => Answer {
                 name: String::new(),
-                slots: recency::fold(
-                    self.read(|connection| recent::candidates(connection, Order::Released)),
-                    *fold,
-                ),
+                slots: recency::filled(*fold, |page| {
+                    self.read(|connection| recent::candidates(connection, Order::Released, page))
+                }),
             },
             Query::Added { fold } => Answer {
                 name: String::new(),
-                slots: recency::fold(
-                    self.read(|connection| recent::candidates(connection, Order::Added)),
-                    *fold,
-                ),
+                slots: recency::filled(*fold, |page| {
+                    self.read(|connection| recent::candidates(connection, Order::Added, page))
+                }),
             },
             Query::Genre { name, order } => Answer {
                 name: name.clone(),

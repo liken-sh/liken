@@ -23,7 +23,19 @@ pub const CANDIDATES: usize = 120;
 
 /// How many slots a strip shows of what the fold answered. The wall
 /// behind "see all" shows the rest.
-pub const SHOWN: usize = 20;
+pub const SHOWN: usize = 24;
+
+/// How many folded slots a recency read collects before it stops
+/// paging: twice what a strip shows, so the added strip still fills
+/// after it drops what the released strip shows. A season drop of a
+/// hundred episodes is one slot, so a read that counted rows would
+/// stop far short of a strip.
+pub const FILL: usize = SHOWN * 2;
+
+/// The most pages of `CANDIDATES` rows a recency read walks before it
+/// stops, whatever the fold made of them. It bounds the read on a
+/// catalog whose newest arrivals are all one series.
+pub const PAGES: usize = 8;
 
 /// A person enters the pool with more works than this. A person
 /// credited in one or two titles makes a strip of one or two slots.
@@ -53,6 +65,24 @@ pub enum Candidate {
         number: i64,
         series: Title,
     },
+}
+
+/// The read behind a recency strip: pages of candidates, newest first,
+/// folded together until `FILL` slots came out, a page came up short,
+/// or `PAGES` pages were read. The fold runs over every candidate read
+/// so far, because a series folds to one slot however its episodes
+/// spread across pages.
+pub fn filled(fold: Fold, mut page: impl FnMut(usize) -> Vec<Candidate>) -> Vec<Slot> {
+    let mut candidates: Vec<Candidate> = Vec::new();
+    for number in 0..PAGES {
+        let read = page(number);
+        let short = read.len() < CANDIDATES;
+        candidates.extend(read);
+        if short || self::fold(candidates.clone(), fold).len() >= FILL {
+            break;
+        }
+    }
+    self::fold(candidates, fold)
 }
 
 /// The fold, over candidates in the query's order, newest first. A
@@ -313,6 +343,53 @@ mod tests {
             assert_eq!(ids(&slots), ["movie:1"]);
             assert_eq!(slots[0].kind, "movies");
         }
+    }
+
+    // A season of one serial, as one page of candidates, every episode
+    // older than the window so the fold makes one slot of the page.
+    fn a_season(page: usize) -> Vec<Candidate> {
+        (0..CANDIDATES)
+            .map(|index| {
+                let number = (page * CANDIDATES + index) as i64;
+                episode(number, "2004-03-01", 400)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_read_pages_past_a_season_drop_until_it_has_its_fill() {
+        let mut pages = Vec::new();
+        let slots = filled(Fold::Titles, |page| {
+            pages.push(page);
+            let mut candidates = a_season(page);
+            for index in 0..FILL / 4 {
+                candidates.push(movie(&format!("movie:{page}:{index}"), "2001"));
+            }
+            candidates
+        });
+        assert_eq!(pages, [0, 1, 2, 3]);
+        assert!(slots.len() >= FILL, "{} slots", slots.len());
+        assert_eq!(slots.iter().filter(|slot| slot.kind == "series").count(), 1);
+    }
+
+    #[test]
+    fn a_short_page_ends_the_read() {
+        let slots = filled(Fold::Titles, |page| match page {
+            0 => vec![movie("movie:1", "2001")],
+            _ => panic!("a second page after a short one"),
+        });
+        assert_eq!(ids(&slots), ["movie:1"]);
+    }
+
+    #[test]
+    fn the_page_bound_ends_a_read_that_never_fills() {
+        let mut pages = 0;
+        let slots = filled(Fold::Titles, |page| {
+            pages += 1;
+            a_season(page)
+        });
+        assert_eq!(pages, PAGES);
+        assert_eq!(ids(&slots), ["series:1"]);
     }
 
     #[test]

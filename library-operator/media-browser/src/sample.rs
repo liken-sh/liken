@@ -98,14 +98,14 @@ impl Source for Catalog {
             },
             Query::Released { fold } => Answer {
                 name: String::new(),
-                slots: recency::fold(
-                    recent(|candidate| released_of(candidate).to_string()),
+                slots: paged(
                     *fold,
+                    recent(|candidate| released_of(candidate).to_string()),
                 ),
             },
             Query::Added { fold } => Answer {
                 name: String::new(),
-                slots: recency::fold(recent(added_of), *fold),
+                slots: paged(*fold, recent(added_of)),
             },
             Query::Genre { name, order } => Answer {
                 name: name.clone(),
@@ -315,9 +315,8 @@ fn serial_year(number: i64) -> i64 {
 }
 
 // The recency candidates: every movie and every episode with the
-// arrival the sample invents for it, sorted newest first by the key and
-// bounded as the catalog's read is. The fold over them is the catalog's
-// own.
+// arrival the sample invents for it, sorted newest first by the key. The
+// paging and the fold over them are the catalog's own.
 fn recent<K: Ord>(key: impl Fn(&Candidate) -> K) -> Vec<Candidate> {
     let mut catalog = Catalog;
     let mut candidates: Vec<Candidate> = (1..=MOVIES)
@@ -345,8 +344,21 @@ fn recent<K: Ord>(key: impl Fn(&Candidate) -> K) -> Vec<Candidate> {
         }
     }
     candidates.sort_by_key(|candidate| std::cmp::Reverse(key(candidate)));
-    candidates.truncate(CANDIDATES);
     candidates
+}
+
+// The sample pages its candidates the way the sidecar pages its rows, so
+// the fold sees the same shape of read and the sample fills a strip the
+// same way.
+fn paged(fold: crate::catalog::Fold, candidates: Vec<Candidate>) -> Vec<Slot> {
+    recency::filled(fold, |page| {
+        candidates
+            .iter()
+            .skip(page * CANDIDATES)
+            .take(CANDIDATES)
+            .cloned()
+            .collect()
+    })
 }
 
 fn released_of(candidate: &Candidate) -> &str {
@@ -584,7 +596,7 @@ mod tests {
             },
         ] {
             let slots = catalog.wall(&query).slots;
-            assert!(slots.len() <= CANDIDATES);
+            assert!(slots.len() <= CANDIDATES * recency::PAGES);
             assert!(slots.iter().any(|slot| slot.still()));
             assert!(slots.iter().any(|slot| slot.kind == "series"));
             assert!(slots.iter().any(|slot| slot.kind == "movies"));

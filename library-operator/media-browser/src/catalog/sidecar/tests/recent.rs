@@ -202,7 +202,7 @@ fn an_episode_whose_series_row_is_missing_is_left_out() {
 }
 
 #[test]
-fn the_read_takes_a_bounded_number_of_candidates() {
+fn a_full_page_of_titles_is_the_read_s_fill() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     for number in 0..CANDIDATES + 5 {
@@ -219,4 +219,47 @@ fn the_read_takes_a_bounded_number_of_candidates() {
     let answer = source.wall(&Query::Released { fold: Fold::Titles });
     assert_eq!(answer.slots.len(), CANDIDATES);
     assert_eq!(answer.slots[0].id, format!("movie:tmdb:{}", CANDIDATES + 4));
+}
+
+// A season drop of one serial that fills a whole page of rows, with a
+// few films that arrived just before it. A read that counted rows would
+// answer the serial alone.
+#[test]
+fn a_season_drop_does_not_starve_the_read() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_series_page(&path, SHOWS, SERIAL, "2004", r#"{"contentRating":"TV-14"}"#);
+    for number in 0..CANDIDATES as i64 + 10 {
+        insert_arrived_episode(
+            &path,
+            &format!("episode:tvdb:{number}"),
+            (1, number),
+            "2004-03-01",
+            1_000_000 + number,
+        );
+    }
+    for number in 0..5 {
+        insert_added_movie(
+            &path,
+            FILMS,
+            &format!("movie:tmdb:{number}"),
+            "1999",
+            500 + number,
+        );
+    }
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let answer = source.wall(&Query::Added { fold: Fold::Titles });
+    let ids: Vec<&str> = answer.slots.iter().map(|slot| slot.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            SERIAL,
+            "movie:tmdb:4",
+            "movie:tmdb:3",
+            "movie:tmdb:2",
+            "movie:tmdb:1",
+            "movie:tmdb:0"
+        ]
+    );
 }
