@@ -28,6 +28,13 @@ is the truth, not a cache of a source, and research writes it.
   the franchise's art under Kodi's names. Its scanner is small: it
   reads the files and writes a `franchises` table and a
   `franchise_members` table, keyed by library like every other table.
+- **The files are public.** They live in a repository of their own,
+  `tangled.org/guid.foo/fiction-franchises`, outside the `liken`
+  organization, because a franchise is an opinion about a story and
+  not a part of this operator. That repository carries its own copy
+  of the schema and a README that defines the format with no
+  reference to `liken`. The folder a `Library` names is a checkout of
+  it, so the volume holds nothing the repository does not.
 - **The file** holds the story order and nothing about release order,
   because release order comes from the members' own dates. The
   schema below is the whole contract between the file's author and
@@ -59,7 +66,8 @@ is the truth, not a cache of a source, and research writes it.
   the film belongs to. The home page of plan 26 gets a franchises row.
 - **The manual.** The file's contract is a page on the docs site,
   `docs/content/docs/reference/franchises.md`, and a JSON Schema the
-  site serves at `/franchise.schema.json`. A file that opens with the
+  site serves at `/franchise.schema.json`, the same schema the public
+  repository carries. A file that opens with the
   `yaml-language-server` schema line validates in an editor before
   the scanner ever reads it, and the scanner enforces the same
   schema. Each franchise directory also holds an `AGENTS.md` with the
@@ -180,8 +188,8 @@ The rules:
 
 ## Proof
 
-On `liken-1`, Star Wars and the MCU written from research into the
-`Franchises` share, across the lab's movies and series libraries. The
+On `liken-1`, a checkout of the public repository as the franchises
+folder, across the lab's movies and series libraries. The
 page draws the order with its gaps and its eras, a film opens from it,
 back returns to it, and a member added to a library fills its gap on
 the next scan.

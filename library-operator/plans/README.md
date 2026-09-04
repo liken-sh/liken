@@ -267,10 +267,10 @@ that took a hearing-impaired flag for Hindi.
   `probe` concern measures the duration, the codecs, the resolution,
   and the audio channel layout. The bitrate, the HDR format, and the
   encode's quality settings are still unread.
-* [Publishing the franchise
-  files](open-problems/publishing-the-franchise-files.md). The files
-  are research that any library could use, and they have no public
-  home.
+* [A franchises folder from a git
+  checkout](open-problems/a-franchises-folder-from-a-git-checkout.md). The
+  files are public now, and the kind still names a folder on a
+  volume.
 
 ## Rejected
 
