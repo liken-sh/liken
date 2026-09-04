@@ -57,6 +57,14 @@ is the truth, not a cache of a source, and research writes it.
   members' dates.
 - **The way in.** A strip under a film's set strip names the franchise
   the film belongs to. The home page of plan 26 gets a franchises row.
+- **The manual.** The file's contract is a page on the docs site,
+  `docs/content/docs/reference/franchises.md`, and a JSON Schema the
+  site serves at `/franchise.schema.json`. A file that opens with the
+  `yaml-language-server` schema line validates in an editor before
+  the scanner ever reads it, and the scanner enforces the same
+  schema. Each franchise directory also holds an `AGENTS.md` with the
+  author's method, sources, and judgment calls, which the scanner
+  ignores and the next author reads first.
 - **Art** comes from the folder, and where the folder holds none, the
   enrichers of plan 30 copy it from the first member's art.
 - **The author.** The first files are written by hand, from research.
@@ -140,6 +148,9 @@ The rules:
   appear again further down for the seasons that play after a film,
   and the same season may appear again inside one show when the
   story order cuts it into runs.
+- An episode code names the provider's numbering, which is not
+  always aired order. TheTVDB numbers Firefly in aired order, so its
+  pilot is `S01E11`. A file names one provider's codes.
 - The scanner expands the tree into one `franchise_members` row per
   film or episode, with a position. A whole show or a whole season
   expands to the episodes the catalog holds today, so an airing show
@@ -193,5 +204,7 @@ one edit.
 Which row the page shows when two libraries hold one film. Whether a
 franchise may name a book or a game, which waits on those kinds.
 Whether a franchise may reach another namespace, which the
-one-cluster-per-namespace rule says no to today. Where the schema
-page lives on the docs site once an agent prompt has to cite it.
+one-cluster-per-namespace rule says no to today. Whether a film
+with chapters set centuries apart, like Predator: Killer of Killers,
+may carry more than one span; today it holds one, and the bar is
+wide.

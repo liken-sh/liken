@@ -58,13 +58,18 @@ outputs:
 # clone. The mount publishes the files the repository holds: there is
 # no copy to drift.
 #
+# The static directory holds the franchise file schema, served at
+# /franchise.schema.json so an editor can validate a file against it.
+#
 # Declaring any mount replaces every default mount for the site, so
-# the content mount comes back explicitly. The theme's own mounts,
+# the content and static mounts come back explicitly. The theme's own mounts,
 # which provide the favicon and the brand images, are the theme's and
 # stay as they are.
 module:
   mounts:
     - source: content
       target: content
+    - source: static
+      target: static
     - source: ../deploy
       target: static/deploy

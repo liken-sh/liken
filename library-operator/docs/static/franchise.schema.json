@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://library.liken.sh/franchise.schema.json",
+  "title": "Franchise file",
+  "description": "One franchise.yaml: the films and series of one story in the order the story plays, with an optional calendar, eras, and universes. The manual is at https://library.liken.sh/docs/reference/franchises/.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "order"],
+  "dependentRequired": { "eras": ["calendar"] },
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The name the page shows."
+    },
+    "sources": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" },
+      "description": "Where the author read the order and the times. The next author reads these first."
+    },
+    "calendar": { "$ref": "#/$defs/calendar" },
+    "universe": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The universe the story happens in. An entry with no universe of its own is in this one."
+    },
+    "eras": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/era" },
+      "description": "Named stretches of the timeline. Needs a calendar. Spans may overlap."
+    },
+    "order": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/entry" },
+      "description": "The story order, first to last. A depth-first walk of this list is the order."
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+:[A-Za-z0-9_-]+$",
+      "description": "A provider id as scheme:id. Films use tmdb and series use tvdb."
+    },
+    "calendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit"],
+      "properties": {
+        "unit": { "type": "string", "enum": ["years", "days"] },
+        "zero": { "type": "string", "minLength": 1, "description": "The event the times count from. Without it, the times are plain calendar years." },
+        "before": { "type": "string", "minLength": 1, "description": "The label after a negative time, such as BBY." },
+        "after": { "type": "string", "minLength": 1, "description": "The label after a positive time, such as ABY." }
+      }
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "number" },
+        "to": { "type": "number" }
+      },
+      "description": "A span in the calendar's unit. from and to are equal for a story that stays in one year. Needs a calendar."
+    },
+    "era": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "from", "to"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "from": { "type": "number" },
+        "to": { "type": "number" }
+      }
+    },
+    "common": {
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "description": "The name the page draws when no library holds the member. Write the year after a film's title." },
+        "time": { "$ref": "#/$defs/time" },
+        "universe": { "type": "string", "minLength": 1, "description": "Where this entry happens, when it is not the franchise's own universe." },
+        "note": { "type": "string", "description": "Free text for the next author. It never reaches the page." }
+      }
+    },
+    "movie": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["movie"],
+      "properties": {
+        "movie": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/common/properties/title" },
+        "time": { "$ref": "#/$defs/time" },
+        "universe": { "$ref": "#/$defs/common/properties/universe" },
+        "note": { "$ref": "#/$defs/common/properties/note" }
+      }
+    },
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["series"],
+      "properties": {
+        "series": { "$ref": "#/$defs/id" },
+        "seasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/season" },
+          "description": "The seasons that play here, in order. Without it, the entry means the whole show."
+        },
+        "title": { "$ref": "#/$defs/common/properties/title" },
+        "time": { "$ref": "#/$defs/time" },
+        "universe": { "$ref": "#/$defs/common/properties/universe" },
+        "note": { "$ref": "#/$defs/common/properties/note" }
+      }
+    },
+    "season": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["season"],
+      "properties": {
+        "season": { "type": "integer", "minimum": 0, "description": "The season number. Specials are season 0." },
+        "episodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^S[0-9]{2,}E[0-9]{2,}(-S[0-9]{2,}E[0-9]{2,})?$"
+          },
+          "description": "Episode codes or ranges, in the order they play. Without it, the season plays whole in aired order."
+        },
+        "time": { "$ref": "#/$defs/time" },
+        "note": { "$ref": "#/$defs/common/properties/note" }
+      }
+    },
+    "entry": {
+      "oneOf": [
+        { "$ref": "#/$defs/movie" },
+        { "$ref": "#/$defs/series" }
+      ]
+    }
+  }
+}

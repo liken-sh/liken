@@ -67,9 +67,9 @@ they share, and plans 28 to 31 build them in order.
   `.liken/` directory for what they cannot say, `.contributors/` for
   people, concerns as the unit of work, `MetadataProvider`, and the
   write rules.
-* [31, Franchises](31-franchises.md). A library kind whose files hold a
-  universe in story order, resolved across the namespace by provider
-  id.
+* [31, Franchises](31-franchises.md). A library kind whose files hold
+  one story in story order, with a calendar and universes, resolved
+  across the namespace by provider id.
 * [33, The IMDb datasets](33-the-imdb-datasets.md). A stub: a provider
   with a store, because the datasets are bulk files and not a call per
   title. OMDb serves `rating.imdb` until then.
@@ -267,6 +267,10 @@ that took a hearing-impaired flag for Hindi.
   `probe` concern measures the duration, the codecs, the resolution,
   and the audio channel layout. The bitrate, the HDR format, and the
   encode's quality settings are still unread.
+* [Publishing the franchise
+  files](open-problems/publishing-the-franchise-files.md). The files
+  are research that any library could use, and they have no public
+  home.
 
 ## Rejected
 
