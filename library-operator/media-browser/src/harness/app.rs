@@ -236,7 +236,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
 /// a `Destroyed` arrives for a window the run has already replaced.
 /// Without this guard the grace starts on that stale window, and the
 /// browser exits 7 fifteen seconds after every `Play`, which puts a
-/// person back at the libraries. The idle client's harness in
+/// person back at the home page. The idle client's harness in
 /// `media-operator` reads the same rule.
 fn lost_its_window(event: &WindowEvent, destroyed: WindowId, drawing: WindowId) -> bool {
     matches!(event, WindowEvent::Destroyed) && destroyed == drawing

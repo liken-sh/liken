@@ -5,14 +5,11 @@ use super::*;
 
 #[test]
 fn a_press_on_the_bus_moves_focus_like_the_keyboard() {
-    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_DOWN")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_RIGHT")]);
 
     assert!(browser.pump(1.0));
 
-    let screens::Screen::Libraries(top) = browser.top() else {
-        panic!("the browser opens on the libraries");
-    };
-    assert_eq!(top.focus, 1);
+    assert_eq!(showing_home(&browser).strips[2].focus, 1);
 }
 
 #[test]
@@ -78,15 +75,12 @@ fn the_shade_covers_the_browser_and_lifts_it() {
 
 #[test]
 fn a_press_that_arrives_asleep_keeps_the_focus() {
-    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep, Moment::Press("KEY_DOWN")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep, Moment::Press("KEY_RIGHT")]);
 
     browser.pump(1.0);
 
     assert!(browser.asleep());
-    let screens::Screen::Libraries(top) = browser.top() else {
-        panic!("the browser opens on the libraries");
-    };
-    assert_eq!(top.focus, 1);
+    assert_eq!(showing_home(&browser).strips[2].focus, 1);
 }
 
 #[test]
@@ -120,18 +114,18 @@ fn a_focus_changes_nothing() {
 }
 
 #[test]
-fn back_at_the_libraries_asks_for_the_shade() {
+fn back_at_the_home_page_asks_for_the_shade() {
     let (mut browser, bus) = on_bus(3, Vec::new());
 
     browser.key("escape");
 
     assert_eq!(bus.sleeps.load(Ordering::SeqCst), 1);
     assert!(!browser.asleep());
-    assert!(matches!(browser.top(), screens::Screen::Libraries(_)));
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
 }
 
 #[test]
-fn backspace_at_the_libraries_asks_too() {
+fn backspace_at_the_home_page_asks_too() {
     let (mut browser, bus) = on_bus(3, Vec::new());
 
     browser.key("backspace");
@@ -151,12 +145,12 @@ fn back_below_the_top_climbs_and_asks_for_nothing() {
 }
 
 #[test]
-fn back_at_the_libraries_with_no_bus_asks_no_one() {
+fn back_at_the_home_page_with_no_bus_asks_no_one() {
     let mut browser = browser(3);
 
     browser.key("escape");
 
-    assert!(matches!(browser.top(), screens::Screen::Libraries(_)));
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
 }
 
 #[test]

@@ -68,7 +68,7 @@ fn the_band_schedules_no_rest() {
 fn a_series_wall_rests_on_the_backdrop_of_the_page_it_opens() {
     let mut browser = browser(3);
     browser.tick(0.0);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     assert_eq!(browser.next_frame(0.0), Some(REST));
 

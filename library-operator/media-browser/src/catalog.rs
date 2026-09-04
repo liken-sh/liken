@@ -12,21 +12,30 @@ pub mod sidecar;
 // slots a source answers one with.
 pub mod query;
 
-pub use query::{Answer, Query, Slot};
+// The recency module: the fold the Released and Added queries share,
+// and the constants that bound them.
+pub mod recency;
 
-/// One library, as the first screen lists it: the name, the kind, and the
-/// count of items it holds.
+pub use query::{Answer, Fold, InSeries, Query, Slot};
+
+/// One library as the home page's libraries strip draws it: the name,
+/// the kind, the count of items it holds, and the art of its newest-added
+/// title.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryEntry {
     /// The catalog's `library` column: the `Library`'s namespace and name,
     /// joined as `namespace/name`.
     pub library: String,
-    /// The library's kind, `movies` or `series`. The first screen draws it in
-    /// the row's detail line. The wall it opens reads by the library alone, and
+    /// The library's kind, `movies` or `series`. The libraries strip draws
+    /// it under the name. The wall it opens reads by the library alone, and
     /// every slot names its own kind.
     pub kind: String,
     /// How many items the library holds.
     pub items: u64,
+    /// The poster of the library's newest-added title that has one, which
+    /// the libraries strip draws the library as. Empty where no title has
+    /// art.
+    pub art: String,
 }
 
 /// One title in a kind's top list: a movie, or a series.
@@ -279,7 +288,7 @@ pub struct Person {
 pub trait Source {
     /// Every library in the catalog, ordered by name. Which libraries a
     /// screen shows is an open problem, so until that resource exists the
-    /// first screen lists them all.
+    /// home page's libraries strip shows them all.
     fn libraries(&mut self) -> Vec<LibraryEntry>;
 
     /// The one read behind every wall. Every slot carries its library and

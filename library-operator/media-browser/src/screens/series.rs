@@ -139,9 +139,38 @@ impl Series {
     /// header shows that episode's plot from the start, and a film is
     /// two presses from the wall.
     pub fn open(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
+        let mut page = Self::read(library, id, source)?;
+        page.refoot(source);
+        Some(page)
+    }
+
+    /// The page with focus on the episode these aired numbers name, which
+    /// is where a select on an episode still lands. Focus stays on the first
+    /// episode where the series holds no such episode.
+    pub fn open_at(
+        library: &str,
+        id: &str,
+        numbers: (i64, i64),
+        source: &mut dyn Source,
+    ) -> Option<Self> {
+        let mut page = Self::read(library, id, source)?;
+        let (season, episode) = numbers;
+        if let Some(index) = page
+            .stills
+            .iter()
+            .position(|still| still.season == season && still.episode == episode)
+        {
+            page.focus = Focus::Still(index);
+        }
+        page.refoot(source);
+        Some(page)
+    }
+
+    // The page before its foot is read, with focus on the first episode.
+    fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.series(library, id)?;
         let (stills, seasons) = wall_of(source.episodes(library, id));
-        let mut page = Self {
+        Some(Self {
             library: library.to_string(),
             id: id.to_string(),
             title: details.title.clone(),
@@ -157,9 +186,7 @@ impl Series {
             seasons,
             stills,
             focus: Focus::Still(0),
-        };
-        page.refoot(source);
-        Some(page)
+        })
     }
 
     // The foot follows the focused episode, so its lines change with focus

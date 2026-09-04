@@ -1,7 +1,7 @@
 // The media browser: a stack of screens over a catalog source and a
 // poster store. The keyboard and the bus fold through one key handler.
-// The libraries screen is always the bottom of the stack, so the screen
-// is never empty, and back from that screen asks for the shade. The
+// The home page is always the bottom of the stack, so the screen is never
+// empty, and back from the home page asks for the shade. The
 // `media-screen` crate holds the shade, the focus gate, and the two
 // windows, so a press that reaches this file is one to act on.
 
@@ -19,7 +19,7 @@ use crate::catalog::{Selection, Source};
 use crate::harness::{Screen, Waker};
 use crate::look;
 use crate::posters::Posters;
-use crate::screens::{self, Step, libraries, loading, volume};
+use crate::screens::{self, Step, home, loading, volume};
 
 /// The browsing screen, generic over where its rows and its posters
 /// come from, so one browser draws the sidecar's file, a test fixture, and
@@ -29,9 +29,9 @@ pub struct Browser<S: Source, P: Posters> {
     // The store is in a RefCell because a canvas program draws through
     // a shared reference while the store mutates its cache.
     posters: RefCell<P>,
-    // The libraries screen is a field of its own, so the type guarantees
-    // a screen to draw; the stack holds only descents.
-    libraries: screens::Screen,
+    // The home page is a field of its own, so the type guarantees a
+    // screen to draw; the stack holds only descents.
+    home: screens::Screen,
     stack: Vec<screens::Screen>,
     // The connection to the room's remotes, or nothing on a run that takes
     // the keyboard alone.
@@ -71,13 +71,13 @@ const REST: f64 = 0.3;
 const PAGE: (u32, u32) = (1920, 1080);
 
 impl<S: Source, P: Posters> Browser<S, P> {
-    /// Open the browser on its first screen, the libraries.
+    /// Open the browser on its first screen, the home page.
     pub fn new(mut source: S, posters: P) -> Self {
-        let libraries = screens::Screen::Libraries(libraries::Libraries::new(&mut source));
+        let home = screens::Screen::Home(home::Home::open(&mut source));
         Self {
             source,
             posters: RefCell::new(posters),
-            libraries,
+            home,
             stack: Vec::new(),
             bus: None,
             play_topic: String::new(),
@@ -157,11 +157,11 @@ impl<S: Source, P: Posters> Browser<S, P> {
     }
 
     fn top(&self) -> &screens::Screen {
-        self.stack.last().unwrap_or(&self.libraries)
+        self.stack.last().unwrap_or(&self.home)
     }
 
     fn reread_top(&mut self) {
-        let top = self.stack.last_mut().unwrap_or(&mut self.libraries);
+        let top = self.stack.last_mut().unwrap_or(&mut self.home);
         top.reread(&mut self.source);
         top.volume(&*self.posters.borrow());
     }
@@ -211,7 +211,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
     // at the size the page draws it. The answer is dropped. The ask is
     // the point: the decode lands in the cache before the page opens.
     fn prefetch(&mut self) {
-        let top = self.stack.last().unwrap_or(&self.libraries);
+        let top = self.stack.last().unwrap_or(&self.home);
         let Some((library, art)) = top.resting(&mut self.source) else {
             return;
         };
@@ -259,7 +259,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
     // folded into the screen that was shown at the time and not into
     // this one.
     //
-    // At the libraries there is nowhere to climb, so a browser on a bus
+    // At the home page there is nowhere to climb, so a browser on a bus
     // asks for the shade. Only the browser knows whether back has
     // anywhere to go, which is why the crate never sleeps on back
     // itself.
@@ -301,7 +301,7 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         if name == "escape" || name == "backspace" {
             self.back();
         } else {
-            let top = self.stack.last_mut().unwrap_or(&mut self.libraries);
+            let top = self.stack.last_mut().unwrap_or(&mut self.home);
             let step = top.key(name, &mut self.source);
             self.take(step);
         }

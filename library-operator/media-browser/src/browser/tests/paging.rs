@@ -4,15 +4,18 @@
 use super::*;
 
 #[test]
-fn the_first_screen_lists_the_libraries() {
+fn the_first_screen_is_the_home_page_and_its_libraries_strip() {
     let browser = browser(3);
-    let screens::Screen::Libraries(top) = browser.top() else {
-        panic!("the browser opens on the libraries");
-    };
-    assert_eq!(top.entries[0].name, "films");
-    assert_eq!(top.entries[0].detail, "movies · 3");
-    assert_eq!(top.entries[1].name, "serials");
-    assert_eq!(top.entries[1].detail, "series · 2");
+    let home = showing_home(&browser);
+    let libraries = &home.strips[2];
+    assert_eq!(libraries.heading, "Libraries");
+    assert_eq!(libraries.items[0].name, "films");
+    assert_eq!(libraries.items[0].under, "movies · 3");
+    assert_eq!(libraries.items[0].art, "1.jpg");
+    assert_eq!(libraries.items[1].name, "serials");
+    assert_eq!(libraries.items[1].under, "series · 2");
+    assert_eq!(home.focus, 2);
+    assert!(home.strips[0].items.is_empty());
 }
 
 #[test]
@@ -36,7 +39,7 @@ fn a_select_on_a_movie_opens_its_page() {
 #[test]
 fn a_select_on_a_series_opens_its_page() {
     let mut browser = browser(3);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
 
@@ -52,7 +55,7 @@ fn a_select_on_a_series_opens_its_page() {
 #[test]
 fn a_press_on_a_series_page_crosses_its_dividers() {
     let mut browser = browser(3);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
 
@@ -99,14 +102,14 @@ fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
 }
 
 #[test]
-fn back_climbs_one_screen_and_stops_at_the_libraries() {
+fn back_climbs_one_screen_and_stops_at_the_home_page() {
     let mut browser = browser(3);
     browser.key("enter");
     browser.key("escape");
     assert!(browser.stack.is_empty());
     browser.key("escape");
     assert!(browser.stack.is_empty());
-    assert!(matches!(browser.top(), screens::Screen::Libraries(_)));
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
 }
 
 #[test]
@@ -144,14 +147,12 @@ fn back_from_a_page_returns_to_the_wall_at_the_same_focus() {
 }
 
 #[test]
-fn arrows_move_focus_on_a_list_and_a_wall() {
+fn arrows_move_focus_on_a_strip_and_a_wall() {
     let mut browser = browser(20);
-    browser.key("down");
-    let screens::Screen::Libraries(top) = browser.top() else {
-        panic!("the browser opens on the libraries");
-    };
-    assert_eq!(top.focus, 1);
-    browser.key("up");
+    browser.key("right");
+    assert_eq!(showing_home(&browser).strips[2].focus, 1);
+    browser.key("left");
+    assert_eq!(showing_home(&browser).strips[2].focus, 0);
     browser.key("enter");
     browser.key("right");
     assert_eq!(showing_wall(&browser).slots.focus, 1);
@@ -318,7 +319,7 @@ fn the_view_builds_for_every_screen() {
     let _ = films.view();
 
     let mut serials = browser(3);
-    serials.key("down");
+    serials.key("right");
     serials.key("enter");
     let _ = serials.view();
     serials.key("enter");
@@ -330,7 +331,7 @@ fn the_view_builds_for_every_screen() {
 #[test]
 fn a_change_rereads_the_series_page_that_is_shown() {
     let mut browser = browser(3);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
 
@@ -344,7 +345,7 @@ fn a_change_rereads_the_series_page_that_is_shown() {
 fn a_series_with_no_episodes_plays_nothing() {
     let mut browser = browser(3);
     browser.source.empty = true;
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
     assert_eq!(browser.stack.len(), 2);
@@ -358,7 +359,7 @@ fn a_series_with_no_episodes_plays_nothing() {
 #[test]
 fn a_select_on_a_still_asks_for_the_episode_and_its_season() {
     let mut browser = browser(3);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
     browser.key("right");

@@ -69,6 +69,7 @@ fn crowded(focus: Focus) -> Movie {
         set: Some(Set {
             heading: "The Set".into(),
             members: vec![Item {
+                episode: None,
                 library: "default/films".into(),
                 kind: "movies".into(),
                 id: "one".into(),

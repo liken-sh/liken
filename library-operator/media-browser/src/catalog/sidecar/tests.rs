@@ -2,6 +2,7 @@ mod lists;
 mod pages;
 mod people;
 mod plays;
+mod recent;
 mod series;
 
 use std::fs;
@@ -12,11 +13,11 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Credit, FileFacts, LibraryEntry, MovieDetails, PlayItem, Presentation, Query, Selection,
-    SeriesDetails, Slot, Source,
+    Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails, PlayItem, Presentation, Query,
+    Selection, SeriesDetails, Slot, Source,
 };
 
-// One library's wall, as the libraries screen opens it.
+// One library's wall, as the libraries strip opens it.
 fn library(name: &str) -> Query {
     Query::Library {
         library: name.into(),
@@ -56,6 +57,26 @@ fn insert_movie(path: &Path, library: &str, id: &str, title: &str, sort_key: &st
                 sort_key,
                 format!("{id}.jpg"),
                 format!("{}-1999", sort_key),
+            ),
+        )
+        .unwrap();
+}
+
+// One movie with the two columns the recency reads order by.
+fn insert_added_movie(path: &Path, library: &str, id: &str, released: &str, added: i64) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO movies (library, id, kind, title, sort_key, released, added, art) \
+             VALUES (?, ?, 'movies', ?, ?, ?, ?, ?)",
+            (
+                library,
+                id,
+                format!("Film {id}"),
+                format!("film {id}"),
+                released,
+                added,
+                format!("{id}.jpg"),
             ),
         )
         .unwrap();

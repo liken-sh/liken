@@ -150,18 +150,20 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 posters,
                 &strip::Strip {
                     members: &set.members,
-                    current: set.current,
+                    current: Some(set.current),
                     focus: match movie.focus {
                         Focus::Strip(index) => Some(index),
                         _ => None,
                     },
                     heading: &set.heading,
                     library: &movie.library,
+                    see_all: false,
+                    lines: 0,
                     region: area(
                         MARGIN,
                         block.top - offset,
                         bounds.width - 2.0 * MARGIN,
-                        strip::HEIGHT,
+                        strip::height(0),
                     ),
                 },
             );
@@ -290,7 +292,7 @@ impl Blocks {
         let tagline = place(0.0, lines(&movie.tagline, look::TAGLINE, column, 0));
         let plot = place(0.0, lines(&movie.plot, look::PLOT, column, PLOT_LINES));
         let buttons = place(0.0, buttons::HEIGHT);
-        let strip = movie.set.as_ref().map(|_| place(0.0, strip::HEIGHT));
+        let strip = movie.set.as_ref().map(|_| place(0.0, strip::height(0)));
         let stripes: Vec<Block> = movie
             .stripes
             .bands()

@@ -137,7 +137,7 @@ pub const SCORE: f32 = 24.0;
 /// The size of the credits and the cast on a page.
 pub const CREDITS: f32 = 18.0;
 
-/// The size of a list row's name.
+/// The size of the number in the volume row.
 pub const ROW_NAME: f32 = 28.0;
 
 /// The size of secondary text: details and placeholder titles.

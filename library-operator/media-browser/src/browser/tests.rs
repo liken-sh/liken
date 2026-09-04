@@ -4,6 +4,7 @@
 // This file holds what every group of tests under it builds from: the
 // catalog they read, the store they draw from, and the bus they fold.
 
+mod home;
 mod loading;
 mod moments;
 mod paging;
@@ -18,10 +19,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::*;
 use crate::catalog::Answer;
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person,
-    PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
+    Credit, CreditSlot, Credits, Episode, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails,
+    MovieSet, Person, PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
 };
 use crate::posters::Art;
+use crate::screens::home::Home;
 use crate::screens::movie::Focus;
 use crate::screens::series::Focus as SeriesFocus;
 use crate::screens::wall::Wall;
@@ -54,7 +56,15 @@ struct Fake {
     // Whether the movies credit anybody, so a page carries the
     // stripes a walk to a person's page starts from.
     people: bool,
+    // Whether the recency queries answer anything: an airing episode, a
+    // series with a back catalog, and a movie, newest first. Without it
+    // the home page is the libraries strip alone.
+    recent: bool,
 }
+
+// The library the fake serial is in, and the serial's id.
+const SERIALS: &str = "screening/serials";
+const SERIAL: &str = "series:1";
 
 // The one person the fake library credits, and the directory their
 // entry sits in.
@@ -71,6 +81,48 @@ fn numbered(id: &str) -> usize {
 }
 
 impl Fake {
+    // What the recency queries answer, by the fold: every episode folds
+    // to the serial under Titles, and the airing episode stands alone
+    // under the other two.
+    fn recency(&self, fold: Fold) -> Answer {
+        if !self.recent {
+            return Answer::default();
+        }
+        let episode = Slot {
+            library: SERIALS.into(),
+            kind: "episodes".into(),
+            id: "episode:1:2".into(),
+            title: "Segment 2".into(),
+            released: "2026-09-01".into(),
+            art: "s1e2.jpg".into(),
+            duration: 2_760,
+            episode: Some(InSeries {
+                series: SERIAL.into(),
+                name: "The Serial".into(),
+                season: 1,
+                episode: 2,
+            }),
+            ..Slot::default()
+        };
+        let serial = Slot {
+            library: SERIALS.into(),
+            kind: "series".into(),
+            id: SERIAL.into(),
+            title: "The Serial".into(),
+            released: "2026-08-20".into(),
+            art: "serial.jpg".into(),
+            ..Slot::default()
+        };
+        let movie = Slot::of("screening/films", "movies", self.member(1));
+        Answer {
+            name: String::new(),
+            slots: match fold {
+                Fold::Titles => vec![serial, movie],
+                _ => vec![episode, serial, movie],
+            },
+        }
+    }
+
     fn member(&self, number: usize) -> Title {
         Title {
             id: format!("movies:{number}"),
@@ -91,11 +143,13 @@ impl Source for Fake {
                 library: "screening/films".into(),
                 kind: "movies".into(),
                 items: self.movies as u64,
+                art: "1.jpg".into(),
             },
             LibraryEntry {
-                library: "screening/serials".into(),
+                library: SERIALS.into(),
                 kind: "series".into(),
                 items: 2,
+                art: "serial.jpg".into(),
             },
         ]
     }
@@ -148,6 +202,7 @@ impl Source for Fake {
                 }
             }
             Query::Set { .. } => Answer::default(),
+            Query::Released { fold } | Query::Added { fold } => self.recency(*fold),
         }
     }
 
@@ -308,6 +363,14 @@ fn browser(movies: usize) -> Browser<Fake, NoPosters> {
         },
         NoPosters::default(),
     )
+}
+
+// The home page the browser is showing.
+fn showing_home(browser: &Browser<Fake, NoPosters>) -> &Home {
+    match browser.top() {
+        screens::Screen::Home(home) => home,
+        _ => panic!("the browser is not showing the home page"),
+    }
 }
 
 // The wall the browser is showing, so a test reads the screen it is on.

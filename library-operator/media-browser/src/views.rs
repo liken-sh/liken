@@ -1,9 +1,10 @@
 // The drawing layer: the primitives a screen composes, and the culling
-// math they share. The primitives are a wall of art slots, a list of
-// rows, a band across the top of a wall, a block of text, a row of
-// buttons, a strip of posters with one marked, a divider between two runs
-// of a wall, and the scrolled stack a page is. A screen chooses which of
-// them it draws and where. No primitive reads a kind.
+// math they share. The primitives are a wall of art slots, a band across
+// the top of a wall, a block of text, a row of buttons, a strip of
+// posters and stills at one height with a "see all" slot where a screen
+// asks for one, a divider between two runs of a wall, and the scrolled
+// stack a page is. A screen chooses which of them it draws and where. No
+// primitive reads a kind.
 //
 // A page draws in the layers the `layers` module stacks, because inside
 // one layer the renderer draws every mesh, then every image, then every
@@ -18,7 +19,6 @@ pub mod curtain;
 pub mod divider;
 pub mod header;
 pub mod layers;
-pub mod list;
 pub mod people;
 pub mod ratings;
 pub mod scroll;
@@ -58,7 +58,8 @@ pub trait Card {
     /// it.
     fn name(&self) -> &str;
 
-    /// The secondary line a list row draws at its right.
+    /// The second line under a headshot in a stripe: the part the person
+    /// played.
     fn detail(&self) -> &str {
         ""
     }
@@ -79,6 +80,13 @@ pub trait Card {
     /// facts of the row that fit in this many characters.
     fn line_fitting(&self, _chars: usize) -> &str {
         self.caption()
+    }
+
+    /// The height of the item's art as a share of its width, which a strip
+    /// draws each slot at. A poster, unless the item says otherwise, and an
+    /// episode's still says otherwise.
+    fn ratio(&self) -> f32 {
+        wall::POSTER
     }
 }
 

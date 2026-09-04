@@ -94,7 +94,7 @@ fn a_sibling_in_the_strip_replaces_the_page_and_back_reaches_the_wall() {
 #[test]
 fn a_select_on_an_episode_names_the_episode_the_still_carries() {
     let (mut browser, _bus) = playing(vec![one_item()]);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
     browser.key("down");
@@ -120,7 +120,7 @@ fn a_select_on_an_episode_publishes_the_list_in_the_order_it_resolved() {
     let mut second = one_item();
     second.path = "Later.mkv".into();
     let (mut browser, bus) = playing(vec![one_item(), second]);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
 
@@ -137,7 +137,7 @@ fn a_select_on_an_episode_publishes_the_list_in_the_order_it_resolved() {
 #[test]
 fn a_select_on_a_series_descends_and_asks_for_no_play() {
     let (mut browser, bus) = playing(vec![one_item()]);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
 
     browser.key("enter");

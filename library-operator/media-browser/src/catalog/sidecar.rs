@@ -10,7 +10,7 @@ use rusqlite::{Connection, OpenFlags, Row};
 
 use crate::catalog::{
     Answer, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person, PlayItem,
-    Query, Selection, SeriesDetails, Slot, Source, library_name,
+    Query, Selection, SeriesDetails, Slot, Source, library_name, recency,
 };
 use crate::harness::Waker;
 
@@ -19,6 +19,7 @@ mod files;
 mod item;
 mod people;
 mod play;
+mod recent;
 mod series;
 mod updates;
 
@@ -130,13 +131,21 @@ fn collect<T>(
 
 impl Source for SidecarSource {
     fn libraries(&mut self) -> Vec<LibraryEntry> {
-        // A library has one kind, so the union yields one row per
-        // library, and the outer ORDER BY gives the first screen its
-        // order.
-        let sql = "SELECT library, kind, items FROM (\
-                     SELECT library, 'movies' AS kind, COUNT(*) AS items FROM movies GROUP BY library \
+        // A library has one kind, so the union yields one row per library, and
+        // the outer ORDER BY gives the libraries strip its order. The correlated
+        // subquery reads the art of the library's newest-added title that has
+        // any, through the (library, added) index, so the libraries strip draws
+        // each library as a poster.
+        let sql = "SELECT library, kind, items, art FROM (\
+                     SELECT library, 'movies' AS kind, COUNT(*) AS items, \
+                       (SELECT art FROM movies newest WHERE newest.library = movies.library \
+                        AND newest.art != '' ORDER BY newest.added DESC, newest.id LIMIT 1) AS art \
+                     FROM movies GROUP BY library \
                      UNION ALL \
-                     SELECT library, 'series' AS kind, COUNT(*) AS items FROM series GROUP BY library\
+                     SELECT library, 'series' AS kind, COUNT(*) AS items, \
+                       (SELECT art FROM series newest WHERE newest.library = series.library \
+                        AND newest.art != '' ORDER BY newest.added DESC, newest.id LIMIT 1) AS art \
+                     FROM series GROUP BY library\
                    ) ORDER BY library";
         self.read(|connection| {
             collect(connection, sql, &[], |row| {
@@ -144,6 +153,7 @@ impl Source for SidecarSource {
                     library: row.get(0)?,
                     kind: row.get(1)?,
                     items: row.get::<_, i64>(2)?.max(0) as u64,
+                    art: item::text(row, 3)?,
                 })
             })
         })
@@ -176,6 +186,20 @@ impl Source for SidecarSource {
                         .collect(),
                 }
             }
+            Query::Released { fold } => Answer {
+                name: String::new(),
+                slots: recency::fold(
+                    self.read(|connection| recent::candidates(connection, recent::Order::Released)),
+                    *fold,
+                ),
+            },
+            Query::Added { fold } => Answer {
+                name: String::new(),
+                slots: recency::fold(
+                    self.read(|connection| recent::candidates(connection, recent::Order::Added)),
+                    *fold,
+                ),
+            },
         }
     }
 

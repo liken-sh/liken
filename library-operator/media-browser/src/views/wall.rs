@@ -231,7 +231,14 @@ pub fn draw<T: Card, P: Posters>(
 
 // One line centered in its band and clipped to it, so a long title never
 // runs off the screen or over the row below.
-fn written(frame: &mut canvas::Frame<Renderer>, band: Rectangle, content: &str, color: Color) {
+// The strip draws its captions through this too, so the two read as
+// one.
+pub(crate) fn written(
+    frame: &mut canvas::Frame<Renderer>,
+    band: Rectangle,
+    content: &str,
+    color: Color,
+) {
     if content.is_empty() {
         return;
     }

@@ -1,5 +1,5 @@
-// The lists the first screens read: the libraries, one library's titles,
-// and every episode of a series.
+// The lists the first screens read: the libraries and their art, one
+// library's titles, and every episode of a series.
 
 use super::*;
 
@@ -31,14 +31,43 @@ fn libraries_come_back_counted_and_ordered_by_name() {
                 library: "default/films".into(),
                 kind: "movies".into(),
                 items: 2,
+                art: "movie:tmdb:603.jpg".into(),
             },
             LibraryEntry {
                 library: "default/shows".into(),
                 kind: "series".into(),
                 items: 1,
+                art: "series:tvdb:73739.jpg".into(),
             },
         ]
     );
+}
+
+#[test]
+fn a_library_draws_as_the_poster_of_its_newest_added_title_with_art() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_added_movie(&path, "default/films", "movie:tmdb:1", "1999", 100);
+    insert_added_movie(&path, "default/films", "movie:tmdb:2", "2004", 300);
+    insert_added_movie(&path, "default/films", "movie:tmdb:3", "2010", 200);
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute("UPDATE movies SET art = '' WHERE id = 'movie:tmdb:2'", [])
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO movies (library, id, kind, title, sort_key) \
+             VALUES ('default/bare', 'movie:tmdb:9', 'movies', 'Bare', 'bare')",
+            [],
+        )
+        .unwrap();
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let libraries = source.libraries();
+    assert_eq!(libraries[0].library, "default/bare");
+    assert_eq!(libraries[0].art, "");
+    assert_eq!(libraries[1].library, "default/films");
+    assert_eq!(libraries[1].art, "movie:tmdb:3.jpg");
 }
 
 #[test]

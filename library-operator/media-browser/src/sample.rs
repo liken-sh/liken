@@ -2,6 +2,7 @@
 // before the sidecar source lands. Every name here is synthesized; nothing
 // resembles a real library.
 
+use crate::catalog::recency::{self, CANDIDATES, Candidate};
 use crate::catalog::{
     Answer, Credit, Credits, Episode, FileFacts, LibraryEntry, MovieDetails, MovieSet, Person,
     PlayItem, Query, Selection, SeriesDetails, Slot, Source, Title, library_name,
@@ -25,6 +26,27 @@ const SERIALS: i64 = 12;
 const IN_SETS: i64 = 12;
 const PER_SET: i64 = 3;
 
+// The two libraries' names, which every invented row carries.
+const FEATURES: &str = "sample/features";
+const SERIALS_LIBRARY: &str = "sample/serials";
+
+// The invented arrivals. They count from one day and the movies fall
+// over a spread of days, so the Added strip differs from the Released
+// strip. The last three episodes of the last serial's last season arrive
+// two days after each airs, so the home page shows standalone episodes
+// beside a folded series and titles on one screen. Every other episode
+// of a serial arrived on that serial's own import day, one step apart
+// per serial, so its series folds. The last serial's import day is later
+// than every movie's arrival and more than the fold window before its
+// first episode of the season, so under Added the folded series comes
+// right after the airing episodes.
+const ARRIVALS_FROM: i64 = 1_640_995_200;
+const ARRIVAL_SPREAD_DAYS: i64 = 1_400;
+const AIRING_EPISODES: i64 = 3;
+const AIRING_LAG_DAYS: i64 = 2;
+const IMPORT_STEP_DAYS: i64 = 120;
+const DAY: i64 = 86_400;
+
 /// The invented catalog. It holds no state; every answer is a
 /// function of its arguments.
 #[derive(Debug, Default)]
@@ -34,14 +56,16 @@ impl Source for Catalog {
     fn libraries(&mut self) -> Vec<LibraryEntry> {
         vec![
             LibraryEntry {
-                library: "sample/features".into(),
+                library: FEATURES.into(),
                 kind: "movies".into(),
                 items: MOVIES as u64,
+                art: movie(1).art,
             },
             LibraryEntry {
-                library: "sample/serials".into(),
+                library: SERIALS_LIBRARY.into(),
                 kind: "series".into(),
                 items: SERIALS as u64,
+                art: serial(SERIALS).art,
             },
         ]
     }
@@ -69,6 +93,17 @@ impl Source for Catalog {
                 },
                 None => Answer::default(),
             },
+            Query::Released { fold } => Answer {
+                name: String::new(),
+                slots: recency::fold(
+                    recent(|candidate| released_of(candidate).to_string()),
+                    *fold,
+                ),
+            },
+            Query::Added { fold } => Answer {
+                name: String::new(),
+                slots: recency::fold(recent(added_of), *fold),
+            },
         }
     }
 
@@ -81,7 +116,7 @@ impl Source for Catalog {
         }
         Some(SeriesDetails {
             title: format!("Serial {number:02}"),
-            released: (1960 + number * 5).to_string(),
+            released: serial_year(number).to_string(),
             duration: 0,
             rating: "TV-14".into(),
             genres: vec!["Drama".into(), "Mystery".into()],
@@ -109,14 +144,14 @@ impl Source for Catalog {
         }
         (1..=seasons(number))
             .flat_map(|season| {
-                (1..=6 + (number + season) % 5).map(move |episode| Episode {
+                (1..=episodes_in(number, season)).map(move |episode| Episode {
                     id: format!("episode:sample:{number:02}-{season:02}-{episode:02}"),
                     season,
                     episode,
                     title: format!("Segment {episode:02}"),
                     released: format!(
                         "{}-{:02}-{:02}",
-                        1960 + number * 5 + season - 1,
+                        serial_year(number) + season - 1,
                         1 + episode % 12,
                         1 + episode % 28
                     ),
@@ -239,27 +274,102 @@ const PLOT: &str = "A survey party reaches the coppice at dusk and finds the gro
 // and the serials for any other, each slot stamped with that library and
 // its kind.
 fn titles(library: &str) -> Vec<Slot> {
-    if library == "sample/features" {
+    if library == FEATURES {
         return (1..=MOVIES)
             .map(|number| Slot::of(library, "movies", movie(number)))
             .collect();
     }
     (1..=SERIALS)
-        .map(|number| {
-            Slot::of(
-                library,
-                "series",
-                Title {
-                    id: format!("series:sample:{number:02}"),
-                    title: format!("Serial {number:02}"),
-                    released: (1960 + number * 5).to_string(),
-                    art: format!("art/serial-{number:02}.jpg"),
-                    duration: 0,
-                    rating: "TV-14".into(),
-                },
-            )
-        })
+        .map(|number| Slot::of(library, "series", serial(number)))
         .collect()
+}
+
+// One invented serial, as a title row.
+fn serial(number: i64) -> Title {
+    Title {
+        id: format!("series:sample:{number:02}"),
+        title: format!("Serial {number:02}"),
+        released: serial_year(number).to_string(),
+        art: format!("art/serial-{number:02}.jpg"),
+        duration: 0,
+        rating: "TV-14".into(),
+    }
+}
+
+// The year an invented serial started. The last serial starts in the
+// year the newest movies came out, so its seasons air after them and the
+// home page's strips show episodes.
+fn serial_year(number: i64) -> i64 {
+    1965 + number * 5
+}
+
+// The recency candidates: every movie and every episode with the
+// arrival the sample invents for it, sorted newest first by the key and
+// bounded as the catalog's read is. The fold over them is the catalog's
+// own.
+fn recent<K: Ord>(key: impl Fn(&Candidate) -> K) -> Vec<Candidate> {
+    let mut catalog = Catalog;
+    let mut candidates: Vec<Candidate> = (1..=MOVIES)
+        .map(|number| Candidate::Movie {
+            slot: Slot::of(FEATURES, "movies", movie(number)),
+        })
+        .collect();
+    for number in 1..=SERIALS {
+        for episode in catalog.episodes(SERIALS_LIBRARY, &serial(number).id) {
+            candidates.push(Candidate::Episode {
+                library: SERIALS_LIBRARY.into(),
+                added: arrival(number, &episode),
+                season: episode.season,
+                number: episode.episode,
+                episode: Title {
+                    id: episode.id,
+                    title: episode.title,
+                    released: episode.released,
+                    art: episode.art,
+                    duration: episode.duration,
+                    rating: String::new(),
+                },
+                series: serial(number),
+            });
+        }
+    }
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(key(candidate)));
+    candidates.truncate(CANDIDATES);
+    candidates
+}
+
+fn released_of(candidate: &Candidate) -> &str {
+    match candidate {
+        Candidate::Movie { slot } => &slot.released,
+        Candidate::Episode { episode, .. } => &episode.released,
+    }
+}
+
+fn added_of(candidate: &Candidate) -> i64 {
+    match candidate {
+        Candidate::Movie { slot } => movie_arrival(trailing(&slot.id)),
+        Candidate::Episode { added, .. } => *added,
+    }
+}
+
+// The invented arrival of one movie, spread over the years after the
+// first arrival day.
+fn movie_arrival(number: i64) -> i64 {
+    ARRIVALS_FROM + (number * 7_919) % ARRIVAL_SPREAD_DAYS * DAY
+}
+
+// The invented arrival of one episode: two days after it aired for the
+// last episodes of the last serial's last season, and the serial's own
+// import day everywhere else.
+fn arrival(number: i64, episode: &Episode) -> i64 {
+    let season = seasons(number);
+    let airing = number == SERIALS
+        && episode.season == season
+        && episode.episode + AIRING_EPISODES > episodes_in(number, season);
+    match airing {
+        true => recency::date_seconds(&episode.released).unwrap_or(0) + AIRING_LAG_DAYS * DAY,
+        false => ARRIVALS_FROM + number * IMPORT_STEP_DAYS * DAY,
+    }
 }
 
 // One invented movie, the same row every time.
@@ -291,6 +401,11 @@ fn ratings(number: i64) -> Vec<(String, f64)> {
 // How many seasons an invented serial holds.
 fn seasons(number: i64) -> i64 {
     2 + number % 3
+}
+
+// How many episodes one season of an invented serial holds.
+fn episodes_in(number: i64, season: i64) -> i64 {
+    6 + (number + season) % 5
 }
 
 // The set a movie belongs to. The first movies fall into sets of three,
@@ -443,7 +558,67 @@ mod tests {
         assert_eq!(episodes[9].season, 2);
         assert!(!episodes[0].art.is_empty());
         assert!(!episodes[0].plot.is_empty());
-        assert_eq!(episodes[0].released, "1995-02-02");
+        assert_eq!(episodes[0].released, "2000-02-02");
+    }
+
+    #[test]
+    fn the_home_strips_show_a_standalone_episode_a_folded_series_and_titles() {
+        let mut catalog = Catalog;
+        for query in [
+            Query::Released {
+                fold: crate::catalog::Fold::Airing,
+            },
+            Query::Added {
+                fold: crate::catalog::Fold::Airing,
+            },
+        ] {
+            let slots = catalog.wall(&query).slots;
+            assert!(slots.len() <= CANDIDATES);
+            assert!(slots.iter().any(|slot| slot.still()));
+            assert!(slots.iter().any(|slot| slot.kind == "series"));
+            assert!(slots.iter().any(|slot| slot.kind == "movies"));
+            assert_eq!(slots[0].kind, "episodes");
+            assert_eq!(slots[0].library, SERIALS_LIBRARY);
+            let stills = slots.iter().filter(|slot| slot.still()).count();
+            assert_eq!(stills as i64, AIRING_EPISODES);
+            assert_eq!(slots[AIRING_EPISODES as usize].kind, "series");
+        }
+    }
+
+    #[test]
+    fn released_comes_newest_first_and_added_by_arrival() {
+        let mut catalog = Catalog;
+        let released = catalog
+            .wall(&Query::Released {
+                fold: crate::catalog::Fold::Episodes,
+            })
+            .slots;
+        assert!(
+            released
+                .windows(2)
+                .all(|pair| pair[0].released >= pair[1].released)
+        );
+        let added = catalog
+            .wall(&Query::Added {
+                fold: crate::catalog::Fold::Titles,
+            })
+            .slots;
+        assert!(added.iter().all(|slot| !slot.still()));
+        assert_ne!(
+            released[0].id,
+            added.last().expect("the strip holds slots").id
+        );
+    }
+
+    #[test]
+    fn every_library_draws_as_one_of_its_posters() {
+        let mut catalog = Catalog;
+        assert!(
+            catalog
+                .libraries()
+                .iter()
+                .all(|entry| !entry.art.is_empty())
+        );
     }
 
     #[test]

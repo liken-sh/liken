@@ -3,6 +3,9 @@
 // home page's walls would have been a third. This module holds the query,
 // the answer's name, the items, the focus, the arrows and select over
 // them, the prefetch under focus, and the drawing into a region.
+// The select and the prefetch over one item are functions of their own
+// here, because the home page's strips open the same pages a wall
+// does.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -64,18 +67,9 @@ impl Slots {
             self.focus = focus::wall(self.focus, self.items.len(), wall::COLUMNS, key);
             return Step::Stay;
         }
-        let Some(item) = self.items.get(self.focus) else {
-            return Step::Stay;
-        };
-        match item.kind.as_str() {
-            "series" => match series::Series::open(&item.library, &item.id, source) {
-                Some(page) => Step::Open(Screen::Series(Box::new(page))),
-                None => Step::Stay,
-            },
-            _ => match movie::Movie::open(&item.library, &item.id, source) {
-                Some(page) => Step::Open(Screen::Movie(Box::new(page))),
-                None => Step::Stay,
-            },
+        match self.items.get(self.focus) {
+            Some(item) => opened(item, source),
+            None => Step::Stay,
         }
     }
 
@@ -83,15 +77,7 @@ impl Slots {
     /// the slot's kind, so the store decodes it while focus rests. Nothing
     /// where that page draws over no art.
     pub fn resting(&self, source: &mut dyn Source) -> Option<(String, String)> {
-        let item = self.items.get(self.focus)?;
-        let backdrop = match item.kind.as_str() {
-            "series" => source.series(&item.library, &item.id)?.backdrop,
-            _ => source.movie(&item.library, &item.id)?.backdrop,
-        };
-        if backdrop.is_empty() {
-            return None;
-        }
-        Some((item.library.clone(), backdrop))
+        backdrop(self.items.get(self.focus)?, source)
     }
 
     /// Draw the grid of these slots in the region, scrolled so the focused
@@ -128,4 +114,43 @@ impl Slots {
             },
         );
     }
+}
+
+/// The page a select on one item opens, by the item's kind: a series
+/// page for a series, the series page focused on the episode for an
+/// episode, and a movie page for everything else. Nothing where the
+/// catalog no longer holds the item.
+pub fn opened(item: &Item, source: &mut dyn Source) -> Step {
+    let page = match (item.kind.as_str(), &item.episode) {
+        ("episodes", Some(place)) => series::Series::open_at(
+            &item.library,
+            &place.series,
+            (place.season, place.episode),
+            source,
+        )
+        .map(|page| Screen::Series(Box::new(page))),
+        ("series", _) => series::Series::open(&item.library, &item.id, source)
+            .map(|page| Screen::Series(Box::new(page))),
+        _ => movie::Movie::open(&item.library, &item.id, source)
+            .map(|page| Screen::Movie(Box::new(page))),
+    };
+    match page {
+        Some(page) => Step::Open(page),
+        None => Step::Stay,
+    }
+}
+
+/// The library and the backdrop of the page a select on this item
+/// opens, so the store decodes it while focus rests. An episode opens its
+/// series' page. Nothing where that page draws over no art.
+pub fn backdrop(item: &Item, source: &mut dyn Source) -> Option<(String, String)> {
+    let backdrop = match (item.kind.as_str(), &item.episode) {
+        ("episodes", Some(place)) => source.series(&item.library, &place.series)?.backdrop,
+        ("series", _) => source.series(&item.library, &item.id)?.backdrop,
+        _ => source.movie(&item.library, &item.id)?.backdrop,
+    };
+    if backdrop.is_empty() {
+        return None;
+    }
+    Some((item.library.clone(), backdrop))
 }

@@ -1,13 +1,13 @@
 // A kind is a plugin in the scanner and a screen design in the browser.
-// This module holds the entries of the navigation stack: the libraries
-// list at the bottom, and the screens each kind descends into. A screen
-// holds the rows it read, decides what a press does, and composes the
+// This module holds the entries of the navigation stack: the home page
+// at the bottom, and the screens each kind descends into. A screen holds
+// the rows it read, decides what a press does, and composes the
 // primitives in the views module. A new kind adds a screen here and,
 // where it needs one, a primitive there. It adds no row to a table.
 
 pub mod facts;
 pub mod foot;
-pub mod libraries;
+pub mod home;
 pub mod loading;
 pub mod movie;
 pub mod person;
@@ -23,15 +23,19 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Theme};
 
-use crate::catalog::{Query, Selection, Slot, Source};
+use crate::catalog::{InSeries, Query, Selection, Slot, Source};
 use crate::posters::Posters;
-use crate::views::Card;
 use crate::views::curtain::Curtain;
+use crate::views::{
+    Card,
+    wall::{POSTER, STILL},
+};
 
 /// One entry of the navigation stack.
 pub enum Screen {
-    /// Every library in the catalog. The browser opens on this screen.
-    Libraries(libraries::Libraries),
+    /// The home page, the screen the browser opens on and the bottom of
+    /// the stack.
+    Home(home::Home),
     /// The slots one query answers, as a wall of art under a band that
     /// carries the query's heading.
     Wall(wall::Wall),
@@ -69,7 +73,7 @@ impl Screen {
     /// browser for.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self {
-            Self::Libraries(screen) => screen.key(key, source),
+            Self::Home(screen) => screen.key(key, source),
             Self::Wall(screen) => screen.key(key, source),
             Self::Movie(screen) => screen.key(key, source),
             Self::Series(screen) => screen.key(key, source),
@@ -82,7 +86,7 @@ impl Screen {
     /// so the uncovered screen reads for itself.
     pub fn reread(&mut self, source: &mut dyn Source) {
         match self {
-            Self::Libraries(screen) => screen.reread(source),
+            Self::Home(screen) => screen.reread(source),
             Self::Wall(screen) => screen.reread(source),
             Self::Movie(screen) => screen.reread(source),
             Self::Series(screen) => screen.reread(source),
@@ -93,8 +97,11 @@ impl Screen {
     /// Whether a rest of focus on this screen is worth a prefetch. Only a
     /// wall whose select opens a page over art answers true, so a press
     /// on any other screen schedules no frame.
+    /// Whether the screen asks for a backdrop while focus rests. The home
+    /// page answers as a wall does while a strip holds focus.
     pub fn prefetches(&self) -> bool {
         match self {
+            Self::Home(screen) => screen.prefetches(),
             Self::Wall(screen) => screen.prefetches(),
             Self::Person(_) => true,
             _ => false,
@@ -107,6 +114,7 @@ impl Screen {
     /// nothing.
     pub fn resting(&self, source: &mut dyn Source) -> Option<(String, String)> {
         match self {
+            Self::Home(screen) => screen.resting(source),
             Self::Wall(screen) => screen.resting(source),
             Self::Person(screen) => screen.resting(source),
             _ => None,
@@ -131,7 +139,7 @@ impl Screen {
         curtain: Option<Curtain>,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
-            Self::Libraries(screen) => screen.view(posters),
+            Self::Home(screen) => screen.view(posters),
             Self::Wall(screen) => screen.view(posters),
             Self::Movie(screen) => screen.view(posters, curtain),
             Self::Series(screen) => screen.view(posters, curtain),
@@ -146,6 +154,14 @@ impl Screen {
 /// carries. The caption is the line under every slot, the line is what the
 /// focused slot shows, and `under` is the second caption line, empty on
 /// every wall but a person's.
+/// One title, as a wall slot or a strip poster draws it. Every item
+/// carries its own library and kind, because a select opens the page for
+/// the slot's kind and a wall may span libraries. The id is what a descent
+/// carries. The caption is the line under every slot, the line is what the
+/// focused slot shows, and `under` is the second caption line, empty on
+/// every wall but a person's and the libraries strip. `episode` is what an
+/// episode slot carries: the series a select opens and the numbers it
+/// opens on, and an item that holds one draws as a still.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub library: String,
@@ -156,6 +172,7 @@ pub struct Item {
     pub line: facts::Line,
     pub under: String,
     pub art: String,
+    pub episode: Option<InSeries>,
 }
 
 impl Item {
@@ -163,13 +180,33 @@ impl Item {
     /// are read by year, so their caption carries it, and every other wall
     /// captions the name alone. Both lines are built once here, at the read,
     /// and not on every frame.
+    /// One slot as an item. The query decides the caption: a person's works
+    /// are read by year, so their caption carries it, and every other wall
+    /// captions the name alone. An episode slot, whatever the query, is
+    /// captioned with its numbers and its series' name, because the still
+    /// alone does not say which series it is from, and its focused line leads
+    /// with the same two. Both lines are built once here, at the read, and not
+    /// on every frame.
     pub fn of(query: &Query, slot: Slot) -> Self {
         let year = facts::year(&slot.released);
-        let caption = match query {
-            Query::Person { .. } => facts::joined(&[&slot.title, year]),
-            Query::Library { .. } | Query::Set { .. } => slot.title.clone(),
+        let numbers = slot
+            .episode
+            .as_ref()
+            .map(|place| format!("S{:02}E{:02}", place.season, place.episode))
+            .unwrap_or_default();
+        let series = slot
+            .episode
+            .as_ref()
+            .map(|place| place.name.as_str())
+            .unwrap_or_default();
+        let caption = match (&slot.episode, query) {
+            (Some(_), _) => facts::joined(&[&numbers, series]),
+            (None, Query::Person { .. }) => facts::joined(&[&slot.title, year]),
+            (None, _) => slot.title.clone(),
         };
         let line = facts::Line::of(&[
+            &numbers,
+            series,
             &slot.title,
             year,
             &facts::runtime(slot.duration),
@@ -184,6 +221,7 @@ impl Item {
             line,
             under: slot.parts,
             art: slot.art,
+            episode: slot.episode,
         }
     }
 }
@@ -191,6 +229,13 @@ impl Item {
 impl Card for Item {
     fn art(&self) -> &str {
         &self.art
+    }
+
+    fn ratio(&self) -> f32 {
+        match self.episode.is_some() {
+            true => STILL,
+            false => POSTER,
+        }
     }
 
     fn library(&self) -> &str {
@@ -237,6 +282,7 @@ mod tests {
             duration: 5_820,
             rating: "PG-13".into(),
             parts: String::new(),
+            episode: None,
         }
     }
 
@@ -250,6 +296,46 @@ mod tests {
         assert_eq!(item.art, "posters/1.jpg");
         assert_eq!(item.library(), LIBRARY);
         assert_eq!(item.kind, "movies");
+        assert_eq!(item.ratio(), POSTER);
+    }
+
+    #[test]
+    fn an_episode_is_captioned_with_its_numbers_and_its_series_and_draws_as_a_still() {
+        let query = Query::Released {
+            fold: crate::catalog::Fold::Airing,
+        };
+        let item = Item::of(
+            &query,
+            Slot {
+                kind: "episodes".into(),
+                id: "episode:sample:1".into(),
+                title: "Segment 04".into(),
+                released: "2026-09-01".into(),
+                duration: 2_760,
+                episode: Some(InSeries {
+                    series: "series:sample:03".into(),
+                    name: "Serial 03".into(),
+                    season: 3,
+                    episode: 4,
+                }),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "S03E04 · Serial 03");
+        assert_eq!(
+            item.line.words(),
+            "S03E04 · Serial 03 · Segment 04 · 2026 · 46m · PG-13"
+        );
+        assert_eq!(item.ratio(), STILL);
+        assert_eq!(item.kind, "episodes");
+    }
+
+    #[test]
+    fn a_recency_slot_of_a_title_is_captioned_with_the_title() {
+        let query = Query::Added {
+            fold: crate::catalog::Fold::Titles,
+        };
+        assert_eq!(Item::of(&query, specimen()).caption(), "Specimen 0001");
     }
 
     #[test]

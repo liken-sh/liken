@@ -21,7 +21,7 @@ fn on_a_movie() -> (Browser<Fake, NoPosters>, FakeBus) {
 // The browser on a series page with focus on the first still.
 fn on_a_series() -> Browser<Fake, NoPosters> {
     let (mut browser, _bus) = playing(vec![one_item()]);
-    browser.key("down");
+    browser.key("right");
     browser.key("enter");
     browser.key("enter");
     browser.tick(PRESS);

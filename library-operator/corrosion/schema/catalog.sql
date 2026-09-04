@@ -163,6 +163,12 @@ CREATE TABLE episodes (
 -- then their episodes, within one library.
 CREATE INDEX episodes_library_series_season_episode ON episodes (library, series, season, episode);
 
+-- The two reads the home page's recency strips make of episodes, newest
+-- release first and newest arrival first, each led by the library column
+-- the way the movies and series indexes are.
+CREATE INDEX episodes_library_released ON episodes (library, released);
+CREATE INDEX episodes_library_added ON episodes (library, added);
+
 -- A file is one physical file on the volume, named by the library that
 -- holds it and its path relative to the library root, which together
 -- are the primary key. The row carries the file's technical attributes

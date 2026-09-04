@@ -207,6 +207,27 @@ fn a_page_opens_on_the_first_episode_of_the_first_season() {
 }
 
 #[test]
+fn a_page_opens_with_focus_on_the_episode_it_was_asked_for() {
+    let mut source = Serials::default();
+    let page = Series::open_at("screening/serials", SERIES, (2, 3), &mut source)
+        .expect("the catalog holds it");
+    assert_eq!(page.focus, Focus::Still(7));
+    assert_eq!(
+        page.focused().map(|still| still.caption.as_str()),
+        Some("E3 · Segment 3")
+    );
+}
+
+#[test]
+fn a_page_asked_for_an_episode_it_does_not_hold_opens_on_the_first() {
+    let mut source = Serials::default();
+    let page = Series::open_at("screening/serials", SERIES, (9, 9), &mut source)
+        .expect("the catalog holds it");
+    assert_eq!(page.focus, Focus::Still(0));
+    assert!(Series::open_at("screening/serials", "series:gone", (1, 1), &mut source).is_none());
+}
+
+#[test]
 fn a_series_the_library_does_not_hold_has_no_page() {
     let mut source = Serials::default();
     assert!(Series::open("screening/serials", "series:gone", &mut source).is_none());
