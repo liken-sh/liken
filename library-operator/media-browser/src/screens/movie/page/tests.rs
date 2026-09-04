@@ -190,22 +190,20 @@ fn a_movie_with_a_logo_reserves_the_box_it_draws_in() {
 }
 
 #[test]
-fn the_scores_share_the_facts_line() {
+fn the_ratings_line_sits_under_the_facts_line() {
     let blocks = blocks(&crowded(Focus::Buttons(0)));
-    assert_eq!(
-        blocks.facts.height,
-        ratings::HEIGHT.max(text::height(1, look::FACTS))
-    );
-    assert_eq!(blocks.tagline.top, blocks.facts.bottom() + GAP);
+    assert_eq!(blocks.ratings.height, ratings::HEIGHT);
+    assert_eq!(blocks.ratings.top, blocks.facts.bottom() + GAP);
+    assert_eq!(blocks.tagline.top, blocks.ratings.bottom() + GAP);
 }
 
 #[test]
-fn a_movie_with_no_score_takes_a_plain_facts_line() {
+fn a_movie_with_no_score_takes_no_ratings_line() {
     let mut movie = crowded(Focus::Buttons(0));
     movie.ratings = Vec::new();
     let blocks = blocks(&movie);
-    assert_eq!(blocks.facts.height, text::height(1, look::FACTS));
-    assert_eq!(blocks.tagline.top, blocks.facts.bottom() + GAP);
+    assert_eq!(blocks.ratings.height, 0.0);
+    assert_eq!(blocks.tagline.top, blocks.ratings.top);
 }
 
 #[test]

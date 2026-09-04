@@ -143,77 +143,19 @@ pub fn scores(ratings: &[(String, f64)]) -> Vec<Score> {
     .collect()
 }
 
-// The space between the last score and the facts on a shared line.
-const BEFORE_FACTS: f32 = 12.0;
-
-/// The height a facts line takes with its scores beside it: the taller
-/// of the text and the marks, and the text's own height where the title
-/// holds no score.
-pub fn line_height(scores: &[Score]) -> f32 {
-    match scores.is_empty() {
-        true => text::height(1, look::FACTS),
-        false => HEIGHT.max(text::height(1, look::FACTS)),
-    }
-}
-
-/// Draw a page's scores and its facts as one line, the scores first and
-/// the facts after them, each centered on the line. A header holds few
-/// lines, and the scores are facts of the same kind, so they share one.
-/// The scores go first because their width is known from the marks they
-/// draw, and the width of a line of text is only an estimate, so the
-/// facts land at an exact place and never over the scores. The answer
-/// is the height the line took.
-pub fn line(
-    frame: &mut canvas::Frame<Renderer>,
-    facts: &str,
-    scores: &[Score],
-    at: Point,
-    width: f32,
-) -> f32 {
-    let height = line_height(scores);
-    let taken = draw(
-        frame,
-        scores,
-        Point::new(at.x, at.y + (height - HEIGHT) / 2.0),
-    );
-    // The separator before the facts is the same dot the facts join
-    // with, so the scores read as more facts.
-    let facts = match (facts.is_empty(), scores.is_empty()) {
-        (false, false) => format!("\u{b7} {facts}"),
-        _ => facts.to_string(),
-    };
-    let after = match scores.is_empty() {
-        true => 0.0,
-        false => taken + BEFORE_FACTS,
-    };
-    text::block(
-        frame,
-        &facts,
-        Point::new(
-            at.x + after,
-            at.y + (height - text::height(1, look::FACTS)) / 2.0,
-        ),
-        look::FACTS,
-        look::muted(),
-        width - after,
-        1,
-    );
-    height
-}
-
-/// Draw the scores with their left edge at `at`. The answer is the width
-/// they took, and zero where the title holds no score, so a line places
-/// what follows them.
+/// Draw the line with its left edge at `at`. The answer is the height it
+/// took, and zero where the title holds no score, so the caller stacks
+/// the next block under it.
 pub fn draw(frame: &mut canvas::Frame<Renderer>, scores: &[Score], at: Point) -> f32 {
+    if scores.is_empty() {
+        return 0.0;
+    }
     let mut left = at.x;
     let top = at.y + (HEIGHT - MARK) / 2.0;
-    for (index, score) in scores.iter().enumerate() {
-        if index > 0 {
-            left += BETWEEN;
-        }
-        left += entry(frame, *score, Point::new(left, top));
+    for score in scores {
+        left += entry(frame, *score, Point::new(left, top)) + BETWEEN;
     }
-    left - at.x
+    HEIGHT
 }
 
 // One entry: the site's mark, then the score, then its scale. The answer

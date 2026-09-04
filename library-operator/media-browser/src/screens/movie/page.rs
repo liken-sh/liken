@@ -115,21 +115,14 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             },
         );
 
-        ratings::line(
-            &mut frame,
-            &movie.facts,
-            &movie.ratings,
-            blocks.facts.at(offset),
-            column,
-        );
-        text::line(
-            &mut frame,
-            &movie.tagline,
-            blocks.tagline.at(offset),
-            look::TAGLINE,
-            look::text(),
-            column,
-        );
+        for (block, content, size, color) in [
+            (blocks.facts, &movie.facts, look::FACTS, look::muted()),
+            (blocks.tagline, &movie.tagline, look::TAGLINE, look::text()),
+        ] {
+            text::line(&mut frame, content, block.at(offset), size, color, column);
+        }
+
+        ratings::draw(&mut frame, &movie.ratings, blocks.ratings.at(offset));
 
         text::block(
             &mut frame,
@@ -258,6 +251,7 @@ impl Block {
 struct Blocks {
     title: Block,
     facts: Block,
+    ratings: Block,
     tagline: Block,
     plot: Block,
     buttons: Block,
@@ -287,7 +281,14 @@ impl Blocks {
                 false => LOGO_HEIGHT,
             },
         );
-        let facts = place(0.0, ratings::line_height(&movie.ratings));
+        let facts = place(0.0, lines(&movie.facts, look::FACTS, column, 0));
+        let ratings = place(
+            0.0,
+            match movie.ratings.is_empty() {
+                true => 0.0,
+                false => ratings::HEIGHT,
+            },
+        );
         let tagline = place(0.0, lines(&movie.tagline, look::TAGLINE, column, 0));
         let plot = place(0.0, lines(&movie.plot, look::PLOT, column, PLOT_LINES));
         let buttons = place(0.0, buttons::HEIGHT);
@@ -308,6 +309,7 @@ impl Blocks {
         Self {
             title,
             facts,
+            ratings,
             tagline,
             plot,
             buttons,

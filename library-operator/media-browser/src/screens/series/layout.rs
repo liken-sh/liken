@@ -62,7 +62,9 @@ pub fn region(bounds: Rectangle) -> Rectangle {
 pub fn head() -> f32 {
     TOP + LOGO_HEIGHT
         + GAP
-        + ratings::HEIGHT.max(text::height(1, look::FACTS))
+        + text::height(1, look::FACTS)
+        + GAP
+        + ratings::HEIGHT
         + GAP
         + text::height(2, look::FACTS)
         + GAP

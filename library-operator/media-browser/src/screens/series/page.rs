@@ -204,7 +204,18 @@ impl<P: Posters> Page<'_, P> {
         });
         stack.add(layout::LOGO_HEIGHT);
 
-        let taken = ratings::line(frame, &series.facts, &series.ratings, stack.at(), column);
+        let taken = text::block(
+            frame,
+            &series.facts,
+            stack.at(),
+            look::FACTS,
+            look::muted(),
+            column,
+            1,
+        );
+        stack.add(taken);
+
+        let taken = ratings::draw(frame, &series.ratings, stack.at());
         stack.add(taken);
 
         let (line, aired, plot) = match series.focused() {
