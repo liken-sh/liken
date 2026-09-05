@@ -1,0 +1,33 @@
+# The CSIDriver object tells the kubelet and the scheduler how to treat
+# git.liken.sh. Its name is the driver name every volume names.
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: git.liken.sh
+spec:
+  # There is no attach step. A checkout is made on the node that
+  # publishes it.
+  attachRequired: false
+
+  # The node plugin receives the pod's name and namespace with each
+  # publish, so it can post events on the pod and find the claim that
+  # arms the volume.
+  podInfoOnMount: true
+
+  # The driver owns file modes, and replays them from the metadata
+  # ref. The kubelet changes none of them.
+  fsGroupPolicy: None
+
+  # A writeable volume is a PersistentVolume. A read-only volume is an
+  # inline volume in the pod spec.
+  volumeLifecycleModes:
+    - Persistent
+    - Ephemeral
+
+  # The driver publishes once and watches the tree from there, so the
+  # kubelet never repeats NodePublishVolume.
+  requiresRepublish: false
+
+  # The driver provisions nothing, so it reports no capacity for the
+  # scheduler to weigh.
+  storageCapacity: false

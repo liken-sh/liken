@@ -1,0 +1,301 @@
+# A pull request runs the whole gate here: the tests, the coverage
+# floors, the docs checks, and a build of every image. A push to main
+# runs the tests, the coverage floors, and the docs checks here, and
+# its images build in release.yaml, which starts at the same moment,
+# waits for this run, and pushes no image from a red gate. So a commit
+# on main gets the same verdict a pull request would, and the images
+# build once. A push to main also publishes the website, so this
+# workflow both judges a change and ships the site that describes it.
+#
+# There is no path filter. The tests are cheap, and a filter would
+# have to decide which files can never break a build. That list is
+# wrong the day someone adds a file it does not name, and the push
+# that adds it would then land untested. Publishing takes no filter
+# either: the site carries the test coverage report, so a change to
+# any Go file moves a page.
+#
+# The gate jobs are independent, so they run at once, and the gate
+# takes as long as its slowest job. publish waits for the go and docs
+# jobs, so a red gate never deploys.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # A dispatch republishes the current main with no change, for the
+  # times the serving side needs a fresh deployment.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # The image builds read their layer cache from ghcr. No run of this
+  # workflow writes an image or the cache, so read is enough.
+  packages: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-go keeps the module downloads and the build cache
+      # between runs, keyed on go.sum, so a run compiles only what
+      # changed.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The same target a workstation runs: gofmt, vet, the race
+      # tests, and the coverage gate on its pinned toolchain. The
+      # Makefile says why the gate pins a toolchain, and
+      # .testcoverage.yml holds the floor.
+      - run: make test-go
+
+      # The site's coverage report measures the commit the site is
+      # built from, and this job holds the only run of the tests on
+      # the pinned toolchain. The profile travels to publish as an
+      # artifact rather than being measured a second time there.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage-go
+          path: coverage.out
+          # A missing profile means the gate wrote nothing, and the
+          # report would then be drawn from stale or absent data.
+          if-no-files-found: error
+          # publish reads it within minutes of this step, and nothing
+          # else ever reads it.
+          retention-days: 7
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      # The theme is the brand repository, a submodule at
+      # docs/themes/brand. A checkout without it builds a site with
+      # no shell, no nav, and no stylesheet.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The docs domain is its own Go module, and Hugo is a tool
+      # directive in it, so the Go toolchain is the only build
+      # dependency and this file pins its version too.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: docs/go.mod
+          cache-dependency-path: docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # tracks docs/go.sum, so between two bumps of that file the Go
+      # build cache inside the entry never refreshes, and Go trims the
+      # compiled Hugo objects out of it. This entry saves on every
+      # run, under a key that ends in the commit, and restores the
+      # newest entry for the same docs/go.sum, so the tools compile
+      # once per bump instead of once per run.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-${{ github.sha }}
+          restore-keys: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-
+
+      # The same target a workstation runs: the link check, then
+      # the site build.
+      - run: make test-docs
+
+      # The publish job deploys this tree as it is, so the site builds
+      # once per commit and the bytes it serves are the bytes the link
+      # check passed.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: site
+          path: docs/dist/site
+          if-no-files-found: error
+          retention-days: 7
+
+  # The layer cache lives in ghcr, as a :buildcache tag beside each
+  # image, not in the GitHub Actions cache. A registry cache has no
+  # 10 GB ceiling, and it outlives a branch. release.yaml writes it
+  # on every push to main and every tag, and this workflow only reads
+  # it, so a pull request's builds start from the layers the last
+  # build on main left.
+  images:
+    runs-on: ubuntu-latest
+    # A push to main gets its Dockerfile verdict from release.yaml,
+    # which builds every image for that commit at the same moment, so
+    # this job runs on a pull request only and no layer builds twice.
+    if: github.event_name == 'pull_request'
+    # One job per image. This repository ships one image, so a second
+    # image is a second entry here and nothing more.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: git-csi-driver
+            file: Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: false
+          # A pull request builds no release, so the commit is the version
+          # the binary reports.
+          build-args: |
+            VERSION=${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  # This is the website deploy. The job deploys the tree the
+  # docs job built to GitHub Pages, which serves it at git.liken.sh,
+  # the driver's own CSI driver name. A pull request never reaches
+  # here: the docs job above already proved the site builds, and a
+  # pull request publishes nothing.
+  #
+  # Pages fits this site because the site is a tree of files, built
+  # ahead of time, and nothing of the driver's has to run to serve
+  # it. The Pages configuration, workflow-sourced deploys under the
+  # git.liken.sh custom domain, is in the repository's settings,
+  # set once by hand, the same class of one-time act as creating the
+  # DNS record that points the name at Pages.
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [go, docs]
+    if: github.event_name != 'pull_request'
+    # Publishing needs two permissions the rest of this workflow does
+    # not have. pages: write creates the deployment, and id-token:
+    # write lets deploy-pages prove to the Pages service that the
+    # artifact came from this exact workflow run. Nothing else can
+    # push content under this site's name.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # Deploys run one at a time: two pushes in quick succession would
+    # otherwise race their deployments, and the served-site check
+    # below needs nothing else to change while it runs.
+    concurrency:
+      group: docs
+    steps:
+      - uses: actions/checkout@v7
+
+      # The coverage report tool is a tool directive in the docs module,
+      # so the Go toolchain is the only install this job needs, and
+      # docs/go.mod pins its version.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: docs/go.mod
+          cache-dependency-path: docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # tracks docs/go.sum, so between two bumps of that file the Go
+      # build cache inside the entry never refreshes, and Go trims the
+      # compiled Hugo objects out of it. This entry saves on every
+      # run, under a key that ends in the commit, and restores the
+      # newest entry for the same docs/go.sum, so the tools compile
+      # once per bump instead of once per run.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-${{ github.sha }}
+          restore-keys: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-
+
+      # The gate above measured this commit, so its profile lands
+      # here whole. Every coverage-* artifact merges into the
+      # repository root, where the Makefile's report target reads
+      # them by the names the test targets write.
+      - name: collect the coverage profiles
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      # The same target a workstation runs. It writes coverage.html
+      # at the repository root, and the Makefile holds the command.
+      - name: draw the coverage report
+        run: make coverage-report
+
+      - name: take the built site
+        uses: actions/download-artifact@v8
+        with:
+          name: site
+          path: docs/dist/site
+
+      # The report is one self-contained file, so it joins the built
+      # tree as a page of its own at /coverage.html. Every page's
+      # footer links it, because docs/hugo.yaml sets params.coverage.
+      - name: add the coverage report to the site
+        run: cp coverage.html docs/dist/site/coverage.html
+
+      # The commit lands in the built tree as release.txt, so the
+      # served-site check below can ask the public name which commit
+      # it serves. The file joins the tree after the build, because
+      # it describes the deploy, not the site.
+      - name: stamp the commit
+        run: echo "${{ github.sha }}" > docs/dist/site/release.txt
+
+      - name: package the site for Pages
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/dist/site
+
+      - name: deploy to Pages
+        uses: actions/deploy-pages@v5
+
+      # This step proves the deploy the way a reader meets it: the
+      # site served over the public name is the one this commit
+      # built. release.txt holds the commit, and the other checks
+      # cover the two forms every page takes and the coverage report.
+      - name: verify the served site
+        run: |
+          # A finished deployment does not mean the public name
+          # follows yet. A CDN in front of Pages caches pages for up
+          # to ten minutes, so the old tree can answer for a while
+          # after the new one is live at the origin. curl's
+          # --retry only covers transport errors, never stale
+          # content, so the freshness check needs its own deadline
+          # loop before the content checks below can mean anything.
+          expected="${{ github.sha }}"
+          for _ in $(seq 1 48); do
+            served="$(curl --fail --silent https://git.liken.sh/release.txt || true)"
+            if [ "$served" = "$expected" ]; then break; fi
+            sleep 15
+          done
+          [ "$served" = "$expected" ] || {
+            echo "the site still serves ${served:-nothing}, expected $expected"
+            exit 1
+          }
+          # The content checks name themselves before they run, so a
+          # failure's last log line says which page broke. Each curl
+          # retries transport errors; a wrong-content grep still
+          # fails at once, because wrong content is not transient.
+          fetch() {
+            curl --fail --silent --retry 5 --retry-delay 3 \
+              --retry-all-errors "$@"
+          }
+          echo "checking the front page"
+          fetch https://git.liken.sh/ \
+            | grep -q "git.liken.sh"
+          echo "checking the markdown twin"
+          fetch --head https://git.liken.sh/index.md \
+            | grep -qi "content-type: text/markdown"
+          # The report is close to a megabyte, and the title is in
+          # its first lines. A grep -q on a pipe would stop reading
+          # there and leave curl to die on a closed pipe, which curl
+          # retries as an error and pipefail would turn into a failed
+          # step, so this one check takes the whole file to disk first.
+          echo "checking the coverage report"
+          fetch https://git.liken.sh/coverage.html > served-coverage.html
+          grep -q "<title>git-csi-driver</title>" served-coverage.html

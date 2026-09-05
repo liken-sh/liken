@@ -1,0 +1,14 @@
+# This is the coverage gate, enforced in CI (see
+# .github/workflows/ci.yaml).
+#
+# The gate measures on a pinned toolchain. The Makefile says why.
+#
+# The floor started at 90, the project's target, because a skeleton has
+# no mature measurement to set it under. It rises with each
+# measurement above it.
+
+profile: coverage.out
+
+threshold:
+  # One package, so the total is the whole gate.
+  total: 90
