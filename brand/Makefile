@@ -82,10 +82,16 @@ assets/liken.css: liken.css
 # that counts each block once.
 COVERAGE_TOOLCHAIN := go1.26.7
 
+# A package with no test file writes no rows to the profile, so the
+# gate never counts it: its number is not low, it is missing. This
+# lists such packages, and test-go fails on the first one.
+UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
+
 test: test-go test-rust
 
 test-go:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
 	go vet ./...
 	go tool staticcheck ./...
 	go test -race ./...
