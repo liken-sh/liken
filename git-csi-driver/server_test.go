@@ -24,6 +24,7 @@ func startServer(t *testing.T, logs io.Writer) *grpc.ClientConn {
 		nodeID:   "node-1",
 		store:    filepath.Join(dir, "store"),
 	}, logs)
+
 }
 
 // start serves the configuration on its socket and stops the server

@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
@@ -25,67 +27,55 @@ type node struct {
 	store  *store
 	mounts mountSyscalls
 	events *events
-	logger *slog.Logger
-	base   context.Context
+	arms   *arming
+	// The gauges every volume reports itself on.
+	readings *metrics
+	logger   *slog.Logger
+	base     context.Context
+	// How long a tree rests before the driver reads what is pending, and
+	// how often it reads that anyway.
+	quiesce time.Duration
+	sweep   time.Duration
+	// mounted asks the kernel whether a path is still a mount. A restarted
+	// driver asks it about every record.
+	mounted func(string) bool
+	// inotify opens the file the watch reads. It is a seam, so a test can
+	// drive a driver whose kernel refused one.
+	inotify func(int) (int, error)
 
 	mu        sync.Mutex
 	volumes   map[string]*volume
 	followers map[string]*follower
+	// The writeable volumes this node has staged, and the loops that watch
+	// and arm them.
+	staged   map[string]*volume
+	watchers map[string]*watcher
+	armings  map[string]context.CancelFunc
 }
 
 // newNode builds the service. base is the driver's run, so every fetch
 // loop ends when the pod stops.
-func newNode(base context.Context, cfg *config, posting *events, logger *slog.Logger) *node {
-	return &node{
+func newNode(base context.Context, cfg *config, posting *events, readings *metrics, logger *slog.Logger) *node {
+	answering := &node{
 		nodeID:    cfg.nodeID,
 		store:     newStore(cfg.store),
 		mounts:    kernelMounts{},
 		events:    posting,
+		readings:  readings,
 		logger:    logger,
 		base:      base,
+		quiesce:   defaultQuiesce,
+		sweep:     defaultSweep,
+		mounted:   mountedNow,
+		inotify:   unix.InotifyInit1,
 		volumes:   map[string]*volume{},
 		followers: map[string]*follower{},
+		staged:    map[string]*volume{},
+		watchers:  map[string]*watcher{},
+		armings:   map[string]context.CancelFunc{},
 	}
-}
-
-// volume is one published volume and what the driver reports about it:
-// the commit its tree holds, and the trouble, if any, since the last
-// good fetch.
-type volume struct {
-	id          string
-	attributes  *attributes
-	credentials *credentials
-	directory   string
-	tree        string
-	target      string
-
-	mu      sync.Mutex
-	commit  string
-	trouble string
-}
-
-// reportCommit records that the tree holds commit and nothing is wrong.
-func (v *volume) reportCommit(commit string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.commit = commit
-	v.trouble = ""
-}
-
-// reportTrouble records a failure and reports whether it is the first
-// since the last success, which is when an Event is worth posting.
-func (v *volume) reportTrouble(message string) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	first := v.trouble == ""
-	v.trouble = message
-	return first
-}
-
-func (v *volume) condition() (string, string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.commit, v.trouble
+	answering.arms = newArming(answering, posting.client, logger)
+	return answering
 }
 
 // NodeGetInfo names the node and no topology. A checkout is made on
@@ -121,24 +111,10 @@ func (n *node) NodeGetCapabilities(
 	return &csi.NodeGetCapabilitiesResponse{Capabilities: capabilities}, nil
 }
 
-// An inline volume gets no stage call, so the whole lifecycle of a
-// read-only volume is publish and unpublish. Stage arrives with the
-// persistent volumes of plan 04.
-func (n *node) NodeStageVolume(
-	context.Context, *csi.NodeStageVolumeRequest,
-) (*csi.NodeStageVolumeResponse, error) {
-	return nil, unimplemented("NodeStageVolume", "plan 04")
-}
-
-func (n *node) NodeUnstageVolume(
-	context.Context, *csi.NodeUnstageVolumeRequest,
-) (*csi.NodeUnstageVolumeResponse, error) {
-	return nil, unimplemented("NodeUnstageVolume", "plan 04")
-}
-
-// NodePublishVolume fetches the ref, checks it out, and binds the tree
-// read-only onto the kubelet's target path. A repeated call for a
-// published volume answers success, because the kubelet retries.
+// NodePublishVolume binds a tree under the pod: a read-only volume's
+// checkout of the ref, made here, or a writeable volume's work tree,
+// made at stage. A repeated call for a published volume answers
+// success, because the kubelet retries.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -158,15 +134,17 @@ func (n *node) NodePublishVolume(
 		n.refused(ctx, podOf(request.GetVolumeContext()), err)
 		return nil, err
 	}
-	if !parsed.ephemeral {
-		err := unimplemented("NodePublishVolume", "a persistent volume: plan 04")
-		n.refused(ctx, parsed.pod, err)
-		return nil, err
-	}
 	holder, err := parseCredentials(request.GetSecrets())
 	if err != nil {
 		n.refused(ctx, parsed.pod, err)
 		return nil, err
+	}
+	if !parsed.ephemeral {
+		if err := n.publishStaged(ctx, request, parsed, holder); err != nil {
+			n.refused(ctx, parsed.pod, err)
+			return nil, err
+		}
+		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
 	n.mu.Lock()
@@ -188,12 +166,14 @@ func (n *node) NodePublishVolume(
 		directory:   directory,
 		tree:        filepath.Join(directory, "tree"),
 		target:      target,
+		pod:         parsed.pod,
 	}
 	if err := n.publish(ctx, mounting); err != nil {
 		n.refused(ctx, parsed.pod, err)
 		_ = os.RemoveAll(directory)
 		return nil, err
 	}
+	n.record(ctx, mounting, request.GetVolumeContext())
 
 	n.mu.Lock()
 	n.volumes[id] = mounting
@@ -278,8 +258,10 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	return nil
 }
 
-// NodeUnpublishVolume takes the mount away and the volume's directory
-// with it. The bare repository stays for the next pod of the same URL.
+// NodeUnpublishVolume takes the mount away, and a read-only volume's
+// directory with it. A writeable volume's work tree stays for the next
+// pod on this node, and the bare repository stays for the next volume
+// of the same URL.
 func (n *node) NodeUnpublishVolume(
 	ctx context.Context, request *csi.NodeUnpublishVolumeRequest,
 ) (*csi.NodeUnpublishVolumeResponse, error) {
@@ -297,6 +279,7 @@ func (n *node) NodeUnpublishVolume(
 	if found {
 		delete(n.volumes, id)
 		n.unfollow(published)
+		n.unwatch(published)
 	}
 	n.mu.Unlock()
 
@@ -306,7 +289,13 @@ func (n *node) NodeUnpublishVolume(
 	if err := os.RemoveAll(target); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	if found {
+	// A writeable volume gives up only its record of the mount. It stays
+	// on the gauges while it is staged, because it is still this node's
+	// volume.
+	if found && published.writeable {
+		n.forget(published)
+	}
+	if found && !published.writeable {
 		if err := os.RemoveAll(published.directory); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -316,8 +305,10 @@ func (n *node) NodeUnpublishVolume(
 }
 
 // NodeGetVolumeStats reports the tree's size as used. A git volume has
-// no free space to report, so available is zero. The condition carries
-// the ref and commit when all is well, and the last failure when not.
+// no free space to report, so available is zero.
+//
+// The condition is what the volume reports, in its order: trouble, then
+// unarmed work, then the commit.
 func (n *node) NodeGetVolumeStats(
 	_ context.Context, request *csi.NodeGetVolumeStatsRequest,
 ) (*csi.NodeGetVolumeStatsResponse, error) {
@@ -340,11 +331,7 @@ func (n *node) NodeGetVolumeStats(
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	commit, trouble := published.condition()
-	message := fmt.Sprintf("%s at %s", published.attributes.ref, short(commit))
-	if trouble != "" {
-		message = trouble
-	}
+	abnormal, message := published.report()
 	return &csi.NodeGetVolumeStatsResponse{
 		Usage: []*csi.VolumeUsage{{
 			Unit:      csi.VolumeUsage_BYTES,
@@ -352,7 +339,7 @@ func (n *node) NodeGetVolumeStats(
 			Available: 0,
 			Total:     size,
 		}},
-		VolumeCondition: &csi.VolumeCondition{Abnormal: trouble != "", Message: message},
+		VolumeCondition: &csi.VolumeCondition{Abnormal: abnormal, Message: message},
 	}, nil
 }
 

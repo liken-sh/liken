@@ -21,6 +21,11 @@ const (
 	reasonRefused = "GitVolumeRefused"
 	reasonStale   = "GitVolumeStale"
 	reasonFailed  = "GitFetchFailed"
+	// The three a writeable volume adds: a class armed it, the class left
+	// it, and the tree holds work the driver has not committed.
+	reasonArmed   = "GitVolumeArmed"
+	reasonUnarmed = "GitVolumeUnarmed"
+	reasonPending = "GitVolumePending"
 )
 
 // events posts Events through the cluster's API, or posts nothing when
@@ -59,22 +64,46 @@ func eventsFrom(nodeID string, logger *slog.Logger, load func() (*rest.Config, e
 // post creates one Event on the pod. A failure to post is logged and
 // nothing more, because a mount must never fail on the API server.
 func (e *events) post(ctx context.Context, pod podReference, kind, reason, message string) {
-	if e == nil || e.client == nil || pod.name == "" || pod.namespace == "" {
+	if pod.name == "" || pod.namespace == "" {
+		return
+	}
+	e.create(ctx, corev1.ObjectReference{
+		Kind:       "Pod",
+		APIVersion: "v1",
+		Name:       pod.name,
+		Namespace:  pod.namespace,
+		UID:        types.UID(pod.uid),
+	}, kind, reason, message)
+}
+
+// postClaim creates the same Event on the claim, where a person who
+// describes the claim learns whether the volume is armed.
+func (e *events) postClaim(ctx context.Context, claim claimReference, kind, reason, message string) {
+	if claim.name == "" || claim.namespace == "" {
+		return
+	}
+	e.create(ctx, corev1.ObjectReference{
+		Kind:       "PersistentVolumeClaim",
+		APIVersion: "v1",
+		Name:       claim.name,
+		Namespace:  claim.namespace,
+	}, kind, reason, message)
+}
+
+// create posts one Event on the object it names.
+func (e *events) create(
+	ctx context.Context, involved corev1.ObjectReference, kind, reason, message string,
+) {
+	if e == nil || e.client == nil {
 		return
 	}
 	now := metav1.NewTime(e.now())
 	event := &corev1.Event{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: pod.name + ".",
-			Namespace:    pod.namespace,
+			GenerateName: involved.Name + ".",
+			Namespace:    involved.Namespace,
 		},
-		InvolvedObject: corev1.ObjectReference{
-			Kind:       "Pod",
-			APIVersion: "v1",
-			Name:       pod.name,
-			Namespace:  pod.namespace,
-			UID:        types.UID(pod.uid),
-		},
+		InvolvedObject: involved,
 		Reason:         reason,
 		Message:        message,
 		Type:           kind,
@@ -83,9 +112,18 @@ func (e *events) post(ctx context.Context, pod podReference, kind, reason, messa
 		LastTimestamp:  now,
 		Count:          1,
 	}
-	if _, err := e.client.CoreV1().Events(pod.namespace).
+	if _, err := e.client.CoreV1().Events(involved.Namespace).
 		Create(ctx, event, metav1.CreateOptions{}); err != nil {
 		e.logger.WarnContext(ctx, "the event was not posted",
-			"pod", pod.namespace+"/"+pod.name, "reason", reason, "error", err)
+			"object", involved.Namespace+"/"+involved.Name, "reason", reason, "error", err)
 	}
+}
+
+// report posts one fact in both places a person looks: on the pod that
+// mounts the volume and on the claim that binds it.
+func (n *node) report(
+	ctx context.Context, held *volume, claim claimReference, kind, reason, message string,
+) {
+	n.events.post(ctx, held.podRef(), kind, reason, message)
+	n.events.postClaim(ctx, claim, kind, reason, message)
 }

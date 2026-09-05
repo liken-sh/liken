@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -20,12 +21,30 @@ import (
 // fakeEvents posts to a client-go fake instead of a cluster.
 func fakeEvents(t *testing.T, logs io.Writer) *events {
 	t.Helper()
+	client := fake.NewClientset()
+	nameEvents(client)
 	return &events{
-		client: fake.NewClientset(),
+		client: client,
 		node:   "node-1",
 		logger: slog.New(slog.NewTextHandler(logs, nil)),
 		now:    func() time.Time { return time.Unix(1757000000, 0).UTC() },
 	}
+}
+
+// The fake makes no name out of generateName, and an API server does, so
+// two Events of one volume would collide in the fixture and never in a
+// cluster.
+func nameEvents(client *fake.Clientset) {
+	named := 0
+	client.PrependReactor("create", "events",
+		func(action k8stesting.Action) (bool, runtime.Object, error) {
+			created, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Event)
+			if ok && created.Name == "" {
+				named++
+				created.Name = fmt.Sprintf("%s%04d", created.GenerateName, named)
+			}
+			return false, nil, nil
+		})
 }
 
 // postedEvents is every Event the fake took, in the order posted.
@@ -156,5 +175,33 @@ func TestEventsFromACluster(t *testing.T) {
 				t.Errorf("the log is %q, want the missing cluster in it", logs)
 			}
 		})
+	}
+}
+
+func TestPostClaimNamesTheClaim(t *testing.T) {
+	posting := fakeEvents(t, io.Discard)
+	claim := claimReference{namespace: "home", name: "config"}
+	posting.postClaim(t.Context(), claim, corev1.EventTypeNormal, reasonArmed, "armed by the class config-eager")
+
+	posted := postedEvents(t, posting)
+	if len(posted) != 1 {
+		t.Fatalf("postClaim made %d events, want 1", len(posted))
+	}
+	involved := posted[0].InvolvedObject
+	if involved.Kind != "PersistentVolumeClaim" || involved.Name != "config" || involved.Namespace != "home" {
+		t.Errorf("the event is on %+v, want the claim", involved)
+	}
+}
+
+func TestPostClaimSaysNothingWithoutAClaim(t *testing.T) {
+	for _, claim := range []claimReference{
+		{namespace: "home"},
+		{name: "config"},
+	} {
+		posting := fakeEvents(t, io.Discard)
+		posting.postClaim(t.Context(), claim, corev1.EventTypeNormal, reasonArmed, "armed")
+		if posted := postedEvents(t, posting); len(posted) != 0 {
+			t.Errorf("postClaim made %v", posted)
+		}
 	}
 }

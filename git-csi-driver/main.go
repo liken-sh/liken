@@ -56,6 +56,7 @@ type config struct {
 	endpoint string
 	nodeID   string
 	store    string
+	metrics  string
 }
 
 // parse reads the command line and reports every problem to out. When
@@ -71,6 +72,9 @@ func parse(args []string, out io.Writer) (*config, error) {
 		"the name of the node this plugin runs on")
 	store := flags.String("store", "/var/lib/liken/pod-storage/git-csi",
 		"the directory that holds the repositories and work trees")
+	// An empty --metrics serves no metrics.
+	metrics := flags.String("metrics", ":9808",
+		"the address the metrics listener takes; empty serves none")
 	showVersion := flags.Bool("version", false, "print the version and exit")
 
 	if err := flags.Parse(args); err != nil {
@@ -85,5 +89,10 @@ func parse(args []string, out io.Writer) (*config, error) {
 		fmt.Fprintln(out, err)
 		return nil, err
 	}
-	return &config{endpoint: *endpoint, nodeID: *nodeID, store: *store}, nil
+	return &config{
+		endpoint: *endpoint,
+		nodeID:   *nodeID,
+		store:    *store,
+		metrics:  *metrics,
+	}, nil
 }

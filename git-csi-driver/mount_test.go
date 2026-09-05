@@ -143,3 +143,21 @@ func TestTheKernelAnswersTheDriversOwnSyscalls(t *testing.T) {
 		t.Errorf("unbind as root: %v", err)
 	}
 }
+
+func TestBindReadWriteBindsOnce(t *testing.T) {
+	calls := &recordedMounts{}
+	if err := bindReadWrite(calls, "/store/tree", "/kubelet/mount"); err != nil {
+		t.Fatalf("bindReadWrite: %v", err)
+	}
+	want := mountCall{source: "/store/tree", target: "/kubelet/mount", flags: unix.MS_BIND}
+	if len(calls.mounts) != 1 || calls.mounts[0] != want {
+		t.Errorf("bindReadWrite made %v, want %v", calls.mounts, want)
+	}
+}
+
+func TestBindReadWriteReportsABindItCannotMake(t *testing.T) {
+	calls := &recordedMounts{failAt: 1, mountErr: unix.EPERM}
+	if err := bindReadWrite(calls, "/store/tree", "/kubelet/mount"); !errors.Is(err, unix.EPERM) {
+		t.Errorf("bindReadWrite answered %v, want %v", err, unix.EPERM)
+	}
+}

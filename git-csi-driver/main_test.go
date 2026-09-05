@@ -25,6 +25,9 @@ func temporaryFlags(t *testing.T) []string {
 	return []string{
 		"--endpoint", "unix://" + filepath.Join(dir, "csi.sock"),
 		"--store", filepath.Join(dir, "store"),
+		// A test serves no metrics, because two tests would take the same
+		// port.
+		"--metrics", "",
 	}
 }
 
@@ -134,6 +137,7 @@ func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
 		endpoint: "unix:///csi/csi.sock",
 		nodeID:   "node-1",
 		store:    "/var/lib/liken/pod-storage/git-csi",
+		metrics:  ":9808",
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)
@@ -145,6 +149,7 @@ func TestParseTakesEveryFlag(t *testing.T) {
 		"--endpoint", "unix:///run/csi/csi.sock",
 		"--node-id", "node-1",
 		"--store", "/srv/git-csi",
+		"--metrics", "127.0.0.1:9808",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -153,6 +158,7 @@ func TestParseTakesEveryFlag(t *testing.T) {
 		endpoint: "unix:///run/csi/csi.sock",
 		nodeID:   "node-1",
 		store:    "/srv/git-csi",
+		metrics:  "127.0.0.1:9808",
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)

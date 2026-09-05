@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
@@ -19,6 +19,9 @@ import (
 
 // testNode is a node whose mounts are recorded, because a test process
 // may not mount, and whose events go to a client-go fake.
+//
+// The quiesce and the sweep are short, so a test that writes in a tree
+// waits milliseconds for the driver to read it.
 func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
 	t.Helper()
 	calls := &recordedMounts{}
@@ -26,9 +29,13 @@ func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
 		t.Context(),
 		&config{nodeID: "node-1", store: filepath.Join(t.TempDir(), "store")},
 		fakeEvents(t, logs),
+		newMetrics(),
 		slog.New(slog.NewTextHandler(logs, nil)),
 	)
 	answering.mounts = calls
+	answering.quiesce = 20 * time.Millisecond
+	answering.sweep = 100 * time.Millisecond
+	answering.arms.resync = 20 * time.Millisecond
 	return answering, calls
 }
 
@@ -95,47 +102,15 @@ func TestNodeGetCapabilitiesDeclaresTheThree(t *testing.T) {
 	}
 }
 
-func TestTheCallsPlan04AddsNameThatPlan(t *testing.T) {
+func TestTheCallTheDriverNeverServesSaysSo(t *testing.T) {
 	client := csi.NewNodeClient(startServer(t, io.Discard))
-	for _, c := range []struct {
-		name    string
-		call    func(context.Context, csi.NodeClient) error
-		message string
-	}{
-		{
-			name: "NodeStageVolume",
-			call: func(ctx context.Context, client csi.NodeClient) error {
-				_, err := client.NodeStageVolume(ctx, &csi.NodeStageVolumeRequest{})
-				return err
-			},
-			message: "NodeStageVolume: plan 04",
-		},
-		{
-			name: "NodeUnstageVolume",
-			call: func(ctx context.Context, client csi.NodeClient) error {
-				_, err := client.NodeUnstageVolume(ctx, &csi.NodeUnstageVolumeRequest{})
-				return err
-			},
-			message: "NodeUnstageVolume: plan 04",
-		},
-		{
-			name: "NodeExpandVolume",
-			call: func(ctx context.Context, client csi.NodeClient) error {
-				_, err := client.NodeExpandVolume(ctx, &csi.NodeExpandVolumeRequest{})
-				return err
-			},
-			message: "NodeExpandVolume: never; git volumes have no size",
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			err := c.call(t.Context(), client)
-			if got := status.Code(err); got != codes.Unimplemented {
-				t.Fatalf("%s answered %v, want %v", c.name, got, codes.Unimplemented)
-			}
-			if got := status.Convert(err).Message(); got != c.message {
-				t.Errorf("%s said %q, want %q", c.name, got, c.message)
-			}
-		})
+	_, err := client.NodeExpandVolume(t.Context(), &csi.NodeExpandVolumeRequest{})
+	if got := status.Code(err); got != codes.Unimplemented {
+		t.Fatalf("NodeExpandVolume answered %v, want %v", got, codes.Unimplemented)
+	}
+	want := "NodeExpandVolume: never; git volumes have no size"
+	if got := status.Convert(err).Message(); got != want {
+		t.Errorf("NodeExpandVolume said %q, want %q", got, want)
 	}
 }
 
@@ -192,15 +167,15 @@ func TestNodePublishVolumePostsARefusalOnThePod(t *testing.T) {
 	}
 }
 
-func TestNodePublishVolumeNamesPlan04ForAPersistentVolume(t *testing.T) {
+func TestNodePublishVolumeRefusesAVolumeItNeverStaged(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	request := publishRequest(t, "csi-1", "file:///nowhere", nil)
 	delete(request.VolumeContext, ephemeralKey)
 	_, err := answering.NodePublishVolume(t.Context(), request)
-	if got := status.Code(err); got != codes.Unimplemented {
-		t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.Unimplemented)
+	if got := status.Code(err); got != codes.FailedPrecondition {
+		t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.FailedPrecondition)
 	}
-	if got := status.Convert(err).Message(); got != "NodePublishVolume: a persistent volume: plan 04" {
+	if got := status.Convert(err).Message(); got != "volume_id: csi-1 is not staged on this node" {
 		t.Errorf("NodePublishVolume said %q", got)
 	}
 }

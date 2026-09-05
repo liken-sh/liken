@@ -56,3 +56,12 @@ func unbind(calls mountSyscalls, target string) error {
 	}
 	return fmt.Errorf("unmount %s: %w", target, err)
 }
+
+// bindReadWrite binds source onto target with one call. The pod writes
+// the tree, and the driver reads what it wrote.
+func bindReadWrite(calls mountSyscalls, source, target string) error {
+	if err := calls.Mount(source, target, "", unix.MS_BIND, ""); err != nil {
+		return fmt.Errorf("bind %s onto %s: %w", source, target, err)
+	}
+	return nil
+}

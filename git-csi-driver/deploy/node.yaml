@@ -39,6 +39,13 @@ spec:
             - --endpoint=unix:///csi/csi.sock
             - --node-id=$(NODE_NAME)
             - --store=/var/lib/liken/pod-storage/git-csi
+            - --metrics=:9808
+          # The metrics are on the pod's own address, not a host
+          # port: a hostPort cannot be held to the node's loopback, and
+          # a scrape reaches the pod through the cluster network.
+          ports:
+            - name: metrics
+              containerPort: 9808
           env:
             # NodeGetInfo answers with the node's name, and the manifest
             # names no machine, so the name comes from the downward API.

@@ -245,3 +245,38 @@ func TestParseAttributesTakesTheURLsGitReallyServes(t *testing.T) {
 		})
 	}
 }
+
+func TestParseStageAttributesRefusesAReadOnlyAttribute(t *testing.T) {
+	for attribute, value := range map[string]string{
+		"pull": "5m", "depth": "1", "offline": "allowStale",
+	} {
+		t.Run(attribute, func(t *testing.T) {
+			_, err := parseStageAttributes(map[string]string{
+				"url": "https://example.com/data.git", attribute: value,
+			})
+			if got := status.Code(err); got != codes.InvalidArgument {
+				t.Fatalf("parseStageAttributes answered %v, want %v", got, codes.InvalidArgument)
+			}
+			want := attribute + ": a writeable volume follows its ref at stage alone"
+			if got := status.Convert(err).Message(); got != want {
+				t.Errorf("parseStageAttributes said %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestParseStageAttributesTakesTheAttributesOfAWriteableVolume(t *testing.T) {
+	parsed, err := parseStageAttributes(map[string]string{
+		"url": "https://example.com/data.git",
+		"ref": "release",
+	})
+	if err != nil {
+		t.Fatalf("parseStageAttributes: %v", err)
+	}
+	if parsed.url != "https://example.com/data.git" || parsed.ref != "release" {
+		t.Errorf("parseStageAttributes answered %+v", *parsed)
+	}
+	if parsed.ephemeral {
+		t.Error("a staged volume is ephemeral")
+	}
+}

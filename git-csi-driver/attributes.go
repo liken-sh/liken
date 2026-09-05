@@ -60,9 +60,39 @@ type attributes struct {
 // attribute and a malformed value with InvalidArgument and the
 // attribute's name, so the pod's events say what to fix.
 func parseAttributes(request *csi.NodePublishVolumeRequest) (*attributes, error) {
+	parsed, err := parseVolumeContext(request.GetVolumeContext())
+	if err != nil {
+		return nil, err
+	}
+	if parsed.ephemeral && !request.GetReadonly() {
+		return nil, status.Error(codes.InvalidArgument,
+			"readOnly: an inline volume of this driver has to be read-only")
+	}
+	return parsed, nil
+}
+
+// readOnlyAttributes are the attributes a read-only volume alone
+// accepts. A writeable volume follows its ref at stage and never after.
+var readOnlyAttributes = []string{"pull", "depth", "offline"}
+
+// parseStageAttributes reads a persistent volume's attributes and
+// refuses the read-only ones.
+func parseStageAttributes(context map[string]string) (*attributes, error) {
+	for _, key := range readOnlyAttributes {
+		if _, found := context[key]; found {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"%s: a writeable volume follows its ref at stage alone", key)
+		}
+	}
+	return parseVolumeContext(context)
+}
+
+// parseVolumeContext reads the attributes both a stage call and a
+// publish call carry.
+func parseVolumeContext(context map[string]string) (*attributes, error) {
 	parsed := &attributes{ref: defaultRef, pull: defaultPull, offline: offlineRefuse}
 
-	for key, value := range request.GetVolumeContext() {
+	for key, value := range context {
 		switch key {
 		case "url":
 			parsed.url = value
@@ -110,10 +140,6 @@ func parseAttributes(request *csi.NodePublishVolumeRequest) (*attributes, error)
 	}
 	if parsed.ref == "" {
 		return nil, status.Error(codes.InvalidArgument, "ref: an empty ref names nothing")
-	}
-	if parsed.ephemeral && !request.GetReadonly() {
-		return nil, status.Error(codes.InvalidArgument,
-			"readOnly: an inline volume of this driver has to be read-only")
 	}
 	return parsed, nil
 }

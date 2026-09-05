@@ -27,6 +27,11 @@ const endpointScheme = "unix://"
 type server struct {
 	grpc     *grpc.Server
 	listener net.Listener
+	// The gauges and the listener that serves them. An empty --metrics
+	// leaves the listener nil.
+	readings *metrics
+	metrics  net.Listener
+	logger   *slog.Logger
 }
 
 // newServer makes the store, takes the socket, and registers the
@@ -56,10 +61,28 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 		return nil, err
 	}
 
+	readings := newMetrics()
+	answering := newNode(ctx, cfg, newEvents(cfg.nodeID, logger), readings, logger)
+	// The mounts outlive the driver, so a driver that starts takes back
+	// the volumes its store still records.
+	answering.resume(ctx)
+
 	registered := grpc.NewServer(grpc.UnaryInterceptor(logCalls(logger)))
 	csi.RegisterIdentityServer(registered, &identity{store: cfg.store})
-	csi.RegisterNodeServer(registered, newNode(ctx, cfg, newEvents(cfg.nodeID, logger), logger))
-	return &server{grpc: registered, listener: listener}, nil
+	csi.RegisterNodeServer(registered, answering)
+
+	metricsListener, err := readings.listen(cfg.metrics)
+	if err != nil {
+		_ = listener.Close()
+		return nil, err
+	}
+	return &server{
+		grpc:     registered,
+		listener: listener,
+		readings: readings,
+		metrics:  metricsListener,
+		logger:   logger,
+	}, nil
 }
 
 // serve blocks until the context ends, then stops the server and lets
@@ -67,6 +90,9 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 func (s *server) serve(ctx context.Context) error {
 	served := make(chan error, 1)
 	go func() { served <- s.grpc.Serve(s.listener) }()
+	if s.metrics != nil {
+		go serveMetrics(ctx, s.metrics, s.readings, s.logger)
+	}
 	select {
 	case err := <-served:
 		return err

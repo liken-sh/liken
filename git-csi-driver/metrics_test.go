@@ -1,0 +1,185 @@
+package main
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// GaugeOf is what one gauge reads for the claim, and false when the claim
+// is on no gauge.
+func gaugeOf(t *testing.T, readings *metrics, name, namespace, claim string) (float64, bool) {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != name {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			if labels["namespace"] == namespace && labels["claim"] == claim {
+				return metric.GetGauge().GetValue(), true
+			}
+		}
+	}
+	return 0, false
+}
+
+// Reported is a volume that has been read once, which is what the gauges
+// take.
+func reported(claim claimReference, armed bool, pending int) *volume {
+	held := &volume{claim: claim, armed: armed}
+	for range pending {
+		held.pending = append(held.pending, change{path: "a.txt"})
+	}
+	return held
+}
+
+func TestTheGaugesCarryTheClaim(t *testing.T) {
+	readings := newMetrics()
+	claim := claimReference{namespace: "home", name: "config"}
+	readings.record(reported(claim, true, 3))
+
+	armed, found := gaugeOf(t, readings, "git_csi_armed", "home", "config")
+	if !found || armed != 1 {
+		t.Errorf("git_csi_armed reads %v (found: %v), want 1", armed, found)
+	}
+	pending, found := gaugeOf(t, readings, "git_csi_pending_paths", "home", "config")
+	if !found || pending != 3 {
+		t.Errorf("git_csi_pending_paths reads %v (found: %v), want 3", pending, found)
+	}
+
+	readings.record(reported(claim, false, 0))
+	if armed, _ := gaugeOf(t, readings, "git_csi_armed", "home", "config"); armed != 0 {
+		t.Errorf("git_csi_armed reads %v after the class went, want 0", armed)
+	}
+}
+
+func TestForgetTakesTheVolumeOffTheGauges(t *testing.T) {
+	readings := newMetrics()
+	claim := claimReference{namespace: "home", name: "config"}
+	held := reported(claim, true, 1)
+	readings.record(held)
+	readings.forget(held)
+
+	if _, found := gaugeOf(t, readings, "git_csi_armed", "home", "config"); found {
+		t.Error("the claim is still on git_csi_armed after the volume went")
+	}
+	if _, found := gaugeOf(t, readings, "git_csi_pending_paths", "home", "config"); found {
+		t.Error("the claim is still on git_csi_pending_paths after the volume went")
+	}
+}
+
+func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
+	readings := newMetrics()
+	held := reported(claimReference{}, true, 1)
+	readings.record(held)
+	readings.forget(held)
+
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		if len(family.GetMetric()) != 0 {
+			t.Errorf("%s carries %v, want nothing", family.GetName(), family.GetMetric())
+		}
+	}
+
+	var absent *metrics
+	absent.record(held)
+	absent.forget(held)
+}
+
+func TestTheListenerServesTheGauges(t *testing.T) {
+	readings := newMetrics()
+	readings.record(reported(claimReference{namespace: "home", name: "config"}, true, 2))
+	listener, err := readings.listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	ctx, stop := context.WithCancel(t.Context())
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		serveMetrics(ctx, listener, readings, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+
+	answer, err := http.Get("http://" + listener.Addr().String() + "/metrics")
+	if err != nil {
+		t.Fatalf("reading the metrics: %v", err)
+	}
+	defer answer.Body.Close()
+	body, err := io.ReadAll(answer.Body)
+	if err != nil {
+		t.Fatalf("reading the metrics: %v", err)
+	}
+	if answer.StatusCode != http.StatusOK {
+		t.Errorf("the listener answered %d, want 200", answer.StatusCode)
+	}
+	if !strings.Contains(string(body), `git_csi_armed{claim="config",namespace="home"} 1`) {
+		t.Errorf("the metrics are %s, want the volume on them", body)
+	}
+
+	stop()
+	select {
+	case <-served:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the listener did not stop with the run")
+	}
+}
+
+func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
+	listener, err := newMetrics().listen("")
+	if err != nil || listener != nil {
+		t.Errorf("listen answered %v, %v, want no listener and no error", listener, err)
+	}
+}
+
+func TestAListenerThatStopsOnItsOwnIsReported(t *testing.T) {
+	logs := &logbook{}
+	readings := newMetrics()
+	listener, err := readings.listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatalf("closing the listener: %v", err)
+	}
+	serveMetrics(t.Context(), listener, readings, slog.New(slog.NewTextHandler(logs, nil)))
+	if !strings.Contains(logs.String(), "the metrics listener stopped") {
+		t.Errorf("the log is %q, want the listener that stopped in it", logs)
+	}
+}
+
+func TestTheDriverServesTheMetricsItIsGivenAnAddressFor(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+		metrics:  "127.0.0.1:0",
+	}
+	start(t, cfg, io.Discard)
+
+	_, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(t.TempDir(), "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(t.TempDir(), "store"),
+		metrics:  "127.0.0.1:-1",
+	}, slog.Default())
+	if err == nil {
+		t.Error("newServer answered no error for an address it cannot take")
+	}
+}
