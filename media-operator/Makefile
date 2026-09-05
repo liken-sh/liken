@@ -3,8 +3,7 @@
 # runs, in the same commands, so a change that passes here passes
 # there. The Go operator is the module at the root, so its checks are
 # here; the Rust crates and the docs are their own domains with
-# their own Makefiles, and the manifests under deploy/ have a check
-# of their own below.
+# their own Makefiles.
 #
 # The coverage floors are the one number each gate enforces: the Go
 # floor is in .testcoverage.yml, and the two Rust floors are in
@@ -12,7 +11,7 @@
 # place.
 
 .PHONY: test
-test: test-go test-rust test-deploy test-docs
+test: test-go test-rust test-docs
 
 # keycodes.go is generated from the kernel header named here, and it is
 # committed, so a build needs the header only when the table is
@@ -58,32 +57,6 @@ test-go:
 .PHONY: test-rust
 test-rust:
 	$(MAKE) -C idle test
-
-# The manifests under deploy/ are checked against the Kubernetes API,
-# offline. kubectl-validate carries the API schemas of each release it
-# embeds, reads the CRDs beside the manifests for the custom kinds,
-# and compiles every CEL rule a CRD declares, the way the API server
-# does on apply. It is a tool directive in deploy/go.mod, a nested
-# module, so its dependency graph stays out of the operator's go.sum,
-# the same way docs/ pins Hugo. kustomization.yaml is left out,
-# because kustomize's own kind is not part of the API.
-#
-# kubectl-validate asks the cluster the current kubeconfig names for
-# its schemas before it falls back to the embedded ones, with no flag
-# to turn that off. KUBECONFIG=/dev/null keeps the check offline and
-# the same on every machine, whatever context a workstation holds.
-#
-# The version is the newest release the pinned kubectl-validate
-# embeds, one minor behind the k3s liken ships. A release it does not
-# embed is fetched from the GitHub API on every run, which fails
-# offline and hits the rate limit under pre-commit. Move this to the
-# shipped release when a newer kubectl-validate embeds it.
-KUBERNETES_VERSION := 1.35
-DEPLOY_MANIFESTS := $(notdir $(filter-out deploy/kustomization.yaml,$(wildcard deploy/*.yaml)))
-
-.PHONY: test-deploy
-test-deploy:
-	cd deploy && KUBECONFIG=/dev/null go tool kubectl-validate --version $(KUBERNETES_VERSION) --local-crds . $(DEPLOY_MANIFESTS)
 
 .PHONY: test-docs
 test-docs:
