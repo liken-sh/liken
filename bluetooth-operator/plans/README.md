@@ -47,6 +47,10 @@ considered and why.
   node. Answers and replaces the open problems "BLE devices connect on
   demand" and "Battery levels are not reported".
 
+* [07, Prometheus metrics](07-prometheus-metrics.md). Proposed.
+  Peripheral battery, connection state, and observed disconnects,
+  with source validity and alert rules that allow sleeping controllers.
+
 ## Open problems
 
 * [The restore set is proven for one BR/EDR device](open-problems/the-restore-set-is-proven-for-one-bredr-device.md).
