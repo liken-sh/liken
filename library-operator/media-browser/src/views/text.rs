@@ -1,11 +1,13 @@
 // The text primitive: one line, or a block cut to a number of lines. Both
 // answer the height they took, so a page stacks its blocks.
 
+use std::f32::consts::FRAC_PI_2;
+
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::{Alignment, LineHeight, Shaping};
-use iced_winit::core::{Color, Font, Pixels, Point, Rectangle};
+use iced_winit::core::{Color, Font, Pixels, Point, Rectangle, Vector};
 
 use super::{area, label};
 use crate::look;
@@ -93,6 +95,26 @@ pub fn measured_cut(content: &str, size: f32, width: f32) -> String {
 fn ellipsed(letters: &[char]) -> String {
     let kept: String = letters.iter().collect();
     format!("{}\u{2026}", kept.trim_end())
+}
+
+/// The content broken into the lines this width holds at this size, on the
+/// spaces between its words, from the shaper's own measure. A word wider than
+/// the line takes a line of its own and runs past the width. A caller that
+/// stacks the lines itself wraps here, because the shaper's own wrap draws
+/// the lines but answers no count of them, and the caller needs the count to
+/// place what follows.
+pub fn wrapped(content: &str, size: f32, width: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in content.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if measured(&format!("{line} {word}"), size) <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines
 }
 
 /// How many lines this content takes at this size and width. The count
@@ -224,6 +246,40 @@ pub fn faced(
     });
 }
 
+/// One line turned a quarter circle inside its box, so it reads from the
+/// foot of the box to its head. A jump rail's bars and a metro strip's
+/// lines are both tall and narrow, and words along them are read this
+/// way. The turn puts the words on the path renderer, which draws them
+/// as a mesh and not as a line of text, so they go into the same buffer
+/// as the shapes under them and draw over what the caller drew first. A
+/// clip of their own would take them out of that buffer and the shapes
+/// would then cover them, so the caller cuts the words to the box
+/// instead.
+pub fn upward(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    at: Rectangle,
+    size: f32,
+    color: Color,
+) {
+    frame.with_save(|frame| {
+        frame.translate(Vector::new(at.center_x(), at.center_y()));
+        frame.rotate(-FRAC_PI_2);
+        frame.fill_text(label(
+            content,
+            Point::ORIGIN,
+            size,
+            color,
+            Alignment::Center,
+            Vertical::Center,
+            // The words are cut to the box already, and a width the
+            // shaper may exceed would wrap them into a second line that
+            // draws across the first once the box turns them.
+            f32::INFINITY,
+        ));
+    });
+}
+
 /// A block of text cut to `cap` lines. The answer is the height the block
 /// took, so the caller stacks the next block under it.
 pub fn block(
@@ -318,6 +374,30 @@ mod tests {
     #[test]
     fn a_band_too_narrow_for_one_letter_holds_the_ellipsis_alone() {
         assert_eq!(measured_cut("Specimen 0001", 18.0, 0.0), "\u{2026}");
+    }
+
+    #[test]
+    fn a_wrap_breaks_the_words_into_the_lines_the_width_holds() {
+        let lines = wrapped("Years from the Battle of Yavin", 18.0, 80.0);
+        assert!(lines.len() > 1, "{lines:?}");
+        assert_eq!(lines.concat().replace(' ', ""), "YearsfromtheBattleofYavin");
+        for line in &lines {
+            assert!(
+                measured(line, 18.0) <= 80.0 || !line.contains(' '),
+                "{line}"
+            );
+        }
+        assert_eq!(
+            wrapped("Years from the Battle of Yavin", 18.0, 400.0).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_word_wider_than_the_line_takes_a_line_of_its_own() {
+        let lines = wrapped("Days from the Anthropocene", 18.0, 10.0);
+        assert_eq!(lines, ["Days", "from", "the", "Anthropocene"]);
+        assert!(wrapped("", 18.0, 100.0).is_empty());
     }
 
     #[test]

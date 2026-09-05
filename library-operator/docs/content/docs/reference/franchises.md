@@ -60,7 +60,7 @@ sources:
 
 calendar:
   unit: years
-  zero: Battle of Yavin
+  zero: the Battle of Yavin
   before: BBY
   after: ABY
 
@@ -157,8 +157,15 @@ names one other universe belongs to that one.
 
 A calendar needs a `unit`, either `years` or `days`. Without `zero`,
 `before`, and `after`, the times are plain calendar years, which is
-what the Marvel films count in. With them, the times count from the
-named event, as Star Wars counts from the Battle of Yavin.
+what the Marvel films count in. With `zero`, the times count from the
+named event, as Star Wars counts from the Battle of Yavin, and the
+page prints the zero once as the caption of the time column: "Years
+from the Battle of Yavin". `before` and `after` are short marks of at
+most six characters, printed after the magnitude of a time, so -233
+with `before: BBY` reads "233 BBY". Leave them out where the franchise
+has no short marks: a days calendar without them reads "Day 1141",
+and a years calendar without them keeps the minus sign on the times
+before the zero.
 
 A `time` is `from` and `to` in the calendar's unit, and they are
 equal for a story that stays in one year. A time on a show covers

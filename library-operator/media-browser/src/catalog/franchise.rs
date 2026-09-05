@@ -7,9 +7,10 @@
 use super::{Answer, Slot, Title};
 
 /// The franchise's own clock, from the file's calendar block. `unit` is years
-/// or days. `zero` names the event the times count from, and it draws nowhere
-/// yet. `before` and `after` are the words a negative and a positive time
-/// take, BBY and ABY for Star Wars, and both are empty for plain years.
+/// or days. `zero` names the event the times count from, and the caption over
+/// the page's time column reads it. `before` and `after` are the marks a
+/// negative and a positive time take, BBY and ABY for Star Wars, and both are
+/// empty for a calendar that counts in plain years or in days.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Calendar {
     pub unit: String,
@@ -19,51 +20,116 @@ pub struct Calendar {
 }
 
 impl Calendar {
-    /// The time label of one span, in the file's own words. One time reads as
-    /// "-32 BBY", and a span as "-22 to -20 BBY". A span that crosses zero
-    /// carries a word at each end. A calendar with no before and after reads
-    /// as plain years, "2024".
+    /// The time label of one span, in the file's own marks. One time reads as
+    /// "32 BBY", and a span as "22 to 20 BBY". A span that crosses zero
+    /// carries a mark at each end, "5 BBY to 5 ABY". A calendar of years with
+    /// no marks reads as plain years, "2024" and "-58", and one of days
+    /// counts days from its zero, "Day 1141".
     pub fn label(&self, from: f64, to: f64) -> String {
-        let (first, last) = (self.word(from), self.word(to));
-        if from == to {
-            return worded(&number(from), first);
-        }
-        if first == last {
-            return worded(&format!("{} to {}", number(from), number(to)), last);
-        }
-        format!(
-            "{} to {}",
-            worded(&number(from), first),
-            worded(&number(to), last)
-        )
+        let (first, last) = (self.mark(from), self.mark(to));
+        let span = match (from == to, first == last) {
+            (true, _) => marked(&self.number(from), first),
+            (false, true) => marked(
+                &format!("{}{SPAN}{}", self.number(from), self.number(to)),
+                last,
+            ),
+            (false, false) => format!(
+                "{}{SPAN}{}",
+                marked(&self.number(from), first),
+                marked(&self.number(to), last)
+            ),
+        };
+        self.counted(&span)
     }
 
-    // The word one time takes: the one for before zero on a negative
-    // time, and the one for after zero on zero and every time past it.
-    fn word(&self, value: f64) -> &str {
+    /// The caption over the times, "Years from the Battle of Yavin", and
+    /// nothing where the file names no zero. The times on the page count from
+    /// one event, and the caption is where the page says which event and in
+    /// what unit.
+    pub fn caption(&self) -> String {
+        match self.zero.is_empty() {
+            true => String::new(),
+            false => format!("{} from {}", capitalized(&self.unit), lowered(&self.zero)),
+        }
+    }
+
+    // The mark one time takes: the one for before zero on a negative time,
+    // and the one for after zero on zero and every time past it.
+    fn mark(&self, value: f64) -> &str {
         match value < 0.0 {
             true => &self.before,
             false => &self.after,
         }
     }
-}
 
-// One time and the word after it, and the time alone on a calendar that
-// names no words.
-fn worded(value: &str, word: &str) -> String {
-    match word.is_empty() {
-        true => value.to_string(),
-        false => format!("{value} {word}"),
+    // One time as the label writes it: the magnitude where a mark follows it,
+    // because the mark says which side of zero the time is on and a minus
+    // sign in front of BBY says it a second time. A time with no mark keeps
+    // its sign, which is then all the reader has.
+    fn number(&self, value: f64) -> String {
+        match self.mark(value).is_empty() {
+            true => number(value),
+            false => number(value.abs()),
+        }
+    }
+
+    // One label with the word a count of days leads with. A calendar of days
+    // with no marks numbers its rows from zero, and 1141 alone reads as a
+    // year. A calendar that names marks says what its numbers are already.
+    fn counted(&self, label: &str) -> String {
+        let bare = self.before.is_empty() && self.after.is_empty();
+        match bare && self.unit == DAYS {
+            true => format!("{DAY} {label}"),
+            false => label.to_string(),
+        }
     }
 }
 
-// One time as the label writes it: the digits alone where the file gave
-// a whole number, because a year is a whole number and a trailing zero
-// after the point reads as a measurement.
+/// The word between the two times of a span. The page's time column splits a
+/// label on it to stack the span on two lines, so the label and the column
+/// spell the word once.
+pub const SPAN: &str = " to ";
+
+// The unit a calendar of days names, and the word its labels lead with.
+const DAYS: &str = "days";
+const DAY: &str = "Day";
+
+// One time and the mark after it, and the time alone on a calendar that names
+// no mark for that side of zero.
+fn marked(value: &str, mark: &str) -> String {
+    match mark.is_empty() {
+        true => value.to_string(),
+        false => format!("{value} {mark}"),
+    }
+}
+
+// One time as the label writes it: the digits alone where the file gave a
+// whole number, because a year is a whole number and a trailing zero after
+// the point reads as a measurement.
 fn number(value: f64) -> String {
     match value.fract() == 0.0 {
         true => format!("{value:.0}"),
         false => format!("{value}"),
+    }
+}
+
+// The unit at the head of the caption, with its first letter in the upper
+// case, because the caption starts with it.
+fn capitalized(unit: &str) -> String {
+    let mut letters = unit.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
+}
+
+// The zero as the caption reads it: a leading "The" in the lower case,
+// because the file writes the zero as a title and the caption reads it inside
+// a sentence.
+fn lowered(zero: &str) -> String {
+    match zero.strip_prefix("The ") {
+        Some(rest) => format!("the {rest}"),
+        None => zero.to_string(),
     }
 }
 
@@ -271,7 +337,7 @@ mod tests {
     fn yavin() -> Calendar {
         Calendar {
             unit: "years".into(),
-            zero: "Battle of Yavin".into(),
+            zero: "the Battle of Yavin".into(),
             before: "BBY".into(),
             after: "ABY".into(),
         }
@@ -284,27 +350,108 @@ mod tests {
         }
     }
 
+    fn outbreak() -> Calendar {
+        Calendar {
+            unit: "days".into(),
+            zero: "The outbreak".into(),
+            ..Calendar::default()
+        }
+    }
+
     #[test]
-    fn one_time_reads_as_the_number_and_its_word() {
-        assert_eq!(yavin().label(-32.0, -32.0), "-32 BBY");
+    fn one_time_reads_as_the_number_and_its_mark() {
+        assert_eq!(yavin().label(-32.0, -32.0), "32 BBY");
         assert_eq!(yavin().label(5.0, 5.0), "5 ABY");
+        assert_eq!(yavin().label(0.0, 0.0), "0 ABY");
         assert_eq!(plain().label(2024.0, 2024.0), "2024");
     }
 
     #[test]
-    fn a_span_reads_as_two_numbers_and_one_word() {
-        assert_eq!(yavin().label(-22.0, -20.0), "-22 to -20 BBY");
-        assert_eq!(plain().label(2008.0, 2012.0), "2008 to 2012");
+    fn a_time_before_zero_drops_its_sign_where_a_mark_says_the_side() {
+        assert_eq!(yavin().label(-32.0, -32.0), "32 BBY");
+        assert_eq!(
+            Calendar {
+                after: String::new(),
+                ..yavin()
+            }
+            .label(5.0, 5.0),
+            "5"
+        );
+        assert_eq!(plain().label(-58.0, -58.0), "-58");
     }
 
     #[test]
-    fn a_span_that_crosses_zero_carries_a_word_at_each_end() {
-        assert_eq!(yavin().label(-5.0, 5.0), "-5 BBY to 5 ABY");
+    fn a_span_reads_as_two_numbers_and_one_mark() {
+        assert_eq!(yavin().label(-22.0, -20.0), "22 to 20 BBY");
+        assert_eq!(plain().label(2002.0, 2005.0), "2002 to 2005");
+    }
+
+    #[test]
+    fn a_span_that_crosses_zero_carries_a_mark_at_each_end() {
+        assert_eq!(yavin().label(-5.0, 5.0), "5 BBY to 5 ABY");
+    }
+
+    #[test]
+    fn a_calendar_of_days_with_no_marks_counts_days() {
+        let cases = [
+            ((1141.0, 1141.0), "Day 1141"),
+            ((1141.0, 1142.0), "Day 1141 to 1142"),
+            ((-3.0, -3.0), "Day -3"),
+            ((0.0, 0.0), "Day 0"),
+        ];
+        for ((from, to), label) in cases {
+            assert_eq!(outbreak().label(from, to), label, "{from} to {to}");
+        }
+    }
+
+    #[test]
+    fn a_calendar_of_days_that_names_marks_leads_with_the_mark_and_not_the_day() {
+        let dated = Calendar {
+            unit: "days".into(),
+            before: "BO".into(),
+            after: "AO".into(),
+            ..outbreak()
+        };
+        assert_eq!(dated.label(-3.0, -3.0), "3 BO");
+        assert_eq!(dated.label(1141.0, 1141.0), "1141 AO");
     }
 
     #[test]
     fn a_time_between_two_years_keeps_its_point() {
         assert_eq!(plain().label(2024.5, 2024.5), "2024.5");
+        assert_eq!(yavin().label(-32.5, -32.5), "32.5 BBY");
+    }
+
+    #[test]
+    fn the_caption_names_the_unit_and_the_event_the_times_count_from() {
+        let cases = [
+            (yavin(), "Years from the Battle of Yavin"),
+            (outbreak(), "Days from the outbreak"),
+            (
+                Calendar {
+                    unit: "years".into(),
+                    zero: "The Fall of the Twelve Colonies".into(),
+                    ..Calendar::default()
+                },
+                "Years from the Fall of the Twelve Colonies",
+            ),
+            (
+                Calendar {
+                    zero: "Aegon's Conquest".into(),
+                    ..plain()
+                },
+                "Years from Aegon's Conquest",
+            ),
+        ];
+        for (calendar, caption) in cases {
+            assert_eq!(calendar.caption(), caption, "{calendar:?}");
+        }
+    }
+
+    #[test]
+    fn a_calendar_with_no_zero_carries_no_caption() {
+        assert_eq!(plain().caption(), "");
+        assert_eq!(Calendar::default().caption(), "");
     }
 
     #[test]

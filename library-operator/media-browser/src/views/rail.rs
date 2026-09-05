@@ -6,15 +6,11 @@
 // deciding which lane each one takes, and the rail draws at most LANES of
 // them. The words read bottom to top, because a bar is tall and narrow.
 
-use std::f32::consts::FRAC_PI_2;
-
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
-use iced_winit::core::alignment::Vertical;
-use iced_winit::core::text::Alignment;
-use iced_winit::core::{Point, Rectangle, Vector};
+use iced_winit::core::Rectangle;
 
-use super::{area, label, mark, rounded, stack, text};
+use super::{area, mark, rounded, stack, text};
 use crate::look;
 
 /// One stretch of rows: the words on it, the first and the last row it covers,
@@ -116,13 +112,8 @@ pub fn label_box(bounds: Rectangle, region: Rectangle, length: f32) -> Rectangle
     stack::held(bounds, region, length)
 }
 
-// One bar's words, turned a quarter circle so they read from the foot
-// of the bar to its head. The turn puts the text on the path renderer,
-// which draws it as a mesh and not as a line of text, so the words go
-// into the same buffer as the bar under them and draw over it. A clip
-// of their own would take them out of that buffer and the bar would
-// then cover them, so the words are cut to the bar's own length
-// instead.
+// One bar's words, cut to the bar's own length and turned to read from
+// its foot to its head.
 fn written(
     frame: &mut canvas::Frame<Renderer>,
     bounds: Rectangle,
@@ -131,22 +122,7 @@ fn written(
 ) {
     let shown = text::cut(content, look::HEADING, bounds.height);
     let at = label_box(bounds, region, text::width(&shown, look::HEADING) + SLACK);
-    frame.with_save(|frame| {
-        frame.translate(Vector::new(at.center_x(), at.center_y()));
-        frame.rotate(-FRAC_PI_2);
-        frame.fill_text(label(
-            &shown,
-            Point::ORIGIN,
-            look::HEADING,
-            look::text(),
-            Alignment::Center,
-            Vertical::Center,
-            // The words are cut to the bar already, and a width the
-            // shaper may exceed would wrap them into a second line that
-            // draws across the first once the bar turns them.
-            f32::INFINITY,
-        ));
-    });
+    text::upward(frame, &shown, at, look::HEADING, look::text());
 }
 
 /// The part of the region the wall beside the rail draws in: everything

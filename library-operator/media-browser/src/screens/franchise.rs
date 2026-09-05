@@ -1,10 +1,11 @@
 // One franchise's page: the order of a story across films and series, as a
-// wall of rows from first to last. The columns are the universes, the rail at
-// the left is the eras, and the label beside a row is its time on the
-// franchise's own clock. A press opens the film or the series, the way the set
-// strip's press does, and a press on a gap opens nothing. Story order is
-// the one order the page draws, because it is the one order a franchise
-// has.
+// wall of rows from first to last. The lines beside the rows are the
+// universes, the rail at the left is the eras, and the label beside a
+// row is its time on the franchise's own clock, under a caption that
+// names what that clock counts. A press opens the film or the series,
+// the way the set strip's press does, and a press on a gap opens
+// nothing. Story order is the one order the page draws, because it is
+// the one order a franchise has.
 
 mod card;
 mod metro;
@@ -26,6 +27,7 @@ use crate::focus;
 use crate::posters::Posters;
 use crate::views::{band, rail};
 
+pub use metro::Run;
 pub use wall::{Cell, Row};
 
 /// Where focus is on the page: one row, or one bar of the rail.
@@ -35,9 +37,10 @@ pub enum Focus {
     Rail(usize),
 }
 
-/// The franchise page: the universes, the rows in story order, the bars of
-/// the rail, and where focus is. Every row and every bar is built once here, at
-/// the read, and not on every frame.
+/// The franchise page: the universes, the rows in story order, the runs
+/// of the strip, the bars of the rail, and where focus is. Every row,
+/// every run, and every bar is built once here, at the read, and not on
+/// every frame.
 #[derive(Debug)]
 pub struct Franchise {
     /// The catalog's library column of the `Library` of kind
@@ -47,11 +50,20 @@ pub struct Franchise {
     pub id: String,
     /// The name a person reads, which the band carries.
     pub title: String,
-    /// The universes, as the lines of the metro strip and the items of the
-    /// legend, in the order the file names them.
+    /// The universes, in the order the file names them. A cell and a run
+    /// both name one by its place in this list.
     pub universes: Vec<String>,
+    /// The lines of the metro strip: one run per universe some row
+    /// names, in the order the runs start.
+    pub runs: Vec<Run>,
     /// The wall in story order, which is the one order a franchise has.
     pub rows: Vec<Row>,
+    /// The width of the time column, from the widest label the rows
+    /// carry, and none where no row carries one.
+    pub time: f32,
+    /// The caption over that column, in the lines the column holds, and
+    /// none where the file's calendar names no zero.
+    pub caption: Vec<String>,
     /// The eras, as the bars of the rail beside the rows.
     pub eras: Vec<rail::Bar>,
     /// Where focus is.
@@ -67,13 +79,21 @@ impl Franchise {
         let today = Date::today().iso();
         let universes = wall::columns(&read);
         let rows = wall::story(&read, &universes, &today);
+        let runs = metro::runs(&rows, &universes);
         let eras = wall::bars(&read.eras, &rows);
+        // The column's width and its caption are measured once, at the
+        // read, because they answer the same words on every frame.
+        let time = wall::time_width(&rows);
+        let caption = wall::caption(&read.calendar, time);
         Some(Self {
             library: library.to_string(),
             id: id.to_string(),
             title: read.title,
             universes,
+            runs,
             rows,
+            time,
+            caption,
             eras,
             focus: Focus::Row(0),
         })

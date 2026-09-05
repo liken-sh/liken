@@ -446,7 +446,7 @@ fn the_page_carries_the_calendar_the_eras_and_the_spans() {
     let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
 
     let calendar = page.calendar.expect("the file names a calendar");
-    assert_eq!(calendar.label(-32.0, -32.0), "-32 BC");
+    assert_eq!(calendar.label(-32.0, -32.0), "32 BC");
     let eras: Vec<(&str, f64, f64)> = page
         .eras
         .iter()

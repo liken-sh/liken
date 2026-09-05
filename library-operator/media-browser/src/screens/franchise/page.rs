@@ -1,9 +1,8 @@
 // The franchise page's one canvas: the rail and the time labels at the
 // left, and the metro strip and one lane of cards beside them. The wall
 // scrolls inside its own region and is clipped to it, so no row draws
-// over the band, and the legend holds the top of the lane while the rows
-// scroll under it. A row the region does not reach builds no geometry,
-// so a wall of a hundred rows costs only the rows a person sees.
+// over the band. A row the region does not reach builds no geometry, so
+// a wall of a hundred rows costs only the rows a person sees.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -25,7 +24,7 @@ use crate::views::{Tone, area, artwork, band, extent, mark, rail, rounded, text,
 // The margin at both sides of the page.
 const MARGIN: f32 = 80.0;
 
-// The space between the band and the legend.
+// The space between the band and the first row.
 const TOP: f32 = 24.0;
 
 // The space between a title's last line and the note under it.
@@ -79,17 +78,18 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 
         let region = region(bounds);
         let rows = &page.rows;
-        // The lane measures where the rail leaves off, the time label's
-        // column, the strip, and the cards, and centers the cards where
-        // nothing stands at the left.
+        // The lane measures where the rail leaves off, the time column,
+        // the strip, and the cards, and centers the cards where nothing
+        // stands at the left.
         let wall::Lane {
             wall,
             columned,
             strip,
             cards,
-        } = wall::Lane::of(region, &page.eras, rows, page.universes.len());
-        let art = wall::art_height(region.height - wall::HEAD);
-        let tops = wall::tops(rows, art);
+        } = wall::Lane::of(region, &page.eras, &page.runs, page.time);
+        let head = wall::head(&page.caption);
+        let art = wall::art_height(region.height - head);
+        let tops = wall::tops(rows, art, head);
         let down = match page.focus {
             Focus::Row(row) => wall::scroll(row, &tops, region.height),
             Focus::Rail(bar) => match page.eras.get(bar) {
@@ -99,8 +99,9 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         };
 
         frame.with_clip(region, |frame| {
-            // The rows start under the legend, and the tops carry that
-            // head, so the rail reads them as they are.
+            // The rows start under the head the caption and the first
+            // row's focus mark need, and the tops carry that head, so
+            // the rail reads them as they are.
             rail::draw(
                 frame,
                 region,
@@ -113,27 +114,19 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 },
             );
 
-            for (index, row) in rows.iter().enumerate() {
-                let label = wall::time_box(wall, index, &tops, down);
-                if label.y + label.height < region.y || label.y > region.y + region.height {
-                    continue;
-                }
-                text::line(
-                    frame,
-                    &row.time,
-                    label.position(),
-                    look::CAPTION,
-                    look::muted(),
-                    wall::TIME - wall::GAP,
-                );
-            }
+            // The caption holds the top of the column, and the times
+            // draw under it, so a time that scrolls up leaves the column
+            // under the caption and never draws through it.
+            let caption = wall::caption_box(wall, page.time, &page.caption, &tops, down);
+            times(frame, page, wall, &tops, down, under(caption, region));
+            stacked(frame, &page.caption, caption.position(), look::faint());
 
-            // The strip and the rows are clipped to their own part of the
-            // region, so a row that has scrolled up draws nothing over
-            // the legend.
+            // The strip and the rows are clipped to their own part of
+            // the region, so a row that has scrolled up draws nothing
+            // over the time labels beside it.
             let cells = wall::clipped(columned);
             frame.with_clip(cells, |frame| {
-                metro::draw(frame, strip, rows, &tops, down);
+                metro::draw(frame, strip, &page.runs, rows, &tops, down);
                 for (index, row) in rows.iter().enumerate() {
                     let bounds = wall::cell_box(cards, index, &tops, down);
                     if outside(bounds, cells) {
@@ -148,23 +141,6 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     }
                 }
             });
-
-            // The legend holds the top of the lane while the wall scrolls
-            // under it.
-            let band = wall::banded(columned);
-            frame.with_clip(band, |frame| {
-                frame.fill_rectangle(band.position(), extent(band), look::BACKGROUND);
-                metro::legend(
-                    frame,
-                    area(
-                        columned.x,
-                        wall::pinned(columned, down),
-                        columned.width,
-                        band.height,
-                    ),
-                    &page.universes,
-                );
-            });
         });
 
         vec![frame.into_geometry()]
@@ -175,6 +151,67 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 // draws in, which then builds no geometry for it.
 fn outside(cell: Rectangle, columned: Rectangle) -> bool {
     cell.y + cell.height < columned.y || cell.y > columned.y + columned.height
+}
+
+// Every row's time label, in the column under the caption. A label the
+// column does not reach builds no geometry, and a label the row above
+// carries too draws nothing, so a run of rows in one year prints the
+// year once.
+fn times(
+    frame: &mut canvas::Frame<Renderer>,
+    page: &Franchise,
+    wall: Rectangle,
+    tops: &[f32],
+    down: f32,
+    column: Rectangle,
+) {
+    frame.with_clip(column, |frame| {
+        for index in 0..page.rows.len() {
+            let label = wall::time_box(wall, page.time, index, tops, down);
+            if label.y + label.height < column.y || label.y > column.y + column.height {
+                continue;
+            }
+            let (first, second) = wall::stacked(wall::label_at(&page.rows, index));
+            stacked(frame, &[first, second], label.position(), look::muted());
+        }
+    });
+}
+
+// A stack of lines at the caption size, one line to a line. Every line
+// was measured against the column's own width before it reached here, so
+// each draws unbounded and takes one line's height. A width would let
+// the shaper break a word the column cannot hold across two lines, and
+// the second of them would draw over the line under it.
+fn stacked(
+    frame: &mut canvas::Frame<Renderer>,
+    lines: &[String],
+    at: Point,
+    color: iced_winit::core::Color,
+) {
+    let mut y = at.y;
+    for line in lines {
+        text::line(
+            frame,
+            line,
+            Point::new(at.x, y),
+            look::CAPTION,
+            color,
+            f32::INFINITY,
+        );
+        y += text::height(1, look::CAPTION);
+    }
+}
+
+// The part of the time column the times draw in: everything under the
+// caption's own band.
+fn under(caption: Rectangle, region: Rectangle) -> Rectangle {
+    let top = caption.y + caption.height;
+    area(
+        caption.x,
+        top,
+        caption.width,
+        (region.y + region.height - top).max(0.0),
+    )
 }
 
 // One held entry of the order as a card of three layers: the ground made
@@ -300,9 +337,9 @@ pub fn thin_words(title: &str, bounds: Rectangle) -> (Point, Point) {
 // to cover the card through the linear filter, at a low opacity over
 // black. The linear upscale is the blur, so the ground reads as a
 // backdrop and never as pixels. The ground clips to the card and to the
-// rows' own clip, because an image carries one clip, and a card half
-// under the legend must not draw over it. A card with no art keeps the
-// plain slot ground.
+// rows' own clip, because an image carries one clip, and a card that has
+// scrolled past the top of the lane must not draw over what is above it.
+// A card with no art keeps the plain slot ground.
 fn ground<P: Posters>(
     frame: &mut canvas::Frame<Renderer>,
     posters: &mut P,
@@ -493,7 +530,7 @@ mod tests {
 
     #[test]
     fn a_row_outside_the_lane_builds_no_geometry() {
-        let columned = wall::columned(area(100.0, 200.0, 1000.0, 800.0), true);
+        let columned = wall::columned(area(100.0, 200.0, 1000.0, 800.0), 120.0);
         assert!(!outside(
             area(columned.x, columned.y, 100.0, 100.0),
             columned

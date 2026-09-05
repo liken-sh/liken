@@ -5,30 +5,106 @@
 // 1260 BC to 2028 with most of it in twenty years, and a time scale is
 // then one dot and an empty rail. The universes are the lines of the
 // metro strip beside the lane: the franchise's own first, then every
-// other universe an entry names, in first-seen order. A held entry is a
-// card as tall as its art and the gaps around it, and an entry no library
-// holds is a thin row, so the rows are not one height, and every measure
-// of the wall reads the row tops the wall lays out once.
+// other universe an entry names, in first-seen order, and the strip packs
+// their runs into lanes. A held entry is a card as tall as its art and
+// the gaps around it, and an entry no library holds is a thin row, so the
+// rows are not one height, and every measure of the wall reads the row
+// tops the wall lays out once.
 
 use iced_winit::core::Rectangle;
 
 use super::metro;
-use crate::catalog::franchise::{Entry, Era, Franchise, Held, SERIES, Standing};
+use crate::catalog::Calendar;
+use crate::catalog::franchise::{Entry, Era, Franchise, Held, SERIES, SPAN, Standing};
 use crate::look;
 use crate::screens::facts;
-use crate::views::{REACH, area, rail, text, wall};
+use crate::views::{REACH, area, rail, stack, text, wall};
 
 /// The space under a row, inside a card, and between the strip and the
 /// cards.
 pub const GAP: f32 = 16.0;
 
-/// The width the time label takes at the left of the wall.
-pub const TIME: f32 = 168.0;
+/// The narrowest the time column is: the room a four-digit year takes,
+/// and the gap between the column and the strip. A franchise numbered in
+/// one or two digits keeps that floor, so its cards start about where the
+/// cards of a franchise numbered in years do.
+pub fn floor() -> f32 {
+    text::measured(YEAR, look::CAPTION) + GAP
+}
 
-/// The height the legend of universes takes over the first row. It holds
-/// the legend and the space the mark of a focused entry in the first row
-/// reaches into.
-pub const HEAD: f32 = 48.0;
+// The widest number a plain calendar writes, which sets the floor.
+const YEAR: &str = "2026";
+
+/// The width the time column takes for these rows: the widest label the
+/// wall draws, on the wider of the two lines it stacks a span on, and the
+/// column's own gap, never under the floor. A wall no row labels takes no
+/// column at all.
+pub fn time_width(rows: &[Row]) -> f32 {
+    if !labelled(rows) {
+        return 0.0;
+    }
+    let widest = rows.iter().fold(0.0_f32, |wide, row| {
+        let (first, second) = stacked(&row.time);
+        wide.max(text::measured(&first, look::CAPTION))
+            .max(text::measured(&second, look::CAPTION))
+    });
+    (widest + GAP).max(floor())
+}
+
+/// One time label as the column draws it: the first time on one line, and
+/// "to" with the second time on the next. A span stacked this way never
+/// widens the column past one time and its mark, and the column is as
+/// narrow as the times it holds. A label of one time takes the first line
+/// alone.
+pub fn stacked(time: &str) -> (String, String) {
+    match time.split_once(SPAN) {
+        Some((first, second)) => (first.to_string(), format!("to {second}")),
+        None => (time.to_string(), String::new()),
+    }
+}
+
+/// The time label one row draws: nothing where the row above it carries
+/// the same label. A run of rows in one year prints the year once, on the
+/// row where the year starts, so the column reads as the times the story
+/// passes through and not as one number repeated.
+pub fn label_at(rows: &[Row], row: usize) -> &str {
+    let Some(here) = rows.get(row) else {
+        return "";
+    };
+    let above = row.checked_sub(1).and_then(|prior| rows.get(prior));
+    match above.is_some_and(|above| above.time == here.time) {
+        true => "",
+        false => &here.time,
+    }
+}
+
+/// The caption over the time column, in the lines the column holds:
+/// "Years from the Battle of Yavin". The column is as wide as one time
+/// and its mark, so the caption wraps into a short stack of lines over
+/// the times it names. A calendar with no zero carries none, and so does
+/// a wall with no column.
+pub fn caption(calendar: &Option<Calendar>, time: f32) -> Vec<String> {
+    let Some(calendar) = calendar else {
+        return Vec::new();
+    };
+    match time > 0.0 {
+        true => text::wrapped(&calendar.caption(), look::CAPTION, time - GAP),
+        false => Vec::new(),
+    }
+}
+
+/// The space over the first row: the caption's own lines at the head of
+/// the time column, and the gap under them. A wall with no caption keeps
+/// the room the mark of a focused first row reaches into, and no more.
+pub fn head(caption: &[String]) -> f32 {
+    match caption.is_empty() {
+        true => HEAD,
+        false => text::height(caption.len(), look::CAPTION) + GAP,
+    }
+}
+
+/// The space over the first row of a wall with no caption.
+pub const HEAD: f32 = REACH;
 
 /// The space under the last row.
 pub const TAIL: f32 = 36.0;
@@ -151,10 +227,10 @@ impl Row {
     }
 }
 
-/// The universes, as the lines of the strip and the items of the legend.
-/// The franchise's own is the first, even where the file names none,
-/// because an entry with no universes is in it. Every other universe an
-/// entry names follows, in first-seen order.
+/// The universes, as the lines of the strip. A run and a cell both name
+/// one by its place in this list. The franchise's own is the first, even
+/// where the file names none, because an entry with no universes is in
+/// it. Every other universe an entry names follows, in first-seen order.
 pub fn columns(franchise: &Franchise) -> Vec<String> {
     let mut named = vec![franchise.universe.clone()];
     for entry in &franchise.entries {
@@ -358,12 +434,13 @@ fn timed(calendar: &Option<crate::catalog::Calendar>, timed: bool, from: f64, to
 
 /// Where every row starts, from the top of the wall, and where the last
 /// one ends: one more top than there are rows. The first row starts under
-/// the legend, and every row after it starts under the one before it and
-/// the space under that. Every measure of the wall that names a row reads
-/// these, because a card and a thin row are not one height.
-pub fn tops(rows: &[Row], art: f32) -> Vec<f32> {
+/// `head`, the room the caption and the focus mark need, and every row
+/// after it starts under the one before it and the space under that.
+/// Every measure of the wall that names a row reads these, because a card
+/// and a thin row are not one height.
+pub fn tops(rows: &[Row], art: f32, head: f32) -> Vec<f32> {
     let mut tops = Vec::with_capacity(rows.len() + 1);
-    let mut top = HEAD;
+    let mut top = head;
     for row in rows {
         tops.push(top);
         top += row.height(art) + GAP;
@@ -373,18 +450,15 @@ pub fn tops(rows: &[Row], art: f32) -> Vec<f32> {
 }
 
 /// The part of the wall the strip and the cards draw in: everything to
-/// the right of the time label's column where some row carries a time
-/// label, and the whole wall where none does.
-pub fn columned(wall: Rectangle, labelled: bool) -> Rectangle {
-    match labelled {
-        true => area(
-            wall.x + TIME,
-            wall.y,
-            (wall.width - TIME).max(0.0),
-            wall.height,
-        ),
-        false => wall,
-    }
+/// the right of the time column. A wall with no column, whose `time` is
+/// no width at all, gives them the whole of it.
+pub fn columned(wall: Rectangle, time: f32) -> Rectangle {
+    area(
+        wall.x + time,
+        wall.y,
+        (wall.width - time).max(0.0),
+        wall.height,
+    )
 }
 
 /// Whether any row carries a time label, which is what earns the time
@@ -396,9 +470,9 @@ pub fn labelled(rows: &[Row]) -> bool {
 /// The lane of the wall: where the rail leaves off, the part the strip and
 /// the cards share, the strip, and the cards. The left-hand room is only
 /// what is used: the rail takes lanes only with eras, the time label its
-/// column only where a row carries one, and the strip its pitches only
-/// with more than one universe. Where none of them stands at the left,
-/// the cards keep the width they have beside a time label and stand
+/// column only where a row carries one, and the strip a pitch for every
+/// lane its runs fill. Where none of them stands at the left, the cards
+/// keep the width they have beside a time column at its floor and stand
 /// centered in the region, so a page of one universe with no calendar
 /// does not sit off to the right.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -410,28 +484,22 @@ pub struct Lane {
 }
 
 impl Lane {
-    /// The lane for these eras, rows, and this many universes over the
-    /// region.
-    pub fn of(region: Rectangle, eras: &[rail::Bar], rows: &[Row], universes: usize) -> Self {
+    /// The lane for these eras and runs over the region, beside a time
+    /// column of this width.
+    pub fn of(region: Rectangle, eras: &[rail::Bar], runs: &[metro::Run], time: f32) -> Self {
         let wall = rail::beside(region, eras);
-        let labelled = labelled(rows);
-        let columned = columned(wall, labelled);
-        let strip = area(
-            columned.x,
-            columned.y,
-            metro::width(universes),
-            columned.height,
-        );
+        let columned = columned(wall, time);
+        let strip = area(columned.x, columned.y, metro::width(runs), columned.height);
         let gap = match strip.width > 0.0 {
             true => GAP,
             false => 0.0,
         };
-        let bare = eras.is_empty() && !labelled && strip.width == 0.0;
+        let bare = eras.is_empty() && time <= 0.0 && strip.width == 0.0;
         let cards = match bare {
             true => area(
-                region.x + TIME / 2.0,
+                region.x + floor() / 2.0,
                 region.y,
-                (region.width - TIME).max(0.0),
+                (region.width - floor()).max(0.0),
                 region.height,
             ),
             false => area(
@@ -464,46 +532,55 @@ pub fn cell_box(cards: Rectangle, row: usize, tops: &[f32], down: f32) -> Rectan
     )
 }
 
-/// The part of the frame the strip and the rows draw in. It starts under
-/// the legend, because a row scrolls under it and must not draw over it.
-/// It reaches the focus stroke's own width past the strip, the cards, and
-/// the first row, so the mark of a focused row is whole wherever the row
-/// is.
+/// The part of the frame the strip and the rows draw in. It reaches the
+/// focus stroke's own width past the strip, the cards, and the first
+/// row, so the mark of a focused row is whole wherever the row is.
 pub fn clipped(columned: Rectangle) -> Rectangle {
     area(
         columned.x - REACH,
-        columned.y + HEAD - REACH,
+        columned.y,
         columned.width + 2.0 * REACH,
-        (columned.height - HEAD + REACH).max(0.0),
+        columned.height,
     )
 }
 
-/// The band the legend draws in, at the top of the lane. It ends where the
-/// rows' own clip starts, so nothing draws in both.
-pub fn banded(columned: Rectangle) -> Rectangle {
-    area(columned.x, columned.y, columned.width, HEAD - REACH)
-}
-
-/// The top of the legend band as the wall scrolls under it. The legend
-/// scrolls up with the wall until it meets the top of the region, and
-/// stays there for the rest of the scroll, the way a section header holds
-/// its place.
-pub fn pinned(columned: Rectangle, down: f32) -> f32 {
-    (columned.y - down).max(columned.y)
-}
-
 /// The box one row's time label draws in, in frame space after the
-/// scroll, at the left of the wall.
-pub fn time_box(wall: Rectangle, row: usize, tops: &[f32], offset: f32) -> Rectangle {
+/// scroll, at the left of the wall. `time` is the width of the column.
+pub fn time_box(wall: Rectangle, time: f32, row: usize, tops: &[f32], offset: f32) -> Rectangle {
     let top = tops.get(row).copied().unwrap_or_default();
     let next = tops.get(row + 1).copied().unwrap_or(top + GAP);
-    area(wall.x, wall.y + top - offset, TIME - GAP, next - top - GAP)
+    area(
+        wall.x,
+        wall.y + top - offset,
+        (time - GAP).max(0.0),
+        next - top - GAP,
+    )
 }
 
-/// The length of the wall these tops lay out, the legend and the space
-/// under the last row included.
+/// The box the caption draws in: the time column at the head of the wall,
+/// held at the top of the region while the wall scrolls under it, the way
+/// a jump rail holds the label of a bar. The times move and the caption
+/// stays, because it names what every one of them counts.
+pub fn caption_box(
+    wall: Rectangle,
+    time: f32,
+    caption: &[String],
+    tops: &[f32],
+    offset: f32,
+) -> Rectangle {
+    let section = area(
+        wall.x,
+        wall.y - offset,
+        (time - GAP).max(0.0),
+        content(tops),
+    );
+    stack::held(section, wall, text::height(caption.len(), look::CAPTION))
+}
+
+/// The length of the wall these tops lay out, the space over the first
+/// row and under the last one included.
 pub fn content(tops: &[f32]) -> f32 {
-    tops.last().copied().unwrap_or(HEAD) + TAIL
+    tops.last().copied().unwrap_or_default() + TAIL
 }
 
 /// How far the wall has scrolled with focus on this row. The last row
@@ -511,7 +588,7 @@ pub fn content(tops: &[f32]) -> f32 {
 /// foot and not a row short of it.
 pub fn scroll(row: usize, tops: &[f32], height: f32) -> f32 {
     let count = tops.len().saturating_sub(1);
-    let top = tops.get(row).copied().unwrap_or(HEAD);
+    let top = tops.get(row).copied().unwrap_or_default();
     let next = tops.get(row + 1).copied().unwrap_or(top);
     let block = area(0.0, top, 0.0, next - top);
     let tail = match row + 1 >= count {

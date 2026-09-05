@@ -123,8 +123,8 @@ fn two_entries_the_story_tells_at_once_each_take_a_row_of_their_own() {
     let rows = story(&page, &columns, TODAY);
     assert_eq!(rows.len(), 3);
     assert_eq!((rows[1].from, rows[1].to), (-30.0, -28.0));
-    assert_eq!(rows[1].time, "-30 to -28 BS");
-    assert_eq!(rows[2].time, "-29 to -27 BS");
+    assert_eq!(rows[1].time, "30 to 28 BS");
+    assert_eq!(rows[2].time, "29 to 27 BS");
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn a_franchise_with_no_calendar_draws_no_time() {
 fn a_row_reads_its_span_in_the_calendars_own_words() {
     let page = franchise(vec![entry(1, (-32.0, -32.0), &[])]);
     let rows = story(&page, &columns(&page), TODAY);
-    assert_eq!(rows[0].time, "-32 BS");
+    assert_eq!(rows[0].time, "32 BS");
 }
 
 #[test]
@@ -371,11 +371,172 @@ fn mixed() -> Vec<Row> {
 }
 
 #[test]
-fn the_strip_and_the_cards_stand_to_the_right_of_the_time_label() {
-    let columned = columned(REGION, true);
-    assert_eq!(columned.x, TIME);
-    assert_eq!(columned.width, REGION.width - TIME);
-    assert_eq!(self::columned(REGION, false), REGION);
+fn the_strip_and_the_cards_stand_to_the_right_of_the_time_column() {
+    let time = time_width(&mixed());
+    let columned = columned(REGION, time);
+    assert_eq!(columned.x, time);
+    assert_eq!(columned.width, REGION.width - time);
+    assert_eq!(self::columned(REGION, 0.0), REGION);
+}
+
+#[test]
+fn the_column_is_as_wide_as_the_widest_label_it_draws() {
+    let rows = story(
+        &franchise(vec![
+            entry(1, (-1_200.0, -1_200.0), &[]),
+            entry(2, (-30.0, -30.0), &[]),
+        ]),
+        &[],
+        TODAY,
+    );
+    assert_eq!(rows[0].time, "1200 BS");
+    assert_eq!(
+        time_width(&rows),
+        text::measured("1200 BS", look::CAPTION) + GAP
+    );
+
+    // A span stacks on two lines, so the column holds one time and its
+    // mark and not the whole span.
+    let spanned = story(
+        &franchise(vec![entry(1, (-1_200.0, -1_100.0), &[])]),
+        &[],
+        TODAY,
+    );
+    assert_eq!(spanned[0].time, "1200 to 1100 BS");
+    assert_eq!(
+        time_width(&spanned),
+        text::measured("to 1100 BS", look::CAPTION) + GAP
+    );
+    assert!(time_width(&spanned) < text::measured(&spanned[0].time, look::CAPTION));
+}
+
+#[test]
+fn a_column_of_short_times_keeps_the_floor_and_a_wall_of_none_takes_no_column() {
+    let short = story(&franchise(vec![entry(1, (1.0, 1.0), &[])]), &[], TODAY);
+    assert_eq!(short[0].time, "1 AS");
+    assert_eq!(time_width(&short), floor());
+    assert!(floor() > text::measured("2026", look::CAPTION));
+
+    let untimed = story(
+        &Franchise {
+            calendar: None,
+            ..franchise(vec![entry(1, (0.0, 0.0), &[])])
+        },
+        &[],
+        TODAY,
+    );
+    assert!(!labelled(&untimed));
+    assert_eq!(time_width(&untimed), 0.0);
+    assert_eq!(time_width(&[]), 0.0);
+}
+
+#[test]
+fn a_span_stacks_the_second_time_on_a_line_of_its_own() {
+    let cases = [
+        ("32 BBY", ("32 BBY", "")),
+        ("22 to 20 BBY", ("22", "to 20 BBY")),
+        ("5 BBY to 5 ABY", ("5 BBY", "to 5 ABY")),
+        ("Day 1141 to 1142", ("Day 1141", "to 1142")),
+        ("2002 to 2005", ("2002", "to 2005")),
+        ("", ("", "")),
+    ];
+    for (time, (first, second)) in cases {
+        assert_eq!(
+            stacked(time),
+            (first.to_string(), second.to_string()),
+            "{time}"
+        );
+    }
+}
+
+#[test]
+fn a_row_prints_its_time_only_where_it_differs_from_the_row_above() {
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[]),
+        entry(2, (-32.0, -32.0), &[]),
+        entry(3, (-30.0, -30.0), &[]),
+        Entry {
+            timed: false,
+            ..entry(4, (-30.0, -30.0), &[])
+        },
+        Entry {
+            timed: false,
+            ..entry(5, (0.0, 0.0), &[])
+        },
+        entry(6, (-30.0, -30.0), &[]),
+    ]);
+    let rows = story(&page, &columns(&page), TODAY);
+    let printed: Vec<&str> = (0..rows.len()).map(|row| label_at(&rows, row)).collect();
+    assert_eq!(printed, ["32 BS", "", "30 BS", "", "", "30 BS"]);
+    assert_eq!(label_at(&rows, 9), "");
+    assert_eq!(label_at(&[], 0), "");
+}
+
+#[test]
+fn the_caption_wraps_into_the_lines_the_column_holds() {
+    let rows = mixed();
+    let time = time_width(&rows);
+    let caption = caption(&Some(calendar()), time);
+    assert_eq!(caption.join(" "), "Years from the Survey");
+    assert!(caption.len() > 1, "{caption:?}");
+    for line in &caption {
+        assert!(
+            text::measured(line, look::CAPTION) <= time - GAP || !line.contains(' '),
+            "{line}"
+        );
+    }
+}
+
+#[test]
+fn a_calendar_with_no_zero_and_a_wall_with_no_column_carry_no_caption() {
+    let bare = Calendar {
+        zero: String::new(),
+        ..calendar()
+    };
+    assert!(caption(&Some(bare), 200.0).is_empty());
+    assert!(caption(&None, 200.0).is_empty());
+    assert!(caption(&Some(calendar()), 0.0).is_empty());
+}
+
+#[test]
+fn the_head_of_the_wall_holds_the_caption_and_a_wall_with_none_holds_the_mark() {
+    let caption = caption(&Some(calendar()), time_width(&mixed()));
+    assert_eq!(
+        head(&caption),
+        text::height(caption.len(), look::CAPTION) + GAP
+    );
+    assert!(head(&caption) > head(&[]));
+    assert_eq!(head(&[]), HEAD);
+    assert_eq!(HEAD, crate::views::REACH);
+}
+
+#[test]
+fn the_caption_holds_the_top_of_the_column_while_the_wall_scrolls() {
+    let page = franchise(
+        (1..=40)
+            .map(|number| entry(number, (number as f64, number as f64), &[]))
+            .collect(),
+    );
+    let rows = story(&page, &columns(&page), TODAY);
+    let time = time_width(&rows);
+    let caption = caption(&Some(calendar()), time);
+    let tops = tops(&rows, art_height(ROWS), head(&caption));
+    let box_of = |down| caption_box(REGION, time, &caption, &tops, down);
+    assert_eq!(box_of(0.0).x, REGION.x);
+    assert_eq!(box_of(0.0).y, REGION.y);
+    assert_eq!(box_of(0.0).width, time - GAP);
+    assert_eq!(
+        box_of(0.0).height,
+        text::height(caption.len(), look::CAPTION)
+    );
+
+    let down = scroll(20, &tops, REGION.height);
+    assert!(down > 0.0);
+    assert_eq!(box_of(down).y, REGION.y);
+
+    // The first label stands under the caption, so the two never draw
+    // over each other.
+    assert!(time_box(REGION, time, 0, &tops, 0.0).y >= box_of(0.0).y + box_of(0.0).height);
 }
 
 #[test]
@@ -386,24 +547,33 @@ fn a_wall_with_no_eras_no_time_labels_and_one_universe_centers_its_cards() {
     };
     let rows = story(&page, &columns(&page), TODAY);
     assert!(!labelled(&rows));
-    let lane = Lane::of(REGION, &[], &rows, 1);
+    let lane = Lane::of(REGION, &[], &metro::runs(&rows, &columns(&page)), 0.0);
     assert_eq!(lane.wall, REGION);
     assert_eq!(lane.strip.width, 0.0);
-    assert_eq!(lane.cards.width, REGION.width - TIME);
+    assert_eq!(lane.cards.width, REGION.width - floor());
     assert_eq!(lane.cards.center_x(), REGION.center_x());
     assert_eq!(lane.cards.y, REGION.y);
 }
 
 #[test]
-fn a_time_label_earns_its_column_and_a_strip_its_pitches() {
+fn a_time_label_earns_its_column_and_a_strip_a_pitch_for_every_lane() {
     let rows = mixed();
+    let time = time_width(&rows);
     assert!(labelled(&rows));
-    let one = Lane::of(REGION, &[], &rows, 1);
-    assert_eq!(one.columned.x, REGION.x + TIME);
+    let one = Lane::of(REGION, &[], &[], time);
+    assert_eq!(one.columned.x, REGION.x + time);
     assert_eq!(one.cards, one.columned);
 
-    let three = Lane::of(REGION, &[], &rows, 3);
-    assert_eq!(three.strip.x, REGION.x + TIME);
+    // Three universes the story tells at once, so the strip takes three
+    // lanes.
+    let page = franchise(vec![
+        entry(1, (-32.0, -32.0), &[COPPICE, FEN, MARSH]),
+        entry(2, (-30.0, -20.0), &[COPPICE, FEN, MARSH]),
+    ]);
+    let crossed = story(&page, &columns(&page), TODAY);
+    let runs = metro::runs(&crossed, &columns(&page));
+    let three = Lane::of(REGION, &[], &runs, time);
+    assert_eq!(three.strip.x, REGION.x + time);
     assert_eq!(three.strip.width, 3.0 * metro::PITCH);
     assert_eq!(three.cards.x, three.strip.x + three.strip.width + GAP);
     assert_eq!(three.cards.x + three.cards.width, REGION.x + REGION.width);
@@ -413,9 +583,9 @@ fn a_time_label_earns_its_column_and_a_strip_its_pitches() {
         last: 1,
         ..rail::Bar::default()
     };
-    let railed = Lane::of(REGION, &[bar], &rows, 1);
+    let railed = Lane::of(REGION, &[bar], &[], time);
     assert_eq!(railed.wall.x, REGION.x + rail::LANE);
-    assert_eq!(railed.cards.x, REGION.x + rail::LANE + TIME);
+    assert_eq!(railed.cards.x, REGION.x + rail::LANE + time);
 }
 
 #[test]
@@ -429,21 +599,21 @@ fn a_card_is_the_arts_height_and_the_gaps_around_it_and_a_gap_is_thin() {
 }
 
 #[test]
-fn the_rows_start_under_the_legend_and_each_after_the_one_before_it() {
+fn the_rows_start_under_the_first_marks_room_and_each_after_the_one_before_it() {
     let art = art_height(ROWS);
-    let tops = tops(&mixed(), art);
+    let tops = tops(&mixed(), art, HEAD);
     assert_eq!(tops.len(), 4);
     assert_eq!(tops[0], HEAD);
     assert_eq!(tops[1], HEAD + card_height(art) + GAP);
     assert_eq!(tops[2], tops[1] + THIN + GAP);
     assert_eq!(tops[3], tops[2] + card_height(art) + GAP);
-    assert_eq!(self::tops(&[], art), [HEAD]);
+    assert_eq!(self::tops(&[], art, HEAD), [HEAD]);
 }
 
 #[test]
 fn a_row_takes_the_cards_width_and_its_own_height_and_scrolls_with_the_wall() {
     let art = art_height(ROWS);
-    let tops = tops(&mixed(), art);
+    let tops = tops(&mixed(), art, HEAD);
     let cards = area(500.0, 100.0, 1200.0, 900.0);
     let card = cell_box(cards, 0, &tops, 0.0);
     assert_eq!(card.x, cards.x);
@@ -499,8 +669,8 @@ fn a_title_of_one_long_word_breaks_where_the_line_ends() {
 
 #[test]
 fn a_focused_row_lies_wholly_inside_the_clip() {
-    let columned = columned(REGION, true);
-    let tops = tops(&mixed(), art_height(ROWS));
+    let columned = columned(REGION, time_width(&mixed()));
+    let tops = tops(&mixed(), art_height(ROWS), HEAD);
     let row = cell_box(columned, 0, &tops, 0.0);
     let marked = crate::views::marked(row);
     let clip = clipped(columned);
@@ -511,28 +681,21 @@ fn a_focused_row_lies_wholly_inside_the_clip() {
 }
 
 #[test]
-fn the_rows_and_the_legend_band_draw_in_no_common_ground() {
-    let columned = columned(REGION, true);
-    let band = banded(columned);
-    assert_eq!(band.y, columned.y);
-    assert_eq!(band.y + band.height, clipped(columned).y);
-    assert!(band.height >= text::height(1, look::HEADING));
-}
-
-#[test]
-fn the_legend_band_never_climbs_over_the_top_of_the_region() {
-    let columned = columned(REGION, true);
-    assert_eq!(pinned(columned, 0.0), columned.y);
-    assert_eq!(pinned(columned, 400.0), columned.y);
+fn the_clip_starts_at_the_top_of_the_lane_and_the_first_row_below_it() {
+    let columned = columned(REGION, time_width(&mixed()));
+    let clip = clipped(columned);
+    assert_eq!(clip.y, columned.y);
+    assert_eq!(clip.height, columned.height);
 }
 
 #[test]
 fn the_time_label_stands_beside_its_own_row() {
-    let tops = tops(&mixed(), art_height(ROWS));
-    let box_of = time_box(REGION, 1, &tops, 40.0);
+    let time = time_width(&mixed());
+    let tops = tops(&mixed(), art_height(ROWS), HEAD);
+    let box_of = time_box(REGION, time, 1, &tops, 40.0);
     assert_eq!(box_of.x, REGION.x);
     assert_eq!(box_of.y, REGION.y + tops[1] - 40.0);
-    assert_eq!(box_of.width, TIME - GAP);
+    assert_eq!(box_of.width, time - GAP);
     assert_eq!(box_of.height, THIN);
 }
 
@@ -540,15 +703,15 @@ fn the_time_label_stands_beside_its_own_row() {
 fn a_wall_that_fits_stands_at_its_top_and_a_long_one_scrolls() {
     let art = art_height(ROWS);
     let page = franchise((1..=40).map(|n| entry(n, (0.0, 0.0), &[])).collect());
-    let tops = tops(&story(&page, &columns(&page), TODAY), art);
+    let tops = tops(&story(&page, &columns(&page), TODAY), art, HEAD);
     assert_eq!(scroll(0, &tops, 900.0), 0.0);
     assert!(scroll(30, &tops, 900.0) > 0.0);
     assert_eq!(scroll(39, &tops, 900.0), content(&tops) - 900.0);
     assert_eq!(content(&tops), tops[40] + TAIL);
-    assert_eq!(content(&[]), HEAD + TAIL);
+    assert_eq!(content(&[]), TAIL);
     assert_eq!(scroll(0, &[], 900.0), 0.0);
 
-    let two = self::tops(&mixed()[..2], art);
+    let two = self::tops(&mixed()[..2], art, HEAD);
     assert_eq!(scroll(1, &two, 900.0), 0.0);
 }
 
