@@ -1,0 +1,6 @@
+#!/bin/sh
+# kubectl aimed at the lab's own credential, so a drill never reaches
+# another cluster.
+exec kubectl \
+  --kubeconfig "$(dirname "$0")/identity/kubeconfig" \
+  "$@"

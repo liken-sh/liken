@@ -1,0 +1,40 @@
+# node-1, the lab's only machine.
+
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata:
+  name: node-1
+spec:
+  # No person watches this machine, so it reboots itself when a change
+  # needs one.
+  rebootPolicy: Auto
+
+  network:
+    interfaces:
+      - name: eth0
+      - name: eth1
+        address: 10.30.0.1/24
+
+  # Seven storage roles on three virtio disks. The guest boots with
+  # UEFI, so it has no BIOS roles. podStorage is where the driver's
+  # store lands.
+  storage:
+    systemA:
+      device: /dev/vdc
+      size: 1Gi
+    systemB:
+      device: /dev/vdc
+      size: 1Gi
+    machineState:
+      device: /dev/vda
+      size: 64Mi
+    machineEphemeral:
+      device: /dev/vdb
+      size: 512Mi
+    clusterState:
+      device: /dev/vda
+    podStorage:
+      device: /dev/vdb
+      size: 2Gi
+    podEphemeral:
+      device: /dev/vdb

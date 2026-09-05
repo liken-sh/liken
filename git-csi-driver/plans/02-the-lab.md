@@ -29,7 +29,10 @@ and `podEphemeral`, and `boot.qcow2` for `systemA` and `systemB`. No
 
 `lab/Makefile` copies the targets, disk names, firmware paths, network
 devices, and MAC scheme of `liken`'s `dev-cluster/Makefile`, for one
-node, and replaces the in-repo build with the public channel:
+node, and replaces the in-repo build with the public channel. The lab
+spells `GC` into its MAC bytes and multicast group, uses `10.30.0.0/24`,
+and forwards the API to port 18443, so it runs beside `liken`'s own
+labs:
 
 | Target | What it does |
 |---|---|
@@ -37,9 +40,9 @@ node, and replaces the in-repo build with the public channel:
 | `identity` | `liken mint identity/`. Idempotent. |
 | `media` | `liken layer` the manifests and identity into `deployment.cpio`, then `liken media` into `install.cpio`, with the fetched release's own toolkit. |
 | `install` | Creates the three disks and the NVRAM copy under `guests/node-1/`, boots `install.cpio` with `-kernel`, waits for the install verdict on the serial console, and stops QEMU. |
-| `run` | Boots from disk with 1 GiB, the API port forwarded to `127.0.0.1:16443`, and the console to `guests/node-1/console.log`. Runs QEMU in the background and writes its pid. |
+| `run` | Boots from disk with 1 GiB, the API port forwarded to `127.0.0.1:18443`, and the console to `guests/node-1/console.log`. Runs QEMU in the background and writes its pid. |
 | `stop` | Stops the guest by pid. |
-| `kubeconfig` | `liken kubeconfig -server https://127.0.0.1:16443 .` into `identity/kubeconfig`. |
+| `kubeconfig` | `liken kubeconfig -server https://127.0.0.1:18443 .` into `identity/kubeconfig`. |
 | `wait` | Polls `kubectl get nodes` until `node-1` is `Ready`, with a five-minute deadline. |
 | `forge` | Starts `git daemon` on the host, serving `forge/` on port 9418 with `receive-pack` enabled, in the background with a pid file. `forge-stop` stops it. |
 | `repo NAME=<name>` | Creates `forge/<name>.git`, a bare repository seeded from `fixtures/<name>/` with one commit on `main`. |
@@ -62,11 +65,13 @@ a lab needs it.
 
 ### What the drill checks about the store
 
-The skeleton stores repositories at `/var/lib/liken/git-csi`. The smoke
-target's last step runs a privileged pod on `node-1` with `findmnt
---target /var/lib/liken/git-csi` and prints the source. If the
-directory is not on the cluster-state partition, the path moves, in
-plan 01's manifests and in the program's default, before plan 03 lands.
+The smoke target's last step runs a privileged pod on `node-1` with
+`findmnt --target` on the store path and prints the source device. The
+first drill found the skeleton's path, `/var/lib/liken/git-csi`, on the
+root overlay, which is RAM, so the store moved to
+`/var/lib/liken/pod-storage/git-csi`, the partition that holds pod
+volumes. The check stays in the smoke target so a change to `liken`'s
+layout shows up here first.
 
 ### Memory
 

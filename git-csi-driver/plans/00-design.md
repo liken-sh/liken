@@ -182,7 +182,7 @@ The repository carries two things for the driver and no configuration.
 **The node plugin** is a `DaemonSet`. It stages, publishes, watches,
 commits, and pushes. Its store holds one bare repository per URL and
 one work tree per writeable volume. On `liken` the store is on the
-cluster-state partition. The plugin watches the claims bound to its
+pod-storage partition, beside every other volume on the node. The plugin watches the claims bound to its
 volumes to learn their current class.
 
 **The controller plugin** is one small `Deployment`. It implements
@@ -283,8 +283,8 @@ driver's log.
 - The `DaemonSet` takes the node-critical priority class, so the
   unpublish push runs before the network goes down and before `liken`
   remounts disks read-only at shutdown.
-- The store is a tenant of the cluster-state partition and shares its
-  budget.
+- The store is a tenant of the pod-storage partition and shares its
+  budget with every other volume on the node.
 - Every failure the driver reports reaches the pod's events, the
   driver's log, and its metrics, which is the console-parity rule
   applied to a driver with no status object.

@@ -38,7 +38,7 @@ spec:
           args:
             - --endpoint=unix:///csi/csi.sock
             - --node-id=$(NODE_NAME)
-            - --store=/var/lib/liken/git-csi
+            - --store=/var/lib/liken/pod-storage/git-csi
           env:
             # NodeGetInfo answers with the node's name, and the manifest
             # names no machine, so the name comes from the downward API.
@@ -67,7 +67,7 @@ spec:
               mountPath: /var/lib/kubelet/pods
               mountPropagation: Bidirectional
             - name: store
-              mountPath: /var/lib/liken/git-csi
+              mountPath: /var/lib/liken/pod-storage/git-csi
         # The registrar, an upstream sidecar, is the whole registration.
         # It reads the driver's name over the socket and tells the
         # kubelet where to find the socket.
@@ -118,9 +118,10 @@ spec:
             path: /var/lib/kubelet/pods
             type: DirectoryOrCreate
         # The store: one bare repository per URL and one work tree per
-        # writeable volume. On liken it is a tenant of the cluster-state
-        # partition.
+        # writeable volume. On liken, /var/lib/liken/pod-storage is the
+        # partition that holds pod volumes, so the store is a tenant of
+        # the same disk as every other volume on the node.
         - name: store
           hostPath:
-            path: /var/lib/liken/git-csi
+            path: /var/lib/liken/pod-storage/git-csi
             type: DirectoryOrCreate

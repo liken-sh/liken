@@ -35,7 +35,7 @@ The program is `git-csi-driver`. Its flags are `--endpoint`, the
 socket to serve, default `unix:///csi/csi.sock`; `--node-id`, the
 node's name, which the `DaemonSet` supplies from the downward API;
 `--store`, the directory for repositories and work trees, default
-`/var/lib/liken/git-csi`; and `--version`.
+`/var/lib/liken/pod-storage/git-csi`; and `--version`.
 
 It serves the CSI `Identity` and `Node` services over gRPC on the
 socket, with `github.com/container-storage-interface/spec/lib/go/csi`
@@ -75,16 +75,19 @@ log has to see them.
   `/csi`, `hostPath` `/var/lib/kubelet/plugins_registry` at
   `/registration`, `hostPath` `/var/lib/kubelet/pods` at the same path
   with `mountPropagation: Bidirectional`, and `hostPath`
-  `/var/lib/liken/git-csi` at the same path for the store. Priority
+  `/var/lib/liken/pod-storage/git-csi` at the same path for the store. Priority
   class `system-node-critical`. Tolerations for every taint, the way
   a `DaemonSet` on `liken` tolerates the node taints. Update strategy
   `RollingUpdate` with `maxUnavailable: 1`.
 - `kustomization.yaml`: namespace `liken-system`, the shared labels,
   and the image entry with `newTag: latest`.
 
-Whether `/var/lib/liken/git-csi` lands on `liken`'s cluster-state
-partition is checked in plan 02's drill with `findmnt`. If it does not,
-the store path moves and this plan's manifests move with it.
+Plan 02's drill checked the store's mount with `findmnt`. The first
+path, `/var/lib/liken/git-csi`, fell through to the root overlay, which
+is RAM. On `liken` the disk partitions are `/var/lib/rancher` for
+cluster state, `/var/lib/kubelet` for pod ephemeral storage, and
+`/var/lib/liken/pod-storage` for pod volumes. The store lives on the
+last one, because that is what it holds.
 
 ### The site
 
