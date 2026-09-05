@@ -171,6 +171,26 @@ fn an_episode_the_catalog_dates_carries_the_date_and_not_the_year() {
 }
 
 #[test]
+fn an_episode_with_no_still_presents_the_art_of_its_series() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_season(&path);
+    set_series_art(
+        &path,
+        "default/shows",
+        SERIES,
+        "Lost/poster.jpg",
+        &["Lost/poster.jpg", "Lost/fanart.jpg"],
+    );
+    clear_episode_art(&path, "default/shows", "episode:tvdb:1");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let items = source.play("default/shows", &episode_chosen(1));
+    assert_eq!(items[0].presentation.art, "Lost/fanart.jpg");
+    assert_eq!(items[1].presentation.art, "episode:tvdb:2.jpg");
+}
+
+#[test]
 fn an_episode_under_no_series_row_names_no_series() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);

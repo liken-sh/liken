@@ -14,8 +14,8 @@
 use iced_winit::core::Rectangle;
 
 use super::metro;
-use crate::catalog::Calendar;
 use crate::catalog::franchise::{Entry, Era, Franchise, Held, SERIES, SPAN, Standing};
+use crate::catalog::{Calendar, art};
 use crate::look;
 use crate::screens::facts;
 use crate::views::{REACH, area, rail, stack, text, wall};
@@ -361,29 +361,15 @@ pub fn facts(entry: &Entry, held: &Held) -> String {
     ])
 }
 
-// The art one cell draws, and whether it fills the cell's 16:9 box. The
-// ladder is the item's own landscape file, then its fanart, then its
-// backdrop, which is the name the scanners of this catalog write the same
-// 16:9 art under, and then the poster. A poster does not fill a landscape
-// box, so the cell says so and the page draws it at its own ratio. A gap
-// holds no item and names no art.
+// The art one cell draws, and whether it fills the cell's 16:9 box: the
+// item's own 16:9 art, and its poster where it holds none. A poster does
+// not fill a landscape box, so the cell says so and the page draws it at
+// its own ratio. A gap holds no item and names no art.
 fn drawn(held: &Held) -> (String, bool) {
-    for name in LANDSCAPE {
-        if let Some(art) = held.arts.iter().find(|art| named(art, name)) {
-            return (art.clone(), true);
-        }
+    match art::landscape(&held.arts) {
+        Some(art) => (art.to_string(), true),
+        None => (held.art.clone(), false),
     }
-    (held.art.clone(), false)
-}
-
-// The names an item's 16:9 art is written under, in the order a cell
-// takes them.
-const LANDSCAPE: [&str; 3] = ["landscape.jpg", "fanart.jpg", "backdrop.jpg"];
-
-// Whether one art path is the file of this name. The paths are relative
-// to the library's volume, so the name is the last part of the path.
-fn named(art: &str, name: &str) -> bool {
-    art.rsplit('/').next().is_some_and(|file| file == name)
 }
 
 /// The note of an entry, under the blurb on a card and at the right of a

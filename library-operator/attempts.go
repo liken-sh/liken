@@ -225,7 +225,7 @@ func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time) 
 	counts := map[string]int{}
 	for fact, query := range gapQueries {
 		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`,
-			gapParams(library, now, time.Time{}))
+			gapParams(fact, library, now, time.Time{}))
 		if err != nil {
 			return nil, err
 		}

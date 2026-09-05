@@ -52,7 +52,7 @@ func TestAnNFOGapHoldsTheTitlesWhoseSidecarLacksTheFactAgainstTheRealSchema(t *t
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[test.fact],
-				gapParams("house/movies", now, time.Time{}))
+				gapParams(test.fact, "house/movies", now, time.Time{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestTheCreditsGapIsATitleWithNoCreditsFileAgainstTheRealSchema(t *testing.T
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
-				gapParams("house/movies", now, time.Time{}))
+				gapParams(factCredits, "house/movies", now, time.Time{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,7 +143,7 @@ func TestEveryAttemptKindGatesTheNFOGap(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
-				gapParams("house/movies", now, time.Time{}))
+				gapParams(factOverview, "house/movies", now, time.Time{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -294,7 +294,7 @@ func TestARefreshOpensTheCreditsGapAgainstTheRealSchema(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
-				gapParams("house/movies", now, test.refresh))
+				gapParams(factCredits, "house/movies", now, test.refresh))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -302,6 +302,47 @@ func TestARefreshOpensTheCreditsGapAgainstTheRealSchema(t *testing.T) {
 			slices.Sort(ids)
 			if !slices.Equal(ids, test.want) {
 				t.Errorf("gap = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
+// An nfo fact reads the title's own release date, so the overview a provider
+// had none of before the film came out is a gap again on the day it does.
+func TestAnNFOAttemptBeforeTheReleaseStandsOnlyUntilIt(t *testing.T) {
+	cases := []struct {
+		name  string
+		today string
+		want  int
+	}{
+		{name: "the film is not out yet", today: "2026-09-05"},
+		{name: "the film comes out today", today: "2026-09-21", want: 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seed := &walkResult{movies: []movieRow{{
+				Id: "movie:tmdb:1", Library: "house/movies", Path: "One (2026)",
+				Title: "One", Released: "2026-09-21",
+			}}}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: "house/movies", Item: "movie:tmdb:1", Fact: factOverview,
+				At: dayOf(t, "2026-09-04").Unix(), Result: attemptNothing, Provider: "tmdb",
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
+				gapParams(factOverview, "house/movies", dayOf(t, test.today), time.Time{}))
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ids) != test.want {
+				t.Errorf("gap = %v, want %d", ids, test.want)
 			}
 		})
 	}

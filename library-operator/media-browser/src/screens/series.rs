@@ -81,7 +81,9 @@ pub struct Still {
     /// The episode's plot. The header draws it in place of the series'
     /// plot while this still has focus.
     pub plot: String,
-    /// The path of the episode's still, empty where it has none.
+    /// The path the still draws: the episode's own still, or the art of
+    /// its series where the catalog holds no still for the episode.
+    /// Empty where the series holds no art either.
     pub art: String,
 }
 

@@ -167,3 +167,49 @@ fn every_episode_carries_its_plot_its_runtime_and_its_still() {
     assert_eq!(episodes[0].art, "episode:1:1.jpg");
     assert!(episodes[1].plot.is_empty());
 }
+
+// A series of two episodes, the second of which the catalog holds no
+// still for, under the art the series itself holds.
+fn a_series_with_a_gap(path: &Path, art: &str, arts: &[&str]) {
+    insert_series_page(path, "default/shows", "one", "2004", SERIES_BODY);
+    set_series_art(path, "default/shows", "one", art, arts);
+    for episode in 1..=2 {
+        insert_episode_page(
+            path,
+            "default/shows",
+            &format!("episode:1:{episode}"),
+            "one",
+            (1, episode),
+            "2004-09-22",
+            "{}",
+        );
+    }
+    clear_episode_art(path, "default/shows", "episode:1:2");
+}
+
+#[test]
+fn an_episode_with_no_still_draws_the_art_of_its_series() {
+    for (art, arts, drawn) in [
+        (
+            "one/poster.jpg",
+            &["one/poster.jpg", "one/fanart.jpg", "one/landscape.jpg"][..],
+            "one/landscape.jpg",
+        ),
+        (
+            "one/poster.jpg",
+            &["one/poster.jpg", "one/fanart.jpg"][..],
+            "one/fanart.jpg",
+        ),
+        ("one/poster.jpg", &["one/poster.jpg"][..], "one/poster.jpg"),
+        ("", &[][..], ""),
+    ] {
+        let dir = TempDir::new().unwrap();
+        let path = fixture(&dir);
+        a_series_with_a_gap(&path, art, arts);
+
+        let mut source = SidecarSource::new(&path, NO_AGENT);
+        let episodes = source.episodes("default/shows", "one");
+        assert_eq!(episodes[0].art, "episode:1:1.jpg");
+        assert_eq!(episodes[1].art, drawn);
+    }
+}

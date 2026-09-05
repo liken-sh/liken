@@ -184,6 +184,69 @@ fn the_titles_fold_is_all_posters() {
     assert_eq!(answer.slots[0].released, "2026-09-02");
 }
 
+// The serial's own art: no landscape file, so the fanart is the 16:9 art
+// an episode with no still of its own draws.
+fn a_serial_with_art(path: &Path) {
+    set_series_art(
+        path,
+        SHOWS,
+        SERIAL,
+        "Serial/poster.jpg",
+        &["Serial/poster.jpg", "Serial/fanart.jpg"],
+    );
+}
+
+#[test]
+fn an_episode_with_no_still_draws_the_art_of_its_series() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_catalog(&path);
+    a_serial_with_art(&path);
+    clear_episode_art(&path, SHOWS, "episode:tvdb:3");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let answer = source.wall(&Query::Released {
+        fold: Fold::Episodes,
+    });
+    assert_eq!(answer.slots[0].id, "episode:tvdb:3");
+    assert_eq!(answer.slots[0].art, "Serial/fanart.jpg");
+    assert_eq!(answer.slots[2].art, "episode:tvdb:2.jpg");
+}
+
+#[test]
+fn a_show_folded_on_an_episode_with_no_still_draws_the_art_of_its_series() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_catalog(&path);
+    a_serial_with_art(&path);
+    clear_episode_art(&path, SHOWS, "episode:tvdb:3");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let answer = source.wall(&Query::Released {
+        fold: Fold::Shows {
+            today: date_seconds("2026-09-03").unwrap(),
+        },
+    });
+    assert_eq!(answer.slots[0].id, SERIAL);
+    assert_eq!(answer.slots[0].art, "Serial/fanart.jpg");
+}
+
+#[test]
+fn an_episode_of_a_series_with_no_art_draws_no_still_at_all() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_catalog(&path);
+    set_series_art(&path, SHOWS, SERIAL, "", &[]);
+    clear_episode_art(&path, SHOWS, "episode:tvdb:3");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let answer = source.wall(&Query::Released {
+        fold: Fold::Episodes,
+    });
+    assert_eq!(answer.slots[0].id, "episode:tvdb:3");
+    assert_eq!(answer.slots[0].art, "");
+}
+
 #[test]
 fn an_episode_whose_series_row_is_missing_is_left_out() {
     let dir = TempDir::new().unwrap();

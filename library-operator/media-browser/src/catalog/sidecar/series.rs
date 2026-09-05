@@ -7,7 +7,7 @@ use rusqlite::Connection;
 
 use super::collect;
 use super::item;
-use crate::catalog::{Episode, SeriesDetails};
+use crate::catalog::{Episode, SeriesDetails, art};
 
 /// One series' details, as a list of one, or an empty list where the
 /// library holds no series under that id.
@@ -63,17 +63,29 @@ pub fn series(
 }
 
 /// Every episode of one series, in aired order, through the index on
-/// (library, series, season, episode).
+/// (library, series, season, episode). The series' own art comes with
+/// every row, because an episode the catalog holds no still for draws
+/// its series' art in the still's place.
 pub fn episodes(
     connection: &Connection,
     library: &str,
     id: &str,
 ) -> rusqlite::Result<Vec<Episode>> {
-    let sql = "SELECT season, episode, title, released, duration, \
-                      json_extract(body, '$.plot'), art, id \
-               FROM episodes WHERE library = ? AND series = ? \
-               ORDER BY season, episode";
+    let sql = "SELECT episodes.season, episodes.episode, episodes.title, \
+                      episodes.released, episodes.duration, \
+                      json_extract(episodes.body, '$.plot'), episodes.art, episodes.id, \
+                      IFNULL(series.art, ''), IFNULL(series.arts, '[]') \
+               FROM episodes \
+               LEFT JOIN series ON series.library = episodes.library \
+               AND series.id = episodes.series \
+               WHERE episodes.library = ? AND episodes.series = ? \
+               ORDER BY episodes.season, episodes.episode";
     collect(connection, sql, &[&library, &id], |row| {
+        let still = art::still(
+            &item::text(row, 6)?,
+            &item::text(row, 8)?,
+            &item::strings(&item::text(row, 9)?),
+        );
         Ok(Episode {
             season: row.get(0)?,
             episode: row.get(1)?,
@@ -81,7 +93,7 @@ pub fn episodes(
             released: row.get(3)?,
             duration: row.get(4)?,
             plot: item::text(row, 5)?,
-            art: row.get(6)?,
+            art: still,
             id: row.get(7)?,
         })
     })

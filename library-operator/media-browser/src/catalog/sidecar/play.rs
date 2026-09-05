@@ -5,8 +5,8 @@
 
 use rusqlite::Connection;
 
-use super::collect;
-use crate::catalog::{PlayItem, Presentation};
+use super::{collect, item};
+use crate::catalog::{PlayItem, Presentation, art};
 
 // The join from an item to one of its video files. A title with a
 // second encoding holds more than one file in a role, so MIN(path) picks
@@ -85,7 +85,8 @@ pub fn trailer(
 /// The chosen episode and every later episode of its season, in
 /// episode order. An episode with no main file drops out of the join,
 /// and a list that does not start with the chosen episode is no list
-/// at all.
+/// at all. The series row carries the art an episode with no still of
+/// its own is presented with.
 pub fn episodes(
     connection: &Connection,
     library: &str,
@@ -95,7 +96,8 @@ pub fn episodes(
 ) -> rusqlite::Result<Vec<PlayItem>> {
     let sql = format!(
         "SELECT item.episode, item.title, item.released, item.art, IFNULL(parent.title, ''), \
-                MIN(files.path), files.trickplay, item.slug \
+                MIN(files.path), files.trickplay, item.slug, \
+                IFNULL(parent.art, ''), IFNULL(parent.arts, '[]') \
          FROM episodes item {} \
          LEFT JOIN series parent ON parent.library = item.library AND parent.id = item.series \
          WHERE item.library = ? AND item.series = ? AND item.season = ? AND item.episode >= ? \
@@ -116,7 +118,11 @@ pub fn episodes(
                 season,
                 episode: number,
                 episode_title: row.get(1)?,
-                art: row.get(3)?,
+                art: art::still(
+                    &item::text(row, 3)?,
+                    &item::text(row, 8)?,
+                    &item::strings(&item::text(row, 9)?),
+                ),
                 trickplay: row.get(6)?,
                 ..Presentation::default()
             };

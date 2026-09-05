@@ -27,6 +27,10 @@ pub mod pool;
 // strips from the pool.
 pub mod draw;
 
+// The art module: which file an item's art is, out of the list of every
+// art file beside it.
+pub mod art;
+
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use query::{Answer, Fold, InSeries, Order, Query, Slot};
 
@@ -266,8 +270,10 @@ pub struct Episode {
     pub duration: i64,
     /// The plot, empty where the sidecar named none.
     pub plot: String,
-    /// The path of the episode's still, relative to the library root, or
-    /// empty where it has none.
+    /// The path the still draws, relative to the library root: the
+    /// episode's own still, and the art of its series where the catalog
+    /// holds no still for the episode. Empty where the series holds no
+    /// art either. See [`art::still`].
     pub art: String,
 }
 

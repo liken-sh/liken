@@ -187,14 +187,21 @@ func titleArtGapSQL(fact string) string {
 		`) AS wanted WHERE library = ?1 AND ` + gapClause(fact, "file", artFileClause())
 }
 
+// The name of one season's art file, as a query builds it from the series
+// path and the episode's season number. The gap query and the release date of
+// a season both key on this name, so one expression writes it.
+func seasonArtFileSQL(suffix string) string {
+	return `s.path || '/' || CASE WHEN e.season = 0 THEN '` + specialsSeasonPrefix + suffix + `' ` +
+		`ELSE printf('season%02d-` + suffix + `', e.season) END`
+}
+
 // One row per season a library holds episodes of, because the catalog keeps
 // no season item. The art lands in the series folder under Kodi's own name.
 func seasonArtGapSQL(fact string) string {
 	suffix := artTypes[fact].file
 	return `SELECT file, tmdb, season, 0 FROM (` +
 		`SELECT DISTINCT s.library AS library, ` +
-		`s.path || '/' || CASE WHEN e.season = 0 THEN '` + specialsSeasonPrefix + suffix + `' ` +
-		`ELSE printf('season%02d-` + suffix + `', e.season) END AS file, ` +
+		seasonArtFileSQL(suffix) + ` AS file, ` +
 		`substr(a.alias, length('` + scopeSeries + `:tmdb:') + 1) AS tmdb, e.season AS season ` +
 		`FROM episodes AS e ` +
 		`JOIN series AS s ON s.library = e.library AND s.id = e.series ` +
@@ -225,6 +232,26 @@ func episodeThumbGapSQL() string {
 			`WHERE fi.library = ?1 `+
 			`AND f.type = '`+fileTypeImage+`' `+
 			`AND f.role IN ('`+fileRoleThumb+`', '`+fileRoleStill+`'))`)
+}
+
+// Where each art fact's items carry their release date. A title's art reads
+// the title's own, a season's art reads the earliest episode of that season,
+// which is the day the season starts, and the episode thumbnail reads the
+// episode. A season whose episodes carry no date at all reads as no date,
+// because min ignores the null the empty column becomes.
+func artReleaseDates(fact string) string {
+	art := artTypes[fact]
+	switch fact {
+	case factEpisodeThumb:
+		return `SELECT library, path AS item, released FROM episodes WHERE library = ?1`
+	case factSeasonPoster, factSeasonBanner:
+		return `SELECT e.library AS library, ` + seasonArtFileSQL(art.file) + ` AS item, ` +
+			`min(nullif(e.released, '')) AS released FROM episodes AS e ` +
+			`JOIN series AS s ON s.library = e.library AND s.id = e.series ` +
+			`WHERE e.library = ?1 GROUP BY e.library, s.path, e.season`
+	default:
+		return titleReleaseDates(`path || '/` + art.file + `'`)
+	}
 }
 
 // The file the fact would write is not in the catalog. This is the whole of

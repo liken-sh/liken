@@ -115,7 +115,7 @@ func (e *enricher) inScope(relative string) bool {
 // the same query the reporter counts the gap with.
 func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]string, error) {
 	keys, err := e.catalog.queryStrings(ctx, gapQueries[fact],
-		gapParams(e.library, now, e.refresh[fact]))
+		gapParams(fact, e.library, now, e.refresh[fact]))
 	if err != nil {
 		return nil, fmt.Errorf("reading the %s gap of %s: %w", fact, e.library, err)
 	}

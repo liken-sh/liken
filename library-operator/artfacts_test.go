@@ -407,3 +407,184 @@ func TestARefreshOpensTheArtGap(t *testing.T) {
 		})
 	}
 }
+
+// The midnight that starts one day, UTC, which is how these cases name a date
+// the catalog holds as text.
+func dayOf(t *testing.T, date string) time.Time {
+	t.Helper()
+	day, err := time.Parse(time.DateOnly, date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return day
+}
+
+// The episode file the fixture below seeds, which is the item the
+// thumbnail's attempts key on.
+const airingEpisodeFile = "Quiet Harbor (2008)/Season 11/Quiet Harbor - S11E09.mkv"
+
+// One series with a TMDb alias and one episode that airs on the date the
+// caller names, which is the shape of a title the enricher asks a provider
+// about before the provider holds anything for it.
+func seedAiringEpisode(t *testing.T, catalog *Catalog, released string) {
+	t.Helper()
+	seed := &walkResult{
+		series: []seriesRow{{
+			Id: "series:tvdb:81189", Library: artLibrary, Kind: libraryKindSeries,
+			Path: "Quiet Harbor (2008)", Title: "Quiet Harbor", Released: "2008-01-06",
+		}},
+		aliases: []aliasRow{
+			{Alias: "series:tvdb:81189", Library: artLibrary, Item: "series:tvdb:81189", Source: aliasSourceProvider},
+			{Alias: "series:tmdb:1396", Library: artLibrary, Item: "series:tvdb:81189", Source: aliasSourceProvider},
+		},
+		episodes: []episodeRow{{
+			Id: episodeID("series:tvdb:81189", 11, 9), Library: artLibrary,
+			Kind: libraryKindSeries, Path: airingEpisodeFile, Title: "One More",
+			Series: "series:tvdb:81189", Season: 11, Episode: 9, Released: released,
+		}},
+	}
+	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An attempt the enricher made before the episode aired stands only until the
+// air date, because a provider that held no still before the episode aired can
+// hold one after it.
+func TestAnAttemptBeforeTheAirDateStandsOnlyUntilIt(t *testing.T) {
+	cases := []struct {
+		name     string
+		released string
+		result   string
+		asked    string
+		today    string
+		want     int
+	}{
+		{name: "asked before the air date, and the episode has not aired",
+			released: "2026-09-21", result: attemptNothing, asked: "2026-09-04", today: "2026-09-05"},
+		{name: "asked before the air date, and the episode airs today",
+			released: "2026-09-21", result: attemptNothing, asked: "2026-09-04", today: "2026-09-21", want: 1},
+		{name: "asked after the air date, inside the thirty days",
+			released: "2026-09-21", result: attemptNothing, asked: "2026-09-22", today: "2026-10-10"},
+		{name: "asked after the air date, past the thirty days",
+			released: "2026-09-21", result: attemptNothing, asked: "2026-09-22", today: "2026-10-25", want: 1},
+		{name: "an episode the catalog holds no air date for",
+			released: "", result: attemptNothing, asked: "2026-09-04", today: "2026-09-21"},
+		{name: "an error before the air date, the same day",
+			released: "2026-09-21", result: attemptError, asked: "2026-09-04", today: "2026-09-04"},
+		{name: "an error before the air date, two days later",
+			released: "2026-09-21", result: attemptError, asked: "2026-09-04", today: "2026-09-06", want: 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedAiringEpisode(t, catalog, test.released)
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: artLibrary, Item: airingEpisodeFile, Fact: factEpisodeThumb,
+				At: dayOf(t, test.asked).Unix(), Result: test.result,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			gaps, err := catalog.artGaps(t.Context(), artLibrary, factEpisodeThumb,
+				dayOf(t, test.today), time.Time{})
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(gaps) != test.want {
+				t.Errorf("gaps = %+v, want %d", gaps, test.want)
+			}
+		})
+	}
+}
+
+// A title's own art reads the title's release date, so a poster no provider
+// held before the film came out is a gap again on the day it comes out.
+func TestATitleArtAttemptBeforeTheReleaseStandsOnlyUntilIt(t *testing.T) {
+	cases := []struct {
+		name  string
+		today string
+		want  int
+	}{
+		{name: "the film is not out yet", today: "2026-09-05"},
+		{name: "the film comes out today", today: "2026-09-21", want: 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seed := &walkResult{
+				movies: []movieRow{{
+					Id: "movie:tmdb:603", Library: artLibrary, Kind: libraryKindMovies,
+					Path: "The Signal (2026)", Title: "The Signal", Released: "2026-09-21",
+				}},
+				aliases: []aliasRow{{
+					Alias: "movie:tmdb:603", Library: artLibrary,
+					Item: "movie:tmdb:603", Source: aliasSourceProvider,
+				}},
+			}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: artLibrary, Item: "The Signal (2026)/poster.jpg", Fact: factPoster,
+				At: dayOf(t, "2026-09-04").Unix(), Result: attemptNothing,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			gaps, err := catalog.artGaps(t.Context(), artLibrary, factPoster,
+				dayOf(t, test.today), time.Time{})
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(gaps) != test.want {
+				t.Errorf("gaps = %+v, want %d", gaps, test.want)
+			}
+		})
+	}
+}
+
+// A season's art reads the earliest episode of that season, because that is
+// the day the season starts and the day a provider first holds art for it.
+func TestASeasonArtAttemptBeforeTheFirstEpisodeStandsOnlyUntilIt(t *testing.T) {
+	cases := []struct {
+		name  string
+		today string
+		want  int
+	}{
+		{name: "the season has not started", today: "2026-09-20"},
+		{name: "the season starts today", today: "2026-09-21", want: 1},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedAiringEpisode(t, catalog, "2026-09-28")
+			if err := upsertWalk(t.Context(), catalog, &walkResult{episodes: []episodeRow{{
+				Id: episodeID("series:tvdb:81189", 11, 1), Library: artLibrary,
+				Kind: libraryKindSeries, Title: "The First",
+				Path:   "Quiet Harbor (2008)/Season 11/Quiet Harbor - S11E01.mkv",
+				Series: "series:tvdb:81189", Season: 11, Episode: 1, Released: "2026-09-21",
+			}}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
+				Library: artLibrary, Item: "Quiet Harbor (2008)/season11-poster.jpg",
+				Fact: factSeasonPoster, At: dayOf(t, "2026-09-04").Unix(), Result: attemptNothing,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+
+			gaps, err := catalog.artGaps(t.Context(), artLibrary, factSeasonPoster,
+				dayOf(t, test.today), time.Time{})
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(gaps) != test.want {
+				t.Errorf("gaps = %+v, want %d", gaps, test.want)
+			}
+		})
+	}
+}

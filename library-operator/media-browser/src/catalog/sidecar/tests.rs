@@ -135,6 +135,31 @@ fn insert_released_episode(
         .unwrap();
 }
 
+// The art files beside a series, as the catalog's own two columns: the
+// primary art, and the list of every art file. An episode with no still
+// of its own draws out of these.
+fn set_series_art(path: &Path, library: &str, id: &str, art: &str, arts: &[&str]) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "UPDATE series SET art = ?, arts = ? WHERE library = ? AND id = ?",
+            (art, serde_json::to_string(arts).unwrap(), library, id),
+        )
+        .unwrap();
+}
+
+// The gap the fallback is about: an episode the catalog holds no still
+// for, its art column empty and its list of art files empty with it.
+fn clear_episode_art(path: &Path, library: &str, id: &str) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "UPDATE episodes SET art = '', arts = '[]' WHERE library = ? AND id = ?",
+            (library, id),
+        )
+        .unwrap();
+}
+
 // One file on the volume, and the link that ties it to an item. The
 // trickplay path is derived from the file's own, the way a scanner writes it.
 fn insert_file(path: &Path, library: &str, file: &str, item: &str, kind: &str, role: &str) {

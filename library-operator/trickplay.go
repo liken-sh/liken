@@ -47,7 +47,7 @@ type trickplayGap struct {
 func (c *Catalog) trickplayGaps(ctx context.Context, library string,
 	now, refresh time.Time) ([]trickplayGap, error) {
 	var gaps []trickplayGap
-	err := c.stream(ctx, gapQueries[factTrickplay], gapParams(library, now, refresh),
+	err := c.stream(ctx, gapQueries[factTrickplay], gapParams(factTrickplay, library, now, refresh),
 		func(cells []any) error {
 			if len(cells) < 2 {
 				return nil

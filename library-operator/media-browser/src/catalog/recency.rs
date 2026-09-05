@@ -51,7 +51,9 @@ const DAY: i64 = 86_400;
 /// One row a recency read answers with before the fold: a movie as its
 /// slot, or an episode with its series row read beside it, because a
 /// folded episode becomes a slot for the series with the series'
-/// poster.
+/// poster. The read resolves the episode's own art before the fold, so
+/// an episode the catalog holds no still for already carries the art of
+/// its series.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Candidate {
     Movie {

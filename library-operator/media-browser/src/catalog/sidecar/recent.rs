@@ -7,7 +7,7 @@ use rusqlite::{Connection, Row};
 
 use super::{collect, item};
 use crate::catalog::recency::{CANDIDATES, Candidate, PAGES};
-use crate::catalog::{Order, Slot, Title};
+use crate::catalog::{Order, Slot, Title, art};
 
 /// The column an order names. The closed match is the whole of what may
 /// reach the SQL text.
@@ -49,7 +49,7 @@ fn candidate_sql(order: Order) -> String {
            SELECT {movie_columns}, keys.library, keys.added, 'movies' AS kind, \
                   '' AS series, 0 AS season, 0 AS episode, \
                   '' AS series_title, '' AS series_art, '' AS series_released, \
-                  0 AS series_duration, '' AS series_rating, \
+                  0 AS series_duration, '' AS series_rating, '[]' AS series_arts, \
                   keys.{key} AS ordering, keys.kind AS tie_kind \
            FROM candidate_keys AS keys \
            JOIN movies ON movies.library = keys.library AND movies.id = keys.id \
@@ -58,7 +58,7 @@ fn candidate_sql(order: Order) -> String {
            SELECT {episode_columns}, keys.library, keys.added, 'episodes' AS kind, \
                   keys.series, keys.season, keys.episode, \
                   series.title, series.art, series.released, series.duration, \
-                  json_extract(series.body, '$.contentRating'), \
+                  json_extract(series.body, '$.contentRating'), series.arts, \
                   keys.{key} AS ordering, keys.kind AS tie_kind \
            FROM candidate_keys AS keys \
            JOIN episodes ON episodes.library = keys.library AND episodes.id = keys.id \
@@ -82,7 +82,7 @@ const EPISODE_COLUMNS: &str = "episodes.id, episodes.title, episodes.released, e
                                episodes.duration, '', ''";
 
 fn candidate(row: &Row<'_>) -> rusqlite::Result<Candidate> {
-    let title = item::title(row)?;
+    let mut title = item::title(row)?;
     // The columns the union selects after the ones every list reads.
     let at = |column: usize| item::WIDTH + column;
     let library: String = row.get(at(0))?;
@@ -92,20 +92,29 @@ fn candidate(row: &Row<'_>) -> rusqlite::Result<Candidate> {
             slot: Slot::of(&library, "movies", title),
         });
     }
+    let series = Title {
+        id: row.get(at(3))?,
+        title: row.get(at(6))?,
+        art: row.get(at(7))?,
+        released: row.get(at(8))?,
+        duration: row.get(at(9))?,
+        rating: item::text(row, at(10))?,
+        tagline: String::new(),
+    };
+    // The series row comes with every episode candidate, so the still an
+    // episode with no art of its own draws is decided here, once, for
+    // every strip a recency query feeds.
+    title.art = art::still(
+        &title.art,
+        &series.art,
+        &item::strings(&item::text(row, at(11))?),
+    );
     Ok(Candidate::Episode {
         library,
         episode: title,
         added: row.get(at(1))?,
         season: row.get(at(4))?,
         number: row.get(at(5))?,
-        series: Title {
-            id: row.get(at(3))?,
-            title: row.get(at(6))?,
-            art: row.get(at(7))?,
-            released: row.get(at(8))?,
-            duration: row.get(at(9))?,
-            rating: item::text(row, at(10))?,
-            tagline: String::new(),
-        },
+        series,
     })
 }

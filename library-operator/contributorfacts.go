@@ -312,7 +312,7 @@ func (e *enricher) recordContributor(folder, fact, provider, result, wrote strin
 func (c *Catalog) contributorGaps(ctx context.Context, library, fact string,
 	now, refresh time.Time) ([]contributorGap, error) {
 	var gaps []contributorGap
-	err := c.stream(ctx, gapQueries[fact], gapParams(library, now, refresh), func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(fact, library, now, refresh), func(cells []any) error {
 		if len(cells) < 2 {
 			return nil
 		}

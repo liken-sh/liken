@@ -193,7 +193,7 @@ func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
 	}
 
 	gaps, err := catalog.queryStrings(t.Context(), gapQueries[factProbe],
-		gapParams("house/series", ledgerTime, time.Time{}))
+		gapParams(factProbe, "house/series", ledgerTime, time.Time{}))
 
 	if err != nil {
 		t.Fatal(err)

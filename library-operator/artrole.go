@@ -156,7 +156,7 @@ func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
 func (c *Catalog) artGaps(ctx context.Context, library, fact string,
 	now, refresh time.Time) ([]artGap, error) {
 	var gaps []artGap
-	err := c.stream(ctx, gapQueries[fact], gapParams(library, now, refresh), func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(fact, library, now, refresh), func(cells []any) error {
 		if len(cells) < 4 {
 			return nil
 		}

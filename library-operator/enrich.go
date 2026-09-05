@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -91,6 +92,8 @@ const (
 // providers gain ids and art over time. An error stands for a day, so a
 // provider that is down or a volume that will not read is asked again the
 // next day, and a fault that stands costs one try a day.
+// An attempt an item's release date has outlived stands for neither
+// window. beforeReleaseClause carries that rule.
 const (
 	defaultRetryInterval = 30 * 24 * time.Hour
 	errorRetryInterval   = 24 * time.Hour
@@ -102,11 +105,20 @@ const (
 // A fact the Library's spec.refresh does not name binds a refresh of
 // zero, which every attempt is later than, so the query reads as it did
 // before the field existed.
-func gapParams(library string, now, refresh time.Time) []any {
-	return []any{library,
+//
+// A fact whose items carry a release date binds today as a fifth, in the
+// form the released column holds, because an attempt made before an item
+// was released stands only until that date. A fact whose items carry
+// none names no fifth parameter, so it binds none.
+func gapParams(fact, library string, now, refresh time.Time) []any {
+	params := []any{library,
 		now.Add(-defaultRetryInterval).Unix(),
 		now.Add(-errorRetryInterval).Unix(),
 		refreshSeconds(refresh, now)}
+	if releaseDates(fact) == "" {
+		return params
+	}
+	return append(params, now.UTC().Format(time.DateOnly))
 }
 
 // The refresh time in Unix seconds, and zero where the Library names none or
@@ -145,14 +157,60 @@ func refreshedClause(fact, column string) string {
 		`AND ` + attemptFactColumn + ` = '` + fact + `' AND at < ?4)`
 }
 
+// The items this fact attempted before the item was released, where the
+// release date has arrived. A provider that held nothing for a title
+// before its release day can hold something after it, so an attempt from
+// before the release date stands only until that date, and an attempt
+// from on or after it stands for the window its own kind carries.
+//
+// Both sides of the comparison are text, and both sort as dates: the
+// catalog holds a release as an ISO date or as a year alone, and a year
+// alone reads as the first day of that year. The subquery reads the
+// release date off a join by item, never off the outer row, so SQLite
+// builds it once.
+func beforeReleaseClause(fact, column string) string {
+	releases := releaseDates(fact)
+	if releases == "" {
+		return ""
+	}
+	return ` OR ` + column + ` IN (SELECT a.item FROM attempts AS a ` +
+		`JOIN (` + releases + `) AS r ON r.library = a.library AND r.item = a.item ` +
+		`WHERE a.library = ?1 AND a.` + attemptFactColumn + ` = '` + fact + `' ` +
+		`AND r.released != '' AND date(a.at, 'unixepoch') < r.released ` +
+		`AND ?5 >= r.released)`
+}
+
+// Where the items of one fact carry their release date, as the library,
+// the item the fact's attempts key on, and the released column. A fact
+// whose items have no release date in the catalog reads as an empty
+// string, and the attempt window alone holds its items.
+func releaseDates(fact string) string {
+	if _, art := artTypes[fact]; art {
+		return artReleaseDates(fact)
+	}
+	if fact == factIdentity || fact == factCredits || slices.Contains(nfoFacts, fact) {
+		return titleReleaseDates("id")
+	}
+	return ""
+}
+
+// The release date of every movie and every series of one library, keyed
+// on the item the fact names: the title's own id, or the file the title's
+// art lands in.
+func titleReleaseDates(item string) string {
+	return `SELECT library, ` + item + ` AS item, released FROM movies WHERE library = ?1 ` +
+		`UNION ALL SELECT library, ` + item + `, released FROM series WHERE library = ?1`
+}
+
 // The whole tail of a gap query: the fact's own condition for an item
 // it has not filled, the refresh that opens an item it did fill, and
-// the attempt window that holds an item it tried lately.
-// Neither subquery reads the outer row, so SQLite builds each one once
+// the attempt window that holds an item it tried lately, less the
+// attempts the item's own release date has outlived.
+// No subquery reads the outer row, so SQLite builds each one once
 // for the whole query.
 func gapClause(fact, column, missing string) string {
 	return `(` + missing + ` OR ` + refreshedClause(fact, column) + `) ` +
-		`AND ` + attemptClause(fact, column)
+		`AND (` + attemptClause(fact, column) + beforeReleaseClause(fact, column) + `)`
 }
 
 // The gap query per fact, keyed by fact. Every query binds the library as ?1,
@@ -160,7 +218,9 @@ func gapClause(fact, column, missing string) string {
 // error as ?3, and selects the key of each row that needs work, so a count(*)
 // over it is the reporter's number and the rows are the container's work list.
 //
-// Every query binds the fact's refresh time as ?4.
+// Every query binds the fact's refresh time as ?4. A query whose items
+// carry a release date binds today's date as ?5, and no other query
+// names a fifth parameter.
 //
 // A probe gap is a present video file with no duration, which is what a file
 // with no streamdetails in its sidecar looks like in the catalog. An identity
