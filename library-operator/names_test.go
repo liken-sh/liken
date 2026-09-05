@@ -200,9 +200,11 @@ func TestDiscoverArtAndTrickplay(t *testing.T) {
 	}
 }
 
-// The art a folder holds is the art the files table already
-// classified, so a name-prefixed poster is the item's poster, a bare name wins
-// over a prefixed one, and the first name in order wins among equals.
+// The art a folder holds is the art the files table already classified,
+// so a name-prefixed poster is the item's poster. A bare name wins over a
+// prefixed one, among names of one shape the explicit mark wins over the
+// generic one (poster over folder over cover), and the first name in
+// order wins among equals.
 func TestDiscoverArtPicksByRole(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -221,12 +223,6 @@ func TestDiscoverArtPicksByRole(t *testing.T) {
 			files:       []string{"poster.jpg", "fanart.jpg"},
 			wantPrimary: "poster.jpg",
 			wantAll:     []string{"poster.jpg", "fanart.jpg"},
-		},
-		{
-			name:        "folder wins over poster",
-			files:       []string{"folder.jpg", "poster.jpg"},
-			wantPrimary: "folder.jpg",
-			wantAll:     []string{"folder.jpg"},
 		},
 		{
 			name:        "backdrop wins over fanart",
@@ -265,6 +261,30 @@ func TestDiscoverArtPicksByRole(t *testing.T) {
 			files:       []string{"Solaris (1972)-poster.jpg", "Andrei Rublev (1966)-poster.jpg"},
 			wantPrimary: "Andrei Rublev (1966)-poster.jpg",
 			wantAll:     []string{"Andrei Rublev (1966)-poster.jpg"},
+		},
+		{
+			name:        "poster wins over folder",
+			files:       []string{"folder.jpg", "poster.jpg"},
+			wantPrimary: "poster.jpg",
+			wantAll:     []string{"poster.jpg"},
+		},
+		{
+			name:        "poster wins over cover",
+			files:       []string{"cover.jpg", "poster.jpg"},
+			wantPrimary: "poster.jpg",
+			wantAll:     []string{"poster.jpg"},
+		},
+		{
+			name:        "folder wins over cover",
+			files:       []string{"cover.jpg", "folder.jpg"},
+			wantPrimary: "folder.jpg",
+			wantAll:     []string{"folder.jpg"},
+		},
+		{
+			name:        "a bare folder still wins over a prefixed poster",
+			files:       []string{"folder.jpg", "Solaris (1972)-poster.jpg"},
+			wantPrimary: "folder.jpg",
+			wantAll:     []string{"folder.jpg"},
 		},
 		{
 			name:        "a folder with no art",

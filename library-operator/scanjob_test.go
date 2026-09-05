@@ -247,9 +247,10 @@ func TestServeHeldPathsWaitsForAFullWalk(t *testing.T) {
 	}
 }
 
-// a walk of another Library, and a walk in another namespace, hold
-// nothing here.
-func TestScanRunningReadsOneLibraryOfOneNamespace(t *testing.T) {
+// A walk of another Library, and a walk in another namespace, hold nothing
+// here. The departure reads the Job and not its pods, so a Job between the
+// pods of its backoff counts as open.
+func TestScanUnfinishedReadsOneLibraryOfOneNamespace(t *testing.T) {
 	otherLibrary := houseJob("shows-scan-1", workerScan, JobStatus{Active: 1})
 	otherLibrary.Metadata.Labels[libraryLabelKey] = "shows"
 	otherNamespace := houseJob("movies-scan-1", workerScan, JobStatus{Active: 1})
@@ -263,11 +264,13 @@ func TestScanRunningReadsOneLibraryOfOneNamespace(t *testing.T) {
 		{name: "another library", jobs: []Job{otherLibrary}},
 		{name: "another namespace", jobs: []Job{otherNamespace}},
 		{name: "this library", jobs: []Job{walkJob(JobStatus{Active: 1})}, running: true},
+		{name: "this library between the pods of its backoff",
+			jobs: []Job{walkJob(JobStatus{Active: 0, Failed: 1})}, running: true},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			if got := scanRunning(one.jobs, "house", "movies"); got != one.running {
-				t.Errorf("scanRunning = %v, want %v", got, one.running)
+			if got := scanUnfinished(one.jobs, "house", "movies"); got != one.running {
+				t.Errorf("scanUnfinished = %v, want %v", got, one.running)
 			}
 		})
 	}

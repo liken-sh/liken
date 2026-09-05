@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,5 +197,96 @@ func TestTheFranchiseScanJobReportsAFailedFetch(t *testing.T) {
 	failure, _ := params[8].(string)
 	if !strings.Contains(failure, "forge.invalid") {
 		t.Errorf("the run carries the failure %q, want it to name the repository", failure)
+	}
+}
+
+// A catalog that answers one kind of request and refuses another, so a test
+// drives the step of a scan that fails. Transactions is how many transactions
+// it answers before it refuses, and queries says whether it answers a read at
+// all.
+func refusingCatalog(t *testing.T, transactions int, queries bool) *Catalog {
+	t.Helper()
+	answered := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, queriesPath) {
+			if !queries {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = io.WriteString(w, "{\"columns\":[\"n\"]}\n{\"row\":[1,[0]]}\n{\"eoq\":{\"time\":0}}\n")
+			return
+		}
+		answered++
+		if answered > transactions {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		var posted []any
+		_ = json.NewDecoder(r.Body).Decode(&posted)
+		results := make([]map[string]any, len(posted))
+		for i := range results {
+			results[i] = map[string]any{"rows_affected": 1}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	}))
+	t.Cleanup(server.Close)
+	return NewCatalog(server.URL, server.Client())
+}
+
+// A scan whose catalog refuses a step fails the Job, so Kubernetes runs it
+// again. It never prunes on a catalog it could not read, because a prune with
+// no marks would sweep the whole library.
+func TestTheFranchiseScanFailsOnACatalogItCannotWrite(t *testing.T) {
+	url := gitRepository(t, "main", map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile})
+	cases := []struct {
+		name         string
+		transactions int
+		queries      bool
+		says         string
+	}{
+		{"the seen table", 0, true, "ensure the seen table"},
+		{"the count before the walk", 1, false, "count the catalog"},
+		{"the rows the walk read", 1, true, "write the franchises"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			scan := franchiseScannerOn(t, refusingCatalog(t, testCase.transactions, testCase.queries),
+				url, "main")
+
+			err := scan.walkOnce(t.Context())
+
+			if err == nil {
+				t.Fatalf("the scan finished, want it failed on %s", testCase.name)
+			}
+			if !strings.Contains(err.Error(), testCase.says) {
+				t.Errorf("the error is %q, want it to name %q", err, testCase.says)
+			}
+		})
+	}
+}
+
+// A checkout the walk could not read in full prunes nothing and fails the
+// Job, so a repository that answered half its files never sweeps a franchise
+// off the wall.
+func TestTheFranchiseScanPrunesNothingOnACheckoutItCouldNotRead(t *testing.T) {
+	scan, agent := franchiseScanner(t,
+		gitRepository(t, "main", map[string]string{"Star Wars/franchise.yaml": wholeFranchiseFile}),
+		"main")
+	if err := scan.walkOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second repository that holds neither file the first held, and whose
+	// one entry is a directory where a franchise.yaml goes, which every read
+	// of it refuses.
+	broken := gitRepository(t, "main", map[string]string{"Alien/franchise.yaml/keep": "x"})
+	second := franchiseScannerOn(t, scan.catalog, broken, "main")
+	err := second.walkOnce(t.Context())
+
+	if !errors.Is(err, errIncompleteWalk) {
+		t.Fatalf("the scan ended with %v, want the incomplete walk", err)
+	}
+	if held := agent.rowsFor(t, "franchises", "house/franchises"); held != 1 {
+		t.Errorf("franchises holds %d rows, want the one the last good scan left", held)
 	}
 }

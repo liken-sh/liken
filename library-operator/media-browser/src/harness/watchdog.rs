@@ -153,4 +153,12 @@ mod tests {
         Watchdog::new(None, Instant::now()).expire("no window");
         Watchdog::new(None, Instant::now()).expire_if_late(Instant::now());
     }
+
+    #[test]
+    fn an_unarmed_watchdog_never_runs_late() {
+        let start = Instant::now();
+        let watchdog = Watchdog::new(None, start);
+        watchdog.expire_if_late(start + Duration::from_secs(3600));
+        assert!(!watchdog.counting());
+    }
 }

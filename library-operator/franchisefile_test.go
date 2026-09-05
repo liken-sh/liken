@@ -204,3 +204,31 @@ func TestTheParserReadsEveryPrecisionOfAReleasedDate(t *testing.T) {
 		})
 	}
 }
+
+// The rules that guard an era and a season, each stated on its own. A file
+// that breaks one of them is refused whole, and the error names the part that
+// broke it.
+func TestTheParserRefusesABrokenEraOrSeason(t *testing.T) {
+	cases := []struct {
+		name string
+		was  string
+		now  string
+		says string
+	}{
+		{"an era with no name", "  - name: Age of Rebellion\n", "  - name: ''\n", "era"},
+		{"a season number below zero", "      - season: 1\n", "      - season: -1\n", "-1"},
+		{"a season time with one end", "      - season: 1\n",
+			"      - season: 1\n        time: { from: -22 }\n", "to"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := parseFranchiseFile(franchiseFileWith(t, testCase.was, testCase.now))
+			if err == nil {
+				t.Fatalf("the parser read the file, want it refused for %s", testCase.name)
+			}
+			if !strings.Contains(err.Error(), testCase.says) {
+				t.Errorf("the error is %q, want it to name %q", err, testCase.says)
+			}
+		})
+	}
+}

@@ -264,7 +264,11 @@ func (e *enricher) rescanTitle(folder string) {
 // left the volume is that folder, because a rescan of it takes its rows.
 func titleFolderOf(root, kind, absolute string) (string, bool) {
 	relative := relativePath(root, absolute)
-	if relative == absolute || relative == "." || strings.HasPrefix(relative, "..") {
+	// The guard names the climb itself and not every name that opens with
+	// two dots, so a title such as "...And Justice for All (1979)" is a
+	// title folder and never a path that left the root.
+	if relative == absolute || relative == "." ||
+		relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", false
 	}
 	parts := splitPath(relative)

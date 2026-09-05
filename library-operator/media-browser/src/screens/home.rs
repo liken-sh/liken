@@ -410,3 +410,34 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
         vec![frame.into_geometry()]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sample::Catalog;
+
+    #[test]
+    fn a_reread_keeps_the_rows_and_the_row_focus_was_on() {
+        let mut home = Home::open(&mut Catalog);
+        home.key("down", &mut Catalog);
+        let focus = home.focus;
+        let rows = home.blocks.len();
+        home.reread(&mut Catalog);
+        assert_eq!(home.focus, focus);
+        assert_eq!(home.blocks.len(), rows);
+    }
+
+    #[test]
+    fn the_band_prefetches_nothing_and_a_press_past_the_rows_moves_nothing() {
+        let mut home = Home::open(&mut Catalog);
+        home.control = Some(0);
+        assert!(!home.prefetches());
+        assert_eq!(home.resting(&mut Catalog), None);
+
+        home.control = None;
+        home.focus = 99;
+        assert!(!home.prefetches());
+        assert!(matches!(home.key("enter", &mut Catalog), Step::Stay));
+        assert_eq!(home.focus, 99);
+    }
+}

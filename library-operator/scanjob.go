@@ -190,18 +190,6 @@ func scanUnfinished(jobs []Job, namespace, library string) bool {
 	return false
 }
 
-// Whether any scan of this Library has a pod running, which is
-// what a departure waits out before it sweeps the rows a scan would
-// write again.
-func scanRunning(jobs []Job, namespace, library string) bool {
-	for _, job := range jobsOf(jobs, namespace, library, workerScan) {
-		if job.active() {
-			return true
-		}
-	}
-	return false
-}
-
 func ownedByCronJob(job *Job) bool {
 	for _, owner := range job.Metadata.OwnerReferences {
 		if owner.Kind == "CronJob" {

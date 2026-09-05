@@ -487,6 +487,28 @@ fn a_series_with_no_episodes_reaches_its_stripes() {
 }
 
 #[test]
+fn a_reread_whose_credits_left_while_a_stripe_held_focus_returns_to_the_wall() {
+    let (mut page, mut source) = credited(Serials {
+        credits: true,
+        ..Serials::default()
+    });
+    page.focus = Focus::Stripe(0, 1);
+    source.credits = false;
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Still(0));
+}
+
+#[test]
+fn a_select_on_a_stripe_slot_past_the_credits_opens_nothing_on_a_series() {
+    let (mut page, mut source) = credited(Serials {
+        credits: true,
+        ..Serials::default()
+    });
+    page.focus = Focus::Stripe(9, 9);
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+}
+
+#[test]
 fn a_reread_whose_credits_left_returns_focus_to_the_wall() {
     let (mut page, mut source) = credited(Serials::default());
     page.focus = Focus::Stripe(1, 1);

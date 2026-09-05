@@ -82,8 +82,11 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 	}
 
 	// A scan that is still running rewrites the rows the sweep deletes,
-	// and it holds the ReadWriteOnce claim the cleanup Job needs.
-	if scanRunning(jobs, namespace, name) {
+	// and it holds the ReadWriteOnce claim the cleanup Job needs. The
+	// guard reads the Job and not its pods, because a scan Job between
+	// the pods of its backoff has no pod running, and its next pod writes
+	// the rows the sweep deleted.
+	if scanUnfinished(jobs, namespace, name) {
 		return departure{
 			reason:  reasonScanRunning,
 			message: "a scan job of this library is still running",

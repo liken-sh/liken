@@ -145,4 +145,16 @@ mod tests {
         assert!(!captures.pending());
         assert!(!captures.taken());
     }
+
+    #[test]
+    fn a_frame_of_the_wrong_size_or_at_a_path_that_cannot_be_written_is_dropped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("frames").join("short.png");
+        write_png(&path, 4, 4, &[0; 12]);
+        assert!(!path.exists());
+
+        let unwritable = std::path::Path::new("/dev/null/frame.png");
+        write_png(unwritable, 1, 1, &[0; 4]);
+        assert!(!unwritable.exists());
+    }
 }

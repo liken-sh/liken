@@ -811,3 +811,20 @@ func TestTheScanJobFailsWhenItCannotWriteItsFinishedRun(t *testing.T) {
 		t.Errorf("error = %v, want the finished run named", err)
 	}
 }
+
+// A title folder whose name opens with dots is a title folder, not a path
+// that climbed above the root. A webhook rescan of it reads that one folder,
+// where a full walk of the library would cost a read of every folder it
+// holds.
+func TestTitleFolderOfATitleWhoseNameOpensWithDots(t *testing.T) {
+	root := t.TempDir()
+	title := "...And Justice for All (1979)"
+	writeFile(t, filepath.Join(root, title, "movie.mkv"), "x")
+
+	folder, held := titleFolderOf(root, libraryKindMovies,
+		filepath.Join(root, title, "movie.mkv"))
+
+	if !held || folder != filepath.Join(root, title) {
+		t.Errorf("titleFolderOf = %q %v, want the title's own folder", folder, held)
+	}
+}

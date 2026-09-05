@@ -198,6 +198,93 @@ fn a_person_in_two_libraries(path: &Path) {
 }
 
 #[test]
+fn a_credit_of_a_part_the_page_does_not_draw_is_left_out() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_movie(&path, "default/films", "movie:path:one", "One", "one");
+    insert_contributor(
+        &path,
+        "default/films",
+        ".contributors/producer",
+        "A Producer",
+        (0, 0),
+    );
+    insert_credit(
+        &path,
+        "default/films",
+        "movie:path:one",
+        1,
+        (".contributors/producer", "A Producer"),
+        ("producer", ""),
+    );
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    let credits = source.credits("default/films", "movie:path:one");
+    assert!(credits.directors.is_empty());
+    assert!(credits.writers.is_empty());
+    assert!(credits.cast.is_empty());
+
+    let answer = source.wall(&person_wall("default/films", ".contributors/producer"));
+    assert!(answer.slots.is_empty());
+}
+
+#[test]
+fn a_persons_alias_into_a_library_with_no_entry_is_passed_over() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_contributor(
+        &path,
+        "default/films",
+        ".contributors/first",
+        "A First",
+        (0, 0),
+    );
+    insert_alias(&path, "default/films", "tmdb", "31", ".contributors/first");
+    insert_alias(
+        &path,
+        "default/shows",
+        "tmdb",
+        "31",
+        ".contributors/a-first",
+    );
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    let person = source
+        .person("default/films", ".contributors/first")
+        .expect("the store holds this person");
+    assert!(!person.headshot);
+    assert_eq!(person.headshot_library, "");
+}
+
+#[test]
+fn the_first_library_that_holds_both_files_ends_the_search() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    a_person_in_two_libraries(&path);
+    insert_contributor(
+        &path,
+        "default/z-more",
+        ".contributors/first-again",
+        "A First",
+        (1, 1),
+    );
+    insert_alias(
+        &path,
+        "default/z-more",
+        "tmdb",
+        "31",
+        ".contributors/first-again",
+    );
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    let person = source
+        .person("default/films", ".contributors/first")
+        .expect("the store holds this person");
+    assert_eq!(person.headshot_library, "default/shows");
+    assert_eq!(person.biography_library, "default/shows");
+}
+
+#[test]
 fn a_persons_files_come_from_whichever_library_holds_them() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);

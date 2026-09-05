@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -220,5 +221,21 @@ func TestServeWebhooksReportsAnAddressItCannotBind(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("err = nil, want the failure to listen")
+	}
+}
+
+// A full walk held after a folder path replaces the set, because a walk
+// covers every path. Two held paths would stand two scan Jobs for one claim
+// that admits one writer, and the second would wait out the first for
+// nothing.
+func TestAFullWalkHeldAfterAPathReplacesIt(t *testing.T) {
+	held := newHeldPaths(nil)
+
+	held.hold("house", "movies", "/media/movies/One (2001)")
+	held.hold("house", "movies", "/media/movies/Two (2002)")
+	held.hold("house", "movies", "")
+
+	if paths := held.held("house", "movies"); !slices.Equal(paths, []string{""}) {
+		t.Errorf("the held paths are %v, want the full walk alone", paths)
 	}
 }

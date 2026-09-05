@@ -312,4 +312,23 @@ mod tests {
         assert_eq!(Tone::Dimmed.opacity(), look::DIM);
         assert_eq!(Tone::At(0.25).opacity(), 0.25);
     }
+
+    struct Named;
+
+    impl Card for Named {
+        fn name(&self) -> &str {
+            "A Title"
+        }
+    }
+
+    #[test]
+    fn a_card_states_nothing_but_its_name_unless_it_says_otherwise() {
+        assert_eq!(Named.art(), "");
+        assert_eq!(Named.library(), "");
+        assert_eq!(Named.detail(), "");
+        assert_eq!(Named.under(), "");
+        assert_eq!(Named.caption(), "A Title");
+        assert_eq!(Named.line_fitting(3), "A Title");
+        assert_eq!(Named.ratio(), wall::POSTER);
+    }
 }

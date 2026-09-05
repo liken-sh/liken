@@ -386,6 +386,18 @@ mod tests {
     }
 
     #[test]
+    fn a_release_date_of_any_bytes_never_splits_the_day_it_is_held_against() {
+        let cases = ["２０２７", "２７", "2027-０3", "soon™", "é"];
+        for date in cases {
+            let entry = Entry {
+                released: date.into(),
+                ..film("A Film")
+            };
+            let _ = entry.standing("2026-09-04");
+        }
+    }
+
+    #[test]
     fn a_held_entry_stands_held_whatever_its_release() {
         let entry = Entry {
             released: "2099-01-01".into(),

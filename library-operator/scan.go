@@ -243,10 +243,16 @@ func (s *scanner) runJob(ctx context.Context) error {
 	// The commit the last scan of this library read. A scan of an
 	// unchanged repository compares against it, and a failed scan keeps
 	// it.
-	if last, err := s.catalog.lastScan(ctx, s.library); err == nil {
-		s.noteCommit(last.Commit)
-		run.Commit = last.Commit
+	last, err := s.catalog.lastScan(ctx, s.library)
+	if err != nil {
+		// A read that failed leaves the mark unknown to this Job. The Job
+		// then names no commit, and the row keeps the one it holds, so a
+		// franchises scan reads the repository again rather than losing
+		// the mark.
+		s.logf("could not read the commit the last scan left: %v", err)
 	}
+	s.noteCommit(last.Commit)
+	run.Commit = last.Commit
 	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", s.library, err)
 	}
@@ -465,8 +471,13 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 // runs. The prune and the second count read the catalog back through the
 // query API, which can miss the walk's own writes for a window after a
 // fresh agent starts, so a failure in either is logged and left for the
-// next walk.
-func (s *scanner) settleWalk(ctx context.Context, epoch int64, before, titles, unidentified int,
+// next walk. `folders` is what the walk read, and the title count the
+// log carries is what the catalog holds after the prune. The two differ
+// where two folders name one provider id, because the id is the item's
+// key and the second folder writes over the first. The log names both,
+// so the number the Library's status shows is in the line beside the
+// number the walk read.
+func (s *scanner) settleWalk(ctx context.Context, epoch int64, before, folders, unidentified int,
 	unidentifiedNames []string, started time.Time) {
 	removed := -1
 	if count, err := pruneLibrary(ctx, s.catalog, s.library, epoch); err != nil {
@@ -491,9 +502,20 @@ func (s *scanner) settleWalk(ctx context.Context, epoch int64, before, titles, u
 		s.logWalk("count the catalog's files", err)
 	}
 
+	// The titles the catalog holds, which is what the reporter publishes
+	// and the Library's status carries. It is read for the log alone, so
+	// a read that lags behind the walk's own writes costs one line and
+	// never a count the operator acts on. A read that fails leaves the
+	// folder count in its place, so the walk still reports a number.
+	titles, err := s.catalog.countTitles(ctx, s.library)
+	if err != nil {
+		s.logWalk("count the catalog's titles", err)
+		titles = folders
+	}
+
 	now := time.Now().UTC()
 	s.mutex.Lock()
-	s.report.Titles = titles
+	s.report.Titles = folders
 	s.report.Unidentified = unidentified
 	s.report.LastWalk = now
 	if removed > 0 || after != before {
@@ -514,7 +536,7 @@ func (s *scanner) settleWalk(ctx context.Context, epoch int64, before, titles, u
 	}
 	s.mutex.Unlock()
 
-	s.logWalkComplete(titles, unidentified, removed, unidentifiedNames, time.Since(started))
+	s.logWalkComplete(titles, folders, unidentified, removed, unidentifiedNames, time.Since(started))
 }
 
 // The walk read only part of the volume, so it pruned nothing and
@@ -570,11 +592,11 @@ func (s *scanner) logIncompleteWalk(readError bool, items, before int) {
 // logWalkComplete writes the one summary line a finished walk leaves:
 // the counts, the sweep, and how long the walk took, then a capped sample of
 // the folders it could not identify.
-func (s *scanner) logWalkComplete(titles, unidentified, removed int, names []string, took time.Duration) {
+func (s *scanner) logWalkComplete(titles, folders, unidentified, removed int, names []string, took time.Duration) {
 	if removed >= 0 {
-		s.logf("walk complete: %d titles, %d unidentified, %d removed, in %s", titles, unidentified, removed, took.Round(time.Millisecond))
+		s.logf("walk complete: %d titles from %d folders, %d unidentified, %d removed, in %s", titles, folders, unidentified, removed, took.Round(time.Millisecond))
 	} else {
-		s.logf("walk complete: %d titles, %d unidentified, prune deferred, in %s", titles, unidentified, took.Round(time.Millisecond))
+		s.logf("walk complete: %d titles from %d folders, %d unidentified, prune deferred, in %s", titles, folders, unidentified, took.Round(time.Millisecond))
 	}
 	if unidentified == 0 {
 		return
@@ -667,6 +689,13 @@ func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder
 	if result == nil {
 		return 0, 0, nil
 	}
+	// A read that failed describes only part of the folder, so the rescan
+	// writes nothing and prunes nothing. It is the rule the full walk
+	// follows, and it is what keeps a share that refuses one directory
+	// from emptying a title's rows.
+	if result.readError {
+		return 0, 0, fmt.Errorf("could not read %s in full", relative)
+	}
 
 	// The sets this folder's movies named are read before the upsert, so a
 	// movie that left its set still names the set that has to be derived
@@ -701,10 +730,14 @@ func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder
 
 // One title or series folder as rows, through the reader the walk uses for
 // the kind. A folder that left the volume reads as no rows, so the prune that
-// follows takes every row it held. A kind with no reader reads as nil.
+// follows takes every row it held. A folder the scanner could not stat
+// is not a folder that left the volume, so it marks the read incomplete
+// and the caller sweeps nothing. A kind with no reader reads as nil.
 func readFolder(scan folderScan, folder string) *walkResult {
 	result := &walkResult{}
-	if !dirExists(folder) {
+	held, err := directoryExists(folder)
+	result.noteReadError(err)
+	if err != nil || !held {
 		return result
 	}
 	switch scan.kind {

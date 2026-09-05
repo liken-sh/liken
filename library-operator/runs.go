@@ -113,7 +113,10 @@ const runsLibraryColumn = "library"
 // UpsertRun writes one worker's run of one library in place. The conflict
 // target is the whole primary key, and the update names no key column,
 // because cr-sqlite reads a change to a key column as a delete and a
-// create.
+// create. A run that names no commit keeps the one the row already
+// holds: a scan that could not read the mark and a scan that failed both
+// name none, so the mark the next scan compares against stands, and a
+// movies or series run always names none, so its column stays empty.
 func (c *Catalog) UpsertRun(ctx context.Context, library string, run libraryRun) error {
 	_, err := c.apply(ctx, []statement{{
 		sql: `INSERT INTO runs (library, worker, job, started, finished, unidentified, removed, commit_id, failure) ` +
@@ -121,7 +124,8 @@ func (c *Catalog) UpsertRun(ctx context.Context, library string, run libraryRun)
 			`ON CONFLICT (library, worker) DO UPDATE SET ` +
 			`job = excluded.job, started = excluded.started, finished = excluded.finished, ` +
 			`unidentified = excluded.unidentified, removed = excluded.removed, ` +
-			`commit_id = excluded.commit_id, failure = excluded.failure`,
+			`commit_id = CASE WHEN excluded.commit_id = '' THEN commit_id ELSE excluded.commit_id END, ` +
+			`failure = excluded.failure`,
 		params: []any{library, run.Worker, run.Job, runSeconds(run.Started), runSeconds(run.Finished),
 			run.Unidentified, run.Removed, run.Commit, run.Failure},
 	}})

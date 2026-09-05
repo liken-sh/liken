@@ -306,6 +306,33 @@ func creditPruneSQL() string {
 		` LIMIT ?`
 }
 
+// scopedCreditPruneSQL selects the credits of one title folder that the
+// current epoch did not mark. A rescan reaches them through the title
+// row the folder holds, so this sweep runs before the item sweeps take
+// that row, the way the genre sweep does. A sidecar that lists fewer
+// people than before leaves its higher billings unmarked, and they leave
+// here.
+func scopedCreditPruneSQL() string {
+	scope := func(table string) string {
+		return `SELECT id FROM ` + table + ` WHERE library = ? AND ` + pathScopeClause("path")
+	}
+	return `SELECT item || char(31) || billing FROM credits` +
+		` WHERE library = ?` +
+		` AND '` + seenCredit + `' || item || char(31) || billing` +
+		` NOT IN (SELECT id FROM seen WHERE epoch = ?)` +
+		` AND item IN (` + scope("movies") + ` UNION ` + scope("series") + `)` +
+		` LIMIT ?`
+}
+
+func scopedCreditPruneParams(library, folder string, epoch int64) []any {
+	params := []any{library, epoch}
+	for range 2 {
+		params = append(params, library)
+		params = append(params, pathScopeParams(folder)...)
+	}
+	return append(params, pruneBatch)
+}
+
 // One bounded batch of one library's credits, and one of its contributor
 // aliases, for the whole-library sweep. Each joins its two key columns
 // the way the prune reads join them.

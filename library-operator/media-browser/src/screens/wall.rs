@@ -256,6 +256,7 @@ fn height(head: Option<&Head>) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sample::Catalog;
 
     const WIDTH: f32 = 1920.0;
     const HEIGHT: f32 = 1080.0;
@@ -301,5 +302,16 @@ mod tests {
         for (movies, series, want) in cases {
             assert_eq!(counted(movies, series), want, "{movies} and {series}");
         }
+    }
+
+    #[test]
+    fn a_wall_whose_band_holds_focus_prefetches_nothing() {
+        let query = Query::Library {
+            library: "sample/features".into(),
+        };
+        let mut wall = Wall::open(query, &mut Catalog);
+        wall.control = Some(0);
+        assert!(!wall.prefetches());
+        assert_eq!(wall.resting(&mut Catalog), None);
     }
 }

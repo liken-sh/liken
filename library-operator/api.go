@@ -229,14 +229,18 @@ func (s LibrarySpec) settings() *LibrarySettings {
 }
 
 // LibraryStorage is the volume and the directory inside it. The
-// scanner mounts the claim read-only, and the operator reads the
-// PersistentVolume behind it for the volume's kind and address.
+// scanner of a movies or series library mounts the claim read-only, and
+// the scanner of a franchises library mounts it writable, because the
+// scan writes the art it downloads into it. The operator reads the
+// PersistentVolume behind the claim for the volume's kind and address.
 type LibraryStorage struct {
 	Claim string `json:"claim,omitempty"`
 
-	// Git is the repository a franchises library reads, in place of a
-	// claim. A Library names one of claim and git, never both and never
-	// neither.
+	// Git is the repository a franchises library reads for the story
+	// orders it derives. Every kind names a claim, and a franchises
+	// library writes the art it downloads into its claim. The CRD's rule
+	// has(self.storage.git) == (self.kind == 'franchises') makes the
+	// repository present exactly when the kind is franchises.
 	Git *LibraryGit `json:"git,omitempty"`
 
 	// The directory inside the claim this library starts at, always an

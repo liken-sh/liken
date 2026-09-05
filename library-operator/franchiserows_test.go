@@ -181,3 +181,35 @@ func heldRelease(t *testing.T, agent *sqliteAgent, position int) (string, int) {
 	}
 	return released, year
 }
+
+// A run key the sweep read back is the franchise, the position, the season,
+// and the episode joined. A key shorter than that names no run, and the
+// delete it builds reaches no row rather than guessing at one.
+func TestTheRunKeysReadBackWhatTheMarkWrote(t *testing.T) {
+	cases := []struct {
+		name string
+		key  string
+		want franchiseRunKey
+	}{
+		{
+			name: "the whole key",
+			key: "franchise:name:alien" + linkKeySeparator + "2" +
+				linkKeySeparator + "3" + linkKeySeparator + "4",
+			want: franchiseRunKey{Franchise: "franchise:name:alien", Position: 2, Season: 3, Episode: 4},
+		},
+		{
+			name: "a key with no season or episode",
+			key:  "franchise:name:alien" + linkKeySeparator + "2",
+			want: franchiseRunKey{Franchise: "franchise:name:alien", Position: 2},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			held := franchiseRunKeys([]string{testCase.key})
+
+			if len(held) != 1 || held[0] != testCase.want {
+				t.Errorf("franchiseRunKeys = %+v, want %+v", held, testCase.want)
+			}
+		})
+	}
+}

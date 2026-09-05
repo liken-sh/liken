@@ -90,7 +90,9 @@ func (h *heldPaths) hold(namespace, name, path string) {
 		h.mutex.Unlock()
 		return
 	}
-	if len(held) >= heldPathLimit {
+	// A full walk held after a folder path replaces the set, so a Library
+	// never stands two scan Jobs for one claim that admits one writer.
+	if path == "" || len(held) >= heldPathLimit {
 		h.paths[key] = map[string]bool{"": true}
 	} else {
 		held[path] = true

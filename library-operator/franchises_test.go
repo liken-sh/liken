@@ -211,3 +211,61 @@ func TestTheWalkReadsOnlyADirectoryThatHoldsTheFile(t *testing.T) {
 			result.franchises, result.unidentified)
 	}
 }
+
+// A checkout the walk cannot read marks the pass incomplete, so the prune
+// keeps the rows the catalog holds.
+func TestTheWalkMarksThePassIncompleteForACheckoutItCannotRead(t *testing.T) {
+	result := walkFranchises(filepath.Join(t.TempDir(), "nowhere"), t.TempDir(), "house/franchises")
+
+	if !result.readError || len(result.franchises) != 0 {
+		t.Errorf("the walk wrote %+v with readError %v, want no row and an incomplete pass",
+			result.franchises, result.readError)
+	}
+}
+
+// A franchise.yaml the scanner cannot read marks the pass incomplete. It is
+// not the same as a file the schema refuses, which is counted unidentified
+// and swept past.
+func TestTheWalkTellsAFileItCannotReadFromOneItRefuses(t *testing.T) {
+	root := franchiseCheckout(t, map[string]string{"Firefly/franchise.yaml": "name: Firefly\norder:\n  - series: tvdb:78874\n"})
+	// A directory where the file goes, which every read of it refuses.
+	if err := os.MkdirAll(filepath.Join(root, "Alien", franchiseFileName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := walkFranchises(root, root, "house/franchises")
+
+	if !result.readError {
+		t.Error("the walk read the whole checkout, want the unreadable file to mark it incomplete")
+	}
+	if result.unidentified != 0 {
+		t.Errorf("unidentified = %d, want a file it could not read counted as no such thing",
+			result.unidentified)
+	}
+	if len(result.franchises) != 1 {
+		t.Errorf("the walk wrote %+v, want the one file it could read", result.franchises)
+	}
+}
+
+// An entry with no time is untimed at both ends. A span the file validated
+// carries both ends, so the guard answers for the entry that carries none.
+func TestTheSpanOfAnUntimedEntryIsZeroAtBothEnds(t *testing.T) {
+	from := 3.0
+	cases := []struct {
+		name string
+		span *franchiseTime
+		want float64
+	}{
+		{"no time at all", nil, 0},
+		{"a span with no end", &franchiseTime{From: &from}, 0},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			held := spanEnd(testCase.span, func(t franchiseTime) *float64 { return t.To })
+
+			if held != testCase.want {
+				t.Errorf("spanEnd = %v, want %v", held, testCase.want)
+			}
+		})
+	}
+}

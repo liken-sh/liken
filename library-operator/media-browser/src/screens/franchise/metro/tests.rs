@@ -88,3 +88,16 @@ fn a_dot_stands_in_the_middle_of_its_row_and_scrolls_with_the_wall() {
         strip.y + tops[1] + THIN / 2.0 - 50.0
     );
 }
+#[test]
+fn black_encodes_as_black_and_white_as_white() {
+    let black = oklch(0.0, 0.0, 0.0);
+    assert!(
+        black.r < 0.01 && black.g < 0.01 && black.b < 0.01,
+        "{black:?}"
+    );
+    let white = oklch(1.0, 0.0, 0.0);
+    assert!(
+        white.r > 0.99 && white.g > 0.99 && white.b > 0.99,
+        "{white:?}"
+    );
+}

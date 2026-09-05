@@ -251,6 +251,10 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 	// holds a UNION of the item tables.
 	case strings.Contains(sql, "FROM genres"):
 		return f.unmarkedPairs(sql, p, f.genres)
+	// The credit read routes here for the same reason the genre read does:
+	// its scoped form holds a UNION of the item tables.
+	case strings.Contains(sql, "FROM credits"):
+		return f.unmarkedPairs(sql, p, f.credits)
 	case strings.Contains(sql, "UNION"):
 		return f.libraryKeys()
 	case strings.Contains(sql, "count(*) FROM seen"):
@@ -272,8 +276,6 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 		return f.unmarkedLinks(sql, p)
 	case strings.Contains(sql, "FROM contributor_aliases"):
 		return f.unmarkedPairs(sql, p, f.contributorAliases)
-	case strings.Contains(sql, "FROM credits"):
-		return f.unmarkedPairs(sql, p, f.credits)
 	case strings.Contains(sql, "FROM aliases"):
 		return f.unmarkedAliases(sql, p)
 	default:

@@ -335,3 +335,121 @@ func TestTheWalkReadsNoArtForADirectoryTheClaimDoesNotHold(t *testing.T) {
 			result.franchises[0].Art, result.readError)
 	}
 }
+
+// A checkout the fetch cannot read costs the art and nothing else. The walk
+// that follows reports the failure, so the fetch says only that it wrote
+// nothing.
+func TestTheArtFetchWritesNothingForACheckoutItCannotRead(t *testing.T) {
+	host := newArtHost(t)
+	fetch, _, claim := artFetchOf(t, host, map[string]string{})
+
+	wrote := fetch.fetchAll(t.Context(), filepath.Join(t.TempDir(), "nowhere"), claim)
+
+	if wrote != 0 {
+		t.Errorf("the fetch wrote %d files, want none", wrote)
+	}
+}
+
+// A directory whose art ledger the fetch cannot read is left alone. The
+// ledger says which files this fetch wrote, so a fetch that cannot read it
+// must not write over what is there.
+func TestTheArtFetchLeavesADirectoryWhoseLedgerItCannotRead(t *testing.T) {
+	host := newArtHost(t)
+	fetch, checkout, claim := artFetchOf(t, host,
+		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+	if err := os.MkdirAll(filepath.Join(claim, "Alien", likenDirectory), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claim, "Alien", likenDirectory, "art.yaml"),
+		[]byte("items: [this is not a list of items\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wrote := fetch.fetchAll(t.Context(), checkout, claim)
+
+	if wrote != 0 {
+		t.Errorf("the fetch wrote %d files, want none", wrote)
+	}
+	if reads := host.reads(); len(reads) != 0 {
+		t.Errorf("the fetch read %v, want nothing", reads)
+	}
+}
+
+// A claim the fetch cannot write leaves the row with no art. The walk still
+// writes the row, so a claim that is full or read-only costs the art and
+// never the order.
+func TestTheArtFetchWritesNothingWhenTheClaimRefusesTheDirectory(t *testing.T) {
+	host := newArtHost(t)
+	fetch, checkout, claim := artFetchOf(t, host,
+		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+	// A file where the directory would go, so the write cannot make it.
+	if err := os.WriteFile(filepath.Join(claim, "Alien"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 0 {
+		t.Errorf("the fetch wrote %d files, want none", wrote)
+	}
+	result := walkFranchises(checkout, claim, "house/franchises")
+	if len(result.franchises) != 1 || result.franchises[0].Art != "" {
+		t.Errorf("the walk wrote %+v, want the row with no art", result.franchises)
+	}
+}
+
+// A fetch that wrote the file and could not record the link leaves the file
+// for the owner. The next scan reads a file the ledger does not name, and
+// keeps it.
+func TestTheArtFetchKeepsAFileWhoseMarkItCouldNotWrite(t *testing.T) {
+	host := newArtHost(t)
+	fetch, checkout, claim := artFetchOf(t, host,
+		map[string]string{"Alien/franchise.yaml": host.file("poster")})
+	// A ledger directory the writer cannot write into, so the mark fails
+	// and the image still lands beside it.
+	if err := os.MkdirAll(filepath.Join(claim, "Alien"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(claim, "Alien", likenDirectory), 0o500); err != nil {
+		t.Fatal(err)
+	}
+
+	if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 1 {
+		t.Fatalf("the fetch wrote %d files, want the one link", wrote)
+	}
+	host.reads()
+	if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 0 {
+		t.Errorf("the second fetch wrote %d files, want it to keep the file it found", wrote)
+	}
+	if reads := host.reads(); len(reads) != 0 {
+		t.Errorf("the second fetch read %v, want nothing", reads)
+	}
+}
+
+// A link the fetch cannot reach at all is logged and skipped, the way a link
+// the host refuses is. A url the client cannot even build is one of them.
+func TestTheArtFetchSkipsALinkItCannotReach(t *testing.T) {
+	host := newArtHost(t)
+	closed := newArtHost(t)
+	address := closed.server.URL
+	closed.server.Close()
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"a host that answers nothing", address + "/alien/poster"},
+		{"a url the client cannot build", "https://art.example/%zz"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fetch, checkout, claim := artFetchOf(t, host, map[string]string{
+				"Alien/franchise.yaml": "name: Alien\nart:\n  poster: " + testCase.url +
+					"\norder:\n  - movie: tmdb:348\n"})
+
+			if wrote := fetch.fetchAll(t.Context(), checkout, claim); wrote != 0 {
+				t.Errorf("the fetch wrote %d files, want none", wrote)
+			}
+			if held := filesIn(t, filepath.Join(claim, "Alien")); len(held) != 0 {
+				t.Errorf("the claim holds %v, want nothing", held)
+			}
+		})
+	}
+}

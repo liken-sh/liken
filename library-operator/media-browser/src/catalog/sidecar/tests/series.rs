@@ -10,6 +10,28 @@ const SERIES_BODY: &str = r#"{"plot":"A plot.","tagline":"One line.","contentRat
     "cast":[{"name":"A Player","role":"The Part"}]}"#;
 
 #[test]
+fn a_series_file_of_a_role_the_page_does_not_draw_is_left_out() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_series(&path, "default/shows", "series:path:one", "One", "one");
+    insert_file(
+        &path,
+        "default/shows",
+        "one/trailer.mkv",
+        "series:path:one",
+        "video",
+        "trailer",
+    );
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    let page = source
+        .series("default/shows", "series:path:one")
+        .expect("the series is there");
+    assert_eq!(page.backdrop, "");
+    assert_eq!(page.logo, "");
+}
+
+#[test]
 fn a_series_page_reads_its_body_its_seasons_and_its_art_by_role() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);

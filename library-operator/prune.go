@@ -506,6 +506,19 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 	}
 	removed += n
 
+	// The credits of the folder's title, swept the way its genres are. A
+	// sidecar that lists fewer people than before leaves its higher
+	// billings unmarked, and a title that left the volume leaves every
+	// credit it held.
+	n, err = catalog.sweep(ctx, scopedCreditPruneSQL(), scopedCreditPruneParams(library, folder, epoch),
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteCredits(ctx, library, creditKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
 	for _, table := range []struct {
 		name   string
 		delete func(context.Context, string, []string) (int, error)

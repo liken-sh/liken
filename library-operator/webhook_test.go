@@ -7,6 +7,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,5 +195,24 @@ func TestResolveWebhookPathRelativeMissing(t *testing.T) {
 	scan, _ := testScanner(t, "testdata/movies", libraryKindMovies)
 	if got := scan.resolveWebhookPath("Action/Not There"); got != "" {
 		t.Errorf("resolveWebhookPath = %q, want empty for a missing relative path", got)
+	}
+}
+
+// A payload path that climbs above the library root maps to nothing, so the
+// caller covers the whole library. The path comes from a media server over
+// HTTP and from a Job's own annotation, so nothing may take it as a path
+// under the mount.
+func TestAPayloadPathThatClimbsAboveTheRootMapsToNothing(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "One (2001)"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []string{"..", "../", "../..", "../" + filepath.Base(root), "One (2001)/../.."}
+	for _, payload := range cases {
+		t.Run(payload, func(t *testing.T) {
+			if held := resolveVolumePath(root, payload); held != "" {
+				t.Errorf("resolveVolumePath = %q, want nothing for a path above the root", held)
+			}
+		})
 	}
 }

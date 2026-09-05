@@ -410,7 +410,8 @@ func TestFullWalkLogsASummaryAndACappedUnidentifiedSample(t *testing.T) {
 			if !strings.Contains(out, fmt.Sprintf("walking %s", root)) {
 				t.Errorf("log = %q, want the walk-start line", out)
 			}
-			summary := fmt.Sprintf("walk complete: %d titles, %d unidentified, 0 removed", testCase.count, testCase.count)
+			summary := fmt.Sprintf("walk complete: %d titles from %d folders, %d unidentified, 0 removed",
+				testCase.count, testCase.count, testCase.count)
 			if !strings.Contains(out, summary) {
 				t.Errorf("log = %q, want %q", out, summary)
 			}

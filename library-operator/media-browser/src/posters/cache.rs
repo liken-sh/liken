@@ -42,11 +42,17 @@ impl<K: Clone + Eq + Hash> Cache<K> {
     }
 
     // A failed decode is cached at zero bytes, so the wall does not
-    // decode a bad file again. Eviction skips zero-byte entries,
-    // because removing one frees no budget.
+    // decode a bad file again. The byte eviction skips zero-byte
+    // entries, because removing one frees no budget, so the failed
+    // entries have a bound of their own: past FAILED, the least recently
+    // asked one leaves, and a library of bad files cannot grow the map
+    // without end.
     pub(crate) fn insert(&mut self, key: K, value: Decoded) {
         if let Some(old) = self.slots.remove(&key) {
             self.used -= bytes(&old.value);
+        }
+        if bytes(&value) == 0 {
+            self.forget_a_failure();
         }
         let incoming = bytes(&value);
         while self.used + incoming > self.budget {
@@ -74,6 +80,34 @@ impl<K: Clone + Eq + Hash> Cache<K> {
     }
 }
 
+// How many failed decodes the cache remembers at most.
+const FAILED: usize = 1024;
+
+impl<K: Clone + Eq + Hash> Cache<K> {
+    // Drops the least recently asked failed entry once the failed entries
+    // reach their bound, so the next one has a place.
+    fn forget_a_failure(&mut self) {
+        let failed = self
+            .slots
+            .values()
+            .filter(|slot| bytes(&slot.value) == 0)
+            .count();
+        if failed < FAILED {
+            return;
+        }
+        let Some(oldest) = self
+            .slots
+            .iter()
+            .filter(|(_, slot)| bytes(&slot.value) == 0)
+            .min_by_key(|(_, slot)| slot.last_used)
+            .map(|(key, _)| key.clone())
+        else {
+            return;
+        };
+        self.slots.remove(&oldest);
+    }
+}
+
 fn bytes(value: &Decoded) -> usize {
     match value {
         Decoded::Ready(poster) => poster.rgba.len(),
@@ -84,7 +118,7 @@ fn bytes(value: &Decoded) -> usize {
 #[cfg(test)]
 mod tests {
     use super::super::store::Poster;
-    use super::{Cache, Decoded};
+    use super::{Cache, Decoded, FAILED};
 
     fn poster(bytes: usize) -> Decoded {
         Decoded::Ready(Poster::new(1, 1, vec![0u8; bytes].into()))
@@ -114,6 +148,20 @@ mod tests {
         cache.insert("bad", Decoded::Failed);
         assert!(is_ready(cache.get(&"a")));
         assert!(matches!(cache.get(&"bad"), Some(Decoded::Failed)));
+    }
+
+    #[test]
+    fn failed_entries_are_bounded_and_the_oldest_leaves_first() {
+        let mut cache = Cache::new(256);
+        for key in 0..FAILED {
+            cache.insert(key, Decoded::Failed);
+        }
+        assert!(matches!(cache.get(&0), Some(Decoded::Failed)));
+        cache.insert(FAILED, Decoded::Failed);
+        assert!(matches!(cache.get(&0), Some(Decoded::Failed)));
+        assert!(cache.get(&1).is_none());
+        assert!(matches!(cache.get(&FAILED), Some(Decoded::Failed)));
+        assert_eq!(cache.slots.len(), FAILED);
     }
 
     #[test]

@@ -279,4 +279,32 @@ mod tests {
     fn a_key_with_no_script_name_is_ignored() {
         assert_eq!(key_name(&Key::Named(NamedKey::F1)), None);
     }
+
+    struct Still;
+
+    impl Screen for Still {
+        type Message = ();
+
+        fn key(&mut self, _name: &str) {}
+
+        fn tick(&mut self, _at: f64) {}
+
+        fn view(&self) -> Element<'_, (), Theme, Renderer> {
+            iced_widget::Space::new().into()
+        }
+    }
+
+    #[test]
+    fn a_screen_that_states_nothing_draws_on_black_folds_nothing_and_redraws_every_pass() {
+        let mut still = Still;
+        assert_eq!(still.background(), Color::BLACK);
+        assert!(!still.pump(1.0));
+        assert_eq!(still.next_frame(3.5), Some(3.5));
+        assert!(!still.surface_due());
+        still.wake_by(Arc::new(|| {}));
+        still.update(());
+        still.surfaced(2.0);
+        still.key("q");
+        still.tick(2.0);
+    }
 }

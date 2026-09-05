@@ -566,3 +566,24 @@ func TestTheCleanupBlockerNamesTheFailedJob(t *testing.T) {
 		})
 	}
 }
+
+// A scan Job between the pods of its backoff has no pod running and no
+// verdict from the controller, and its next pod writes the rows the sweep is
+// deleting. The departure waits it out, the way it waits out an enricher
+// between its own pods.
+func TestDepartWaitsForAScanBetweenThePodsOfItsBackoff(t *testing.T) {
+	cluster := newFakeCluster()
+	library := departingMovies(cluster)
+	jobs := []Job{walkJob(JobStatus{Active: 0, Failed: 1})}
+
+	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldJob("house", "movies-cleanup") != nil {
+		t.Error("the cleanup job stood while a scan job was still open")
+	}
+	if stage := departingCondition(t, cluster); stage.Reason != reasonScanRunning {
+		t.Errorf("Departing = %+v, want %s", stage, reasonScanRunning)
+	}
+}

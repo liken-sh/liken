@@ -320,7 +320,7 @@ var imageMarks = []struct {
 // that holds one of the words anywhere else, the way Discovery holds
 // disc, is not art.
 func imageRole(base string, place filePlace) string {
-	if role, _ := imageArt(base); role != "" {
+	if role, _, _ := imageArt(base); role != "" {
 		return role
 	}
 	if place.season {
@@ -329,18 +329,21 @@ func imageRole(base string, place filePlace) string {
 	return ""
 }
 
-// imageArt reads which art an image is, from its name alone, and
-// whether that name is the bare mark word rather than a word after a
-// title, which is the one fact discoverArt needs beyond the role.
-func imageArt(base string) (role string, bare bool) {
+// imageArt reads which art an image is, from its name alone. bare says
+// the name is the mark word itself rather than a word after a title, and
+// rank is the mark's place in imageMarks, where the explicit name comes
+// before the generic one; discoverArt picks the lower rank among the
+// images of one role. A name that names no art reads as no role, at a
+// rank past every mark.
+func imageArt(base string) (role string, rank int, bare bool) {
 	tokens := nameTokens(base)
 	last := strings.TrimRight(lastToken(tokens), "0123456789")
-	for _, entry := range imageMarks {
+	for index, entry := range imageMarks {
 		if strings.HasSuffix(last, entry.mark) {
-			return entry.role, len(tokens) == 1 && last == entry.mark
+			return entry.role, index, len(tokens) == 1 && last == entry.mark
 		}
 	}
-	return "", false
+	return "", len(imageMarks), false
 }
 
 // metadataRole reads which sidecar an .nfo is. The fixed names win, and a

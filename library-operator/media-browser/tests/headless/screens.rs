@@ -461,11 +461,11 @@ fn a_select_on_a_franchise_strip_draws_the_franchise_page() {
             "--script",
             "0.4:down,0.7:down,1.0:down,1.3:down,1.6:down,1.9:down,2.2:down,2.5:enter,\
              3.0:enter,3.4:down,3.8:down,4.6:enter,5.6:down,5.9:down,6.2:down,6.5:down,\
-             7.2:left,8.0:down,8.6:right",
+             7.2:left,8.0:down,8.6:right,9.4:down,9.7:down,10.0:down,10.3:down,10.6:down",
             "--capture",
             &text(&frames),
             "--capture-at",
-            "4.2,5.2,7.0,7.8,9.0",
+            "4.2,5.2,7.0,7.8,9.0,11.2",
             "--size",
             "1920x1080",
             "--quit-after",
@@ -480,6 +480,7 @@ fn a_select_on_a_franchise_strip_draws_the_franchise_page() {
         "007.00.png",
         "007.80.png",
         "009.00.png",
+        "011.20.png",
     ] {
         drawn(&frames.join(at), &run);
     }

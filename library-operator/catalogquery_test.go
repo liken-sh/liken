@@ -184,3 +184,57 @@ func TestCountTitlesCountsMoviesAndSeries(t *testing.T) {
 		t.Errorf("titles = %d, want the movie and the series", titles)
 	}
 }
+
+// An answer the operator cannot read is an error and never an empty result,
+// so a reader never takes a broken stream for a catalog that holds nothing.
+// An event that carries no row is skipped, which is what the columns line and
+// the end-of-query line are.
+func TestAQueryEventTheOperatorCannotReadIsAnError(t *testing.T) {
+	cases := []struct {
+		name    string
+		line    string
+		wantErr bool
+	}{
+		{name: "a line that is not an object", line: `["row"]`, wantErr: true},
+		{name: "a row that is not a list", line: `{"row":7}`, wantErr: true},
+		{name: "cells that are not a list", line: `{"row":[1,7]}`, wantErr: true},
+		{name: "a row of one element", line: `{"row":[1]}`},
+		{name: "the columns line", line: `{"columns":["id"]}`},
+		{name: "the end-of-query line", line: `{"eoq":{"time":0}}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, _, _, err := decodeQueryEvent([]byte(testCase.line))
+
+			if (err != nil) != testCase.wantErr {
+				t.Errorf("decodeQueryEvent = %v, want an error: %v", err, testCase.wantErr)
+			}
+		})
+	}
+}
+
+// A subscription event the operator cannot read is an error, the way a query
+// event is. A change event carries its cells one element later than a row
+// event, because it names the kind of change first.
+func TestASubscriptionEventTheOperatorCannotReadIsAnError(t *testing.T) {
+	cases := []struct {
+		name    string
+		line    string
+		wantErr bool
+	}{
+		{name: "a row that is not a list", line: `{"row":7}`, wantErr: true},
+		{name: "cells that are not a list", line: `{"row":[1,7]}`, wantErr: true},
+		{name: "a change whose cells are not a list", line: `{"change":["update",1,7]}`, wantErr: true},
+		{name: "a row of one element", line: `{"row":[1]}`},
+		{name: "an event that is neither", line: `{"columns":["id"]}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := decodeSubscriptionEvent([]byte(testCase.line))
+
+			if (err != nil) != testCase.wantErr {
+				t.Errorf("decodeSubscriptionEvent = %v, want an error: %v", err, testCase.wantErr)
+			}
+		})
+	}
+}

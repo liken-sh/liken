@@ -230,3 +230,60 @@ func TestARatingFactWritesTheScoreIntoTheBody(t *testing.T) {
 		t.Errorf("ratings = %v, want the score the fact wrote", rows)
 	}
 }
+
+// The volume holds the truth, so a fact whose catalog refuses its rows
+// reports the refusal and the run goes on. Every fact answers the same way,
+// whichever columns it owns and whichever of its writes is the one refused.
+func TestAFactReportsTheRowsItsCatalogRefused(t *testing.T) {
+	video := []fileRow{{
+		Path: "One (2001)/one.mkv", Library: contributorLibrary, Type: fileTypeVideo,
+		Role: fileRolePrimary, Present: true, Items: []string{"movie:tmdb:1"},
+	}}
+	title := []movieRow{{
+		Id: "movie:tmdb:1", Library: contributorLibrary, Kind: libraryKindMovies,
+		Path: "One (2001)", Title: "One",
+	}}
+	cases := []struct {
+		name   string
+		fact   string
+		result *walkResult
+	}{
+		{"the probe's stream columns", factProbe, &walkResult{files: video, movies: title}},
+		{"the trickplay column", factTrickplay, &walkResult{files: video}},
+		{"the arrival columns", factArrival, &walkResult{files: video, movies: title}},
+		{"an nfo fact's body", factOverview, &walkResult{movies: title}},
+		{"the credits fact's body and credits", factCredits, &walkResult{
+			movies: title,
+			credits: []creditRow{{
+				Library: contributorLibrary, Item: "movie:tmdb:1", Billing: 0,
+				Contributor: ".contributors/person", Name: "A Person", Part: creditPartActor,
+			}},
+		}},
+		{"an art fact's images and art column", factPoster, &walkResult{
+			movies: title,
+			files: []fileRow{{
+				Path: "One (2001)/poster.jpg", Library: contributorLibrary,
+				Type: fileTypeImage, Role: fileRolePoster, Present: true,
+				Items: []string{"movie:tmdb:1"},
+			}},
+		}},
+		{"a contributor fact's own columns", factContributorIDs, &walkResult{
+			contributors: []contributorRow{{
+				Library: contributorLibrary, Path: ".contributors/person", Name: "A Person",
+			}},
+		}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			catalog, agent := newSQLiteCatalog(t)
+			work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
+			agent.transactionsLeft = 1
+
+			err := work.writeOwnedRows(t.Context(), testCase.fact, testCase.result)
+
+			if err == nil {
+				t.Error("the fact reported no error for rows the catalog refused")
+			}
+		})
+	}
+}

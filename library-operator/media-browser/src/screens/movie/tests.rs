@@ -30,6 +30,9 @@ struct Films {
     // The movie names a set that no sets row holds, which is what a page
     // reads between the scanner's movie write and its set write.
     lost: bool,
+    // The set row is there but every member has left it, which a page
+    // reads between the scanner's member deletes and its set delete.
+    emptied: bool,
     // Whether the movie belongs to a franchise, which puts a strip
     // under the set strip.
     franchise: bool,
@@ -160,6 +163,12 @@ impl Source for Films {
     fn set(&mut self, _library: &str, id: &str) -> Option<MovieSet> {
         if id != "set:one" || self.lost {
             return None;
+        }
+        if self.emptied {
+            return Some(MovieSet {
+                title: "The Set".into(),
+                members: Vec::new(),
+            });
         }
         Some(MovieSet {
             title: "The Set".into(),
@@ -552,6 +561,75 @@ fn a_select_on_this_film_replaces_nothing() {
     page.key("down", &mut source);
 
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
+}
+
+#[test]
+fn a_select_past_the_set_strips_last_member_opens_nothing() {
+    let mut source = Films {
+        set: true,
+        ..Films::default()
+    };
+    let mut page = Movie::open("screening/films", "one", &mut source).expect("the film is there");
+    page.focus = Focus::Strip(9);
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+}
+
+#[test]
+fn a_select_on_a_stripe_slot_past_the_credits_opens_nothing() {
+    let (mut page, mut source) = credited();
+    page.focus = Focus::Stripe(9, 9);
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+    assert_eq!(page.focus, Focus::Stripe(9, 9));
+}
+
+#[test]
+fn down_from_the_set_strip_holds_where_nothing_stands_under_it() {
+    let mut source = Films {
+        set: true,
+        ..Films::default()
+    };
+    let mut page = Movie::open("screening/films", "one", &mut source).expect("the film is there");
+    page.focus = Focus::Strip(1);
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Strip(1));
+}
+
+#[test]
+fn down_from_a_franchise_member_holds_where_the_film_credits_nobody() {
+    let mut source = Films {
+        franchise: true,
+        ..Films::default()
+    };
+    let mut page = Movie::open("screening/films", "one", &mut source).expect("the film is there");
+    page.focus = Focus::Franchise(0, Place::Member(1));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(1)));
+}
+
+#[test]
+fn a_select_on_a_franchise_heading_past_the_strips_opens_nothing() {
+    let mut source = Films {
+        franchise: true,
+        ..Films::default()
+    };
+    let mut page = Movie::open("screening/films", "one", &mut source).expect("the film is there");
+    page.focus = Focus::Franchise(9, Place::Heading);
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+    page.focus = Focus::Franchise(9, Place::Member(0));
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+}
+
+#[test]
+fn a_reread_that_finds_the_set_emptied_lands_focus_on_the_buttons() {
+    let mut source = Films {
+        set: true,
+        ..Films::default()
+    };
+    let mut page = Movie::open("screening/films", "one", &mut source).expect("the film is there");
+    page.focus = Focus::Strip(1);
+    source.emptied = true;
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Buttons(0));
 }
 
 #[test]

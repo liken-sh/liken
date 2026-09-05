@@ -340,30 +340,36 @@ var artRoles = []string{fileRolePoster, fileRoleBackdrop, fileRoleLogo}
 // name-prefixed poster counts.
 //
 // One directory read answers for every role, and it opens no file.
-// Among the images of one role, a bare name wins over a name-prefixed one,
-// because a folder that holds both wrote folder.jpg for the whole title; among
-// equals the first in name order wins, which is the order os.ReadDir returns.
+// Among the images of one role, a bare name wins over a name-prefixed
+// one, because a folder that holds both wrote folder.jpg for the whole
+// title. Among names of one shape, the explicit mark wins over the
+// generic one, in the order imageMarks lists them: poster over folder
+// over cover, and discart over cdart over disc, so a share that carries
+// a 500x281 folder.jpg beside a 680x1000 poster.jpg draws the poster.
+// Among equals the first in name order wins, which is the order
+// os.ReadDir returns.
 func discoverArt(root, dir string) (string, []string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", nil, err
 	}
 	chosen := map[string]string{}
-	chosenIsBare := map[string]bool{}
+	held := map[string]artCandidateRank{}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || skipName(name) || fileTypeOf(name) != fileTypeImage {
 			continue
 		}
-		role, bare := imageArt(strings.ToLower(stripAnyExtension(name)))
+		role, rank, bare := imageArt(strings.ToLower(stripAnyExtension(name)))
 		if role == "" {
 			continue
 		}
-		if _, taken := chosen[role]; taken && (!bare || chosenIsBare[role]) {
+		candidate := artCandidateRank{bare: bare, mark: rank}
+		if _, taken := chosen[role]; taken && !candidate.beats(held[role]) {
 			continue
 		}
 		chosen[role] = relativePath(root, filepath.Join(dir, name))
-		chosenIsBare[role] = bare
+		held[role] = candidate
 	}
 
 	var primary string
@@ -379,6 +385,25 @@ func discoverArt(root, dir string) (string, []string, error) {
 		all = append(all, path)
 	}
 	return primary, all, nil
+}
+
+// artCandidateRank is what parts two images of one role: whether the
+// name is the bare mark, and where that mark sits in imageMarks.
+type artCandidateRank struct {
+	bare bool
+	mark int
+}
+
+// beats says whether this candidate takes the role from the other. A
+// bare name beats a name-prefixed one, whatever the marks are. Two names
+// of one shape are parted by the mark, and the explicit mark sits before
+// the generic one in imageMarks. Two names of one shape and one mark are
+// equal, so the one the walk read first stands.
+func (c artCandidateRank) beats(other artCandidateRank) bool {
+	if c.bare != other.bare {
+		return c.bare
+	}
+	return c.mark < other.mark
 }
 
 // listVideoFiles reads a directory's video files in name order, so a re-walk
@@ -474,6 +499,22 @@ func fileExists(path string) (bool, error) {
 		return false, err
 	}
 	return !info.IsDir(), nil
+}
+
+// directoryExists reports whether a path is a directory that exists. An
+// absent path is an answer, and a stat that fails any other way is an
+// error, the rule fileExists follows. A rescan reads it, because a folder
+// it cannot stat is not a folder that left the volume, and reading one as
+// the other sweeps a live title's rows out of the catalog.
+func directoryExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.IsDir(), nil
 }
 
 // dirExists reports whether a path is a directory that exists.

@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -349,5 +350,63 @@ func TestTheHouseholdZoneIsTheDefaultPreferencesOwn(t *testing.T) {
 		if got := householdZone(&c.list); got != c.want {
 			t.Errorf("%s: zone = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// Adding a finalizer answers a new list, so a patch that fails leaves the
+// caller's copy of the object alone. Adding one the object already carries
+// changes nothing. Removing takes every name it is given and keeps the rest
+// in order.
+func TestTheFinalizerListIsAnsweredAndNeverEdited(t *testing.T) {
+	cases := []struct {
+		name  string
+		held  []string
+		add   string
+		drop  []string
+		after []string
+	}{
+		{name: "adding to none", add: "library.liken.sh/departure", after: []string{"library.liken.sh/departure"}},
+		{
+			name:  "adding one that is there",
+			held:  []string{"library.liken.sh/departure"},
+			add:   "library.liken.sh/departure",
+			after: []string{"library.liken.sh/departure"},
+		},
+		{
+			name:  "adding beside another owner's",
+			held:  []string{"kubernetes.io/pvc-protection"},
+			add:   "library.liken.sh/departure",
+			after: []string{"kubernetes.io/pvc-protection", "library.liken.sh/departure"},
+		},
+		{
+			name:  "removing one and keeping the rest",
+			held:  []string{"kubernetes.io/pvc-protection", "library.liken.sh/departure"},
+			drop:  []string{"library.liken.sh/departure"},
+			after: []string{"kubernetes.io/pvc-protection"},
+		},
+		{
+			name:  "removing every one it holds",
+			held:  []string{"library.liken.sh/departure"},
+			drop:  []string{"library.liken.sh/departure", "kubernetes.io/pvc-protection"},
+			after: []string{},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			meta := ObjectMeta{Finalizers: slices.Clone(testCase.held)}
+
+			answered := meta.with(testCase.add)
+			if len(testCase.drop) > 0 {
+				answered = meta.without(testCase.drop...)
+			}
+
+			if !slices.Equal(answered, testCase.after) {
+				t.Errorf("the list is %v, want %v", answered, testCase.after)
+			}
+			if !slices.Equal(meta.Finalizers, testCase.held) {
+				t.Errorf("the object now holds %v, want the %v it came with",
+					meta.Finalizers, testCase.held)
+			}
+		})
 	}
 }

@@ -122,6 +122,12 @@ func resolveVolumePath(root, payloadPath string) string {
 	}
 	cleaned := filepath.Clean(payloadPath)
 	if !filepath.IsAbs(cleaned) {
+		// A relative path that climbs above the root maps to nothing. The
+		// path arrives from a media server over HTTP and from a Job's own
+		// annotation, so no caller may read it as a path under the mount.
+		if !inside(cleaned) {
+			return ""
+		}
 		candidate := filepath.Join(root, cleaned)
 		if pathExists(candidate) {
 			return candidate
