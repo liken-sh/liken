@@ -162,6 +162,10 @@ say why it is built the way it is.
   media layer's per-`Player` idle policy, where the screen's owner
   states it once.
 
+* [14, Prometheus metrics](14-prometheus-metrics.md). Proposed.
+  Claimed output availability, control failures, and kernel/compositor
+  mode agreement, with alert rules that allow intentional darkness.
+
 ## Open problems
 
 [`open-problems/`](open-problems/) holds the questions this operator
