@@ -73,18 +73,19 @@ pub fn canvas_width(surface: (u32, u32)) -> f32 {
 pub const MARGIN_X: f32 = 140.0;
 pub const MARGIN_Y: f32 = 90.0;
 
-/// The face's metric: its bounding height over its em, 1362 units over 1000.
-/// The bounding height is `usWinAscent` plus `usWinDescent` from the `OS/2`
-/// table of `NotoSans-Regular.ttf` in `fonts-noto-core`, the package both this
-/// image and the player image install.
-///
-/// libass scales a face so that its bounding height fills the size an ASS `\fs`
-/// states. One `\fs` number therefore states two measures. The first is the
-/// line box the text draws in, in canvas pixels. The second is the type size,
-/// which is that box divided by this metric. So a layout measure
-/// `display/theme.lua` writes in `\fs` units is a canvas measure here and
-/// passes through unchanged, and only a type size goes through the metric.
-const FACE_METRIC: f32 = 1362.0 / 1000.0;
+// The face's metric: its bounding height over its em, 1326 units over
+// 1000. The bounding height is `usWinAscent` plus `usWinDescent` and the
+// em is `unitsPerEm`, from the `OS/2` and `head` tables of
+// `SourceSans3-Regular.otf`, the face the brand crate carries and both
+// renderers draw.
+//
+// libass scales a face so that its bounding height fills the size an ASS
+// `\fs` states, so one `\fs` number states two measures: the line box the
+// text draws in, in canvas pixels, and the type size, which is that box
+// divided by this metric. A layout measure `display/theme.lua` writes in
+// `\fs` units is a canvas measure here and passes through unchanged; only
+// a type size goes through the metric.
+const FACE_METRIC: f32 = 1326.0 / 1000.0;
 
 /// The line box one type size draws in, in canvas pixels. A line's anchor falls
 /// on that box in both renderers, so a line placed by its top or its bottom
@@ -103,9 +104,16 @@ pub const fn type_size(height: f32) -> f32 {
 // The type scale, in canvas pixels. The sizes are large enough to read from a
 // couch at 1080. They are `display/theme.lua`'s `\fs40`, `\fs34`, and `\fs28`
 // through `type_size`, each rounded to a whole pixel.
-pub const LABEL: f32 = 29.0;
-pub const SMALL: f32 = 25.0;
+pub const LABEL: f32 = 30.0;
+pub const SMALL: f32 = 26.0;
 pub const TINY: f32 = 21.0;
+
+/// The small size's line box, `theme.lua`'s `\fs34`, as the canvas measure
+/// every layout built on that box reads. It is stated, not read back
+/// through `line_box(SMALL)`, because the type size is rounded to a whole
+/// pixel and its box is then up to half a metric off the number the Lua
+/// states.
+pub const SMALL_BOX: f32 = 34.0;
 
 /// The drop from one line of the top-right column to the next: one line box of
 /// the small size, and 12 canvas pixels of air. It is `theme.lua`'s
@@ -113,14 +121,14 @@ pub const TINY: f32 = 21.0;
 /// canvas pixels. The clock hangs at the top margin, the activity line one
 /// pitch under it, and the volume row one pitch under that, so the three read
 /// as a column and no two of them touch.
-pub const LINE_PITCH: f32 = line_box(SMALL) + 12.0;
+pub const LINE_PITCH: f32 = SMALL_BOX + 12.0;
 
-/// The one family the whole display draws in, the same family
-/// `display/theme.lua` names for the playback overlay. The image installs it
-/// and the toolkit resolves it by name. It is Noto Sans because that is also
-/// what the toolkit falls back to, so a face an image failed to install draws
-/// as itself rather than as a look that quietly drifted.
-pub const FONT: &str = "Noto Sans";
+/// The one family the whole display draws in, the family
+/// `display/theme.lua` names for the playback overlay. It comes from the
+/// brand crate, which carries the two files and loads them into the toolkit
+/// before the first frame, so this screen and every other liken display
+/// draw one face.
+pub use liken_iced::font::FAMILY as FONT;
 
 /// Where a line's position falls on the line, in the ASS anchors
 /// `display/theme.lua` states. The display draws with three of the nine.
@@ -250,10 +258,11 @@ mod tests {
     #[test]
     fn a_size_and_its_line_box_are_the_two_readings_of_one_ass_size() {
         // `theme.lua` states the small size as `\fs34`, so the line box the
-        // small size draws in is 34 canvas pixels.
+        // small size draws in is 34 canvas pixels. The size is rounded to a
+        // whole pixel, so its box lands within half a metric of that number.
         let box_ = line_box(SMALL);
 
-        assert!((box_ - 34.0).abs() < 0.1, "{box_}");
+        assert!((box_ - 34.0).abs() < FACE_METRIC / 2.0, "{box_}");
         assert!((type_size(box_) - SMALL).abs() < 0.001, "{box_}");
     }
 

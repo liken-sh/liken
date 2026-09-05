@@ -36,6 +36,12 @@ const displayAppIDVariable = "DISPLAY_APP_ID"
 // at a stand-in, the way mpvBinary is.
 var displayScriptDir = "/display"
 
+// overlayFont is the family the overlay draws in, installed as two OTF
+// files in the player image and named here for mpv's own OSD. The brand
+// crate carries the same family for the idle screen, and display/theme.lua
+// names it in its ASS tags, which is what draws the overlay's text.
+const overlayFont = "Source Sans 3"
+
 // runPlayer builds mpv's argument vector and execs mpv, so mpv becomes
 // the container's process. On any failure it writes the reason to
 // stderr and exits nonzero, which the kubelet reads as a pod that
@@ -104,6 +110,9 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		"--input-ipc-server=" + mpvSocketPath,
 		"--script=" + displayScriptDir,
 		"--osc=no",
+		// mpv's own OSD messages draw in the brand family; libass resolves
+		// it through fontconfig against the two OTF files the image installs.
+		"--osd-font=" + overlayFont,
 	}
 	// A run of nothing but music draws no video, so the display owns the
 	// whole frame instead of annotating the cover art mpv would frame. One

@@ -123,6 +123,11 @@ pub trait Screen {
 
 /// Run a screen until the run ends, and write what it measured.
 pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), String> {
+    // The brand's two faces go into the toolkit's shared font system before
+    // anything shapes a run of text, so every line the screen draws is
+    // shaped against the face the binary carries and not against a fallback.
+    liken_iced::font::load();
+
     // Two spans start here. The watchdog's grace runs from this moment, and so
     // does the time to the first frame, which covers the whole life of the
     // process: the wgpu setup, the first window, and the first draw.

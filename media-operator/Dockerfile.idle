@@ -26,6 +26,9 @@ COPY idle/Cargo.toml idle/
 COPY media-screen/Cargo.toml media-screen/
 COPY docs/themes/brand/iced/ docs/themes/brand/iced/
 COPY docs/themes/brand/liken.svg docs/themes/brand/liken.css docs/themes/brand/
+# The brand crate embeds the brand's two font files, so they arrive with it
+# and before the stub build compiles it.
+COPY docs/themes/brand/fonts/ docs/themes/brand/fonts/
 
 # A stub library and a stub binary for each member give cargo something to
 # compile the dependencies against. That build is the layer the image cache
@@ -76,17 +79,20 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 # winit opens by name. libvulkan1 with mesa-vulkan-drivers is the renderer's
 # path to the Intel graphics these machines have.
 #
-# fonts-noto-core carries the face the screen draws its text in, the same face
-# the player image installs for the playback overlay. fonts-droid-fallback is
-# one small file that draws Chinese, Japanese, and Korean, for the reason the
-# player image installs it: the unit's name and its parts are text a household
-# writes, and a face with no CJK draws a blank box for each character. tzdata
+# The image installs no font package for the screen's own family. The
+# binary carries the brand's two faces and loads them into the toolkit
+# before the first frame.
+#
+# fonts-droid-fallback is one small file that draws Chinese, Japanese, and
+# Korean, for the reason the player image installs it: the unit's name and its
+# parts are text a household writes, Source Sans 3 carries none of those
+# characters, and a face with no CJK draws a blank box for each one. tzdata
 # carries the zoneinfo database, because Rust's standard library has no time
 # zones and the clock reads the zone TZ names.
 #
 # The Snapshot line pins apt to the archive as it stood at one instant, so the
 # versions below stay fetchable after Ubuntu publishes newer ones. To move the
-# image forward, set a later serial and refresh the seven versions from a build
+# image forward, set a later serial and refresh the six versions from a build
 # at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries no
 # certificate store, so the build installs ca-certificates from the default
 # archive first, then purges it after the pinned install so it leaves no trace
@@ -100,7 +106,6 @@ RUN apt-get update \
         libxkbcommon0=1.13.1-1 \
         libvulkan1=1.4.341.0-1 \
         mesa-vulkan-drivers=26.0.8-1ubuntu0.3 \
-        fonts-noto-core=20201225-2build1 \
         fonts-droid-fallback=1:8.1.0r7-1~1.gbp36536bbuild1 \
         tzdata=2026c-0ubuntu0.26.04.1 \
     && apt-get purge -y ca-certificates \

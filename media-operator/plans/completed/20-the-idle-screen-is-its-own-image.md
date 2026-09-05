@@ -30,7 +30,8 @@ one of them is redrawn as a string on every frame.
 
 `media-operator-idle` is the third image this repository ships, beside
 the operator and the player. It carries one Rust binary, the Wayland and
-Vulkan client libraries, Noto Sans, and `tzdata`. Its crate is at
+Vulkan client libraries, and `tzdata`; the brand's faces travel inside
+the binary. Its crate is at
 `idle/`, and the build context is the repository root, the way the other
 two images take it, so the build reaches the `brand` submodule the look
 comes from.

@@ -40,22 +40,21 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 # client context without /usr/share/pipewire/client.conf, that file
 # ships in pipewire-bin, and --ao=pipewire fails without it.
 #
-# The display draws its text in Noto Sans, which fonts-noto-core carries. That
-# family is also fontconfig's own fallback, so one package draws the display
-# and covers the glyphs a foreign title or a subtitle track name needs, and no
-# glyph drops to a blank box.
+# The image installs no font package for the display's own family. The
+# brand's two OTF files arrive below as files, and libass resolves the
+# family name display/theme.lua states through fontconfig.
 #
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and
 # Korean, so a CJK title or subtitle track name renders instead of a blank box.
-# The full Noto CJK family reads better but is far larger, and this face is
-# enough to read.
+# Source Sans 3 carries none of those characters, and the full Noto CJK family
+# reads better but is far larger, so this face is what the image installs.
 #
 # tzdata carries the zoneinfo database, so the display clock resolves the
 # household's TZ to a wall-clock time instead of UTC.
 #
 # The Snapshot line pins apt to the archive as it stood at one instant, so the
 # versions below stay fetchable after Ubuntu publishes newer ones. To move the
-# image forward, set a later serial and refresh the eight versions from a build
+# image forward, set a later serial and refresh the seven versions from a build
 # at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries
 # no certificate store, so the build installs ca-certificates from the default
 # archive first, then purges it after the pinned install so it leaves no trace
@@ -69,7 +68,6 @@ RUN apt-get update \
         intel-media-va-driver=26.1.2+dfsg1-1 \
         libgl1-mesa-dri=26.0.8-1ubuntu0.3 \
         pipewire-bin=1.6.2-1ubuntu1.1 \
-        fonts-noto-core=20201225-2build1 \
         fonts-droid-fallback=1:8.1.0r7-1~1.gbp36536bbuild1 \
         tzdata=2026c-0ubuntu0.26.04.1 \
     && apt-get purge -y ca-certificates \
@@ -77,6 +75,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /media-operator /media-operator
+
+# The brand's upright and italic faces, as files fontconfig finds when it
+# scans /usr/share/fonts, so libass resolves the family the display names
+# with no cache step and no font package.
+COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
+     docs/themes/brand/fonts/SourceSans3-It.otf \
+     docs/themes/brand/fonts/LICENSE.md \
+     /usr/share/fonts/opentype/source-sans-3/
 
 # mpv treats a directory that holds main.lua as one client and adds it to
 # Lua's package path, so the display script directory copies whole.

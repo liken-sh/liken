@@ -45,7 +45,7 @@ const HEADER_SIZE: f32 = look::LABEL;
 /// That one number does two jobs in the Lua, and this block keeps them apart.
 /// `ITEM_BOX` is the layout measure, and every step and offset below is a
 /// fraction of it. `ITEM_SIZE` is the type size the same number states.
-const ITEM_BOX: f32 = look::line_box(look::SMALL) - 4.0;
+const ITEM_BOX: f32 = look::SMALL_BOX - 4.0;
 
 /// The size a part's name draws at, which is `ITEM_BOX` through the face
 /// metric.
@@ -594,16 +594,16 @@ mod tests {
 
     #[test]
     fn the_block_measures_in_line_boxes_and_draws_at_the_size_that_box_states() {
-        // `identity.lua` lists its parts in a 30 pixel line box, which is 22
+        // `identity.lua` lists its parts in a 30 pixel line box, which is 22.6
         // canvas pixels of type, and it places the marker a fifth of that box
         // wide and 0.42 of it over the line.
         assert_close(ITEM_BOX, 30.0, 0.1);
-        assert_close(ITEM_SIZE, 22.0, 0.1);
+        assert_close(ITEM_SIZE, 22.6, 0.1);
         assert_close(MARKER_R, 6.0, 0.1);
         assert_close(MARKER_RISE, 12.6, 0.1);
-        // The charge bar is two of those 22 pixel characters long and an
+        // The charge bar is two of those 22.6 pixel characters long and an
         // eighth of the line box tall.
-        assert_close(BAR_LENGTH, 44.0, 0.2);
+        assert_close(BAR_LENGTH, 45.2, 0.2);
         assert_close(BAR_HEIGHT, 3.75, 0.01);
     }
 

@@ -136,13 +136,11 @@ theme.panel_bottom = 876
 -- so a clear line separates the two and the row never crowds the clock.
 theme.line_pitch = theme.type.small + 12
 
--- The whole display draws in one family. libass resolves it through
--- fontconfig, and the player image installs the family, so the text renders
--- the same on every machine. Noto Sans is that family because it is also what
--- fontconfig falls back to: a face the image failed to install would draw as
--- itself rather than as a look that quietly drifted. The idle screen draws in
--- the same family for the same reason.
-theme.font = "Noto Sans"
+-- The whole display draws in the brand family. libass resolves it through
+-- fontconfig against the two OTF files Dockerfile.player installs under
+-- /usr/share/fonts/opentype/source-sans-3/. The shim names the same family
+-- in --osd-font, and the idle screen draws in it out of the brand crate.
+theme.font = "Source Sans 3"
 
 -- Place a shape at its top-left with an7 and pos, so the path points are the
 -- shape's own local box. p1 is the ASS vector drawing mode.
