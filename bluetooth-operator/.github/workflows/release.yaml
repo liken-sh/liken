@@ -9,9 +9,10 @@
 # in order. A development build never moves :latest, so a cluster
 # that pulls a release keeps pulling releases.
 #
-# Both kinds run the tests first and build only when they pass. A
-# development build that skipped the tests would put a broken image
-# one pin away from a cluster.
+# ci.yaml holds the tests, the coverage floors, and the other checks.
+# This workflow builds the images beside that run and pushes nothing
+# until the run passes, so a development build that failed its tests
+# never sits one pin away from a cluster.
 #
 # The three images share one version, because they are three
 # parts of one pod and a deployment that mixes versions is a
@@ -30,6 +31,9 @@ on:
 permissions:
   contents: read
   packages: write
+  # actions: read lets the gate step in the release job read the state
+  # of the ci run for this commit through the workflow's own token.
+  actions: read
 
 # Two tags pushed in quick succession would otherwise race their
 # pushes to :latest in an order nobody chose.
@@ -91,17 +95,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # The tests gate the release. An image that reaches ghcr.io is
-      # one that passed them, so a rollback target is always a build
-      # that worked.
-      - run: go vet ./...
-      - run: go test -race ./...
-
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -155,6 +148,44 @@ jobs:
           tags: |
             ghcr.io/liken-sh/bluetoothd:${{ env.VERSION }}
             ghcr.io/liken-sh/bluetoothd:latest
+
+      # ci.yaml runs beside this workflow on a push to main and holds
+      # the coverage floors and the other checks. This step waits for
+      # that run and lets nothing push from a red gate. The images built
+      # while the checks ran, so the wait is normally over before this
+      # step starts. A tag's ci run finished when its commit landed on
+      # main, so a tag never waits; a tag on a commit older than the run
+      # retention finds no run and fails, and the answer is to re-run ci
+      # on that commit and push the tag again. GITHUB_SHA names the tag
+      # object for an annotated tag, and the ci run is keyed by the
+      # commit, so the lookup resolves the commit first.
+      - name: require the gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
+          for _ in $(seq 1 40); do
+            state=$(gh run list --workflow ci.yaml --commit "$commit" --event push \
+              --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
+            case "$state" in
+              "completed success")
+                exit 0 ;;
+              "completed "*)
+                echo "the ci run for $commit ended with ${state#completed }; no image ships from a red gate" >&2
+                exit 1 ;;
+              "")
+                if [ "$GITHUB_REF_TYPE" = tag ]; then
+                  echo "no ci run exists for $commit; re-run ci on that commit, then push the tag again" >&2
+                  exit 1
+                fi
+                echo "no ci run for $commit yet" ;;
+              *)
+                echo "the ci run for $commit is $state" ;;
+            esac
+            sleep 15
+          done
+          echo "the ci run for $commit did not finish within ten minutes" >&2
+          exit 1
 
       # :latest marks the newest release and nothing else. A
       # development build pushes its own tag only.

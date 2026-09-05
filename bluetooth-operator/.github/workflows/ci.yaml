@@ -1,11 +1,11 @@
-# Every pull request and every push to main runs the full gate: the
-# tests, the coverage floors, the docs checks, and a build of every
-# image. A push to main then publishes the website. This workflow
-# pushes no image. On main, release.yaml runs beside it and publishes
-# a development build. release.yaml runs a plain go test of its own
-# as a guard before it pushes images, but the coverage floors and the
-# other checks live only here, so a commit on main gets the same
-# verdict a pull request would.
+# A pull request runs the whole gate here: the tests, the coverage
+# floors, the docs checks, and a build of every image. A push to main
+# runs the tests, the coverage floors, and the docs checks here, and
+# its images build in release.yaml, which starts at the same moment,
+# waits for this run, and pushes no image from a red gate. So a commit
+# on main gets the same verdict a pull request would, and the images
+# build once. This workflow pushes no image. A push to main
+# then publishes the website.
 #
 # There is no path filter. The tests are cheap next to the image
 # builds, and a filter that guessed wrong would leave a commit with
@@ -13,9 +13,9 @@
 # coverage report measured on the commit the site was built from, so
 # every change to the operator's code moves a published page.
 #
-# The three test jobs are independent, so they run at once, and the
-# gate takes as long as its slowest job. The publish job waits for
-# all three, so a failed check never publishes.
+# The gate jobs are independent, so they run at once, and the gate
+# takes as long as its slowest job. The publish job waits for the
+# go and docs jobs, so a failed check there never publishes.
 name: ci
 
 on:
@@ -84,14 +84,35 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: docs/go.mod
+          cache-dependency-path: docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # tracks docs/go.sum, so between two bumps of that file the Go
+      # build cache inside the entry never refreshes, and Go trims the
+      # compiled Hugo and crdref objects out of it. This entry saves on
+      # every run, under a key that ends in the commit, and restores the
+      # newest entry for the same docs/go.sum, so the tools compile once
+      # per bump instead of once per run.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-${{ github.sha }}
+          restore-keys: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-
 
       # The same target a workstation runs: the link check, then
       # the site build.
       - run: make test-docs
 
-  # Every image builds on every pull request, and none is pushed, so
-  # a Dockerfile that stopped building fails here and not on main.
-  #
+      # The publish job deploys this tree as it is, so the site builds
+      # once per commit and the bytes it serves are the bytes the link
+      # check passed.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: site
+          path: docs/dist/site
+          if-no-files-found: error
+          retention-days: 7
+
   # The layer cache lives in ghcr, as a :buildcache tag beside each
   # image, not in the GitHub Actions cache. A registry cache has no
   # 10 GB ceiling, and it outlives a branch. release.yaml writes it
@@ -100,6 +121,10 @@ jobs:
   # build on main left.
   images:
     runs-on: ubuntu-latest
+    # A push to main gets its Dockerfile verdict from release.yaml,
+    # which builds every image for that commit at the same moment, so
+    # this job runs on a pull request only and no layer builds twice.
+    if: github.event_name == 'pull_request'
     # One job per image, so the three build at once and the run is as
     # long as the slowest of them, not the sum.
     strategy:
@@ -131,12 +156,12 @@ jobs:
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
 
-  # This is the website deploy. A push to main is a publish: the job
-  # builds the site, adds the coverage report for that commit, and
-  # deploys the tree to GitHub Pages, which serves it at
-  # bluetooth.liken.sh. This job does not run on a pull request, so a
-  # pull request publishes nothing. The docs job above already proves
-  # the site builds.
+  # This is the website deploy. A push to main is a publish:
+  # the job takes the tree the docs job built, adds the coverage
+  # report for that commit, and deploys the tree to GitHub Pages,
+  # which serves it at bluetooth.liken.sh. This job does not run on a
+  # pull request, so a pull request publishes nothing. The docs job
+  # above already proves the site builds.
   #
   # The site's name is the operator's DRA driver name, so the address
   # on a ResourceSlice is also the address of its manual. Pages serves
@@ -146,10 +171,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name != 'pull_request'
-    # The site shows the verdict of the whole gate, so this job waits
-    # for every test job. A commit that fails any check never
+    # The site carries the coverage report, so this job waits
+    # for the go and docs jobs. A commit that fails either one never
     # publishes.
-    needs: [go, docs, images]
+    needs: [go, docs]
     # Publishing needs two permissions the rest of this workflow does
     # not have. pages: write creates the deployment, and
     # id-token: write lets deploy-pages prove to the Pages service
@@ -166,20 +191,27 @@ jobs:
       group: docs
     steps:
       - uses: actions/checkout@v7
-        with:
-          # The brand theme is a git submodule; without this the
-          # checkout leaves docs/themes/brand empty and Hugo fails
-          # to find the theme.
-          submodules: true
 
+      # The coverage report tool is a tool directive in the docs module,
+      # so the Go toolchain is the only install this job needs, and
+      # docs/go.mod pins its version.
       - uses: actions/setup-go@v6
         with:
-          # The docs domain is its own module, so Hugo's dependency
-          # graph stays out of the operator's go.sum. Its go.mod pins
-          # Hugo as a tool directive, and go tool builds it from
-          # source on first use. It pins the coverage report tool the
-          # same way.
           go-version-file: docs/go.mod
+          cache-dependency-path: docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # tracks docs/go.sum, so between two bumps of that file the Go
+      # build cache inside the entry never refreshes, and Go trims the
+      # compiled Hugo and crdref objects out of it. This entry saves on
+      # every run, under a key that ends in the commit, and restores the
+      # newest entry for the same docs/go.sum, so the tools compile once
+      # per bump instead of once per run.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-${{ github.sha }}
+          restore-keys: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-
 
       # Every test job that measures coverage uploads its profile
       # under a coverage-* name. They land in the repository root,
@@ -193,11 +225,11 @@ jobs:
       - name: render the coverage report
         run: make coverage-report
 
-      # The build runs the same command a workstation runs, so local
-      # and CI builds produce the same tree. What lands in docs/dist/site
-      # is byte for byte what Pages serves.
-      - name: build the site
-        run: make -C docs build
+      - name: take the built site
+        uses: actions/download-artifact@v8
+        with:
+          name: site
+          path: docs/dist/site
 
       # The report is not a Hugo page: it is one finished file with
       # its stylesheet inlined, so it goes into the built tree after
