@@ -15,20 +15,19 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 
 # liken-iced is a path dependency on the brand repository, a submodule inside
-# this build context. cargo reads its manifest and its sources to resolve the
-# dependency, so the crate arrives before the stub build below and shares that
-# cached layer. It changes only when the submodule pin moves.
-COPY brand/iced/ ./brand/iced/
-COPY brand/liken.svg brand/liken.css ./brand/
-# The crate embeds the brand's two font files, so they arrive with it and
-# before the stub build compiles it.
-COPY brand/fonts/ ./brand/fonts/
+# this build context. The stub build below needs only its manifest, so the
+# manifest and its lock file arrive here and the crate's sources arrive after
+# that layer. A submodule bump then recompiles this crate alone and leaves the
+# third-party dependency layer cached.
+COPY brand/iced/Cargo.toml brand/iced/Cargo.lock ./brand/iced/
 
-# A stub library and a stub binary give cargo something to compile the
-# dependencies against. That build is the layer the image cache keeps.
-RUN mkdir src \
+# A stub library and a stub binary for this crate, and a stub library for
+# liken-iced, give cargo something to compile the dependencies against. That
+# build is the layer the image cache keeps.
+RUN mkdir src brand/iced/src \
     && echo 'fn main() {}' > src/main.rs \
-    && : > src/lib.rs
+    && : > src/lib.rs \
+    && : > brand/iced/src/lib.rs
 
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
@@ -40,12 +39,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 COPY src/ ./src/
 # The ratings marks are baked into the binary from this directory.
 COPY assets/ ./assets/
+# liken-iced's sources land here, over the stub, with the two brand files it
+# parses and the two font files it embeds. All four are inputs of the real
+# build alone; the stub compiles without them.
+COPY brand/iced/src/ ./brand/iced/src/
+COPY brand/liken.svg brand/liken.css ./brand/
+COPY brand/fonts/ ./brand/fonts/
 
-# The touch marks the crate's own sources newer than the stub build, so cargo
-# compiles this crate again and leaves the dependencies as they are.
+# The touch marks both crates' own sources newer than the stub build, so cargo
+# compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    touch src/main.rs src/lib.rs \
+    touch src/main.rs src/lib.rs brand/iced/src/*.rs \
     && cargo build --release --locked
 
 # A distribution base, unlike the operator's scratch. The toolkit opens a wide

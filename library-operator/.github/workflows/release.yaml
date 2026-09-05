@@ -9,9 +9,9 @@
 # in order. A development build never moves :latest, so a cluster
 # that pulls a release keeps pulling releases.
 #
-# Both kinds run the tests first and build only when they pass. A
-# development build that skipped the tests would put a broken image
-# one pin away from a cluster.
+# Both kinds build first and push only when the ci run for the same
+# commit passes. A development build that skipped the tests would put
+# a broken image one pin away from a cluster.
 #
 # The release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
@@ -21,8 +21,10 @@
 # could drift apart would put the catalog contract at two versions at
 # once.
 #
-# The run is ci.yaml's three test jobs, then one job that builds,
-# proves, and pushes, which it reaches only after all three pass.
+# The run is one job: it builds the images, proves them, waits for
+# the ci.yaml run of the same commit, and pushes only when that run
+# is green. The build and the ci run overlap, so the wait is normally
+# over before the images are ready.
 name: release
 
 on:
@@ -33,6 +35,9 @@ on:
 permissions:
   contents: read
   packages: write
+  # actions: read lets the gate step in the release job read the state
+  # of the ci run for this commit through the workflow's own token.
+  actions: read
 
 # One release at a time. Two runs that pushed :latest at once would
 # leave whichever finished second, which is not always the newer one.
@@ -40,119 +45,7 @@ concurrency:
   group: release
 
 jobs:
-  # The tests gate the build. A tag can name any commit, so the
-  # release proves the one it ships. An image that reaches the registry
-  # has passed them. A rollback names an older tag, and never has to
-  # find out which tag was good.
-  #
-  # The three jobs below are ci.yaml's go, rust, and docs jobs, step
-  # for step and target for target, so the release gate is never weaker
-  # than the one main passes.
-  go:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      # setup-go keeps the module downloads and the build cache
-      # between runs, keyed on go.sum, so a run compiles only what
-      # changed.
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # The same target a workstation runs: gofmt, vet, the race
-      # tests, and the coverage gate on its pinned toolchain. The
-      # Makefile says why the gate pins a toolchain, and
-      # .testcoverage.yml holds the floor.
-      - run: make test-go
-
-  rust:
-    # The headless tests run under cage, and the cage in Ubuntu 24.04
-    # (0.1.5) dies on an assertion when wlr-randr changes the output
-    # mode. Ubuntu 26.04 carries 0.2.1, which takes the change, and it
-    # is the release the workstations run.
-    runs-on: ubuntu-26.04
-    defaults:
-      run:
-        working-directory: media-browser
-    env:
-      # Incremental artifacts are large, and a fresh runner never
-      # reuses them. Without this they would fill the cache and gain
-      # nothing.
-      CARGO_INCREMENTAL: 0
-      # cage renders with pixman, so the compositor needs no GPU on
-      # the runner.
-      WLR_RENDERER: pixman
-    steps:
-      # The media browser builds against liken-iced, the crate in the
-      # brand repository that carries the mark and the palette. It is
-      # a submodule at media-browser/brand, and a checkout without it
-      # resolves no dependency.
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
-
-      # The media browser's tests open a real window. cage is the
-      # compositor, wlr-randr sets the headless mode, and
-      # mesa-vulkan-drivers carries lavapipe, the software Vulkan
-      # device a runner with no GPU draws through.
-      - name: install the headless graphics
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cage wlr-randr mesa-vulkan-drivers libvulkan1 \
-            libwayland-client0 libxkbcommon0
-
-      # media-browser/rust-toolchain.toml names the version and the
-      # components. rustup installs what the file names, so this
-      # workflow pins no version of its own.
-      - name: install the toolchain
-        run: rustup show
-
-      # The cache holds the cargo registry and target/, keyed on
-      # Cargo.lock. Almost all of the build is dependencies, and they
-      # change only when the lock file changes.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: media-browser
-          cache-on-failure: true
-
-      # cargo-llvm-cov is a binary. The action fetches its release
-      # build instead of compiling one, and it runs after rust-cache,
-      # which prunes binaries it did not see before it saved.
-      - uses: taiki-e/install-action@v2.87.1
-        with:
-          tool: cargo-llvm-cov
-
-      # The same target a workstation runs: the format, the lints,
-      # and the tests under the coverage gate. media-browser/Makefile
-      # holds the floor.
-      - run: make test
-
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      # The theme is the brand repository, a submodule at
-      # docs/themes/brand. A checkout without it builds a site with
-      # no shell, no nav, and no stylesheet.
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
-
-      # The docs domain is its own Go module, and Hugo is a tool
-      # directive in it, so the Go toolchain is the only build
-      # dependency and this file pins its version too.
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: docs/go.mod
-
-      # The same target a workstation runs: the link check, then
-      # the site build.
-      - run: make test-docs
-
   release:
-    needs: [go, rust, docs]
     runs-on: ubuntu-latest
     steps:
       # The media browser image builds liken-iced from the submodule
@@ -270,6 +163,44 @@ jobs:
           set -eu
           docker run --rm "ghcr.io/liken-sh/library-operator-media-browser:$VERSION" --help
           docker run --rm "ghcr.io/liken-sh/library-operator-corrosion:$VERSION" --version
+
+      # ci.yaml runs beside this workflow on a push to main and holds
+      # the coverage floors and the other checks. This step waits for
+      # that run and lets nothing push from a red gate. The images built
+      # while the checks ran, so the wait is normally over before this
+      # step starts. A tag's ci run finished when its commit landed on
+      # main, so a tag never waits; a tag on a commit older than the run
+      # retention finds no run and fails, and the answer is to re-run ci
+      # on that commit and push the tag again. GITHUB_SHA names the tag
+      # object for an annotated tag, and the ci run is keyed by the
+      # commit, so the lookup resolves the commit first.
+      - name: require the gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
+          for _ in $(seq 1 40); do
+            state=$(gh run list --workflow ci.yaml --commit "$commit" --event push \
+              --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
+            case "$state" in
+              "completed success")
+                exit 0 ;;
+              "completed "*)
+                echo "the ci run for $commit ended with ${state#completed }; no image ships from a red gate" >&2
+                exit 1 ;;
+              "")
+                if [ "$GITHUB_REF_TYPE" = tag ]; then
+                  echo "no ci run exists for $commit; re-run ci on that commit, then push the tag again" >&2
+                  exit 1
+                fi
+                echo "no ci run for $commit yet" ;;
+              *)
+                echo "the ci run for $commit is $state" ;;
+            esac
+            sleep 15
+          done
+          echo "the ci run for $commit did not finish within ten minutes" >&2
+          exit 1
 
       # :latest marks the newest release and nothing else. A
       # development build pushes its own tag only.
