@@ -17,3 +17,9 @@ test:
 	cargo fmt --check
 	cargo clippy --all-targets -- -D warnings
 	cargo llvm-cov --all-targets --fail-under-lines $(COVERAGE_FLOOR)
+# The gate's own run, written out as a Cobertura file at the
+# repository root. `cargo llvm-cov report` reads the profiles the
+# gate just wrote, so it runs right after the gate. The file is an
+# input to `make coverage-report`, which draws the page the site
+# publishes.
+	cargo llvm-cov report --cobertura --output-path ../coverage-media-browser.xml

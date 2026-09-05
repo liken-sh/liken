@@ -9,8 +9,12 @@
 /docs/.hugo_build.lock
 /docs/public/
 
-# The coverage profile the gate measures.
+# The coverage data the gates measure, and the page `make
+# coverage-report` draws from it. CI writes them on every run and
+# reads them once; they never belong to the tree.
 /coverage.out
+/coverage-media-browser.xml
+/coverage.html
 
 # State the local harness writes: catalogs, agent logs, and captures.
 /local/state/

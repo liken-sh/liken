@@ -1,20 +1,32 @@
-# Every pull request runs the tests and builds every image, and
-# pushes nothing. A push to main runs release.yaml instead, which
-# runs the same tests and then publishes a development build, so
-# this workflow does not run there: two workflows that test one push
-# would spend twice the runners for one answer.
+# Every pull request and every push to main runs the full gate: the
+# tests, the coverage floors, the docs checks, and a build of every
+# image. A pull request stops there. A push to main goes on to
+# assemble the website with its test coverage report, the tree that
+# GitHub Pages will serve once the site is published. This workflow
+# pushes nothing. On main, release.yaml runs beside it and publishes
+# a development build. release.yaml runs a plain go test of its own
+# as a guard before it pushes images, but the coverage floors and the
+# other checks live only here, so a commit on main gets the same
+# verdict a pull request would.
 #
 # There is no path filter. The tests are cheap, and a filter would
 # have to decide which files can never break a build. That list is
 # wrong the day someone adds a file it does not name, and the push
 # that adds it would then land untested.
 #
-# The four jobs are independent, so they run at once, and the run
-# takes as long as its slowest job.
+# The four gate jobs are independent, so they run at once, and the
+# gate takes as long as its slowest job. publish waits for all four,
+# so a red gate never assembles a site.
 name: ci
 
 on:
+  push:
+    branches: [main]
   pull_request:
+    branches: [main]
+  # A dispatch assembles the current main with no change, for the
+  # times the serving side needs a fresh tree.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,6 +53,21 @@ jobs:
       # Makefile says why the gate pins a toolchain, and
       # .testcoverage.yml holds the floor.
       - run: make test-go
+
+      # The site's coverage report measures the commit the site is
+      # built from, and this job holds the only run of the tests on
+      # the pinned toolchain. The profile travels to publish as an
+      # artifact rather than being measured a second time there.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage-go
+          path: coverage.out
+          # A missing profile means the gate wrote nothing, and the
+          # report would then be drawn from stale or absent data.
+          if-no-files-found: error
+          # publish reads it within minutes of this step, and nothing
+          # else ever reads it.
+          retention-days: 7
 
   rust:
     # The headless tests run under cage, and the cage in Ubuntu 24.04
@@ -104,6 +131,15 @@ jobs:
       # and the tests under the coverage gate. media-browser/Makefile
       # holds the floor.
       - run: make test
+
+      # The gate writes its run out as a Cobertura file at the
+      # repository root, the Rust half of the coverage report.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage-rust
+          path: coverage-media-browser.xml
+          if-no-files-found: error
+          retention-days: 7
 
   docs:
     runs-on: ubuntu-latest
@@ -173,3 +209,83 @@ jobs:
           file: ${{ matrix.context }}/Dockerfile
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  # This job assembles the website: the built tree, with the test
+  # coverage report as a page of its own at /coverage.html, and the
+  # commit in release.txt. A pull request never reaches here: the
+  # docs job above already proved the site builds, and a pull
+  # request publishes nothing.
+  #
+  # The site is not published yet. Until GitHub Pages is configured
+  # for this repository and library.liken.sh points at it, this job
+  # stops at the tree, kept as a workflow artifact, so the assembly
+  # is proven on every push to main and nothing is deployed. The
+  # Pages deploy and the served-site check are the steps that arrive
+  # with the site, the same steps every other liken site's publish
+  # job runs today.
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [go, rust, docs, images]
+    if: github.event_name != 'pull_request'
+    steps:
+      # The theme is the brand repository, a submodule at
+      # docs/themes/brand. A checkout without it builds a site with
+      # no shell, no nav, and no stylesheet.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The docs domain is its own Go module, and Hugo and the
+      # coverage tool are tool directives in it, so the Go toolchain
+      # is the only build dependency and this file pins its version
+      # too.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: docs/go.mod
+
+      # The gate above measured this commit, so its data lands here
+      # whole. Every coverage-* artifact merges into the repository
+      # root, where the Makefile's report target reads them by the
+      # names the test targets write.
+      - name: collect the coverage data
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      # The same target a workstation runs. It writes coverage.html
+      # at the repository root, and the Makefile holds the command.
+      - name: draw the coverage report
+        run: make coverage-report
+
+      # The same command a workstation runs, so local and CI builds
+      # produce the same tree. What this step writes to
+      # docs/dist/site/ is what Pages will serve, plus the two files
+      # the steps below add.
+      - name: build the site
+        run: make -C docs build
+
+      # The report is one self-contained file, so it joins the built
+      # tree as a page of its own at /coverage.html. Every page's
+      # footer links it, because docs/hugo.yaml sets params.coverage.
+      - name: add the coverage report to the site
+        run: cp coverage.html docs/dist/site/coverage.html
+
+      # The commit lands in the built tree as release.txt, so a
+      # served-site check can ask the public name which commit it
+      # serves. The file joins the tree after the build, because it
+      # describes the deploy, not the site.
+      - name: stamp the commit
+        run: echo "${{ github.sha }}" > docs/dist/site/release.txt
+
+      # The tree is kept for a week, long enough to open the report
+      # from a run and to confirm the assembly, and nothing else reads
+      # it.
+      - name: keep the site tree
+        uses: actions/upload-artifact@v6
+        with:
+          name: site
+          path: docs/dist/site
+          if-no-files-found: error
+          retention-days: 7
