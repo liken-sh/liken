@@ -110,15 +110,16 @@ func (c *Catalog) cleanSeen(ctx context.Context, epoch int64) (int, error) {
 }
 
 // countItems reads how many item rows the catalog holds for this library,
-// across the three item tables. The prune-abort guard reads it to tell a
+// across the four item tables. The prune-abort guard reads it to tell a
 // complete walk from a walk that returned far fewer rows than the catalog
 // holds.
 func (c *Catalog) countItems(ctx context.Context, library string) (int, error) {
 	return c.queryInt(ctx, `SELECT `+
 		`(SELECT count(*) FROM movies WHERE library = ?) + `+
 		`(SELECT count(*) FROM series WHERE library = ?) + `+
-		`(SELECT count(*) FROM episodes WHERE library = ?)`,
-		[]any{library, library, library})
+		`(SELECT count(*) FROM episodes WHERE library = ?) + `+
+		`(SELECT count(*) FROM franchises WHERE library = ?)`,
+		[]any{library, library, library, library})
 }
 
 // countSeen reads how many ids this epoch marked. The prune guard reads
@@ -205,6 +206,15 @@ func markKeys(result *walkResult) []string {
 	}
 	for _, row := range result.genres {
 		add(seenGenre, genreSeenKey(row))
+	}
+	for _, row := range result.franchises {
+		add(seenItem, row.Id)
+	}
+	for _, row := range result.franchiseMembers {
+		add(seenFranchiseMember, franchiseMemberSeenKey(row))
+	}
+	for _, row := range result.franchiseRuns {
+		add(seenFranchiseRun, franchiseRunSeenKey(row))
 	}
 	return keys
 }
@@ -295,6 +305,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		{"sets", catalog.DeleteSets},
 		{"series", catalog.DeleteSeries},
 		{"episodes", catalog.DeleteEpisodes},
+		{"franchises", catalog.DeleteFranchises},
 	} {
 		n, err := catalog.sweep(ctx, itemPruneSQL(table.name, "id", seenItem), []any{library, epoch, pruneBatch},
 			func(ctx context.Context, keys []string) (int, error) {
@@ -370,6 +381,28 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		[]any{library, epoch, pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
 			return catalog.DeleteContributors(ctx, library, keys)
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	// The members and the runs of a franchise that left the repository.
+	// They sweep after the franchises row, because each keys on the
+	// franchise and the position and never on the row the sweep above
+	// took.
+	n, err = catalog.sweep(ctx, franchiseMemberPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFranchiseMembers(ctx, library, franchiseMemberKeys(keys))
+		})
+	if err != nil {
+		return removed, err
+	}
+	removed += n
+
+	n, err = catalog.sweep(ctx, franchiseRunPruneSQL(), []any{library, epoch, pruneBatch},
+		func(ctx context.Context, keys []string) (int, error) {
+			return catalog.DeleteFranchiseRuns(ctx, library, franchiseRunKeys(keys))
 		})
 	if err != nil {
 		return removed, err

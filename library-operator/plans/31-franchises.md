@@ -24,17 +24,17 @@ is the truth, not a cache of a source, and research writes it.
 ## The contract
 
 - **A library kind.** A `Library` of kind `franchises` names a git
-  repository, not a volume: `storage.git` holds a `url` and a `ref`,
-  and the `storage` block becomes one of `claim` or `git` under the
-  same CEL shape the kind blocks use. The files are a few hundred
-  kilobytes, so nothing keeps a checkout. Each scan Job does a shallow
-  clone of `ref` into an `emptyDir`, reads every `*/franchise.yaml`
-  against the schema, writes a `franchises` table and a
-  `franchise_members` table keyed by library like every other table,
-  and exits with the checkout. `status.commit` holds the commit the
-  last scan read, and a scan that finds the same commit skips the
-  write. `spec.refresh` sets the period, as it does for the other
-  kinds.
+  repository for the truth and a claim for what the operator derives
+  from it: `storage.git` holds a `url` and a `ref`, and
+  `storage.claim` names the volume, as it does for every other kind.
+  The files are a few hundred kilobytes, so nothing keeps a checkout.
+  Each scan Job does a shallow clone of `ref` into an `emptyDir`,
+  reads every `*/franchise.yaml` against the schema, writes a
+  `franchises` table and a `franchise_members` table keyed by library
+  like every other table, and exits with the checkout. `status.commit`
+  holds the commit the last scan read, and a scan that finds the same
+  commit skips the write. `spec.refresh` sets the period, as it does
+  for the other kinds.
 - **A failed fetch keeps the tables.** The other kinds scan a volume
   that is always there. This kind scans a server that is not. If the
   clone fails, the scan reports `Failed` on the `Library` and leaves
@@ -64,7 +64,7 @@ is the truth, not a cache of a source, and research writes it.
   The franchise scanner never reads another library's volume. A
   member no library holds draws as a gap in the order with its
   `title`, and it fills when the title arrives anywhere in the
-  namespace. A gap whose `title` year is ahead of today draws as
+  namespace. A gap whose `release_year` is ahead of today draws as
   coming, and any other gap draws as missing, so the wall is also
   the list of what to go find.
 - **The page**, from plan 22's primitives, is a vertical wall in
@@ -112,9 +112,18 @@ is the truth, not a cache of a source, and research writes it.
   schema. Each franchise directory also holds an `AGENTS.md` with the
   author's method, sources, and judgment calls, which the scanner
   ignores and the next author reads first.
-- **Art** comes from the franchise directory in the repository, and
-  where the directory holds none, the enrichers of plan 30 copy it
-  from the first member's art.
+- **Art** comes from the file's `art` block: `poster`, `fanart`,
+  `landscape`, `logo`, and `banner`, each an `https` URL, under
+  Kodi's names. The repository holds links and never image bytes,
+  because the files are public and meant to be forked. The scan
+  downloads each URL into the claim, under the franchise's directory
+  with Kodi's file names, only where the file is absent or the URL
+  changed, and keeps the URL in a mark beside the file. A file with
+  no mark is the owner's and is never overwritten, so a fork's own
+  bytes win. The rows then read `art` and `arts` from the claim the
+  way the movies do, so a franchises library reaches the screen like
+  every other library. Where the file names no art, the screen draws
+  the poster of the first held member in story order.
 - **The author.** The first files are written by hand, from research.
   Later, an agent writes the same file on a schedule and pushes it
   to the repository, and the file is the only contract between the
@@ -134,6 +143,12 @@ name: Star Wars
 # The next author reads them first.
 sources:
   - https://www.starwars.com/news/star-wars-timeline
+
+# Links to the franchise's own art, under Kodi's names. Optional.
+# The repository holds links, never image bytes.
+art:
+  poster: https://image.tmdb.org/t/p/original/example.jpg
+  fanart: https://image.tmdb.org/t/p/original/example-wide.jpg
 
 # The franchise's own clock. Optional. Without it, the file holds an
 # order and the page draws only the wall.
@@ -165,7 +180,8 @@ eras:
 # first, and that walk is the story order.
 order:
   - movie: tmdb:1893
-    title: "Star Wars: Episode I – The Phantom Menace (1999)"
+    title: "Star Wars: Episode I – The Phantom Menace"
+    release_year: 1999
     time: { from: -32, to: -32 }
   - series: tvdb:83268
     title: "Star Wars: The Clone Wars"
@@ -179,15 +195,18 @@ order:
         time: { from: -21, to: -20 }
         note: Lucasfilm's order plays S03E02 before S02E16.
   - movie: tmdb:11
-    title: "Star Wars (1977)"
+    title: "Star Wars"
+    release_year: 1977
     time: { from: 0, to: 0 }
   - movie: tmdb:557
-    title: "Spider-Man (2002)"
+    title: "Spider-Man"
+    release_year: 2002
     universes: [Earth-96283]
     time: { from: 2002, to: 2002 }
     note: An example from another franchise, since Star Wars has one universe.
   - movie: tmdb:634649
-    title: "Spider-Man: No Way Home (2021)"
+    title: "Spider-Man: No Way Home"
+    release_year: 2021
     universes: [Earth-616, Earth-96283, Earth-120703]
     time: { from: 2024, to: 2024 }
     note: One film in three universes draws as a banner across three columns.
@@ -216,8 +235,11 @@ The rules:
   `tvdb`, because those are the schemes the movies and series
   libraries write to `aliases`. Another scheme is legal and resolves
   only if some sidecar carries it.
-- `title` is optional. The page draws it only when no library holds
-  the member. Write it with the year for a film.
+- `title` is optional, and it carries no year. The page draws it only
+  when no library holds the member. `release_year` is the year a film
+  was released or a series first aired, the real-world year and never
+  the story's calendar. A gap whose `release_year` is after this year
+  draws as coming, and any other gap draws as missing.
 - A calendar needs `unit`. Without `zero`, `before`, and `after`,
   the times are plain calendar years, which is what the MCU counts
   in. With them, the times count from the named event, as Star Wars
@@ -235,6 +257,9 @@ The rules:
   entry that names several draws across their columns. The franchise's own `universe`
   stays one name, because a franchise has one home. An entry with no
   `time` draws in its row and joins no era on the rail.
+- `art` holds `poster`, `fanart`, `landscape`, `logo`, and `banner`,
+  each an `https` URL and each optional. The usual source is the
+  first film's collection art on TMDB.
 - `note` is free text for the next author and never reaches the page.
 
 ## Proof
@@ -256,7 +281,11 @@ the pointer, and the repository holds the truth.
 
 A checkout on a volume that a person keeps by hand. The files are
 small enough to fetch on every scan, and a volume adds a step the
-operator can do itself.
+operator can do itself. The claim a franchises library names holds
+what the scan derives, never the truth.
+
+Art fetched by the screen from the URL. A screen would need a fetch,
+a cache, and a place for it, and the claim already is that place.
 
 Two orders in one file. Release order is derived, and a second
 hand-written order can be a second franchise directory.
@@ -265,10 +294,13 @@ A review gate on the agent's writes. The stakes are an order on a
 wall, the never-remove rule bounds a bad run, and a wrong file is
 one edit.
 
+A rule for which row the page shows when two libraries hold one
+film. The read keeps the first library by name, which is
+deterministic and enough until someone holds two copies on purpose.
+
 ## What is not decided
 
-Which row the page shows when two libraries hold one film. Whether a
-franchise may name a book or a game, which waits on those kinds.
+Whether a franchise may name a book or a game, which waits on those kinds.
 Whether a franchise may reach another namespace, which the
 one-cluster-per-namespace rule says no to today. Whether the scanner
 fetches a tarball instead of a clone, which would drop `git` from its

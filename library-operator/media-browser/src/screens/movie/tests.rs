@@ -3,11 +3,19 @@
 
 use super::*;
 use crate::catalog::Answer;
+use crate::catalog::franchise::{Entry, Held, MOVIE};
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, Person, PlayItem,
-    Query, SeriesDetails, Title,
+    Credit, CreditSlot, Credits, Episode, FileFacts, Franchise, GenreEntry, LibraryEntry,
+    Membership, Person, PlayItem, Query, SeriesDetails, Title,
 };
+
+// The Library of kind franchises the fake holds, and the one franchise
+// in it.
+const ORDERS: &str = "screening/orders";
+const CYCLE: &str = "franchise:name:the-cycle";
+
 use crate::harness::Waker;
+use crate::screens::franchise::strips::Place;
 
 // A catalog of one set of three films, so a page has siblings to move
 // across.
@@ -22,6 +30,9 @@ struct Films {
     // The movie names a set that no sets row holds, which is what a page
     // reads between the scanner's movie write and its set write.
     lost: bool,
+    // Whether the movie belongs to a franchise, which puts a strip
+    // under the set strip.
+    franchise: bool,
 }
 
 impl Films {
@@ -64,6 +75,62 @@ impl Films {
 }
 
 impl Source for Films {
+    fn franchises(&mut self) -> Vec<crate::catalog::FranchiseEntry> {
+        Vec::new()
+    }
+
+    // One franchise of the same three films, which is what puts a
+    // franchise strip on the page.
+    fn franchises_of(&mut self, _library: &str, _id: &str) -> Vec<Membership> {
+        if !self.franchise {
+            return Vec::new();
+        }
+        vec![Membership {
+            movies: 3,
+            series: 0,
+            library: ORDERS.into(),
+            id: CYCLE.into(),
+            title: "The Cycle".into(),
+            members: ["one", "two", "three"]
+                .iter()
+                .enumerate()
+                .map(|(position, id)| Entry {
+                    position: position as i64,
+                    kind: MOVIE.into(),
+                    alias: format!("movie:tmdb:{id}"),
+                    title: format!("Film {id} (1994)"),
+                    held: Some(Held {
+                        arts: Vec::new(),
+                        library: "screening/films".into(),
+                        id: (*id).to_string(),
+                        kind: "movies".into(),
+                        title: format!("Film {id}"),
+                        art: format!("{id}.jpg"),
+                        released: "1994".into(),
+                        slug: (*id).to_string(),
+                        tagline: String::new(),
+                        plot: String::new(),
+                        duration: 0,
+                    }),
+                    ..Entry::default()
+                })
+                .collect(),
+        }]
+    }
+
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
+        if !self.franchise || library != ORDERS || id != CYCLE {
+            return None;
+        }
+        Some(Franchise {
+            library: library.to_string(),
+            id: id.to_string(),
+            title: "The Cycle".into(),
+            entries: self.franchises_of("", "").remove(0).members,
+            ..Franchise::default()
+        })
+    }
+
     fn libraries(&mut self) -> Vec<LibraryEntry> {
         Vec::new()
     }
@@ -191,6 +258,17 @@ fn credited() -> (Movie, Films) {
     })
 }
 
+// A page whose movie is in a set and in a franchise, which is the
+// page with every strip on it.
+fn ordered() -> (Movie, Films) {
+    page(Films {
+        set: true,
+        franchise: true,
+        credits: true,
+        ..Films::default()
+    })
+}
+
 fn page(films: Films) -> (Movie, Films) {
     let mut source = films;
     let page =
@@ -290,7 +368,7 @@ fn a_set_strip_holds_the_whole_set_and_marks_this_film() {
         ..Films::default()
     });
     let set = page.set.expect("the movie belongs to a set");
-    assert_eq!(set.heading, "The Set");
+    assert_eq!(set.heading, "The Set · a 3-film set");
     let ids: Vec<&str> = set
         .members
         .iter()
@@ -525,4 +603,111 @@ fn a_movie_that_names_a_set_the_catalog_lost_draws_no_strip() {
         ..Films::default()
     });
     assert!(page.set.is_none());
+}
+
+#[test]
+fn a_set_heading_says_how_many_films_the_set_holds() {
+    assert_eq!(films(2), "a 2-film set");
+    assert_eq!(films(3), "a 3-film set");
+}
+
+#[test]
+fn a_movie_in_a_franchise_draws_a_strip_under_its_set_strip() {
+    let (ordered, _) = ordered();
+    assert_eq!(ordered.franchises.bands().len(), 1);
+    assert_eq!(
+        ordered.franchises.bands()[0].heading,
+        "The Cycle · a franchise of 3 films"
+    );
+    assert_eq!(ordered.franchises.bands()[0].current, Some(1));
+    let (plain, _) = page(Films::default());
+    assert!(plain.franchises.is_empty());
+}
+
+#[test]
+fn down_from_the_set_strip_reaches_the_franchise_strips_heading() {
+    let (mut page, mut source) = ordered();
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Strip(1));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(1)));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 0));
+}
+
+#[test]
+fn up_from_the_stripes_climbs_back_through_the_franchise_strip() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Stripe(0, 0);
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(1)));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Strip(1));
+}
+
+#[test]
+fn a_movie_in_a_franchise_and_no_set_reaches_the_strip_from_the_buttons() {
+    let (mut page, mut source) = page(Films {
+        franchise: true,
+        ..Films::default()
+    });
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Buttons(0));
+}
+
+#[test]
+fn left_and_right_move_across_the_franchise_strip() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Member(1));
+    page.key("right", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(2)));
+    page.key("left", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(1)));
+}
+
+#[test]
+fn a_press_on_the_strips_heading_opens_the_franchises_page() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Heading);
+    let step = page.key("enter", &mut source);
+    assert!(matches!(step, Step::Open(Screen::Franchise(_))));
+}
+
+#[test]
+fn a_press_on_a_member_replaces_this_page_with_that_members() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Member(2));
+    let step = page.key("enter", &mut source);
+    assert!(matches!(step, Step::Replace(Screen::Movie(_))));
+}
+
+#[test]
+fn a_press_on_a_member_no_library_holds_opens_nothing() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Member(9));
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+    page.focus = Focus::Franchise(9, Place::Heading);
+    assert!(matches!(page.key("enter", &mut source), Step::Stay));
+}
+
+#[test]
+fn a_reread_holds_the_rung_of_the_franchise_strip() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Member(2));
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(2)));
+
+    page.focus = Focus::Franchise(0, Place::Member(9));
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(2)));
+
+    source.franchise = false;
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Buttons(0));
 }

@@ -8,15 +8,18 @@ use std::sync::atomic::Ordering;
 
 use rusqlite::{Connection, OpenFlags, Row};
 
+use crate::catalog::franchise;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet, Order,
-    Person, PlayItem, Query, Selection, SeriesDetails, Slot, Source, library_name, recency,
+    Answer, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, LibraryEntry,
+    Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Query, Selection, SeriesDetails,
+    Slot, Source, library_name, recency,
 };
 use crate::harness::Waker;
 
 mod details;
 mod files;
+mod franchises;
 mod genres;
 mod item;
 mod people;
@@ -173,6 +176,10 @@ impl Source for SidecarSource {
         self.read(genres::entries)
     }
 
+    fn franchises(&mut self) -> Vec<FranchiseEntry> {
+        self.read(franchises::all)
+    }
+
     fn wall(&mut self, query: &Query) -> Answer {
         match query {
             Query::Library { library } => Answer {
@@ -216,6 +223,7 @@ impl Source for SidecarSource {
                 name: name.clone(),
                 slots: self.read(|connection| genres::titles(connection, name, *order)),
             },
+            Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
         }
     }
 
@@ -258,6 +266,16 @@ impl Source for SidecarSource {
             } => self
                 .read(|connection| play::episodes(connection, library, series, *season, *episode)),
         }
+    }
+
+    fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership> {
+        self.read(|connection| franchises::strips(connection, library, id))
+    }
+
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
+        self.read(|connection| franchises::franchise(connection, library, id))
+            .into_iter()
+            .next()
     }
 
     fn credits(&mut self, library: &str, id: &str) -> Credits {

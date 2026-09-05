@@ -78,3 +78,101 @@ func TestTheOperatorReadsARefreshTheSchemaAdmits(t *testing.T) {
 		t.Errorf("refresh[%s] = %v, want %v", factCredits, at, want)
 	}
 }
+
+// rulesOf is the rules one field of the schema carries, as the CRD states
+// them.
+func rulesOf(t *testing.T, field any) []string {
+	t.Helper()
+	held, _ := field.(map[string]any)["x-kubernetes-validations"].([]any)
+	rules := []string{}
+	for _, rule := range held {
+		text, _ := rule.(map[string]any)["rule"].(string)
+		rules = append(rules, strings.Join(strings.Fields(text), " "))
+	}
+	return rules
+}
+
+// The kind enum and the settings blocks of the CRD are the kinds the operator
+// serves, and a kind the schema admits resolves to a settings block in Go.
+func TestTheSchemaAdmitsTheKindsTheOperatorServes(t *testing.T) {
+	spec := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+		"spec", "properties").(map[string]any)
+	kinds, _ := spec["kind"].(map[string]any)["enum"].([]any)
+
+	for _, kind := range kinds {
+		name := kind.(string)
+		if _, held := spec[name]; !held {
+			t.Errorf("the kind %s names no settings block", name)
+		}
+		if settings := (LibrarySpec{Kind: name, Movies: &LibrarySettings{}, Series: &LibrarySettings{},
+			Franchises: &LibrarySettings{}}).settings(); settings == nil {
+			t.Errorf("the operator resolves no settings block for the kind %s", name)
+		}
+	}
+	if len(kinds) != 3 {
+		t.Errorf("the enum names %v, want the three kinds the operator serves", kinds)
+	}
+}
+
+// Every kind names a claim, so the storage block requires it. The git block is
+// the franchises addition beside the claim, and it requires a url and a ref.
+func TestTheSchemaTakesAClaimForEveryKind(t *testing.T) {
+	storage := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+		"spec", "properties", "storage")
+
+	if required := requiredOf(t, storage); !slices.Equal(required, []string{"claim"}) {
+		t.Errorf("storage requires %v, want the claim every kind names", required)
+	}
+	git := storage.(map[string]any)["properties"].(map[string]any)["git"]
+	if required := requiredOf(t, git); !slices.Equal(required, []string{"url", "ref"}) {
+		t.Errorf("git requires %v, want the url and the ref", required)
+	}
+}
+
+// requiredOf is the fields one object of the schema requires, in the order it
+// names them.
+func requiredOf(t *testing.T, field any) []string {
+	t.Helper()
+	held, _ := field.(map[string]any)["required"].([]any)
+	names := []string{}
+	for _, name := range held {
+		names = append(names, name.(string))
+	}
+	return names
+}
+
+// The kind rule names one clause per settings block. A franchises library
+// names a git repository beside its claim, and every other kind names a claim
+// alone.
+func TestTheSchemaTiesTheKindToItsBlockAndItsStorage(t *testing.T) {
+	spec := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties", "spec")
+
+	rules := rulesOf(t, spec)
+	for _, want := range []string{
+		"has(self.movies) == (self.kind == 'movies') && has(self.series) == (self.kind == 'series') && has(self.franchises) == (self.kind == 'franchises')",
+		"has(self.storage.git) == (self.kind == 'franchises')",
+	} {
+		if !slices.Contains(rules, want) {
+			t.Errorf("the spec rules are %v, want %q among them", rules, want)
+		}
+	}
+}
+
+// The storage the API server admits is the one the operator reads back: a
+// franchises library carries a claim, a url, and a ref.
+func TestTheOperatorReadsAGitStorageTheSchemaAdmits(t *testing.T) {
+	spec := LibrarySpec{}
+	body := `{"kind":"franchises","franchises":{},` +
+		`"storage":{"claim":"franchise-art","root":"/",` +
+		`"git":{"url":"https://tangled.org/guid.foo/fiction-franchises","ref":"main"}}}`
+	if err := json.Unmarshal([]byte(body), &spec); err != nil {
+		t.Fatal(err)
+	}
+
+	if !spec.fromGit() {
+		t.Fatalf("spec.fromGit() = false, want a library that reads a repository")
+	}
+	if spec.Storage.Git.Ref != "main" || spec.Storage.Claim != "franchise-art" {
+		t.Errorf("storage = %+v, want the ref main beside the claim", spec.Storage)
+	}
+}

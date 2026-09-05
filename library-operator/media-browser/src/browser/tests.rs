@@ -23,9 +23,9 @@ use super::*;
 use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, GenreEntry, InSeries,
-    LibraryEntry, MovieDetails, MovieSet, Order, Person, PlayItem, Presentation, Query,
-    SeriesDetails, Slot, Title,
+    Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, Franchise, FranchiseEntry,
+    GenreEntry, InSeries, LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person,
+    PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
 };
 use crate::posters::Art;
 use crate::screens::home::Home;
@@ -179,6 +179,67 @@ impl Fake {
 }
 
 impl Source for Fake {
+    // Two franchises, so the home page's franchises strip draws one with art
+    // and one with none. The one with no art draws as the tile of words every
+    // slot with no poster draws.
+    fn franchises(&mut self) -> Vec<FranchiseEntry> {
+        self.calls.push("franchises");
+        vec![
+            FranchiseEntry {
+                library: "screening/orders".into(),
+                id: "franchise:name:the-cycle".into(),
+                title: "The Cycle".into(),
+                art: "cycle.jpg".into(),
+                art_library: "screening/films".into(),
+                slug: "the-cycle".into(),
+            },
+            FranchiseEntry {
+                library: "screening/orders".into(),
+                id: "franchise:name:the-saga".into(),
+                title: "The Saga".into(),
+                art: String::new(),
+                art_library: String::new(),
+                slug: "the-saga".into(),
+            },
+        ]
+    }
+
+    fn franchises_of(&mut self, _library: &str, _id: &str) -> Vec<Membership> {
+        Vec::new()
+    }
+
+    // The page of the first franchise, so a select on the strip opens
+    // one. The order holds the two films of the fake set.
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
+        if id != "franchise:name:the-cycle" {
+            return None;
+        }
+        Some(Franchise {
+            library: library.to_string(),
+            id: id.to_string(),
+            title: "The Cycle".into(),
+            entries: (1..=2)
+                .map(|number| crate::catalog::Entry {
+                    position: number,
+                    kind: crate::catalog::franchise::MOVIE.into(),
+                    alias: format!("movie:tmdb:{number}"),
+                    title: format!("Entry {number}"),
+                    release_year: 1980,
+                    held: Some(crate::catalog::Held {
+                        library: "screening/films".into(),
+                        id: format!("movies:{number}"),
+                        kind: "movies".into(),
+                        title: format!("Entry {number}"),
+                        released: "1980".into(),
+                        ..crate::catalog::Held::default()
+                    }),
+                    ..crate::catalog::Entry::default()
+                })
+                .collect(),
+            ..Franchise::default()
+        })
+    }
+
     fn libraries(&mut self) -> Vec<LibraryEntry> {
         self.calls.push("libraries");
         vec![
@@ -273,6 +334,9 @@ impl Source for Fake {
                 },
                 None => Answer::default(),
             },
+            Query::Franchise { library, id } => {
+                crate::catalog::franchise::answer(self.franchise(library, id))
+            }
             Query::Released { fold } | Query::Added { fold } => self.recency(*fold),
             Query::Genre { name, .. } => Answer {
                 name: name.clone(),
@@ -502,6 +566,15 @@ fn showing_home(browser: &Browser<Fake, NoPosters>) -> &Home {
     match browser.top() {
         screens::Screen::Home(home) => home,
         _ => panic!("the browser is not showing the home page"),
+    }
+}
+
+// The franchise page the browser is showing, so a test reads the screen a
+// press on the franchises strip opened.
+fn showing_franchise(browser: &Browser<Fake, NoPosters>) -> &crate::screens::franchise::Franchise {
+    match browser.top() {
+        screens::Screen::Franchise(page) => page,
+        _ => panic!("the browser is not showing a franchise page"),
     }
 }
 

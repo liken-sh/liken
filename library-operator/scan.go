@@ -92,6 +92,12 @@ const defaultCatalogAPI = "http://127.0.0.1:8080"
 // and the mount point is this operator's choice.
 const libraryMountPath = "/library"
 
+// checkoutMountPath is where the operator mounts a franchises Job's checkout,
+// beside the claim. It is an emptyDir the clone fills, and the Job exits with
+// it. A franchise's directory in the checkout and its art directory on the
+// claim carry the same name.
+const checkoutMountPath = "/checkout"
+
 // catalogWriteTimeout bounds a walk's writes to the catalog agent, so a
 // stuck agent cannot hold a walk open forever.
 var catalogWriteTimeout = 2 * time.Minute
@@ -106,9 +112,16 @@ type scanner struct {
 	library     string
 	kind        string
 	ignore      ignoreSet
-	catalog     *Catalog
-	bus         *Bus
-	echo        *echoWaiter
+	// git is the repository a franchises library reads, and empty for a
+	// library that reads a claim.
+	git LibraryGit
+	// checkout is the directory a franchises scan clones into. It is the
+	// emptyDir the operator mounts, and empty for a library that reads a claim
+	// alone.
+	checkout string
+	catalog  *Catalog
+	bus      *Bus
+	echo     *echoWaiter
 	// The Job this container runs, the folder it rescans, and how
 	// long it waits for the reporter to publish its run back.
 	job         string
@@ -127,6 +140,10 @@ type scanner struct {
 	// walk ended, and whether the walk could read it.
 	counts     libraryCounts
 	countsRead bool
+	// commit is the commit this library's catalog holds. The Job reads it
+	// out of its own runs row before it clones, and writes it back when
+	// the scan succeeds.
+	commit string
 
 	// One walk runs at a time, so the reconciliation reads a
 	// settled catalog whichever caller drives the walk.
@@ -197,6 +214,8 @@ func newScanner(started time.Time, log io.Writer) (*scanner, error) {
 		library:     libraryKey(namespace, name),
 		kind:        kind,
 		ignore:      ignore,
+		git:         LibraryGit{URL: os.Getenv(libraryGitURLVariable), Ref: os.Getenv(libraryGitRefVariable)},
+		checkout:    checkoutMountPath,
 		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
 		log:         log,
 		report:      libraryReport{LastWalk: started, LastChange: started},
@@ -221,6 +240,13 @@ func newScanner(started time.Time, log io.Writer) (*scanner, error) {
 // every row this Job wrote.
 func (s *scanner) runJob(ctx context.Context) error {
 	run := libraryRun{Worker: s.worker(), Job: s.job, Started: time.Now().UTC()}
+	// The commit the last scan of this library read. A scan of an
+	// unchanged repository compares against it, and a failed scan keeps
+	// it.
+	if last, err := s.catalog.lastScan(ctx, s.library); err == nil {
+		s.noteCommit(last.Commit)
+		run.Commit = last.Commit
+	}
 	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", s.library, err)
 	}
@@ -228,6 +254,10 @@ func (s *scanner) runJob(ctx context.Context) error {
 	walked := s.walkOnce(ctx)
 
 	run.Finished = time.Now().UTC()
+	run.Commit = s.lastCommit()
+	if walked != nil {
+		run.Failure = walked.Error()
+	}
 	s.mutex.Lock()
 	run.Unidentified = s.report.Unidentified
 	run.Removed = s.report.RemovedLastSweep
@@ -265,6 +295,9 @@ func (s *scanner) worker() string {
 // SCAN_PATH names, which falls back to the whole root when the path names
 // no folder on the volume.
 func (s *scanner) walkOnce(ctx context.Context) error {
+	if s.kind == libraryKindFranchises {
+		return s.franchiseScan(ctx)
+	}
 	if s.scanPath == "" {
 		return s.fullWalk(ctx)
 	}
@@ -422,12 +455,19 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 		return s.walkFailed("write the sets", err)
 	}
 
-	// The walk read the volume and wrote what it holds, so the count is
-	// settled here. The prune and the second count read the catalog back
-	// through the query API, which can miss the walk's own writes for a
-	// window after a fresh agent starts. Those steps run after this point,
-	// and a failure in one is logged and left for the next walk, so a read
-	// that lags does not discard the count the walk already knows.
+	s.settleWalk(ctx, epoch, before, titles, unidentified, unidentifiedNames, started)
+	return nil
+}
+
+// settleWalk is the tail every walk of this library shares: the prune,
+// the counts, the report, and the one summary line. The walk read its
+// source and wrote what it holds, so the count is settled before this
+// runs. The prune and the second count read the catalog back through the
+// query API, which can miss the walk's own writes for a window after a
+// fresh agent starts, so a failure in either is logged and left for the
+// next walk.
+func (s *scanner) settleWalk(ctx context.Context, epoch int64, before, titles, unidentified int,
+	unidentifiedNames []string, started time.Time) {
 	removed := -1
 	if count, err := pruneLibrary(ctx, s.catalog, s.library, epoch); err != nil {
 		s.logWalk("prune the catalog", err)
@@ -475,7 +515,6 @@ func (s *scanner) fullWalk(ctx context.Context) error {
 	s.mutex.Unlock()
 
 	s.logWalkComplete(titles, unidentified, removed, unidentifiedNames, time.Since(started))
-	return nil
 }
 
 // The walk read only part of the volume, so it pruned nothing and

@@ -144,6 +144,9 @@ type LibrarySpec struct {
 	Kind    string           `json:"kind"`
 	Movies  *LibrarySettings `json:"movies,omitempty"`
 	Series  *LibrarySettings `json:"series,omitempty"`
+	// Franchises is the settings block of the franchises kind. It carries
+	// the same one field the other blocks carry.
+	Franchises *LibrarySettings `json:"franchises,omitempty"`
 
 	// The metadata providers to ask about a title, in the order they
 	// are asked. Enrichment reads the list; nothing acts on it yet.
@@ -203,6 +206,10 @@ func (s LibrarySpec) scanSchedule() string {
 const (
 	libraryKindMovies = "movies"
 	libraryKindSeries = "series"
+	// A franchises library reads franchise.yaml files from a git
+	// repository. It is the one kind whose storage is git and never a
+	// claim.
+	libraryKindFranchises = "franchises"
 )
 
 // Settings is the block that matches the kind, which is the block the
@@ -215,6 +222,8 @@ func (s LibrarySpec) settings() *LibrarySettings {
 		return s.Movies
 	case libraryKindSeries:
 		return s.Series
+	case libraryKindFranchises:
+		return s.Franchises
 	}
 	return nil
 }
@@ -223,13 +232,33 @@ func (s LibrarySpec) settings() *LibrarySettings {
 // scanner mounts the claim read-only, and the operator reads the
 // PersistentVolume behind it for the volume's kind and address.
 type LibraryStorage struct {
-	Claim string `json:"claim"`
+	Claim string `json:"claim,omitempty"`
+
+	// Git is the repository a franchises library reads, in place of a
+	// claim. A Library names one of claim and git, never both and never
+	// neither.
+	Git *LibraryGit `json:"git,omitempty"`
 
 	// The directory inside the claim this library starts at, always an
 	// absolute path from the root of the volume. The CRD defaults it
 	// to / and refuses a relative path, so the scanner takes this
 	// field as it stands.
 	Root string `json:"root,omitempty"`
+}
+
+// LibraryGit names the repository a scan clones. URL is the repository,
+// reached over anonymous HTTPS, and Ref is the branch or the tag. Both are
+// required. The clone is shallow, into an emptyDir, and the Job exits with
+// the checkout.
+type LibraryGit struct {
+	URL string `json:"url"`
+	Ref string `json:"ref"`
+}
+
+// fromGit reports whether this Library reads a git repository rather than
+// a claim. The kind rule of the CRD keeps this in step with the kind.
+func (s LibrarySpec) fromGit() bool {
+	return s.Storage.Git != nil
 }
 
 // LibrarySettings is one kind's settings block. One struct serves both
@@ -288,7 +317,11 @@ type LibraryStatus struct {
 	// Webhook is the URL of this Library's webhook endpoint on the
 	// operator, the address a person gives to Radarr, Sonarr, or
 	// Jellyfin.
-	Webhook    string      `json:"webhook,omitempty"`
+	Webhook string `json:"webhook,omitempty"`
+	// Commit is the commit the last successful scan of a git library
+	// read. A scan that finds this commit again writes no row. It is
+	// empty for a library whose storage is a claim.
+	Commit     string      `json:"commit,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
@@ -534,6 +567,10 @@ const (
 	phaseEnriching = "Enriching"
 	phaseIdle      = "Idle"
 	phaseDeparting = "Departing"
+	// Failed means the last scan of this library failed and wrote no
+	// rows. A franchises library reads it when the clone could not reach
+	// the forge. The tables hold what the last good scan left.
+	phaseFailed = "Failed"
 )
 
 // ConditionStatus is a condition's verdict. It is a string rather than

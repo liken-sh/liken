@@ -86,6 +86,15 @@ func (c *Catalog) librarySweepSteps(library string) []librarySweepStep {
 		{librarySweepSQL("contributors", "path"), func(ctx context.Context, keys []string) (int, error) {
 			return c.DeleteContributors(ctx, library, keys)
 		}},
+		{librarySweepFranchiseMemberSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteFranchiseMembers(ctx, library, franchiseMemberKeys(keys))
+		}},
+		{librarySweepFranchiseRunSQL(), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteFranchiseRuns(ctx, library, franchiseRunKeys(keys))
+		}},
+		{librarySweepSQL("franchises", "id"), func(ctx context.Context, keys []string) (int, error) {
+			return c.DeleteFranchises(ctx, library, keys)
+		}},
 	}
 }
 

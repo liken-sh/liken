@@ -276,10 +276,6 @@ that took a hearing-impaired flag for Hindi.
   `probe` concern measures the duration, the codecs, the resolution,
   and the audio channel layout. The bitrate, the HDR format, and the
   encode's quality settings are still unread.
-* [A franchises folder from a git
-  checkout](open-problems/a-franchises-folder-from-a-git-checkout.md). The
-  files are public now, and the kind still names a folder on a
-  volume.
 
 ## Rejected
 
@@ -287,7 +283,8 @@ that took a hearing-impaired flag for Hindi.
   Superseded by plan 27, which replaces the pod per provider with a
   `Job` per concern.
 * [24, Franchises](rejected/24-franchises.md). Superseded by plan 31,
-  which puts a franchise on the volume instead of in a resource.
+  which keeps the pointer in the `Library` and the truth in a public
+  repository, in place of a resource the cluster owns.
 * [Litestream as the catalog
   transport](rejected/litestream-as-the-catalog-transport.md). Built and
   measured. Polled reads, a compaction race, and a Go runtime inside the

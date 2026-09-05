@@ -661,3 +661,28 @@ func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
 		t.Errorf("env = %v, want the window grace alone", environment)
 	}
 }
+
+// A franchises library mounts its claim in the screen pod the way every other
+// kind does. The browser reads the art of a franchise off that claim, under
+// the library root the argument names.
+func TestTheScreenPodMountsTheClaimOfARepositoryLibrary(t *testing.T) {
+	libraries := append(houseLibraries(), *studioFranchises())
+
+	pod := testScreenPod(denScreen(), libraries)
+
+	held := false
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == libraryVolumeName+"-franchises" {
+			held = volume.PersistentVolumeClaim != nil &&
+				volume.PersistentVolumeClaim.ClaimName == "franchise-art"
+		}
+	}
+	if !held {
+		t.Errorf("volumes = %+v, want the franchises claim among them", pod.Spec.Volumes)
+	}
+	if !strings.Contains(strings.Join(pod.Spec.Containers[0].Args, " "),
+		"house/franchises=/libraries/franchises") {
+		t.Errorf("args = %v, want the library root of the franchises claim",
+			pod.Spec.Containers[0].Args)
+	}
+}

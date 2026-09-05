@@ -51,7 +51,13 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
     let home = showing_home(&browser);
     assert_eq!(
         headings(&browser),
-        ["Recently released", "Recently added", "Libraries", "Genres"]
+        [
+            "Recently released",
+            "Recently added",
+            "Libraries",
+            "Genres",
+            "Franchises · 2"
+        ]
     );
     assert_eq!(home.focus, 1);
     assert_eq!(home.control, None);
@@ -88,8 +94,12 @@ fn up_and_down_move_between_the_strips_and_each_remembers_its_focus() {
     browser.key("down");
     assert_eq!(at(&browser), (4, 0));
     browser.key("down");
-    assert_eq!(at(&browser), (4, 0));
+    assert_eq!(at(&browser), (5, 0));
+    browser.key("down");
+    assert_eq!(at(&browser), (5, 0));
 
+    browser.key("up");
+    assert_eq!(at(&browser), (4, 0));
     browser.key("up");
     assert_eq!(at(&browser), (3, 0));
     browser.key("up");
@@ -406,11 +416,12 @@ fn headings(browser: &Browser<Fake, NoPosters>) -> Vec<&str> {
 fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     let browser = with_draw();
     let headings = headings(&browser);
-    assert_eq!(headings.len(), 8);
+    assert_eq!(headings.len(), 9);
     assert_eq!(headings[0], "Recently released");
     assert_eq!(headings[1], "Recently added");
     assert_eq!(headings[6], "Libraries");
     assert_eq!(headings[7], "Genres");
+    assert_eq!(headings[8], "Franchises · 2");
     let mut drawn: Vec<&str> = headings[2..6].to_vec();
     drawn.sort_unstable();
     assert_eq!(drawn, ["A Player", "Drama", "The Entries", "Western"]);
@@ -551,13 +562,19 @@ fn a_pool_that_empties_takes_its_strips_with_it() {
 
     assert_eq!(
         headings(&browser),
-        ["Recently released", "Recently added", "Libraries", "Genres"]
+        [
+            "Recently released",
+            "Recently added",
+            "Libraries",
+            "Genres",
+            "Franchises · 2"
+        ]
     );
     assert_eq!(at(&browser), (4, 0));
 }
 
 #[test]
-fn the_genres_strip_ends_the_page_and_holds_every_genre() {
+fn the_genres_strip_holds_every_genre() {
     let mut browser = on_strips(3);
     browser.key("down");
     browser.key("down");
@@ -565,7 +582,7 @@ fn the_genres_strip_ends_the_page_and_holds_every_genre() {
 
     let (row, slot) = at(&browser);
     let strips = strips(&browser);
-    let genres = strips.last().expect("the page ends with the genres");
+    let genres = strips[3];
     assert_eq!((row, slot), (4, 0));
     assert_eq!(genres.heading, "Genres");
     assert!(genres.last.is_none());
@@ -686,4 +703,55 @@ fn the_slot_about_a_person_draws_their_headshot() {
     assert_eq!(last.words, format!("About {PLAYER}"));
     assert_eq!(last.library, "screening/films");
     assert_eq!(last.art, format!("{ENTRY}/headshot.jpg"));
+}
+
+#[test]
+fn the_franchises_strip_ends_the_page_and_holds_every_franchise() {
+    let mut browser = on_strips(3);
+    for _ in 0..4 {
+        browser.key("down");
+    }
+
+    let (row, slot) = at(&browser);
+    let strips = strips(&browser);
+    let franchises = strips.last().expect("the page ends with the franchises");
+    assert_eq!((row, slot), (5, 0));
+    assert_eq!(franchises.heading, "Franchises · 2");
+    assert!(franchises.last.is_none());
+    let names: Vec<&str> = franchises
+        .items
+        .iter()
+        .map(|item| item.name.as_str())
+        .collect();
+    assert_eq!(names, ["The Cycle", "The Saga"]);
+    assert_eq!(franchises.items[0].art, "cycle.jpg");
+    assert_eq!(franchises.items[0].under, "");
+    assert_eq!(franchises.items[1].art, "");
+}
+
+#[test]
+fn a_select_on_a_franchise_opens_its_page() {
+    let mut browser = on_strips(3);
+    for _ in 0..4 {
+        browser.key("down");
+    }
+
+    browser.key("enter");
+
+    let page = showing_franchise(&browser);
+    assert_eq!(page.title, "The Cycle");
+    assert_eq!(page.rows.len(), 2);
+}
+
+#[test]
+fn a_select_on_a_franchise_the_catalog_dropped_opens_nothing() {
+    let mut browser = on_strips(3);
+    for _ in 0..4 {
+        browser.key("down");
+    }
+    browser.key("right");
+
+    browser.key("enter");
+
+    showing_home(&browser);
 }

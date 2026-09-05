@@ -62,6 +62,15 @@ type libraryRun struct {
 	Finished     time.Time `json:"finished,omitempty"`
 	Unidentified int       `json:"unidentified,omitempty"`
 	Removed      int       `json:"removed,omitempty"`
+	// Commit is the commit that run read, for a library whose storage is
+	// git. A run that failed carries the commit the last good run read,
+	// so a forge outage does not lose the mark the next scan compares
+	// against. The column is commit_id, because commit is a word SQLite
+	// reserves.
+	Commit string `json:"commit,omitempty"`
+	// Failure is why that run failed, and empty for a run that finished
+	// its work. status.phase reads Failed while the scan run carries one.
+	Failure string `json:"failure,omitempty"`
 }
 
 // echoTimeout reads the echo wait out of the environment. An empty,
@@ -95,7 +104,7 @@ func echoBusAddress(log io.Writer) (string, error) {
 
 // The read of the whole runs table. It needs no LIMIT, because the
 // table holds one row per library and worker.
-const runsQuery = `SELECT library, worker, job, started, finished, unidentified, removed FROM runs`
+const runsQuery = `SELECT library, worker, job, started, finished, unidentified, removed, commit_id, failure FROM runs`
 
 // The column the reporter reads out of a runs change to learn which
 // library's report to publish again.
@@ -107,13 +116,14 @@ const runsLibraryColumn = "library"
 // create.
 func (c *Catalog) UpsertRun(ctx context.Context, library string, run libraryRun) error {
 	_, err := c.apply(ctx, []statement{{
-		sql: `INSERT INTO runs (library, worker, job, started, finished, unidentified, removed) ` +
-			`VALUES (?, ?, ?, ?, ?, ?, ?) ` +
+		sql: `INSERT INTO runs (library, worker, job, started, finished, unidentified, removed, commit_id, failure) ` +
+			`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 			`ON CONFLICT (library, worker) DO UPDATE SET ` +
 			`job = excluded.job, started = excluded.started, finished = excluded.finished, ` +
-			`unidentified = excluded.unidentified, removed = excluded.removed`,
+			`unidentified = excluded.unidentified, removed = excluded.removed, ` +
+			`commit_id = excluded.commit_id, failure = excluded.failure`,
 		params: []any{library, run.Worker, run.Job, runSeconds(run.Started), runSeconds(run.Finished),
-			run.Unidentified, run.Removed},
+			run.Unidentified, run.Removed, run.Commit, run.Failure},
 	}})
 	return err
 }
@@ -167,7 +177,7 @@ func (c *Catalog) subscribeRuns(ctx context.Context, onReady func(), onLibrary f
 // decodeRun reads one runs row out of the cells the query streams, in
 // the column order runsQuery names.
 func decodeRun(cells []any) (string, libraryRun, bool) {
-	if len(cells) < 7 {
+	if len(cells) < 9 {
 		return "", libraryRun{}, false
 	}
 	library, ok := cells[0].(string)
@@ -176,6 +186,8 @@ func decodeRun(cells []any) (string, libraryRun, bool) {
 	}
 	worker, _ := cells[1].(string)
 	job, _ := cells[2].(string)
+	commit, _ := cells[7].(string)
+	failure, _ := cells[8].(string)
 	return library, libraryRun{
 		Worker:       worker,
 		Job:          job,
@@ -183,7 +195,27 @@ func decodeRun(cells []any) (string, libraryRun, bool) {
 		Finished:     runTime(cellNumber(cells[4])),
 		Unidentified: int(cellNumber(cells[5])),
 		Removed:      int(cellNumber(cells[6])),
+		Commit:       commit,
+		Failure:      failure,
 	}, true
+}
+
+// lastScan reads the commit and the failure the last scan of one library
+// left. The scan Job reads it before it clones, so a scan that finds the
+// same commit writes no row, and a failed scan keeps the mark. A library
+// with no scan run yet reads both as empty.
+func (c *Catalog) lastScan(ctx context.Context, library string) (libraryRun, error) {
+	run := libraryRun{Worker: workerScan}
+	err := c.stream(ctx, `SELECT commit_id, failure FROM runs WHERE library = ? AND worker = ?`,
+		[]any{library, workerScan}, func(cells []any) error {
+			if len(cells) < 2 {
+				return nil
+			}
+			run.Commit, _ = cells[0].(string)
+			run.Failure, _ = cells[1].(string)
+			return nil
+		})
+	return run, err
 }
 
 // A SQLite integer arrives from the API as a JSON number, so every

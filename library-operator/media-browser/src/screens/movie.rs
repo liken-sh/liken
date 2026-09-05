@@ -1,6 +1,7 @@
 // A movie's page. The backdrop draws full bleed under the text, and the
 // page reads down: the logo or the title, the facts, the tagline, the
-// plot, the buttons, the set strip, and the stripes of credited people.
+// plot, the buttons, the set strip, a strip for each franchise the movie
+// belongs to, and the stripes of credited people.
 // Focus lands on Play, so a film is two presses from the wall, as it was
 // when the wall played it on select.
 
@@ -12,7 +13,8 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
-use super::{Item, Screen, Step, facts, foot, person, stripes};
+use super::franchise::strips::{self, Move, Place, Strips};
+use super::{Item, Screen, Step, facts, foot, franchise, person, stripes};
 use crate::catalog::{MovieDetails, MovieSet, Query, Selection, Slot, Source};
 use crate::focus;
 use crate::posters::Posters;
@@ -26,14 +28,26 @@ pub enum Focus {
     Buttons(usize),
     /// One member of the set strip.
     Strip(usize),
+    /// One rung of the franchise strips: which strip, and the heading or
+    /// the member in it.
+    Franchise(usize, Place),
     /// One headshot of one stripe: the stripe, and the slot in it.
     Stripe(usize, usize),
+}
+
+/// The words after a set's name on its strip heading. The count is the
+/// members of the set, which is every film it holds. A set is narrower
+/// than a franchise, and the heading says which of the two a strip is. A
+/// set of one never reaches a page, because a set needs two members.
+fn films(count: usize) -> String {
+    format!("a {count}-film set")
 }
 
 /// The set the movie belongs to, as the strip draws it.
 #[derive(Debug)]
 pub struct Set {
-    /// The set's own title, which is the strip's heading.
+    /// The strip's heading: the set's own title and the count of its
+    /// films.
     pub heading: String,
     /// Every movie in the set, in release order.
     pub members: Vec<Item>,
@@ -56,7 +70,7 @@ impl Set {
             .collect();
         let current = members.iter().position(|member| member.id == id)?;
         Some(Self {
-            heading: set.title,
+            heading: facts::joined(&[&set.title, &films(members.len())]),
             members,
             current,
         })
@@ -97,6 +111,9 @@ pub struct Movie {
     pub foot: foot::Foot,
     /// The set the movie belongs to, or nothing where it belongs to none.
     pub set: Option<Set>,
+    /// The franchises the movie belongs to, one strip each, under the set
+    /// strip.
+    pub franchises: Strips,
     /// Where focus is.
     pub focus: Focus,
 }
@@ -121,6 +138,7 @@ impl Movie {
             stripes: stripes::Stripes::of(source.credits(library, id)),
             foot: foot::Foot::of(&details.studios, &source.files(library, id)),
             set,
+            franchises: Strips::of(library, id, source),
             focus: Focus::Buttons(0),
         })
     }
@@ -147,12 +165,14 @@ impl Movie {
     }
 
     /// Fold one press in. Left and right move across the row that holds
-    /// focus, down reaches the strip and then the stripes, and up climbs
-    /// back to the buttons.
+    /// focus, down reaches the set strip, then the franchise strips, and
+    /// then the stripes, and up climbs back to the buttons. A franchise
+    /// strip's heading is a rung over its members.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self.focus {
             Focus::Buttons(index) => self.on_button(index, key),
             Focus::Strip(index) => self.on_strip(index, key, source),
+            Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
         }
     }
@@ -231,9 +251,7 @@ impl Movie {
                 Step::Stay
             }
             "down" => {
-                if let Some((stripe, slot)) = self.stripes.first() {
-                    self.focus = Focus::Stripe(stripe, slot);
-                }
+                self.focus = self.under_strip();
                 Step::Stay
             }
             _ => {
@@ -265,26 +283,73 @@ impl Movie {
         Step::Stay
     }
 
-    // The rung under the buttons: the strip where the movie is in a
-    // set, the first stripe where it is not, and the buttons themselves
-    // where the page holds neither.
+    // The rung under the buttons: the set strip where the movie is in a
+    // set, then the franchise strips, then the first stripe, and the
+    // buttons themselves where the page holds none of the three.
     fn below(&self, index: usize) -> Focus {
         if let Some(set) = &self.set {
             return Focus::Strip(set.current);
         }
-        match self.stripes.first() {
-            Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-            None => Focus::Buttons(index),
+        match self.franchises.first() {
+            Some((strip, place)) => Focus::Franchise(strip, place),
+            None => match self.stripes.first() {
+                Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+                None => Focus::Buttons(index),
+            },
         }
     }
 
-    // The rung over the first stripe: the strip where the movie is
-    // in a set, and the buttons where it is not.
+    // The rung under the set strip: the first franchise strip, then the
+    // first stripe, and the set strip itself where the page holds
+    // neither.
+    fn under_strip(&self) -> Focus {
+        match self.franchises.first() {
+            Some((strip, place)) => Focus::Franchise(strip, place),
+            None => match self.stripes.first() {
+                Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+                None => self.focus,
+            },
+        }
+    }
+
+    // The rung over the first stripe: the last franchise strip, the set
+    // strip where the movie is in a set, and the buttons where the page
+    // holds neither.
     fn above(&self) -> Focus {
+        if let Some((strip, place)) = self.franchises.last() {
+            return Focus::Franchise(strip, place);
+        }
         match &self.set {
             Some(set) => Focus::Strip(set.current),
             None => Focus::Buttons(0),
         }
+    }
+
+    // The rung over the franchise strips: the set strip where the movie
+    // is in a set, and the buttons where it is not.
+    fn over_franchises(&self) -> Focus {
+        match &self.set {
+            Some(set) => Focus::Strip(set.current),
+            None => Focus::Buttons(0),
+        }
+    }
+
+    // One press on a franchise strip. A select on the heading opens the
+    // franchise's page, and a select on a member replaces this page
+    // with that member's, the way a sibling in a set strip does.
+    fn on_franchise(&mut self, rung: strips::Rung, key: &str, source: &mut dyn Source) -> Step {
+        if key == "enter" {
+            return franchise_press(&self.franchises, rung, source);
+        }
+        self.focus = match self.franchises.key(rung, key) {
+            Move::To((strip, place)) => Focus::Franchise(strip, place),
+            Move::Above => self.over_franchises(),
+            Move::Below => match self.stripes.first() {
+                Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+                None => Focus::Franchise(rung.0, rung.1),
+            },
+        };
+        Step::Stay
     }
 
     // The choice a button stands for. Only a movie with a trailer file
@@ -309,6 +374,10 @@ impl Movie {
                 Some(set) => Focus::Strip(index.min(set.members.len() - 1)),
                 None => Focus::Buttons(0),
             },
+            Focus::Franchise(strip, place) => match self.franchises.held((strip, place)) {
+                Some((strip, place)) => Focus::Franchise(strip, place),
+                None => Focus::Buttons(0),
+            },
             Focus::Stripe(stripe, slot) => match self.stripes.held((stripe, slot)) {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
                 None => Focus::Buttons(0),
@@ -320,6 +389,40 @@ impl Movie {
 impl Head for Movie {
     fn head(&self, bounds: Rectangle) -> Rectangle {
         page::head(self, bounds)
+    }
+}
+
+/// What a select on a franchise strip opens. The heading opens the
+/// franchise's own page, which covers this one, so back returns here. A
+/// member replaces this page, because it is another title of the same
+/// story and not a screen of its own. The movie page and the series page
+/// share this one rule.
+pub(crate) fn franchise_press(
+    franchises: &Strips,
+    rung: strips::Rung,
+    source: &mut dyn Source,
+) -> Step {
+    if let Place::Heading = rung.1 {
+        let Some(band) = franchises.band(rung) else {
+            return Step::Stay;
+        };
+        return match franchise::Franchise::open(&band.library, &band.id, source) {
+            Some(page) => Step::Open(Screen::Franchise(Box::new(page))),
+            None => Step::Stay,
+        };
+    }
+    let Some(member) = franchises.member(rung) else {
+        return Step::Stay;
+    };
+    let opened = match member.kind.as_str() {
+        "movies" => Movie::open(&member.library, &member.id, source)
+            .map(|page| Screen::Movie(Box::new(page))),
+        _ => super::series::Series::open(&member.library, &member.id, source)
+            .map(|page| Screen::Series(Box::new(page))),
+    };
+    match opened {
+        Some(screen) => Step::Replace(screen),
+        None => Step::Stay,
     }
 }
 

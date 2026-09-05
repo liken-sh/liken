@@ -127,9 +127,13 @@ type likenItem struct {
 	// Which provider answered for this item, so a person reads why the file
 	// looks the way it does. An art fact writes existing here for a file another
 	// tool had already written.
-	Provider   providerNames    `yaml:"provider,omitempty"`
-	ID         providerIDs      `yaml:"id,omitempty"`
-	Reason     string           `yaml:"reason,omitempty"`
+	Provider providerNames `yaml:"provider,omitempty"`
+	ID       providerIDs   `yaml:"id,omitempty"`
+	Reason   string        `yaml:"reason,omitempty"`
+	// Source is where the bytes came from, for a fact that writes a file from
+	// a link. The franchise art fetch keys on it: the same link is never read
+	// again, and a changed link is.
+	Source     string           `yaml:"source,omitempty"`
 	Wrote      string           `yaml:"wrote,omitempty"`
 	Written    time.Time        `yaml:"written,omitempty"`
 	Candidates []likenCandidate `yaml:"candidates,omitempty"`

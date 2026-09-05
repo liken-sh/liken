@@ -14,11 +14,9 @@
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
-use iced_winit::core::alignment::Vertical;
-use iced_winit::core::text::Alignment;
-use iced_winit::core::{Color, Point, Rectangle};
+use iced_winit::core::{Color, Rectangle};
 
-use super::{Card, Tone, area, artwork, label, mark, scroll, text};
+use super::{Card, Tone, area, artwork, mark, scroll, text};
 use crate::look;
 use crate::posters::Posters;
 
@@ -239,21 +237,7 @@ pub(crate) fn written(
     content: &str,
     color: Color,
 ) {
-    if content.is_empty() {
-        return;
-    }
-    let shown = text::cut(content, look::CAPTION, band.width);
-    frame.with_clip(band, |frame| {
-        frame.fill_text(label(
-            &shown,
-            Point::new(band.center_x(), band.y),
-            look::CAPTION,
-            color,
-            Alignment::Center,
-            Vertical::Top,
-            f32::INFINITY,
-        ));
-    });
+    text::centered(frame, content, band, look::CAPTION, color);
 }
 
 // One slot in frame space: its place in the grid, moved down by the top

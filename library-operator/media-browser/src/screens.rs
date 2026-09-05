@@ -7,6 +7,7 @@
 
 pub mod facts;
 pub mod foot;
+pub mod franchise;
 pub mod home;
 pub mod loading;
 pub mod movie;
@@ -46,6 +47,8 @@ pub enum Screen {
     Series(Box<series::Series>),
     /// One person's page, boxed for the reason a movie's page is.
     Person(Box<person::Person>),
+    /// One franchise's page, boxed for the reason a movie's page is.
+    Franchise(Box<franchise::Franchise>),
 }
 
 /// What a press asks the browser to do. A screen reads the catalog and
@@ -78,6 +81,7 @@ impl Screen {
             Self::Movie(screen) => screen.key(key, source),
             Self::Series(screen) => screen.key(key, source),
             Self::Person(screen) => screen.key(key, source),
+            Self::Franchise(screen) => screen.key(key, source),
         }
     }
 
@@ -91,6 +95,7 @@ impl Screen {
             Self::Movie(screen) => screen.reread(source),
             Self::Series(screen) => screen.reread(source),
             Self::Person(screen) => screen.reread(source),
+            Self::Franchise(screen) => screen.reread(source),
         }
     }
 
@@ -144,6 +149,7 @@ impl Screen {
             Self::Movie(screen) => screen.view(posters, curtain),
             Self::Series(screen) => screen.view(posters, curtain),
             Self::Person(screen) => screen.view(posters),
+            Self::Franchise(screen) => screen.view(posters),
         }
     }
 }
@@ -155,10 +161,14 @@ impl Screen {
 /// focused slot shows, and `under` is the second caption line, empty on
 /// every wall but a person's and the libraries strip. `episode` is what an
 /// episode slot carries: the series a select opens and the numbers it
-/// opens on, and an item that holds one draws as a still.
+/// opens on, and an item that holds one draws as a still. `art_library` is
+/// the library the art resolves against, where that is not the item's own:
+/// a franchise slot opens in the `Library` of kind franchises, and its art
+/// may be a member's poster on the member's own volume.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub library: String,
+    pub art_library: String,
     pub kind: String,
     pub id: String,
     pub name: String,
@@ -210,6 +220,7 @@ impl Item {
         };
         Self {
             library: slot.library,
+            art_library: String::new(),
             kind: slot.kind,
             id: slot.id,
             name: slot.title,
@@ -234,8 +245,13 @@ impl Card for Item {
         }
     }
 
+    // The art resolves against the library that holds it, which is the
+    // item's own unless the item names another.
     fn library(&self) -> &str {
-        &self.library
+        match self.art_library.is_empty() {
+            true => &self.library,
+            false => &self.art_library,
+        }
     }
 
     fn name(&self) -> &str {

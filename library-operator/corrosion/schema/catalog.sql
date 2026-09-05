@@ -270,6 +270,8 @@ CREATE TABLE runs (
     finished INTEGER NOT NULL DEFAULT 0,
     unidentified INTEGER NOT NULL DEFAULT 0,
     removed INTEGER NOT NULL DEFAULT 0,
+    commit_id TEXT NOT NULL DEFAULT '',
+    failure TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, worker)
 );
 
@@ -423,6 +425,17 @@ CREATE INDEX franchises_library_sort_key ON franchises (library, sort_key);
 --              aliases.alias, across every library of the namespace.
 --   title      the name from the file, drawn only when no library
 --              holds the member
+--   released   the real-world date the file gives, as much of it as
+--              the author knows: 1999, 1999-05, or 1999-05-19, and
+--              empty where the file gives none. On a film it is the
+--              first public release, and on a series the day the
+--              first episode aired.
+--   release_year
+--              the year of that date, or 0 where the file gives
+--              none. It is derived from released, so the wall reads
+--              one integer for its year label and never parses a
+--              string. A gap whose release_year is after this year
+--              draws as coming, and any other gap draws as missing.
 --   timed      1 where the file gives the entry a time, else 0
 --   time_from  the entry's span in the calendar's unit; both 0 when
 --   time_to    timed is 0
@@ -440,6 +453,8 @@ CREATE TABLE franchise_members (
     kind TEXT NOT NULL DEFAULT '',
     alias TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
+    released TEXT NOT NULL DEFAULT '',
+    release_year INTEGER NOT NULL DEFAULT 0,
     timed INTEGER NOT NULL DEFAULT 0,
     time_from REAL NOT NULL DEFAULT 0,
     time_to REAL NOT NULL DEFAULT 0,
@@ -493,7 +508,8 @@ CREATE INDEX aliases_alias ON aliases (alias);
 --     SELECT library, id, title, art, released, slug, 'series' AS kind FROM series
 --   )
 --   SELECT m.library, m.franchise, m.position, m.kind, m.alias, m.title,
---          m.timed, m.time_from, m.time_to, m.universes,
+--          m.released, m.release_year, m.timed, m.time_from, m.time_to,
+--          m.universes,
 --          MIN(i.library) AS held_library, i.id, i.title, i.art, i.released, i.slug
 --   FROM franchise_members m
 --   JOIN found f ON f.library = m.library AND f.franchise = m.franchise

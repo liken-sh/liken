@@ -36,6 +36,9 @@ pub enum Order {
 /// across every library and both folded by their `Fold`. `Genre` is every
 /// movie and series across every library that carries the genre, the
 /// titles that lead with it first, then newest by the order's column.
+/// `Franchise` is the members of one franchise that some library holds,
+/// in story order; it names the `Library` of kind franchises that holds
+/// the order, and never a member's own library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
     Library { library: String },
@@ -44,16 +47,17 @@ pub enum Query {
     Released { fold: Fold },
     Added { fold: Fold },
     Genre { name: String, order: Order },
+    Franchise { library: String, id: String },
 }
 
 impl Query {
     /// The heading without the count, which is what a strip draws over its
-    /// slots. A person's and a set's name comes with the answer, because only
-    /// the catalog holds it.
+    /// slots. A person's, a set's, and a franchise's name comes with the
+    /// answer, because only the catalog holds it.
     pub fn name(&self, name: &str) -> String {
         match self {
             Self::Library { library } => library_name(library).to_string(),
-            Self::Person { .. } | Self::Set { .. } => name.to_string(),
+            Self::Person { .. } | Self::Set { .. } | Self::Franchise { .. } => name.to_string(),
             Self::Released { .. } => "Recently released".to_string(),
             Self::Added { .. } => "Recently added".to_string(),
             Self::Genre { name, .. } => name.clone(),
@@ -61,11 +65,11 @@ impl Query {
     }
 
     /// The heading the band draws over this query's slots. A library's
-    /// heading and a recency query's carry the count. A person's and a set's
-    /// carry the name alone.
+    /// heading and a recency query's carry the count. A person's, a set's,
+    /// and a franchise's carry the name alone.
     pub fn heading(&self, name: &str, count: usize) -> String {
         match self {
-            Self::Person { .. } | Self::Set { .. } => name.to_string(),
+            Self::Person { .. } | Self::Set { .. } | Self::Franchise { .. } => name.to_string(),
             _ => format!("{} · {count}", self.name(name)),
         }
     }
@@ -168,6 +172,18 @@ mod tests {
             library: "screening/features".into(),
         };
         assert_eq!(query.heading("features", 42), "features · 42");
+    }
+
+    #[test]
+    fn a_franchise_is_headed_by_its_name_alone_and_carries_no_kind_word() {
+        let query = Query::Franchise {
+            library: "screening/franchises".into(),
+            id: "franchise:name:the-cycle".into(),
+        };
+        assert_eq!(query.name("The Cycle"), "The Cycle");
+        assert_eq!(query.heading("The Cycle", 9), "The Cycle");
+        assert_eq!(query.kind_word(), None);
+        assert_eq!(query.all_titles(), query);
     }
 
     #[test]

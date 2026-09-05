@@ -6,9 +6,11 @@
 
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
-use crate::catalog::{Fold, GenreEntry, LibraryEntry, Order, Query, Source, library_name};
+use crate::catalog::{
+    Fold, FranchiseEntry, GenreEntry, LibraryEntry, Order, Query, Source, library_name,
+};
 use crate::screens::wall::Wall;
-use crate::screens::{Item, Screen, Step, facts, person, slots};
+use crate::screens::{Item, Screen, Step, facts, franchise, person, slots};
 use crate::views::strip;
 
 // The kind an item of the libraries strip carries, so a select on it
@@ -19,14 +21,20 @@ pub(super) const LIBRARY: &str = "library";
 // the genre's page and never a title's.
 pub(super) const GENRE: &str = "genre";
 
+// The kind an item of the franchises strip carries, so a select on it opens
+// the franchise's page and never a title's.
+pub(super) const FRANCHISE: &str = "franchise";
+
 /// One row of the page as a read: the banner, the slots of one query,
-/// the libraries themselves, or the genres themselves.
+/// the libraries themselves, the genres themselves, or the franchises
+/// themselves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Banner,
     Query(Query),
     Libraries,
     Genres,
+    Franchises,
 }
 
 impl Row {
@@ -44,7 +52,7 @@ impl Row {
 // The rows of the page, top to bottom: the banner, the two recency
 // strips under the `Airing` fold because the home page shows what is
 // new, the strips the day drew in the drawn order, the libraries, and
-// the genres to close the page.
+// the genres, and the franchises to close the page.
 pub(super) fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
     let mut rows = vec![
         Row::Banner,
@@ -58,6 +66,7 @@ pub(super) fn rows(drawn: Vec<Candidate>) -> Vec<Row> {
     );
     rows.push(Row::Libraries);
     rows.push(Row::Genres);
+    rows.push(Row::Franchises);
     rows
 }
 
@@ -168,6 +177,19 @@ impl Strip {
                 self.heading = "Genres".to_string();
                 self.items = source.genres().into_iter().map(genre_item).collect();
             }
+            // The franchises row reads every franchise of the namespace, in
+            // sort order, and has no "see all" for the reason the genres row
+            // has none. The heading carries the count, as a library band does,
+            // because the count is the size of the shelf.
+            Row::Franchises => {
+                let items: Vec<Item> = source
+                    .franchises()
+                    .into_iter()
+                    .map(franchise_item)
+                    .collect();
+                self.heading = format!("Franchises · {}", items.len());
+                self.items = items;
+            }
             // The libraries row reads the libraries. The banner row is here only
             // because the match is exhaustive: a strip never carries it, because
             // the banner is read off the strips and not from a row of its own.
@@ -218,6 +240,12 @@ impl Strip {
             };
             return slots::see_all(&query, source);
         }
+        if item.kind == FRANCHISE {
+            return match franchise::Franchise::open(&item.library, &item.id, source) {
+                Some(page) => Step::Open(Screen::Franchise(Box::new(page))),
+                None => Step::Stay,
+            };
+        }
         slots::opened(item, source)
     }
 }
@@ -230,6 +258,7 @@ fn library_item(entry: LibraryEntry) -> Item {
     Item {
         id: entry.library.clone(),
         library: entry.library,
+        art_library: String::new(),
         kind: LIBRARY.to_string(),
         caption: name.clone(),
         line: facts::Line::of(&[&name]),
@@ -251,6 +280,7 @@ fn genre_item(entry: GenreEntry) -> Item {
     Item {
         id: entry.name.clone(),
         library: entry.library,
+        art_library: String::new(),
         kind: GENRE.to_string(),
         caption: entry.name.clone(),
         line: facts::Line::of(&[&entry.name]),
@@ -261,12 +291,34 @@ fn genre_item(entry: GenreEntry) -> Item {
     }
 }
 
+// One franchise as a slot of the franchises strip: its title as the caption,
+// and the art beside its franchise.yaml as the poster. The slot draws its
+// title on the tile where the row carries no art, which is what every slot
+// with no art draws. The library and the id are the ones a press opens the
+// page by.
+fn franchise_item(entry: FranchiseEntry) -> Item {
+    Item {
+        id: entry.id,
+        library: entry.library,
+        art_library: entry.art_library,
+        kind: FRANCHISE.to_string(),
+        caption: entry.title.clone(),
+        line: facts::Line::of(&[&entry.title]),
+        name: entry.title,
+        under: String::new(),
+        art: entry.art,
+        episode: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::Card;
 
     #[test]
-    fn the_page_reads_the_banner_the_recency_rows_the_draw_the_libraries_then_the_genres() {
+    fn the_page_reads_the_banner_the_recency_rows_the_draw_the_libraries_the_genres_then_the_franchises()
+     {
         let western = Query::Genre {
             name: "Western".into(),
             order: crate::catalog::Order::Released,
@@ -285,9 +337,10 @@ mod tests {
                 Row::Query(western),
                 Row::Libraries,
                 Row::Genres,
+                Row::Franchises,
             ]
         );
-        assert_eq!(rows(Vec::new()).len(), 5);
+        assert_eq!(rows(Vec::new()).len(), 6);
     }
 
     #[test]
@@ -297,6 +350,7 @@ mod tests {
         assert!(!Row::Banner.recency());
         assert!(!Row::Libraries.recency());
         assert!(!Row::Genres.recency());
+        assert!(!Row::Franchises.recency());
         assert!(
             !Row::Query(Query::Library {
                 library: "sample/features".into()
@@ -341,6 +395,41 @@ mod tests {
         assert_eq!(item.under, "42 titles");
         assert_eq!(item.art, "posters/newest.jpg");
         assert_eq!(item.episode, None);
+    }
+
+    #[test]
+    fn a_franchise_is_a_slot_with_its_title_and_the_art_beside_its_file() {
+        let item = franchise_item(FranchiseEntry {
+            library: "screening/orders".into(),
+            id: "franchise:name:the-cycle".into(),
+            title: "The Cycle".into(),
+            art: "the-cycle/poster.jpg".into(),
+            art_library: "screening/films".into(),
+            slug: "the-cycle".into(),
+        });
+        assert_eq!(item.kind, FRANCHISE);
+        assert_eq!(item.id, "franchise:name:the-cycle");
+        assert_eq!(item.library, "screening/orders");
+        // The art of a franchise is a member's poster on the member's
+        // own volume, so the slot resolves it there.
+        assert_eq!(item.art_library, "screening/films");
+        assert_eq!(Card::library(&item), "screening/films");
+        assert_eq!(item.name, "The Cycle");
+        assert_eq!(item.caption, "The Cycle");
+        assert_eq!(item.line.words(), "The Cycle");
+        assert_eq!(item.under, "");
+        assert_eq!(item.art, "the-cycle/poster.jpg");
+        assert_eq!(item.episode, None);
+    }
+
+    #[test]
+    fn a_franchise_with_no_art_draws_the_tile_of_its_title() {
+        let item = franchise_item(FranchiseEntry {
+            title: "The Saga".into(),
+            ..FranchiseEntry::default()
+        });
+        assert_eq!(item.art, "");
+        assert_eq!(item.name, "The Saga");
     }
 
     #[test]

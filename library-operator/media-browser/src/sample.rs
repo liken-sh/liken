@@ -2,10 +2,12 @@
 // before the sidecar source lands. Every name here is synthesized; nothing
 // resembles a real library.
 
+use crate::catalog::franchise;
 use crate::catalog::recency::{self, CANDIDATES, Candidate};
 use crate::catalog::{
-    Answer, Credit, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
-    Person, PlayItem, Query, Selection, SeriesDetails, Slot, Source, Title, library_name, pool,
+    Answer, Credit, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
+    LibraryEntry, Membership, MovieDetails, MovieSet, Person, PlayItem, Query, Selection,
+    SeriesDetails, Slot, Source, Title, library_name, pool,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
@@ -15,6 +17,10 @@ mod people;
 
 // The invented genres and the invented pool the day's draw reads.
 mod draw;
+
+// The invented franchises: the two orders the strip and the franchise
+// page draw.
+mod orders;
 
 // Enough movies to exercise the wall's culling, near the
 // head-to-head's five thousand.
@@ -77,6 +83,10 @@ impl Source for Catalog {
         draw::genres()
     }
 
+    fn franchises(&mut self) -> Vec<FranchiseEntry> {
+        orders::entries()
+    }
+
     fn wall(&mut self, query: &Query) -> Answer {
         match query {
             Query::Library { library } => Answer {
@@ -115,6 +125,7 @@ impl Source for Catalog {
                 name: name.clone(),
                 slots: draw::titles(name, *order),
             },
+            Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
         }
     }
 
@@ -227,6 +238,14 @@ impl Source for Catalog {
             title: format!("The Specimen Cycle {set:02}"),
             members,
         })
+    }
+
+    fn franchises_of(&mut self, _library: &str, id: &str) -> Vec<Membership> {
+        orders::memberships(id)
+    }
+
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
+        orders::franchise(library, id)
     }
 
     fn credits(&mut self, _library: &str, id: &str) -> Credits {

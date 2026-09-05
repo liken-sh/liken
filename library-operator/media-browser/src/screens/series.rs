@@ -1,8 +1,9 @@
 // A series' page. One screen holds the whole series: a header over the
 // backdrop, and under it a wall of episode stills in aired order, with a
-// divider before each season's first row, and the stripes of credited
-// people after the last season. Focus is on a still or on a headshot, and
-// the header stays at the top of the frame, because it shows the focused
+// divider before each season's first row, a strip for each franchise the
+// series belongs to after the last season, and the stripes of credited
+// people after those. Focus is on a still or on a headshot, and the
+// header stays at the top of the frame, because it shows the focused
 // episode's facts and plot.
 
 mod layout;
@@ -14,6 +15,8 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
+use super::franchise::strips::{self, Move, Place, Strips};
+use super::movie::franchise_press;
 use super::{Screen, Step, facts, foot, person, stripes};
 use crate::catalog::{Episode, Selection, SeriesDetails, Source};
 use crate::focus::{self, Run};
@@ -30,6 +33,9 @@ pub const COLUMNS: usize = 4;
 pub enum Focus {
     /// One still of the episode wall.
     Still(usize),
+    /// One rung of the franchise strips: which strip, and the heading or
+    /// the member in it.
+    Franchise(usize, Place),
     /// One headshot of one stripe: the stripe, and the slot in it.
     Stripe(usize, usize),
 }
@@ -121,6 +127,9 @@ pub struct Series {
     /// The series' plot. The header draws it while no still holds focus:
     /// on a series with no episodes, and while a stripe holds focus.
     pub plot: String,
+    /// The franchises the series belongs to, one strip each, between the
+    /// last season and the stripes.
+    pub franchises: Strips,
     /// The credited people, as the stripes after the last season.
     pub stripes: stripes::Stripes,
     /// The studios the series' body names. The foot draws them whatever
@@ -184,6 +193,7 @@ impl Series {
             ratings: ratings::scores(&details.ratings),
             tagline: details.tagline.clone(),
             plot: details.plot.clone(),
+            franchises: Strips::of(library, id, source),
             stripes: stripes::Stripes::of(source.credits(library, id)),
             studios: details.studios.clone(),
             foot: foot::Foot::default(),
@@ -220,6 +230,10 @@ impl Series {
     fn hold(&self, focus: Focus) -> Focus {
         match focus {
             Focus::Still(index) => Focus::Still(index.min(self.stills.len().saturating_sub(1))),
+            Focus::Franchise(strip, place) => match self.franchises.held((strip, place)) {
+                Some((strip, place)) => Focus::Franchise(strip, place),
+                None => Focus::Still(0),
+            },
             Focus::Stripe(stripe, slot) => match self.stripes.held((stripe, slot)) {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
                 None => Focus::Still(0),
@@ -233,17 +247,18 @@ impl Series {
     pub fn focused(&self) -> Option<&Still> {
         match self.focus {
             Focus::Still(index) => self.stills.get(index),
-            Focus::Stripe(..) => None,
+            Focus::Franchise(..) | Focus::Stripe(..) => None,
         }
     }
 
     /// Fold one press in. Left and right move inside one season, up and
     /// down move by a row and cross the dividers, down from the last row
-    /// reaches the stripes, and select plays the episode and the rest of
-    /// its season.
+    /// reaches the franchise strips and then the stripes, and select plays
+    /// the episode and the rest of its season.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self.focus {
             Focus::Still(index) => self.on_still(index, key, source),
+            Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
         }
     }
@@ -252,8 +267,8 @@ impl Series {
         if key != "enter" {
             let runs: Vec<Run> = self.seasons.iter().map(|season| season.run).collect();
             let moved = focus::sectioned(index, &runs, COLUMNS, key);
-            self.focus = match (key, moved == index, self.stripes.first()) {
-                ("down", true, Some((stripe, slot))) => Focus::Stripe(stripe, slot),
+            self.focus = match (key, moved == index) {
+                ("down", true) => self.under_wall(moved),
                 _ => Focus::Still(moved),
             };
             self.refoot(source);
@@ -270,6 +285,53 @@ impl Series {
                 episode: still.episode,
             },
         }
+    }
+
+    // The rung under the last row of stills: the first franchise strip,
+    // then the first stripe, and the still itself where the page holds
+    // neither.
+    fn under_wall(&self, index: usize) -> Focus {
+        if let Some((strip, place)) = self.franchises.first() {
+            return Focus::Franchise(strip, place);
+        }
+        match self.stripes.first() {
+            Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+            None => Focus::Still(index),
+        }
+    }
+
+    // The rung over the first stripe: the last franchise strip, and the
+    // wall's last still where the page holds none.
+    fn over_stripes(&self, rung: stripes::Rung) -> Focus {
+        if let Some((strip, place)) = self.franchises.last() {
+            return Focus::Franchise(strip, place);
+        }
+        match self.stills.len() {
+            0 => Focus::Stripe(rung.0, rung.1),
+            count => Focus::Still(count - 1),
+        }
+    }
+
+    // One press on a franchise strip. A select on the heading opens the
+    // franchise's page, and a select on a member opens that member's, the
+    // way it does from a film's page.
+    fn on_franchise(&mut self, rung: strips::Rung, key: &str, source: &mut dyn Source) -> Step {
+        if key == "enter" {
+            return franchise_press(&self.franchises, rung, source);
+        }
+        self.focus = match self.franchises.key(rung, key) {
+            Move::To((strip, place)) => Focus::Franchise(strip, place),
+            Move::Above => match self.stills.len() {
+                0 => Focus::Franchise(rung.0, rung.1),
+                count => Focus::Still(count - 1),
+            },
+            Move::Below => match self.stripes.first() {
+                Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+                None => Focus::Franchise(rung.0, rung.1),
+            },
+        };
+        self.refoot(source);
+        Step::Stay
     }
 
     // One press on a stripe. Select opens the person's page, and a
@@ -289,12 +351,10 @@ impl Series {
         }
         self.focus = match self.stripes.key(rung, key) {
             Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-            // Up from the first stripe returns to the wall's last
-            // row, and stays where the series holds no episode.
-            None => match self.stills.len() {
-                0 => Focus::Stripe(rung.0, rung.1),
-                count => Focus::Still(count - 1),
-            },
+            // Up from the first stripe returns to the last franchise
+            // strip, then to the wall's last row, and stays where the
+            // series holds neither.
+            None => self.over_stripes(rung),
         };
         self.refoot(source);
         Step::Stay

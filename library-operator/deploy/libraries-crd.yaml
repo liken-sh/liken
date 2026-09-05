@@ -1,10 +1,11 @@
 # The Library API, declared to Kubernetes.
 #
-# A Library is one declaration of "this volume holds movies". It
-# names a PersistentVolumeClaim, a directory inside it, and the kind of
-# media that directory holds. The library operator reconciles it into a
-# CronJob whose Jobs walk the volume and write what they find into the
-# namespace's catalog, and it folds the namespace reporter's message
+# A Library is one declaration of "this volume holds movies" or "this
+# repository holds franchises". It names the kind of media and where it
+# is: a PersistentVolumeClaim with a directory inside it for the movies
+# and series kinds, or a git url and ref for the franchises kind. The
+# library operator reconciles it into a CronJob whose Jobs walk the
+# storage and write what they find into the namespace's catalog, and it folds the namespace reporter's message
 # back into the status: how many titles, how many folders the scanner
 # could not identify, and when it last walked.
 #
@@ -51,16 +52,24 @@ spec:
       # status. The API server enforces the split.
       subresources:
         status: {}
-      # The columns `kubectl get` shows for a Library. The claim and the
-      # count of unidentified folders carry priority 1, so they appear
-      # under `kubectl get -o wide` and stay out of the default view.
+      # The columns `kubectl get` shows for a Library. The storage
+      # columns and the count of unidentified folders carry priority 1,
+      # so they appear under `kubectl get -o wide` and stay out of the
+      # default view.
       additionalPrinterColumns:
         - name: Kind
           type: string
           jsonPath: .spec.kind
+        # A printer column reads one path and cannot fall back to
+        # another, so the two storage shapes are two columns. A claim
+        # library fills Claim and a git library fills Repository.
         - name: Claim
           type: string
           jsonPath: .spec.storage.claim
+          priority: 1
+        - name: Repository
+          type: string
+          jsonPath: .spec.storage.git.url
           priority: 1
         - name: Titles
           type: integer
@@ -91,17 +100,21 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A Library is a volume of media of one kind, indexed into
-            the catalog the screens read. Create one for each volume
-            and kind you hold: a Library of movies over the movie
-            volume, a Library of series over the series volume.
+            A Library is media of one kind, indexed into the catalog
+            the screens read. A Library of movies or series covers one
+            volume, and a Library of franchises covers one git
+            repository. Create one for each volume and kind you hold:
+            a Library of movies over the movie volume, a Library of
+            series over the series volume, and a Library of franchises
+            over the repository that holds their files.
           properties:
             spec:
               type: object
               required: [storage, kind]
               description: >-
-                The volume this library covers, the kind of media it
-                holds, and the settings for that kind.
+                The storage this library covers, a claim or a git
+                repository, the kind of media it holds, and the
+                settings for that kind.
               # The kind and its settings block are one declaration
               # in two fields, so the API server keeps them together:
               # the block named by the kind must be there, and the
@@ -115,11 +128,20 @@ spec:
               x-kubernetes-validations:
                 - rule: >-
                     has(self.movies) == (self.kind == 'movies') &&
-                    has(self.series) == (self.kind == 'series')
+                    has(self.series) == (self.kind == 'series') &&
+                    has(self.franchises) == (self.kind == 'franchises')
                   message: >-
-                    the settings block must match the kind: a movies
-                    library carries movies and no series, and a series
-                    library carries series and no movies
+                    the settings block must match the kind: the block
+                    the kind names is present, and no other
+                # The kind and the storage shape are one declaration
+                # too: a franchises library names a claim for what it
+                # derives and a git repository for the truth, and
+                # every other kind names a claim alone.
+                - rule: has(self.storage.git) == (self.kind == 'franchises')
+                  message: >-
+                    the storage must match the kind: a franchises
+                    library names storage.git beside its claim, and a
+                    movies or series library names storage.claim alone
                 - rule: self.kind == oldSelf.kind
                   message: >-
                     a Library's kind is immutable; create another
@@ -127,14 +149,17 @@ spec:
                 - rule: self.storage == oldSelf.storage
                   message: >-
                     a Library's storage is immutable; create another
-                    Library for the other volume or root
+                    Library for the other volume, root, url, or ref
               properties:
                 storage:
                   type: object
                   required: [claim]
                   description: >-
-                    Where the media is: a claim, and a directory
-                    inside it.
+                    Where the media is: a claim, and a directory inside
+                    it. A franchises library also names a git
+                    repository, which holds the story orders; its claim
+                    holds the art the scan downloads from them, and
+                    never the yaml files.
                   properties:
                     claim:
                       type: string
@@ -143,12 +168,15 @@ spec:
                         The PersistentVolumeClaim in this namespace
                         that holds the media. Any volume the cluster
                         can mount will do, an NFS export or a CSI
-                        volume or a disk on one node. The scanner
-                        mounts it read-only and writes nothing to it.
-                        The operator reads the PersistentVolume
+                        volume or a disk on one node. The scanner of a
+                        movies or series library mounts it read-only
+                        and writes nothing to it. The operator reads the PersistentVolume
                         behind the claim and reports it in the
                         status, because playing a title needs to know
-                        how the volume is served.
+                        how the volume is served. For a franchises
+                        library the scanner mounts the claim writable
+                        and downloads the art each franchise.yaml
+                        links to into it, under Kodi's names.
                     root:
                       type: string
                       minLength: 1
@@ -167,14 +195,44 @@ spec:
                         libraries, each with its own root, such as
                         /movies beside /kids-movies. Omitted, it is /,
                         the whole volume.
+                    git:
+                      type: object
+                      required: [url, ref]
+                      description: >-
+                        The repository a franchises library reads. Each
+                        scan Job clones it shallow into an emptyDir and
+                        exits with the checkout, so nothing keeps a
+                        copy. The clone is anonymous over HTTPS, which
+                        tangled.org and GitHub both serve. status.commit
+                        holds what the last scan read, and a scan that
+                        finds the same commit again writes no row.
+                      properties:
+                        url:
+                          type: string
+                          minLength: 1
+                          description: >-
+                            The clone url, such as
+                            https://tangled.org/guid.foo/fiction-franchises.
+                            A fork is a second Library with another url.
+                            Two libraries that define one franchise are
+                            two rows, and the screen draws both.
+                        ref:
+                          type: string
+                          minLength: 1
+                          description: >-
+                            The branch or the tag the clone reads. The
+                            clone is shallow, so the ref names one
+                            commit and no history.
                 kind:
                   type: string
-                  enum: [movies, series]
+                  enum: [movies, series, franchises]
                   description: >-
                     What this library holds. The kind selects the
-                    scanner that walks the volume and the shape the
+                    scanner that walks the storage and the shape the
                     catalog stores each title in. The settings block
-                    of the same name must be present, and no other.
+                    of the same name must be present, and no other. A
+                    franchises library takes storage.git, and the other
+                    kinds take storage.claim.
                 movies:
                   type: object
                   description: >-
@@ -209,6 +267,23 @@ spec:
                         The scanner image to run in place of the one
                         this project ships for series, on the same
                         terms as the movies image.
+                franchises:
+                  type: object
+                  description: >-
+                    The settings for a library of franchises: one
+                    directory per franchise in a git repository, each
+                    with a franchise.yaml and the franchise's art under
+                    Kodi's names. Present exactly when the kind is
+                    franchises, and an empty block is a complete one.
+                  properties:
+                    image:
+                      type: string
+                      minLength: 1
+                      description: >-
+                        The scanner image to run in place of the one
+                        this project ships for franchises, on the same
+                        terms as the movies image. The image needs
+                        git.
                 sources:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -307,7 +382,8 @@ spec:
                   type: object
                   description: >-
                     The PersistentVolume the claim is bound to. It is
-                    absent until the claim binds. Playing a title
+                    absent until the claim binds, and a Library whose
+                    storage is git never carries one. Playing a title
                     from this library needs the volume's kind and
                     address, so the operator reports them here and no
                     reader has to follow the claim to its volume.
@@ -334,7 +410,7 @@ spec:
                         this path and the title's own path under it.
                 phase:
                   type: string
-                  description: "What this library is doing. Scanning while a walk runs, Enriching while an enricher Job runs, Idle between them, Pending while the storage, the catalog pod, or the schedule is not ready, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached."
+                  description: "What this library is doing. Scanning while a walk runs, Enriching while an enricher Job runs, Idle between them, Pending while the storage, the catalog pod, or the schedule is not ready, Failed when the last scan Job failed and wrote no rows, which a franchises library reads when the clone could not reach the forge while the tables hold what the last good scan left, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached."
                 titles:
                   type: integer
                   minimum: 0
@@ -431,6 +507,15 @@ spec:
                         type: integer
                         minimum: 0
                         description: "How many rows that run removed."
+                      commit:
+                        type: string
+                        description: "The commit that run read, for a git library. A run that failed carries the commit the last good run read, so the next scan still has a commit to compare against."
+                      failure:
+                        type: string
+                        description: "Why that run failed, in one sentence. It is empty for a run that finished its work, and status.phase reads Failed while the scan run carries one."
+                commit:
+                  type: string
+                  description: "The commit the last successful scan of a git library read. A scan that clones the same commit again writes no row. It is empty for a library whose storage is a claim."
                 webhook:
                   type: string
                   description: "The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog."
@@ -442,7 +527,9 @@ spec:
                     reports the storage: True when the claim exists, is
                     bound, and its PersistentVolume was read, and False
                     with the reason ClaimNotFound, ClaimUnbound, or
-                    VolumeNotFound. Ready reports the scanning path:
+                    VolumeNotFound. A Library whose storage is git is
+                    Bound as declared, because the scan Job is what
+                    reaches the repository. Ready reports the scanning path:
                     True when the namespace's catalog pod runs with
                     every container ready, the schedule stands, and the
                     reporter has reported this library, and False with

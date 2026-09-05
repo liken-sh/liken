@@ -38,6 +38,7 @@ fn stripes() -> Stripes {
 // stripes of credited people.
 fn crowded(focus: Focus) -> Movie {
     Movie {
+        franchises: crate::screens::franchise::strips::Strips::default(),
         library: "screening/films".into(),
         id: "one".into(),
         title: "A Long Title That Wraps Onto Two".into(),
@@ -69,6 +70,7 @@ fn crowded(focus: Focus) -> Movie {
         set: Some(Set {
             heading: "The Set".into(),
             members: vec![Item {
+                art_library: String::new(),
                 episode: None,
                 library: "default/films".into(),
                 kind: "movies".into(),

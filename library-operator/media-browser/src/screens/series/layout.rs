@@ -6,7 +6,7 @@
 
 use super::{COLUMNS, Focus, Season};
 use crate::look;
-use crate::views::{REACH, area, divider, people, ratings, scroll, stack, text, wall};
+use crate::views::{REACH, area, divider, people, ratings, scroll, stack, strip, text, wall};
 use iced_winit::core::Rectangle;
 
 /// The space between the foot of the header and the first divider.
@@ -33,6 +33,12 @@ pub const PLOT_LINES: usize = 2;
 /// The space between the foot of the wall and the first stripe,
 /// and between two stripes.
 pub const STRIPE_GAP: f32 = 24.0;
+
+/// The height one franchise strip takes on the page. A strip draws one
+/// caption line under each poster, as the strips of the home page do.
+pub fn strip_height() -> f32 {
+    strip::height(1)
+}
 
 // How much of the row under the focused one the scroll keeps in view, as
 // a share of a row, so a person sees that there is more below.
@@ -102,6 +108,8 @@ pub struct Layout {
     pub cells: wall::Cells,
     /// One band for each season, in aired order.
     pub bands: Vec<Band>,
+    /// The top of each franchise strip, in the wall's own space.
+    pub franchises: Vec<f32>,
     /// The top of each stripe, in the wall's own space.
     pub stripes: Vec<f32>,
     /// The top of the foot block, in the wall's own space.
@@ -114,7 +122,13 @@ impl Layout {
     /// The wall for these seasons, with stills of this cell. The first
     /// divider starts a gap below the header, and the gap scrolls away
     /// with the rows.
-    pub fn of(seasons: &[Season], cells: wall::Cells, stripes: usize, foot: f32) -> Self {
+    pub fn of(
+        seasons: &[Season],
+        cells: wall::Cells,
+        franchises: usize,
+        stripes: usize,
+        foot: f32,
+    ) -> Self {
         let mut bands = Vec::with_capacity(seasons.len());
         let mut top = HEAD;
         for season in seasons {
@@ -131,18 +145,24 @@ impl Layout {
             });
             top += height;
         }
+        let mut strips = Vec::with_capacity(franchises);
+        for _ in 0..franchises {
+            top += STRIPE_GAP;
+            strips.push(top);
+            top += strip_height();
+        }
         let mut tops = Vec::with_capacity(stripes);
         for _ in 0..stripes {
             top += STRIPE_GAP;
             tops.push(top);
             top += people::HEIGHT;
         }
-        if stripes > 0 {
+        if stripes > 0 || franchises > 0 {
             top += STRIPE_GAP;
         }
         let mut block = top;
         if foot > 0.0 {
-            if stripes == 0 {
+            if stripes == 0 && franchises == 0 {
                 block += STRIPE_GAP;
             }
             top = block + foot + STRIPE_GAP;
@@ -150,6 +170,7 @@ impl Layout {
         Self {
             cells,
             bands,
+            franchises: strips,
             stripes: tops,
             foot: block,
             content: top,
@@ -161,6 +182,16 @@ impl Layout {
     /// region, and the header above the region never moves.
     pub fn scroll(&self, focus: Focus, seasons: &[Season], height: f32) -> f32 {
         let (region, tail) = match focus {
+            Focus::Franchise(strip, _) => match self.franchises.get(strip) {
+                Some(top) => {
+                    // A franchise strip is never the last block, because
+                    // the stripes and the foot follow it, so it pulls
+                    // the gap under it into view and no more.
+                    let below = self.content - top - strip_height();
+                    (area(0.0, *top, 0.0, strip_height()), STRIPE_GAP.min(below))
+                }
+                None => return 0.0,
+            },
             Focus::Stripe(stripe, _) => match self.stripes.get(stripe) {
                 Some(top) => {
                     // The last stripe pulls everything under it into view,
@@ -208,6 +239,7 @@ impl Layout {
 mod tests {
     use super::*;
     use crate::focus::Run;
+    use crate::screens::franchise::strips::Place;
 
     // A frame of the size the screens this browser draws on hold.
     const WIDTH: f32 = 1920.0;
@@ -237,18 +269,18 @@ mod tests {
     }
 
     fn layout() -> Layout {
-        Layout::of(&seasons(), cells(), 0, 0.0)
+        Layout::of(&seasons(), cells(), 0, 0, 0.0)
     }
 
     // The same wall with the three stripes of a title's credits
     // after it.
     fn with_stripes() -> Layout {
-        Layout::of(&seasons(), cells(), 3, 0.0)
+        Layout::of(&seasons(), cells(), 0, 3, 0.0)
     }
 
     // The same wall, its stripes, and a foot of two lines under them.
     fn with_foot() -> Layout {
-        Layout::of(&seasons(), cells(), 3, FOOT_LINES)
+        Layout::of(&seasons(), cells(), 0, 3, FOOT_LINES)
     }
 
     // The height of a foot of two lines.
@@ -309,6 +341,39 @@ mod tests {
         );
     }
 
+    // The same wall with one franchise strip between the seasons and
+    // the stripes.
+    fn with_franchise() -> Layout {
+        Layout::of(&seasons(), cells(), 1, 3, 0.0)
+    }
+
+    #[test]
+    fn a_franchise_strip_stands_between_the_last_season_and_the_stripes() {
+        let plain = with_stripes();
+        let layout = with_franchise();
+        assert_eq!(layout.bands, plain.bands);
+        assert_eq!(layout.franchises.len(), 1);
+        assert_eq!(layout.franchises[0], plain.stripes[0]);
+        assert_eq!(
+            layout.stripes[0],
+            layout.franchises[0] + strip_height() + STRIPE_GAP
+        );
+        assert_eq!(layout.content, plain.content + strip_height() + STRIPE_GAP);
+    }
+
+    #[test]
+    fn the_wall_scrolls_the_focused_franchise_strip_into_view() {
+        let layout = with_franchise();
+        let height = region(frame()).height;
+        let offset = layout.scroll(Focus::Franchise(0, Place::Heading), &seasons(), height);
+        assert!(layout.franchises[0] - offset >= 0.0);
+        assert!(layout.franchises[0] + strip_height() - offset <= height);
+        assert_eq!(
+            layout.scroll(Focus::Franchise(9, Place::Heading), &seasons(), height),
+            0.0
+        );
+    }
+
     #[test]
     fn the_foot_follows_the_last_stripe_and_ends_the_wall() {
         let plain = with_stripes();
@@ -320,7 +385,7 @@ mod tests {
 
     #[test]
     fn a_wall_with_no_stripe_still_leaves_a_gap_over_its_foot() {
-        let layout = Layout::of(&seasons(), cells(), 0, FOOT_LINES);
+        let layout = Layout::of(&seasons(), cells(), 0, 0, FOOT_LINES);
         assert_eq!(
             layout.foot,
             layout.bands[2].top + layout.bands[2].height + STRIPE_GAP
@@ -397,13 +462,13 @@ mod tests {
 
     #[test]
     fn a_wall_shorter_than_its_region_never_scrolls() {
-        let layout = Layout::of(&seasons()[..1], cells(), 0, 0.0);
+        let layout = Layout::of(&seasons()[..1], cells(), 0, 0, 0.0);
         assert_eq!(layout.scroll(Focus::Still(7), &seasons()[..1], 2000.0), 0.0);
     }
 
     #[test]
     fn a_series_with_no_episodes_never_scrolls() {
-        let layout = Layout::of(&[], cells(), 0, 0.0);
+        let layout = Layout::of(&[], cells(), 0, 0, 0.0);
         assert_eq!(layout.content, HEAD);
         assert_eq!(layout.scroll(Focus::Still(0), &[], 1080.0), 0.0);
     }

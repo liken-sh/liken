@@ -68,7 +68,7 @@ fn titles(blocks: &[Block], source: &mut dyn Source) -> Vec<Title> {
     let strips: Vec<&Strip> = blocks.iter().filter_map(Block::strip).collect();
     let (recency, drawn): (Vec<&Strip>, Vec<&Strip>) = strips
         .into_iter()
-        .filter(|strip| !matches!(strip.row, Row::Libraries | Row::Genres))
+        .filter(|strip| !matches!(strip.row, Row::Libraries | Row::Genres | Row::Franchises))
         .partition(|strip| strip.row.recency());
     Banner::read(drawn.into_iter().chain(recency), source)
 }

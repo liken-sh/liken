@@ -5,7 +5,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
-use iced_winit::core::{Color, Point};
+use iced_winit::core::{Color, Point, Rectangle};
 
 use super::{area, label};
 
@@ -83,6 +83,35 @@ pub fn line(
         width,
     ));
     height(lines(content, size, width), size)
+}
+
+/// One line centered in its band and clipped to it, so a long line never
+/// runs off the screen or over what is beside it. The line is cut to the
+/// band's width with an ellipsis, because a band is one line tall and a
+/// wrapped line would show the tops of a second. A band with nothing in
+/// it draws nothing.
+pub fn centered(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    band: Rectangle,
+    size: f32,
+    color: Color,
+) {
+    if content.is_empty() {
+        return;
+    }
+    let shown = cut(content, size, band.width);
+    frame.with_clip(band, |frame| {
+        frame.fill_text(label(
+            &shown,
+            Point::new(band.center_x(), band.y),
+            size,
+            color,
+            Alignment::Center,
+            Vertical::Top,
+            f32::INFINITY,
+        ));
+    });
 }
 
 /// A block of text cut to `cap` lines. The answer is the height the block

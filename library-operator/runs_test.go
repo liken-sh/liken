@@ -502,13 +502,13 @@ func TestRunsSkipsARowItCannotRead(t *testing.T) {
 		row  string
 	}{
 		{name: "a row shorter than the columns", row: `{"row":[1,["house/movies","scan"]]}`},
-		{name: "a library that is not a string", row: `{"row":[1,[7,"scan","scan-1",10,20,0,0]]}`},
+		{name: "a library that is not a string", row: `{"row":[1,[7,"scan","scan-1",10,20,0,0,"",""]]}`},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			body := `{"columns":["library","worker","job","started","finished","unidentified","removed"]}` + "\n" +
+			body := `{"columns":["library","worker","job","started","finished","unidentified","removed","commit_id","failure"]}` + "\n" +
 				testCase.row + "\n" +
-				`{"row":[2,["house/series","scan","scan-2",10,20,0,0]]}` + "\n" +
+				`{"row":[2,["house/series","scan","scan-2",10,20,0,0,"",""]]}` + "\n" +
 				`{"eoq":{"time":0.1}}` + "\n"
 			catalog := subscriptionServer(t, http.StatusOK, body)
 

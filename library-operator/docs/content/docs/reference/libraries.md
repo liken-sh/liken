@@ -36,18 +36,19 @@ The block named by `kind` must be present and the other kinds' blocks
 must not. Each block holds that kind's own settings, and an empty
 block is a complete one.
 
-A Library is a volume of media of one kind, indexed into the catalog the screens read. Create one for each volume and kind you hold: a Library of movies over the movie volume, a Library of series over the series volume.
+A Library is media of one kind, indexed into the catalog the screens read. A Library of movies or series covers one volume, and a Library of franchises covers one git repository. Create one for each volume and kind you hold: a Library of movies over the movie volume, a Library of series over the series volume, and a Library of franchises over the repository that holds their files.
 
 ## spec
 
-The volume this library covers, the kind of media it holds, and the settings for that kind.
+The storage this library covers, a claim or a git repository, the kind of media it holds, and the settings for that kind.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | Where the media is: a claim, and a directory inside it. |
-| <span id="spec--kind"></span>`kind` | string | yes | What this library holds. The kind selects the scanner that walks the volume and the shape the catalog stores each title in. The settings block of the same name must be present, and no other. One of: `movies`, `series`. |
+| <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | Where the media is: a claim, and a directory inside it. A franchises library also names a git repository, which holds the story orders; its claim holds the art the scan downloads from them, and never the yaml files. |
+| <span id="spec--kind"></span>`kind` | string | yes | What this library holds. The kind selects the scanner that walks the storage and the shape the catalog stores each title in. The settings block of the same name must be present, and no other. A franchises library takes storage.git, and the other kinds take storage.claim. One of: `movies`, `series`, `franchises`. |
 | <span id="spec--movies"></span>`movies` | [object](#specmovies) | no | The settings for a library of movies, one folder per title. Present exactly when kind is movies, and empty is a complete block: every setting has a default. |
 | <span id="spec--series"></span>`series` | [object](#specseries) | no | The settings for a library of series, one folder per series with a folder per season inside it. Present exactly when kind is series, and empty is a complete block. |
+| <span id="spec--franchises"></span>`franchises` | [object](#specfranchises) | no | The settings for a library of franchises: one directory per franchise in a git repository, each with a franchise.yaml and the franchise's art under Kodi's names. Present exactly when the kind is franchises, and an empty block is a complete one. |
 | <span id="spec--sources"></span>`sources` | []string | no | The MetadataProviders in this namespace to ask about a title, by name, in the order they are asked: for each fact, the first provider in the list that serves it and is Ready is the one asked. The Sources condition reports a name that resolves to no provider, or a list where none serves a fact this library needs. A library that omits the list runs only the facts that need no provider. |
 | <span id="spec--scan"></span>`scan` | [object](#specscan) | no | When the full walk of this library runs. |
 | <span id="spec--trickplay"></span>`trickplay` | [object](#spectrickplay) | no | The thumbnail sheets and the WebVTT map a scrub bar reads, built beside each video from the file alone, with no provider. |
@@ -56,12 +57,22 @@ The volume this library covers, the kind of media it holds, and the settings for
 
 ### spec.storage
 
-Where the media is: a claim, and a directory inside it.
+Where the media is: a claim, and a directory inside it. A franchises library also names a git repository, which holds the story orders; its claim holds the art the scan downloads from them, and never the yaml files.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specstorage--claim"></span>`claim` | string | yes | The PersistentVolumeClaim in this namespace that holds the media. Any volume the cluster can mount will do, an NFS export or a CSI volume or a disk on one node. The scanner mounts it read-only and writes nothing to it. The operator reads the PersistentVolume behind the claim and reports it in the status, because playing a title needs to know how the volume is served. |
+| <span id="specstorage--claim"></span>`claim` | string | yes | The PersistentVolumeClaim in this namespace that holds the media. Any volume the cluster can mount will do, an NFS export or a CSI volume or a disk on one node. The scanner of a movies or series library mounts it read-only and writes nothing to it. The operator reads the PersistentVolume behind the claim and reports it in the status, because playing a title needs to know how the volume is served. For a franchises library the scanner mounts the claim writable and downloads the art each franchise.yaml links to into it, under Kodi's names. |
 | <span id="specstorage--root"></span>`root` | string | no | The directory inside the claim this library starts at, as an absolute path from the root of the volume. One volume may hold several libraries, each with its own root, such as /movies beside /kids-movies. Omitted, it is /, the whole volume. Default: `/`. |
+| <span id="specstorage--git"></span>`git` | [object](#specstoragegit) | no | The repository a franchises library reads. Each scan Job clones it shallow into an emptyDir and exits with the checkout, so nothing keeps a copy. The clone is anonymous over HTTPS, which tangled.org and GitHub both serve. status.commit holds what the last scan read, and a scan that finds the same commit again writes no row. |
+
+#### spec.storage.git
+
+The repository a franchises library reads. Each scan Job clones it shallow into an emptyDir and exits with the checkout, so nothing keeps a copy. The clone is anonymous over HTTPS, which tangled.org and GitHub both serve. status.commit holds what the last scan read, and a scan that finds the same commit again writes no row.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specstoragegit--url"></span>`url` | string | yes | The clone url, such as https://tangled.org/guid.foo/fiction-franchises. A fork is a second Library with another url. Two libraries that define one franchise are two rows, and the screen draws both. |
+| <span id="specstoragegit--ref"></span>`ref` | string | yes | The branch or the tag the clone reads. The clone is shallow, so the ref names one commit and no history. |
 
 ### spec.movies
 
@@ -78,6 +89,14 @@ The settings for a library of series, one folder per series with a folder per se
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specseries--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for series, on the same terms as the movies image. |
+
+### spec.franchises
+
+The settings for a library of franchises: one directory per franchise in a git repository, each with a franchise.yaml and the franchise's art under Kodi's names. Present exactly when the kind is franchises, and an empty block is a complete one.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specfranchises--image"></span>`image` | string | no | The scanner image to run in place of the one this project ships for franchises, on the same terms as the movies image. The image needs git. |
 
 ### spec.scan
 
@@ -101,8 +120,8 @@ What the volume resolved to and what the namespace's reporter says about this li
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--volume"></span>`volume` | [object](#statusvolume) | no | The PersistentVolume the claim is bound to. It is absent until the claim binds. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume. |
-| <span id="status--phase"></span>`phase` | string | no | What this library is doing. Scanning while a walk runs, Enriching while an enricher Job runs, Idle between them, Pending while the storage, the catalog pod, or the schedule is not ready, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached. |
+| <span id="status--volume"></span>`volume` | [object](#statusvolume) | no | The PersistentVolume the claim is bound to. It is absent until the claim binds, and a Library whose storage is git never carries one. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume. |
+| <span id="status--phase"></span>`phase` | string | no | What this library is doing. Scanning while a walk runs, Enriching while an enricher Job runs, Idle between them, Pending while the storage, the catalog pod, or the schedule is not ready, Failed when the last scan Job failed and wrote no rows, which a franchises library reads when the clone could not reach the forge while the tables hold what the last good scan left, and Offline when the namespace's reporter has left the bus. Departing means the Library is deleted and the operator holds it open while a cleanup Job takes this library's rows out of the namespace's catalog; the Departing condition says which step that teardown has reached. |
 | <span id="status--titles"></span>`titles` | integer | no | How many titles the scanner's last walk cataloged. |
 | <span id="status--items"></span>`items` | integer | no | How many entries this library holds: its movies, or its series and their episodes counted together. |
 | <span id="status--files"></span>`files` | integer | no | How many files this library holds: the video files and everything beside them, the sidecars, the artwork, the subtitles, and the trickplay directories. |
@@ -115,12 +134,13 @@ What the volume resolved to and what the namespace's reporter says about this li
 | <span id="status--lastwalk"></span>`lastWalk` | string | no | When the scanner last finished a full walk of the volume. |
 | <span id="status--lastchange"></span>`lastChange` | string | no | When the scanner last wrote a change to the catalog. A walk that finds nothing new moves lastWalk and leaves this alone. |
 | <span id="status--runs"></span>`runs` | [\[\]object](#statusruns) | no | The last run of each worker of this library, as the namespace's reporter published it. |
+| <span id="status--commit"></span>`commit` | string | no | The commit the last successful scan of a git library read. A scan that clones the same commit again writes no row. It is empty for a library whose storage is a claim. |
 | <span id="status--webhook"></span>`webhook` | string | no | The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, the schedule stands, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScanPending, Offline, or NoReport. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, AwaitingEcho, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. A Library whose storage is git is Bound as declared, because the scan Job is what reaches the repository. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, the schedule stands, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScanPending, Offline, or NoReport. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, AwaitingEcho, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition. |
 
 ### status.volume
 
-The PersistentVolume the claim is bound to. It is absent until the claim binds. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume.
+The PersistentVolume the claim is bound to. It is absent until the claim binds, and a Library whose storage is git never carries one. Playing a title from this library needs the volume's kind and address, so the operator reports them here and no reader has to follow the claim to its volume.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -141,10 +161,12 @@ The last run of each worker of this library, as the namespace's reporter publish
 | <span id="statusruns--finished"></span>`finished` | string | no | When that Job wrote its last row, which is what a Job waits to see echoed before it exits. |
 | <span id="statusruns--unidentified"></span>`unidentified` | integer | no | How many folders that run could not identify. |
 | <span id="statusruns--removed"></span>`removed` | integer | no | How many rows that run removed. |
+| <span id="statusruns--commit"></span>`commit` | string | no | The commit that run read, for a git library. A run that failed carries the commit the last good run read, so the next scan still has a commit to compare against. |
+| <span id="statusruns--failure"></span>`failure` | string | no | Why that run failed, in one sentence. It is empty for a run that finished its work, and status.phase reads Failed while the scan run carries one. |
 
 ### status.conditions[]
 
-The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, the schedule stands, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScanPending, Offline, or NoReport. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, AwaitingEcho, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition.
+The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. A Library whose storage is git is Bound as declared, because the scan Job is what reaches the repository. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, the schedule stands, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScanPending, Offline, or NoReport. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, AwaitingEcho, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

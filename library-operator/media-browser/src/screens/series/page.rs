@@ -14,12 +14,13 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
+use super::super::franchise::strips::Place;
 use super::layout::{self, Layout};
 use super::{COLUMNS, Focus, Series};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::Stack;
-use crate::views::{area, divider, header, people, ratings, text, wall};
+use crate::views::{area, divider, header, people, ratings, strip, text, wall};
 
 // The margin at both sides of the header's text.
 const MARGIN: f32 = 120.0;
@@ -64,6 +65,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         let layout = Layout::of(
             &series.seasons,
             cells,
+            series.franchises.bands().len(),
             series.stripes.bands().len(),
             series.foot.height(width),
         );
@@ -105,6 +107,43 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         lines: 1,
                         region,
                         offset: offset - band.rows_top,
+                    },
+                );
+            }
+
+            for (index, (band, top)) in series
+                .franchises
+                .bands()
+                .iter()
+                .zip(&layout.franchises)
+                .enumerate()
+            {
+                strip::draw(
+                    frame,
+                    posters,
+                    &strip::Strip {
+                        members: &band.members,
+                        current: band.current,
+                        focus: match series.focus {
+                            Focus::Franchise(strip, Place::Member(member)) if strip == index => {
+                                Some(member)
+                            }
+                            _ => None,
+                        },
+                        heading: &band.heading,
+                        library: &series.library,
+                        last: None,
+                        lines: 1,
+                        headed: matches!(
+                            series.focus,
+                            Focus::Franchise(strip, Place::Heading) if strip == index
+                        ),
+                        region: area(
+                            inset,
+                            region.y + top - offset,
+                            region.width - 2.0 * inset,
+                            layout::strip_height(),
+                        ),
                     },
                 );
             }

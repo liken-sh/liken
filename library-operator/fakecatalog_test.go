@@ -261,6 +261,11 @@ func (f *fakeCatalog) evaluate(sql string, p []any) []any {
 		lib := str(p[0])
 		count := f.countIn(f.movies, lib) + f.countIn(f.series, lib) + f.countIn(f.episodes, lib)
 		return []any{float64(count)}
+	// The three franchise tables answer no key here. The fake holds no
+	// franchise row, because sqlitecatalog_test.go drives their write, their
+	// prune, and their sweep against the shipped schema itself.
+	case strings.Contains(sql, "FROM franchise"):
+		return nil
 	case strings.Contains(sql, "SELECT set_id FROM movies"):
 		return f.setIDsUnder(p)
 	case strings.Contains(sql, "FROM file_items"):

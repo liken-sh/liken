@@ -492,3 +492,38 @@ func TestReconcileStartsNoWalkWhenAScanHasRun(t *testing.T) {
 		})
 	}
 }
+
+// A franchises Library binds its claim the way every other kind does, and
+// reports the volume behind it. The repository is the scan Job's own work, and
+// the operator never reads it.
+func TestReconcileBindsTheClaimOfALibraryThatNamesARepository(t *testing.T) {
+	cluster := newFakeCluster()
+	library := studioFranchises()
+	cluster.libraries["franchises"] = library
+	seedCatalog(cluster, "house-catalog", "house")
+	cluster.claims["franchise-art"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "franchise-art", Namespace: "house"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-franchise-art"},
+		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
+	}
+	cluster.volumes["pv-franchise-art"] = `{"metadata":{"name":"pv-franchise-art"},"spec":` +
+		`{"capacity":{"storage":"1Gi"},"accessModes":["ReadWriteOnce"],` +
+		`"local":{"path":"/srv/franchise-art"}}}`
+
+	if err := testOperator(t, cluster).reconcile(t.Context(), library,
+		standingCatalog(), nil, nil, testNow); err != nil {
+		t.Fatal(err)
+	}
+
+	status := cluster.heldLibrary("franchises").Status
+	bound := conditionOf(t, status, conditionBound)
+	if bound.Status != ConditionTrue || bound.Reason != reasonBound {
+		t.Errorf("Bound = %+v, want True with the reason %s", bound, reasonBound)
+	}
+	if status.Volume == nil || status.Volume.Name != "pv-franchise-art" {
+		t.Errorf("volume = %+v, want the one behind the claim", status.Volume)
+	}
+	if cluster.heldCronJob("house", scanCronJobName("franchises")) == nil {
+		t.Error("the pass stood no schedule for a library that names a repository")
+	}
+}

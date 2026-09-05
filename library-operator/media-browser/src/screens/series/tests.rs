@@ -4,9 +4,10 @@
 
 use super::*;
 use crate::catalog::Answer;
+use crate::catalog::franchise::{Entry, Held, SERIES as SERIES_KIND};
 use crate::catalog::{
-    Credit, CreditSlot, Credits, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
-    Person, PlayItem, Query, SeriesDetails,
+    Credit, CreditSlot, Credits, FileFacts, Franchise, GenreEntry, LibraryEntry, Membership,
+    MovieDetails, MovieSet, Person, PlayItem, Query, SeriesDetails,
 };
 use crate::harness::Waker;
 
@@ -29,9 +30,73 @@ struct Serials {
     // Whether the episodes carry no release at all, which is what a
     // library the enrichers have not reached looks like.
     undated: bool,
+    // Whether the series belongs to a franchise, which puts a strip
+    // between the last season and the stripes.
+    franchise: bool,
 }
 
+// The Library of kind franchises the fake holds, and the one franchise
+// in it.
+const ORDERS: &str = "screening/orders";
+const CYCLE: &str = "franchise:name:the-cycle";
+
 impl Source for Serials {
+    fn franchises(&mut self) -> Vec<crate::catalog::FranchiseEntry> {
+        Vec::new()
+    }
+
+    // One franchise of two serials, which is what puts a franchise
+    // strip on the page.
+    fn franchises_of(&mut self, _library: &str, _id: &str) -> Vec<Membership> {
+        if !self.franchise {
+            return Vec::new();
+        }
+        vec![Membership {
+            movies: 0,
+            series: 2,
+            library: ORDERS.into(),
+            id: CYCLE.into(),
+            title: "The Cycle".into(),
+            members: [SERIES, "series:two"]
+                .iter()
+                .enumerate()
+                .map(|(position, id)| Entry {
+                    position: position as i64,
+                    kind: SERIES_KIND.into(),
+                    alias: format!("series:tvdb:{position}"),
+                    title: format!("Serial {id}"),
+                    held: Some(Held {
+                        arts: Vec::new(),
+                        library: "screening/serials".into(),
+                        id: (*id).to_string(),
+                        kind: "series".into(),
+                        title: format!("Serial {id}"),
+                        art: format!("{id}.jpg"),
+                        released: "2004".into(),
+                        slug: (*id).to_string(),
+                        tagline: String::new(),
+                        plot: String::new(),
+                        duration: 0,
+                    }),
+                    ..Entry::default()
+                })
+                .collect(),
+        }]
+    }
+
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
+        if !self.franchise || library != ORDERS || id != CYCLE {
+            return None;
+        }
+        Some(Franchise {
+            library: library.to_string(),
+            id: id.to_string(),
+            title: "The Cycle".into(),
+            entries: self.franchises_of("", "").remove(0).members,
+            ..Franchise::default()
+        })
+    }
+
     fn libraries(&mut self) -> Vec<LibraryEntry> {
         Vec::new()
     }
@@ -53,7 +118,9 @@ impl Source for Serials {
     }
 
     fn series(&mut self, _library: &str, id: &str) -> Option<SeriesDetails> {
-        if id != SERIES {
+        // The second serial is the one a press on the franchise strip
+        // opens, and it carries the same body as the first.
+        if id != SERIES && !(self.franchise && id == "series:two") {
             return None;
         }
         Some(SeriesDetails {
@@ -200,7 +267,7 @@ fn pressed(page: &mut Series, source: &mut Serials, key: &str) -> Focus {
 fn still(focus: Focus) -> usize {
     match focus {
         Focus::Still(index) => index,
-        Focus::Stripe(..) => panic!("focus left the wall"),
+        Focus::Franchise(..) | Focus::Stripe(..) => panic!("focus left the wall"),
     }
 }
 
@@ -488,4 +555,95 @@ fn a_series_whose_episodes_have_not_landed_names_no_seasons() {
     assert_eq!(seasons_of(0), "");
     assert_eq!(seasons_of(1), "1 season");
     assert_eq!(seasons_of(4), "4 seasons");
+}
+
+// A page whose series is in a franchise and credits its people, which
+// is the page with every block on it.
+fn ordered() -> (Series, Serials) {
+    page(Serials {
+        franchise: true,
+        credits: true,
+        ..Serials::default()
+    })
+}
+
+#[test]
+fn a_series_in_a_franchise_draws_a_strip_after_its_last_season() {
+    let (ordered, _) = ordered();
+    assert_eq!(ordered.franchises.bands().len(), 1);
+    assert_eq!(
+        ordered.franchises.bands()[0].heading,
+        "The Cycle · a franchise of 2 series"
+    );
+    assert_eq!(ordered.franchises.bands()[0].current, Some(0));
+    let (plain, _) = page(Serials::default());
+    assert!(plain.franchises.is_empty());
+}
+
+#[test]
+fn down_from_the_last_row_of_stills_reaches_the_franchise_strip() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Still(13);
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(0)));
+    page.key("down", &mut source);
+    assert_eq!(page.focus, Focus::Stripe(0, 0));
+}
+
+#[test]
+fn up_from_the_stripes_climbs_back_through_the_franchise_strip() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Stripe(0, 0);
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(0)));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Still(13));
+}
+
+#[test]
+fn a_press_on_the_strips_heading_opens_the_franchises_page() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Heading);
+    assert!(matches!(
+        page.key("enter", &mut source),
+        Step::Open(Screen::Franchise(_))
+    ));
+}
+
+#[test]
+fn a_press_on_a_member_replaces_this_page_with_that_members() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Member(1));
+    assert!(matches!(
+        page.key("enter", &mut source),
+        Step::Replace(Screen::Series(_))
+    ));
+}
+
+#[test]
+fn a_reread_holds_the_rung_of_the_franchise_strip() {
+    let (mut page, mut source) = ordered();
+    page.focus = Focus::Franchise(0, Place::Member(1));
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Member(1)));
+
+    source.franchise = false;
+    page.reread(&mut source);
+    assert_eq!(page.focus, Focus::Still(0));
+}
+
+#[test]
+fn a_series_with_no_episode_holds_focus_on_its_franchise_strip() {
+    let (mut page, mut source) = page(Serials {
+        empty: true,
+        franchise: true,
+        ..Serials::default()
+    });
+    page.focus = Focus::Franchise(0, Place::Heading);
+    page.key("up", &mut source);
+    assert_eq!(page.focus, Focus::Franchise(0, Place::Heading));
 }

@@ -444,3 +444,43 @@ fn playable(database: &Path) {
         )
         .expect("link the fixture film");
 }
+
+// The franchise page: seven presses down reach the libraries strip, a
+// select opens the features wall, a select on its first film opens the
+// page, and two presses down reach the franchise strip's heading. A
+// select there opens the franchise's own page, where the rows draw
+// across the universes with the era rail beside them.
+#[test]
+fn a_select_on_a_franchise_strip_draws_the_franchise_page() {
+    let dir = workspace("franchise");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.4:down,0.7:down,1.0:down,1.3:down,1.6:down,1.9:down,2.2:down,2.5:enter,\
+             3.0:enter,3.4:down,3.8:down,4.6:enter,5.6:down,5.9:down,6.2:down,6.5:down,\
+             7.2:left,8.0:down,8.6:right",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "4.2,5.2,7.0,7.8,9.0",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    for at in [
+        "004.20.png",
+        "005.20.png",
+        "007.00.png",
+        "007.80.png",
+        "009.00.png",
+    ] {
+        drawn(&frames.join(at), &run);
+    }
+}

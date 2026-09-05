@@ -393,6 +393,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                         frame,
                         posters,
                         &strip::Strip {
+                            headed: false,
                             members: &strip.items,
                             current: None,
                             focus: focused.then_some(strip.focus),

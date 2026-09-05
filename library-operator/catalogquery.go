@@ -137,14 +137,15 @@ func (c *Catalog) stream(ctx context.Context, sql string, params []any, onRow fu
 	return scanner.Err()
 }
 
-// Reads how many titles the catalog holds for this library: the
-// movie rows and the series rows, which are the folders a walk reads, and
-// never the episodes under a series.
+// Reads how many titles the catalog holds for this library: the movie
+// rows, the series rows, and the franchise rows, which are the folders a
+// walk reads, and never the episodes under a series.
 func (c *Catalog) countTitles(ctx context.Context, library string) (int, error) {
 	return c.queryInt(ctx, `SELECT `+
 		`(SELECT count(*) FROM movies WHERE library = ?) + `+
-		`(SELECT count(*) FROM series WHERE library = ?)`,
-		[]any{library, library})
+		`(SELECT count(*) FROM series WHERE library = ?) + `+
+		`(SELECT count(*) FROM franchises WHERE library = ?)`,
+		[]any{library, library, library})
 }
 
 // The subscriptions endpoint, which answers one statement with the

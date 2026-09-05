@@ -6,6 +6,8 @@
 // stack a page is. A screen chooses which of them it draws and where. No
 // primitive reads a kind.
 //
+// A jump rail of rotated bars at the left of a long wall is one more.
+//
 // A page draws in the layers the `layers` module stacks, because inside
 // one layer the renderer draws every mesh, then every image, then every
 // text, whatever order the canvas drew them in. That one fact decides
@@ -22,6 +24,7 @@ pub mod divider;
 pub mod header;
 pub mod layers;
 pub mod people;
+pub mod rail;
 pub mod ratings;
 pub mod scroll;
 pub mod stack;
@@ -122,7 +125,7 @@ impl Tone {
 // at the slot's exact pixel size, and never for a row with no art
 // path. Until a poster arrives, the slot shows the ground color and
 // the row's name.
-fn artwork<P: Posters>(
+pub(crate) fn artwork<P: Posters>(
     frame: &mut canvas::Frame<Renderer>,
     posters: &mut P,
     library: &str,

@@ -12,6 +12,9 @@ pub mod sidecar;
 // slots a source answers one with.
 pub mod query;
 
+// The franchise module: what the two franchise reads answer with.
+pub mod franchise;
+
 // The recency module: the fold the Released and Added queries share,
 // and the constants that bound them.
 pub mod recency;
@@ -24,6 +27,7 @@ pub mod pool;
 // strips from the pool.
 pub mod draw;
 
+pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use query::{Answer, Fold, InSeries, Order, Query, Slot};
 
 /// One library as the home page's libraries strip draws it: the name,
@@ -62,6 +66,24 @@ pub struct GenreEntry {
     /// The poster of the newest-released title that carries the genre and
     /// has one, empty where none has.
     pub art: String,
+}
+
+/// One franchise as the home page's franchises strip draws it. `library` and
+/// `id` name the `Library` of kind franchises and the row in it, which is what
+/// a press opens. `title` is the name a person reads, and the strip draws it
+/// on the slot where the row carries no art. `art` is the file beside the
+/// franchise.yaml, or where the directory holds none, the poster of the first
+/// held member in story order. `art_library` is the library that art
+/// resolves against, which is the member's own library in the second case.
+/// `slug` is the catalog's own name for the row.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FranchiseEntry {
+    pub library: String,
+    pub id: String,
+    pub title: String,
+    pub art: String,
+    pub art_library: String,
+    pub slug: String,
 }
 
 /// One title in a kind's top list: a movie, or a series.
@@ -322,11 +344,17 @@ pub trait Source {
     /// genres strip is a row of every home page.
     fn genres(&mut self) -> Vec<GenreEntry>;
 
+    /// Every franchise the catalog holds, across every library of the
+    /// namespace, in the sort order a wall of them draws. The franchises strip
+    /// of the home page reads it, and draws every row and not a sample of
+    /// them, the way the genres strip does.
+    fn franchises(&mut self) -> Vec<FranchiseEntry>;
+
     /// The one read behind every wall. Every slot carries its library and
-    /// its kind, so one wall draws a library, a person's works, and a set from
-    /// the same answer. The answer names what the query is about and holds
-    /// its slots in the query's order. It is empty where the query names
-    /// nothing the catalog holds.
+    /// its kind, so one wall draws a library, a person's works, a set, and
+    /// a franchise's held members from the same answer. The answer names
+    /// what the query is about and holds its slots in the query's order.
+    /// It is empty where the query names nothing the catalog holds.
     fn wall(&mut self, query: &Query) -> Answer;
 
     /// Every candidate strip the day may draw, with its weight: every
@@ -351,6 +379,18 @@ pub trait Source {
     /// One set and its members in release order, or nothing where the
     /// library holds no set under that id.
     fn set(&mut self, library: &str, id: &str) -> Option<MovieSet>;
+
+    /// Every franchise one title belongs to, with the members some library
+    /// of the namespace holds, in story order. The strip on the title's
+    /// page draws them, so it draws what a person can play. The title's
+    /// own aliases find the franchises, so a member resolves by string
+    /// match and no library reads another's volume.
+    fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership>;
+
+    /// One franchise as its own page draws it, or nothing where that
+    /// `Library` holds no franchise under that id. Every entry is in story
+    /// order, held or not, so a gap draws with the file's own title.
+    fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise>;
 
     /// The play list one choice resolves to. A movie is one item or
     /// none. An episode is itself and every later episode of its season,

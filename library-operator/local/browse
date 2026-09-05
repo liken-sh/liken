@@ -72,10 +72,10 @@ fi
 # draws placeholders and reports nothing.
 #
 # The union is the browser's own libraries query, so this reads the
-# same keys the first screen lists.
+# same keys the first screen lists, the franchises libraries included.
 mapfile -t keys < <(curl --silent --fail --max-time 5 \
   --header 'content-type: application/json' \
-  --data '"SELECT library FROM movies UNION SELECT library FROM series ORDER BY library"' \
+  --data '"SELECT library FROM movies UNION SELECT library FROM series UNION SELECT library FROM franchises ORDER BY library"' \
   "$updates/v1/queries" 2>/dev/null |
   jq --raw-output 'select(has("row")) | .row[1][0]')
 

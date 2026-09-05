@@ -1,0 +1,408 @@
+// The franchise page's one canvas: the rail and the time labels at the
+// left, and the metro strip and one lane of cards beside them. The wall
+// scrolls inside its own region and is clipped to it, so no row draws
+// over the band, and the legend holds the top of the lane while the rows
+// scroll under it. A row the region does not reach builds no geometry,
+// so a wall of a hundred rows costs only the rows a person sees.
+
+use std::cell::RefCell;
+use std::convert::Infallible;
+
+use iced_wgpu::Renderer;
+use iced_widget::canvas;
+use iced_winit::core::image::FilterMethod;
+use iced_winit::core::{Point, Rectangle, Theme, mouse};
+
+use super::card::{self, GROUND_TONE};
+use super::metro;
+use super::wall::{self, Cell};
+use super::{Focus, Franchise};
+use crate::catalog::franchise::Standing;
+use crate::look;
+use crate::posters::Posters;
+use crate::views::{Tone, area, artwork, band, extent, mark, rail, rounded, text, wall as still};
+
+// The margin at both sides of the page.
+const MARGIN: f32 = 80.0;
+
+// The space between the band and the legend.
+const TOP: f32 = 24.0;
+
+// The space between a title's last line and the note under it.
+const LEAD: f32 = 2.0;
+
+// The space inside a thin row, from its edge to its words.
+const INSET: f32 = 12.0;
+
+// The dash and the space of a thin row's outline, and the width of its
+// stroke.
+const DASH: [f32; 2] = [6.0, 4.0];
+const OUTLINE: f32 = 1.0;
+
+// The radius of a thin row's corners.
+const ROUND: f32 = 4.0;
+
+/// The part of the frame the wall scrolls in: under the band, and inside
+/// the margins.
+pub fn region(bounds: Rectangle) -> Rectangle {
+    let top = band::HEIGHT + TOP;
+    area(
+        MARGIN,
+        top,
+        (bounds.width - 2.0 * MARGIN).max(0.0),
+        (bounds.height - top).max(0.0),
+    )
+}
+
+/// The page's one canvas.
+pub struct Page<'a, P> {
+    /// The franchise the page is about.
+    pub franchise: &'a Franchise,
+    /// The store the entries' art comes from.
+    pub posters: &'a RefCell<P>,
+}
+
+impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let page = self.franchise;
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let posters = &mut *self.posters.borrow_mut();
+
+        let region = region(bounds);
+        let rows = &page.rows;
+        // The lane measures where the rail leaves off, the time label's
+        // column, the strip, and the cards, and centers the cards where
+        // nothing stands at the left.
+        let wall::Lane {
+            wall,
+            columned,
+            strip,
+            cards,
+        } = wall::Lane::of(region, &page.eras, rows, page.universes.len());
+        let art = wall::art_height(region.height - wall::HEAD);
+        let tops = wall::tops(rows, art);
+        let down = match page.focus {
+            Focus::Row(row) => wall::scroll(row, &tops, region.height),
+            Focus::Rail(bar) => match page.eras.get(bar) {
+                Some(bar) => wall::scroll(bar.first, &tops, region.height),
+                None => 0.0,
+            },
+        };
+
+        frame.with_clip(region, |frame| {
+            // The rows start under the legend, and the tops carry that
+            // head, so the rail reads them as they are.
+            rail::draw(
+                frame,
+                region,
+                &page.eras,
+                &tops,
+                down,
+                match page.focus {
+                    Focus::Rail(bar) => Some(bar),
+                    _ => None,
+                },
+            );
+
+            for (index, row) in rows.iter().enumerate() {
+                let label = wall::time_box(wall, index, &tops, down);
+                if label.y + label.height < region.y || label.y > region.y + region.height {
+                    continue;
+                }
+                text::line(
+                    frame,
+                    &row.time,
+                    label.position(),
+                    look::CAPTION,
+                    look::muted(),
+                    wall::TIME - wall::GAP,
+                );
+            }
+
+            // The strip and the rows are clipped to their own part of the
+            // region, so a row that has scrolled up draws nothing over
+            // the legend.
+            let cells = wall::clipped(columned);
+            frame.with_clip(cells, |frame| {
+                metro::draw(frame, strip, rows, &tops, down);
+                for (index, row) in rows.iter().enumerate() {
+                    let bounds = wall::cell_box(cards, index, &tops, down);
+                    if outside(bounds, cells) {
+                        continue;
+                    }
+                    match row.cell.held() {
+                        true => entry(frame, posters, &row.cell, bounds, cells, art),
+                        false => thin(frame, &row.cell, bounds),
+                    }
+                    if page.focus == Focus::Row(index) {
+                        mark(frame, bounds);
+                    }
+                }
+            });
+
+            // The legend holds the top of the lane while the wall scrolls
+            // under it.
+            let band = wall::banded(columned);
+            frame.with_clip(band, |frame| {
+                frame.fill_rectangle(band.position(), extent(band), look::BACKGROUND);
+                metro::legend(
+                    frame,
+                    area(
+                        columned.x,
+                        wall::pinned(columned, down),
+                        columned.width,
+                        band.height,
+                    ),
+                    &page.universes,
+                );
+            });
+        });
+
+        vec![frame.into_geometry()]
+    }
+}
+
+// Whether a row falls above or below the part of the frame the lane
+// draws in, which then builds no geometry for it.
+fn outside(cell: Rectangle, columned: Rectangle) -> bool {
+    cell.y + cell.height < columned.y || cell.y > columned.y + columned.height
+}
+
+// One held entry of the order as a card of three layers: the ground made
+// from its own art, the sharp art at the left, and the words beside the
+// art. The ground draws first, then the art, then the words; the images
+// of one layer draw in the order the canvas drew them, so the sharp art
+// lands over the ground.
+fn entry<P: Posters>(
+    frame: &mut canvas::Frame<Renderer>,
+    posters: &mut P,
+    cell: &Cell,
+    bounds: Rectangle,
+    clip: Rectangle,
+    art: f32,
+) {
+    ground(frame, posters, cell, bounds, clip);
+    let box_of = card::art_box(bounds, art);
+    let art = match cell.wide {
+        true => box_of,
+        false => card::poster_box(box_of),
+    };
+    artwork(
+        frame,
+        posters,
+        &cell.library,
+        &cell.art,
+        art,
+        "",
+        Tone::Full,
+    );
+    words(frame, cell, card::words_box(bounds, art));
+}
+
+// A thin row for an entry no library holds: a dashed outline, the title
+// and the year from the left, and the note at the right. The note is the
+// accent for a title still to come, so a person reads at a glance what
+// is not out yet.
+fn thin(frame: &mut canvas::Frame<Renderer>, cell: &Cell, bounds: Rectangle) {
+    frame.stroke(
+        &rounded(bounds, ROUND),
+        canvas::Stroke {
+            line_dash: canvas::LineDash {
+                segments: &DASH,
+                offset: 0,
+            },
+            ..canvas::Stroke::default()
+                .with_color(look::faint())
+                .with_width(OUTLINE)
+        },
+    );
+    let middle = bounds.center_y();
+    let mut x = bounds.x + INSET;
+    let title = text::cut(&cell.name, look::DETAIL, bounds.width / 2.0);
+    text::line(
+        frame,
+        &title,
+        Point::new(x, middle - text::height(1, look::DETAIL) / 2.0),
+        look::DETAIL,
+        look::muted(),
+        bounds.width / 2.0,
+    );
+    x += text::width(&title, look::DETAIL) + wall::GAP;
+    text::line(
+        frame,
+        &cell.facts,
+        Point::new(x, middle - text::height(1, look::FACE) / 2.0),
+        look::FACE,
+        look::muted(),
+        bounds.width / 2.0,
+    );
+    text::line(
+        frame,
+        &cell.note,
+        Point::new(
+            bounds.x + bounds.width - INSET - text::width(&cell.note, look::FACE),
+            middle - text::height(1, look::FACE) / 2.0,
+        ),
+        look::FACE,
+        noted(cell),
+        bounds.width / 2.0,
+    );
+}
+
+// The card's ground: the entry's art decoded at a few pixels wide, scaled
+// to cover the card through the linear filter, at a low opacity over
+// black. The linear upscale is the blur, so the ground reads as a
+// backdrop and never as pixels. The ground clips to the card and to the
+// rows' own clip, because an image carries one clip, and a card half
+// under the legend must not draw over it. A card with no art keeps the
+// plain slot ground.
+fn ground<P: Posters>(
+    frame: &mut canvas::Frame<Renderer>,
+    posters: &mut P,
+    cell: &Cell,
+    bounds: Rectangle,
+    clip: Rectangle,
+) {
+    let ratio = match cell.wide {
+        true => still::STILL,
+        false => still::POSTER,
+    };
+    let (width, height) = card::ground(ratio);
+    let tiny = match cell.art.is_empty() {
+        true => None,
+        false => posters.poster(&cell.library, &cell.art, width, height),
+    };
+    let Some(tiny) = tiny else {
+        frame.fill_rectangle(bounds.position(), extent(bounds), look::slot());
+        return;
+    };
+    let Some(clip) = bounds.intersection(&clip) else {
+        return;
+    };
+    frame.fill_rectangle(bounds.position(), extent(bounds), look::BACKGROUND);
+    frame.with_clip(clip, |frame| {
+        for (band, handle) in tiny.bands(card::covering(bounds, ratio)) {
+            frame.draw_image(
+                band,
+                canvas::Image::new(handle)
+                    .opacity(GROUND_TONE)
+                    .filter_method(FilterMethod::Linear),
+            );
+        }
+    });
+}
+
+// The color of a note, on a card or a thin row: the accent for a title
+// still to come, faint otherwise.
+fn noted(cell: &Cell) -> iced_winit::core::Color {
+    match cell.standing {
+        Standing::Coming => look::accent(),
+        _ => look::faint(),
+    }
+}
+
+// The words of a card, stacked from the top of the art: the title on up
+// to two lines at the name size, the year, the blurb, and the note. The
+// blurb takes the lines left over the note, so the note always shows and
+// the blurb is what the art's height has room for.
+fn words(frame: &mut canvas::Frame<Renderer>, cell: &Cell, words: Rectangle) {
+    let mut y = words.y;
+    let (first, second) = wall::titled(&cell.name, words.width);
+    for line in [first, second] {
+        y += text::line(
+            frame,
+            &line,
+            Point::new(words.x, y),
+            look::NAME,
+            look::text(),
+            words.width,
+        );
+    }
+    y += text::line(
+        frame,
+        &cell.facts,
+        Point::new(words.x, y),
+        look::CAPTION,
+        look::muted(),
+        words.width,
+    );
+
+    let note = match cell.note.is_empty() {
+        true => 0.0,
+        false => text::height(1, look::CAPTION) + LEAD,
+    };
+    let room = words.y + words.height - y - note - LEAD;
+    let cap = (room / text::height(1, look::CAPTION)).floor().max(0.0) as usize;
+    if cap > 0 {
+        y += LEAD;
+        y += text::block(
+            frame,
+            &cell.blurb,
+            Point::new(words.x, y),
+            look::CAPTION,
+            look::muted(),
+            words.width,
+            cap,
+        );
+    }
+    text::line(
+        frame,
+        &cell.note,
+        Point::new(words.x, y + LEAD),
+        look::CAPTION,
+        noted(cell),
+        words.width,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FRAME: Rectangle = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 1920.0,
+        height: 1080.0,
+    };
+
+    #[test]
+    fn the_wall_starts_under_the_band_inside_the_margins() {
+        let region = region(FRAME);
+        assert!(region.y > band::HEIGHT);
+        assert_eq!(region.y + region.height, FRAME.height);
+        assert_eq!(region.x, MARGIN);
+        assert_eq!(region.width, FRAME.width - 2.0 * MARGIN);
+    }
+
+    #[test]
+    fn a_row_outside_the_lane_builds_no_geometry() {
+        let columned = wall::columned(area(100.0, 200.0, 1000.0, 800.0), true);
+        assert!(!outside(
+            area(columned.x, columned.y, 100.0, 100.0),
+            columned
+        ));
+        assert!(outside(
+            area(columned.x, columned.y - 300.0, 100.0, 100.0),
+            columned
+        ));
+        assert!(outside(
+            area(
+                columned.x,
+                columned.y + columned.height + 10.0,
+                100.0,
+                100.0
+            ),
+            columned
+        ));
+    }
+}

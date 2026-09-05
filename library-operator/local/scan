@@ -8,6 +8,10 @@
 # Usage:
 #   local/scan <media-directory> [kind]   walk the directory into the catalog;
 #                                         kind is movies (the default) or series
+#   local/scan <art-directory> franchises <git-url> [ref]
+#                                         clone the repository into the catalog
+#                                         as a franchises library, downloading
+#                                         its art into the directory; ref is main
 set -euo pipefail
 
 # The repository is the directory above this file, so every path resolves
@@ -34,24 +38,46 @@ bus_address="127.0.0.1:20883"
 run_seconds="${RUN_SECONDS:-600}"
 
 # The mount point inside the container, the path the pod mounts the claim
-# at. The media directory is mounted here read-only and the root is the
-# whole mount, so the scanner reads the workstation directory the way it
-# reads a claim.
+# at. The root is the whole mount, so the scanner reads the workstation
+# directory the way it reads a claim. A movies or series run mounts the
+# directory read-only. A franchises run mounts it writable, because the
+# scan downloads the art each franchise.yaml links to into it.
 container_mount="/library"
 
+# Where a franchises run clones the repository, the path the pod mounts
+# the emptyDir at. It is a tmpfs here, because the checkout lives for the
+# length of the run and nothing keeps it.
+container_checkout="/checkout"
+
 usage() {
-  sed -n '8,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '8,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
 media="${1:-}"
 kind="${2:-movies}"
 [ -n "$media" ] || usage
+
+# A franchises library names both a directory and a repository: the
+# directory is the claim the art lands in, and the repository holds the
+# story orders. The checkout is a tmpfs, the way the Job's emptyDir is in
+# the cluster, so nothing keeps it. The directory is mounted writable for
+# this kind, because the scan downloads the art into it.
+git_url=""
+git_ref=""
 if [ ! -d "$media" ]; then
   echo "local/scan: $media is not a directory" >&2
   exit 1
 fi
 media="$(cd "$media" && pwd)"
+if [ "$kind" = franchises ]; then
+  git_url="${3:-}"
+  git_ref="${4:-main}"
+  [ -n "$git_url" ] || usage
+  source_volume=(--volume "$media:$container_mount" --tmpfs "$container_checkout")
+else
+  source_volume=(--volume "$media:$container_mount:ro")
+fi
 
 # The local cluster must be up, because the scanner writes through an
 # agent's API and reports nothing a read can find without one.
@@ -86,8 +112,10 @@ container="library-operator-scan-$$"
 docker run --detach --name "$container" \
   --network host \
   --user "$(id -u):$(id -g)" \
-  --volume "$media:$container_mount:ro" \
+  "${source_volume[@]}" \
   --env LIBRARY_NAMESPACE=local \
+  --env LIBRARY_GIT_URL="$git_url" \
+  --env LIBRARY_GIT_REF="$git_ref" \
   --env LIBRARY_NAME="$kind" \
   --env LIBRARY_KIND="$kind" \
   --env LIBRARY_ROOT=/ \

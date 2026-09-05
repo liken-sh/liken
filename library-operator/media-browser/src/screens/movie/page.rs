@@ -11,6 +11,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
+use super::super::franchise::strips::Place;
 use super::{Focus, Movie};
 use crate::look;
 use crate::posters::Posters;
@@ -159,11 +160,49 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     library: &movie.library,
                     last: None,
                     lines: 0,
+                    headed: false,
                     region: area(
                         MARGIN,
                         block.top - offset,
                         bounds.width - 2.0 * MARGIN,
                         strip::height(0),
+                    ),
+                },
+            );
+        }
+
+        for (index, (band, block)) in movie
+            .franchises
+            .bands()
+            .iter()
+            .zip(&blocks.franchises)
+            .enumerate()
+        {
+            strip::draw(
+                &mut frame,
+                posters,
+                &strip::Strip {
+                    members: &band.members,
+                    current: band.current,
+                    focus: match movie.focus {
+                        Focus::Franchise(strip, Place::Member(member)) if strip == index => {
+                            Some(member)
+                        }
+                        _ => None,
+                    },
+                    heading: &band.heading,
+                    library: &movie.library,
+                    last: None,
+                    lines: 1,
+                    headed: matches!(
+                        movie.focus,
+                        Focus::Franchise(strip, Place::Heading) if strip == index
+                    ),
+                    region: area(
+                        MARGIN,
+                        block.top - offset,
+                        bounds.width - 2.0 * MARGIN,
+                        strip::height(1),
                     ),
                 },
             );
@@ -256,6 +295,7 @@ struct Blocks {
     plot: Block,
     buttons: Block,
     strip: Option<Block>,
+    franchises: Vec<Block>,
     stripes: Vec<Block>,
     foot: Block,
     content: f32,
@@ -293,6 +333,12 @@ impl Blocks {
         let plot = place(0.0, lines(&movie.plot, look::PLOT, column, PLOT_LINES));
         let buttons = place(0.0, buttons::HEIGHT);
         let strip = movie.set.as_ref().map(|_| place(0.0, strip::height(0)));
+        let franchises: Vec<Block> = movie
+            .franchises
+            .bands()
+            .iter()
+            .map(|_| place(STRIPE_LEAD, strip::height(1)))
+            .collect();
         let stripes: Vec<Block> = movie
             .stripes
             .bands()
@@ -301,10 +347,18 @@ impl Blocks {
             .collect();
 
         let foot = place(STRIPE_LEAD, movie.foot.height(width));
-        let content = match (stripes.last(), foot.height > 0.0) {
-            (_, true) => foot.bottom() + FOOT,
-            (Some(last), false) => last.bottom() + FOOT,
-            (None, false) => strip.unwrap_or(buttons).bottom(),
+        let last = stripes
+            .last()
+            .or(franchises.last())
+            .copied()
+            .or(strip)
+            .unwrap_or(buttons);
+        let content = match foot.height > 0.0 {
+            true => foot.bottom() + FOOT,
+            false => match stripes.is_empty() && franchises.is_empty() {
+                true => last.bottom(),
+                false => last.bottom() + FOOT,
+            },
         };
         Self {
             title,
@@ -314,6 +368,7 @@ impl Blocks {
             plot,
             buttons,
             strip,
+            franchises,
             stripes,
             foot,
             content,
@@ -326,6 +381,7 @@ impl Blocks {
     fn scroll(&self, movie: &Movie, height: f32) -> f32 {
         let block = match movie.focus {
             Focus::Stripe(stripe, _) => self.stripes.get(stripe).copied(),
+            Focus::Franchise(strip, _) => self.franchises.get(strip).copied(),
             Focus::Strip(_) => self.strip,
             Focus::Buttons(_) => None,
         }
@@ -340,6 +396,7 @@ impl Blocks {
     fn after(&self, block: Block) -> f32 {
         self.strip
             .into_iter()
+            .chain(self.franchises.iter().copied())
             .chain(self.stripes.iter().copied())
             .map(|under| under.top)
             .find(|top| *top > block.top)

@@ -1,4 +1,5 @@
 mod draw;
+mod franchises;
 mod lists;
 mod pages;
 mod people;
@@ -16,8 +17,8 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails, PlayItem, Presentation, Query,
-    Selection, SeriesDetails, Slot, Source,
+    Answer, Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails, PlayItem, Presentation,
+    Query, Selection, SeriesDetails, Slot, Source,
 };
 
 // One library's wall, as the libraries strip opens it.

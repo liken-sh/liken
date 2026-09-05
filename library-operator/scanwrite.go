@@ -42,6 +42,11 @@ func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) error
 		},
 		func() (int, error) { return catalog.UpsertCredits(ctx, result.credits) },
 		func() (int, error) { return catalog.UpsertGenres(ctx, result.genres) },
+		func() (int, error) { return catalog.UpsertFranchises(ctx, result.franchises) },
+		func() (int, error) {
+			return catalog.UpsertFranchiseMembers(ctx, result.franchiseMembers)
+		},
+		func() (int, error) { return catalog.UpsertFranchiseRuns(ctx, result.franchiseRuns) },
 	}
 	for _, step := range steps {
 		if _, err := step(); err != nil {

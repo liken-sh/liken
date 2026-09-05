@@ -61,9 +61,15 @@ type walkResult struct {
 	contributorAliases []contributorAliasRow
 	// The genres of each movie and series, in the sidecar's order, derived
 	// from the sidecar the way the attempts are derived from the ledgers.
-	genres       []genreRow
-	titles       int
-	unidentified int
+	genres []genreRow
+	// The three tables one franchise directory writes. The members and
+	// the runs key on the franchise and the position, so they travel with
+	// the franchises row that names them.
+	franchises       []franchiseRow
+	franchiseMembers []franchiseMemberRow
+	franchiseRuns    []franchiseRunRow
+	titles           int
+	unidentified     int
 	// the paths of the folders this walk could not identify, so a
 	// full walk names a sample of them in its log without holding every
 	// one. It carries one path per unidentified folder.
@@ -109,6 +115,9 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.contributors = append(buffer.contributors, folder.contributors...)
 	buffer.contributorAliases = append(buffer.contributorAliases, folder.contributorAliases...)
 	buffer.genres = append(buffer.genres, folder.genres...)
+	buffer.franchises = append(buffer.franchises, folder.franchises...)
+	buffer.franchiseMembers = append(buffer.franchiseMembers, folder.franchiseMembers...)
+	buffer.franchiseRuns = append(buffer.franchiseRuns, folder.franchiseRuns...)
 }
 
 // collectFolders reads a whole folder stream into one walkResult, with the

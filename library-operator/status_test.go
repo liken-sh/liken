@@ -421,3 +421,43 @@ func TestWriteLibraryStatusAnswersTheServersRefusal(t *testing.T) {
 		})
 	}
 }
+
+// A git library reports the commit its last successful scan read.
+// status.commit is the scan run's own commit, so the operator reads it from
+// the catalog and never from a checkout.
+func TestDeriveStatusCarriesTheCommitTheScanRead(t *testing.T) {
+	seen := scanning()
+	seen.report = &libraryReport{Runs: []libraryRun{{
+		Worker: workerScan, Job: "franchises-scan-1", Finished: testNow,
+		Commit: "9b1c0a7f2d3e4b5a6c7d8e9f0a1b2c3d4e5f6a7b",
+	}}}
+
+	status := deriveLibraryStatus(studioMovies(), seen, testNow)
+
+	if status.Commit != "9b1c0a7f2d3e4b5a6c7d8e9f0a1b2c3d4e5f6a7b" {
+		t.Errorf("commit = %q, want the one the scan run read", status.Commit)
+	}
+	if status.Phase != phaseIdle {
+		t.Errorf("phase = %q, want %q for a run that carries no failure", status.Phase, phaseIdle)
+	}
+}
+
+// A scan that failed leaves the tables as they were, and the phase says so
+// until the next scan succeeds. A franchises library reads Failed when the
+// clone could not reach the forge.
+func TestDeriveStatusReadsFailedWhileTheScanRunCarriesAFailure(t *testing.T) {
+	seen := scanning()
+	seen.report = &libraryReport{Runs: []libraryRun{{
+		Worker: workerScan, Job: "franchises-scan-2", Finished: testNow,
+		Commit: "9b1c0a7f", Failure: "could not clone the repository",
+	}}}
+
+	status := deriveLibraryStatus(studioMovies(), seen, testNow)
+
+	if status.Phase != phaseFailed {
+		t.Errorf("phase = %q, want %q", status.Phase, phaseFailed)
+	}
+	if status.Commit != "9b1c0a7f" {
+		t.Errorf("commit = %q, want the commit the last good scan read", status.Commit)
+	}
+}

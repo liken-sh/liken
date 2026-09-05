@@ -42,6 +42,63 @@ pub fn height(lines: usize) -> f32 {
     }
 }
 
+// The space the heading's box holds past the width the average advance
+// measures, so the mark never cuts the last letter of a name the
+// shaper set wider than the estimate.
+const SLACK: f32 = 24.0;
+
+/// A heading in two runs: the name, and the dot and the words after it. A
+/// heading with no dot is the name alone, and the second run is empty. The two
+/// runs draw in two colors, so a person reads the name first and the scope
+/// second.
+pub fn split(heading: &str) -> (&str, &str) {
+    match heading.find(DOT) {
+        Some(at) => heading.split_at(at),
+        None => (heading, ""),
+    }
+}
+
+// The words that stand between the name of a strip and the scope after
+// it. The library bands join their facts with the same three
+// characters.
+const DOT: &str = " · ";
+
+// The heading over a strip, in two colors: the name bright, and the dot and
+// the words after it muted. The whole heading draws muted, and the name draws
+// over it in the bright ink, so the shaper places both runs and no estimate of
+// the name's width stands between them. An estimate is what the page has, and
+// it is short by a few pixels on a long name, which would close the space
+// before the dot.
+fn headed(frame: &mut canvas::Frame<Renderer>, region: Rectangle, heading: &str) {
+    let (name, _) = split(heading);
+    for (content, color) in [(heading, look::muted()), (name, look::text())] {
+        if content.is_empty() {
+            continue;
+        }
+        frame.fill_text(label(
+            content,
+            Point::new(region.x, region.y),
+            look::HEADING,
+            color,
+            Alignment::Left,
+            Vertical::Top,
+            region.width,
+        ));
+    }
+}
+
+/// The box the heading over a strip draws in, which the mark follows
+/// where the heading holds focus. It is as wide as the words, so the
+/// mark frames the name and not the row.
+pub fn heading_box(region: Rectangle, heading: &str) -> Rectangle {
+    area(
+        region.x,
+        region.y,
+        (text::width(heading, look::HEADING) + SLACK).min(region.width),
+        text::height(1, look::HEADING),
+    )
+}
+
 /// The width of one poster: the height at the wall's own ratio.
 pub fn poster_width() -> f32 {
     width_at(wall::POSTER)
@@ -83,6 +140,10 @@ pub struct Strip<'a, T> {
     pub library: &'a str,
     pub last: Option<Last<'a>>,
     pub lines: usize,
+    /// Whether the heading over the strip holds focus. A strip whose
+    /// heading opens a page of its own takes focus there as well as on
+    /// its members, and the mark says which.
+    pub headed: bool,
     /// The part of the frame the strip draws in.
     pub region: Rectangle,
 }
@@ -139,15 +200,10 @@ pub fn draw<T: Card, P: Posters>(
     posters: &mut P,
     strip: &Strip<'_, T>,
 ) {
-    frame.fill_text(label(
-        strip.heading,
-        Point::new(strip.region.x, strip.region.y),
-        look::HEADING,
-        look::muted(),
-        Alignment::Left,
-        Vertical::Top,
-        strip.region.width,
-    ));
+    headed(frame, strip.region, strip.heading);
+    if strip.headed {
+        mark(frame, heading_box(strip.region, strip.heading));
+    }
 
     let slots = placed(strip.members, strip.last.is_some());
     let offset = offset(&slots, strip.focus.or(strip.current), strip.region.width);
@@ -295,8 +351,47 @@ mod tests {
             library: "screening/films",
             last: None,
             lines: 1,
+            headed: false,
             region: area(0.0, 0.0, 1000.0, height(1)),
         }
+    }
+
+    #[test]
+    fn a_heading_splits_into_its_name_and_the_scope_after_the_dot() {
+        assert_eq!(
+            split("Wizarding World · a 4-film set"),
+            ("Wizarding World", " · a 4-film set")
+        );
+        assert_eq!(
+            split("Marvel Cinematic Universe · a franchise of 124 films and series"),
+            (
+                "Marvel Cinematic Universe",
+                " · a franchise of 124 films and series"
+            )
+        );
+        assert_eq!(split("Franchises · 32"), ("Franchises", " · 32"));
+        assert_eq!(split("Genres"), ("Genres", ""));
+        assert_eq!(split(""), ("", ""));
+    }
+
+    #[test]
+    fn a_heading_splits_on_its_first_dot_alone() {
+        assert_eq!(split("One · Two · Three"), ("One", " · Two · Three"));
+    }
+
+    #[test]
+    fn the_heading_takes_a_box_as_wide_as_its_words() {
+        let region = area(10.0, 20.0, 1000.0, height(1));
+        let box_of = heading_box(region, "The Order");
+        assert_eq!(box_of.x, 10.0);
+        assert_eq!(box_of.y, 20.0);
+        assert!(box_of.width < region.width);
+        assert!(box_of.width > text::width("The Order", look::HEADING));
+        assert_eq!(
+            heading_box(area(0.0, 0.0, 40.0, 10.0), "A Long Name").width,
+            40.0
+        );
+        assert_eq!(box_of.height, text::height(1, look::HEADING));
     }
 
     #[test]
