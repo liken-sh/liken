@@ -20,11 +20,25 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 75
+  total: 79
 
 override:
-  # The Machine API: pure functions over declared types. (Paths here
-  # are regular expressions over module-relative package paths.)
+  # The API group's grammar: the shared shapes, the version format,
+  # and the condition vocabulary, all pure and tested to the last
+  # line. (Paths here are regular expressions over module-relative
+  # package paths.)
+  - path: ^api$
+    threshold: 99
+  # The Cluster API: pure functions over declared types, the same
+  # shape as machine below.
+  - path: ^cluster$
+    threshold: 97
+  # The hardware package: the sysfs walk, the modalias matching, and
+  # the ID databases, and the tests run them against fixture trees.
+  # What stays untested is a scattering of I/O error returns.
+  - path: ^hardware$
+    threshold: 89
+  # The Machine API: pure functions over declared types.
   - path: ^machine$
     threshold: 87
   # The identity package: minting, adoption, and the kubeconfig are
@@ -35,19 +49,19 @@ override:
   # The CLI: a dispatch table over the domain packages, which carry
   # their own tests. What stays untested here is main itself.
   - path: ^cli$
-    threshold: 79
+    threshold: 83
   # The Kubernetes client: the tests exercise every verb against a
   # real HTTP test server. What stays untested is the in-cluster
   # bootstrapping that only a pod's mounted credentials can satisfy.
   - path: ^kubernetes$
-    threshold: 81
+    threshold: 91
   # The machine operator: its decisions (drift, staging validation,
   # the convergence truth table, the drain) are pure and tested. The
   # reconcile pass that strings the decisions together, against the
   # real facts files and the live API, is exercised by the QEMU
   # harness, not unit tests.
   - path: ^machine-operator$
-    threshold: 74
+    threshold: 78
   # The cluster operator: the sweep and rollout decisions are pure
   # and tested, and the acting halves run against a miniature API
   # server. What stays untested is main's loop.
@@ -58,7 +72,7 @@ override:
   # parsers, planners, derivations, and file-shaped actuators around
   # it are tested here against fakes.
   - path: ^init$
-    threshold: 69
+    threshold: 73
   # mount(8): the option parser, the command-line parser, and the
   # helper lookup are pure, and the tests cover them against the
   # command lines the kubelet really builds. What stays untested is
@@ -71,7 +85,7 @@ override:
   # readers. What stays untested is the ioctl that only a real block
   # device answers.
   - path: ^disks$
-    threshold: 85
+    threshold: 86
   # The image package: the cpio writer and the deployment layer, and
   # the tests exercise them end to end against fixture trees. What
   # stays untested is a scattering of I/O error returns.
@@ -81,15 +95,15 @@ override:
   # temp files. What stays untested is the real /dev/kmsg device and
   # the clock syscalls.
   - path: ^logs$
-    threshold: 77
+    threshold: 85
   # The releases package: publishing, bundling, the corruption drill,
   # and the file server, and the tests exercise them against fixture
   # channels and httptest. What stays untested is Serve's real
   # listener.
   - path: ^releases$
-    threshold: 77
+    threshold: 84
   # The scaffold: the interview and the templates, and the tests
   # exercise them with scripted answers. What stays untested is a
   # scattering of I/O error returns.
   - path: ^scaffold$
-    threshold: 79
+    threshold: 80
