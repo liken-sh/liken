@@ -266,6 +266,11 @@ jobs:
             | grep -qi "content-type: text/markdown"
           echo "checking the sitemap"
           fetch https://display.liken.sh/sitemap.xml >/dev/null
+          # The report is close to a megabyte, and the title is in
+          # its first lines. A grep -q on a pipe would stop reading
+          # there and leave curl to die on a closed pipe, which curl
+          # retries as an error and pipefail would turn into a failed
+          # step, so this one check takes the whole file to disk first.
           echo "checking the coverage report"
-          fetch https://display.liken.sh/coverage.html \
-            | grep -q "<title>display-operator</title>"
+          fetch https://display.liken.sh/coverage.html > served-coverage.html
+          grep -q "<title>display-operator</title>" served-coverage.html
