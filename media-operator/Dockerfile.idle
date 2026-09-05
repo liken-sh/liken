@@ -14,29 +14,27 @@ FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019b
 WORKDIR /src
 
 # The two Rust crates are one cargo workspace, so the build copies the
-# workspace manifest, the lock file, and the toolchain pin, then both
-# member manifests. A source edit then reuses the cached dependency
-# layer. liken-iced is a path dependency, so cargo reads its manifest
-# and its sources here too, and the two files it parses arrive with it.
+# workspace manifest, the lock file, and the toolchain pin, then both member
+# manifests. liken-iced is a path dependency in the brand submodule, and the
+# stub build below needs only its manifest, so the manifest and its lock file
+# arrive here and the crate's sources arrive after that layer. A source edit
+# or a submodule bump then reuses the cached dependency layer.
 #
 # The dependencies are almost all of the build, and they change only when the
-# lock file or the submodule pin changes.
+# lock file changes.
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY idle/Cargo.toml idle/
 COPY media-screen/Cargo.toml media-screen/
-COPY docs/themes/brand/iced/ docs/themes/brand/iced/
-COPY docs/themes/brand/liken.svg docs/themes/brand/liken.css docs/themes/brand/
-# The brand crate embeds the brand's two font files, so they arrive with it
-# and before the stub build compiles it.
-COPY docs/themes/brand/fonts/ docs/themes/brand/fonts/
+COPY docs/themes/brand/iced/Cargo.toml docs/themes/brand/iced/Cargo.lock docs/themes/brand/iced/
 
-# A stub library and a stub binary for each member give cargo something to
-# compile the dependencies against. That build is the layer the image cache
-# keeps.
-RUN mkdir idle/src media-screen/src \
+# A stub library and a stub binary for each workspace member, and a stub
+# library for liken-iced, give cargo something to compile the dependencies
+# against. That build is the layer the image cache keeps.
+RUN mkdir idle/src media-screen/src docs/themes/brand/iced/src \
     && echo 'fn main() {}' > idle/src/main.rs \
     && : > idle/src/lib.rs \
-    && : > media-screen/src/lib.rs
+    && : > media-screen/src/lib.rs \
+    && : > docs/themes/brand/iced/src/lib.rs
 
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
@@ -57,12 +55,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 COPY media-screen/src/ media-screen/src/
 COPY idle/src/ idle/src/
+# liken-iced's sources land here, over the stub, with the two brand files it
+# parses and the two font files it embeds. All four are inputs of the real
+# build alone; the stub compiles without them.
+COPY docs/themes/brand/iced/src/ docs/themes/brand/iced/src/
+COPY docs/themes/brand/liken.svg docs/themes/brand/liken.css docs/themes/brand/
+COPY docs/themes/brand/fonts/ docs/themes/brand/fonts/
 
-# The touch marks the two crates' own sources newer than the stub build, so
-# cargo compiles both again and leaves the dependencies as they are.
+# The touch marks all three crates' own sources newer than the stub build, so
+# cargo compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch idle/src/main.rs idle/src/lib.rs media-screen/src/lib.rs \
+        docs/themes/brand/iced/src/*.rs \
     && cargo build --release --locked --no-default-features -p idle-screen
 
 # A distribution base, unlike the operator's scratch, and for the reason the

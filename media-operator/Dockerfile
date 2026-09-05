@@ -3,9 +3,10 @@
 # its image carries no shell, no libc, and no tools, which is the
 # least there is to attack.
 #
-# The player image (mpv under this same binary as its supervisor), the
-# idle image, and the sidecar image build from the three Dockerfiles
-# beside this one, and a release ships all four together.
+# The player image (mpv under this same binary as its supervisor) and
+# the idle image build from the two Dockerfiles beside this one. The
+# sidecar image is this image under a second name: release.yaml tags
+# it, and no Dockerfile builds it. A release ships all four together.
 
 FROM golang:1.27.0-bookworm AS build
 WORKDIR /src

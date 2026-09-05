@@ -9,14 +9,16 @@
 # in order. A development build never moves :latest, so a cluster
 # that pulls a release keeps pulling releases.
 #
-# Both kinds run the tests first and build only when they pass. A
-# development build that skipped the tests would put a broken image
-# one pin away from a cluster.
+# Both kinds build first and push only when the ci run for the same
+# commit passes. A development build that skipped the tests would put
+# a broken image one pin away from a cluster.
 #
 # The release cadences of the operators do not couple, and reading one
 # version beside another still tells you when each one was cut.
 #
-# The four images release together, always. The operator stamps the
+# The four images release together, always, and three Dockerfiles
+# build them: the sidecar image is the operator image under a second
+# name, tagged here and never built twice. The operator stamps the
 # player image into every playback pod, the idle image into every idle
 # pod, and the sidecar image into every sidecar container, and images
 # that could drift apart would put the report contract and the screen
@@ -31,6 +33,9 @@ on:
 permissions:
   contents: read
   packages: write
+  # actions: read lets the gate step in the release job read the state
+  # of the ci run for this commit through the workflow's own token.
+  actions: read
 
 # One release at a time. Two runs that pushed :latest at once would
 # leave whichever finished second, which is not always the newer one.
@@ -98,18 +103,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      # The tests gate the build. A tag can name any commit, so the
-      # release proves the one it ships. An image that reaches the
-      # registry has passed them. A rollback names an older tag, and
-      # never has to find out which tag was good.
-      - run: go vet ./...
-      - run: go test -race ./...
-
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -162,17 +155,18 @@ jobs:
             ghcr.io/liken-sh/media-operator-idle:${{ env.VERSION }}
             ghcr.io/liken-sh/media-operator-idle:latest
 
-      - name: Build the sidecar image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.sidecar
-          load: true
-          cache-from: type=registry,ref=ghcr.io/liken-sh/media-operator-sidecar:buildcache
-          cache-to: type=registry,ref=ghcr.io/liken-sh/media-operator-sidecar:buildcache,mode=max
-          tags: |
-            ghcr.io/liken-sh/media-operator-sidecar:${{ env.VERSION }}
-            ghcr.io/liken-sh/media-operator-sidecar:latest
+      # The sidecar image is the operator image under a second name.
+      # Every sidecar container runs the operator binary in one of its
+      # modes, so a second build would spend a build to produce the same
+      # bytes. The two names carry two jobs: a repository that needs
+      # only the sidecar pins a name that promises nothing about the
+      # controller.
+      - name: Name the sidecar image
+        run: |
+          docker tag "ghcr.io/liken-sh/media-operator:$VERSION" \
+            "ghcr.io/liken-sh/media-operator-sidecar:$VERSION"
+          docker tag "ghcr.io/liken-sh/media-operator:latest" \
+            "ghcr.io/liken-sh/media-operator-sidecar:latest"
 
       # The gate on the idle image, the same shape the player's gate
       # takes. The runner has no GPU and no compositor, so the client
@@ -198,6 +192,44 @@ jobs:
           docker export "$container" | tar -t | grep -qx 'media-operator' \
             || { echo "the player image has no /media-operator"; exit 1; }
           docker rm "$container" > /dev/null
+
+      # ci.yaml runs beside this workflow on a push to main and holds
+      # the coverage floors and the other checks. This step waits for
+      # that run and lets nothing push from a red gate. The images built
+      # while the checks ran, so the wait is normally over before this
+      # step starts. A tag's ci run finished when its commit landed on
+      # main, so a tag never waits; a tag on a commit older than the run
+      # retention finds no run and fails, and the answer is to re-run ci
+      # on that commit and push the tag again. GITHUB_SHA names the tag
+      # object for an annotated tag, and the ci run is keyed by the
+      # commit, so the lookup resolves the commit first.
+      - name: require the gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
+          for _ in $(seq 1 40); do
+            state=$(gh run list --workflow ci.yaml --commit "$commit" --event push \
+              --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
+            case "$state" in
+              "completed success")
+                exit 0 ;;
+              "completed "*)
+                echo "the ci run for $commit ended with ${state#completed }; no image ships from a red gate" >&2
+                exit 1 ;;
+              "")
+                if [ "$GITHUB_REF_TYPE" = tag ]; then
+                  echo "no ci run exists for $commit; re-run ci on that commit, then push the tag again" >&2
+                  exit 1
+                fi
+                echo "no ci run for $commit yet" ;;
+              *)
+                echo "the ci run for $commit is $state" ;;
+            esac
+            sleep 15
+          done
+          echo "the ci run for $commit did not finish within ten minutes" >&2
+          exit 1
 
       # :latest marks the newest release and nothing else. A
       # development build pushes its own tag only.
