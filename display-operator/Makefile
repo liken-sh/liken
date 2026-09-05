@@ -43,3 +43,26 @@ test-go:
 test-docs:
 	$(MAKE) -C docs test
 	$(MAKE) -C docs build
+
+# The report is a reader's view of the same profile the gate
+# measures, as one self-contained HTML page. The site serves it at
+# /coverage.html, and the publish job in ci.yaml renders it from the
+# profile the test job uploaded.
+#
+# `test` does not depend on this. The gate says pass or fail, the
+# report says where the holes are, and a failing gate must not wait
+# on a page.
+#
+# coverage is the report tool the brand repository publishes, pinned
+# as a tool of the docs module beside Hugo and crdref, so the command
+# runs from docs/ and names the repository root with -root.
+.PHONY: coverage-report
+coverage-report: coverage.out
+	cd docs && go tool coverage \
+		-title display-operator -label Go \
+		-root .. -out ../coverage.html ../coverage.out
+
+# The profile is the gate's own output, so a report on a tree that
+# has never run the tests runs them first.
+coverage.out:
+	$(MAKE) test-go

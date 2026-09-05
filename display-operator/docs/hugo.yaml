@@ -21,6 +21,10 @@ theme: brand
 # project name in the sidebar's "manual" heading.
 params:
   repository: https://github.com/liken-sh/display-operator
+  # The site publishes the test coverage report at /coverage.html,
+  # so every page's footer links it. The publish job in ci.yaml
+  # renders the page and copies it into the built tree.
+  coverage: true
 # No taxonomies and no feeds: the site is a manual, not a blog. The
 # sitemap stays, because it is free and crawlers use it.
 disableKinds: [taxonomy, term, rss]
