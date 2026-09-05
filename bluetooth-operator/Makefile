@@ -43,3 +43,20 @@ test-go:
 test-docs:
 	$(MAKE) -C docs test
 	$(MAKE) -C docs build
+
+# The report is not the gate. `go tool coverage` turns the profile
+# test-go leaves in coverage.out into one self-contained HTML page.
+# The page holds every source file, and colors the lines the tests
+# reached and the lines they missed. The gate answers pass or fail,
+# and the page says where the holes are. So `test` does not depend on
+# this target, and CI runs it only on the way to a publish.
+#
+# The tool belongs to the brand repository and is a tool dependency of
+# the docs module, the same way Hugo and crdref are, so the recipe
+# runs from docs/. `-root ..` names the tree the profile describes,
+# which is this repository's root, and the tool reads the source files
+# from there to color them.
+.PHONY: coverage-report
+coverage-report:
+	cd docs && go tool coverage -title bluetooth-operator -label Go \
+		-root .. -out ../coverage.html ../coverage.out

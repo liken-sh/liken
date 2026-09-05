@@ -12,3 +12,8 @@
 # The coverage profile the gate measures. CI writes it on every
 # run and reads it once; it never belongs to the tree.
 /coverage.out
+
+# The coverage report `make coverage-report` renders from that
+# profile. CI builds it from the commit it publishes and copies it
+# into the site, so a committed copy could only be stale.
+/coverage.html

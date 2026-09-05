@@ -1,17 +1,21 @@
 # Every pull request and every push to main runs the full gate: the
 # tests, the coverage floors, the docs checks, and a build of every
-# image. This workflow pushes nothing. On main, release.yaml runs
-# beside it and publishes a development build. release.yaml runs a
-# plain go test of its own as a guard before it pushes images, but
-# the coverage floors and the other checks live only here, so a
-# commit on main gets the same verdict a pull request would.
+# image. A push to main then publishes the website. This workflow
+# pushes no image. On main, release.yaml runs beside it and publishes
+# a development build. release.yaml runs a plain go test of its own
+# as a guard before it pushes images, but the coverage floors and the
+# other checks live only here, so a commit on main gets the same
+# verdict a pull request would.
 #
 # There is no path filter. The tests are cheap next to the image
 # builds, and a filter that guessed wrong would leave a commit with
-# no verdict.
+# no verdict. The publish job has no filter either: the site serves a
+# coverage report measured on the commit the site was built from, so
+# every change to the operator's code moves a published page.
 #
-# The three jobs are independent, so they run at once, and the run
-# takes as long as its slowest job.
+# The three test jobs are independent, so they run at once, and the
+# gate takes as long as its slowest job. The publish job waits for
+# all three, so a failed check never publishes.
 name: ci
 
 on:
@@ -19,11 +23,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # A dispatch republishes the current main with no change, for the
+  # times the serving side needs a fresh deployment.
+  workflow_dispatch:
 
 permissions:
   contents: read
   # The image builds read their layer cache from ghcr. No run of this
-  # workflow writes an image or the cache, so read is enough.
+  # workflow writes an image or the cache, so read is enough. The
+  # publish job needs a different set, and states it for itself.
   packages: read
 
 jobs:
@@ -45,6 +53,20 @@ jobs:
       # Makefile says why the gate pins a toolchain, and
       # .testcoverage.yml holds the floors.
       - run: make test-go
+
+      # The publish job renders the site's coverage report from this
+      # profile, so the page reports the same run the gate measured.
+      # The two jobs run on different machines and share no disk, so
+      # the profile moves between them as an artifact. The publish job
+      # reads it within minutes, and seven days is far longer than it
+      # needs.
+      - name: keep the coverage profile
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-go
+          path: coverage.out
+          if-no-files-found: error
+          retention-days: 7
 
   docs:
     runs-on: ubuntu-latest
@@ -108,3 +130,139 @@ jobs:
           file: ${{ matrix.file }}
           push: false
           cache-from: type=registry,ref=ghcr.io/liken-sh/${{ matrix.image }}:buildcache
+
+  # This is the website deploy. A push to main is a publish: the job
+  # builds the site, adds the coverage report for that commit, and
+  # deploys the tree to GitHub Pages, which serves it at
+  # bluetooth.liken.sh. This job does not run on a pull request, so a
+  # pull request publishes nothing. The docs job above already proves
+  # the site builds.
+  #
+  # The site's name is the operator's DRA driver name, so the address
+  # on a ResourceSlice is also the address of its manual. Pages serves
+  # it under that custom domain from the repository's settings, set
+  # once by hand; the DNS CNAME is in liken.sh's zone.
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name != 'pull_request'
+    # The site shows the verdict of the whole gate, so this job waits
+    # for every test job. A commit that fails any check never
+    # publishes.
+    needs: [go, docs, images]
+    # Publishing needs two permissions the rest of this workflow does
+    # not have. pages: write creates the deployment, and
+    # id-token: write lets deploy-pages prove to the Pages service
+    # that the artifact came from this exact workflow run. Nothing
+    # else can push content under this site's name.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # Deploys run one at a time: two pushes in quick succession would
+    # otherwise race their deployments, and the served-site check
+    # below needs nothing else to change while it runs.
+    concurrency:
+      group: docs
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The brand theme is a git submodule; without this the
+          # checkout leaves docs/themes/brand empty and Hugo fails
+          # to find the theme.
+          submodules: true
+
+      - uses: actions/setup-go@v6
+        with:
+          # The docs domain is its own module, so Hugo's dependency
+          # graph stays out of the operator's go.sum. Its go.mod pins
+          # Hugo as a tool directive, and go tool builds it from
+          # source on first use. It pins the coverage report tool the
+          # same way.
+          go-version-file: docs/go.mod
+
+      # Every test job that measures coverage uploads its profile
+      # under a coverage-* name. They land in the repository root,
+      # where the coverage-report target reads them.
+      - name: fetch the coverage profiles
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: render the coverage report
+        run: make coverage-report
+
+      # The build runs the same command a workstation runs, so local
+      # and CI builds produce the same tree. What lands in docs/dist/site
+      # is byte for byte what Pages serves.
+      - name: build the site
+        run: make -C docs build
+
+      # The report is not a Hugo page: it is one finished file with
+      # its stylesheet inlined, so it goes into the built tree after
+      # the build. The theme's footer links /coverage.html on every
+      # page, because docs/hugo.yaml sets params.coverage.
+      - name: add the coverage report to the site
+        run: cp coverage.html docs/dist/site/coverage.html
+
+      # release.txt is the deploy marker: the served-site check below
+      # polls it until this commit's tree answers on the public
+      # name.
+      - name: stamp the built tree
+        run: git rev-parse HEAD > docs/dist/site/release.txt
+
+      - name: package the site for Pages
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/dist/site
+
+      - name: deploy to Pages
+        uses: actions/deploy-pages@v5
+
+      # This step proves the deploy the way a reader meets it: the
+      # site served over the public name is the one this commit
+      # built. release.txt holds the commit, and the other checks
+      # cover the two forms every page serves.
+      - name: verify the served site
+        run: |
+          # A finished deployment does not mean the public name
+          # follows yet. A CDN in front of Pages caches pages for up
+          # to ten minutes, so the old tree can answer for a while
+          # after the new one is live at the origin. curl's
+          # --retry only covers transport errors, never stale
+          # content, so the freshness check needs its own deadline
+          # loop before the content checks below can mean anything.
+          expected="${{ github.sha }}"
+          for _ in $(seq 1 48); do
+            served="$(curl --fail --silent https://bluetooth.liken.sh/release.txt || true)"
+            if [ "$served" = "$expected" ]; then break; fi
+            sleep 15
+          done
+          [ "$served" = "$expected" ] || {
+            echo "the site still serves ${served:-nothing}, expected $expected"
+            exit 1
+          }
+          # The content checks name themselves before they run, so a
+          # failure's last log line says which page broke. Each curl
+          # retries transport errors; a wrong-content grep still
+          # fails at once, because wrong content is not transient.
+          fetch() {
+            curl --fail --silent --retry 5 --retry-delay 3 \
+              --retry-all-errors "$@"
+          }
+          echo "checking the front page"
+          fetch https://bluetooth.liken.sh/ | grep -q "publishes each paired"
+          echo "checking the markdown twin"
+          fetch --head https://bluetooth.liken.sh/index.md \
+            | grep -qi "content-type: text/markdown"
+          echo "checking the sitemap"
+          fetch https://bluetooth.liken.sh/sitemap.xml >/dev/null
+          # The report is close to a megabyte, and the title is in
+          # its first lines. A grep -q on a pipe would stop reading
+          # there and leave curl to die on a closed pipe, which curl
+          # retries as an error and pipefail would turn into a failed
+          # step, so this one check takes the whole file to disk first.
+          echo "checking the coverage report"
+          fetch https://bluetooth.liken.sh/coverage.html > served-coverage.html
+          grep -q "<title>bluetooth-operator</title>" served-coverage.html

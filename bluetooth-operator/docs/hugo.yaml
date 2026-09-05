@@ -22,11 +22,16 @@ theme: brand
 # sitemap stays, because it is free and crawlers use it.
 disableKinds: [taxonomy, term, rss]
 
-# The repository this site documents. The theme's nav points its
-# repository entry here, and the sidebar heads the manual with the
-# project's name, taken from the last path segment.
 params:
+  # The repository this site documents. The theme's nav points its
+  # repository entry here, and the sidebar heads the manual with the
+  # project's name, taken from the last path segment.
   repository: https://github.com/liken-sh/bluetooth-operator
+
+  # CI renders the test coverage report and copies it into the built
+  # tree, so the site serves it at /coverage.html. The theme's footer
+  # links that page only when this parameter is set.
+  coverage: true
 
 # Every page renders twice, once as HTML for people and once as the
 # authored Markdown for agents and scripts. The two files land side
