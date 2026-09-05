@@ -18,12 +18,6 @@ they become.
 
 ## Planned
 
-* [01, The skeleton](01-the-skeleton.md). Proposed. The repository,
-  its gates and workflows, its site, and a node plugin that registers
-  with the kubelet and serves no volumes.
-* [02, The lab](02-the-lab.md). Proposed. One `liken` machine in QEMU
-  from the public release channel, a git daemon on the host as its
-  forge, and a smoke target.
 * [03, Read-only volumes](03-read-only-volumes.md). Proposed. Inline
   ephemeral volumes that follow a ref, with `pull`, `depth`, and
   `offline`, from one bare repository per URL on the node.
@@ -40,7 +34,14 @@ they become.
 
 ## Designs
 
-None built yet.
+* [01, The skeleton](completed/01-the-skeleton.md). Built, and drilled
+  in the lab on 2026-09-05. The repository, its gates and workflows,
+  its site, and a node plugin that registers with the kubelet and
+  serves no volumes.
+* [02, The lab](completed/02-the-lab.md). Built and run on 2026-09-05.
+  One `liken` machine in QEMU from the public release channel, a git
+  daemon on the host as its forge, and a smoke target that runs the
+  chain in 78 seconds.
 
 ## Open problems
 

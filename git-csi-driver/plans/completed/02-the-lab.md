@@ -1,6 +1,9 @@
 # 02, The lab
 
-Proposed. Full fidelity.
+Built and run on `vega` on 2026-09-05. `make -C lab smoke` takes 78
+seconds with a warm channel: fetch 4 s, install 6 to 10 s, boot to
+`Ready` 15 s, deploy 35 s. The cold fetch of the 497 MB release took
+62 s.
 
 ## The problem
 

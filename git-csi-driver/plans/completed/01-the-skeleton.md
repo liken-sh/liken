@@ -1,6 +1,8 @@
 # 01, The skeleton
 
-Proposed. Full fidelity.
+Built, and drilled in the lab on 2026-09-05. Development build
+`0000.00.00-000-dev-003-3c7a6454` registered with the kubelet of a
+`liken` node booted from release 2026.09.02-001.
 
 ## The problem
 
