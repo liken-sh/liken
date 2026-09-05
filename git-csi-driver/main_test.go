@@ -133,7 +133,7 @@ func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
 	want := config{
 		endpoint: "unix:///csi/csi.sock",
 		nodeID:   "node-1",
-		store:    "/var/lib/liken/git-csi",
+		store:    "/var/lib/liken/pod-storage/git-csi",
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)

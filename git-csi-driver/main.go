@@ -39,7 +39,7 @@ func run(ctx context.Context, args []string, out io.Writer) int {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	server, err := newServer(cfg, slog.Default())
+	server, err := newServer(ctx, cfg, slog.Default())
 	if err != nil {
 		fmt.Fprintln(out, err)
 		return 1
@@ -69,7 +69,7 @@ func parse(args []string, out io.Writer) (*config, error) {
 		"the address the CSI socket listens on")
 	nodeID := flags.String("node-id", "",
 		"the name of the node this plugin runs on")
-	store := flags.String("store", "/var/lib/liken/git-csi",
+	store := flags.String("store", "/var/lib/liken/pod-storage/git-csi",
 		"the directory that holds the repositories and work trees")
 	showVersion := flags.Bool("version", false, "print the version and exit")
 

@@ -32,7 +32,11 @@ type server struct {
 // newServer makes the store, takes the socket, and registers the
 // Identity and Node services. It fails before it listens when the store
 // cannot be made, because a driver with no store can hold no volume.
-func newServer(cfg *config, logger *slog.Logger) (*server, error) {
+//
+// newServer makes the store, takes the socket, and registers the
+// Identity and Node services. ctx is the driver's run, and every fetch
+// loop the Node service starts ends with it.
+func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, error) {
 	socket, found := strings.CutPrefix(cfg.endpoint, endpointScheme)
 	if !found {
 		return nil, fmt.Errorf("--endpoint %q does not begin with %s", cfg.endpoint, endpointScheme)
@@ -54,7 +58,7 @@ func newServer(cfg *config, logger *slog.Logger) (*server, error) {
 
 	registered := grpc.NewServer(grpc.UnaryInterceptor(logCalls(logger)))
 	csi.RegisterIdentityServer(registered, &identity{store: cfg.store})
-	csi.RegisterNodeServer(registered, &node{nodeID: cfg.nodeID})
+	csi.RegisterNodeServer(registered, newNode(ctx, cfg, newEvents(cfg.nodeID, logger), logger))
 	return &server{grpc: registered, listener: listener}, nil
 }
 

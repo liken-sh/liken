@@ -29,15 +29,22 @@ context and sends no stage call for it, so the whole lifecycle is
 The driver refuses, with `InvalidArgument` and a message naming the
 attribute, an unknown attribute, a malformed value, an inline volume
 without `readOnly: true`, and an inline volume with a
-`nodePublishSecretRef` that is missing a usable credential.
+`nodePublishSecretRef` that is missing a usable credential. It also
+refuses two URL shapes that would run a command: a URL that starts with
+a dash, which git reads as an option, and git's `<transport>::<address>`
+form, which names a helper program git runs. The driver fetches as root
+on the node and the URL comes from a pod spec, so both are refused
+before git sees them.
 
 ### The store
 
 The store has one bare repository per URL at
 `<store>/repos/<sha256 of url>/`, with the URL written beside it in
 `url` so a person can read the directory. Every volume of that URL on
-the node shares it. A `depth` other than `0` applies to the first clone
-of a repository; a later volume with a different `depth` reuses what is
+the node shares it. The repository fetches each followed ref into
+`refs/git-csi/<ref>`, so one repository serves volumes on different
+refs. A `depth` other than `0` applies to the first fetch of a
+repository; a later volume with a different `depth` reuses what is
 there.
 
 A published tree is `<store>/volumes/<volume id>/tree`, a checkout of
@@ -50,10 +57,23 @@ volume is unique per pod.
 `pull` schedules a fetch per repository, at the shortest `pull` among
 the volumes that share it. `never` on every volume stops the fetch.
 When a fetch moves the ref, the driver checks the new commit out into a
-new directory beside the old tree, then swaps the two with `rename`
-under the bind mount's source. Pods that read through the mount see the
-old tree until the swap and the new tree after it, never a tree between
-two commits. The old directory is removed after the swap.
+directory beside the published tree and then replaces the published
+tree entry by entry, one `rename` per file, recursing into directories
+that exist on both sides. A reader sees the old file or the new one and
+never a partial write.
+
+The plan first said to swap the two directories with one `rename`. That
+does not work: a bind mount follows the directory it was made from, not
+the name, so every pod stays on the old tree after the swap. A fresh
+bind over the target path reaches new pods only, and a symlink swap
+shows the pod a symlink. Replacing entries inside the directory the pod
+holds is the one way a running pod sees the new commit through a plain
+directory.
+
+The same placement serves a first publish, where the whole checkout
+arrives with one `rename`, and a publish the kubelet repeats after the
+driver restarted, where the tree a pod still reads is brought to the
+commit without a remount.
 
 ### Offline
 

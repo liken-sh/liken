@@ -30,7 +30,7 @@ func startServer(t *testing.T, logs io.Writer) *grpc.ClientConn {
 // when the test ends.
 func start(t *testing.T, cfg *config, logs io.Writer) *grpc.ClientConn {
 	t.Helper()
-	server, err := newServer(cfg, slog.New(slog.NewTextHandler(logs, nil)))
+	server, err := newServer(t.Context(), cfg, slog.New(slog.NewTextHandler(logs, nil)))
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestNewServerReportsAnEndpointItCannotServe(t *testing.T) {
 		{name: "a socket that cannot be removed", endpoint: "unix://" + busy},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := newServer(&config{
+			_, err := newServer(t.Context(), &config{
 				endpoint: c.endpoint,
 				nodeID:   "node-1",
 				store:    filepath.Join(t.TempDir(), "store"),
@@ -126,7 +126,7 @@ func TestNewServerReportsAStoreItCannotCreate(t *testing.T) {
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatalf("writing the file: %v", err)
 	}
-	_, err := newServer(&config{
+	_, err := newServer(t.Context(), &config{
 		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
 		nodeID:   "node-1",
 		store:    filepath.Join(file, "store"),
@@ -161,7 +161,7 @@ func TestTheServerLogsEveryCall(t *testing.T) {
 
 func TestServeStopsWhenTheContextEnds(t *testing.T) {
 	dir := t.TempDir()
-	server, err := newServer(&config{
+	server, err := newServer(t.Context(), &config{
 		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
 		nodeID:   "node-1",
 		store:    filepath.Join(dir, "store"),
@@ -178,7 +178,7 @@ func TestServeStopsWhenTheContextEnds(t *testing.T) {
 
 func TestServeReportsASocketThatGoesAway(t *testing.T) {
 	dir := t.TempDir()
-	server, err := newServer(&config{
+	server, err := newServer(t.Context(), &config{
 		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
 		nodeID:   "node-1",
 		store:    filepath.Join(dir, "store"),
