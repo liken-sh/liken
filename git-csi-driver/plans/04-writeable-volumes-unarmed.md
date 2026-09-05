@@ -75,6 +75,19 @@ This needs `get`, `list`, and `watch` on `persistentvolumes`,
 `persistentvolumeclaims`, and `volumeattributesclasses`, which
 `rbac.yaml` adds to the `ClusterRole`.
 
+### What survives a restart
+
+The node plugin holds its published volumes in memory, and a restarted
+driver knows none of them. This plan gives every volume, read-only and
+writeable, a record file in its store directory, written at publish
+with the attributes, the target path, and the staging path where one
+exists, and removed at unpublish. At start the driver reads every
+record, checks that the target path is still a mount, and resumes the
+watch and the fetch loop for each one that is. A record whose target is
+no longer mounted is removed with its directory, for a read-only
+volume, or left in place, for a writeable one, because its work tree
+may hold work.
+
 ### Reporting
 
 The three channels carry the same facts:

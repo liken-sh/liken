@@ -16,3 +16,11 @@ Until that is known, the condition stays where the design puts it, and
 the events and the metrics carry the same facts, so nothing is reported
 in one place only. When the kubelet adopts `NodeGetVolumeHealth`, the
 driver serves both for one release and then drops the field.
+
+The lab drill of plan 03 added a fact: the kubelet on a `liken` node
+posted no `kubelet_volume_stats_health_status_abnormal` series while
+four volumes were mounted. The metric is behind the `CSIVolumeHealth`
+feature gate, which k3s does not enable by default, so on `liken` today
+the condition reaches nothing. The events and the metrics carry the
+same facts, and a `liken` release that enables the gate is the fix on
+that side.

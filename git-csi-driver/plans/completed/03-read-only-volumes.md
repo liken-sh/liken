@@ -1,6 +1,12 @@
 # 03, Read-only volumes
 
-Proposed. Full fidelity.
+Built, and drilled in the lab on 2026-09-05 with development build
+`0000.00.00-000-dev-008-bce97b16`. Two pods in two namespaces read the
+forge's repository; a push reached both inside a 15 second `pull`; with
+the forge stopped, an `allowStale` pod started and a `refuse` pod stayed
+refused with `GitVolumeRefused` in its events; the forge's return
+started the refused pod. The kubelet posted no volume health metric,
+which the open problem on the volume condition now records.
 
 ## The problem
 

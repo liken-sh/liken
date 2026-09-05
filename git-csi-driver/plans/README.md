@@ -18,9 +18,6 @@ they become.
 
 ## Planned
 
-* [03, Read-only volumes](03-read-only-volumes.md). Proposed. Inline
-  ephemeral volumes that follow a ref, with `pull`, `depth`, and
-  `offline`, from one bare repository per URL on the node.
 * [04, Writeable volumes, unarmed](04-writeable-volumes-unarmed.md).
   Proposed. A static `PersistentVolume` and a `ReadWriteOncePod`
   claim, a work tree per volume, and a driver that watches and reports
@@ -42,6 +39,10 @@ they become.
   One `liken` machine in QEMU from the public release channel, a git
   daemon on the host as its forge, and a smoke target that runs the
   chain in 78 seconds.
+* [03, Read-only volumes](completed/03-read-only-volumes.md). Built,
+  and drilled in the lab on 2026-09-05. Inline volumes that follow a
+  ref from one bare repository per URL, with `pull`, `depth`, and
+  `offline`, replaced file by file under the mount.
 
 ## Open problems
 
