@@ -189,6 +189,43 @@ original through the `brand` Go package, because a Go program can
 only embed files from its own module. The file at the root of this
 repository is the only original.
 
+## The coverage report
+
+`coverage/` is a Go program that turns the coverage data a
+repository's tests produce into one HTML page. A repository runs it
+as `go tool coverage`, the way it runs Hugo, and pins it as a tool
+dependency of its docs module:
+
+```sh
+go tool coverage -title "media-operator" -label Go -label Rust \
+  -out coverage.html -root .. go.out cobertura.xml
+```
+
+An input is a Go coverage profile (`go test -coverprofile`) or a
+Cobertura report (`cargo llvm-cov --cobertura`). The program reads
+the format from the content, so a repository names its files what it
+likes, and one page holds a program in each language. Go counts
+statements, and its total is the number `go-test-coverage` reports,
+so the page and the coverage gate agree. Cobertura counts lines. The
+page says which unit every number is in.
+
+The page is one file. It inlines the shared stylesheet, asks for
+nothing over the network, and needs no JavaScript, so a site can
+publish it and a release can ship it. It opens with a summary of each
+input, then a table of every file, then every source file with its
+lines numbered and its covered and uncovered lines colored.
+
+A site that publishes the report serves it at `/coverage.html` and
+sets one parameter:
+
+```yaml
+params:
+  coverage: true
+```
+
+Every page's footer then links it. A site that sets nothing shows no
+link.
+
 ## The `liken-iced` crate
 
 `iced/` is a Rust crate, `liken-iced`, for a program that draws the

@@ -38,6 +38,10 @@ chrome excluded.
 {{ with resources.Get "liken.css" }}{{ .Content | safeCSS }}{{ end }}
   nav.site { margin-bottom: 2rem; }
   nav.site a { margin-right: 1rem; }
+  /* The footer holds one link on most sites and two on a site that
+     publishes its coverage report. The gap belongs to the second
+     link, so a footer with one link is unchanged. */
+  footer a + a { margin-left: 1rem; }
   nav.crumbs { font-size: 0.9em; margin-bottom: 1.5rem; }
   nav.crumbs span[aria-current] { color: var(--ink-muted); }
   /* A figure is a floated aside: the image is at the right margin
@@ -116,6 +120,13 @@ chrome excluded.
 <footer>
   {{ with .OutputFormats.Get "markdown" -}}
   <a href="{{ .RelPermalink }}">This page as Markdown</a>
+  {{- end }}
+  {{- /* A site that publishes a test coverage report sets the
+  coverage parameter, and its footer links the page the report lands
+  on. A site that sets nothing shows no link, and its footer is the
+  one it has today. */ -}}
+  {{- if .Site.Params.coverage }}
+  <a href="/coverage.html">Test coverage</a>
   {{- end }}
 </footer>
 </body>

@@ -4,7 +4,10 @@ go 1.26.5
 
 toolchain go1.27.0
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	golang.org/x/mod v0.40.0
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
@@ -33,7 +36,6 @@ require (
 	github.com/vladopajic/go-test-coverage/v2 v2.19.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260824195058-e88cd73687aa // indirect
 	golang.org/x/image v0.41.0 // indirect
-	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect

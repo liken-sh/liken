@@ -11,9 +11,15 @@
 profile: coverage.out
 
 threshold:
-  total: 90
+  total: 91
 
 override:
+  # coverage reads a repository's coverage data and writes the HTML
+  # report. The tests run it against a fixture tree with a profile
+  # and a Cobertura report. What stays untested is main itself and a
+  # scattering of I/O error returns.
+  - path: ^coverage$
+    threshold: 93
   # crdref reads a CRD's schema and writes the reference page. The
   # tests run it against real CRDs. What stays untested is a
   # scattering of I/O error returns.
