@@ -230,7 +230,7 @@ link.
 
 `iced/` is a Rust crate, `liken-iced`, for a program that draws the
 brand with the [`iced`](https://iced.rs/) toolkit, such as an idle
-screen on a television. The crate carries three things:
+screen on a television. The crate carries four things:
 
 * **The mark.** It embeds `liken.svg` and parses the fourteen
   polygons out of it. A caller reads the six vertices, the fill, and
@@ -243,6 +243,12 @@ screen on a television. The crate carries three things:
   numbers: two sines for each hexagon, first rates between 0.22 and
   0.40 cycles a second spread by the golden ratio, and a ten percent
   swing at full energy. At energy 0 the mark is still.
+* **The faces.** `fonts/` holds Source Sans 3, the family every liken
+  page and screen sets its text in, as two static faces for programs
+  (upright and italic, release 3.052) and two variable faces for the
+  web. The crate embeds the two static files and loads them into
+  `iced`'s font system on request, so a screen draws the family out
+  of its own binary and not out of whatever a machine has installed.
 
 No value in the crate is a copy of a value in `liken.svg` or
 `liken.css`. An edit to either original reaches a screen with no
