@@ -10,6 +10,12 @@ toolchain go1.27.0
 tool github.com/vladopajic/go-test-coverage/v2
 
 require (
+	github.com/container-storage-interface/spec v1.12.0
+	google.golang.org/grpc v1.83.2
+	google.golang.org/protobuf v1.36.11
+)
+
+require (
 	github.com/alexflint/go-arg v1.6.0 // indirect
 	github.com/alexflint/go-scalar v1.2.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.43.0 // indirect
@@ -34,7 +40,10 @@ require (
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/vladopajic/go-test-coverage/v2 v2.19.0 // indirect
 	golang.org/x/image v0.41.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/tools v0.26.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/tools v0.48.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

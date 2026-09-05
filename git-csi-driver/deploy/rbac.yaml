@@ -1,0 +1,10 @@
+# The driver's identity in the cluster. It has no roles yet: plan 03
+# adds events, and plan 04 adds the claims and classes.
+# Name the two plans that add rules: plan 03 adds events, plan 04 adds
+# claims. Say why a CSI driver needs an account at all before it reads
+# anything: the registrar and the kubelet talk to it over a socket, not
+# the API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: git-csi-driver

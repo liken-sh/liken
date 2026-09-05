@@ -10,6 +10,8 @@ namespace: liken-system
 
 resources:
   - csidriver.yaml
+  - rbac.yaml
+  - node.yaml
 
 labels:
   - includeSelectors: false

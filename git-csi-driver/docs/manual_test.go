@@ -17,6 +17,8 @@ import (
 var exceptions = []string{
 	"/deploy/csidriver.yaml",
 	"/deploy/kustomization.yaml",
+	"/deploy/node.yaml",
+	"/deploy/rbac.yaml",
 }
 
 func TestManualInternalLinks(t *testing.T) {

@@ -1,14 +1,18 @@
 // git-csi-driver is the CSI driver named git.liken.sh. It mounts git
-// repositories as volumes. This file holds the command line; the CSI
-// services arrive with plan 01.
+// repositories as volumes. This file holds the command line and the
+// run that serves the socket until the pod stops.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 // version is the release the binary was built from. The Dockerfile sets
@@ -17,15 +21,33 @@ import (
 var version = "dev"
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout))
+	os.Exit(run(context.Background(), os.Args[1:], os.Stdout))
 }
 
-func run(args []string, out io.Writer) int {
-	if _, err := parse(args, out); err != nil {
+// run parses the command line, serves the socket, and returns the exit
+// code. The context is the run's life: a signal ends it in the pod, and
+// a test ends it the same way.
+func run(ctx context.Context, args []string, out io.Writer) int {
+	cfg, err := parse(args, out)
+	if err != nil {
 		return 1
 	}
-	// The driver serves nothing yet, so a parsed command line is the
-	// whole run.
+	if cfg == nil {
+		return 0
+	}
+
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	server, err := newServer(cfg, slog.Default())
+	if err != nil {
+		fmt.Fprintln(out, err)
+		return 1
+	}
+	if err := server.serve(ctx); err != nil {
+		fmt.Fprintln(out, err)
+		return 1
+	}
 	return 0
 }
 

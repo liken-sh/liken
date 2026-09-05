@@ -2,34 +2,73 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// stopped is a context that is already over, so run serves and stops
+// without waiting for a signal.
+func stopped(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	return ctx
+}
+
+// temporaryFlags puts the socket and the store in a temporary directory
+// of the test's own.
+func temporaryFlags(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	return []string{
+		"--endpoint", "unix://" + filepath.Join(dir, "csi.sock"),
+		"--store", filepath.Join(dir, "store"),
+	}
+}
+
 func TestRunExitCodes(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		args []string
+		args func(t *testing.T) []string
 		code int
 	}{
-		{name: "the version alone", args: []string{"--version"}, code: 0},
-		{name: "a node id alone", args: []string{"--node-id", "node-1"}, code: 0},
 		{
-			name: "every flag",
-			args: []string{
-				"--endpoint", "unix:///run/csi/csi.sock",
-				"--node-id", "node-1",
-				"--store", "/srv/git-csi",
+			name: "the version alone",
+			args: func(*testing.T) []string { return []string{"--version"} },
+			code: 0,
+		},
+		{
+			name: "a node id and a place to serve",
+			args: func(t *testing.T) []string {
+				return append([]string{"--node-id", "node-1"}, temporaryFlags(t)...)
 			},
 			code: 0,
 		},
-		{name: "no arguments", args: nil, code: 1},
-		{name: "an unknown flag", args: []string{"--bogus"}, code: 1},
+		{
+			name: "no arguments",
+			args: func(*testing.T) []string { return nil },
+			code: 1,
+		},
+		{
+			name: "an unknown flag",
+			args: func(*testing.T) []string { return []string{"--bogus"} },
+			code: 1,
+		},
+		{
+			name: "an endpoint the driver cannot serve",
+			args: func(*testing.T) []string {
+				return []string{"--node-id", "node-1", "--endpoint", "tcp://127.0.0.1:9000"}
+			},
+			code: 1,
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			out := &bytes.Buffer{}
-			if code := run(c.args, out); code != c.code {
-				t.Errorf("run(%q) = %d, want %d (output: %q)", c.args, code, c.code, out)
+			args := c.args(t)
+			if code := run(stopped(t), args, out); code != c.code {
+				t.Errorf("run(%q) = %d, want %d (output: %q)", args, code, c.code, out)
 			}
 		})
 	}
@@ -37,7 +76,7 @@ func TestRunExitCodes(t *testing.T) {
 
 func TestRunPrintsTheVersion(t *testing.T) {
 	out := &bytes.Buffer{}
-	run([]string{"--version"}, out)
+	run(stopped(t), []string{"--version"}, out)
 	if out.String() != version+"\n" {
 		t.Errorf("run printed %q, want %q", out, version+"\n")
 	}
@@ -45,7 +84,7 @@ func TestRunPrintsTheVersion(t *testing.T) {
 
 func TestRunSaysNothingOnAGoodCommandLine(t *testing.T) {
 	out := &bytes.Buffer{}
-	run([]string{"--node-id", "node-1"}, out)
+	run(stopped(t), append([]string{"--node-id", "node-1"}, temporaryFlags(t)...), out)
 	if out.String() != "" {
 		t.Errorf("run printed %q, want nothing", out)
 	}
@@ -53,7 +92,7 @@ func TestRunSaysNothingOnAGoodCommandLine(t *testing.T) {
 
 func TestRunReportsAMissingNodeID(t *testing.T) {
 	out := &bytes.Buffer{}
-	run(nil, out)
+	run(stopped(t), nil, out)
 	if !strings.Contains(out.String(), "--node-id is required") {
 		t.Errorf("run printed %q, want the missing node id reported", out)
 	}
@@ -61,9 +100,28 @@ func TestRunReportsAMissingNodeID(t *testing.T) {
 
 func TestRunReportsAnUnknownFlag(t *testing.T) {
 	out := &bytes.Buffer{}
-	run([]string{"--bogus"}, out)
+	run(stopped(t), []string{"--bogus"}, out)
 	if !strings.Contains(out.String(), "not defined") {
 		t.Errorf("run printed %q, want the unknown flag reported", out)
+	}
+}
+
+func TestRunReportsAnEndpointItCannotServe(t *testing.T) {
+	out := &bytes.Buffer{}
+	run(stopped(t), []string{"--node-id", "node-1", "--endpoint", "tcp://127.0.0.1:9000"}, out)
+	if !strings.Contains(out.String(), "unix://") {
+		t.Errorf("run printed %q, want the endpoint reported", out)
+	}
+}
+
+func TestRunServesUntilTheContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	args := append([]string{"--node-id", "node-1"}, temporaryFlags(t)...)
+	codes := make(chan int, 1)
+	go func() { codes <- run(ctx, args, &bytes.Buffer{}) }()
+	cancel()
+	if code := <-codes; code != 0 {
+		t.Errorf("run = %d, want 0", code)
 	}
 }
 

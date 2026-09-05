@@ -44,4 +44,6 @@ None built yet.
 
 ## Open problems
 
-None yet.
+* [The volume condition moved in CSI 1.13](open-problems/the-volume-condition-moved-in-csi-1-13.md).
+  Spec 1.13 replaced `VolumeCondition` with an alpha RPC the kubelet
+  does not call yet, so the driver pins spec 1.12.
