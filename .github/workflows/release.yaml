@@ -27,11 +27,13 @@ on:
     tags: ["2*"]
 
 # contents: write is what lets the last step create the GitHub
-# release. Every step before it only reads the tree. The real
+# release. actions: read is what lets the coverage step find the
+# checks run of this commit and download its profile. The real
 # publishing credentials (the channel's key) arrive as secrets, not
 # through this token.
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -90,6 +92,30 @@ jobs:
       # catch a bundle that cannot boot. After publication, the only
       # remedy is the next serial.
       - run: make smoke-uefi
+
+      # The release publishes the test coverage report beside the
+      # artifacts, and this run cannot measure it: the checks workflow
+      # does not run on a tag, and a release must not measure its own
+      # coverage anyway. So the report comes from the checks run of
+      # this exact commit. A tag on a commit that never passed the
+      # checks fails here, before a byte moves. The profile is an
+      # artifact of that run, kept for 7 days, so a tag pushed more
+      # than a week after its commit fails too. Re-run the checks for
+      # the commit, then push the tag again.
+      - name: render the coverage report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(gh run list --workflow checks.yaml --commit "$GITHUB_SHA" \
+            --status success --json databaseId --jq '.[0].databaseId')
+          if [ -z "$RUN" ]; then
+            echo "no successful checks run for $GITHUB_SHA; a release needs one" >&2
+            exit 1
+          fi
+          gh run download "$RUN" --name coverage-go
+          make coverage-report
+          cp coverage.html \
+            "releases/dist/${{ steps.version.outputs.version }}/coverage.html"
 
       # s3cmd is the uploader, because it speaks plain S3 to non-AWS
       # endpoints without errors. Recent aws-cli versions attach
@@ -154,7 +180,10 @@ jobs:
       # This step publishes the artifacts first, and the document
       # last: release.yaml is how anyone discovers the artifacts, so
       # until it lands, the half-uploaded release simply does not
-      # exist yet. Every object is public-read, because the channel is
+      # exist yet. The loop reads the directory, so the coverage
+      # report goes up with the artifacts. It is not one of them: the
+      # document does not name it, and no machine downloads it onto a
+      # boot slot. Every object is public-read, because the channel is
       # public by design, while the bucket itself refuses to list its
       # contents, so only named paths answer. channel.yaml goes last
       # of all, and it is the channel's one mutable object: the

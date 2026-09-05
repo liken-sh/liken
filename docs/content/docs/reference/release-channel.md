@@ -31,6 +31,7 @@ fleet](/docs/guides/upgrade/) gives the steps that use it.
       grub-core.img            the BIOS boot loader's second stage
       LICENSES.md              third-party license notices
       notes.md                 what changed in this release
+      coverage.html            the test coverage of the tree it was built from
     sources/                   source mirrors for GPL and LGPL components,
       <component>/<version>/   keyed by the component's own version
     index.html                 the index pages, one at the root, one in
@@ -114,6 +115,16 @@ wraps the same text. No digest pins the notes, `release.yaml` does
 not list them, and no machine reads them. They are announcement
 prose, in the same trust class as the index pages. That is also what
 lets a release published before notes existed gain them later.
+
+## The coverage report
+
+`<version>/coverage.html` is the test coverage of the tree the
+release was built from: one page that gives every package's number
+and colors every line of source. The checks measured it on the commit
+the tag names, and the release publishes that report. [The same
+report for the current main](/coverage.html) is on this site. No
+digest pins the report, `release.yaml` does not list it, and no
+machine reads it. It is in the same trust class as the index pages.
 
 ## The index pages
 

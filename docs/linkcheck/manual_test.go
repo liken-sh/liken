@@ -33,6 +33,9 @@ var exceptions = []string{
 	"/brand/liken.svg",
 	// The Makefile writes the deploy marker into the built tree.
 	"/release.txt",
+	// CI renders the test coverage report from the profile the gate
+	// wrote, and copies it into the built tree.
+	"/coverage.html",
 }
 
 // TestManualInternalLinks resolves every absolute link in the manual:

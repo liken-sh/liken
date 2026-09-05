@@ -699,6 +699,24 @@ test-go:
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
 
+# The coverage report is the profile as a page: one HTML file that
+# names every package's number and colors every line of source. The
+# gate above decides whether the tree passes; this target only shows
+# what the same profile holds, so `test` does not depend on it and a
+# report is never a verdict.
+#
+# The renderer is a tool dependency of the docs module, beside Hugo
+# and crdref, because the report is published with the site. So the
+# command runs from docs/, and the paths cross back to the root: the
+# profile test-go wrote, and the source tree the profile names.
+#
+# test-go writes that profile as a side effect, not as a named
+# artifact, so this target takes it as it finds it. Run it after any
+# `make test`.
+coverage-report:
+	cd docs && go tool coverage -title liken -label Go \
+		-root .. -out ../coverage.html ../coverage.out
+
 test-docs:
 	$(MAKE) -C docs test
 	$(MAKE) -C docs build
@@ -760,4 +778,4 @@ clean:
 	rm -rf $(HW_IMAGE_DIR)
 	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go test-docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go coverage-report test-docs clean

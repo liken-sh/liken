@@ -107,8 +107,8 @@ resource "github_repository" "repositories" {
   }
 }
 
-# Each site is one Pages configuration: a workflow deploy (the same
-# docs.yaml shape in every repository, so no branch source), the
+# Each site is one Pages configuration: a workflow deploy (a publish
+# job in every repository's CI workflow, so no branch source), the
 # custom domain whose CNAME is in terraform.tf, and the redirect from
 # http. The github_repository resource also offers an inline pages
 # block, but the provider deprecates it, and it cannot state

@@ -17,12 +17,13 @@ toolchain go1.27.0
 
 tool (
 	github.com/gohugoio/hugo
+	github.com/liken-sh/brand/coverage
 	github.com/liken-sh/brand/crdref
 	honnef.co/go/tools/cmd/staticcheck
 )
 
 require (
-	github.com/liken-sh/brand v0.0.0-20260826005113-79f51d4d6ec6
+	github.com/liken-sh/brand v0.0.0-20260905124916-f549935dd193
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

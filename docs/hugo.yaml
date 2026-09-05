@@ -22,6 +22,10 @@ theme: brand
 # site without this parameter gets no "repository" entry.
 params:
   repository: https://github.com/liken-sh/liken
+  # This site publishes the test coverage report at /coverage.html,
+  # built by CI from the same commit the site is built from. The
+  # theme's footer links it only when this parameter is set.
+  coverage: true
 # No taxonomies and no feeds: the site is a manual, not a blog. The
 # sitemap stays, because it is free and crawlers use it.
 disableKinds: [taxonomy, term, rss]

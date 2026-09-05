@@ -84,10 +84,13 @@ server pointed at it is an exact preview.
 
 ## The deploy path
 
-A push to main that changes this domain publishes the site. CI
-builds `dist/site/` and deploys the tree to GitHub Pages, which
-serves it at liken.sh. The workflow is
-`.github/workflows/docs.yaml`.
+A push to main publishes the site, whatever it changed. CI builds
+`dist/site/` and deploys the tree to GitHub Pages, which serves it
+at liken.sh. The publish job is in `.github/workflows/checks.yaml`,
+and it runs only after the checks pass. Nothing filters it by path,
+because the site carries the test coverage report at
+`/coverage.html`, and a change to any Go file moves a number the
+site serves.
 
 The name reaches Pages through DNS: the apex records in
 `liken.sh/terraform.tf` point liken.sh at GitHub's published Pages
@@ -100,3 +103,9 @@ act as delegating the zone.
 `dist/site/release.txt` holds the commit that the site was built
 from. CI reads it back over https://liken.sh/release.txt to prove
 that the deploy landed.
+
+The coverage report is not built here. `make coverage-report` at the
+repository root renders it from the profile `make test-go` writes,
+and the publish job copies the file into `dist/site/`. So a local
+`make -C docs build` produces the site without it, and the footer
+link that the theme adds leads nowhere until CI publishes.
