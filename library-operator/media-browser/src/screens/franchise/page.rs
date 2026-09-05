@@ -226,21 +226,20 @@ fn thin(frame: &mut canvas::Frame<Renderer>, cell: &Cell, bounds: Rectangle) {
         },
     );
     let middle = bounds.center_y();
-    let mut x = bounds.x + INSET;
     let title = text::cut(&cell.name, look::DETAIL, bounds.width / 2.0);
+    let (at, facts) = thin_words(&title, bounds);
     text::line(
         frame,
         &title,
-        Point::new(x, middle - text::height(1, look::DETAIL) / 2.0),
+        at,
         look::DETAIL,
         look::muted(),
         bounds.width / 2.0,
     );
-    x += text::width(&title, look::DETAIL) + wall::GAP;
     text::line(
         frame,
         &cell.facts,
-        Point::new(x, middle - text::height(1, look::FACE) / 2.0),
+        facts,
         look::FACE,
         look::muted(),
         bounds.width / 2.0,
@@ -256,6 +255,23 @@ fn thin(frame: &mut canvas::Frame<Renderer>, cell: &Cell, bounds: Rectangle) {
         noted(cell),
         bounds.width / 2.0,
     );
+}
+
+// Where a thin row's title and its facts start: the title at the row's
+// left inset, centered on the row, and the facts a gap right of the
+// title's drawn width. The shaper measures the title, because an
+// estimate drifts with the glyphs, and the facts then run into one
+// title and stand far from another. The facts line's top is the title's
+// top plus the difference of the two line heights, so the two share a
+// baseline.
+pub fn thin_words(title: &str, bounds: Rectangle) -> (Point, Point) {
+    let top = bounds.center_y() - text::height(1, look::DETAIL) / 2.0;
+    let at = Point::new(bounds.x + INSET, top);
+    let facts = Point::new(
+        at.x + text::measured(title, look::DETAIL) + wall::GAP,
+        top + text::height(1, look::DETAIL) - text::height(1, look::FACE),
+    );
+    (at, facts)
 }
 
 // The card's ground: the entry's art decoded at a few pixels wide, scaled
@@ -382,6 +398,29 @@ mod tests {
         assert_eq!(region.y + region.height, FRAME.height);
         assert_eq!(region.x, MARGIN);
         assert_eq!(region.width, FRAME.width - 2.0 * MARGIN);
+    }
+
+    #[test]
+    fn a_thin_rows_facts_stand_a_gap_right_of_the_drawn_title_on_its_baseline() {
+        let row = area(100.0, 200.0, 1500.0, wall::THIN);
+        for title in ["Inhumans", "Cloak & Dagger", "Agents of S.H.I.E.L.D."] {
+            let (at, facts) = thin_words(title, row);
+            let drawn = text::measured(title, look::DETAIL);
+            assert!(drawn > 0.0, "{title}");
+            assert_eq!(facts.x, at.x + drawn + wall::GAP, "{title}");
+            assert!(
+                facts.x >= at.x + text::width(title, look::DETAIL) * 0.5,
+                "{title}"
+            );
+            assert_eq!(
+                facts.y + text::height(1, look::FACE),
+                at.y + text::height(1, look::DETAIL),
+                "{title}"
+            );
+        }
+        let (at, _) = thin_words("Inhumans", row);
+        assert_eq!(at.x, row.x + INSET);
+        assert_eq!(at.y + text::height(1, look::DETAIL) / 2.0, row.center_y());
     }
 
     #[test]

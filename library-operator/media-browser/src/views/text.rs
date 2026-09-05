@@ -4,10 +4,11 @@
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
-use iced_winit::core::text::Alignment;
-use iced_winit::core::{Color, Point, Rectangle};
+use iced_winit::core::text::{Alignment, LineHeight, Shaping};
+use iced_winit::core::{Color, Font, Pixels, Point, Rectangle};
 
 use super::{area, label};
+use crate::look;
 
 /// The height of one line as a share of its size. Every block of text on
 /// a page is measured in it.
@@ -28,6 +29,29 @@ pub fn fits(size: f32, width: f32) -> usize {
 /// the line count uses.
 pub fn width(content: &str, size: f32) -> f32 {
     content.chars().count() as f32 * size * ADVANCE
+}
+
+/// The width this content draws at, from the shaper's own paragraph over
+/// the display's font, so a line placed after it never drifts with the
+/// glyphs the estimate cannot see. The shaper runs on the draw path
+/// already, and one paragraph of a short line costs less than a frame.
+/// The measure reads the fonts the harness loaded into the graphics font
+/// system; a test with none loaded measures a fallback face, which still
+/// places the runs apart.
+pub fn measured(content: &str, size: f32) -> f32 {
+    use iced_winit::core::text::{Paragraph, Text, Wrapping};
+    let paragraph = iced_wgpu::graphics::text::Paragraph::with_text(Text {
+        content,
+        bounds: iced_winit::core::Size::INFINITE,
+        size: Pixels(size),
+        line_height: LineHeight::Absolute(Pixels(size * LEADING)),
+        font: Font::with_name(look::FONT),
+        align_x: Alignment::Left,
+        align_y: Vertical::Top,
+        shaping: Shaping::Advanced,
+        wrapping: Wrapping::None,
+    });
+    paragraph.min_width()
 }
 
 /// The content cut to what one line of this width holds at this size,

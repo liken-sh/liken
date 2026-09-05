@@ -424,9 +424,9 @@ fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     assert_eq!(headings[8], "Franchises · 2");
     let mut drawn: Vec<&str> = headings[2..6].to_vec();
     drawn.sort_unstable();
-    assert_eq!(drawn, ["A Player", "Drama", "The Entries", "Western"]);
+    assert_eq!(drawn, [PLAYER_STRIP, "Drama", "The Entries", "Western"]);
     let first_three = &headings[2..5];
-    assert!(first_three.contains(&"A Player"));
+    assert!(first_three.contains(&PLAYER_STRIP));
     assert!(first_three.contains(&"The Entries"));
     let last: Vec<(&str, Option<&str>)> = strips(&browser)[2..6]
         .iter()
@@ -440,7 +440,7 @@ fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     for (heading, last) in last {
         let want = match heading {
             "The Entries" => None,
-            "A Player" => Some("About A Player"),
+            PLAYER_STRIP => Some("About A Player"),
             _ => Some("See all"),
         };
         assert_eq!(last, want, "{heading}");
@@ -459,7 +459,7 @@ fn a_drawn_strip_captions_a_title_with_its_facts_and_a_persons_with_the_parts() 
     assert_eq!(western.items[0].under, "1980 · 1h 30m · PG");
     let player = strips
         .iter()
-        .find(|strip| strip.heading == PLAYER)
+        .find(|strip| strip.heading == PLAYER_STRIP)
         .expect("the page drew the player");
     assert_eq!(player.items[0].caption, "Entry 1 · 1980");
     assert_eq!(player.items[0].under, "Director");
@@ -525,7 +525,7 @@ fn a_reread_of_a_genre_page_counts_its_slots_again() {
 
 #[test]
 fn see_all_on_a_persons_strip_opens_their_page() {
-    let browser = see_all_on(PLAYER);
+    let browser = see_all_on(PLAYER_STRIP);
 
     let page = showing_person(&browser);
     assert_eq!(page.name, PLAYER);
@@ -696,7 +696,7 @@ fn the_slot_about_a_person_draws_their_headshot() {
     let browser = with_draw();
     let player = strips(&browser)
         .into_iter()
-        .find(|strip| strip.heading == PLAYER)
+        .find(|strip| strip.heading == PLAYER_STRIP)
         .expect("the page drew the person's strip");
 
     let last = player.last.as_ref().expect("the strip ends in a slot");

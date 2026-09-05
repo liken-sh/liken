@@ -7,7 +7,7 @@
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
 use crate::catalog::{
-    Fold, FranchiseEntry, GenreEntry, LibraryEntry, Order, Query, Source, library_name,
+    Fold, FranchiseEntry, GenreEntry, LibraryEntry, Order, Query, Slot, Source, library_name,
 };
 use crate::screens::wall::Wall;
 use crate::screens::{Item, Screen, Step, facts, franchise, person, slots};
@@ -153,7 +153,13 @@ impl Strip {
         match &self.row {
             Row::Query(query) => {
                 let answer = source.wall(query);
-                self.heading = query.name(&answer.name);
+                // A person's heading is two-tone: the name bright, and
+                // after the dot the person's roles across the strip's
+                // works, most frequent first.
+                self.heading = match query {
+                    Query::Person { .. } => facts::joined(&[&answer.name, &roles(&answer.slots)]),
+                    _ => query.name(&answer.name),
+                };
                 let answered = answer.slots.len();
                 let slots = match query {
                     Query::Released { .. } => super::recent::released(answer.slots, today),
@@ -311,10 +317,103 @@ fn franchise_item(entry: FranchiseEntry) -> Item {
     }
 }
 
+/// The person's roles across these works as role words in lower case,
+/// comma separated, most frequent first. A work's parts line is what the
+/// works read wrote: the role words and `as <character>` runs, comma
+/// separated, and an `as` run is the actor role, never the character's
+/// name. A role counts once per work even where a work credits it twice.
+/// A tie in frequency keeps the order the roles first came in, so the
+/// heading is stable between frames.
+pub fn roles(slots: &[Slot]) -> String {
+    let mut counted: Vec<(String, usize)> = Vec::new();
+    for slot in slots {
+        let mut seen: Vec<String> = Vec::new();
+        for part in slot.parts.split(", ").filter(|part| !part.is_empty()) {
+            let role = match part.starts_with("as ") {
+                true => "actor".to_string(),
+                false => part.to_lowercase(),
+            };
+            if seen.contains(&role) {
+                continue;
+            }
+            seen.push(role.clone());
+            match counted.iter_mut().find(|(named, _)| *named == role) {
+                Some((_, count)) => *count += 1,
+                None => counted.push((role, 1)),
+            }
+        }
+    }
+    counted.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    counted
+        .into_iter()
+        .map(|(role, _)| role)
+        .collect::<Vec<String>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sample::Catalog;
     use crate::views::Card;
+
+    fn work(parts: &str) -> Slot {
+        Slot {
+            parts: parts.into(),
+            ..Slot::default()
+        }
+    }
+
+    #[test]
+    fn a_persons_roles_read_most_frequent_first_in_lower_case() {
+        let works = [
+            work("as Ripley"),
+            work("Writer"),
+            work("as Dallas"),
+            work("as Kane"),
+            work("as Ash"),
+            work("as Parker"),
+        ];
+        assert_eq!(roles(&works), "actor, writer");
+    }
+
+    #[test]
+    fn roles_of_one_frequency_keep_the_order_they_first_came_in() {
+        let works = [work("Writer"), work("Director"), work("as Someone")];
+        assert_eq!(roles(&works), "writer, director, actor");
+        let works = [work("Director"), work("Writer")];
+        assert_eq!(roles(&works), "director, writer");
+    }
+
+    #[test]
+    fn a_work_that_credits_a_person_twice_counts_once_per_role() {
+        let works = [
+            work("as One, as Two"),
+            work("Writer, Director"),
+            work("Writer"),
+        ];
+        assert_eq!(roles(&works), "writer, actor, director");
+    }
+
+    #[test]
+    fn one_role_reads_as_one_word_and_no_work_reads_as_nothing() {
+        assert_eq!(roles(&[work("Writer"), work("Writer")]), "writer");
+        assert_eq!(roles(&[work("as The Part")]), "actor");
+        assert_eq!(roles(&[]), "");
+        assert_eq!(roles(&[work("")]), "");
+    }
+
+    #[test]
+    fn a_persons_strip_is_headed_by_their_name_and_their_roles() {
+        let mut strip = Strip::new(Row::Query(Query::Person {
+            library: "sample/features".into(),
+            path: ".contributors/A Second Writer".into(),
+        }));
+        strip.reread(&mut Catalog, 0, &[]);
+        assert_eq!(strip.heading, "A Second Writer · writer");
+        let (name, rest) = crate::views::strip::split(&strip.heading);
+        assert_eq!((name, rest), ("A Second Writer", " · writer"));
+    }
 
     #[test]
     fn the_page_reads_the_banner_the_recency_rows_the_draw_the_libraries_the_genres_then_the_franchises()

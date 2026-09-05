@@ -92,6 +92,9 @@ const SERIAL: &str = "series:1";
 // The one person the fake library credits, and the directory their
 // entry sits in.
 const PLAYER: &str = "A Player";
+// The player's strip heading: the name and, after the dot, the roles
+// across the works the fake credits them with.
+const PLAYER_STRIP: &str = "A Player · director";
 const ENTRY: &str = ".contributors/A Player";
 
 // The catalog's date this many days before today. A date is named by
