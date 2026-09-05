@@ -16,6 +16,10 @@ theme: brand
 # last segment of this URL.
 params:
   repository: https://github.com/liken-sh/audio-operator
+  # The site publishes the test coverage report at /coverage.html,
+  # built by the publish job in ci.yaml from the profile the tests
+  # wrote. This parameter puts the footer link to it on every page.
+  coverage: true
 
 # No taxonomies and no feeds: the site is a manual, not a blog. The
 # sitemap stays, because it is free and crawlers use it.

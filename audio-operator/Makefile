@@ -43,3 +43,24 @@ test-go:
 test-docs:
 	$(MAKE) -C docs test
 	$(MAKE) -C docs build
+
+# The coverage report is the profile the gate already measured, drawn
+# as one HTML page for the site to publish. `test` does not depend on
+# it: the gate decides whether a change passes, and the report only
+# shows a reader what the tests reached, so a report that fails to
+# render never fails a build.
+#
+# coverage is a tool of the docs module, the way Hugo and crdref are,
+# so the command runs from docs/ and names the paths above it.
+.PHONY: coverage-report
+coverage-report: coverage.out
+	cd docs && go tool coverage \
+		-title audio-operator \
+		-root .. \
+		-out ../coverage.html \
+		-label Go ../coverage.out
+
+# The report reads the profile test-go writes, so a tree with no
+# profile runs the tests first.
+coverage.out:
+	$(MAKE) test-go
