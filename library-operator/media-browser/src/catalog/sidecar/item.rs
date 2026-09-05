@@ -54,9 +54,10 @@ pub fn art(
     library: &str,
     id: &str,
 ) -> rusqlite::Result<Vec<(String, String)>> {
-    let sql = "SELECT files.role, MIN(files.path) FROM files \
-               JOIN file_items ON file_items.library = files.library \
-               AND file_items.path = files.path \
+    let sql = "SELECT files.role, MIN(files.path) \
+               FROM file_items INDEXED BY file_items_library_item \
+               JOIN files ON files.library = file_items.library \
+               AND files.path = file_items.path \
                WHERE file_items.library = ? AND file_items.item = ? \
                AND ((files.type = 'image' AND files.role IN ('backdrop', 'logo')) \
                     OR (files.type = 'video' AND files.role = 'trailer')) \

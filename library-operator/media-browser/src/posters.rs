@@ -11,6 +11,8 @@ use crate::harness::Waker;
 mod art;
 mod cache;
 mod decode;
+mod disk;
+mod key;
 mod queue;
 pub mod store;
 pub mod volumes;
@@ -19,6 +21,7 @@ pub mod volumes;
 mod tests;
 
 pub use art::Art;
+pub use store::PosterCounts;
 
 /// How a decode fills the box it is asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -57,6 +60,11 @@ pub trait Posters {
     /// source to read the rows again.
     fn delivered(&mut self) -> bool {
         false
+    }
+
+    /// Disk-cache hits and source decode attempts for this run.
+    fn counts(&self) -> PosterCounts {
+        PosterCounts::default()
     }
 
     /// The path of one file of a library's volume on this machine, or nothing where the store holds no root for that library

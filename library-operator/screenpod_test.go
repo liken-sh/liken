@@ -8,6 +8,7 @@ package main
 // display claim the browser draws through.
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -122,6 +123,7 @@ func TestScreenPodBrowserReadsTheCatalogAndEveryLibraryRoot(t *testing.T) {
 		t.Errorf("image = %q, want %q", browser.Image, testBrowserImage)
 	}
 	want := "--catalog /var/lib/corrosion/state.db --updates http://127.0.0.1:8080 " +
+		"--cache-dir /var/cache/media-browser " +
 		"--library-root house/films=/libraries/films/exports/films " +
 		"--library-root house/shows=/libraries/shows"
 	if got := strings.Join(browser.Args, " "); got != want {
@@ -144,6 +146,74 @@ func TestScreenPodBrowserMountsTheCatalogFile(t *testing.T) {
 	t.Errorf("the browser mounts %+v, want %s at %s", browser.VolumeMounts, catalogVolumeName, catalogStatePath)
 }
 
+func posterCacheMounts(mounts []VolumeMount) []VolumeMount {
+	found := []VolumeMount{}
+	for _, mount := range mounts {
+		if mount.Name == posterCacheVolumeName {
+			found = append(found, mount)
+		}
+	}
+	return found
+}
+
+func posterCacheVolume(t *testing.T, volumes []Volume) Volume {
+	t.Helper()
+	for _, volume := range volumes {
+		if volume.Name == posterCacheVolumeName {
+			return volume
+		}
+	}
+	t.Fatalf("volumes = %+v, want %s", volumes, posterCacheVolumeName)
+	return Volume{}
+}
+
+func serializedVolume(t *testing.T, volume Volume) string {
+	t.Helper()
+	body, err := json.Marshal(volume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+func TestScreenPodGivesOnlyTheBrowserAWritablePosterCache(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+	browserMounts := posterCacheMounts(pod.Spec.Containers[0].VolumeMounts)
+	catalogMounts := posterCacheMounts(pod.Spec.InitContainers[0].VolumeMounts)
+
+	if len(browserMounts) != 1 {
+		t.Fatalf("browser poster cache mounts = %+v, want one", browserMounts)
+	}
+	want := VolumeMount{Name: posterCacheVolumeName, MountPath: posterCacheMountPath}
+	if browserMounts[0] != want {
+		t.Errorf("browser poster cache mount = %+v, want %+v", browserMounts[0], want)
+	}
+	if len(catalogMounts) != 0 {
+		t.Errorf("catalog poster cache mounts = %+v, want none", catalogMounts)
+	}
+}
+
+func TestScreenPodBoundsThePosterCacheAt640Mi(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+	volume := posterCacheVolume(t, pod.Spec.Volumes)
+
+	got := serializedVolume(t, volume)
+	want := `{"name":"poster-cache","emptyDir":{"sizeLimit":"640Mi"}}`
+	if got != want {
+		t.Errorf("poster cache volume = %s, want %s", got, want)
+	}
+}
+
+func TestAnUnboundedEmptyDirStillSerializesWithNoSettings(t *testing.T) {
+	volume := screenCatalogVolume(denScreen(), nil)
+
+	got := serializedVolume(t, volume)
+	want := `{"name":"catalog","emptyDir":{}}`
+	if got != want {
+		t.Errorf("volume = %s, want %s", got, want)
+	}
+}
+
 // A namespace with no Library still stands a screen: the browser draws
 // the wall the catalog holds, and it mounts the catalog and no media
 // volume.
@@ -151,14 +221,16 @@ func TestScreenPodWithNoLibrariesMountsNone(t *testing.T) {
 	pod := testScreenPod(denScreen(), nil)
 
 	browser := pod.Spec.Containers[0]
-	if len(browser.VolumeMounts) != 1 || browser.VolumeMounts[0].Name != catalogVolumeName {
-		t.Errorf("volumeMounts = %+v, want the catalog alone", browser.VolumeMounts)
+	if len(browser.VolumeMounts) != 2 || browser.VolumeMounts[0].Name != catalogVolumeName ||
+		browser.VolumeMounts[1].Name != posterCacheVolumeName {
+		t.Errorf("volumeMounts = %+v, want the catalog and poster cache", browser.VolumeMounts)
 	}
 	if strings.Contains(strings.Join(browser.Args, " "), "--library-root") {
 		t.Errorf("args = %v, want no library root", browser.Args)
 	}
-	if len(pod.Spec.Volumes) != 1 || pod.Spec.Volumes[0].Name != catalogVolumeName {
-		t.Errorf("volumes = %+v, want the catalog volume alone", pod.Spec.Volumes)
+	if len(pod.Spec.Volumes) != 2 || pod.Spec.Volumes[0].Name != catalogVolumeName ||
+		pod.Spec.Volumes[1].Name != posterCacheVolumeName {
+		t.Errorf("volumes = %+v, want the catalog and poster cache", pod.Spec.Volumes)
 	}
 }
 

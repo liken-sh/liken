@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use iced_widget::core::Bytes;
 
 use super::store::ArtStore;
-use super::{Art, Fit, Posters};
+use super::{Art, Fit, PosterCounts, Posters};
 use crate::harness::Waker;
 use crate::views::wall;
 
@@ -46,6 +46,15 @@ impl Volumes {
     /// A store over these library roots, keyed by the catalog's
     /// `library` column, holding decoded posters under `budget` bytes.
     pub fn new(roots: HashMap<String, PathBuf>, budget: usize) -> Self {
+        Self::with_cache_dir(roots, budget, None)
+    }
+
+    /// A store with a disk cache where `cache_dir` names one.
+    pub fn with_cache_dir(
+        roots: HashMap<String, PathBuf>,
+        budget: usize,
+        cache_dir: Option<PathBuf>,
+    ) -> Self {
         let wake = Arc::new(Mutex::new(None::<Waker>));
         let held = wake.clone();
         let waker: Waker = Arc::new(move || {
@@ -58,7 +67,7 @@ impl Volumes {
             }
         });
         Self {
-            store: ArtStore::new(roots, budget, waker),
+            store: ArtStore::with_cache_dir(roots, budget, waker, cache_dir),
             wake,
         }
     }
@@ -118,6 +127,10 @@ impl Posters for Volumes {
 
     fn delivered(&mut self) -> bool {
         self.store.delivered()
+    }
+
+    fn counts(&self) -> PosterCounts {
+        self.store.counts()
     }
 
     fn wake_by(&mut self, wake: Waker) {
@@ -195,6 +208,13 @@ mod tests {
         };
         assert_eq!((*width, *height), (40, 60));
         assert_eq!(pixels.len(), 40 * 60 * 4);
+        assert_eq!(
+            volumes.counts(),
+            PosterCounts {
+                from_cache: 0,
+                from_source: 1,
+            }
+        );
     }
 
     #[test]

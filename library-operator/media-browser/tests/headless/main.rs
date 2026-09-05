@@ -5,6 +5,7 @@
 // cage is missing; a skip would let a run pass under the floor.
 
 mod broker;
+mod cache;
 mod flags;
 mod screens;
 

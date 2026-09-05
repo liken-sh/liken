@@ -38,6 +38,8 @@ use stats::Stats;
 use timeline::Timeline;
 use watchdog::Watchdog;
 
+use crate::posters::PosterCounts;
+
 /// The key that ends a run, from the keyboard or from a script.
 pub const QUIT: &str = "q";
 
@@ -114,6 +116,11 @@ pub trait Screen {
     /// ask maps one new surface.
     fn surface_due(&mut self) -> bool {
         false
+    }
+
+    /// Disk-cache hits and source decode attempts for this run.
+    fn poster_counts(&self) -> PosterCounts {
+        PosterCounts::default()
     }
 
     /// The new surface is up, on the frame at `at` seconds.
@@ -307,6 +314,7 @@ mod tests {
         assert!(!still.pump(1.0));
         assert_eq!(still.next_frame(3.5), Some(3.5));
         assert!(!still.surface_due());
+        assert_eq!(still.poster_counts(), PosterCounts::default());
         still.wake_by(Arc::new(|| {}));
         still.update(());
         still.surfaced(2.0);

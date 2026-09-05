@@ -335,6 +335,10 @@ CREATE TABLE contributor_aliases (
 -- them. The contributor.ids gap query reads it.
 CREATE INDEX contributor_aliases_library_path ON contributor_aliases (library, path);
 
+-- A person joins across libraries by a shared id, with no library known
+-- before the lookup.
+CREATE INDEX contributor_aliases_scheme_id ON contributor_aliases (scheme, id);
+
 -- One credited person on one title, lifted from the title's own credits.yaml.
 -- billing is the billing order, and it is the key beside the item because a
 -- title gives each of its people one slot; the column is not named order,
@@ -357,6 +361,10 @@ CREATE TABLE credits (
 -- The read a person's page makes: every title in this library that credits one
 -- person.
 CREATE INDEX credits_library_contributor ON credits (library, contributor);
+
+-- The people pool counts distinct titles before reading each person's name.
+-- These columns cover both the grouping and the distinct title count.
+CREATE INDEX credits_library_contributor_item ON credits (library, contributor, item);
 
 -- One genre of one title, lifted from the sidecar in its order. The rank is
 -- the key beside the item because the first genre is the title's main genre,

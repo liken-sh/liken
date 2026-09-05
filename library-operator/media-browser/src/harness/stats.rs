@@ -4,6 +4,8 @@ use std::path::Path;
 
 use serde_json::json;
 
+use crate::posters::PosterCounts;
+
 pub struct Stats {
     backend: String,
     adapter: String,
@@ -18,6 +20,7 @@ pub struct Stats {
     loop_ms: Vec<f64>,
     rss_mib: Vec<f64>,
     next_rss_at: f64,
+    poster_counts: PosterCounts,
 }
 
 impl Stats {
@@ -32,6 +35,7 @@ impl Stats {
             loop_ms: Vec::new(),
             rss_mib: Vec::new(),
             next_rss_at: 0.0,
+            poster_counts: PosterCounts::default(),
         }
     }
 
@@ -72,6 +76,11 @@ impl Stats {
         }
     }
 
+    /// Record the poster counts at the end of the run.
+    pub fn poster_counts(&mut self, counts: PosterCounts) {
+        self.poster_counts = counts;
+    }
+
     /// The measurements, as the file holds them.
     pub fn report(&self) -> serde_json::Value {
         json!({
@@ -80,6 +89,8 @@ impl Stats {
             "width": self.size.0,
             "height": self.size.1,
             "frames": self.frames,
+            "posters_from_cache": self.poster_counts.from_cache,
+            "posters_from_source": self.poster_counts.from_source,
             "seconds_to_first_frame": rounded(self.first_frame.unwrap_or(f64::NAN), 4),
             "frame_ms_p50": rounded(percentile(&self.build_ms, 0.50), 3),
             "frame_ms_p99": rounded(percentile(&self.build_ms, 0.99), 3),
@@ -183,6 +194,21 @@ mod tests {
         assert_eq!(report["frame_ms_max"], json!(10.0));
         assert_eq!(report["loop_ms_p50"], json!(16.0));
         assert_eq!(report["seconds_to_first_frame"], json!(1.0));
+        assert_eq!(report["posters_from_cache"], json!(0));
+        assert_eq!(report["posters_from_source"], json!(0));
+    }
+
+    #[test]
+    fn the_report_records_the_final_poster_counts() {
+        let mut stats = measured();
+        stats.poster_counts(PosterCounts {
+            from_cache: 17,
+            from_source: 23,
+        });
+
+        let report = stats.report();
+        assert_eq!(report["posters_from_cache"], json!(17));
+        assert_eq!(report["posters_from_source"], json!(23));
     }
 
     #[test]

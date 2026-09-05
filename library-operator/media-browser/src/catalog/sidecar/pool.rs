@@ -1,6 +1,6 @@
 // The three grouped reads behind the pool, each over an index the
 // catalog already holds: `genres` by `(library, genre)`, `credits` by
-// `(library, contributor)`, and `movies` by `(library, set_id)`.
+// `(library, contributor, item)`, and `movies` by `(library, set_id)`.
 
 use rusqlite::Connection;
 
@@ -44,14 +44,15 @@ fn genres(connection: &Connection) -> rusqlite::Result<Vec<Candidate>> {
 // library's entry, so this read stays one group over the credits
 // index.
 fn people(connection: &Connection) -> rusqlite::Result<Vec<Candidate>> {
-    let sql = "SELECT credits.library, credits.contributor, contributors.name, \
-                      COUNT(DISTINCT credits.item) AS works \
-               FROM credits JOIN contributors ON contributors.library = credits.library \
-               AND contributors.path = credits.contributor \
-               WHERE credits.contributor != '' \
-               GROUP BY credits.library, credits.contributor \
-               HAVING works > ?1 \
-               ORDER BY contributors.name, credits.library";
+    let sql = "SELECT credited.library, credited.contributor, contributors.name, credited.works \
+               FROM (\
+                 SELECT library, contributor, COUNT(DISTINCT item) AS works \
+                 FROM credits WHERE contributor != '' \
+                 GROUP BY library, contributor HAVING works > ?1\
+               ) AS credited \
+               JOIN contributors ON contributors.library = credited.library \
+               AND contributors.path = credited.contributor \
+               ORDER BY contributors.name, credited.library";
     collect(connection, sql, &[&(WORKS_FLOOR as i64)], |row| {
         Ok(Candidate {
             query: Query::Person {

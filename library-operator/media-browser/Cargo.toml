@@ -53,6 +53,9 @@ image = { version = "=0.25.10", default-features = false, features = [
 libc = "=0.2.189"
 # serde_json writes the measurements file.
 serde_json = "=1.0.151"
+# SHA-256 gives each disk cache key a stable file name across processes
+# and Rust releases.
+sha2 = "=0.10.9"
 # rusqlite reads the sidecar's file; bundled compiles its own SQLite so
 # the read path loads no extension and matches no system library.
 rusqlite = { version = "=0.40.2", features = ["bundled"] }

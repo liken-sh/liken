@@ -98,7 +98,11 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     let updates = options.updates.clone().unwrap_or_default();
     let source = SidecarSource::new(catalog, &updates);
     let roots = options.library_roots.iter().cloned().collect();
-    let posters = Volumes::new(roots, volumes::budget(options.size));
+    let posters = Volumes::with_cache_dir(
+        roots,
+        volumes::budget(options.size),
+        options.cache_dir.clone(),
+    );
 
     harness::run(
         Browser::new(source, posters)

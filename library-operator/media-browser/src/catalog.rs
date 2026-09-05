@@ -371,6 +371,13 @@ pub struct Person {
 /// wakes the loop through the handle from [`Source::wake_by`], and answers
 /// true once, and the views then re-read what they show.
 pub trait Source {
+    /// Start one home page read. A source can retain repeated answers until
+    /// [`Source::end_page_read`].
+    fn begin_page_read(&mut self) {}
+
+    /// End one home page read and release any answers retained for it.
+    fn end_page_read(&mut self) {}
+
     /// Every library in the catalog, ordered by name. Which libraries a
     /// screen shows is an open problem, so until that resource exists the
     /// home page's libraries strip shows them all.

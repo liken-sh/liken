@@ -20,7 +20,7 @@ use crate::catalog::{Selection, Source};
 use crate::clock;
 use crate::harness::{Screen, Waker};
 use crate::look;
-use crate::posters::Posters;
+use crate::posters::{PosterCounts, Posters};
 use crate::screens::{self, Step, home, loading, volume};
 use crate::views;
 
@@ -443,6 +443,10 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
 
     fn surface_due(&mut self) -> bool {
         std::mem::take(&mut self.surface_due)
+    }
+
+    fn poster_counts(&self) -> PosterCounts {
+        self.posters.borrow().counts()
     }
 
     // The clock is read here alone, so the rest is measured on the same

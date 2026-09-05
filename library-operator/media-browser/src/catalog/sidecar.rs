@@ -2,6 +2,7 @@
 // the sidecar's local file, and a background stream marks changes, so
 // the views re-read the file and never ask a service.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -10,6 +11,7 @@ use rusqlite::{Connection, OpenFlags, Row};
 
 use crate::catalog::franchise;
 use crate::catalog::pool::Candidate;
+use crate::catalog::recency::DRAWN;
 use crate::catalog::{
     Answer, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, LibraryEntry,
     Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Query, Selection, SeriesDetails,
@@ -36,10 +38,19 @@ pub struct SidecarSource {
     database: PathBuf,
     connection: Option<Connection>,
     shared: Arc<updates::Shared>,
+    page_reads: Option<PageReads>,
     // Whether this source owns the update streams. The source the browser
     // holds owns them and stops them when it drops. The second source over
     // the same file reads alone and stops nothing.
     streams: bool,
+}
+
+type PersonEntries = Arc<Vec<(String, String)>>;
+
+#[derive(Default)]
+struct PageReads {
+    people: HashMap<(String, String), PersonEntries>,
+    kinds: Option<Arc<HashMap<String, String>>>,
 }
 
 impl SidecarSource {
@@ -56,6 +67,7 @@ impl SidecarSource {
             database: database.into(),
             connection: None,
             shared,
+            page_reads: None,
             streams: true,
         }
     }
@@ -66,7 +78,10 @@ impl SidecarSource {
     // failure is logged, because a wall that draws nothing looks the
     // same whether the catalog is empty or the file is unreachable, and
     // the log is where the difference shows.
-    fn read<T>(&mut self, run: impl Fn(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
+    fn read_result<T>(
+        &mut self,
+        run: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<T> {
         if self.connection.is_none() {
             let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
             match Connection::open_with_flags(&self.database, flags) {
@@ -76,19 +91,57 @@ impl SidecarSource {
                         "media-browser: cannot open the catalog {}: {error}",
                         self.database.display()
                     );
+                    return Err(error);
                 }
             }
         }
-        let Some(connection) = self.connection.as_ref() else {
-            return Vec::new();
-        };
-        match run(connection) {
-            Ok(rows) => rows,
-            Err(_) => {
-                self.connection = None;
-                Vec::new()
-            }
+        let result = run(self.connection.as_ref().expect("the connection opened"));
+        if result.is_err() {
+            self.connection = None;
         }
+        result
+    }
+
+    fn read<T>(&mut self, run: impl FnOnce(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
+        self.read_result(run).unwrap_or_default()
+    }
+
+    fn person_entries(&mut self, library: &str, path: &str) -> Option<PersonEntries> {
+        let key = (library.to_string(), path.to_string());
+        if let Some(entries) = self
+            .page_reads
+            .as_ref()
+            .and_then(|reads| reads.people.get(&key))
+        {
+            return Some(entries.clone());
+        }
+
+        let entries = Arc::new(
+            self.read_result(|connection| people::entries(connection, library, path))
+                .ok()?,
+        );
+        if let Some(reads) = self.page_reads.as_mut()
+            && reads.people.len() < DRAWN
+        {
+            reads.people.insert(key, entries.clone());
+        }
+        Some(entries)
+    }
+
+    fn library_kinds(&mut self) -> Option<Arc<HashMap<String, String>>> {
+        if let Some(kinds) = self
+            .page_reads
+            .as_ref()
+            .and_then(|reads| reads.kinds.as_ref())
+        {
+            return Some(kinds.clone());
+        }
+
+        let kinds = Arc::new(self.read_result(people::kinds).ok()?);
+        if let Some(reads) = self.page_reads.as_mut() {
+            reads.kinds = Some(kinds.clone());
+        }
+        Some(kinds)
     }
 }
 
@@ -163,6 +216,14 @@ fn collect<T>(
 }
 
 impl Source for SidecarSource {
+    fn begin_page_read(&mut self) {
+        self.page_reads = Some(PageReads::default());
+    }
+
+    fn end_page_read(&mut self) {
+        self.page_reads = None;
+    }
+
     fn libraries(&mut self) -> Vec<LibraryEntry> {
         // A library has one kind, so the union yields one row per library, and
         // the outer ORDER BY gives the libraries strip its order.
@@ -195,7 +256,10 @@ impl Source for SidecarSource {
     }
 
     fn genres(&mut self) -> Vec<GenreEntry> {
-        self.read(genres::entries)
+        let Some(kinds) = self.library_kinds() else {
+            return Vec::new();
+        };
+        self.read(|connection| genres::entries(connection, &kinds))
     }
 
     fn franchises(&mut self) -> Vec<FranchiseEntry> {
@@ -208,14 +272,22 @@ impl Source for SidecarSource {
                 name: library_name(library).to_string(),
                 slots: self.read(|connection| library_slots(connection, library)),
             },
-            Query::Person { library, path } => Answer {
-                name: self
+            Query::Person { library, path } => {
+                let name = self
                     .read(|connection| people::name(connection, library, path))
                     .into_iter()
                     .next()
-                    .unwrap_or_default(),
-                slots: self.read(|connection| people::works(connection, library, path)),
-            },
+                    .unwrap_or_default();
+                let slots = if let Some(entries) = self.person_entries(library, path) {
+                    let kinds = self.library_kinds();
+                    kinds.map_or_else(Vec::new, |kinds| {
+                        self.read(|connection| people::works(connection, &entries, &kinds))
+                    })
+                } else {
+                    Vec::new()
+                };
+                Answer { name, slots }
+            }
             Query::Set { library, id } => {
                 let Some(set) = self.set(library, id) else {
                     return Answer::default();
@@ -231,20 +303,27 @@ impl Source for SidecarSource {
             }
             Query::Released { fold } => Answer {
                 name: String::new(),
-                slots: recency::filled(*fold, |page| {
-                    self.read(|connection| recent::candidates(connection, Order::Released, page))
-                }),
+                slots: recency::filled(
+                    *fold,
+                    self.read(|connection| recent::candidates(connection, Order::Released)),
+                ),
             },
             Query::Added { fold } => Answer {
                 name: String::new(),
-                slots: recency::filled(*fold, |page| {
-                    self.read(|connection| recent::candidates(connection, Order::Added, page))
-                }),
+                slots: recency::filled(
+                    *fold,
+                    self.read(|connection| recent::candidates(connection, Order::Added)),
+                ),
             },
-            Query::Genre { name, order } => Answer {
-                name: name.clone(),
-                slots: self.read(|connection| genres::titles(connection, name, *order)),
-            },
+            Query::Genre { name, order } => {
+                let kinds = self.library_kinds();
+                Answer {
+                    name: name.clone(),
+                    slots: kinds.map_or_else(Vec::new, |kinds| {
+                        self.read(|connection| genres::titles(connection, name, *order, &kinds))
+                    }),
+                }
+            }
             Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
         }
     }
@@ -312,7 +391,15 @@ impl Source for SidecarSource {
     }
 
     fn person(&mut self, library: &str, path: &str) -> Option<Person> {
-        self.read(|connection| people::person(connection, library, path))
+        let person = self
+            .read(|connection| people::local_person(connection, library, path))
+            .into_iter()
+            .next()?;
+        if person.biography && person.headshot {
+            return Some(person);
+        }
+        let entries = self.person_entries(library, path)?;
+        self.read(|connection| people::person(connection, person, &entries))
             .into_iter()
             .next()
     }
@@ -334,6 +421,7 @@ impl Source for SidecarSource {
             database: self.database.clone(),
             connection: None,
             shared: self.shared.clone(),
+            page_reads: None,
             streams: false,
         }))
     }

@@ -122,7 +122,8 @@ if [ "${#roots[@]}" -eq 0 ]; then
   echo "local/browse: no library roots; pass NAME=DIR, as local/scan named the library" >&2
 fi
 
-arguments=("${headless[@]}" --catalog "$catalog" --updates "$updates")
+arguments=("${headless[@]}" --cache-dir "$HOME/tmp/library-operator-media-browser-cache" \
+  --catalog "$catalog" --updates "$updates")
 for root in "${roots[@]}"; do
   arguments+=(--library-root "$root")
 done

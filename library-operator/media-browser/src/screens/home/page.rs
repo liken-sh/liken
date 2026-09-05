@@ -19,11 +19,31 @@ pub struct Page {
     pub blocks: Vec<Block>,
 }
 
+// The scope ends through `Drop`, including when one of its reads panics.
+struct PageRead<'a> {
+    source: &'a mut dyn Source,
+}
+
+impl<'a> PageRead<'a> {
+    fn begin(source: &'a mut dyn Source) -> Self {
+        source.begin_page_read();
+        Self { source }
+    }
+}
+
+impl Drop for PageRead<'_> {
+    fn drop(&mut self) {
+        self.source.end_page_read();
+    }
+}
+
 /// Read every row of the home page on this date: the pool and the day's
 /// draw, then each strip in the page's order, then the banner off the
 /// strips. It touches no screen, so it runs wherever the caller puts
 /// it.
 pub fn read(source: &mut dyn Source, today: Date) -> Page {
+    let scope = PageRead::begin(source);
+    let source = &mut *scope.source;
     let seconds = today.seconds();
     let mut blocks: Vec<Block> = rows(seconds, draw::draw(today, &source.pool()))
         .into_iter()

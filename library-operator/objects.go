@@ -368,17 +368,19 @@ type VolumeMount struct {
 // read-only, and its catalog agent's own claim beside them. That agent holds
 // a copy of the namespace's catalog, and the claim is what makes a restart a
 // delta sync. A screen in a namespace with no single Catalog carries an
-// emptyDir there, which is the one emptyDir left.
+// unbounded emptyDir there. Its poster cache uses a separate bounded emptyDir.
 type Volume struct {
 	Name                  string                             `json:"name"`
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
 	EmptyDir              *EmptyDirVolumeSource              `json:"emptyDir,omitempty"`
 }
 
-// An emptyDir the kubelet creates with the pod and removes with it. The
-// operator states no size and no medium, so the volume is on the node's own
-// disk and the kubelet's ephemeral storage limits hold it.
-type EmptyDirVolumeSource struct{}
+// An emptyDir the kubelet creates with the pod and removes with it. A
+// `SizeLimit` bounds the volume where the pod states one. The node's ephemeral
+// storage limits apply as well.
+type EmptyDirVolumeSource struct {
+	SizeLimit string `json:"sizeLimit,omitempty"`
+}
 
 // ReadOnly here is the mount the kubelet makes, so a scanner cannot
 // write to the media volume even if its own mount said otherwise.

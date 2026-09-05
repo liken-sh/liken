@@ -3,8 +3,11 @@ mod franchises;
 mod lists;
 mod pages;
 mod people;
+mod plans;
 mod plays;
+mod read_scope;
 mod recent;
+mod recent_queries;
 mod series;
 
 use std::fs;

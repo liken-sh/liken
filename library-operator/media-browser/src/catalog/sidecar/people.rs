@@ -47,71 +47,79 @@ pub fn credits(connection: &Connection, library: &str, id: &str) -> rusqlite::Re
     Ok(vec![credits])
 }
 
-/// One person, as a list of one, or an empty list where that library
-/// holds no entry under that path. The dates come off the opening
-/// library's row, and each of the two files comes off the first entry
-/// that holds it, the opening library first.
-pub fn person(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Person>> {
+/// One person's entry in the opening library, as a list of one, or an
+/// empty list where that library holds no entry under that path.
+pub fn local_person(
+    connection: &Connection,
+    library: &str,
+    path: &str,
+) -> rusqlite::Result<Vec<Person>> {
     let sql = "SELECT name, born, died, biography, headshot \
                FROM contributors WHERE library = ? AND path = ?";
-    let mut found = collect(connection, sql, &[&library, &path], |row| {
+    collect(connection, sql, &[&library, &path], |row| {
+        let biography = row.get::<_, i64>(3)? != 0;
+        let headshot = row.get::<_, i64>(4)? != 0;
+        let biography_entry = if biography {
+            (library.to_string(), path.to_string())
+        } else {
+            (String::new(), String::new())
+        };
+        let headshot_entry = if headshot {
+            (library.to_string(), path.to_string())
+        } else {
+            (String::new(), String::new())
+        };
         Ok(Person {
             library: library.to_string(),
             path: path.to_string(),
             name: row.get(0)?,
             born: row.get(1)?,
             died: row.get(2)?,
-            biography: row.get::<_, i64>(3)? != 0,
-            headshot: row.get::<_, i64>(4)? != 0,
-            biography_library: String::new(),
-            biography_path: String::new(),
-            headshot_library: String::new(),
-            headshot_path: String::new(),
+            biography,
+            headshot,
+            biography_library: biography_entry.0,
+            biography_path: biography_entry.1,
+            headshot_library: headshot_entry.0,
+            headshot_path: headshot_entry.1,
         })
-    })?;
+    })
+}
 
-    let Some(person) = found.first_mut() else {
-        return Ok(Vec::new());
-    };
-    if person.biography {
-        person.biography_library = library.to_string();
-        person.biography_path = path.to_string();
-    }
-    if person.headshot {
-        person.headshot_library = library.to_string();
-        person.headshot_path = path.to_string();
-    }
-
-    if !(person.biography && person.headshot) {
-        for (other, elsewhere) in entries(connection, library, path)? {
-            if person.biography && person.headshot {
-                break;
-            }
-            if other == library && elsewhere == path {
-                continue;
-            }
-            let files = collect(
-                connection,
-                "SELECT biography, headshot FROM contributors WHERE library = ? AND path = ?",
-                &[&other, &elsewhere],
-                |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)? != 0)),
-            )?;
-            let Some((biography, headshot)) = files.into_iter().next() else {
-                continue;
-            };
-            if biography && !person.biography {
-                person.biography = true;
-                person.biography_library = other.clone();
-                person.biography_path = elsewhere.clone();
-            }
-            if headshot && !person.headshot {
-                person.headshot = true;
-                person.headshot_library = other;
-                person.headshot_path = elsewhere;
-            }
+/// Fill a person's missing files from the first resolved entry that holds
+/// each one, with the opening library first.
+pub fn person(
+    connection: &Connection,
+    mut person: Person,
+    entries: &[(String, String)],
+) -> rusqlite::Result<Vec<Person>> {
+    for (other, elsewhere) in entries {
+        if person.biography && person.headshot {
+            break;
+        }
+        if other == &person.library && elsewhere == &person.path {
+            continue;
+        }
+        let files = collect(
+            connection,
+            "SELECT biography, headshot FROM contributors WHERE library = ? AND path = ?",
+            &[other, elsewhere],
+            |row| Ok((row.get::<_, i64>(0)? != 0, row.get::<_, i64>(1)? != 0)),
+        )?;
+        let Some((biography, headshot)) = files.into_iter().next() else {
+            continue;
+        };
+        if biography && !person.biography {
+            person.biography = true;
+            person.biography_library = other.clone();
+            person.biography_path = elsewhere.clone();
+        }
+        if headshot && !person.headshot {
+            person.headshot = true;
+            person.headshot_library = other.clone();
+            person.headshot_path = elsewhere.clone();
         }
     }
-    Ok(found)
+    Ok(vec![person])
 }
 
 /// The person's name as a list of one, or an empty list where the
@@ -130,14 +138,17 @@ pub fn name(connection: &Connection, library: &str, path: &str) -> rusqlite::Res
 /// them, newest release first and a title with no release last. A title
 /// the person holds more than one credit on is one row, with the parts
 /// joined.
-pub fn works(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Slot>> {
-    let kinds = kinds(connection)?;
+pub fn works(
+    connection: &Connection,
+    entries: &[(String, String)],
+    kinds: &HashMap<String, String>,
+) -> rusqlite::Result<Vec<Slot>> {
     let mut works: Vec<Slot> = Vec::new();
     let mut parts: Vec<Vec<(u8, String)>> = Vec::new();
     let mut placed: HashMap<(String, String), usize> = HashMap::new();
 
-    for (other, elsewhere) in entries(connection, library, path)? {
-        let Some(kind) = kinds.get(&other) else {
+    for (other, elsewhere) in entries {
+        let Some(kind) = kinds.get(other) else {
             continue;
         };
         let Some(table) = item_table(kind) else {
@@ -161,7 +172,7 @@ pub fn works(connection: &Connection, library: &str, path: &str) -> rusqlite::Re
              ORDER BY credits.billing",
             seasons = item::seasons(table),
         );
-        let rows = collect(connection, &sql, &[&other, &elsewhere], |row| {
+        let rows = collect(connection, &sql, &[other, elsewhere], |row| {
             Ok((
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
@@ -187,7 +198,7 @@ pub fn works(connection: &Connection, library: &str, path: &str) -> rusqlite::Re
                 .or_insert_with(|| {
                     works.push(Slot {
                         seasons,
-                        ..Slot::of(&other, kind, title)
+                        ..Slot::of(other, kind, title)
                     });
                     parts.push(Vec::new());
                     works.len() - 1
@@ -226,7 +237,7 @@ fn named(part: &str, role: &str) -> Option<(u8, String)> {
 
 // Every entry of one person, the opening library's first and then every
 // other library that holds an id this person's aliases carry.
-fn entries(
+pub fn entries(
     connection: &Connection,
     library: &str,
     path: &str,
@@ -234,8 +245,9 @@ fn entries(
     let mut found = vec![(library.to_string(), path.to_string())];
     let ids = collect(
         connection,
-        "SELECT scheme, id FROM contributor_aliases WHERE library = ? AND path = ? \
-         ORDER BY scheme, id",
+        "SELECT scheme, id FROM contributor_aliases \
+         INDEXED BY contributor_aliases_library_path \
+         WHERE library = ? AND path = ? ORDER BY scheme, id",
         &[&library, &path],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
     )?;

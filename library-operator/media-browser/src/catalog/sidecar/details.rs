@@ -73,11 +73,11 @@ pub fn set(connection: &Connection, library: &str, id: &str) -> rusqlite::Result
         return Ok(Vec::new());
     };
 
-    // The members come off the index on (library, set_id), so the strip
-    // is one indexed read and not a scan of the body column.
+    // The index selects only this set's members. SQLite sorts those rows
+    // by release, without reading the rest of the library.
     let sql = format!(
-        "SELECT {COLUMNS} FROM movies WHERE library = ? AND set_id = ? \
-         ORDER BY released, sort_key"
+        "SELECT {COLUMNS} FROM movies INDEXED BY movies_library_set_id \
+         WHERE library = ? AND set_id = ? ORDER BY released, sort_key"
     );
     let members = collect(connection, &sql, &[&library, &id], item::title)?;
     Ok(vec![MovieSet { title, members }])

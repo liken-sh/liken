@@ -45,6 +45,15 @@ const playerLabelKey = "library.liken.sh/player"
 // from the mount its library root names.
 const librariesMountPath = "/libraries"
 
+// The browser keeps scaled posters on the node's local disk. The extra
+// 128 MiB above the disk cache's 512 MiB cap gives atomic writes room for
+// temporary files before their rename.
+const (
+	posterCacheVolumeName = "poster-cache"
+	posterCacheMountPath  = "/var/cache/media-browser"
+	posterCacheSizeLimit  = "640Mi"
+)
+
 // The pod-local name of the display claim. The pod holds
 // media-operator's ResourceClaim under this name, and the browser container's
 // resource claims refer to the same name.
@@ -158,7 +167,13 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 	// The agent's state is the screen's own claim, which the pass
 	// creates before this pod. A namespace with no single Catalog states no
 	// size, so the agent takes an emptyDir and pays a full sync per start.
-	volumes = append(volumes, screenCatalogVolume(player, catalog))
+	volumes = append(volumes,
+		screenCatalogVolume(player, catalog),
+		Volume{
+			Name:     posterCacheVolumeName,
+			EmptyDir: &EmptyDirVolumeSource{SizeLimit: posterCacheSizeLimit},
+		},
+	)
 
 	return &Pod{
 		APIVersion: podAPIVersion,
@@ -218,6 +233,7 @@ func browserSidecar(player *Player, libraries []Library, image, topicBase, timeZ
 	args := []string{
 		"--catalog", path.Join(catalogStatePath, catalogStateFile),
 		"--updates", defaultCatalogAPI,
+		"--cache-dir", posterCacheMountPath,
 	}
 	// The browser reads the agent's database file straight off the
 	// shared volume, so the catalog volume is mounted here as well as in
@@ -228,6 +244,7 @@ func browserSidecar(player *Player, libraries []Library, image, topicBase, timeZ
 	// file beside the database, and that file must be writable.
 	mounts := []VolumeMount{
 		{Name: catalogVolumeName, MountPath: catalogStatePath},
+		{Name: posterCacheVolumeName, MountPath: posterCacheMountPath},
 	}
 	for index := range libraries {
 		library := &libraries[index]

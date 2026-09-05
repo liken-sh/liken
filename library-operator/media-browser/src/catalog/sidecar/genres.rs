@@ -7,22 +7,27 @@
 // index, the counts and the candidate posters, folded across libraries
 // here for the same reason.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::Connection;
 
-use super::{collect, item, item_table, people};
+use super::{collect, item, item_table};
 use crate::catalog::{GenreEntry, Order, Slot, TILE_CANDIDATES, unrepeated};
 
 /// Every title across every library that carries the genre, the titles
 /// that lead with it first, then newest by the order's column, then by
 /// library and id so the order is the same on every read.
-pub fn titles(connection: &Connection, name: &str, order: Order) -> rusqlite::Result<Vec<Slot>> {
-    let mut kinds: Vec<(String, String)> = people::kinds(connection)?.into_iter().collect();
+pub fn titles(
+    connection: &Connection,
+    name: &str,
+    order: Order,
+    kinds: &HashMap<String, String>,
+) -> rusqlite::Result<Vec<Slot>> {
+    let mut kinds: Vec<(&String, &String)> = kinds.iter().collect();
     kinds.sort();
     let mut found: Vec<(i64, i64, Slot)> = Vec::new();
     for (library, kind) in kinds {
-        let Some(table) = item_table(&kind) else {
+        let Some(table) = item_table(kind) else {
             continue;
         };
         let sql = format!(
@@ -39,7 +44,7 @@ pub fn titles(connection: &Connection, name: &str, order: Order) -> rusqlite::Re
                 row.get::<_, i64>(item::WIDTH + 2)?,
                 Slot {
                     seasons: row.get(item::WIDTH)?,
-                    ..Slot::of(&library, &kind, item::title(row)?)
+                    ..Slot::of(library, kind, item::title(row)?)
                 },
             ))
         })?;
@@ -80,16 +85,19 @@ struct Found {
 /// grouped read per library through the `(library, genre)` index, then
 /// the fold across libraries in this process, because a genre spans
 /// libraries and each library has one item table.
-pub fn entries(connection: &Connection) -> rusqlite::Result<Vec<GenreEntry>> {
-    let mut kinds: Vec<(String, String)> = people::kinds(connection)?.into_iter().collect();
+pub fn entries(
+    connection: &Connection,
+    kinds: &HashMap<String, String>,
+) -> rusqlite::Result<Vec<GenreEntry>> {
+    let mut kinds: Vec<(&String, &String)> = kinds.iter().collect();
     kinds.sort();
     let mut found: BTreeMap<String, Found> = BTreeMap::new();
     for (library, kind) in kinds {
-        let Some(table) = item_table(&kind) else {
+        let Some(table) = item_table(kind) else {
             continue;
         };
-        counted(connection, &library, table, &mut found)?;
-        for (genre, candidate) in candidates(connection, &library, table)? {
+        counted(connection, library, table, &mut found)?;
+        for (genre, candidate) in candidates(connection, library, table)? {
             found.entry(genre).or_default().candidates.push(candidate);
         }
     }

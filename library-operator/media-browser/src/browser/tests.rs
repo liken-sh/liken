@@ -11,6 +11,7 @@ mod loading;
 mod moments;
 mod paging;
 mod plays;
+mod poster_counts;
 mod prefetch;
 mod reader;
 mod volume;
@@ -27,7 +28,7 @@ use crate::catalog::{
     GenreEntry, InSeries, LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person,
     PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
 };
-use crate::posters::Art;
+use crate::posters::{Art, PosterCounts};
 use crate::screens::home::Home;
 use crate::screens::movie::Focus;
 use crate::screens::series::Focus as SeriesFocus;
@@ -543,6 +544,7 @@ impl Source for Fake {
 #[derive(Default)]
 struct NoPosters {
     delivers: bool,
+    counts: PosterCounts,
     // Every ask the views and the prefetch made: the library, the art,
     // and the size they asked at.
     asked: Vec<(String, String, u32, u32)>,
@@ -557,6 +559,10 @@ impl Posters for NoPosters {
 
     fn delivered(&mut self) -> bool {
         std::mem::take(&mut self.delivers)
+    }
+
+    fn counts(&self) -> PosterCounts {
+        self.counts
     }
 }
 

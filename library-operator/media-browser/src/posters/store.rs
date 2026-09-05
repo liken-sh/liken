@@ -9,6 +9,8 @@ use std::thread::{self, JoinHandle};
 
 use super::cache::{Cache, Decoded};
 use super::decode::decode_art;
+use super::disk::{DiskCache, Result as DiskResult};
+use super::key::Key;
 use super::queue::RequestQueue;
 use super::{Art, Fit};
 use crate::harness::Waker;
@@ -37,13 +39,13 @@ impl Poster {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct Key {
-    library: String,
-    art: String,
-    width: u32,
-    height: u32,
-    fit: Fit,
+/// The worker requests that read a valid disk entry or fell back to the
+/// source. A memory hit changes neither count. A failed source read still
+/// counts because it performed the source I/O.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PosterCounts {
+    pub from_cache: u64,
+    pub from_source: u64,
 }
 
 // A decode of more than this many pixels takes the page lane. A poster
@@ -58,6 +60,7 @@ struct Shared {
     // alike, and the mark stands until a reader takes it, so a decode
     // that landed between two frames is never missed.
     delivered: bool,
+    counts: PosterCounts,
     stop: bool,
 }
 
@@ -71,11 +74,16 @@ impl ArtStore {
     // The pool caps at four workers, so decode work leaves cores for
     // the compositor and the rest of the machine.
     pub fn new(roots: HashMap<String, PathBuf>, budget: usize, waker: Waker) -> Self {
-        let workers = thread::available_parallelism()
-            .map(std::num::NonZeroUsize::get)
-            .unwrap_or(1)
-            .min(4);
-        Self::with_workers(roots, budget, waker, workers)
+        Self::initialize(roots, budget, waker, worker_count(), None)
+    }
+
+    pub fn with_cache_dir(
+        roots: HashMap<String, PathBuf>,
+        budget: usize,
+        waker: Waker,
+        cache_dir: Option<PathBuf>,
+    ) -> Self {
+        Self::initialize(roots, budget, waker, worker_count(), cache_dir)
     }
 
     /// The root of one library's volume, or nothing where the store
@@ -90,18 +98,30 @@ impl ArtStore {
         waker: Waker,
         workers: usize,
     ) -> Self {
+        Self::initialize(roots, budget, waker, workers, None)
+    }
+
+    fn initialize(
+        roots: HashMap<String, PathBuf>,
+        budget: usize,
+        waker: Waker,
+        workers: usize,
+        cache_dir: Option<PathBuf>,
+    ) -> Self {
         let roots = Arc::new(roots);
+        let disk = cache_dir.map(DiskCache::new).map(Arc::new);
         let shared = Arc::new((
             Mutex::new(Shared {
                 cache: Cache::new(budget),
                 queue: RequestQueue::default(),
                 delivered: false,
+                counts: PosterCounts::default(),
                 stop: false,
             }),
             Condvar::new(),
         ));
         let workers = (0..workers.max(1))
-            .map(|_| spawn_worker(roots.clone(), shared.clone(), waker.clone()))
+            .map(|_| spawn_worker(roots.clone(), shared.clone(), disk.clone(), waker.clone()))
             .collect();
         Self {
             roots,
@@ -154,6 +174,13 @@ impl ArtStore {
         let mut shared = lock.lock().expect("the store mutex is never poisoned");
         std::mem::take(&mut shared.delivered)
     }
+
+    pub fn counts(&self) -> PosterCounts {
+        let (lock, _) = &*self.shared;
+        lock.lock()
+            .expect("the store mutex is never poisoned")
+            .counts
+    }
 }
 
 // Dropping the store stops and joins the workers, so no decode outlives
@@ -169,11 +196,19 @@ impl Drop for ArtStore {
     }
 }
 
+fn worker_count() -> usize {
+    thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+        .min(4)
+}
+
 // The worker's loop: sleep until a request lands, decode with the lock
 // released, insert the result, and wake the event loop.
 fn spawn_worker(
     roots: Arc<HashMap<String, PathBuf>>,
     shared: Arc<(Mutex<Shared>, Condvar)>,
+    disk: Option<Arc<DiskCache>>,
     waker: Waker,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
@@ -194,13 +229,25 @@ fn spawn_worker(
                 }
             };
             let path = roots[&key.library].join(&key.art);
-            let value = match decode_art(&path, key.width, key.height, key.fit) {
-                Some(poster) => Decoded::Ready(poster),
-                None => Decoded::Failed,
+            let result = match &disk {
+                Some(disk) => disk.resolve(&key, &path, || {
+                    decode_art(&path, key.width, key.height, key.fit)
+                }),
+                None => DiskResult::Source(decode_art(&path, key.width, key.height, key.fit)),
+            };
+            let (value, from_cache) = match result {
+                DiskResult::Cache(poster) => (Decoded::Ready(poster), true),
+                DiskResult::Source(Some(poster)) => (Decoded::Ready(poster), false),
+                DiskResult::Source(None) => (Decoded::Failed, false),
             };
             {
                 let (lock, _) = &*shared;
                 let mut state = lock.lock().expect("the store mutex is never poisoned");
+                if from_cache {
+                    state.counts.from_cache += 1;
+                } else {
+                    state.counts.from_source += 1;
+                }
                 state.cache.insert(key.clone(), value);
                 state.queue.finish(&key);
                 // The mark is set under the same lock as the insert
@@ -212,3 +259,6 @@ fn spawn_worker(
         }
     })
 }
+
+#[cfg(test)]
+mod tests;

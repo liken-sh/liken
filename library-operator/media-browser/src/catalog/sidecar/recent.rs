@@ -1,12 +1,12 @@
 // The one read behind the two recency queries: movies and episodes off
-// every library in one union, newest first by the query's own column,
-// bounded to the candidate count. The series row is joined to each
-// episode because a folded episode becomes a slot for its series.
+// every library in one union, newest first by the query's own column.
+// The bounded key selection runs before the payload reads, so titles,
+// art, and JSON are read only for candidates that can enter the fold.
 
 use rusqlite::{Connection, Row};
 
 use super::{collect, item};
-use crate::catalog::recency::{CANDIDATES, Candidate};
+use crate::catalog::recency::{CANDIDATES, Candidate, PAGES};
 use crate::catalog::{Order, Slot, Title};
 
 /// The column an order names. The closed match is the whole of what may
@@ -18,47 +18,66 @@ pub fn column(order: Order) -> &'static str {
     }
 }
 
-/// One page of candidates, newest first, `CANDIDATES` rows from the
-/// page's offset. A movie row pads the series columns
-/// with nothing, and an episode row carries its series' title, art,
-/// release, duration, and rating from the join. The library and the id
-/// break ties, so the order is the same on every read.
-pub fn candidates(
-    connection: &Connection,
-    order: Order,
-    page: usize,
-) -> rusqlite::Result<Vec<Candidate>> {
-    let sql = format!(
-        "SELECT * FROM (\
-           SELECT {columns}, library, added, 'movies' AS kind, \
-                  '' AS series, 0 AS season, 0 AS episode, \
-                  '' AS series_title, '' AS series_art, '' AS series_released, \
-                  0 AS series_duration, '' AS series_rating \
-           FROM movies \
-           UNION ALL \
-           SELECT {episode_columns}, episodes.library, episodes.added, 'episodes' AS kind, \
-                  episodes.series, episodes.season, episodes.episode, \
-                  series.title, series.art, series.released, series.duration, \
-                  json_extract(series.body, '$.contentRating') \
-           FROM episodes JOIN series ON series.library = episodes.library \
-           AND series.id = episodes.series\
-         ) ORDER BY {key} DESC, library, id LIMIT ?1 OFFSET ?2",
-        columns = item::COLUMNS,
-        episode_columns = EPISODE_COLUMNS,
-        key = column(order),
-    );
-    let offset = (page * CANDIDATES) as i64;
+/// At most `PAGES * CANDIDATES` candidates, newest first. The key union
+/// joins episodes to their series before the limit, so an orphan cannot
+/// displace a candidate that the payload read can return. `kind` keeps a
+/// movie first when the order column, `library`, and `id` are equal.
+pub fn candidates(connection: &Connection, order: Order) -> rusqlite::Result<Vec<Candidate>> {
+    let sql = candidate_sql(order);
     collect(
         connection,
         &sql,
-        &[&(CANDIDATES as i64), &offset],
+        &[&((PAGES * CANDIDATES) as i64)],
         candidate,
     )
 }
 
-// The episode half of the union, in the order item::COLUMNS takes them.
-// An episode row holds neither a content rating nor a tagline of its
-// own, so the union's two halves carry the same columns.
+fn candidate_sql(order: Order) -> String {
+    format!(
+        "WITH candidate_keys AS MATERIALIZED (\
+           SELECT movies.library, movies.id, movies.released, movies.added, \
+                  0 AS kind, '' AS series, 0 AS season, 0 AS episode \
+           FROM movies \
+           UNION ALL \
+           SELECT episodes.library, episodes.id, episodes.released, episodes.added, \
+                  1 AS kind, episodes.series, episodes.season, episodes.episode \
+           FROM episodes JOIN series ON series.library = episodes.library \
+           AND series.id = episodes.series \
+           ORDER BY {key} DESC, library, id, kind LIMIT ?1\
+         ) \
+         SELECT * FROM (\
+           SELECT {movie_columns}, keys.library, keys.added, 'movies' AS kind, \
+                  '' AS series, 0 AS season, 0 AS episode, \
+                  '' AS series_title, '' AS series_art, '' AS series_released, \
+                  0 AS series_duration, '' AS series_rating, \
+                  keys.{key} AS ordering, keys.kind AS tie_kind \
+           FROM candidate_keys AS keys \
+           JOIN movies ON movies.library = keys.library AND movies.id = keys.id \
+           WHERE keys.kind = 0 \
+           UNION ALL \
+           SELECT {episode_columns}, keys.library, keys.added, 'episodes' AS kind, \
+                  keys.series, keys.season, keys.episode, \
+                  series.title, series.art, series.released, series.duration, \
+                  json_extract(series.body, '$.contentRating'), \
+                  keys.{key} AS ordering, keys.kind AS tie_kind \
+           FROM candidate_keys AS keys \
+           JOIN episodes ON episodes.library = keys.library AND episodes.id = keys.id \
+           JOIN series ON series.library = keys.library AND series.id = keys.series \
+           WHERE keys.kind = 1\
+         ) ORDER BY ordering DESC, library, id, tie_kind",
+        movie_columns = MOVIE_COLUMNS,
+        episode_columns = EPISODE_COLUMNS,
+        key = column(order),
+    )
+}
+
+// These payload columns have the order `item::title` reads. An episode
+// has no content rating or tagline of its own, so those positions are
+// empty strings.
+const MOVIE_COLUMNS: &str = "movies.id, movies.title, movies.released, movies.art, \
+                             movies.duration, \
+                             json_extract(movies.body, '$.contentRating'), \
+                             json_extract(movies.body, '$.tagline')";
 const EPISODE_COLUMNS: &str = "episodes.id, episodes.title, episodes.released, episodes.art, \
                                episodes.duration, '', ''";
 
