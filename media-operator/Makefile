@@ -62,3 +62,26 @@ test-rust:
 test-docs:
 	$(MAKE) -C docs test
 	$(MAKE) -C docs build
+
+# The report is the coverage data as one page the site publishes at
+# /coverage.html. It reads what the gates already wrote: the Go
+# profile from test-go, and one Cobertura file per crate from
+# test-rust. Run `make test` first, or the inputs are stale or
+# missing.
+#
+# `test` does not depend on this, because a gate and a report are
+# separate acts: the gate says pass or fail, and the report says
+# where the lines are.
+#
+# The tool is the brand repository's, pinned as a tool dependency of
+# the docs module the way Hugo and crdref are, so it runs from docs/
+# and needs nothing installed. -root names the tree the inputs
+# describe, which is this directory.
+COVERAGE_INPUTS := coverage.out coverage-media-screen.xml coverage-idle-screen.xml
+
+.PHONY: coverage-report
+coverage-report:
+	cd docs && go tool coverage -title media-operator -root .. \
+		-label Go -label "Rust (media-screen)" -label "Rust (idle-screen)" \
+		-out ../coverage.html \
+		$(addprefix ../,$(COVERAGE_INPUTS))

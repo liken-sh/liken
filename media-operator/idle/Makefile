@@ -34,9 +34,20 @@ test:
 # binary links media-screen, so its profiles count media-screen lines
 # the idle tests never reach. Each gate starts from no profiles, so it
 # measures its own tests alone.
+#
+# Each gate is followed by a report of the same run, as a Cobertura
+# file at the workspace root. `cargo llvm-cov report` reads the
+# profiles the gate wrote, so it must run before the next clean
+# deletes them. A report after both gates would measure one crate
+# under the other's tests. The two files are inputs to
+# `make coverage-report`, which draws the page the site publishes.
 	cd $(ROOT) && cargo llvm-cov clean --workspace --profraw-only
 	cd $(ROOT) && cargo llvm-cov -p media-screen --all-targets \
 		--fail-under-lines $(SCREEN_COVERAGE_FLOOR)
+	cd $(ROOT) && cargo llvm-cov report -p media-screen \
+		--cobertura --output-path $(ROOT)/coverage-media-screen.xml
 	cd $(ROOT) && cargo llvm-cov clean --workspace --profraw-only
 	cd $(ROOT) && cargo llvm-cov -p idle-screen --all-targets \
 		--fail-under-lines $(IDLE_COVERAGE_FLOOR)
+	cd $(ROOT) && cargo llvm-cov report -p idle-screen \
+		--cobertura --output-path $(ROOT)/coverage-idle-screen.xml
