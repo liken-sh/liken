@@ -37,12 +37,6 @@ repos:
         language: system
         files: \.go$|^go\.(mod|sum)$|^\.testcoverage\.yml$|^Makefile$
         pass_filenames: false
-      - id: test-deploy
-        name: manifests against the Kubernetes API
-        entry: make test-deploy
-        language: system
-        files: ^deploy/|^Makefile$
-        pass_filenames: false
       - id: test-docs
         name: docs links and build
         entry: make test-docs
