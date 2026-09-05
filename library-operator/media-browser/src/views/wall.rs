@@ -1,5 +1,5 @@
-// The wall: a grid of art slots, each with one line under it, and a
-// stroke of the accent outside the one that holds focus. Only the slots
+// The wall: a grid of art slots, each with the card's lines under it, and
+// a stroke of the accent outside the one that holds focus. Only the slots
 // inside the viewport become geometry, so a wall of five thousand titles
 // builds a couple of dozen slots a frame.
 //
@@ -16,7 +16,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Color, Rectangle};
 
-use super::{Card, Tone, area, artwork, mark, scroll, text};
+use super::{Card, Tone, area, artwork, card, mark, scroll, text};
 use crate::look;
 use crate::posters::Posters;
 
@@ -63,19 +63,30 @@ pub fn cells(width: f32, ratio: f32, columns: usize) -> Cells {
     lined(width, ratio, columns, 1)
 }
 
-/// The cell measures with this many caption lines under each slot: one
-/// on most walls, and two on a person's works, where the parts the
-/// person played stand under the title.
+/// The cell measures for a viewport of this width, at this slot ratio,
+/// with this many slots across and this many lines under each. Every
+/// wall that draws cards asks for two.
 pub fn lined(width: f32, ratio: f32, columns: usize, lines: usize) -> Cells {
     let width = width / columns as f32;
     let poster_width = width * POSTER_SHARE;
     let poster_height = poster_width * ratio;
     Cells {
         width,
-        height: poster_height + GAP + text::height(lines, look::CAPTION) + FOOT,
+        height: poster_height + GAP + card::height(lines) + FOOT,
         poster_width,
         poster_height,
     }
+}
+
+// The width the wall lays a cell out at when a read cuts a card to it.
+// The frame the wall draws in is not known at the read, so the cut runs
+// at the size the browser is drawn for.
+const SCREEN: f32 = 1920.0;
+
+/// The band a card's lines are cut to at the read: one cell of a wall of
+/// this many columns.
+pub fn band(columns: usize) -> f32 {
+    cells(SCREEN, POSTER, columns).width
 }
 
 /// The poster slot of one index, in viewport space after the scroll.
@@ -103,11 +114,7 @@ pub fn caption(cells: &Cells, slot: Rectangle) -> Rectangle {
 
 /// The band one slot's second line draws in, under its caption.
 pub fn under(cells: &Cells, slot: Rectangle) -> Rectangle {
-    let caption = caption(cells, slot);
-    Rectangle {
-        y: caption.y + caption.height,
-        ..caption
-    }
+    card::under(caption(cells, slot))
 }
 
 /// The words and the color one slot's caption draws in: the slot's own
@@ -204,10 +211,20 @@ pub fn draw<T: Card, P: Posters>(
         if focused && grid.marked {
             mark(frame, slot);
         }
-        let (content, color) = captioned(item, focused, chars);
-        written(frame, caption(&cells, slot), content, color);
-        if grid.lines > 1 {
-            written(frame, under(&cells, slot), item.under(), look::faint());
+        // A card's lines clip to their own bands, and a band's clip does
+        // not inherit the wall's, so a line whose band has left the region
+        // draws nothing at all, instead of over what stands above the
+        // wall.
+        let band = caption(&cells, slot);
+        if band.y < grid.region.y {
+            continue;
+        }
+        match grid.lines {
+            1 => {
+                let (content, color) = captioned(item, focused, chars);
+                written(frame, band, content, color);
+            }
+            _ => card::draw(frame, item, band),
         }
     }
 
@@ -322,11 +339,18 @@ mod tests {
     }
 
     #[test]
-    fn a_second_caption_line_makes_the_cell_one_line_taller() {
+    fn a_second_line_makes_the_cell_taller_by_the_smaller_size_it_draws_at() {
         let one = cells(1920.0, POSTER, COLUMNS);
         let two = lined(1920.0, POSTER, COLUMNS, 2);
-        assert!((two.height - one.height - text::height(1, look::CAPTION)).abs() < 1e-3);
+        assert!((two.height - one.height - text::height(1, look::FACE)).abs() < 1e-3);
+        assert!(two.height - one.height < text::height(1, look::CAPTION));
         assert_eq!(two.poster_height, one.poster_height);
+    }
+
+    #[test]
+    fn a_cards_band_is_one_cell_of_the_wall_it_is_cut_for() {
+        assert_eq!(band(COLUMNS), cells(1920.0, POSTER, COLUMNS).width);
+        assert!(band(4) > band(COLUMNS));
     }
 
     #[test]

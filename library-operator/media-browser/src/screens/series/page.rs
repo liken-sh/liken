@@ -20,7 +20,7 @@ use super::{COLUMNS, Focus, Series};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::Stack;
-use crate::views::{area, divider, header, people, ratings, strip, text, wall};
+use crate::views::{area, card, divider, header, people, ratings, strip, text, wall};
 
 // The margin at both sides of the header's text.
 const MARGIN: f32 = 120.0;
@@ -59,7 +59,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         self.header(&mut frame, posters, layout::header(bounds));
 
         let region = layout::region(bounds);
-        let cells = wall::cells(region.width, wall::STILL, COLUMNS);
+        let cells = wall::lined(region.width, wall::STILL, COLUMNS, card::LINES);
         let inset = (cells.width - cells.poster_width) / 2.0;
         let width = region.width - 2.0 * inset;
         let layout = Layout::of(
@@ -71,21 +71,19 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         );
         let offset = layout.scroll(series.focus, &series.seasons, region.height);
 
-        frame.with_clip(region, |frame| {
+        // The stills draw under the band a held divider keeps, and the
+        // dividers over their own clip, because the renderer draws every
+        // image of a layer over every fill of it, and a still that reached
+        // the band would cross the divider's rule. The band stands over the
+        // stills' own region, so it counts as content the wall has
+        // scrolled past.
+        let stills = layout::stills(region);
+        let scrolled = offset + (stills.y - region.y);
+        frame.with_clip(stills, |frame| {
             for (season, band) in series.seasons.iter().zip(&layout.bands) {
                 if !band.shows(offset, region.height) {
                     continue;
                 }
-                divider::draw(
-                    frame,
-                    area(
-                        inset,
-                        region.y + band.top - offset,
-                        region.width - 2.0 * inset,
-                        divider::HEIGHT,
-                    ),
-                    &season.name,
-                );
                 let run = season.run;
                 wall::draw(
                     frame,
@@ -104,10 +102,24 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         library: &series.library,
                         ratio: wall::STILL,
                         columns: COLUMNS,
-                        lines: 1,
-                        region,
-                        offset: offset - band.rows_top,
+                        lines: card::LINES,
+                        region: stills,
+                        offset: scrolled - band.rows_top,
                     },
+                );
+            }
+        });
+
+        let dividers = area(inset, region.y, width, region.height);
+        frame.with_clip(region, |frame| {
+            for (season, band) in series.seasons.iter().zip(&layout.bands) {
+                if !band.shows(offset, region.height) {
+                    continue;
+                }
+                divider::draw(
+                    frame,
+                    layout::divider_box(dividers, band, offset),
+                    &season.name,
                 );
             }
 
@@ -133,7 +145,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         heading: &band.heading,
                         library: &series.library,
                         last: None,
-                        lines: 1,
+                        lines: card::LINES,
                         headed: matches!(
                             series.focus,
                             Focus::Franchise(strip, Place::Heading) if strip == index

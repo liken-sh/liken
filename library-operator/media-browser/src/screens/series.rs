@@ -18,11 +18,12 @@ use iced_winit::core::{Element, Rectangle, Theme};
 use super::franchise::strips::{self, Move, Place, Strips};
 use super::movie::franchise_press;
 use super::{Screen, Step, facts, foot, person, stripes};
+use crate::catalog::draw::Date;
 use crate::catalog::{Episode, Selection, SeriesDetails, Source};
 use crate::focus::{self, Run};
 use crate::posters::Posters;
 use crate::views::curtain::{Curtain, Head, Layer};
-use crate::views::{Card, layers, ratings};
+use crate::views::{Card, card, layers, ratings, wall};
 
 /// How many stills a row of the episode wall holds. A still is wider
 /// than a poster, so the wall holds fewer across.
@@ -64,11 +65,12 @@ pub struct Still {
     pub episode: i64,
     /// The name a person reads. A still with no art shows it.
     pub name: String,
-    /// The caption under the still: the episode number and the name.
-    pub caption: String,
-    /// The caption under the still while it holds focus: the caption and
-    /// the runtime.
-    pub line: facts::Line,
+    /// The card's first line under the still, the episode's own name,
+    /// cut by the shaper at the read to one cell of the wall.
+    pub fitted: String,
+    /// The card's second line: the episode number in the page's own
+    /// spelling, then the runtime, cut to the same cell.
+    pub under: String,
     /// The header's line while this still has focus: the season and
     /// episode numbers and the name. The header cuts it to one line.
     pub facts: String,
@@ -92,12 +94,12 @@ impl Card for Still {
         &self.name
     }
 
-    fn caption(&self) -> &str {
-        &self.caption
+    fn fitted(&self) -> &str {
+        &self.fitted
     }
 
-    fn line_fitting(&self, chars: usize) -> &str {
-        self.line.fitting(chars)
+    fn under(&self) -> &str {
+        &self.under
     }
 }
 
@@ -182,7 +184,7 @@ impl Series {
     // The page before its foot is read, with focus on the first episode.
     fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.series(library, id)?;
-        let (stills, seasons) = wall_of(source.episodes(library, id));
+        let (stills, seasons) = wall_of(source.episodes(library, id), &Date::today().iso());
         Some(Self {
             library: library.to_string(),
             id: id.to_string(),
@@ -402,7 +404,8 @@ impl Head for Series {
 // arrive in aired order, so a season starts wherever the season number
 // changes, and its year is the year of the first episode that aired in
 // it.
-fn wall_of(episodes: Vec<Episode>) -> (Vec<Still>, Vec<Season>) {
+fn wall_of(episodes: Vec<Episode>, today: &str) -> (Vec<Still>, Vec<Season>) {
+    let band = wall::band(COLUMNS);
     let mut stills = Vec::with_capacity(episodes.len());
     let mut seasons: Vec<Season> = Vec::new();
     for (index, episode) in episodes.into_iter().enumerate() {
@@ -417,7 +420,7 @@ fn wall_of(episodes: Vec<Episode>) -> (Vec<Still>, Vec<Season>) {
                 },
             }),
         }
-        stills.push(still_of(episode));
+        stills.push(still_of(episode, today, band));
     }
     (stills, seasons)
 }
@@ -431,16 +434,17 @@ fn named(season: i64, year: &str) -> String {
     }
 }
 
-fn still_of(episode: Episode) -> Still {
-    let numbers = format!("S{} E{}", episode.season, episode.episode);
+fn still_of(episode: Episode, today: &str, band: f32) -> Still {
+    let season = format!("S{:02}", episode.season);
+    let numbered = format!("E{:02}", episode.episode);
     let runtime = facts::runtime(episode.duration);
-    let caption = facts::joined(&[&format!("E{}", episode.episode), &episode.title]);
+    let under = facts::joined(&[&numbered, &runtime]);
     Still {
         id: episode.id,
-        line: facts::Line::of(&[&caption, &runtime]),
-        caption,
-        facts: facts::joined(&[&numbers, &episode.title]),
-        aired: facts::joined(&[&runtime, &facts::date(&episode.released)]),
+        fitted: card::cut(&episode.title, band),
+        under: card::under_cut(&under, band),
+        facts: facts::joined(&[&season, &numbered, &episode.title]),
+        aired: facts::joined(&[&runtime, &facts::date_worded(&episode.released, today)]),
         season: episode.season,
         episode: episode.episode,
         name: episode.title,
@@ -461,7 +465,7 @@ pub(crate) fn facts_of(details: &SeriesDetails) -> String {
 
 // The season count as a person reads it, and nothing at all for a series
 // whose episodes have not landed yet.
-fn seasons_of(seasons: i64) -> String {
+pub(crate) fn seasons_of(seasons: i64) -> String {
     match seasons {
         0 => String::new(),
         1 => "1 season".to_string(),

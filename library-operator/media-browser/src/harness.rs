@@ -122,6 +122,12 @@ pub trait Screen {
 
 /// Run a screen to the end of its script and write what it measured.
 pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), String> {
+    // The brand's faces go into the toolkit's font system before anything
+    // shapes a run of text. `views::text::measured` runs the shaper on the
+    // read path, and a measurement taken against a fallback face would
+    // place every line after it wrong.
+    liken_iced::font::load();
+
     // The launch is measured from here, so the time to the first frame
     // counts the whole life of the process: the wgpu setup, the first
     // window, and the first draw.

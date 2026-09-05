@@ -100,10 +100,10 @@ impl Era {
 /// table the row came from, movies or series. `arts` is every art file
 /// beside the item, as the catalog's own list; a wall of landscape cells
 /// picks its art out of that list, and a strip of posters draws `art` and
-/// reads none of it. `tagline` and `plot` come out of the item's body,
-/// the way the movie page reads them; a card of the wall draws the
-/// tagline, or the first lines of the plot where there is none, and a
-/// strip reads neither.
+/// `tagline` and `plot` come out of the item's body, the way the movie
+/// page reads them. A card of the wall draws the tagline, or the first
+/// lines of the plot where there is none; a card of the strip leads with
+/// the tagline and reads no plot.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Held {
     pub library: String,
@@ -219,29 +219,33 @@ pub fn answer(franchise: Option<Franchise>) -> Answer {
     }
 }
 
-/// The held members of one order as the slots of a strip, in the order they
-/// were given. A gap yields no slot, because a strip draws what a person can
-/// play. The duration and the content rating are in neither read, so a slot
-/// carries none and its caption is the title and the year.
+/// The held members of one order as the slots of a strip, in the order
+/// they were given. A gap yields no slot, because a strip draws what a
+/// person can play. The content rating is in neither read, so a slot
+/// carries none.
 pub fn slots(entries: &[Entry]) -> Vec<Slot> {
     entries
         .iter()
-        .filter_map(|entry| {
-            let held = entry.held.clone()?;
-            Some(Slot::of(
-                &held.library,
-                &held.kind,
-                Title {
-                    id: held.id,
-                    title: held.title,
-                    released: held.released,
-                    art: held.art,
-                    duration: 0,
-                    rating: String::new(),
-                },
-            ))
-        })
+        .filter_map(|entry| entry.held.clone().map(slot))
         .collect()
+}
+
+/// One held member as a slot: what a strip draws, and what a select on it
+/// opens.
+pub fn slot(held: Held) -> Slot {
+    Slot::of(
+        &held.library,
+        &held.kind,
+        Title {
+            id: held.id,
+            title: held.title,
+            released: held.released,
+            art: held.art,
+            duration: held.duration,
+            rating: String::new(),
+            tagline: held.tagline,
+        },
+    )
 }
 
 /// One franchise a title belongs to, with the members some library holds, in

@@ -261,6 +261,23 @@ fn the_home_page_reads_every_franchise_in_sort_order() {
 }
 
 #[test]
+fn a_franchise_entry_counts_every_entry_of_its_order_by_kind() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    an_order(&path);
+    insert_franchise(&path, "franchise:name:another", "Another Order", "{}");
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    let entries = source.franchises();
+
+    // The cycle holds three films and one serial, and the gap at
+    // position three counts with them. The order with no member of its
+    // own counts none.
+    assert_eq!((entries[1].movies, entries[1].series), (3, 1));
+    assert_eq!((entries[0].movies, entries[0].series), (0, 0));
+}
+
+#[test]
 fn a_franchise_with_no_art_draws_the_poster_of_its_first_held_member() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
@@ -383,7 +400,7 @@ fn the_page_carries_a_release_date_at_the_precision_the_file_gave() {
 }
 
 #[test]
-fn the_page_carries_the_tagline_and_the_plot_of_a_held_member() {
+fn both_reads_carry_the_tagline_of_a_held_member_and_the_page_carries_its_plot() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_franchise(&path, CYCLE, "The Cycle", BODY);
@@ -414,7 +431,9 @@ fn the_page_carries_the_tagline_and_the_plot_of_a_held_member() {
 
     let strip = source.franchises_of("screening/films", "movie:path:one");
     let member = strip[0].members[0].held.as_ref().expect("held");
-    assert_eq!(member.tagline, "");
+    assert_eq!(member.tagline, "One line.");
+    assert_eq!(member.plot, "");
+    assert_eq!(member.duration, 6720);
 }
 
 #[test]
@@ -456,6 +475,11 @@ fn a_series_run_counts_the_episodes_the_catalog_holds() {
     // A run with no rows is the whole show.
     let whole = source.franchise(ORDERS, CYCLE).expect("the order is there");
     assert_eq!(whole.entries[1].episodes, 4);
+
+    // The strip read counts them the same way, because a member's card
+    // there says how many episodes the run holds.
+    let strip = source.franchises_of("screening/films", "movie:path:one");
+    assert_eq!(strip[0].members[1].episodes, 4);
 
     // A run that names one season counts that season alone, and one
     // that names episodes counts those.

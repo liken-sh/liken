@@ -23,7 +23,7 @@ use crate::focus;
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::Stack;
-use crate::views::{area, band, text, wall};
+use crate::views::{area, band, card, text, wall};
 
 // The margin at both sides of the head, the person page's own, so the
 // two heads line up.
@@ -59,17 +59,11 @@ impl Head {
 // How many movies and how many series the wall holds, on one line. A
 // kind the wall holds none of leaves no words behind.
 fn counted(movies: usize, series: usize) -> String {
-    let movies = match movies {
+    let counted = |count: usize, nouns| match count {
         0 => String::new(),
-        1 => "1 movie".to_string(),
-        count => format!("{count} movies"),
+        count => facts::counted(count as i64, nouns),
     };
-    let series = match series {
-        0 => String::new(),
-        1 => "1 series".to_string(),
-        count => format!("{count} series"),
-    };
-    facts::joined(&[&movies, &series])
+    facts::joined(&[&counted(movies, "movies"), &counted(series, "series")])
 }
 
 /// The wall screen: the slots the query answered, the head over the
@@ -210,7 +204,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
             &mut *self.posters.borrow_mut(),
             region,
             self.wall.control.is_none(),
-            1,
+            card::LINES,
         );
         vec![frame.into_geometry()]
     }

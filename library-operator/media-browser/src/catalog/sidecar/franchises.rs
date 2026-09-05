@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::collect;
 use super::item;
 use crate::catalog::FranchiseEntry;
-use crate::catalog::franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
+use crate::catalog::franchise::{Calendar, Entry, Era, Franchise, Held, MOVIE, Membership, SERIES};
 
 // The two item tables as one list of members, which both reads join
 // through. The kind column names the table a row came from, so a press
@@ -50,12 +50,24 @@ pub fn all(connection: &Connection) -> rusqlite::Result<Vec<FranchiseEntry>> {
               ORDER BY m.position, i.library LIMIT 1)"
         )
     };
+    // The two counts are the correlated counts the strip read makes, on
+    // the primary key of franchise_members, so the tile and the strip
+    // heading say one scope.
+    let kind = |kind: &str| {
+        format!(
+            "(SELECT count(*) FROM franchise_members every \
+              WHERE every.library = f.library AND every.franchise = f.id \
+                AND every.kind = '{kind}')"
+        )
+    };
     let sql = format!(
         "WITH items AS ({ITEMS}) \
-         SELECT f.library, f.id, f.title, f.art, f.slug, {art}, {holder} \
+         SELECT f.library, f.id, f.title, f.art, f.slug, {art}, {holder}, {movies}, {series} \
          FROM franchises f ORDER BY f.sort_key, f.library, f.id",
         art = member("i.art"),
         holder = member("i.library"),
+        movies = kind(MOVIE),
+        series = kind(SERIES),
     );
     collect(connection, &sql, &[], |row| {
         let own: String = item::text(row, 3)?;
@@ -70,6 +82,8 @@ pub fn all(connection: &Connection) -> rusqlite::Result<Vec<FranchiseEntry>> {
             art,
             art_library,
             slug: item::text(row, 4)?,
+            movies: row.get(7)?,
+            series: row.get(8)?,
         })
     })
 }
@@ -102,7 +116,7 @@ pub fn strips(
            (SELECT count(*) FROM franchise_members every \
             WHERE every.library = m.library AND every.franchise = m.franchise \
               AND every.kind = 'series'), \
-           {COLUMNS} \
+           {COLUMNS}, {HELD} \
          FROM franchise_members m \
          JOIN found f ON f.library = m.library AND f.franchise = m.franchise \
          JOIN aliases a ON a.alias = m.alias \
@@ -111,6 +125,9 @@ pub fn strips(
          ORDER BY m.library, m.franchise, m.position"
     );
     let members = collect(connection, &sql, &[&library, &id], |row| {
+        // The membership's own five columns stand before the member's.
+        let mut member = entry(row, 5)?;
+        held(row, 5 + MEMBER, &mut member)?;
         Ok((
             Membership {
                 library: row.get(0)?,
@@ -120,7 +137,7 @@ pub fn strips(
                 series: row.get(4)?,
                 members: Vec::new(),
             },
-            entry(row, 5)?,
+            member,
         ))
     })?;
 
@@ -170,27 +187,47 @@ pub fn franchise(
     Ok(found)
 }
 
+// The two columns both member reads select after [`COLUMNS`]: how many
+// episodes of a series run the catalog holds, and the tagline of the held
+// item. A card of the wall and a card of the strip both draw them.
+const HELD: &str = "(SELECT count(*) FROM episodes e \
+                     JOIN aliases sa ON sa.library = e.library AND sa.item = e.series \
+                     WHERE sa.alias = m.alias \
+                       AND (NOT EXISTS (SELECT 1 FROM franchise_runs r \
+                                        WHERE r.library = m.library \
+                                          AND r.franchise = m.franchise \
+                                          AND r.position = m.position) \
+                            OR EXISTS (SELECT 1 FROM franchise_runs r \
+                                       WHERE r.library = m.library \
+                                         AND r.franchise = m.franchise \
+                                         AND r.position = m.position AND r.season = e.season \
+                                         AND r.episode IN (0, e.episode)))) AS held_episodes, \
+                    json_extract(i.body, '$.tagline')";
+
+// How many columns [`COLUMNS`] names, so a read counts the ones it
+// selects after them from where the member's own end.
+const MEMBER: usize = 19;
+
+// The two columns [`HELD`] adds, folded into the entry the row opened.
+fn held(row: &Row<'_>, at: usize, member: &mut Entry) -> rusqlite::Result<()> {
+    member.episodes = row.get(at)?;
+    if let Some(held) = member.held.as_mut() {
+        held.tagline = item::text(row, at + 1)?;
+    }
+    Ok(())
+}
+
 // Every entry of one franchise in story order, held or not. The
 // episodes column counts what the catalog holds for a series run: every
 // episode of the show where the run names no season, and the episodes
-// the runs name where it does. The read also takes the tagline and the
-// plot out of the held item's body, because the wall's card draws them
-// beside the art; the strip read carries neither.
+// the runs name where it does.
+// The page's read also takes the plot out of the held item's body,
+// because the wall's card draws it beside the art and the strip's card
+// does not.
 fn entries(connection: &Connection, library: &str, id: &str) -> rusqlite::Result<Vec<Entry>> {
     let sql = format!(
         "WITH items AS ({ITEMS}) \
-         SELECT {COLUMNS}, \
-           (SELECT count(*) FROM episodes e \
-            JOIN aliases sa ON sa.library = e.library AND sa.item = e.series \
-            WHERE sa.alias = m.alias \
-              AND (NOT EXISTS (SELECT 1 FROM franchise_runs r \
-                               WHERE r.library = m.library AND r.franchise = m.franchise \
-                                 AND r.position = m.position) \
-                   OR EXISTS (SELECT 1 FROM franchise_runs r \
-                              WHERE r.library = m.library AND r.franchise = m.franchise \
-                                AND r.position = m.position AND r.season = e.season \
-                                AND r.episode IN (0, e.episode)))) AS held_episodes, \
-           json_extract(i.body, '$.tagline'), json_extract(i.body, '$.plot') \
+         SELECT {COLUMNS}, {HELD}, json_extract(i.body, '$.plot') \
          FROM franchise_members m \
          LEFT JOIN aliases a ON a.alias = m.alias \
          LEFT JOIN items i ON i.library = a.library AND i.id = a.item \
@@ -200,10 +237,9 @@ fn entries(connection: &Connection, library: &str, id: &str) -> rusqlite::Result
     );
     collect(connection, &sql, &[&library, &id], |row| {
         let mut member = entry(row, 0)?;
-        member.episodes = row.get(19)?;
+        held(row, MEMBER, &mut member)?;
         if let Some(held) = member.held.as_mut() {
-            held.tagline = item::text(row, 20)?;
-            held.plot = item::text(row, 21)?;
+            held.plot = item::text(row, MEMBER + 2)?;
         }
         Ok(member)
     })

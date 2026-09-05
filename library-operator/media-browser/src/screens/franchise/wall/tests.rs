@@ -189,9 +189,9 @@ fn a_gap_whose_release_year_is_ahead_of_today_is_coming() {
 fn a_coming_note_reads_as_much_of_the_date_as_the_file_knows() {
     let cases = [
         ("2027", "Coming 2027"),
-        ("2027-03", "Coming March 2027"),
-        ("2027-03-12", "Coming 12 March 2027"),
-        ("2027-03-01", "Coming 1 March 2027"),
+        ("2027-03", "Coming March"),
+        ("2027-03-12", "Coming March 12"),
+        ("2027-03-01", "Coming March 1"),
         ("2027-12", "Coming December 2027"),
     ];
     for (released, note) in cases {
@@ -207,11 +207,18 @@ fn a_coming_note_reads_as_much_of_the_date_as_the_file_knows() {
 }
 
 #[test]
-fn a_date_that_is_not_one_reads_as_it_was_written() {
-    assert_eq!(worded("2027-13"), "2027-13");
-    assert_eq!(worded("2027-xx-01"), "2027-xx-01");
-    assert_eq!(worded("2027-00"), "2027-00");
-    assert_eq!(worded(""), "");
+fn a_coming_note_whose_date_is_not_one_reads_the_year_it_holds() {
+    let noted = |released: &str| {
+        let page = franchise(vec![Entry {
+            released: released.into(),
+            release_year: 2027,
+            ..gap(1, (0.0, 0.0), &[])
+        }]);
+        story(&page, &columns(&page), TODAY)[0].cell.note.clone()
+    };
+    assert_eq!(noted("2027-13"), "Coming 2027");
+    assert_eq!(noted("2027-xx-01"), "Coming 2027");
+    assert_eq!(noted("2027-00"), "Coming 2027");
 }
 
 #[test]

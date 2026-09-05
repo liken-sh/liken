@@ -6,7 +6,7 @@
 
 use super::{COLUMNS, Focus, Season};
 use crate::look;
-use crate::views::{REACH, area, divider, people, ratings, scroll, stack, strip, text, wall};
+use crate::views::{REACH, area, card, divider, people, ratings, scroll, stack, strip, text, wall};
 use iced_winit::core::Rectangle;
 
 /// The space between the foot of the header and the first divider.
@@ -34,10 +34,10 @@ pub const PLOT_LINES: usize = 2;
 /// and between two stripes.
 pub const STRIPE_GAP: f32 = 24.0;
 
-/// The height one franchise strip takes on the page. A strip draws one
-/// caption line under each poster, as the strips of the home page do.
+/// The height one franchise strip takes on the page. Its slots draw the
+/// card every other strip draws, which is two lines.
 pub fn strip_height() -> f32 {
-    strip::height(1)
+    strip::height(card::LINES)
 }
 
 // How much of the row under the focused one the scroll keeps in view, as
@@ -76,6 +76,37 @@ pub fn head() -> f32 {
         + GAP
         + text::height(PLOT_LINES, look::PLOT)
         + FOOT
+}
+
+/// The box one season's divider draws in, in frame space after the
+/// scroll. The divider stands at the top of its own band while that top
+/// is in view, holds at the top of the region while the season's rows
+/// scroll under it, and the next season's band pushes it off: the rule
+/// the jump rail's era labels follow.
+pub fn divider_box(region: Rectangle, band: &Band, offset: f32) -> Rectangle {
+    stack::held(
+        area(
+            region.x,
+            region.y + band.top - offset,
+            region.width,
+            band.height,
+        ),
+        region,
+        divider::HEIGHT,
+    )
+}
+
+/// The part of the region the stills draw in: under the band a held
+/// divider keeps at the top. A still that scrolls into that band draws
+/// nothing, so art never crosses the divider, which the renderer would
+/// otherwise draw the art over.
+pub fn stills(region: Rectangle) -> Rectangle {
+    area(
+        region.x,
+        region.y + divider::HEIGHT,
+        region.width,
+        (region.height - divider::HEIGHT).max(0.0),
+    )
 }
 
 /// One season's place in the wall: the divider, the rows of stills under
@@ -265,7 +296,7 @@ mod tests {
     }
 
     fn cells() -> wall::Cells {
-        wall::cells(WIDTH, wall::STILL, COLUMNS)
+        wall::lined(WIDTH, wall::STILL, COLUMNS, card::LINES)
     }
 
     fn layout() -> Layout {
@@ -299,6 +330,58 @@ mod tests {
     fn the_header_is_as_tall_as_the_blocks_it_draws() {
         assert_eq!(header(frame()).height, head());
         assert!(head() < HEIGHT / 2.0, "{}", head());
+    }
+
+    #[test]
+    fn a_still_carries_the_two_lines_of_a_card_under_it() {
+        assert_eq!(
+            cells().height,
+            wall::cells(WIDTH, wall::STILL, COLUMNS).height + text::height(1, look::FACE)
+        );
+    }
+
+    #[test]
+    fn a_divider_stands_at_the_top_of_its_own_season_while_that_top_is_in_view() {
+        let layout = layout();
+        let region = region(frame());
+        let first = divider_box(region, &layout.bands[0], 0.0);
+        assert_eq!(first.y, region.y + layout.bands[0].top);
+        assert_eq!(first.x, region.x);
+        assert_eq!(first.width, region.width);
+        assert_eq!(first.height, divider::HEIGHT);
+    }
+
+    #[test]
+    fn a_divider_holds_at_the_top_of_the_wall_while_its_rows_scroll_under_it() {
+        let layout = layout();
+        let region = region(frame());
+        let seasons = seasons();
+        let offset = layout.scroll(Focus::Still(7), &seasons, region.height);
+        assert!(offset > layout.bands[0].top);
+        assert_eq!(divider_box(region, &layout.bands[0], offset).y, region.y);
+    }
+
+    #[test]
+    fn the_next_season_pushes_the_divider_over_it_off() {
+        let layout = layout();
+        let region = region(frame());
+        let band = layout.bands[0];
+        // The scroll that leaves the first season a divider short of its
+        // foot, where the second season's rows reach the top.
+        let offset = band.top + band.height - divider::HEIGHT / 2.0;
+        let held = divider_box(region, &band, offset);
+        assert!(held.y < region.y);
+        assert_eq!(held.y + held.height, region.y + divider::HEIGHT / 2.0);
+    }
+
+    #[test]
+    fn the_stills_draw_under_the_band_a_held_divider_keeps() {
+        let region = region(frame());
+        let stills = stills(region);
+        assert_eq!(stills.y, region.y + divider::HEIGHT);
+        assert_eq!(stills.y + stills.height, region.y + region.height);
+        assert_eq!(stills.x, region.x);
+        assert_eq!(stills.width, region.width);
     }
 
     #[test]
@@ -348,6 +431,12 @@ mod tests {
     }
 
     #[test]
+    fn a_franchise_strip_stands_as_tall_as_the_card_its_slots_draw() {
+        assert_eq!(strip_height(), strip::height(card::LINES));
+        assert!(strip_height() > strip::height(1));
+    }
+
+    #[test]
     fn a_franchise_strip_stands_between_the_last_season_and_the_stripes() {
         let plain = with_stripes();
         let layout = with_franchise();
@@ -358,7 +447,7 @@ mod tests {
             layout.stripes[0],
             layout.franchises[0] + strip_height() + STRIPE_GAP
         );
-        assert_eq!(layout.content, plain.content + strip_height() + STRIPE_GAP);
+        assert!((layout.content - plain.content - strip_height() - STRIPE_GAP).abs() < 1e-3);
     }
 
     #[test]

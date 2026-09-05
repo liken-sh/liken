@@ -70,7 +70,8 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
     );
     assert_eq!(released.lines, 2);
     assert_eq!(released.items.len(), 2);
-    assert_eq!(released.items[0].caption, "S01E02 · The Serial");
+    assert_eq!(released.items[0].caption, "Segment 2");
+    assert_eq!(released.items[0].under, "The Serial · S01 · E02 · 46m");
     assert_eq!(released.items[0].art, "s1e2.jpg");
     assert_eq!(released.items[1].caption, "The Serial");
     let added = strips[1];
@@ -167,7 +168,7 @@ fn a_select_on_an_episode_opens_the_series_page_on_that_episode() {
     assert_eq!(page.id, SERIAL);
     assert_eq!(page.library, SERIALS);
     assert_eq!(page.focus, SeriesFocus::Still(1));
-    assert_eq!(page.stills[1].caption, "E2 · Segment 2");
+    assert_eq!(page.stills[1].fitted, "Segment 2");
 }
 
 #[test]
@@ -448,7 +449,7 @@ fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
 }
 
 #[test]
-fn a_drawn_strip_captions_a_title_with_its_facts_and_a_persons_with_the_parts() {
+fn a_drawn_strip_captions_every_title_with_its_own_title_and_its_facts_under_it() {
     let browser = with_draw();
     let strips = strips(&browser);
     let western = strips
@@ -461,14 +462,14 @@ fn a_drawn_strip_captions_a_title_with_its_facts_and_a_persons_with_the_parts() 
         .iter()
         .find(|strip| strip.heading == PLAYER_STRIP)
         .expect("the page drew the player");
-    assert_eq!(player.items[0].caption, "Entry 1 · 1980");
-    assert_eq!(player.items[0].under, "Director");
+    assert_eq!(player.items[0].caption, "Entry 1");
+    assert_eq!(player.items[0].under, "Film · 1980");
     let set = strips
         .iter()
         .find(|strip| strip.heading == "The Entries")
         .expect("the page drew the set");
-    assert_eq!(set.items.len(), 3);
-    assert_eq!(set.items[0].under, "1980 · 1h 30m · PG");
+    assert_eq!(set.items.len(), IN_SET);
+    assert_eq!(set.items[0].under, "1980 · 1h 30m");
 }
 
 // The browser after a "see all" on the drawn strip under this heading.
@@ -589,7 +590,10 @@ fn the_genres_strip_holds_every_genre() {
     let names: Vec<&str> = genres.items.iter().map(|item| item.name.as_str()).collect();
     assert_eq!(names, ["Drama", "Western"]);
     assert_eq!(genres.items[0].under, "2 titles");
-    assert_eq!(genres.items[0].art, "1.jpg");
+    assert_eq!(
+        genres.items[0].tiles,
+        [("screening/films".to_string(), "1.jpg".to_string())]
+    );
     assert_eq!(genres.items[1].under, "1 title");
 }
 
@@ -725,7 +729,7 @@ fn the_franchises_strip_ends_the_page_and_holds_every_franchise() {
         .collect();
     assert_eq!(names, ["The Cycle", "The Saga"]);
     assert_eq!(franchises.items[0].art, "cycle.jpg");
-    assert_eq!(franchises.items[0].under, "");
+    assert_eq!(franchises.items[0].under, "4 films and series");
     assert_eq!(franchises.items[1].art, "");
 }
 

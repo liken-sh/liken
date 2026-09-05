@@ -428,6 +428,17 @@ mod tests {
     }
 
     #[test]
+    fn a_press_moves_over_a_drawn_row_that_holds_nothing() {
+        let mut home = Home::open(&mut Catalog);
+        home.blocks.insert(1, Block::Strip(Strip::new(Row::Genres)));
+        home.focus = 0;
+        home.key("down", &mut Catalog);
+        assert_eq!(home.focus, 2);
+        home.key("up", &mut Catalog);
+        assert_eq!(home.focus, 0);
+    }
+
+    #[test]
     fn the_band_prefetches_nothing_and_a_press_past_the_rows_moves_nothing() {
         let mut home = Home::open(&mut Catalog);
         home.control = Some(0);

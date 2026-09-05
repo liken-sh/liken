@@ -14,7 +14,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle, Vector};
 
-use super::{area, label, mark, rounded, text};
+use super::{area, label, mark, rounded, stack, text};
 use crate::look;
 
 /// One stretch of rows: the words on it, the first and the last row it covers,
@@ -113,12 +113,7 @@ pub fn draw(
 /// the label's own length along the bar, and a bar shorter than that carries
 /// as much of the label as it holds.
 pub fn label_box(bounds: Rectangle, region: Rectangle, length: f32) -> Rectangle {
-    let length = length.min(bounds.height);
-    let top = bounds
-        .y
-        .max(region.y)
-        .min(bounds.y + bounds.height - length);
-    area(bounds.x, top, bounds.width, length)
+    stack::held(bounds, region, length)
 }
 
 // One bar's words, turned a quarter circle so they read from the foot

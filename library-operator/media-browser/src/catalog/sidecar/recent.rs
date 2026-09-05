@@ -57,13 +57,17 @@ pub fn candidates(
 }
 
 // The episode half of the union, in the order item::COLUMNS takes them.
+// An episode row holds neither a content rating nor a tagline of its
+// own, so the union's two halves carry the same columns.
 const EPISODE_COLUMNS: &str = "episodes.id, episodes.title, episodes.released, episodes.art, \
-                               episodes.duration, ''";
+                               episodes.duration, '', ''";
 
 fn candidate(row: &Row<'_>) -> rusqlite::Result<Candidate> {
     let title = item::title(row)?;
-    let library: String = row.get(6)?;
-    let kind: String = row.get(8)?;
+    // The columns the union selects after the ones every list reads.
+    let at = |column: usize| item::WIDTH + column;
+    let library: String = row.get(at(0))?;
+    let kind: String = row.get(at(2))?;
     if kind == "movies" {
         return Ok(Candidate::Movie {
             slot: Slot::of(&library, "movies", title),
@@ -72,16 +76,17 @@ fn candidate(row: &Row<'_>) -> rusqlite::Result<Candidate> {
     Ok(Candidate::Episode {
         library,
         episode: title,
-        added: row.get(7)?,
-        season: row.get(10)?,
-        number: row.get(11)?,
+        added: row.get(at(1))?,
+        season: row.get(at(4))?,
+        number: row.get(at(5))?,
         series: Title {
-            id: row.get(9)?,
-            title: row.get(12)?,
-            art: row.get(13)?,
-            released: row.get(14)?,
-            duration: row.get(15)?,
-            rating: item::text(row, 16)?,
+            id: row.get(at(3))?,
+            title: row.get(at(6))?,
+            art: row.get(at(7))?,
+            released: row.get(at(8))?,
+            duration: row.get(at(9))?,
+            rating: item::text(row, at(10))?,
+            tagline: String::new(),
         },
     })
 }

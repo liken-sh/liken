@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use rusqlite::Connection;
 
-use super::{collect, item_table};
+use super::{collect, item, item_table};
 use crate::catalog::{CreditSlot, Credits, Person, Slot, Title};
 
 /// One title's credits, split into the three stripes, as a list of one.
@@ -145,43 +145,50 @@ pub fn works(connection: &Connection, library: &str, path: &str) -> rusqlite::Re
         };
         // The library's kind names the item table, so a credit joins to
         // the one table that holds its titles.
+        // The read carries the duration and the content rating, because a
+        // card of a person's strip draws the facts line every other strip
+        // draws where the credit leaves no character behind.
+        // The read carries the tagline as every other slot read does,
+        // because a film's card leads with it.
         let sql = format!(
             "SELECT credits.item, credits.part, credits.role, \
-                    {table}.title, {table}.released, {table}.art \
+                    {table}.title, {table}.released, {table}.art, \
+                    {table}.duration, json_extract({table}.body, '$.contentRating'), \
+                    {seasons} AS seasons, json_extract({table}.body, '$.tagline') \
              FROM credits JOIN {table} ON {table}.library = credits.library \
              AND {table}.id = credits.item \
              WHERE credits.library = ? AND credits.contributor = ? \
-             ORDER BY credits.billing"
+             ORDER BY credits.billing",
+            seasons = item::seasons(table),
         );
         let rows = collect(connection, &sql, &[&other, &elsewhere], |row| {
             Ok((
-                row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, i64>(8)?,
+                Title {
+                    id: row.get(0)?,
+                    title: row.get(3)?,
+                    released: row.get(4)?,
+                    art: row.get(5)?,
+                    duration: row.get(6)?,
+                    rating: item::text(row, 7)?,
+                    tagline: item::text(row, 9)?,
+                },
             ))
         })?;
 
-        for (id, part, role, title, released, art) in rows {
+        for (part, role, seasons, title) in rows {
             let Some(named) = named(&part, &role) else {
                 continue;
             };
             let slot = *placed
-                .entry((other.clone(), id.clone()))
+                .entry((other.clone(), title.id.clone()))
                 .or_insert_with(|| {
-                    works.push(Slot::of(
-                        &other,
-                        kind,
-                        Title {
-                            id,
-                            title,
-                            released,
-                            art,
-                            ..Title::default()
-                        },
-                    ));
+                    works.push(Slot {
+                        seasons,
+                        ..Slot::of(&other, kind, title)
+                    });
                     parts.push(Vec::new());
                     works.len() - 1
                 });

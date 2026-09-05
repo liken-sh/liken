@@ -225,7 +225,6 @@ fn thin(frame: &mut canvas::Frame<Renderer>, cell: &Cell, bounds: Rectangle) {
                 .with_width(OUTLINE)
         },
     );
-    let middle = bounds.center_y();
     let title = text::cut(&cell.name, look::DETAIL, bounds.width / 2.0);
     let (at, facts) = thin_words(&title, bounds);
     text::line(
@@ -244,17 +243,40 @@ fn thin(frame: &mut canvas::Frame<Renderer>, cell: &Cell, bounds: Rectangle) {
         look::muted(),
         bounds.width / 2.0,
     );
+    let (note, band) = thin_note(&cell.note, &cell.facts, facts, bounds);
     text::line(
         frame,
-        &cell.note,
-        Point::new(
-            bounds.x + bounds.width - INSET - text::width(&cell.note, look::FACE),
-            middle - text::height(1, look::FACE) / 2.0,
-        ),
+        &note,
+        band.position(),
         look::FACE,
         noted(cell),
-        bounds.width / 2.0,
+        bounds.width,
     );
+}
+
+/// The note of a thin row and the band it draws in: as wide as the shaper
+/// sets it, with its right edge the row's own inset in from the border,
+/// and cut by the shaper to the room left beside the facts, so the words
+/// end inside the outline whatever the title and the note are. A note the
+/// room cannot hold at all draws nothing.
+pub fn thin_note(note: &str, facts: &str, at: Point, bounds: Rectangle) -> (String, Rectangle) {
+    let right = bounds.x + bounds.width - INSET;
+    let room = (right - at.x - text::measured(facts, look::FACE) - wall::GAP).max(0.0);
+    let cut = text::measured_cut(note, look::FACE, room);
+    let height = text::height(1, look::FACE);
+    let (note, width) = match text::measured(&cut, look::FACE) {
+        drawn if drawn <= room => (cut, drawn),
+        _ => (String::new(), 0.0),
+    };
+    (
+        note,
+        area(
+            right - width,
+            bounds.center_y() - height / 2.0,
+            width,
+            height,
+        ),
+    )
 }
 
 // Where a thin row's title and its facts start: the title at the row's
@@ -360,11 +382,17 @@ fn words(frame: &mut canvas::Frame<Renderer>, cell: &Cell, words: Rectangle) {
     let cap = (room / text::height(1, look::CAPTION)).floor().max(0.0) as usize;
     if cap > 0 {
         y += LEAD;
-        y += text::block(
+        // A tagline draws in the italic, as it does everywhere; the
+        // plot keeps the roman face.
+        let face = match cell.tagline {
+            true => look::ITALIC,
+            false => iced_winit::core::Font::with_name(look::FONT),
+        };
+        y += text::block_in(
             frame,
             &cell.blurb,
             Point::new(words.x, y),
-            look::CAPTION,
+            (look::CAPTION, face),
             look::muted(),
             words.width,
             cap,
@@ -421,6 +449,46 @@ mod tests {
         let (at, _) = thin_words("Inhumans", row);
         assert_eq!(at.x, row.x + INSET);
         assert_eq!(at.y + text::height(1, look::DETAIL) / 2.0, row.center_y());
+    }
+
+    #[test]
+    fn a_thin_rows_note_ends_inside_the_rows_own_border() {
+        let row = area(100.0, 200.0, 1500.0, wall::THIN);
+        for (name, facts) in [
+            ("Inhumans", "2027"),
+            ("Agents of S.H.I.E.L.D.", "2027"),
+            ("A Franchise Entry Whose Name Runs On", ""),
+        ] {
+            let title = text::cut(name, look::DETAIL, row.width / 2.0);
+            let (_, at) = thin_words(&title, row);
+            let (note, band) = thin_note("Coming 15 December 2027", facts, at, row);
+            assert_eq!(note, "Coming 15 December 2027", "{name}");
+            assert_eq!(band.width, text::measured(&note, look::FACE), "{name}");
+            assert!(band.x + band.width <= row.x + row.width - INSET, "{name}");
+            assert!(band.x > at.x + text::measured(facts, look::FACE), "{name}");
+            assert_eq!(band.center_y(), row.center_y(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_note_the_room_beside_the_title_cannot_hold_is_cut_by_the_shaper() {
+        let row = area(100.0, 200.0, 250.0, wall::THIN);
+        let title = text::cut("Inhumans", look::DETAIL, row.width / 2.0);
+        let (_, at) = thin_words(&title, row);
+        let (note, band) = thin_note("Coming 15 December 2027", "2027", at, row);
+        assert!(note.ends_with('\u{2026}'), "{note}");
+        assert!(band.x + band.width <= row.x + row.width - INSET);
+        assert_eq!(band.width, text::measured(&note, look::FACE));
+    }
+
+    #[test]
+    fn a_row_with_no_room_left_draws_no_note() {
+        let row = area(100.0, 200.0, 2.0 * INSET, wall::THIN);
+        let (_, at) = thin_words("A Name", row);
+        let (note, band) = thin_note("Coming 15 December 2027", "2027", at, row);
+        assert_eq!(note, "");
+        assert_eq!(band.width, 0.0);
+        assert_eq!(band.x, row.x + row.width - INSET);
     }
 
     #[test]

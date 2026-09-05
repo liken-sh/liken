@@ -10,10 +10,13 @@ fn the_first_screen_is_the_home_page_and_its_libraries_strip() {
     let libraries = strip_at(&browser, 3);
     assert_eq!(libraries.heading, "Libraries");
     assert_eq!(libraries.items[0].name, "films");
-    assert_eq!(libraries.items[0].under, "movies · 3");
-    assert_eq!(libraries.items[0].art, "1.jpg");
+    assert_eq!(libraries.items[0].under, "3 movies");
+    assert_eq!(
+        libraries.items[0].tiles,
+        [("screening/films".to_string(), "1.jpg".to_string())]
+    );
     assert_eq!(libraries.items[1].name, "serials");
-    assert_eq!(libraries.items[1].under, "series · 2");
+    assert_eq!(libraries.items[1].under, "2 series");
     assert_eq!(home.focus, 3);
     assert!(strip_at(&browser, 1).items.is_empty());
 }
@@ -49,7 +52,7 @@ fn a_select_on_a_series_opens_its_page() {
     assert_eq!(page.facts, "1980 · 2 seasons · TV-14");
     assert_eq!(page.seasons.len(), 2);
     assert_eq!(page.stills.len(), 8);
-    assert_eq!(page.stills[0].caption, "E1 · Segment 1");
+    assert_eq!(page.stills[0].fitted, "Segment 1");
 }
 
 #[test]

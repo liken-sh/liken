@@ -90,6 +90,11 @@ pub fn filled(fold: Fold, mut page: impl FnMut(usize) -> Vec<Candidate>) -> Vec<
 /// still. Every other episode folds to its series, and a series appears
 /// once, at the newest date among its folded episodes.
 pub fn fold(candidates: Vec<Candidate>, fold: Fold) -> Vec<Slot> {
+    // The Shows fold has a pass of its own, because it answers one slot
+    // per series and not one per candidate that stands alone.
+    if let Fold::Shows { today } = fold {
+        return shows(candidates, today);
+    }
     let mut slots: Vec<Slot> = Vec::new();
     for candidate in candidates {
         match candidate {
@@ -120,13 +125,108 @@ pub fn fold(candidates: Vec<Candidate>, fold: Fold) -> Vec<Slot> {
     slots
 }
 
+// The Shows fold: a movie is its own slot, and every episode of a series
+// folds to one slot for the series, at the place the series first came
+// in.
+fn shows(candidates: Vec<Candidate>, today: i64) -> Vec<Slot> {
+    let mut slots: Vec<Slot> = Vec::new();
+    let mut shows: Vec<(usize, Show)> = Vec::new();
+    for candidate in candidates {
+        match candidate {
+            Candidate::Movie { slot } => slots.push(slot),
+            Candidate::Episode {
+                library,
+                episode,
+                season,
+                number,
+                series,
+                ..
+            } => {
+                let new = usize::from(current(&episode.released, today));
+                match shows
+                    .iter()
+                    .position(|(_, show)| show.holds(&library, &series.id))
+                {
+                    Some(at) => shows[at].1.add(episode, season, number, new),
+                    None => {
+                        shows.push((
+                            slots.len(),
+                            Show {
+                                library,
+                                series,
+                                episode,
+                                season,
+                                number,
+                                new,
+                            },
+                        ));
+                        slots.push(Slot::default());
+                    }
+                }
+            }
+        }
+    }
+    // Each show takes the place its first episode held, so the slots keep
+    // the order the candidates came in.
+    for (at, show) in shows {
+        slots[at] = show.slot();
+    }
+    slots
+}
+
+// The episodes of one series folded together: the series, the newest
+// episode among them, and how many of them are current.
+struct Show {
+    library: String,
+    series: Title,
+    episode: Title,
+    season: i64,
+    number: i64,
+    new: usize,
+}
+
+impl Show {
+    // Whether this is the show of that library and series.
+    fn holds(&self, library: &str, series: &str) -> bool {
+        self.library == library && self.series.id == series
+    }
+
+    // One more episode folded in. It counts toward `new` where it is
+    // current, and it takes the still where it is the newest.
+    fn add(&mut self, episode: Title, season: i64, number: i64, new: usize) {
+        self.new += new;
+        if (&episode.released, season, number) <= (&self.episode.released, self.season, self.number)
+        {
+            return;
+        }
+        self.episode = episode;
+        self.season = season;
+        self.number = number;
+    }
+
+    // The slot: the newest episode's still under the series' id, so a
+    // select opens the series on that episode, as an episode slot does.
+    fn slot(self) -> Slot {
+        let mut slot = episode_slot(
+            &self.library,
+            self.episode,
+            self.season,
+            self.number,
+            &self.series,
+        );
+        slot.id = self.series.id;
+        slot.new = self.new;
+        slot
+    }
+}
+
 // Whether an episode stands alone under this fold: never under
 // `Titles`, always under `Episodes`, and under `Airing` when its release
 // date and its arrival fall inside the window. An episode with no full
 // date folds, because the gap cannot be measured.
 fn stands_alone(fold: Fold, released: &str, added: i64) -> bool {
     match fold {
-        Fold::Titles => false,
+        Fold::Titles | Fold::Shows { .. } => false,
         Fold::Episodes => true,
         Fold::Airing => match date_seconds(released) {
             Some(aired) => (added - aired).abs() <= WINDOW_DAYS * DAY,
@@ -316,6 +416,127 @@ mod tests {
         assert_eq!(slots[2].released, "2026-08-20");
     }
 
+    fn today() -> i64 {
+        date_seconds("2026-09-03").expect("a full date")
+    }
+
+    fn shown(candidates: Vec<Candidate>) -> Vec<Slot> {
+        fold(candidates, Fold::Shows { today: today() })
+    }
+
+    #[test]
+    fn the_shows_fold_makes_one_still_of_the_newest_episode_of_a_series() {
+        let slots = shown(vec![
+            episode(8, "2026-09-03", 1),
+            episode(7, "2026-08-27", 1),
+            episode(1, "2026-03-01", 400),
+        ]);
+        assert_eq!(ids(&slots), ["series:1"]);
+        assert_eq!(slots[0].kind, "episodes");
+        assert_eq!(slots[0].library, LIBRARY);
+        assert_eq!(slots[0].title, "Segment 8");
+        assert_eq!(slots[0].art, "still-8.jpg");
+        assert_eq!(slots[0].released, "2026-09-03");
+        assert_eq!(slots[0].duration, 2_760);
+        assert_eq!(slots[0].new, 2);
+        assert!(slots[0].still());
+        assert!(slots[0].folded());
+        assert_eq!(
+            slots[0].episode,
+            Some(InSeries {
+                series: "series:1".into(),
+                name: "The Serial".into(),
+                season: 3,
+                episode: 8,
+            })
+        );
+    }
+
+    #[test]
+    fn the_newest_episode_takes_the_slot_whatever_order_they_came_in() {
+        let slots = shown(vec![
+            episode(7, "2026-08-27", 1),
+            episode(8, "2026-09-03", 1),
+        ]);
+        assert_eq!(slots[0].art, "still-8.jpg");
+        assert_eq!(slots[0].released, "2026-09-03");
+        assert_eq!(slots[0].new, 2);
+    }
+
+    #[test]
+    fn two_episodes_of_one_date_break_the_tie_by_their_numbers() {
+        let slots = shown(vec![
+            episode(7, "2026-09-03", 1),
+            episode(8, "2026-09-03", 1),
+        ]);
+        assert_eq!(slots[0].art, "still-8.jpg");
+    }
+
+    #[test]
+    fn a_series_with_one_current_episode_is_one_new() {
+        let slots = shown(vec![
+            episode(8, "2026-09-03", 1),
+            episode(1, "2026-03-01", 400),
+        ]);
+        assert_eq!(slots[0].new, 1);
+        assert_eq!(slots[0].art, "still-8.jpg");
+    }
+
+    #[test]
+    fn a_series_of_old_episodes_alone_is_none_new_and_still_draws_as_a_still() {
+        let slots = shown(vec![
+            episode(2, "2026-03-01", 400),
+            episode(1, "2026-02-01", 400),
+        ]);
+        assert_eq!(ids(&slots), ["series:1"]);
+        assert_eq!(slots[0].new, 0);
+        assert_eq!(slots[0].art, "still-2.jpg");
+        assert!(slots[0].still());
+    }
+
+    // One episode of a second serial, released on the date and arrived
+    // the same day.
+    fn other(number: i64, released: &str) -> Candidate {
+        Candidate::Episode {
+            library: LIBRARY.into(),
+            episode: Title {
+                id: format!("part:{number}"),
+                title: format!("Part {number}"),
+                released: released.into(),
+                art: format!("part-{number}.jpg"),
+                duration: 1_800,
+                ..Title::default()
+            },
+            added: date_seconds(released).unwrap_or(0),
+            season: 1,
+            number,
+            series: Title {
+                id: "series:2".into(),
+                title: "The Other".into(),
+                released: "2019".into(),
+                art: "other.jpg".into(),
+                ..Title::default()
+            },
+        }
+    }
+
+    #[test]
+    fn two_series_interleaved_keep_their_order_by_their_newest_episode() {
+        let slots = shown(vec![
+            episode(8, "2026-09-03", 1),
+            other(4, "2026-09-01"),
+            movie("movie:1", "2026-08-30"),
+            episode(7, "2026-08-27", 1),
+            other(3, "2026-08-20"),
+        ]);
+        assert_eq!(ids(&slots), ["series:1", "series:2", "movie:1"]);
+        assert_eq!(slots[0].released, "2026-09-03");
+        assert_eq!(slots[1].released, "2026-09-01");
+        assert_eq!(slots[1].title, "Part 4");
+        assert_eq!(slots[1].new, 2);
+        assert_eq!(slots[2].kind, "movies");
+    }
+
     #[test]
     fn an_episode_with_no_full_date_folds_under_airing() {
         let slots = fold(vec![episode(1, "2004", 0)], Fold::Airing);
@@ -338,7 +559,12 @@ mod tests {
 
     #[test]
     fn a_movie_is_its_own_slot_under_every_fold() {
-        for rule in [Fold::Titles, Fold::Episodes, Fold::Airing] {
+        for rule in [
+            Fold::Titles,
+            Fold::Episodes,
+            Fold::Airing,
+            Fold::Shows { today: 0 },
+        ] {
             let slots = fold(vec![movie("movie:1", "1999")], rule);
             assert_eq!(ids(&slots), ["movie:1"]);
             assert_eq!(slots[0].kind, "movies");

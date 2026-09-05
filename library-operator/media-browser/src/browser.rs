@@ -98,7 +98,12 @@ impl<S: Source, P: Posters> Browser<S, P> {
     /// Open the browser on its first screen, the home page.
     pub fn new(mut source: S, posters: P) -> Self {
         let home_date = Date::today();
+        // The first read is the one a person waits for, so the run says
+        // how long it took, the way the reader thread says it of a re-read.
+        let started = std::time::Instant::now();
         let home = screens::Screen::Home(home::Home::open(&mut source));
+        let ms = started.elapsed().as_secs_f64() * 1_000.0;
+        eprintln!("media-browser: the home page opened in {ms:.1} ms");
         let reader = reader::Reader::new(source.reader());
         Self {
             source,

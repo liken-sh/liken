@@ -8,6 +8,9 @@
 //
 // A jump rail of rotated bars at the left of a long wall is one more.
 //
+// The two lines under a slot are one primitive of their own, the card,
+// which the strip and the wall both draw.
+//
 // A page draws in the layers the `layers` module stacks, because inside
 // one layer the renderer draws every mesh, then every image, then every
 // text, whatever order the canvas drew them in. That one fact decides
@@ -18,6 +21,7 @@
 pub mod band;
 pub mod banner;
 pub mod buttons;
+pub mod card;
 pub mod clock;
 pub mod curtain;
 pub mod divider;
@@ -69,16 +73,37 @@ pub trait Card {
         ""
     }
 
-    /// The one line under every slot of a wall, drawn muted.
+    /// The words a card leads with, which a wall of one line draws muted
+    /// under every slot.
     fn caption(&self) -> &str {
         self.name()
     }
 
-    /// The second line under a slot of a wall that draws two, faint under
-    /// the caption. A person's works put the parts the person played
-    /// here; every other wall leaves it empty.
+    /// The caption cut by the shaper at the read to the band the card
+    /// draws it in. An item that measures none answers its caption and
+    /// takes the band's own clip.
+    fn fitted(&self) -> &str {
+        self.caption()
+    }
+
+    /// The second line of a card, small, faint, and italic under the
+    /// first. A person's works put the parts the person played here,
+    /// except where every part left is an `as` run: then the character
+    /// leads the card and the title and the year stand here. Every wall
+    /// that draws one line leaves it empty.
     fn under(&self) -> &str {
         ""
+    }
+
+    /// The second line cut to the same band, the way the caption is.
+    fn under_fitted(&self) -> &str {
+        self.under()
+    }
+
+    /// Whether the words the card leads with are a film's tagline, which
+    /// draws in the italic face. A title draws in the roman one.
+    fn leads_with_tagline(&self) -> bool {
+        false
     }
 
     /// The line under the focused slot of a wall, drawn bright: the whole
@@ -87,11 +112,24 @@ pub trait Card {
         self.caption()
     }
 
+    /// How many episodes of a folded show are current, which a strip
+    /// draws as a pill over the still. Zero on every other item.
+    fn new_episodes(&self) -> usize {
+        0
+    }
+
     /// The height of the item's art as a share of its width, which a strip
     /// draws each slot at. A poster, unless the item says otherwise, and an
     /// episode's still says otherwise.
     fn ratio(&self) -> f32 {
         wall::POSTER
+    }
+
+    /// The posters a shelf draws as a mosaic in its slot, each with the
+    /// library it resolves against, and empty for every item that draws
+    /// one art of its own.
+    fn tiles(&self) -> &[(String, String)] {
+        &[]
     }
 }
 
@@ -159,6 +197,54 @@ pub(crate) fn artwork<P: Posters>(
             Vertical::Center,
             slot.width - 16.0,
         ));
+    }
+}
+
+// The ground the slot shows between two cells of a mosaic.
+const CELL_GAP: f32 = 2.0;
+
+/// The four cells of a mosaic in reading order: the slot halved across,
+/// less the gap between the halves, and each cell at the poster's own
+/// ratio, so a cell crops nothing. The grid centers in the slot where the
+/// ratio leaves it a fraction of a pixel short.
+pub fn quarters(slot: Rectangle) -> [Rectangle; 4] {
+    let width = (slot.width - CELL_GAP) / 2.0;
+    let height = width * wall::POSTER;
+    let left = slot.x;
+    let right = slot.x + width + CELL_GAP;
+    let top = slot.y + (slot.height - 2.0 * height - CELL_GAP) / 2.0;
+    let bottom = top + height + CELL_GAP;
+    [
+        area(left, top, width, height),
+        area(right, top, width, height),
+        area(left, bottom, width, height),
+        area(right, bottom, width, height),
+    ]
+}
+
+/// The library and the path of one cell of a mosaic, and two empty
+/// strings where the shelf holds fewer posters than the grid has cells.
+pub fn cell(tiles: &[(String, String)], index: usize) -> (&str, &str) {
+    match tiles.get(index) {
+        Some((library, art)) => (library.as_str(), art.as_str()),
+        None => ("", ""),
+    }
+}
+
+// A 2x2 of posters in one slot. Every cell goes through the call one
+// poster goes through, so the store decodes a quarter-size poster the way
+// it decodes a whole one, and a cell whose art has not landed draws the
+// ground an empty slot draws.
+pub(crate) fn mosaic<P: Posters>(
+    frame: &mut canvas::Frame<Renderer>,
+    posters: &mut P,
+    tiles: &[(String, String)],
+    slot: Rectangle,
+    tone: Tone,
+) {
+    for (index, cell_of) in quarters(slot).into_iter().enumerate() {
+        let (library, art) = cell(tiles, index);
+        artwork(frame, posters, library, art, cell_of, "", tone);
     }
 }
 
@@ -307,6 +393,42 @@ mod tests {
     }
 
     #[test]
+    fn a_mosaic_fills_its_slot_with_four_cells_at_the_posters_ratio() {
+        let slot = area(10.0, 20.0, strip::poster_width(), strip::POSTER);
+        let cells = quarters(slot);
+        for cell in cells {
+            assert_eq!(cell.width, (slot.width - CELL_GAP) / 2.0);
+            assert_eq!(cell.height, cell.width * wall::POSTER);
+        }
+        assert_eq!(cells[0].x, slot.x);
+        assert_eq!(cells[1].x, cells[0].x + cells[0].width + CELL_GAP);
+        assert_eq!(cells[2].x, cells[0].x);
+        assert_eq!(cells[3].x, cells[1].x);
+        assert_eq!(cells[1].y, cells[0].y);
+        assert_eq!(cells[2].y, cells[0].y + cells[0].height + CELL_GAP);
+        assert_eq!(cells[3].y, cells[2].y);
+        assert_eq!(cells[1].x + cells[1].width, slot.x + slot.width);
+    }
+
+    #[test]
+    fn a_mosaic_stays_inside_the_slot_it_draws_in() {
+        let slot = area(10.0, 20.0, strip::poster_width(), strip::POSTER);
+        let cells = quarters(slot);
+        let over = cells[0].y - slot.y;
+        let under = slot.y + slot.height - (cells[2].y + cells[2].height);
+        assert!((0.0..1.0).contains(&over));
+        assert!((over - under).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_cell_the_shelf_holds_no_poster_for_names_no_art() {
+        let tiles = [("screening/films".to_string(), "posters/one.jpg".to_string())];
+        assert_eq!(cell(&tiles, 0), ("screening/films", "posters/one.jpg"));
+        assert_eq!(cell(&tiles, 1), ("", ""));
+        assert_eq!(cell(&[], 0), ("", ""));
+    }
+
+    #[test]
     fn art_the_person_chose_draws_at_full_opacity() {
         assert_eq!(Tone::Full.opacity(), 1.0);
         assert_eq!(Tone::Dimmed.opacity(), look::DIM);
@@ -328,7 +450,9 @@ mod tests {
         assert_eq!(Named.detail(), "");
         assert_eq!(Named.under(), "");
         assert_eq!(Named.caption(), "A Title");
+        assert!(!Named.leads_with_tagline());
         assert_eq!(Named.line_fitting(3), "A Title");
+        assert_eq!(Named.new_episodes(), 0);
         assert_eq!(Named.ratio(), wall::POSTER);
     }
 }

@@ -6,7 +6,7 @@
 use iced_winit::core::Rectangle;
 
 use super::{Block, Home};
-use crate::views::{area, banner, stack, strip, wall};
+use crate::views::{area, banner, strip, wall};
 
 // The margin at both sides of the strips, which is the band's own inset,
 // so the headings line up.
@@ -14,10 +14,6 @@ pub const MARGIN: f32 = 32.0;
 
 // The space between two strips.
 const GAP: f32 = 28.0;
-
-// How much of the strip under the focused one the scroll keeps in
-// view, so a person sees that there is more below.
-const TRAIL: f32 = 70.0;
 
 // The height one row takes on a page this tall.
 fn height(block: &Block, page: f32) -> f32 {
@@ -75,8 +71,15 @@ impl Layout {
         ))
     }
 
-    /// How far the page has scrolled: enough to hold the focused row and the
-    /// head of the row under it, and none while the band holds focus.
+    /// How far the page has scrolled. None while the band or the banner
+    /// holds focus. The first strip keeps as much of the banner over it as
+    /// the viewport holds, and scrolls only as far as it needs to stand
+    /// whole in view, because a short viewport holds less than the banner
+    /// and one strip. For every later row, the row's heading sits directly
+    /// under the band, so the rows under it fill the rest of the viewport:
+    /// a person presses down far more than up, and what is next matters
+    /// more than what was passed. The scroll stops at the foot of the
+    /// page, so the last rows never leave a gap under them.
     pub fn scroll(&self, home: &Home, page: f32, viewport: f32) -> f32 {
         if home.control.is_some() {
             return 0.0;
@@ -84,14 +87,32 @@ impl Layout {
         let Some(top) = self.tops.get(home.focus).copied().flatten() else {
             return 0.0;
         };
-        let block = area(0.0, top, 0.0, height(&home.blocks[home.focus], page));
-        let tail = TRAIL.min(self.content - block.y - block.height);
-        stack::offset(block, tail, self.content, viewport)
+        if home.focus == 0 {
+            return 0.0;
+        }
+        let under_band = top - wall::HEAD;
+        let foot = (self.content - viewport).max(0.0);
+        if self.head() == Some(home.focus) {
+            let bottom = top + height(&home.blocks[home.focus], page) + wall::HEAD;
+            return (bottom - viewport).clamp(0.0, under_band.min(foot).max(0.0));
+        }
+        under_band.clamp(0.0, foot)
+    }
+
+    // The first row after the banner that holds anything. A row that
+    // holds nothing takes no room, so it is never the first strip.
+    fn head(&self) -> Option<usize> {
+        self.tops
+            .iter()
+            .skip(1)
+            .position(Option::is_some)
+            .map(|index| index + 1)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::{Row, Strip};
     use super::*;
     use crate::sample::Catalog;
     use crate::views::band;
@@ -100,12 +121,6 @@ mod tests {
 
     fn home() -> Home {
         Home::open(&mut Catalog)
-    }
-
-    #[test]
-    fn the_trail_keeps_the_next_rows_heading_in_view() {
-        const { assert!(TRAIL > 46.0) };
-        const { assert!(TRAIL < strip::POSTER) };
     }
 
     #[test]
@@ -135,6 +150,36 @@ mod tests {
     }
 
     #[test]
+    fn the_first_strip_that_holds_anything_stands_under_the_whole_banner() {
+        let mut home = home();
+        home.blocks.insert(1, Block::Strip(Strip::new(Row::Genres)));
+        home.focus = 2;
+        let layout = Layout::of(&home, PAGE);
+        assert_eq!(layout.tops[1], None);
+        assert_eq!(layout.scroll(&home, PAGE, PAGE - band::HEIGHT), 0.0);
+    }
+
+    #[test]
+    fn a_short_viewport_scrolls_the_first_strip_whole_into_view_and_no_further() {
+        let mut home = home();
+        home.focus = 1;
+        let layout = Layout::of(&home, PAGE);
+        let strip = layout.tops[1].expect("the released strip holds slots");
+        let bottom = strip + strip::height(2) + wall::HEAD;
+        let short = bottom - 100.0;
+        let offset = layout.scroll(&home, PAGE, short);
+        assert_eq!(offset, 100.0);
+        let region = layout
+            .region(&home, 1, offset, 1920.0, PAGE)
+            .expect("the released strip has a region");
+        assert_eq!(region.y + region.height + wall::HEAD, band::HEIGHT + short);
+        assert_eq!(
+            layout.scroll(&home, PAGE, wall::HEAD + strip::height(2)),
+            strip - wall::HEAD
+        );
+    }
+
+    #[test]
     fn focus_on_the_second_strip_scrolls_the_banner_up_under_the_band() {
         let mut home = home();
         home.focus = 2;
@@ -145,6 +190,24 @@ mod tests {
             .region(&home, 0, offset, 1920.0, PAGE)
             .expect("the banner has a region");
         assert!(region.y < band::HEIGHT);
+        let region = layout
+            .region(&home, 2, offset, 1920.0, PAGE)
+            .expect("the second strip has a region");
+        assert_eq!(region.y, band::HEIGHT + wall::HEAD);
+    }
+
+    #[test]
+    fn the_last_row_scrolls_no_further_than_the_foot_of_the_page() {
+        let mut home = home();
+        home.focus = home.blocks.len() - 1;
+        let layout = Layout::of(&home, PAGE);
+        let viewport = PAGE - band::HEIGHT;
+        assert!(layout.tops[home.focus].is_some());
+        assert_eq!(
+            layout.scroll(&home, PAGE, viewport),
+            layout.content - viewport
+        );
+        assert_eq!(layout.scroll(&home, PAGE, layout.content + 100.0), 0.0);
     }
 
     #[test]

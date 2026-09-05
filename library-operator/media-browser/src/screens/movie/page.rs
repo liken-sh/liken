@@ -16,7 +16,7 @@ use super::{Focus, Movie};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::{self, Stack};
-use crate::views::{area, buttons, header, people, ratings, strip, text};
+use crate::views::{area, buttons, card, header, people, ratings, strip, text};
 
 // The margin at both sides of the page.
 const MARGIN: f32 = 120.0;
@@ -116,11 +116,23 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             },
         );
 
-        for (block, content, size, color) in [
-            (blocks.facts, &movie.facts, look::FACTS, look::muted()),
-            (blocks.tagline, &movie.tagline, look::TAGLINE, look::text()),
+        // The tagline is the film's own words, so it draws in the italic,
+        // as a card's tagline does.
+        for (block, content, face, color) in [
+            (
+                blocks.facts,
+                &movie.facts,
+                (look::FACTS, iced_winit::core::Font::with_name(look::FONT)),
+                look::muted(),
+            ),
+            (
+                blocks.tagline,
+                &movie.tagline,
+                (look::TAGLINE, look::ITALIC),
+                look::text(),
+            ),
         ] {
-            text::line(&mut frame, content, block.at(offset), size, color, column);
+            text::line_in(&mut frame, content, block.at(offset), face, color, column);
         }
 
         ratings::draw(&mut frame, &movie.ratings, blocks.ratings.at(offset));
@@ -159,13 +171,13 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     heading: &set.heading,
                     library: &movie.library,
                     last: None,
-                    lines: 0,
+                    lines: card::LINES,
                     headed: false,
                     region: area(
                         MARGIN,
                         block.top - offset,
                         bounds.width - 2.0 * MARGIN,
-                        strip::height(0),
+                        strip::height(card::LINES),
                     ),
                 },
             );
@@ -193,7 +205,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     heading: &band.heading,
                     library: &movie.library,
                     last: None,
-                    lines: 1,
+                    lines: card::LINES,
                     headed: matches!(
                         movie.focus,
                         Focus::Franchise(strip, Place::Heading) if strip == index
@@ -202,7 +214,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         MARGIN,
                         block.top - offset,
                         bounds.width - 2.0 * MARGIN,
-                        strip::height(1),
+                        strip::height(card::LINES),
                     ),
                 },
             );
@@ -332,12 +344,15 @@ impl Blocks {
         let tagline = place(0.0, lines(&movie.tagline, look::TAGLINE, column, 0));
         let plot = place(0.0, lines(&movie.plot, look::PLOT, column, PLOT_LINES));
         let buttons = place(0.0, buttons::HEIGHT);
-        let strip = movie.set.as_ref().map(|_| place(0.0, strip::height(0)));
+        let strip = movie
+            .set
+            .as_ref()
+            .map(|_| place(0.0, strip::height(card::LINES)));
         let franchises: Vec<Block> = movie
             .franchises
             .bands()
             .iter()
-            .map(|_| place(STRIPE_LEAD, strip::height(1)))
+            .map(|_| place(STRIPE_LEAD, strip::height(card::LINES)))
             .collect();
         let stripes: Vec<Block> = movie
             .stripes

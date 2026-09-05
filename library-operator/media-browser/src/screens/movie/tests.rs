@@ -177,6 +177,16 @@ impl Source for Films {
                 .map(|id| Title {
                     id: (*id).to_string(),
                     title: format!("Film {id}"),
+                    released: "2019-05-04".into(),
+                    duration: 8_460,
+                    rating: "PG-13".into(),
+                    // The first member carries a tagline and the others
+                    // do not, so the strip draws both kinds of words a
+                    // card leads with.
+                    tagline: match *id == "one" {
+                        true => "One line of it.".to_string(),
+                        false => String::new(),
+                    },
                     ..Title::default()
                 })
                 .collect(),
@@ -385,6 +395,22 @@ fn a_set_strip_holds_the_whole_set_and_marks_this_film() {
         .collect();
     assert_eq!(ids, ["one", "two", "three"]);
     assert_eq!(set.current, 1);
+}
+
+#[test]
+fn a_set_strip_draws_a_card_of_two_lines_over_the_year_and_the_runtime() {
+    let (page, _) = page(Films {
+        set: true,
+        ..Films::default()
+    });
+    let set = page.set.expect("the movie belongs to a set");
+    assert_eq!(set.members[0].fitted, "One line of it.");
+    assert!(set.members[0].tagline);
+    assert_eq!(set.members[1].fitted, "Film two");
+    assert!(!set.members[1].tagline);
+    for member in &set.members {
+        assert_eq!(member.under_fitted, "2019 · 2h 21m");
+    }
 }
 
 #[test]

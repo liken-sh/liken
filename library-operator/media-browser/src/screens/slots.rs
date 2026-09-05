@@ -7,12 +7,14 @@
 // here, because the home page's strips open the same pages a wall
 // does.
 
+use std::ops::Range;
+
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::Rectangle;
 
 use super::wall::Wall;
-use super::{Item, Screen, Step, movie, person, series};
+use super::{Item, Screen, Step, credits, movie, person, series};
 use crate::catalog::{Query, Source};
 use crate::focus;
 use crate::posters::Posters;
@@ -27,6 +29,11 @@ pub struct Slots {
     pub name: String,
     pub items: Vec<Item>,
     pub focus: usize,
+    // The run of items whose cards the shaper has already cut. A wall of
+    // a whole library is thousands of slots, and cutting them all costs
+    // more than a press may take, so the read cuts the page around the
+    // focus and a move cuts what it reaches.
+    cut: Range<usize>,
 }
 
 impl Slots {
@@ -37,6 +44,7 @@ impl Slots {
             name: String::new(),
             items: Vec::new(),
             focus: 0,
+            cut: 0..0,
         };
         slots.reread(source);
         slots
@@ -45,14 +53,32 @@ impl Slots {
     /// Read the answer again and keep focus in range, because a change can
     /// remove the focused slot.
     pub fn reread(&mut self, source: &mut dyn Source) {
-        let answer = source.wall(&self.query);
+        let mut answer = source.wall(&self.query);
+        credits::credit(&self.query, &mut answer.slots);
         self.name = answer.name;
         self.items = answer
             .slots
             .into_iter()
             .map(|slot| Item::of(&self.query, slot))
             .collect();
+        self.cut = 0..0;
         self.focus = self.focus.min(self.items.len().saturating_sub(1));
+        self.fitted();
+    }
+
+    // Cut the cards of the page around the focus to the band one cell
+    // holds, and leave the cards already cut as they are.
+    fn fitted(&mut self) {
+        let page = page(self.focus, self.items.len());
+        let band = wall::band(wall::COLUMNS);
+        let cut = self.cut.clone();
+        for index in page.clone().filter(|index| !cut.contains(index)) {
+            self.items[index].fit(band);
+        }
+        self.cut = match cut.is_empty() || page.start > cut.end || cut.start > page.end {
+            true => page,
+            false => page.start.min(cut.start)..page.end.max(cut.end),
+        };
     }
 
     /// The heading the band draws over these slots: the query's heading
@@ -66,6 +92,7 @@ impl Slots {
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         if key != "enter" {
             self.focus = focus::wall(self.focus, self.items.len(), wall::COLUMNS, key);
+            self.fitted();
             return Step::Stay;
         }
         match self.items.get(self.focus) {
@@ -115,6 +142,19 @@ impl Slots {
             },
         );
     }
+}
+
+// How many rows of cards on each side of the focused one the shaper
+// cuts. It is far more than a screen holds, so a move of one row cuts one
+// row, and a frame never draws a card the shaper has not measured.
+const PAGE: usize = 12;
+
+// The run of items one focus asks the shaper for: the rows around the
+// focused one, clamped to the wall.
+fn page(focus: usize, count: usize) -> Range<usize> {
+    let row = focus / wall::COLUMNS;
+    let first = row.saturating_sub(PAGE) * wall::COLUMNS;
+    first..((row + PAGE + 1) * wall::COLUMNS).min(count)
 }
 
 /// The screen a "see all" on this query opens. A person opens their own
@@ -177,6 +217,28 @@ mod tests {
     use crate::sample::Catalog;
 
     const LIBRARY: &str = "sample/features";
+
+    #[test]
+    fn the_shaper_cuts_the_rows_around_the_focus_and_no_more() {
+        assert_eq!(page(0, 5_000), 0..(PAGE + 1) * wall::COLUMNS);
+        assert_eq!(page(0, 12), 0..12);
+        let far = page(100 * wall::COLUMNS, 5_000);
+        assert_eq!(far.start, (100 - PAGE) * wall::COLUMNS);
+        assert_eq!(far.end, (100 + PAGE + 1) * wall::COLUMNS);
+        assert_eq!(page(0, 0), 0..0);
+    }
+
+    #[test]
+    fn a_move_across_the_wall_cuts_the_row_it_reached_and_leaves_the_rest() {
+        let query = Query::Library {
+            library: LIBRARY.into(),
+        };
+        let mut slots = Slots::open(query, &mut Catalog);
+        assert_eq!(slots.cut, page(0, slots.items.len()));
+        slots.key("down", &mut Catalog);
+        assert_eq!(slots.cut, 0..page(slots.focus, slots.items.len()).end);
+        assert_eq!(slots.cut.end, (PAGE + 2) * wall::COLUMNS);
+    }
 
     #[test]
     fn see_all_on_an_unknown_person_opens_nothing() {

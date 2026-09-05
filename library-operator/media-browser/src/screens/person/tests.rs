@@ -30,6 +30,14 @@ struct People {
     gone: bool,
     // How many works the person is credited in.
     works: usize,
+    // Whether the person is credited as an actor alone, so every work's
+    // parts line holds one `as` run and no role word.
+    acting: bool,
+    // Whether the person is credited as a director alone, so the credit
+    // leaves no part behind on any card.
+    directing: bool,
+    // Whether every work carries a title too long for a cell's band.
+    wordy: bool,
 }
 
 impl People {
@@ -42,10 +50,17 @@ impl People {
                 false => "movies".into(),
             },
             id: format!("title:{number}"),
-            title: format!("Title {number}"),
+            title: match self.wordy {
+                true => "W".repeat(60),
+                false => format!("Title {number}"),
+            },
             released: format!("{}-05-02", 2000 - number),
             art: format!("{number}.jpg"),
-            parts: "Director, as The Part".into(),
+            parts: match (self.acting, self.directing) {
+                (true, _) => "as The Part".into(),
+                (_, true) => "Director".into(),
+                _ => "Director, as The Part".into(),
+            },
             ..Slot::default()
         }
     }
@@ -193,17 +208,59 @@ fn the_dates_read_as_the_entry_holds_them() {
 }
 
 #[test]
-fn a_work_carries_its_title_its_year_and_its_parts() {
+fn a_work_carries_its_title_and_its_parts() {
     let (page, _) = credited(3);
     let works = &page.works.items;
     assert_eq!(works.len(), 3);
-    assert_eq!(works[0].caption(), "Title 1 · 1999");
+    assert_eq!(works[0].caption(), "Title 1");
     assert_eq!(works[0].line_fitting(80), "Title 1 · 1999");
-    assert_eq!(works[0].under(), "Director, as The Part");
+    assert_eq!(works[0].under(), "Director, as The Part · 1999");
     assert_eq!(works[0].art(), "1.jpg");
     assert_eq!(works[0].name(), "Title 1");
     assert_eq!(works[0].library(), LIBRARY);
     assert_eq!(page.works.heading(), "A Player");
+}
+
+#[test]
+fn a_work_of_an_actor_alone_leads_with_the_character() {
+    let (page, _) = page(People {
+        works: 3,
+        acting: true,
+        ..People::default()
+    });
+    let works = &page.works.items;
+    assert_eq!(works[0].caption(), "The Part");
+    assert_eq!(works[0].under(), "Title 1 · 1999");
+    assert_eq!(works[0].name(), "Title 1");
+}
+
+#[test]
+fn a_work_the_credit_leaves_no_part_on_reads_its_kind_and_its_year() {
+    let (page, _) = page(People {
+        works: 3,
+        directing: true,
+        ..People::default()
+    });
+    let works = &page.works.items;
+    assert_eq!(works[0].caption(), "Title 1");
+    assert_eq!(works[0].under(), "Film · 1999");
+    assert_eq!(works[2].caption(), "Title 3");
+    assert_eq!(works[2].under(), "Series · 1997");
+}
+
+#[test]
+fn a_wall_of_works_cuts_both_lines_of_every_card_at_the_read() {
+    let (page, _) = page(People {
+        works: 3,
+        wordy: true,
+        ..People::default()
+    });
+    let band = crate::views::wall::band(crate::views::wall::COLUMNS);
+    let card = &page.works.items[0];
+    assert!(card.fitted().ends_with('\u{2026}'));
+    assert!(card.fitted().chars().count() < card.caption().chars().count());
+    assert!(crate::views::text::measured(card.fitted(), crate::look::CAPTION) <= band);
+    assert!(crate::views::text::measured(card.under_fitted(), crate::look::FACE) <= band);
 }
 
 #[test]

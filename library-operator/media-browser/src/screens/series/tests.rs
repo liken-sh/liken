@@ -288,8 +288,8 @@ fn a_page_opens_with_focus_on_the_episode_it_was_asked_for() {
         .expect("the catalog holds it");
     assert_eq!(page.focus, Focus::Still(7));
     assert_eq!(
-        page.focused().map(|still| still.caption.as_str()),
-        Some("E3 · Segment 3")
+        page.focused().map(|still| still.fitted.as_str()),
+        Some("Segment 3")
     );
 }
 
@@ -333,23 +333,33 @@ fn a_season_whose_first_episode_holds_no_year_names_the_season_alone() {
 }
 
 #[test]
-fn a_still_carries_its_caption_and_the_facts_the_header_draws() {
+fn a_still_leads_with_its_name_and_carries_the_facts_the_header_draws() {
     let (page, _) = page(Serials::default());
-    assert_eq!(page.stills[1].caption, "E2 · Segment 2");
-    assert_eq!(page.stills[1].line.words(), "E2 · Segment 2 · 46m");
-    assert_eq!(page.stills[1].facts, "S1 E2 · Segment 2");
+    assert_eq!(page.stills[1].fitted, "Segment 2");
+    assert_eq!(page.stills[1].under, "E02 · 46m");
+    assert_eq!(page.stills[1].facts, "S01 · E02 · Segment 2");
     assert_eq!(page.stills[1].aired, "46m · March 2, 2004");
     assert_eq!(page.stills[1].plot, "The plot of S1 E2.");
     assert_eq!(page.stills[1].art, "s1e2.jpg");
 }
 
 #[test]
-fn a_narrow_band_drops_a_still_s_runtime_before_its_name() {
-    let (page, _) = page(Serials::default());
-    let still = &page.stills[1];
-    assert_eq!(still.line_fitting(20), "E2 · Segment 2 · 46m");
-    assert_eq!(still.line_fitting(19), "E2 · Segment 2");
-    assert_eq!(still.line_fitting(4), "E2 · Segment 2");
+fn a_still_whose_name_runs_past_its_cell_is_cut_at_the_read() {
+    let band = wall::band(COLUMNS);
+    let still = still_of(
+        Episode {
+            season: 1,
+            episode: 2,
+            title: "The Segment That Ran Long ".repeat(4),
+            duration: 2_760,
+            ..Episode::default()
+        },
+        "2026-09-04",
+        band,
+    );
+    assert!(still.fitted.ends_with('\u{2026}'));
+    assert!(crate::views::text::measured(&still.fitted, crate::look::CAPTION) <= band);
+    assert_eq!(still.under, "E02 · 46m");
 }
 
 #[test]
@@ -387,7 +397,7 @@ fn the_header_shows_the_focused_episodes_plot_in_place_of_the_series() {
     assert_eq!(page.plot, "The series' own plot.");
     pressed(&mut page, &mut source, "down");
     let focused = page.focused().expect("a still holds focus");
-    assert_eq!(focused.facts, "S1 E5 · Segment 5");
+    assert_eq!(focused.facts, "S01 · E05 · Segment 5");
     assert_eq!(focused.aired, "46m · March 5, 2004");
     assert_eq!(focused.plot, "The plot of S1 E5.");
 }

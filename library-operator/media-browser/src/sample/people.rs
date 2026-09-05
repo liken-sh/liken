@@ -68,9 +68,10 @@ pub fn person(library: &str, path: &str) -> Option<Person> {
 /// Every invented person acts in the first three movies, so a person's
 /// page opens on a wall of three, and the prolific writer's wall holds
 /// the first `PROLIFIC_WORKS` movies as their writer, so the sample's pool
-/// has one person over the floor. The slots carry no duration and no
-/// rating, because the sidecar's works read carries neither, and the
-/// sample answers the same shape.
+/// has one person over the floor.
+/// The slots carry the duration and the rating, as the sidecar's works
+/// read does, so a card under a one-role heading draws the facts line
+/// every other strip draws.
 pub fn works(library: &str, path: &str) -> Vec<Slot> {
     if !path.starts_with(CONTRIBUTORS) {
         return Vec::new();
@@ -83,8 +84,6 @@ pub fn works(library: &str, path: &str) -> Vec<Slot> {
         .map(movie)
         .map(|title| Slot {
             parts: parts.into(),
-            duration: 0,
-            rating: String::new(),
             ..Slot::of(library, "movies", title)
         })
         .collect();

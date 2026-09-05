@@ -90,7 +90,7 @@ fn a_title_carries_its_genres_and_its_scores_apart_from_its_facts() {
 fn the_drawn_strips_feed_the_banner_before_the_recency_strips() {
     let browser = Browser::new(
         Fake {
-            movies: 3,
+            movies: IN_SET,
             recent: true,
             people: true,
             sets: true,
@@ -100,11 +100,11 @@ fn the_drawn_strips_feed_the_banner_before_the_recency_strips() {
         NoPosters::default(),
     );
     let names = names(&browser);
-    assert_eq!(names.len(), 4);
-    assert_eq!(names[3], "The Serial");
-    let mut drawn: Vec<&str> = names[..3].to_vec();
+    assert_eq!(names.len(), 5);
+    assert_eq!(names[4], "The Serial");
+    let mut drawn: Vec<&str> = names[..4].to_vec();
     drawn.sort_unstable();
-    assert_eq!(drawn, ["Entry 1", "Entry 2", "Entry 3"]);
+    assert_eq!(drawn, ["Entry 1", "Entry 2", "Entry 3", "Entry 4"]);
 }
 
 #[test]

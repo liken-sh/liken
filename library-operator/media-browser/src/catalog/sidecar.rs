@@ -13,7 +13,7 @@ use crate::catalog::pool::Candidate;
 use crate::catalog::{
     Answer, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, LibraryEntry,
     Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Query, Selection, SeriesDetails,
-    Slot, Source, library_name, recency,
+    Slot, Source, TILES, library_name, recency,
 };
 use crate::harness::Waker;
 
@@ -119,16 +119,36 @@ fn item_table(kind: &str) -> Option<&'static str> {
 fn library_slots(connection: &Connection, library: &str) -> rusqlite::Result<Vec<Slot>> {
     let sql = format!(
         "SELECT * FROM (\
-           SELECT {columns}, 'movies' AS kind, sort_key FROM movies WHERE library = ?1 \
+           SELECT {columns}, {movies} AS seasons, 'movies' AS kind, sort_key \
+           FROM movies WHERE library = ?1 \
            UNION ALL \
-           SELECT {columns}, 'series' AS kind, sort_key FROM series WHERE library = ?1\
+           SELECT {columns}, {series} AS seasons, 'series' AS kind, sort_key \
+           FROM series WHERE library = ?1\
          ) ORDER BY sort_key",
-        columns = item::COLUMNS
+        columns = item::COLUMNS,
+        movies = item::seasons("movies"),
+        series = item::seasons("series"),
     );
     collect(connection, &sql, &[&library], |row| {
-        let kind: String = row.get(6)?;
-        Ok(Slot::of(library, &kind, item::title(row)?))
+        let kind: String = row.get(item::WIDTH + 1)?;
+        Ok(Slot {
+            seasons: row.get(item::WIDTH)?,
+            ..Slot::of(library, &kind, item::title(row)?)
+        })
     })
+}
+
+// The posters of one library's newest-added titles that have one, in the
+// order the Added query reads them, and no more than a tile holds.
+fn newest_art(connection: &Connection, library: &str, kind: &str) -> rusqlite::Result<Vec<String>> {
+    let Some(table) = item_table(kind) else {
+        return Ok(Vec::new());
+    };
+    let sql = format!(
+        "SELECT art FROM {table} WHERE library = ?1 AND art != '' \
+         ORDER BY added DESC, id LIMIT {TILES}"
+    );
+    collect(connection, &sql, &[&library], |row| row.get(0))
 }
 
 fn collect<T>(
@@ -145,31 +165,33 @@ fn collect<T>(
 impl Source for SidecarSource {
     fn libraries(&mut self) -> Vec<LibraryEntry> {
         // A library has one kind, so the union yields one row per library, and
-        // the outer ORDER BY gives the libraries strip its order. The correlated
-        // subquery reads the art of the library's newest-added title that has
-        // any, through the (library, added) index, so the libraries strip draws
-        // each library as a poster.
-        let sql = "SELECT library, kind, items, art FROM (\
-                     SELECT library, 'movies' AS kind, COUNT(*) AS items, \
-                       (SELECT art FROM movies newest WHERE newest.library = movies.library \
-                        AND newest.art != '' ORDER BY newest.added DESC, newest.id LIMIT 1) AS art \
+        // the outer ORDER BY gives the libraries strip its order.
+        let sql = "SELECT library, kind, items FROM (\
+                     SELECT library, 'movies' AS kind, COUNT(*) AS items \
                      FROM movies GROUP BY library \
                      UNION ALL \
-                     SELECT library, 'series' AS kind, COUNT(*) AS items, \
-                       (SELECT art FROM series newest WHERE newest.library = series.library \
-                        AND newest.art != '' ORDER BY newest.added DESC, newest.id LIMIT 1) AS art \
+                     SELECT library, 'series' AS kind, COUNT(*) AS items \
                      FROM series GROUP BY library\
                    ) ORDER BY library";
-        self.read(|connection| {
+        let mut entries: Vec<LibraryEntry> = self.read(|connection| {
             collect(connection, sql, &[], |row| {
                 Ok(LibraryEntry {
                     library: row.get(0)?,
                     kind: row.get(1)?,
                     items: row.get::<_, i64>(2)?.max(0) as u64,
-                    art: item::text(row, 3)?,
+                    art: Vec::new(),
                 })
             })
-        })
+        });
+        // The art is one read per library, because the count is a grouped
+        // read of the whole table and the art is the head of that library's
+        // own (library, added) index.
+        for entry in &mut entries {
+            let library = entry.library.clone();
+            let kind = entry.kind.clone();
+            entry.art = self.read(|connection| newest_art(connection, &library, &kind));
+        }
+        entries
     }
 
     fn genres(&mut self) -> Vec<GenreEntry> {

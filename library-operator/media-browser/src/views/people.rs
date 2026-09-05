@@ -7,7 +7,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
-use iced_winit::core::{Color, Point, Rectangle};
+use iced_winit::core::{Point, Rectangle};
 
 use super::{Card, Tone, area, artwork, label, mark, scroll, text, wall};
 use crate::look;
@@ -125,8 +125,18 @@ pub fn draw<T: Card, P: Posters>(
             mark(frame, slot);
         }
         let name = captioned(slot);
-        written(frame, name, person.name(), look::text());
-        written(frame, under(name), person.detail(), look::faint());
+        text::centered(frame, person.name(), name, look::FACE, look::text());
+        // The second line draws the way a card's does, small, faint, and
+        // italic, so a headshot and a poster read as one.
+        let band = under(name);
+        text::faced(
+            frame,
+            &text::cut(person.detail(), look::FACE, band.width),
+            band,
+            look::FACE,
+            look::faint(),
+            look::ITALIC,
+        );
     }
 }
 
@@ -144,26 +154,6 @@ fn captioned(slot: Rectangle) -> Rectangle {
 // The band the second caption line draws in, under the first.
 fn under(band: Rectangle) -> Rectangle {
     area(band.x, band.y + band.height, band.width, band.height)
-}
-
-// One caption line centered in its band and clipped to it, so a
-// long name never runs over its neighbour.
-fn written(frame: &mut canvas::Frame<Renderer>, band: Rectangle, content: &str, color: Color) {
-    if content.is_empty() {
-        return;
-    }
-    let shown = text::cut(content, look::FACE, band.width);
-    frame.with_clip(band, |frame| {
-        frame.fill_text(label(
-            &shown,
-            Point::new(band.center_x(), band.y),
-            look::FACE,
-            color,
-            Alignment::Center,
-            Vertical::Top,
-            f32::INFINITY,
-        ));
-    });
 }
 
 #[cfg(test)]

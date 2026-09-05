@@ -14,7 +14,7 @@ use super::Person;
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::Stack;
-use crate::views::{area, extent, text, wall};
+use crate::views::{area, card, extent, text, wall};
 
 // The margin at both sides of the head.
 const MARGIN: f32 = 120.0;
@@ -35,9 +35,8 @@ const GAP: f32 = 12.0;
 // The lines the biography is cut to.
 const BIOGRAPHY_LINES: usize = 4;
 
-// The caption lines under each work: the title and its year, then the
-// parts the person played in it.
-const LINES: usize = 2;
+// The lines under each work: the card's own two.
+const LINES: usize = card::LINES;
 
 /// The width of the headshot: the height at the wall's poster
 /// ratio.

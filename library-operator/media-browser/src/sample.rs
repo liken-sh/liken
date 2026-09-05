@@ -7,13 +7,13 @@ use crate::catalog::recency::{self, CANDIDATES, Candidate};
 use crate::catalog::{
     Answer, Credit, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
     LibraryEntry, Membership, MovieDetails, MovieSet, Person, PlayItem, Query, Selection,
-    SeriesDetails, Slot, Source, Title, library_name, pool,
+    SeriesDetails, Slot, Source, TILES, Title, library_name, pool,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
 
 // The invented people of the sample catalog.
-mod people;
+pub mod people;
 
 // The invented genres and the invented pool the day's draw reads.
 mod draw;
@@ -68,13 +68,17 @@ impl Source for Catalog {
                 library: FEATURES.into(),
                 kind: "movies".into(),
                 items: MOVIES as u64,
-                art: movie(1).art,
+                art: newest_movies(),
             },
             LibraryEntry {
                 library: SERIALS_LIBRARY.into(),
                 kind: "series".into(),
                 items: SERIALS as u64,
-                art: serial(SERIALS).art,
+                // A serial's import day climbs with its number, so the
+                // newest-added serials are the last ones invented.
+                art: (0..TILES as i64)
+                    .map(|step| serial(SERIALS - step).art)
+                    .collect(),
             },
         ]
     }
@@ -146,7 +150,7 @@ impl Source for Catalog {
             duration: 0,
             rating: "TV-14".into(),
             genres: draw::serial_genres(),
-            tagline: format!("Serial {number:02}, in its own seasons."),
+            tagline: serial(number).tagline,
             plot: PLOT.repeat(2),
             creators: vec![format!("Creator {number:02}")],
             cast: (1..=6)
@@ -203,7 +207,7 @@ impl Source for Catalog {
             duration: title.duration,
             rating: title.rating,
             genres: draw::movie_genres(number),
-            tagline: format!("The {number:04}th of its kind."),
+            tagline: tagline(number),
             plot: PLOT.repeat(2),
             directors: vec![format!("Director {number:04}")],
             writers: vec![format!("Writer {number:04}"), "A Second Writer".into()],
@@ -314,8 +318,26 @@ fn titles(library: &str) -> Vec<Slot> {
             .collect();
     }
     (1..=SERIALS)
-        .map(|number| Slot::of(library, "series", serial(number)))
+        .map(|number| serial_slot(library, number))
         .collect()
+}
+
+// The tagline of one invented movie. Every third movie has none, so a
+// card of one falls back to its title.
+pub(super) fn tagline(number: i64) -> String {
+    match number % 3 == 0 {
+        true => String::new(),
+        false => format!("The {number:04}th of its kind."),
+    }
+}
+
+// One invented serial as a slot, with the season count the sidecar's
+// series read carries.
+pub(super) fn serial_slot(library: &str, number: i64) -> Slot {
+    Slot {
+        seasons: seasons(number),
+        ..Slot::of(library, "series", serial(number))
+    }
 }
 
 // One invented serial, as a title row.
@@ -327,6 +349,7 @@ fn serial(number: i64) -> Title {
         art: format!("art/serial-{number:02}.jpg"),
         duration: 0,
         rating: "TV-14".into(),
+        tagline: format!("Serial {number:02}, in its own seasons."),
     }
 }
 
@@ -361,6 +384,7 @@ fn recent<K: Ord>(key: impl Fn(&Candidate) -> K) -> Vec<Candidate> {
                     art: episode.art,
                     duration: episode.duration,
                     rating: String::new(),
+                    tagline: String::new(),
                 },
                 series: serial(number),
             });
@@ -418,6 +442,19 @@ fn arrival(number: i64, episode: &Episode) -> i64 {
     }
 }
 
+// The posters of the newest-added invented movies, which the libraries
+// strip draws the features library as, in the order the Added query
+// answers them.
+fn newest_movies() -> Vec<String> {
+    let mut numbers: Vec<i64> = (1..=MOVIES).collect();
+    numbers.sort_by_key(|number| std::cmp::Reverse(movie_arrival(*number)));
+    numbers
+        .into_iter()
+        .take(TILES)
+        .map(|number| movie(number).art)
+        .collect()
+}
+
 // One invented movie, the same row every time.
 fn movie(number: i64) -> Title {
     Title {
@@ -427,6 +464,7 @@ fn movie(number: i64) -> Title {
         art: format!("posters/specimen-{number:04}.jpg"),
         duration: 4_800 + (number % 47) * 60,
         rating: "PG-13".into(),
+        tagline: tagline(number),
     }
 }
 
@@ -657,14 +695,20 @@ mod tests {
     }
 
     #[test]
-    fn every_library_draws_as_one_of_its_posters() {
+    fn every_library_draws_as_a_mosaic_of_its_newest_added_posters() {
         let mut catalog = Catalog;
-        assert!(
-            catalog
-                .libraries()
-                .iter()
-                .all(|entry| !entry.art.is_empty())
-        );
+        let libraries = catalog.libraries();
+        assert!(libraries.iter().all(|entry| entry.art.len() == TILES));
+        let added = catalog.wall(&Query::Added {
+            fold: crate::catalog::Fold::Titles,
+        });
+        let newest = added
+            .slots
+            .iter()
+            .find(|slot| slot.library == FEATURES)
+            .expect("the added strip holds a movie");
+        assert_eq!(libraries[0].art[0], newest.art);
+        assert_eq!(libraries[1].art[0], serial(SERIALS).art);
     }
 
     #[test]

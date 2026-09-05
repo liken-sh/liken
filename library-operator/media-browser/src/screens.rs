@@ -5,6 +5,7 @@
 // primitives in the views module. A new kind adds a screen here and,
 // where it needs one, a primitive there. It adds no row to a table.
 
+pub mod credits;
 pub mod facts;
 pub mod foot;
 pub mod franchise;
@@ -24,11 +25,12 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Theme};
 
+use self::series::seasons_of;
 use crate::catalog::{InSeries, Query, Selection, Slot, Source};
 use crate::posters::Posters;
 use crate::views::curtain::Curtain;
 use crate::views::{
-    Card,
+    Card, card, strip,
     wall::{POSTER, STILL},
 };
 
@@ -157,14 +159,18 @@ impl Screen {
 /// One title, as a wall slot or a strip poster draws it. Every item
 /// carries its own library and kind, because a select opens the page for
 /// the slot's kind and a wall may span libraries. The id is what a descent
-/// carries. The caption is the line under every slot, the line is what the
-/// focused slot shows, and `under` is the second caption line, empty on
-/// every wall but a person's and the libraries strip. `episode` is what an
+/// carries. `episode` is what an
 /// episode slot carries: the series a select opens and the numbers it
 /// opens on, and an item that holds one draws as a still. `art_library` is
 /// the library the art resolves against, where that is not the item's own:
 /// a franchise slot opens in the `Library` of kind franchises, and its art
 /// may be a member's poster on the member's own volume.
+/// The caption is the words the card leads with, `under` is its second
+/// line, and `line` is what the focused slot of a one-line wall shows.
+/// `fitted` and `under_fitted` are those two lines cut by the shaper to
+/// the band the card draws them in, so no frame measures them and no
+/// line runs past its cell. A strip cuts every card at its read, and a
+/// wall cuts the page of rows around its focus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub library: String,
@@ -173,50 +179,83 @@ pub struct Item {
     pub id: String,
     pub name: String,
     pub caption: String,
+    pub fitted: String,
     pub line: facts::Line,
     pub under: String,
+    pub under_fitted: String,
+    /// Whether the card's first line is the film's tagline, which draws
+    /// in the italic face, and not the title, which draws in the roman
+    /// one.
+    pub tagline: bool,
     pub art: String,
+    /// The posters a shelf draws as a mosaic, each with the library it
+    /// resolves against. Only a library and a genre carry any; every
+    /// other item draws the one art beside it.
+    pub tiles: Vec<(String, String)>,
     pub episode: Option<InSeries>,
+    /// How many episodes of a folded show are current, and zero on every
+    /// other item.
+    pub new: usize,
 }
 
 impl Item {
-    /// One slot as an item. The query decides the caption: a person's works
-    /// are read by year, so their caption carries it, and every other wall
-    /// captions the name alone. An episode slot, whatever the query, is
-    /// captioned with its numbers and its series' name, because the still
-    /// alone does not say which series it is from, and its focused line is
-    /// the same two, bright. A recency, genre, or set strip draws a second
-    /// line under every slot, an episode's title and runtime or a title's
-    /// year, runtime, and rating, because a strip's caption band holds one
-    /// short line and an episode's title would otherwise be dropped from the
-    /// end. A person's strip draws the parts there. Every line is built once
-    /// here, at the read, and not on every frame.
+    /// One slot as an item, with both caption lines built once here, at
+    /// the read, and not on every frame.
+    /// A still reads as its episode title over the series, the numbers,
+    /// and the runtime. A work whose parts are all `as` runs reads as the
+    /// character over the title and the year.
+    /// Every other slot leads with the words its kind leads with, a
+    /// film's tagline or a title.
+    /// The second line under those words is one of four: the parts a
+    /// person's strip credits with the year; the kind word with the year
+    /// where that strip credits none; the year and the runtime on a set's
+    /// strip, where every member is a film and the kind word says nothing;
+    /// or the facts line: the year, a series' season count, the runtime,
+    /// and the rating.
     pub fn of(query: &Query, slot: Slot) -> Self {
         let year = facts::year(&slot.released);
         let numbers = slot
             .episode
             .as_ref()
-            .map(|place| format!("S{:02}E{:02}", place.season, place.episode))
+            .map(|place| format!("S{:02} · E{:02}", place.season, place.episode))
             .unwrap_or_default();
         let series = slot
             .episode
             .as_ref()
             .map(|place| place.name.as_str())
             .unwrap_or_default();
-        let caption = match (&slot.episode, query) {
-            (Some(_), _) => facts::joined(&[&numbers, series]),
-            (None, Query::Person { .. }) => facts::joined(&[&slot.title, year]),
-            (None, _) => slot.title.clone(),
-        };
         let runtime = facts::runtime(slot.duration);
         let line = match slot.episode.is_some() {
             true => facts::Line::of(&[series, &numbers]),
             false => facts::Line::of(&[&slot.title, year, &runtime, &slot.rating]),
         };
-        let under = match (query, &slot.episode) {
-            (Query::Person { .. } | Query::Library { .. }, _) => slot.parts.clone(),
-            (_, Some(_)) => facts::joined(&[&slot.title, &runtime]),
-            (_, None) => facts::joined(&[year, &runtime, &slot.rating]),
+        // The facts line. Only a series slot carries a season count, and
+        // it stands between the year and the runtime.
+        let facts = facts::joined(&[year, &seasons_of(slot.seasons), &runtime, &slot.rating]);
+        // A whole show folded into one still reads the way one episode of
+        // it does, so every still of a strip reads the same. The character
+        // leads a work only where every part left is an `as` run.
+        let leads = leading(&slot);
+        let tagged = tagged(&slot);
+        let (caption, under, tagline) = match (&slot.episode, query, played(&slot.parts)) {
+            (Some(_), _, _) => (
+                slot.title.clone(),
+                facts::joined(&[series, &numbers, &runtime]),
+                false,
+            ),
+            (None, Query::Person { .. }, Some(character)) => {
+                (character, facts::joined(&[&slot.title, year]), false)
+            }
+            (None, Query::Person { .. }, None) => (
+                leads,
+                match slot.parts.is_empty() {
+                    true => facts::joined(&[facts::kind_word(&slot.kind), year]),
+                    false => facts::joined(&[&slot.parts, year]),
+                },
+                tagged,
+            ),
+            (None, Query::Set { .. }, _) => (leads, facts::joined(&[year, &runtime]), tagged),
+            (None, _, _) => (leads, facts, tagged),
         };
         Self {
             library: slot.library,
@@ -224,13 +263,74 @@ impl Item {
             kind: slot.kind,
             id: slot.id,
             name: slot.title,
+            fitted: caption.clone(),
             caption,
             line,
+            under_fitted: under.clone(),
             under,
+            tagline,
             art: slot.art,
+            tiles: Vec::new(),
             episode: slot.episode,
+            new: slot.new,
         }
     }
+
+    /// Both lines of the card cut by the shaper to a band of this width,
+    /// each at the size it draws at, so the smaller second line keeps
+    /// the words the first would have lost.
+    pub fn fit(&mut self, band: f32) {
+        self.fitted = card::cut(&self.caption, band);
+        self.under_fitted = card::under_cut(&self.under, band);
+    }
+}
+
+/// Every card of a strip, cut at the read to the band its own ratio
+/// draws it in. A strip slot is one poster or one still wide, so the band
+/// is a constant of the strip and not of the frame.
+pub fn fitted_strip(items: &mut [Item]) {
+    for item in items.iter_mut() {
+        item.fit(strip::caption_width(item.ratio()));
+    }
+}
+
+// The words a card leads with: a film's tagline where the sidecar wrote
+// one, and the title everywhere else. A film's poster carries its title,
+// so the card says something the poster cannot; a series is known by its
+// name.
+fn leading(slot: &Slot) -> String {
+    match tagged(slot) {
+        true => slot.tagline.clone(),
+        false => slot.title.clone(),
+    }
+}
+
+// Whether the words a card leads with are the film's tagline.
+fn tagged(slot: &Slot) -> bool {
+    slot.kind == MOVIES && !slot.tagline.is_empty()
+}
+
+// The kind a movie row carries, the one kind whose card leads with a
+// tagline.
+const MOVIES: &str = "movies";
+
+// The run that names a character in a parts line, and never a role word.
+const AS: &str = "as ";
+
+// The characters of a parts line without the `as `, joined the way the
+// parts were, and nothing where a part is not an `as` run, because then
+// the parts line still says which role was which.
+fn played(parts: &str) -> Option<String> {
+    let runs: Vec<&str> = parts.split(", ").filter(|part| !part.is_empty()).collect();
+    if runs.is_empty() || !runs.iter().all(|run| run.starts_with(AS)) {
+        return None;
+    }
+    Some(
+        runs.iter()
+            .map(|run| &run[AS.len()..])
+            .collect::<Vec<&str>>()
+            .join(", "),
+    )
 }
 
 impl Card for Item {
@@ -262,12 +362,32 @@ impl Card for Item {
         &self.caption
     }
 
+    fn fitted(&self) -> &str {
+        &self.fitted
+    }
+
+    fn under_fitted(&self) -> &str {
+        &self.under_fitted
+    }
+
     fn under(&self) -> &str {
         &self.under
     }
 
     fn line_fitting(&self, chars: usize) -> &str {
         self.line.fitting(chars)
+    }
+
+    fn leads_with_tagline(&self) -> bool {
+        self.tagline
+    }
+
+    fn tiles(&self) -> &[(String, String)] {
+        &self.tiles
+    }
+
+    fn new_episodes(&self) -> usize {
+        self.new
     }
 }
 
@@ -294,8 +414,11 @@ mod tests {
             art: "posters/1.jpg".into(),
             duration: 5_820,
             rating: "PG-13".into(),
+            tagline: String::new(),
             parts: String::new(),
             episode: None,
+            new: 0,
+            seasons: 0,
         }
     }
 
@@ -305,7 +428,7 @@ mod tests {
         assert_eq!(item.line.words(), "Specimen 0001 · 1987 · 1h 37m · PG-13");
         assert_eq!(item.name, "Specimen 0001");
         assert_eq!(item.caption(), "Specimen 0001");
-        assert_eq!(item.under(), "");
+        assert_eq!(item.under(), "1987 · 1h 37m · PG-13");
         assert_eq!(item.art, "posters/1.jpg");
         assert_eq!(item.library(), LIBRARY);
         assert_eq!(item.kind, "movies");
@@ -313,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn an_episode_is_captioned_with_its_numbers_and_its_series_and_draws_as_a_still() {
+    fn an_episode_leads_with_its_own_title_over_its_show_and_draws_as_a_still() {
         let query = Query::Released {
             fold: crate::catalog::Fold::Airing,
         };
@@ -334,11 +457,129 @@ mod tests {
                 ..specimen()
             },
         );
-        assert_eq!(item.caption(), "S03E04 · Serial 03");
-        assert_eq!(item.line.words(), "Serial 03 · S03E04");
-        assert_eq!(item.under(), "Segment 04 · 46m");
+        assert_eq!(item.caption(), "Segment 04");
+        assert_eq!(item.line.words(), "Serial 03 · S03 · E04");
+        assert_eq!(item.under(), "Serial 03 · S03 · E04 · 46m");
         assert_eq!(item.ratio(), STILL);
         assert_eq!(item.kind, "episodes");
+    }
+
+    #[test]
+    fn a_folded_show_reads_the_way_one_episode_of_it_does() {
+        let query = Query::Released {
+            fold: Fold::Shows { today: 0 },
+        };
+        let item = Item::of(
+            &query,
+            Slot {
+                kind: "episodes".into(),
+                id: "series:sample:03".into(),
+                title: "Segment 08".into(),
+                released: "2026-09-01".into(),
+                duration: 3_120,
+                new: 2,
+                episode: Some(InSeries {
+                    series: "series:sample:03".into(),
+                    name: "Serial 03".into(),
+                    season: 4,
+                    episode: 8,
+                }),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "Segment 08");
+        assert_eq!(item.under(), "Serial 03 · S04 · E08 · 52m");
+        assert_eq!(item.line.words(), "Serial 03 · S04 · E08");
+        assert_eq!(item.ratio(), STILL);
+        assert_eq!(item.new_episodes(), 2);
+    }
+
+    #[test]
+    fn a_films_card_leads_with_its_tagline_and_keeps_its_title_as_its_name() {
+        let item = Item::of(
+            &library(),
+            Slot {
+                tagline: "One of a kind.".into(),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "One of a kind.");
+        assert_eq!(item.under(), "1987 · 1h 37m · PG-13");
+        assert_eq!(item.name(), "Specimen 0001");
+        assert_eq!(item.line.words(), "Specimen 0001 · 1987 · 1h 37m · PG-13");
+    }
+
+    #[test]
+    fn a_film_the_sidecar_wrote_no_tagline_for_leads_with_its_title() {
+        assert_eq!(Item::of(&library(), specimen()).caption(), "Specimen 0001");
+    }
+
+    #[test]
+    fn a_series_card_leads_with_its_title_whatever_its_tagline_says() {
+        let item = Item::of(
+            &library(),
+            Slot {
+                tagline: "One of a kind.".into(),
+                ..serial()
+            },
+        );
+        assert_eq!(item.caption(), "Serial 03");
+        assert_eq!(item.under(), "2004 · 5 seasons · TV-14");
+    }
+
+    #[test]
+    fn a_persons_card_of_a_film_leads_with_the_tagline_over_the_parts_and_the_year() {
+        let item = Item::of(
+            &person(),
+            Slot {
+                tagline: "One of a kind.".into(),
+                parts: "Director, Writer".into(),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "One of a kind.");
+        assert_eq!(item.under(), "Director, Writer · 1987");
+    }
+
+    #[test]
+    fn a_card_cuts_both_its_lines_to_the_band_it_is_given() {
+        let mut item = Item::of(
+            &library(),
+            Slot {
+                title: "W".repeat(60),
+                ..specimen()
+            },
+        );
+        item.fit(200.0);
+        assert!(item.fitted().ends_with('\u{2026}'));
+        assert!(crate::views::text::measured(item.fitted(), crate::look::CAPTION) <= 200.0);
+        assert_eq!(item.under_fitted(), item.under());
+    }
+
+    #[test]
+    fn every_card_of_a_strip_is_cut_to_the_band_its_own_ratio_draws_in() {
+        let mut items = vec![
+            Item::of(
+                &library(),
+                Slot {
+                    title: "W".repeat(60),
+                    ..specimen()
+                },
+            ),
+            Item::of(
+                &library(),
+                Slot {
+                    title: "W".repeat(60),
+                    episode: Some(InSeries::default()),
+                    ..specimen()
+                },
+            ),
+        ];
+        fitted_strip(&mut items);
+        let poster = crate::views::text::measured(items[0].fitted(), crate::look::CAPTION);
+        let still = crate::views::text::measured(items[1].fitted(), crate::look::CAPTION);
+        assert!(poster <= strip::caption_width(POSTER));
+        assert!(still > poster);
     }
 
     #[test]
@@ -349,14 +590,17 @@ mod tests {
         assert_eq!(Item::of(&query, specimen()).caption(), "Specimen 0001");
     }
 
-    #[test]
-    fn a_persons_work_is_captioned_with_its_year_and_its_parts() {
-        let query = Query::Person {
+    fn person() -> Query {
+        Query::Person {
             library: LIBRARY.into(),
             path: ".contributors/A Player".into(),
-        };
+        }
+    }
+
+    #[test]
+    fn a_persons_work_is_captioned_with_its_title_over_its_parts_and_its_year() {
         let item = Item::of(
-            &query,
+            &person(),
             Slot {
                 parts: "Director, as The Part".into(),
                 duration: 0,
@@ -364,9 +608,22 @@ mod tests {
                 ..specimen()
             },
         );
-        assert_eq!(item.caption(), "Specimen 0001 · 1987");
+        assert_eq!(item.caption(), "Specimen 0001");
         assert_eq!(item.line_fitting(80), "Specimen 0001 · 1987");
-        assert_eq!(item.under(), "Director, as The Part");
+        assert_eq!(item.under(), "Director, as The Part · 1987");
+    }
+
+    #[test]
+    fn a_persons_work_with_no_parts_left_reads_its_kind_and_its_year() {
+        let item = Item::of(
+            &person(),
+            Slot {
+                parts: String::new(),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "Specimen 0001");
+        assert_eq!(item.under(), "Film · 1987");
     }
 
     #[test]
@@ -376,8 +633,104 @@ mod tests {
         assert_eq!(item.under(), "1987 · 1h 37m · PG-13");
     }
 
+    // One serial as a slot of the strip that read it: five seasons, and
+    // the columns a series row carries.
+    fn serial() -> Slot {
+        Slot {
+            kind: "series".into(),
+            id: "series:sample:03".into(),
+            title: "Serial 03".into(),
+            released: "2004-09-22".into(),
+            duration: 0,
+            rating: "TV-14".into(),
+            seasons: 5,
+            ..specimen()
+        }
+    }
+
     #[test]
-    fn a_title_on_a_genre_or_a_set_strip_carries_its_facts_under_it() {
+    fn a_series_carries_its_season_count_between_its_year_and_its_rating() {
+        let genre = Query::Genre {
+            name: "Mystery".into(),
+            order: crate::catalog::Order::Released,
+        };
+        let item = Item::of(&genre, serial());
+        assert_eq!(item.caption(), "Serial 03");
+        assert_eq!(item.under(), "2004 · 5 seasons · TV-14");
+        assert_eq!(item.ratio(), POSTER);
+    }
+
+    #[test]
+    fn a_series_of_one_season_and_a_series_of_none_read_in_their_own_words() {
+        let genre = Query::Genre {
+            name: "Mystery".into(),
+            order: crate::catalog::Order::Released,
+        };
+        let one = Item::of(
+            &genre,
+            Slot {
+                seasons: 1,
+                ..serial()
+            },
+        );
+        assert_eq!(one.under(), "2004 · 1 season · TV-14");
+        let none = Item::of(
+            &genre,
+            Slot {
+                seasons: 0,
+                ..serial()
+            },
+        );
+        assert_eq!(none.under(), "2004 · TV-14");
+    }
+
+    #[test]
+    fn a_persons_card_of_a_series_leads_with_the_character_it_credits() {
+        let item = Item::of(
+            &person(),
+            Slot {
+                parts: "as The Part".into(),
+                ..serial()
+            },
+        );
+        assert_eq!(item.caption(), "The Part");
+        assert_eq!(item.under(), "Serial 03 · 2004");
+    }
+
+    #[test]
+    fn a_card_of_two_roles_keeps_its_title_over_the_parts_it_credits() {
+        let item = Item::of(
+            &person(),
+            Slot {
+                parts: "Director, as The Lead".into(),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "Specimen 0001");
+        assert_eq!(item.under(), "Director, as The Lead · 1987");
+    }
+
+    #[test]
+    fn a_card_of_two_characters_leads_with_both_of_them() {
+        let item = Item::of(
+            &person(),
+            Slot {
+                parts: "as One, as Two".into(),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "One, Two");
+        assert_eq!(item.under(), "Specimen 0001 · 1987");
+    }
+
+    #[test]
+    fn a_persons_card_of_a_series_with_no_parts_left_reads_its_kind_and_its_year() {
+        let item = Item::of(&person(), serial());
+        assert_eq!(item.under(), "Series · 2004");
+    }
+
+    #[test]
+    fn a_title_on_a_genre_strip_carries_its_facts_under_it() {
         let genre = Query::Genre {
             name: "Western".into(),
             order: crate::catalog::Order::Released,
@@ -385,11 +738,30 @@ mod tests {
         let item = Item::of(&genre, specimen());
         assert_eq!(item.caption(), "Specimen 0001");
         assert_eq!(item.under(), "1987 · 1h 37m · PG-13");
+    }
+
+    #[test]
+    fn a_film_on_a_set_strip_carries_its_year_and_its_runtime_under_it() {
         let set = Query::Set {
             library: LIBRARY.into(),
             id: "set:sample:01".into(),
         };
-        assert_eq!(Item::of(&set, specimen()).under(), "1987 · 1h 37m · PG-13");
+        let item = Item::of(&set, specimen());
+        assert_eq!(item.caption(), "Specimen 0001");
+        assert_eq!(item.under(), "1987 · 1h 37m");
+    }
+
+    #[test]
+    fn a_card_that_leads_with_a_tagline_says_so_and_every_other_card_does_not() {
+        let tagged = Slot {
+            tagline: "One of a kind.".into(),
+            ..specimen()
+        };
+        let item = Item::of(&library(), tagged);
+        assert_eq!(item.caption(), "One of a kind.");
+        assert!(item.leads_with_tagline());
+        assert!(!Item::of(&library(), specimen()).leads_with_tagline());
+        assert!(!Item::of(&library(), serial()).leads_with_tagline());
     }
 
     #[test]
@@ -403,6 +775,19 @@ mod tests {
         assert_eq!(item.line_fitting(24), "Specimen 0001 · 1987");
         assert_eq!(item.line_fitting(19), "Specimen 0001");
         assert_eq!(item.line_fitting(4), "Specimen 0001");
+    }
+
+    #[test]
+    fn a_slot_leaves_both_its_lines_as_the_words_they_are_until_a_strip_cuts_them() {
+        let item = Item::of(
+            &library(),
+            Slot {
+                title: "W".repeat(60),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.fitted(), item.caption());
+        assert_eq!(item.under_fitted(), item.under());
     }
 
     #[test]

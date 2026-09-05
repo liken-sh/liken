@@ -31,20 +31,46 @@ fn libraries_come_back_counted_and_ordered_by_name() {
                 library: "default/films".into(),
                 kind: "movies".into(),
                 items: 2,
-                art: "movie:tmdb:603.jpg".into(),
+                art: vec!["movie:tmdb:603.jpg".into(), "movie:tmdb:604.jpg".into()],
             },
             LibraryEntry {
                 library: "default/shows".into(),
                 kind: "series".into(),
                 items: 1,
-                art: "series:tvdb:73739.jpg".into(),
+                art: vec!["series:tvdb:73739.jpg".into()],
             },
         ]
     );
 }
 
 #[test]
-fn a_library_draws_as_the_poster_of_its_newest_added_title_with_art() {
+fn a_library_draws_no_more_posters_than_its_tile_holds() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    for number in 1..=6 {
+        insert_added_movie(
+            &path,
+            "default/films",
+            &format!("movie:tmdb:{number}"),
+            "1999",
+            number * 100,
+        );
+    }
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    assert_eq!(
+        source.libraries()[0].art,
+        [
+            "movie:tmdb:6.jpg",
+            "movie:tmdb:5.jpg",
+            "movie:tmdb:4.jpg",
+            "movie:tmdb:3.jpg",
+        ]
+    );
+}
+
+#[test]
+fn a_library_draws_as_the_posters_of_its_newest_added_titles_with_art() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_added_movie(&path, "default/films", "movie:tmdb:1", "1999", 100);
@@ -65,9 +91,9 @@ fn a_library_draws_as_the_poster_of_its_newest_added_title_with_art() {
     let mut source = SidecarSource::new(&path, NO_AGENT);
     let libraries = source.libraries();
     assert_eq!(libraries[0].library, "default/bare");
-    assert_eq!(libraries[0].art, "");
+    assert!(libraries[0].art.is_empty());
     assert_eq!(libraries[1].library, "default/films");
-    assert_eq!(libraries[1].art, "movie:tmdb:3.jpg");
+    assert_eq!(libraries[1].art, ["movie:tmdb:3.jpg", "movie:tmdb:1.jpg"]);
 }
 
 #[test]
@@ -116,6 +142,19 @@ fn a_library_wall_comes_back_in_sort_key_order() {
 }
 
 #[test]
+fn a_slot_carries_the_tagline_its_card_leads_with() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_page(&path, "default/films", "one", "1999", "", BODY);
+    insert_page(&path, "default/films", "two", "1999", "", "{}");
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let slots = source.wall(&library("default/films")).slots;
+    assert_eq!(slots[0].tagline, "One line.");
+    assert_eq!(slots[1].tagline, "");
+}
+
+#[test]
 fn a_series_library_wall_stamps_every_slot_with_its_kind() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
@@ -135,6 +174,42 @@ fn a_series_library_wall_stamps_every_slot_with_its_kind() {
     assert_eq!(slots[0].kind, "series");
     assert_eq!(slots[0].library, "default/shows");
     assert!(source.wall(&library("default/empty")).slots.is_empty());
+}
+
+#[test]
+fn a_series_slot_counts_the_seasons_its_episodes_fall_into_and_a_movie_counts_none() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    let series = "series:tvdb:73739";
+    insert_movie(
+        &path,
+        "default/films",
+        "movie:tmdb:603",
+        "The Matrix",
+        "matrix",
+    );
+    insert_series(&path, "default/shows", series, "Lost", "lost");
+    insert_series(&path, "default/shows", "series:tvdb:1", "Alias", "alias");
+    for (season, episode) in [(1, 1), (1, 2), (2, 1), (4, 7)] {
+        insert_episode(
+            &path,
+            "default/shows",
+            &format!("episode:tvdb:{season}-{episode}"),
+            series,
+            season,
+            episode,
+        );
+    }
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let shows = source.wall(&library("default/shows")).slots;
+    let counted: Vec<(&str, i64)> = shows
+        .iter()
+        .map(|slot| (slot.id.as_str(), slot.seasons))
+        .collect();
+    assert_eq!(counted, [("series:tvdb:1", 0), (series, 3)]);
+    let films = source.wall(&library("default/films")).slots;
+    assert_eq!(films[0].seasons, 0);
 }
 
 #[test]

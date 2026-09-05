@@ -15,6 +15,7 @@ use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
 use super::{Item, Screen, Step, facts, foot, franchise, person, stripes};
+use crate::catalog::draw::Date;
 use crate::catalog::{MovieDetails, MovieSet, Query, Selection, Slot, Source};
 use crate::focus;
 use crate::posters::Posters;
@@ -63,11 +64,14 @@ impl Set {
         let Query::Set { library, .. } = query else {
             return None;
         };
-        let members: Vec<Item> = set
+        let mut members: Vec<Item> = set
             .members
             .into_iter()
             .map(|member| Item::of(query, Slot::of(library, "movies", member)))
             .collect();
+        // The strip draws the card's two lines, so both are cut by the
+        // shaper here at the read, and not on every frame.
+        super::fitted_strip(&mut members);
         let current = members.iter().position(|member| member.id == id)?;
         Some(Self {
             heading: facts::joined(&[&set.title, &films(members.len())]),
@@ -445,9 +449,11 @@ pub(crate) fn facts_of(details: &MovieDetails) -> String {
 
 /// The date, the runtime, and the content rating. The banner reads this
 /// line, because it draws the genres on a line of their own.
+/// The date is spelled against today, which the line reads at the read
+/// and not on every frame.
 pub(crate) fn facts_without_genres(details: &MovieDetails) -> String {
     facts::joined(&[
-        &facts::date(&details.released),
+        &facts::date_worded(&details.released, &Date::today().iso()),
         &facts::runtime(details.duration),
         &details.rating,
     ])

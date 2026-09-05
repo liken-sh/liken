@@ -9,9 +9,28 @@ use super::collect;
 use crate::catalog::{Credit, Title};
 
 /// The columns every list of titles reads, in the order [`title`] takes
-/// them.
-pub const COLUMNS: &str =
-    "id, title, released, art, duration, json_extract(body, '$.contentRating')";
+/// them. The last is the tagline a film's card leads with.
+pub const COLUMNS: &str = "id, title, released, art, duration, \
+                           json_extract(body, '$.contentRating'), \
+                           json_extract(body, '$.tagline')";
+
+/// How many columns [`COLUMNS`] names, so a read that selects more after
+/// them counts its own from there.
+pub const WIDTH: usize = 7;
+
+// The seasons column of a slot read: a correlated count over the
+// covering index (library, series, season, episode) for the series
+// table, and the literal zero for every other item table, so the two
+// halves of a union carry the same columns.
+pub fn seasons(table: &str) -> String {
+    if table != "series" {
+        return "0".to_string();
+    }
+    format!(
+        "(SELECT COUNT(DISTINCT episodes.season) FROM episodes \
+          WHERE episodes.library = {table}.library AND episodes.series = {table}.id)"
+    )
+}
 
 /// One title from those columns.
 pub fn title(row: &Row<'_>) -> rusqlite::Result<Title> {
@@ -22,6 +41,7 @@ pub fn title(row: &Row<'_>) -> rusqlite::Result<Title> {
         art: row.get(3)?,
         duration: row.get(4)?,
         rating: text(row, 5)?,
+        tagline: text(row, 6)?,
     })
 }
 

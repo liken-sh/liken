@@ -3,10 +3,10 @@
 
 use super::{
     ARRIVALS_FROM, DAY, FEATURES, IMPORT_STEP_DAYS, IN_SETS, MOVIES, PER_SET, SERIALS,
-    SERIALS_LIBRARY, movie, movie_arrival, people, serial,
+    SERIALS_LIBRARY, movie, movie_arrival, people, serial_slot,
 };
 use crate::catalog::pool::Candidate;
-use crate::catalog::{GenreEntry, Order, Query, Slot};
+use crate::catalog::{GenreEntry, Order, Query, Slot, TILE_CANDIDATES, unrepeated};
 
 // The invented genres. Every movie carries one or two of them by its
 // number, so every genre has titles that lead with it and titles that
@@ -50,7 +50,7 @@ pub fn titles(name: &str, order: Order) -> Vec<Slot> {
     }
     for number in 1..=SERIALS {
         if let Some(rank) = serial_genres().iter().position(|genre| genre == name) {
-            let slot = Slot::of(SERIALS_LIBRARY, "series", serial(number));
+            let slot = serial_slot(SERIALS_LIBRARY, number);
             found.push((rank, serial_arrival(number), slot));
         }
     }
@@ -67,27 +67,29 @@ pub fn titles(name: &str, order: Order) -> Vec<Slot> {
 }
 
 /// Every invented genre as the genres strip draws it, in name order: the
-/// count of the titles that carry it, and the poster of the newest-released
-/// of them.
+/// count of the titles that carry it, and the posters of its candidates,
+/// which the genre read already orders the way the sidecar orders them.
 pub fn genres() -> Vec<GenreEntry> {
     let mut names = GENRES;
     names.sort_unstable();
-    names
+    let mut entries: Vec<GenreEntry> = names
         .into_iter()
         .map(|name| {
             let slots = titles(name, Order::Released);
-            let newest = slots
-                .iter()
-                .filter(|slot| !slot.art.is_empty())
-                .max_by(|slot, other| slot.released.cmp(&other.released));
             GenreEntry {
                 name: name.to_string(),
                 titles: slots.len() as u64,
-                library: newest.map(|slot| slot.library.clone()).unwrap_or_default(),
-                art: newest.map(|slot| slot.art.clone()).unwrap_or_default(),
+                art: slots
+                    .iter()
+                    .filter(|slot| !slot.art.is_empty())
+                    .take(TILE_CANDIDATES)
+                    .map(|slot| (slot.library.clone(), slot.art.clone()))
+                    .collect(),
             }
         })
-        .collect()
+        .collect();
+    unrepeated(&mut entries);
+    entries
 }
 
 /// The invented pool: every genre weighed as the catalog weighs it, the
@@ -239,17 +241,25 @@ mod tests {
     }
 
     #[test]
-    fn every_invented_genre_carries_its_count_and_a_poster() {
+    fn every_invented_genre_carries_its_count_and_a_mosaic_of_its_own_posters() {
         let entries = Catalog.genres();
         let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
         let mut sorted = GENRES;
         sorted.sort_unstable();
         assert_eq!(names, sorted);
-        assert!(entries.iter().all(|entry| !entry.art.is_empty()));
         assert!(
             entries
                 .iter()
-                .all(|entry| entry.library == FEATURES || entry.library == SERIALS_LIBRARY)
+                .all(|entry| entry.art.len() == crate::catalog::TILES)
+        );
+        assert!(
+            entries
+                .iter()
+                .flat_map(|entry| &entry.art)
+                .all(
+                    |(library, art)| (library == FEATURES || library == SERIALS_LIBRARY)
+                        && !art.is_empty()
+                )
         );
         let western = entries
             .iter()
@@ -259,7 +269,7 @@ mod tests {
             western.titles,
             titles("Western", Order::Released).len() as u64
         );
-        assert_eq!(western.library, FEATURES);
+        assert!(western.art.iter().all(|(library, _)| library == FEATURES));
     }
 
     #[test]

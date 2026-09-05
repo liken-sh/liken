@@ -17,6 +17,12 @@ pub enum Fold {
     Titles,
     Episodes,
     Airing,
+    /// Every episode of a series folds to one slot, drawn as the still of
+    /// the newest of them, which counts how many of them are current on
+    /// `today`, in seconds.
+    Shows {
+        today: i64,
+    },
 }
 
 /// The column a read orders by: the release date or the arrival. It is
@@ -124,8 +130,17 @@ pub struct Slot {
     pub art: String,
     pub duration: i64,
     pub rating: String,
+    /// The tagline the sidecar wrote, empty where the read carried none.
+    /// A film's card leads with it.
+    pub tagline: String,
     pub parts: String,
     pub episode: Option<InSeries>,
+    /// How many of the episodes a folded show holds are current, and
+    /// zero on every other slot.
+    pub new: usize,
+    /// How many seasons a series slot's episodes fall into. Zero on every
+    /// other kind, and where the read carried none.
+    pub seasons: i64,
 }
 
 impl Slot {
@@ -141,8 +156,11 @@ impl Slot {
             art: title.art,
             duration: title.duration,
             rating: title.rating,
+            tagline: title.tagline,
             parts: String::new(),
             episode: None,
+            new: 0,
+            seasons: 0,
         }
     }
 
@@ -150,6 +168,14 @@ impl Slot {
     /// Only an episode's is.
     pub fn still(&self) -> bool {
         self.episode.is_some()
+    }
+
+    /// Whether the slot is a whole show folded into one still, and not
+    /// one episode of it: its id is then its series' id.
+    pub fn folded(&self) -> bool {
+        self.episode
+            .as_ref()
+            .is_some_and(|place| place.series == self.id)
     }
 }
 
@@ -281,6 +307,24 @@ mod tests {
     }
 
     #[test]
+    fn a_slot_whose_id_is_its_series_is_the_whole_show_folded() {
+        let mut slot = Slot {
+            id: "episode:1".into(),
+            episode: Some(InSeries {
+                series: "series:1".into(),
+                name: "The Serial".into(),
+                season: 3,
+                episode: 4,
+            }),
+            ..Slot::default()
+        };
+        assert!(!slot.folded());
+        slot.id = "series:1".into();
+        assert!(slot.folded());
+        assert!(!Slot::default().folded());
+    }
+
+    #[test]
     fn a_slot_of_a_title_carries_its_library_and_kind_and_no_parts() {
         let slot = Slot::of(
             "screening/features",
@@ -292,6 +336,7 @@ mod tests {
                 art: "1.jpg".into(),
                 duration: 5_820,
                 rating: "PG-13".into(),
+                tagline: "One of a kind.".into(),
             },
         );
         assert_eq!(slot.library, "screening/features");
@@ -301,6 +346,8 @@ mod tests {
         assert_eq!(slot.duration, 5_820);
         assert_eq!(slot.rating, "PG-13");
         assert_eq!(slot.parts, "");
+        assert_eq!(slot.new, 0);
+        assert_eq!(slot.seasons, 0);
         assert!(!slot.still());
     }
 }

@@ -35,11 +35,12 @@ pub fn width(content: &str, size: f32) -> f32 {
 /// the display's font, so a line placed after it never drifts with the
 /// glyphs the estimate cannot see. The shaper runs on the draw path
 /// already, and one paragraph of a short line costs less than a frame.
-/// The measure reads the fonts the harness loaded into the graphics font
-/// system; a test with none loaded measures a fallback face, which still
-/// places the runs apart.
+/// The measure shapes with the brand's faces, loaded once on the first
+/// call, so a test and the screen measure the same face.
 pub fn measured(content: &str, size: f32) -> f32 {
     use iced_winit::core::text::{Paragraph, Text, Wrapping};
+    static FACES: std::sync::Once = std::sync::Once::new();
+    FACES.call_once(liken_iced::font::load);
     let paragraph = iced_wgpu::graphics::text::Paragraph::with_text(Text {
         content,
         bounds: iced_winit::core::Size::INFINITE,
@@ -64,6 +65,33 @@ pub fn cut(content: &str, size: f32, width: f32) -> String {
         return content.to_string();
     }
     let kept: String = content.chars().take(room.saturating_sub(1)).collect();
+    format!("{}\u{2026}", kept.trim_end())
+}
+
+/// The content cut to the widest prefix the shaper sets inside this
+/// width, with the same ellipsis `cut` leaves. The estimate under `cut`
+/// can call a caption short enough that the shaper sets wider than its
+/// band, so a caption that has to fit exactly is cut here.
+pub fn measured_cut(content: &str, size: f32, width: f32) -> String {
+    if measured(content, size) <= width {
+        return content.to_string();
+    }
+    let letters: Vec<char> = content.chars().collect();
+    let (mut kept, mut over) = (0, letters.len());
+    while kept < over {
+        let middle = (kept + over).div_ceil(2);
+        match measured(&ellipsed(&letters[..middle]), size) <= width {
+            true => kept = middle,
+            false => over = middle - 1,
+        }
+    }
+    ellipsed(&letters[..kept])
+}
+
+// One ellipsis after the letters that were kept, the convention `cut`
+// writes.
+fn ellipsed(letters: &[char]) -> String {
+    let kept: String = letters.iter().collect();
     format!("{}\u{2026}", kept.trim_end())
 }
 
@@ -94,10 +122,30 @@ pub fn line(
     color: Color,
     width: f32,
 ) -> f32 {
+    line_in(
+        frame,
+        content,
+        at,
+        (size, Font::with_name(look::FONT)),
+        color,
+        width,
+    )
+}
+
+/// One line at a size, in a named face, so a tagline draws in the
+/// family's italic while every other line keeps the roman one.
+pub fn line_in(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    at: Point,
+    (size, font): (f32, Font),
+    color: Color,
+    width: f32,
+) -> f32 {
     if content.is_empty() {
         return 0.0;
     }
-    frame.fill_text(label(
+    let mut text = label(
         content,
         at,
         size,
@@ -105,7 +153,9 @@ pub fn line(
         Alignment::Left,
         Vertical::Top,
         width,
-    ));
+    );
+    text.font = font;
+    frame.fill_text(text);
     height(lines(content, size, width), size)
 }
 
@@ -121,20 +171,56 @@ pub fn centered(
     size: f32,
     color: Color,
 ) {
+    shown(frame, &cut(content, size, band.width), band, size, color);
+}
+
+/// One line centered in its band and clipped to it, drawn as it stands.
+/// The caller cut it to the band at the read, and a second cut by the
+/// estimate would take letters the shaper set inside the band.
+pub fn shown(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    band: Rectangle,
+    size: f32,
+    color: Color,
+) {
+    faced(
+        frame,
+        content,
+        band,
+        size,
+        color,
+        Font::with_name(look::FONT),
+    );
+}
+
+/// One line centered in its band and clipped to it, in a named face, so
+/// a caption's second line draws in the family's italic while every
+/// other line keeps the roman one.
+pub fn faced(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    band: Rectangle,
+    size: f32,
+    color: Color,
+    font: Font,
+) {
     if content.is_empty() {
         return;
     }
-    let shown = cut(content, size, band.width);
     frame.with_clip(band, |frame| {
-        frame.fill_text(label(
-            &shown,
-            Point::new(band.center_x(), band.y),
-            size,
-            color,
-            Alignment::Center,
-            Vertical::Top,
-            f32::INFINITY,
-        ));
+        frame.fill_text(canvas::Text {
+            font,
+            ..label(
+                content,
+                Point::new(band.center_x(), band.y),
+                size,
+                color,
+                Alignment::Center,
+                Vertical::Top,
+                f32::INFINITY,
+            )
+        });
     });
 }
 
@@ -149,6 +235,28 @@ pub fn block(
     width: f32,
     cap: usize,
 ) -> f32 {
+    block_in(
+        frame,
+        content,
+        at,
+        (size, Font::with_name(look::FONT)),
+        color,
+        width,
+        cap,
+    )
+}
+
+/// A block at a size, in a named face, so a tagline draws in the
+/// family's italic while every other block keeps the roman one.
+pub fn block_in(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    at: Point,
+    (size, font): (f32, Font),
+    color: Color,
+    width: f32,
+    cap: usize,
+) -> f32 {
     let taken = lines(content, size, width);
     if taken == 0 {
         return 0.0;
@@ -159,7 +267,7 @@ pub fn block(
     // The clip cuts the block at its last line, so a plot of any length
     // draws in the space the page gave it and never over the row below.
     frame.with_clip(block, |frame| {
-        frame.fill_text(label(
+        let mut text = label(
             content,
             at,
             size,
@@ -167,7 +275,9 @@ pub fn block(
             Alignment::Left,
             Vertical::Top,
             width,
-        ));
+        );
+        text.font = font;
+        frame.fill_text(text);
     });
 
     height
@@ -185,6 +295,29 @@ mod tests {
         assert_eq!(shown.chars().count(), room);
         assert!(shown.ends_with('\u{2026}'));
         assert_eq!(cut("short", 16.0, 120.0), "short");
+    }
+
+    #[test]
+    fn a_caption_the_shaper_sets_wider_than_its_band_is_cut_to_fit_it() {
+        let long = "W".repeat(40);
+        let shown = measured_cut(&long, 18.0, 200.0);
+        assert!(shown.ends_with('\u{2026}'));
+        assert!(shown.chars().count() < long.chars().count());
+        assert!(measured(&shown, 18.0) <= 200.0);
+    }
+
+    #[test]
+    fn a_caption_the_shaper_sets_inside_its_band_is_cut_nowhere() {
+        assert_eq!(
+            measured_cut("Specimen 0001", 18.0, 2_000.0),
+            "Specimen 0001"
+        );
+        assert_eq!(measured_cut("", 18.0, 200.0), "");
+    }
+
+    #[test]
+    fn a_band_too_narrow_for_one_letter_holds_the_ellipsis_alone() {
+        assert_eq!(measured_cut("Specimen 0001", 18.0, 0.0), "\u{2026}");
     }
 
     #[test]

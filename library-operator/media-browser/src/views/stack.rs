@@ -5,6 +5,8 @@
 
 use iced_winit::core::{Point, Rectangle};
 
+use super::area;
+
 /// Where the next block of a page starts. A block that drew nothing moves
 /// it nowhere and takes no gap, so a missing line leaves no hole.
 pub struct Stack {
@@ -49,6 +51,22 @@ pub fn offset(region: Rectangle, tail: f32, content: f32, height: f32) -> f32 {
     (region.y + region.height + tail - height)
         .max(0.0)
         .min(most.max(0.0))
+}
+
+/// Where the head of one section draws while the section scrolls through
+/// a region: at the section's own top while that top is in view, held at
+/// the top of the region while the section runs past it, and pushed off
+/// by the foot of the section, so a head never leaves the section it
+/// names. A section shorter than its head carries as much of it as it
+/// holds. The jump rail's labels and a series page's season dividers are
+/// the same rule.
+pub fn held(section: Rectangle, region: Rectangle, head: f32) -> Rectangle {
+    let head = head.min(section.height);
+    let top = section
+        .y
+        .max(region.y)
+        .min(section.y + section.height - head);
+    area(section.x, top, section.width, head)
 }
 
 #[cfg(test)]

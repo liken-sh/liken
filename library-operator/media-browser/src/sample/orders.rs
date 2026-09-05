@@ -53,6 +53,8 @@ pub fn entries() -> Vec<FranchiseEntry> {
                 false => (franchise.art, franchise.library.clone()),
             };
             FranchiseEntry {
+                movies: counted(&franchise.entries, MOVIE),
+                series: counted(&franchise.entries, SERIES),
                 library: franchise.library,
                 id: franchise.id,
                 title: franchise.title,
@@ -201,7 +203,7 @@ fn film(position: i64, number: i64, span: (f64, f64), universes: &[&str]) -> Ent
             art: title.art,
             released: title.released,
             slug: format!("specimen-{number:04}"),
-            tagline: format!("The {number:04}th of its kind."),
+            tagline: super::tagline(number),
             plot: super::PLOT.repeat(2),
             duration: title.duration,
         }),

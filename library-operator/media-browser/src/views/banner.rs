@@ -185,11 +185,13 @@ pub fn draw<P: Posters>(frame: &mut canvas::Frame<Renderer>, posters: &mut P, ba
     let taken = ratings::draw(frame, banner.ratings, stack.at());
     stack.add(taken);
 
-    text::block(
+    // A tagline is the film's own words, so it draws in the italic, as
+    // a card's tagline does.
+    text::block_in(
         frame,
         banner.tagline,
         stack.at(),
-        look::TAGLINE,
+        (look::TAGLINE, look::ITALIC),
         look::text(),
         column,
         TAGLINE_LINES,

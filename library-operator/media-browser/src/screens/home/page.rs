@@ -24,14 +24,14 @@ pub struct Page {
 /// strips. It touches no screen, so it runs wherever the caller puts
 /// it.
 pub fn read(source: &mut dyn Source, today: Date) -> Page {
-    let mut blocks: Vec<Block> = rows(draw::draw(today, &source.pool()))
+    let seconds = today.seconds();
+    let mut blocks: Vec<Block> = rows(seconds, draw::draw(today, &source.pool()))
         .into_iter()
         .map(Block::new)
         .collect();
     // The released strip's items are in hand while the added strip reads,
     // because the added strip drops what the released strip shows, and the
     // released strip stands before it.
-    let seconds = today.seconds();
     for index in 0..blocks.len() {
         let released = released(&blocks);
         if let Block::Strip(strip) = &mut blocks[index] {

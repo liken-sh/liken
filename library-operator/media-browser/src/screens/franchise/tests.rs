@@ -42,9 +42,17 @@ fn held(number: i64, kind: &str) -> Held {
         art: format!("{number}.jpg"),
         released: format!("{}", 1970 + number),
         slug: format!("title-{number}"),
-        tagline: String::new(),
+        // The third title carries no tagline, so a card of it falls back
+        // to the name.
+        tagline: match number {
+            3 => String::new(),
+            number => format!("Title {number}, in one line."),
+        },
         plot: String::new(),
-        duration: 0,
+        duration: match kind {
+            "movies" => 7_620,
+            _ => 0,
+        },
     }
 }
 

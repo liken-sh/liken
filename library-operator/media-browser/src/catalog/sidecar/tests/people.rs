@@ -367,7 +367,7 @@ fn a_worked_person(path: &Path) {
 }
 
 #[test]
-fn a_persons_works_gather_every_library_newest_first() {
+fn a_persons_works_gather_every_library_newest_first_with_their_facts() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     a_worked_person(&path);
@@ -385,6 +385,8 @@ fn a_persons_works_gather_every_library_newest_first() {
                 title: "Serial three".into(),
                 released: "2004".into(),
                 art: "three.jpg".into(),
+                rating: "PG".into(),
+                tagline: "One line.".into(),
                 parts: "Actor".into(),
                 ..Slot::default()
             },
@@ -395,6 +397,9 @@ fn a_persons_works_gather_every_library_newest_first() {
                 title: "Film one".into(),
                 released: "1994".into(),
                 art: "one.jpg".into(),
+                duration: 6_720,
+                rating: "PG".into(),
+                tagline: "One line.".into(),
                 parts: "Director, Writer".into(),
                 ..Slot::default()
             },
@@ -405,6 +410,9 @@ fn a_persons_works_gather_every_library_newest_first() {
                 title: "Film two".into(),
                 released: String::new(),
                 art: "two.jpg".into(),
+                duration: 6_720,
+                rating: "PG".into(),
+                tagline: "One line.".into(),
                 parts: "as Tony".into(),
                 ..Slot::default()
             },

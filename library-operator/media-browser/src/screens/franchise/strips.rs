@@ -6,9 +6,11 @@
 // Every function here is pure over the rows, so the two pages share one
 // ladder.
 
+use super::wall;
+use crate::catalog::franchise::Entry;
 use crate::catalog::{Query, Source, franchise};
 use crate::focus;
-use crate::screens::{Item, facts};
+use crate::screens::{self, Item, facts};
 #[cfg(test)]
 use crate::views::Card;
 
@@ -47,22 +49,37 @@ pub struct Strip {
     pub current: Option<usize>,
 }
 
+// One held member as the card the strip draws: the words its kind leads
+// with, over the line the franchise page draws under the same member:
+// the kind word, the year, and a film's running time or a series run's
+// episodes.
+fn carded(query: &Query, entry: &Entry) -> Option<Item> {
+    let held = entry.held.as_ref()?;
+    let mut item = Item::of(query, franchise::slot(held.clone()));
+    item.under = wall::facts(entry, held);
+    Some(item)
+}
+
+/// The count of every entry of the order, held or not, and the kinds the
+/// order holds: `40 films and series`, `12 films`, `1 film`, `3 series`.
+/// A strip heading and the tile of the franchises strip both draw it, so
+/// it is spelled once.
+pub fn counted(movies: i64, series: i64) -> String {
+    let kinds = match (movies > 0, series > 0) {
+        (true, true) => "films and series",
+        (false, true) => "series",
+        _ => "films",
+    };
+    facts::counted(movies + series, kinds)
+}
+
 /// The words after a franchise's name on a strip heading. The count is
 /// every entry of the order, held or not, because the scope of the order
 /// is what tells a franchise from a set. The kinds the order holds name
 /// themselves: films alone, series alone, or both. One film reads in the
 /// singular, and series reads the same either way.
 pub fn scope(movies: i64, series: i64) -> String {
-    let all = movies + series;
-    let kinds = match (movies > 0, series > 0) {
-        (true, true) => "films and series",
-        (false, true) => "series",
-        _ => match all {
-            1 => "film",
-            _ => "films",
-        },
-    };
-    format!("a franchise of {all} {kinds}")
+    format!("a franchise of {}", counted(movies, series))
 }
 
 /// Every franchise strip of one title, in the order the pages draw them.
@@ -85,10 +102,12 @@ impl Strips {
                     library: membership.library.clone(),
                     id: membership.id.clone(),
                 };
-                let members: Vec<Item> = franchise::slots(&membership.members)
-                    .into_iter()
-                    .map(|slot| Item::of(&query, slot))
+                let mut members: Vec<Item> = membership
+                    .members
+                    .iter()
+                    .filter_map(|entry| carded(&query, entry))
                     .collect();
+                screens::fitted_strip(&mut members);
                 let current = members.iter().position(|member| member.id == id);
                 Strip {
                     library: membership.library,
@@ -217,8 +236,11 @@ mod tests {
         assert_eq!(strips.bands()[0].id, CYCLE);
         assert_eq!(strips.bands()[0].members.len(), 5);
         assert_eq!(strips.bands()[0].current, Some(1));
-        assert_eq!(strips.bands()[0].members[0].caption(), "Title 1");
-        assert_eq!(strips.bands()[0].members[0].under(), "1971");
+        assert_eq!(
+            strips.bands()[0].members[0].caption(),
+            "Title 1, in one line."
+        );
+        assert_eq!(strips.bands()[0].members[0].under(), "Film · 1971 · 2h 7m");
     }
 
     #[test]
@@ -233,6 +255,21 @@ mod tests {
         ];
         for (movies, series, words) in cases {
             assert_eq!(scope(movies, series), words, "{movies} and {series}");
+        }
+    }
+
+    #[test]
+    fn a_tile_says_the_same_scope_without_the_words_that_head_a_strip() {
+        let cases = [
+            (26, 14, "40 films and series"),
+            (12, 0, "12 films"),
+            (1, 0, "1 film"),
+            (0, 3, "3 series"),
+            (0, 0, "0 films"),
+        ];
+        for (movies, series, words) in cases {
+            assert_eq!(counted(movies, series), words, "{movies} and {series}");
+            assert_eq!(scope(movies, series), format!("a franchise of {words}"));
         }
     }
 

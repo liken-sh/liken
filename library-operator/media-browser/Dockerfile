@@ -20,6 +20,9 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 # cached layer. It changes only when the submodule pin moves.
 COPY brand/iced/ ./brand/iced/
 COPY brand/liken.svg brand/liken.css ./brand/
+# The crate embeds the brand's two font files, so they arrive with it and
+# before the stub build compiles it.
+COPY brand/fonts/ ./brand/fonts/
 
 # A stub library and a stub binary give cargo something to compile the
 # dependencies against. That build is the layer the image cache keeps.
@@ -59,14 +62,17 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 # winit opens by name. libvulkan1 with mesa-vulkan-drivers is the renderer's
 # path to the Intel graphics these machines have.
 #
-# fonts-adobe-sourcesans3 carries the face the display draws its text in.
+# The image installs no font package. The binary carries the brand's two
+# faces and loads them at startup, so no text is resolved through
+# fontconfig.
+#
 # tzdata carries the zoneinfo database, because Rust's standard library has
 # no time zones and the clock reads the zone the environment names.
 #
 # The Snapshot line pins apt to the archive as it stood at one instant, so the
 # versions below stay fetchable after Ubuntu publishes newer ones. To move the
-# image forward, set a later serial and refresh the six versions from a build at
-# that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries no
+# image forward, set a later serial and refresh the five versions from a build
+# at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries no
 # certificate store, so the build installs ca-certificates from the default
 # archive first, then purges it after the pinned install so it leaves no trace
 # in the runtime.
@@ -79,7 +85,6 @@ RUN apt-get update \
         libxkbcommon0=1.13.1-1 \
         libvulkan1=1.4.341.0-1 \
         mesa-vulkan-drivers=26.0.8-1ubuntu0.3 \
-        fonts-adobe-sourcesans3=3.052+dfsg-2 \
         tzdata=2026c-0ubuntu0.26.04.1 \
     && apt-get purge -y ca-certificates \
     && apt-get autoremove -y --purge \

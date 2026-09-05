@@ -43,8 +43,10 @@ const PLAY_TOPIC: &str = "liken/library/players/house/den-tv/play";
 // schedule states the second itself, past every other second it names.
 const MINUTE: f64 = 600.0;
 
-// The set the first three movies of the fake library belong to.
+// The set the first movies of the fake library belong to, and how many
+// of them: four, because a drawn strip of fewer holds nothing.
 const SET: &str = "set:films";
+const IN_SET: usize = 4;
 
 #[derive(Default, Clone)]
 struct Fake {
@@ -195,6 +197,8 @@ impl Source for Fake {
                 art: "cycle.jpg".into(),
                 art_library: "screening/films".into(),
                 slug: "the-cycle".into(),
+                movies: 3,
+                series: 1,
             },
             FranchiseEntry {
                 library: "screening/orders".into(),
@@ -203,6 +207,8 @@ impl Source for Fake {
                 art: String::new(),
                 art_library: String::new(),
                 slug: "the-saga".into(),
+                movies: 1,
+                series: 0,
             },
         ]
     }
@@ -250,13 +256,13 @@ impl Source for Fake {
                 library: "screening/films".into(),
                 kind: "movies".into(),
                 items: self.movies as u64,
-                art: "1.jpg".into(),
+                art: vec!["1.jpg".into()],
             },
             LibraryEntry {
                 library: SERIALS.into(),
                 kind: "series".into(),
                 items: 2,
-                art: "serial.jpg".into(),
+                art: vec!["serial.jpg".into()],
             },
         ]
     }
@@ -267,14 +273,12 @@ impl Source for Fake {
             GenreEntry {
                 name: "Drama".into(),
                 titles: 2,
-                library: "screening/films".into(),
-                art: "1.jpg".into(),
+                art: vec![("screening/films".into(), "1.jpg".into())],
             },
             GenreEntry {
                 name: "Western".into(),
                 titles: 1,
-                library: SERIALS.into(),
-                art: "serial.jpg".into(),
+                art: vec![(SERIALS.into(), "serial.jpg".into())],
             },
         ]
     }
@@ -320,6 +324,8 @@ impl Source for Fake {
                             title: format!("Entry {number}"),
                             released: "1980".into(),
                             art: format!("{number}.jpg"),
+                            duration: 5_400,
+                            rating: "PG".into(),
                             parts: "Director".into(),
                             ..Slot::default()
                         })
@@ -450,7 +456,7 @@ impl Source for Fake {
                 name: "A Player".into(),
                 role: "The Part".into(),
             }],
-            set_id: if self.sets && number <= 3 {
+            set_id: if self.sets && number <= IN_SET {
                 SET.into()
             } else {
                 String::new()
@@ -472,7 +478,7 @@ impl Source for Fake {
         }
         Some(MovieSet {
             title: "The Entries".into(),
-            members: (1..=3.min(self.movies))
+            members: (1..=IN_SET.min(self.movies))
                 .map(|number| self.member(number))
                 .collect(),
         })

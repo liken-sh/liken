@@ -77,9 +77,14 @@ fn crowded(focus: Focus) -> Movie {
                 id: "one".into(),
                 name: "Film one".into(),
                 caption: "Film one".into(),
+                fitted: "Film one".into(),
                 line: facts::Line::of(&["Film one"]),
                 under: String::new(),
+                under_fitted: String::new(),
+                tagline: false,
                 art: String::new(),
+                tiles: Vec::new(),
+                new: 0,
             }],
             current: 0,
         }),
@@ -122,6 +127,14 @@ fn the_strip_and_the_first_stripe_are_in_view_while_the_strip_has_focus() {
     assert!(strip.bottom() - offset <= SHORT);
     assert!(blocks.stripes[0].top - offset < SHORT);
     assert!(blocks.stripes[0].bottom() - offset > SHORT);
+}
+
+#[test]
+fn the_set_strip_takes_the_height_of_a_strip_of_cards() {
+    let blocks = blocks(&crowded(Focus::Strip(0)));
+    let strip = blocks.strip.expect("the crowded page holds a set");
+    assert_eq!(strip.height, strip::height(card::LINES));
+    assert!(strip.height > strip::height(1));
 }
 
 #[test]

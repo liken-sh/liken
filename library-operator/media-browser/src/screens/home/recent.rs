@@ -1,19 +1,20 @@
 // The two recency strips differ from the walls behind them. Both
-// queries put the same airing episodes first, so the released strip
-// keeps what is new in the world, and the added strip keeps what arrived
-// and is not. The walls answer whole. This module holds the two rules,
-// applied to the strips on the home page alone.
+// queries fold the same shows, so the released strip keeps what is new in
+// the world, and the added strip keeps what arrived and is not. The walls
+// answer whole. This module holds the two rules, applied to the strips on
+// the home page alone.
 
 use crate::catalog::Slot;
 use crate::catalog::recency::{SHOWN, current};
 use crate::screens::Item;
 
 /// The released strip's slots: the ones inside the window of today, in
-/// seconds, newest first, cut to `SHOWN`.
+/// seconds, and a folded show that holds an episode inside it whatever
+/// the date of the newest episode it draws, newest first, cut to `SHOWN`.
 pub fn released(slots: Vec<Slot>, today: i64) -> Vec<Slot> {
     slots
         .into_iter()
-        .filter(|slot| current(&slot.released, today))
+        .filter(|slot| slot.new > 0 || current(&slot.released, today))
         .take(SHOWN)
         .collect()
 }
@@ -102,6 +103,53 @@ mod tests {
         assert_eq!(left.len(), SHOWN);
         assert_eq!(ids(&left)[0], "movie:3");
         assert!(!ids(&left).contains(&"movie:0"));
+    }
+
+    // One show as the `Shows` fold answers it: the newest episode's
+    // still under the series' own id.
+    fn show() -> Slot {
+        Slot {
+            library: "screening/serials".into(),
+            kind: "episodes".into(),
+            id: "series:1".into(),
+            title: "Segment 08".into(),
+            released: "2026-09-01".into(),
+            new: 2,
+            episode: Some(crate::catalog::InSeries {
+                series: "series:1".into(),
+                name: "The Serial".into(),
+                season: 4,
+                episode: 8,
+            }),
+            ..Slot::default()
+        }
+    }
+
+    #[test]
+    fn the_released_strip_keeps_a_show_that_holds_a_new_episode() {
+        let ahead = Slot {
+            released: "2027-01-01".into(),
+            new: 2,
+            ..show()
+        };
+        assert_eq!(ids(&released(vec![ahead], today())), ["series:1"]);
+        let none = Slot {
+            released: "2027-01-01".into(),
+            new: 0,
+            ..show()
+        };
+        assert!(released(vec![none], today()).is_empty());
+    }
+
+    #[test]
+    fn the_added_strip_drops_a_folded_show_the_released_strip_shows() {
+        let query = Query::Released {
+            fold: crate::catalog::Fold::Shows { today: today() },
+        };
+        let shown = vec![Item::of(&query, show())];
+        assert_eq!(shown[0].id, "series:1");
+        let left = added(vec![show(), slot("movie:1", "1980")], &shown);
+        assert_eq!(ids(&left), ["movie:1"]);
     }
 
     #[test]

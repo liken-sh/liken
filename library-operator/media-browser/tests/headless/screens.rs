@@ -445,11 +445,12 @@ fn playable(database: &Path) {
         .expect("link the fixture film");
 }
 
-// The franchise page: seven presses down reach the libraries strip, a
-// select opens the features wall, a select on its first film opens the
-// page, and two presses down reach the franchise strip's heading. A
-// select there opens the franchise's own page, where the rows draw
-// across the universes with the era rail beside them.
+// The franchise page: nine presses down rest on the last row of the
+// home page, whatever the day drew and whatever it left empty, and two
+// presses up from there reach the libraries strip. A select opens the features wall, a select on its
+// first film opens the page, and two presses down reach the franchise
+// strip's heading. A select there opens the franchise's own page, where
+// the rows draw across the universes with the era rail beside them.
 #[test]
 fn a_select_on_a_franchise_strip_draws_the_franchise_page() {
     let dir = workspace("franchise");
@@ -459,7 +460,8 @@ fn a_select_on_a_franchise_strip_draws_the_franchise_page() {
         &dir,
         &[
             "--script",
-            "0.4:down,0.7:down,1.0:down,1.3:down,1.6:down,1.9:down,2.2:down,2.5:enter,\
+            "0.4:down,0.55:down,0.7:down,0.85:down,1.0:down,1.15:down,1.3:down,1.45:down,\
+             1.6:down,1.9:up,2.2:up,2.5:enter,\
              3.0:enter,3.4:down,3.8:down,4.6:enter,5.6:down,5.9:down,6.2:down,6.5:down,\
              7.2:left,8.0:down,8.6:right,9.4:down,9.7:down,10.0:down,10.3:down,10.6:down",
             "--capture",

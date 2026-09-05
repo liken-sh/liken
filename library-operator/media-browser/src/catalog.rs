@@ -30,9 +30,16 @@ pub mod draw;
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use query::{Answer, Fold, InSeries, Order, Query, Slot};
 
+/// How many posters the tile of a library or a genre draws, as a 2x2.
+pub const TILES: usize = 4;
+
+/// How many posters a genre offers [`unrepeated`], so a genre whose
+/// newest posters an earlier genre took has more to fall back on.
+pub const TILE_CANDIDATES: usize = 3 * TILES;
+
 /// One library as the home page's libraries strip draws it: the name,
 /// the kind, the count of items it holds, and the art of its newest-added
-/// title.
+/// titles.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryEntry {
     /// The catalog's `library` column: the `Library`'s namespace and name,
@@ -44,10 +51,10 @@ pub struct LibraryEntry {
     pub kind: String,
     /// How many items the library holds.
     pub items: u64,
-    /// The poster of the library's newest-added title that has one, which
-    /// the libraries strip draws the library as. Empty where no title has
-    /// art.
-    pub art: String,
+    /// The posters of the library's newest-added titles that have one, up
+    /// to [`TILES`] of them, which the libraries strip draws as a mosaic.
+    /// Every path resolves against the library itself.
+    pub art: Vec<String>,
 }
 
 /// One genre as the home page's genres strip draws it: the name, how
@@ -60,12 +67,34 @@ pub struct GenreEntry {
     /// How many movies and series carry the genre at any rank, across
     /// every library.
     pub titles: u64,
-    /// The library the art resolves against, empty where no title that
-    /// carries the genre has art.
-    pub library: String,
-    /// The poster of the newest-released title that carries the genre and
-    /// has one, empty where none has.
-    pub art: String,
+    /// The posters the genre's tile draws, each with the library it
+    /// resolves against, because a genre spans libraries. A read answers up
+    /// to [`TILE_CANDIDATES`] of them, the titles that lead with the genre
+    /// first and the newest release next, and [`unrepeated`] cuts each
+    /// entry to the [`TILES`] no earlier genre took.
+    pub art: Vec<(String, String)>,
+}
+
+/// The posters each genre's tile draws, in the strip's order: the first
+/// [`TILES`] candidates of the entry that no earlier entry took, so one
+/// poster never stands on two tiles of the row. An entry whose candidates
+/// run out draws fewer.
+pub fn unrepeated(entries: &mut [GenreEntry]) {
+    let mut taken: Vec<(String, String)> = Vec::new();
+    for entry in entries {
+        let mut drawn: Vec<(String, String)> = Vec::with_capacity(TILES);
+        for poster in std::mem::take(&mut entry.art) {
+            if drawn.len() == TILES {
+                break;
+            }
+            if taken.contains(&poster) {
+                continue;
+            }
+            taken.push(poster.clone());
+            drawn.push(poster);
+        }
+        entry.art = drawn;
+    }
 }
 
 /// One franchise as the home page's franchises strip draws it. `library` and
@@ -76,6 +105,9 @@ pub struct GenreEntry {
 /// held member in story order. `art_library` is the library that art
 /// resolves against, which is the member's own library in the second case.
 /// `slug` is the catalog's own name for the row.
+/// `movies` and `series` count every entry of the order by kind, held or
+/// not: the scope the tile draws under the title, and the count a strip
+/// heading carries.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FranchiseEntry {
     pub library: String,
@@ -84,6 +116,8 @@ pub struct FranchiseEntry {
     pub art: String,
     pub art_library: String,
     pub slug: String,
+    pub movies: i64,
+    pub series: i64,
 }
 
 /// One title in a kind's top list: a movie, or a series.
@@ -104,6 +138,9 @@ pub struct Title {
     /// The content rating from the body, empty where the sidecar named
     /// none.
     pub rating: String,
+    /// The tagline from the body, empty where the sidecar wrote none. A
+    /// film's card leads with it.
+    pub tagline: String,
 }
 
 /// One credited person and the part they played, from the body's cast.
@@ -519,6 +556,59 @@ pub struct Presentation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(name: &str, art: &[&str]) -> GenreEntry {
+        GenreEntry {
+            name: name.into(),
+            titles: art.len() as u64,
+            art: art
+                .iter()
+                .map(|path| ("screening/films".to_string(), (*path).to_string()))
+                .collect(),
+        }
+    }
+
+    fn posters(entry: &GenreEntry) -> Vec<&str> {
+        entry.art.iter().map(|(_, path)| path.as_str()).collect()
+    }
+
+    #[test]
+    fn a_genre_draws_the_first_four_posters_no_earlier_genre_took() {
+        let mut entries = [
+            entry("Crime", &["a", "b", "c", "d", "e", "f"]),
+            entry("Drama", &["a", "b", "e", "g", "h", "i"]),
+        ];
+        unrepeated(&mut entries);
+        assert_eq!(posters(&entries[0]), ["a", "b", "c", "d"]);
+        assert_eq!(posters(&entries[1]), ["e", "g", "h", "i"]);
+    }
+
+    #[test]
+    fn a_genre_whose_candidates_run_out_draws_fewer() {
+        let mut entries = [
+            entry("Crime", &["a", "b"]),
+            entry("Drama", &["a", "b", "c"]),
+            entry("Silent", &[]),
+        ];
+        unrepeated(&mut entries);
+        assert_eq!(posters(&entries[0]), ["a", "b"]);
+        assert_eq!(posters(&entries[1]), ["c"]);
+        assert!(entries[2].art.is_empty());
+    }
+
+    #[test]
+    fn one_path_in_two_libraries_is_two_posters() {
+        let mut entries = [
+            entry("Crime", &["a"]),
+            GenreEntry {
+                art: vec![("screening/serials".into(), "a".into())],
+                ..entry("Drama", &[])
+            },
+        ];
+        unrepeated(&mut entries);
+        assert_eq!(entries[0].art, [("screening/films".into(), "a".into())]);
+        assert_eq!(entries[1].art, [("screening/serials".into(), "a".into())]);
+    }
 
     #[test]
     fn a_library_names_itself_after_its_namespace() {

@@ -93,6 +93,30 @@ fn a_genre_reads_the_titles_that_lead_with_it_first_and_then_newest_release() {
 }
 
 #[test]
+fn a_series_of_a_genre_carries_the_seasons_its_episodes_fall_into() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    westerns(&path);
+    for (season, episode) in [(1, 1), (1, 2), (2, 1)] {
+        insert_episode(
+            &path,
+            SHOWS,
+            &format!("episode:{season}-{episode}"),
+            "serial",
+            season,
+            episode,
+        );
+    }
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let answer = source.wall(&genre("Western", Order::Released));
+
+    assert_eq!(answer.slots[0].id, "serial");
+    assert_eq!(answer.slots[0].seasons, 2);
+    assert_eq!(answer.slots[1].seasons, 0);
+}
+
+#[test]
 fn a_genre_ordered_by_arrival_keeps_the_rank_first() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
@@ -117,41 +141,76 @@ fn a_genre_no_title_carries_answers_nothing() {
     assert!(answer.slots.is_empty());
 }
 
+// The posters of one entry, each with the library it resolves against.
+fn art(entries: &[GenreEntry], name: &str) -> Vec<(String, String)> {
+    entries
+        .iter()
+        .find(|entry| entry.name == name)
+        .expect("the fixture carries the genre")
+        .art
+        .clone()
+}
+
+// One poster of a library, as the entries name it.
+fn poster(library: &str, id: &str) -> (String, String) {
+    (library.to_string(), format!("{id}.jpg"))
+}
+
 #[test]
-fn every_genre_carries_its_count_and_the_poster_of_its_newest_title() {
+fn every_genre_carries_its_count_and_the_posters_of_its_newest_titles() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     westerns(&path);
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
+    let entries = source.genres();
+
+    let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!(names, ["Crime", "Drama", "Western"]);
+    let counts: Vec<u64> = entries.iter().map(|entry| entry.titles).collect();
+    assert_eq!(counts, [1, 2, 4]);
+    assert_eq!(art(&entries, "Crime"), [poster(FILMS, "streak")]);
+    assert_eq!(
+        art(&entries, "Drama"),
+        [poster(FILMS, "apart"), poster(FILMS, "new")]
+    );
+    // Every Western poster but two stands on an earlier tile of the row.
+    assert_eq!(
+        art(&entries, "Western"),
+        [poster(SHOWS, "serial"), poster(FILMS, "old")]
+    );
+}
+
+#[test]
+fn a_genre_leads_with_the_titles_it_is_the_main_genre_of_then_fills_by_release() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    for (id, released, rank) in [
+        ("main-new", "2004", 0),
+        ("main-old", "1969", 0),
+        ("second", "1990", 1),
+        ("third", "2010", 2),
+    ] {
+        insert_added_movie(&path, FILMS, id, released, 0);
+        insert_genre(&path, FILMS, id, rank, "Western");
+    }
+
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+    let entries = source.genres();
 
     assert_eq!(
-        source.genres(),
+        art(&entries, "Western"),
         [
-            GenreEntry {
-                name: "Crime".into(),
-                titles: 1,
-                library: FILMS.into(),
-                art: "streak.jpg".into(),
-            },
-            GenreEntry {
-                name: "Drama".into(),
-                titles: 2,
-                library: FILMS.into(),
-                art: "apart.jpg".into(),
-            },
-            GenreEntry {
-                name: "Western".into(),
-                titles: 4,
-                library: FILMS.into(),
-                art: "streak.jpg".into(),
-            },
+            poster(FILMS, "main-new"),
+            poster(FILMS, "main-old"),
+            poster(FILMS, "third"),
+            poster(FILMS, "second"),
         ]
     );
 }
 
 #[test]
-fn a_genres_poster_is_the_newest_title_that_has_one_in_any_library() {
+fn a_genres_posters_come_from_every_library_and_skip_the_titles_with_no_art() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     westerns(&path);
@@ -174,32 +233,24 @@ fn a_genres_poster_is_the_newest_title_that_has_one_in_any_library() {
     let entries = source.genres();
 
     assert_eq!(
-        entries.iter().find(|entry| entry.name == "Western"),
-        Some(&GenreEntry {
-            name: "Western".into(),
-            titles: 5,
-            library: FILMS.into(),
-            art: "streak.jpg".into(),
-        })
+        art(&entries, "Drama"),
+        [
+            poster(FILMS, "apart"),
+            poster(SHOWS, "serial"),
+            poster(FILMS, "new"),
+        ]
     );
-    assert_eq!(
-        entries.iter().find(|entry| entry.name == "Drama"),
-        Some(&GenreEntry {
-            name: "Drama".into(),
-            titles: 3,
-            library: SHOWS.into(),
-            art: "serial.jpg".into(),
-        })
-    );
+    assert_eq!(art(&entries, "Western"), [poster(FILMS, "old")]);
     assert_eq!(
         entries.iter().find(|entry| entry.name == "Silent"),
         Some(&GenreEntry {
             name: "Silent".into(),
             titles: 1,
-            library: String::new(),
-            art: String::new(),
+            art: Vec::new(),
         })
     );
+    let counts: Vec<u64> = entries.iter().map(|entry| entry.titles).collect();
+    assert_eq!(counts, [1, 3, 1, 5]);
 }
 
 // A person over the works floor, one at it, a set of two, and a set of

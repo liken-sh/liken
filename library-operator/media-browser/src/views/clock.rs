@@ -49,9 +49,10 @@ const AROUND: [(f32, f32); 8] = [
 // The length of each leg of a diagonal unit vector.
 const DIAGONAL: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
-// Where the eight dark copies of the reading draw, around the point the
-// bright reading draws at.
-fn halo(at: Point) -> [Point; 8] {
+/// Where the eight dark copies of a reading draw, around the point the
+/// bright reading draws at. The pill over a still draws the same way,
+/// because any plate under the words would draw under the art.
+pub fn halo(at: Point) -> [Point; 8] {
     AROUND.map(|(x, y)| Point::new(at.x + x * HALO, at.y + y * HALO))
 }
 

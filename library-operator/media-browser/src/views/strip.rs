@@ -9,9 +9,9 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
-use iced_winit::core::{Point, Rectangle};
+use iced_winit::core::{Color, Point, Rectangle};
 
-use super::{Card, Tone, area, artwork, label, mark, text, underline, wall};
+use super::{Card, Tone, area, artwork, card, clock, label, mark, mosaic, text, underline, wall};
 use crate::look;
 use crate::posters::Posters;
 
@@ -33,12 +33,12 @@ const FOOT: f32 = 12.0;
 /// the strip shows.
 pub const SEE_ALL: &str = "See all";
 
-/// The height a strip takes with this many caption lines under each
-/// slot: none on a set strip, and two on every strip of the home page.
+/// The height a strip takes with this many lines under each slot: none on
+/// a set strip, and the card's two everywhere else.
 pub fn height(lines: usize) -> f32 {
     match lines {
         0 => HEADING + POSTER,
-        lines => HEADING + POSTER + FOOT + text::height(lines, look::CAPTION),
+        lines => HEADING + POSTER + FOOT + card::height(lines),
     }
 }
 
@@ -108,6 +108,13 @@ pub fn poster_width() -> f32 {
 /// at the same height.
 pub fn width_at(ratio: f32) -> f32 {
     POSTER / ratio
+}
+
+/// The width of the caption band under a slot at this ratio. It is a
+/// constant of the strip and not of the frame, so a caption is cut to it
+/// once, at the read.
+pub fn caption_width(ratio: f32) -> f32 {
+    width_at(ratio) + GAP
 }
 
 /// The slot that ends a strip and opens what the strip is about: its
@@ -216,18 +223,24 @@ pub fn draw<T: Card, P: Posters>(
         }
         let focused = strip.focus == Some(index);
         match strip.members.get(index) {
+            // A shelf draws the mosaic of its own posters, and every other
+            // slot draws the one art the member names.
             Some(member) => {
-                artwork(
-                    frame,
-                    posters,
-                    library_of(member, strip.library),
-                    member.art(),
-                    slot,
-                    member.name(),
-                    tone(strip, index),
-                );
+                match member.tiles().is_empty() {
+                    true => artwork(
+                        frame,
+                        posters,
+                        library_of(member, strip.library),
+                        member.art(),
+                        slot,
+                        member.name(),
+                        tone(strip, index),
+                    ),
+                    false => mosaic(frame, posters, member.tiles(), slot, tone(strip, index)),
+                }
+                pilled(frame, member, slot);
                 if strip.lines > 0 {
-                    captioned(frame, member, slot, focused, strip.lines);
+                    card::draw(frame, member, caption_band(slot));
                 }
             }
             // The last slot draws its art with its words as the caption,
@@ -246,7 +259,7 @@ pub fn draw<T: Card, P: Posters>(
                     Tone::Full,
                 );
                 if !last.art.is_empty() && strip.lines > 0 {
-                    wall::written(frame, caption_band(slot), last.words, look::muted());
+                    worded(frame, caption_band(slot), last.words);
                 }
             }
         }
@@ -257,6 +270,55 @@ pub fn draw<T: Card, P: Posters>(
             mark(frame, slot);
         }
     }
+}
+
+// The pill's inset from the top and left edges of the still.
+const PILL_INSET: f32 = 10.0;
+
+// The words on the pill over a show's still, and nothing where the show
+// holds one new episode or none, because one new thing is what every
+// slot of the strip is.
+fn pill_words(new: usize) -> Option<String> {
+    (new > 1).then(|| format!("{new} new"))
+}
+
+// The band the pill's words draw in: as wide as the shaper sets them, in
+// the top-left corner of the art.
+fn pill(slot: Rectangle, words: &str) -> Rectangle {
+    area(
+        slot.x + PILL_INSET,
+        slot.y + PILL_INSET,
+        text::measured(words, look::CAPTION),
+        text::height(1, look::CAPTION),
+    )
+}
+
+// The pill over the still of a show that holds more than one new
+// episode, and nothing over any other slot. The words draw over a halo
+// of dark copies, as the clock does, because a layer draws every fill
+// under every image, so a plate under the words would never show over
+// the still.
+fn pilled<T: Card>(frame: &mut canvas::Frame<Renderer>, member: &T, slot: Rectangle) {
+    let Some(words) = pill_words(member.new_episodes()) else {
+        return;
+    };
+    let band = pill(slot, &words);
+    let at = Point::new(band.x, band.center_y());
+    let ink = |point: Point, color: Color| {
+        label(
+            &words,
+            point,
+            look::CAPTION,
+            color,
+            Alignment::Left,
+            Vertical::Center,
+            band.width + SLACK,
+        )
+    };
+    for point in clock::halo(at) {
+        frame.fill_text(ink(point, look::BACKGROUND));
+    }
+    frame.fill_text(ink(at, look::text()));
 }
 
 // The band the first caption line of a slot draws in, a gap wider than
@@ -270,27 +332,13 @@ fn caption_band(slot: Rectangle) -> Rectangle {
     )
 }
 
-// The caption lines under one slot, in the wall's own words and colors:
-// the slot's line muted, the focused slot's facts bright, and the second
-// line faint where the strip draws two.
-fn captioned<T: Card>(
-    frame: &mut canvas::Frame<Renderer>,
-    member: &T,
-    slot: Rectangle,
-    focused: bool,
-    lines: usize,
-) {
-    let band = caption_band(slot);
-    let chars = text::fits(look::CAPTION, band.width);
-    let (content, color) = wall::captioned(member, focused, chars);
-    wall::written(frame, band, content, color);
-    if lines > 1 {
-        let under = Rectangle {
-            y: band.y + band.height,
-            ..band
-        };
-        wall::written(frame, under, member.under(), look::faint());
-    }
+// The one muted line under the slot that ends a strip. The shaper cuts it
+// to the band, as it cuts the cards beside it, because a word the
+// estimate calls short enough can set wider than the band and clip in
+// the middle of a letter.
+fn worded(frame: &mut canvas::Frame<Renderer>, band: Rectangle, words: &str) {
+    let cut = card::cut(words, band.width);
+    text::shown(frame, &cut, band, look::CAPTION, look::muted());
 }
 
 // The library one slot's art resolves against: the slot's own where it
@@ -411,6 +459,20 @@ mod tests {
     }
 
     #[test]
+    fn a_strips_two_lines_are_the_cards_own() {
+        assert_eq!(height(2), HEADING + POSTER + FOOT + card::height(2));
+        assert!(height(2) - height(1) < text::height(1, look::CAPTION));
+        let members = mixed();
+        let slots = placed(&members, false);
+        let region = area(0.0, 0.0, 1000.0, height(2));
+        let band = caption_band(slot(region, &slots, 0.0, 0));
+        assert_eq!(
+            band.y + band.height + card::under(band).height,
+            region.y + HEADING + POSTER + FOOT + card::height(2)
+        );
+    }
+
+    #[test]
     fn posters_and_stills_sit_side_by_side_at_one_height() {
         let members = mixed();
         let slots = placed(&members, false);
@@ -462,6 +524,43 @@ mod tests {
         let (last, width) = slots[30];
         let end = offset(&slots, Some(30), viewport);
         assert_eq!(end, last + width - viewport);
+    }
+
+    #[test]
+    fn the_caption_band_is_one_slot_and_one_gap_wide() {
+        assert_eq!(caption_width(wall::POSTER), poster_width() + GAP);
+        assert_eq!(caption_width(wall::STILL), width_at(wall::STILL) + GAP);
+        let members = mixed();
+        let slots = placed(&members, false);
+        let region = area(0.0, 0.0, 1000.0, height(2));
+        assert_eq!(
+            caption_band(slot(region, &slots, 0.0, 0)).width,
+            caption_width(wall::POSTER)
+        );
+        assert_eq!(
+            caption_band(slot(region, &slots, 0.0, 1)).width,
+            caption_width(wall::STILL)
+        );
+    }
+
+    #[test]
+    fn a_show_of_more_than_one_new_episode_carries_a_pill_and_no_other_slot_does() {
+        assert_eq!(pill_words(2).as_deref(), Some("2 new"));
+        assert_eq!(pill_words(12).as_deref(), Some("12 new"));
+        assert_eq!(pill_words(1), None);
+        assert_eq!(pill_words(0), None);
+    }
+
+    #[test]
+    fn the_pill_sits_in_the_top_left_corner_of_the_still_it_marks() {
+        let slot = area(100.0, 200.0, width_at(wall::STILL), POSTER);
+        let pill = pill(slot, "2 new");
+        assert_eq!(pill.x, slot.x + PILL_INSET);
+        assert_eq!(pill.y, slot.y + PILL_INSET);
+        assert_eq!(pill.width, text::measured("2 new", look::CAPTION));
+        assert_eq!(pill.height, text::height(1, look::CAPTION));
+        assert!(pill.x + pill.width < slot.x + slot.width);
+        assert!(pill.y + pill.height < slot.y + slot.height);
     }
 
     #[test]

@@ -15,6 +15,7 @@ use iced_winit::core::Rectangle;
 use super::metro;
 use crate::catalog::franchise::{Entry, Era, Franchise, Held, SERIES, Standing};
 use crate::look;
+use crate::screens::facts;
 use crate::views::{REACH, area, rail, text, wall};
 
 /// The space under a row, inside a card, and between the strip and the
@@ -104,6 +105,9 @@ pub struct Cell {
     /// film's page words them.
     pub facts: String,
     pub blurb: String,
+    /// Whether the blurb is the item's tagline, which draws in the
+    /// italic, and not the first lines of its plot.
+    pub tagline: bool,
     pub note: String,
     pub standing: Standing,
 }
@@ -240,6 +244,7 @@ fn cell(entry: &Entry, columns: &[String], today: &str) -> Cell {
         wide,
         name: entry.name().to_string(),
         facts,
+        tagline: !held.tagline.is_empty(),
         blurb: match held.tagline.is_empty() {
             true => held.plot,
             false => held.tagline,
@@ -259,21 +264,25 @@ fn dated(entry: &Entry, held: &Held) -> String {
     }
 }
 
-// The facts line: Film or Series, the year, and then a film's running
-// time or a series run's episodes where the catalog holds them. A fact
-// the entry does not carry leaves no gap and no dot behind.
-fn facts(entry: &Entry, held: &Held) -> String {
+/// The facts line: Film or Series, the year, and then a film's running
+/// time or a series run's episodes where the catalog holds them. A fact
+/// the entry does not carry leaves no gap and no dot behind.
+/// The facts under one entry: the kind word, the year, and a film's
+/// running time or a series run's episodes. The franchise strip on a
+/// film's page and on a series' page draws the same line under its
+/// members, so the words are spelled once.
+pub fn facts(entry: &Entry, held: &Held) -> String {
     let series = entry.kind == SERIES;
-    let kind = match series {
-        true => "Series",
-        false => "Film",
-    };
     let held_facts = match (entry.held.is_some(), series) {
-        (true, true) => counted(entry.episodes),
-        (true, false) => crate::screens::facts::runtime(held.duration),
+        (true, true) => facts::counted(entry.episodes, "episodes"),
+        (true, false) => facts::runtime(held.duration),
         (false, _) => String::new(),
     };
-    crate::screens::facts::joined(&[kind, &dated(entry, held), &held_facts])
+    facts::joined(&[
+        facts::kind_word(&entry.kind),
+        &dated(entry, held),
+        &held_facts,
+    ])
 }
 
 // The art one cell draws, and whether it fills the cell's 16:9 box. The
@@ -312,44 +321,10 @@ pub fn note(entry: &Entry, today: &str) -> String {
     // no note, because its episodes stand on the facts line.
     match entry.standing(today) {
         Standing::Held => String::new(),
-        Standing::Coming => format!("{COMING} {}", worded(&entry.released)),
+        Standing::Coming => format!("{COMING} {}", facts::date_worded(&entry.released, today)),
         Standing::Missing => MISSING.to_string(),
     }
 }
-
-/// An ISO date at year, month, or day precision as a person reads it:
-/// `2027`, `March 2027`, `12 March 2027`. A month past the twelve, or a
-/// part that is not a number, reads as the date was written.
-pub fn worded(released: &str) -> String {
-    let mut parts = released.split('-');
-    let year = parts.next().unwrap_or_default();
-    let month = parts
-        .next()
-        .and_then(|month| month.parse::<usize>().ok())
-        .and_then(|month| MONTHS.get(month.wrapping_sub(1)));
-    let day = parts.next().and_then(|day| day.parse::<u32>().ok());
-    match (month, day) {
-        (Some(month), Some(day)) => format!("{day} {month} {year}"),
-        (Some(month), None) => format!("{month} {year}"),
-        _ => released.to_string(),
-    }
-}
-
-// The months as the note names them.
-const MONTHS: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-];
 
 // The word under an entry no library holds and the file does not date
 // ahead.
@@ -358,14 +333,6 @@ const MISSING: &str = "Missing";
 // The word before the year of an entry no library holds and the file
 // dates ahead.
 const COMING: &str = "Coming";
-
-// How many episodes a series run holds, as a person reads it.
-fn counted(episodes: i64) -> String {
-    match episodes {
-        1 => "1 episode".to_string(),
-        count => format!("{count} episodes"),
-    }
-}
 
 // One cell as a row of its own, with the time label the calendar gives
 // its span.

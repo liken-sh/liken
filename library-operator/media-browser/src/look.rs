@@ -151,10 +151,12 @@ pub const DEPARTURE: f64 = 0.35;
 /// departure, so the way back is quicker than the way out.
 pub const RETURN: f64 = 0.12;
 
-/// The one family the whole display draws in. The image installs the face, and
-/// the toolkit resolves it by name. With no installed match the toolkit falls
-/// back and the look drifts.
-pub const FONT: &str = "Source Sans 3";
+/// The one family the whole display draws in, and the italic face of that
+/// family, which the second caption line of a two-line card draws in. Both
+/// come from the brand crate, which carries the files and loads them into
+/// the toolkit at startup, so this screen and every other liken display
+/// draw the same face.
+pub use liken_iced::font::{FAMILY as FONT, ITALIC};
 
 #[cfg(test)]
 mod tests {
