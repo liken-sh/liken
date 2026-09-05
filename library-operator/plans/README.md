@@ -40,6 +40,10 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [10, The documentation site](10-the-documentation-site.md). The manual
   and the generated reference, written after plan 09.
 
+* [37, Prometheus metrics](37-prometheus-metrics.md). Proposed.
+  Enrichment progress, work needing attention, worker outcomes, and
+  observation health, with optional collection and quiet idle libraries.
+
 ## Future
 
 These plans are named so the design accounts for them. Each is a stub
