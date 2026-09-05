@@ -11,7 +11,7 @@
 profile: coverage.out
 
 threshold:
-  total: 85
+  total: 86
 
 override:
   # The EDL: pure parsing and timeline arithmetic.

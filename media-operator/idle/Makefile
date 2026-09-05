@@ -15,8 +15,8 @@
 # The floor on line coverage, as a percentage, one per crate. CI enforces the
 # same numbers through this file. Raise one when the tests earn it; never
 # lower it.
-IDLE_COVERAGE_FLOOR := 90
-SCREEN_COVERAGE_FLOOR := 95
+IDLE_COVERAGE_FLOOR := 95
+SCREEN_COVERAGE_FLOOR := 99
 
 # Every cargo command runs at the workspace root, which is the directory
 # above this one.

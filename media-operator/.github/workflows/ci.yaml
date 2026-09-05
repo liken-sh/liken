@@ -42,6 +42,11 @@ jobs:
       # .testcoverage.yml holds the floors.
       - run: make test-go
 
+      # The same target a workstation runs: the manifests under
+      # deploy/ against the Kubernetes API, offline. The Makefile says
+      # which release and why.
+      - run: make test-deploy
+
   docs:
     runs-on: ubuntu-latest
     steps:
