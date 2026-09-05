@@ -49,6 +49,11 @@ test-go:
 # the same way docs/ pins Hugo. kustomization.yaml is left out,
 # because kustomize's own kind is not part of the API.
 #
+# kubectl-validate asks the cluster the current kubeconfig names for
+# its schemas before it falls back to the embedded ones, with no flag
+# to turn that off. KUBECONFIG=/dev/null keeps the check offline and
+# the same on every machine, whatever context a workstation holds.
+#
 # The version is the newest release the pinned kubectl-validate
 # embeds, one minor behind the k3s liken ships. A release it does not
 # embed is fetched from the GitHub API on every run, which fails
@@ -59,7 +64,7 @@ DEPLOY_MANIFESTS := $(notdir $(filter-out deploy/kustomization.yaml,$(wildcard d
 
 .PHONY: test-deploy
 test-deploy:
-	cd deploy && go tool kubectl-validate --version $(KUBERNETES_VERSION) --local-crds . $(DEPLOY_MANIFESTS)
+	cd deploy && KUBECONFIG=/dev/null go tool kubectl-validate --version $(KUBERNETES_VERSION) --local-crds . $(DEPLOY_MANIFESTS)
 
 .PHONY: test-docs
 test-docs:

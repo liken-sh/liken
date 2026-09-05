@@ -34,6 +34,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          # deploy/go.sum joins the key because kubectl-validate
+          # compiles the API server's libraries, several minutes from
+          # cold, and the root go.sum never sees that module change.
+          cache-dependency-path: |
+            go.sum
+            deploy/go.sum
 
       # The same target a workstation runs: gofmt, vet, the race
       # tests, and the coverage gate on its pinned toolchain. The
