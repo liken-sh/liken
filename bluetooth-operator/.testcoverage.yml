@@ -11,7 +11,7 @@
 profile: coverage.out
 
 threshold:
-  total: 65
+  total: 68
 
 override:
   # The bluetoothd supervisor: what is testable is the argument
@@ -24,4 +24,4 @@ override:
     threshold: 52
   # bonds: the on-disk bond format, which is pure byte layout.
   - path: ^bonds$
-    threshold: 90
+    threshold: 91
