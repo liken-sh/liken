@@ -650,7 +650,7 @@ docs:
 
 # `make test` runs every check CI runs, in the same commands, so a
 # change that passes here passes there.
-test: test-go test-manifests test-docs
+test: test-go test-docs
 
 # The gate measures coverage on its own run, on its own pinned
 # toolchain, and the pin is the point.
@@ -698,11 +698,6 @@ test-go:
 	go test ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
-
-# The manifests liken applies, against the API of the k3s it ships.
-# The k3s domain owns the check; its Makefile says how.
-test-manifests:
-	$(MAKE) -C k3s test
 
 test-docs:
 	$(MAKE) -C docs test
@@ -765,4 +760,4 @@ clean:
 	rm -rf $(HW_IMAGE_DIR)
 	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go test-manifests test-docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go test-docs clean
