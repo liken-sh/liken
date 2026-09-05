@@ -76,7 +76,7 @@ jobs:
   # The docs domain is a nested Go module, so the hooks above never
   # see it. This job runs its checks and builds the site, which proves
   # on a pull request that the site still builds. The publish job
-  # below builds it again, from a checkout it deploys.
+  # below deploys the tree this job built, so the site builds once.
   docs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -99,6 +99,19 @@ jobs:
             go.sum
             docs/go.sum
 
+      # setup-go saves its cache only when its key misses, and the key
+      # tracks docs/go.sum, so between two bumps of that file the Go
+      # build cache inside the entry never refreshes, and Go trims the
+      # compiled Hugo and crdref objects out of it. This entry saves on
+      # every run, under a key that ends in the commit, and restores the
+      # newest entry for the same docs/go.sum, so the tools compile once
+      # per bump instead of once per run.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-${{ github.sha }}
+          restore-keys: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-
+
       # The make target generates the reference pages first, because
       # the link check reads them as sources and as targets.
       - name: test the docs
@@ -109,8 +122,19 @@ jobs:
       - name: build the site
         run: make -C docs build
 
-  # This is the website deploy. The job builds the site and deploys
-  # the tree to GitHub Pages, which serves it at liken.sh. Every push
+      # The publish job deploys this tree as it is, so the site builds
+      # once per commit and the bytes it serves are the bytes the link
+      # check passed.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: site
+          path: docs/dist/site
+          if-no-files-found: error
+          retention-days: 7
+
+  # This is the website deploy. The job takes the tree the docs job
+  # built and deploys it to GitHub Pages, which serves it at liken.sh.
+  # Every push
   # to main publishes, and no path filter narrows that, because the
   # site now carries the test coverage report: a change to any Go file
   # moves a number the site serves. A pull request never reaches this
@@ -151,8 +175,6 @@ jobs:
       group: docs
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-go@v6
         with:
@@ -160,6 +182,19 @@ jobs:
           cache-dependency-path: |
             go.sum
             docs/go.sum
+
+      # setup-go saves its cache only when its key misses, and the key
+      # tracks docs/go.sum, so between two bumps of that file the Go
+      # build cache inside the entry never refreshes, and Go trims the
+      # compiled coverage tool out of it. This entry saves on
+      # every run, under a key that ends in the commit, and restores the
+      # newest entry for the same docs/go.sum, so the tools compile once
+      # per bump instead of once per run.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-${{ github.sha }}
+          restore-keys: docs-build-${{ runner.os }}-${{ hashFiles('docs/go.sum') }}-
 
       # The report is rendered here, from the profile the gate wrote,
       # rather than measured again: the numbers the site publishes are
@@ -173,11 +208,16 @@ jobs:
       - name: render the coverage report
         run: make coverage-report
 
-      # What this step writes to dist/site/ is byte for byte what
+      # This tree is byte for byte what the docs job built and what
       # Pages serves, apart from the report, which is copied in below
       # because it is built from the tests and not from content.
-      - name: build the site
-        run: make -C docs build
+      # docs/Makefile writes release.txt inside that build, so the
+      # deploy marker arrives with the tree.
+      - name: take the built site
+        uses: actions/download-artifact@v8
+        with:
+          name: site
+          path: docs/dist/site
 
       - name: add the coverage report to the site
         run: cp coverage.html docs/dist/site/coverage.html
