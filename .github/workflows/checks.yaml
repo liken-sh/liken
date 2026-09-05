@@ -29,18 +29,27 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Thirty minutes is what a cold cache needs: the kubectl-validate
+    # build alone is several minutes on a runner, and the cache only
+    # saves when the job completes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
       # setup-go reads the version from go.mod, so the pin lives where
       # Go pins live. It also caches the module and build caches,
-      # keyed on go.sum, so the hooks' go builds start warm on repeat
-      # runs.
+      # keyed on both go.sum files, so the hooks' go builds start
+      # warm on repeat runs. The k3s module's go.sum is in the key
+      # because kubectl-validate compiles the API server's libraries,
+      # about ten CPU-minutes from cold, and a key on the root go.sum
+      # alone would never see that module change.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            k3s/go.sum
 
       # prek runs the hooks. Its version is pinned here, because the
       # workflow is the only place CI reads it from. The action caches

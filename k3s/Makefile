@@ -28,6 +28,11 @@ clean:
 # nested module, so its dependency graph stays out of the root go.sum,
 # the same way docs/ pins Hugo.
 #
+# kubectl-validate asks the cluster the current kubeconfig names for
+# its schemas before it falls back to the embedded ones, with no flag
+# to turn that off. KUBECONFIG=/dev/null keeps the check offline and
+# the same on every machine, whatever context a workstation holds.
+#
 # The version is the newest release the pinned kubectl-validate
 # embeds, one minor behind the k3s VERSION names. A release it does
 # not embed is fetched from the GitHub API on every run, which fails
@@ -50,4 +55,4 @@ space := $(empty) $(empty)
 CRD_DIRECTORIES := $(subst $(space),$(comma),$(patsubst %/,%,$(sort $(dir $(MANIFESTS)))))
 
 test:
-	go tool kubectl-validate --version $(KUBERNETES_VERSION) --local-crds $(CRD_DIRECTORIES) $(MANIFESTS)
+	KUBECONFIG=/dev/null go tool kubectl-validate --version $(KUBERNETES_VERSION) --local-crds $(CRD_DIRECTORIES) $(MANIFESTS)
