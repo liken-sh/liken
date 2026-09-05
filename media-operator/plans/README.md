@@ -25,6 +25,10 @@ is built the way it is, and what it still owes an answer to.
 These plans are designed. Each keeps its number and moves to
 [`completed/`](completed/) when it is built and drilled.
 
+* [26, Prometheus metrics](26-prometheus-metrics.md). Proposed.
+  Playback outcomes, startup delay, and report freshness per `Player`,
+  with explicit rules for retained reports, pause, and normal endings.
+
 ## Completed
 
 * [01, A play becomes a pod](completed/01-a-play-becomes-a-pod.md). Built, and
