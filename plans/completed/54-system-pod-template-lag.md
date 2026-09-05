@@ -2,7 +2,7 @@
 
 A rollout must survive the gap between a system pod's binary and the
 pod spec around it.
-[The open problem](../open-problems/system-pod-mounts-wedge-follower-first-rollouts.md)
+[The open problem](../open-problems/system-pod-template-compatibility.md)
 records the failure: a release added a `/host/etc` mount to the
 machine-operator template, a follower took the first turn, and its new
 binary failed writing `/etc/hosts` through a mount its old pod did not

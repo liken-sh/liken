@@ -16,9 +16,10 @@ A document's directory states its status:
 The numbers run in one sequence across all three directories. The next
 milestone is 65.
 
-[`open-problems/`](open-problems/) holds the questions that liken owes
-an answer to. Those documents have no number, because nobody has
-decided yet what work they become.
+[`open-problems/`](open-problems/) records unresolved bugs and design
+questions. Each document explains the evidence, possible remedies, and
+whether the work needs a design decision. These documents have no
+milestone number because their implementation scope is not settled.
 
 ## Completed
 
@@ -203,7 +204,7 @@ decided yet what work they become.
 * **62.** [Wifi](completed/62-wifi.md). A machine joins over a wireless
   interface, declared in `spec.network` the way a wired one is. The
   image vendors `wpa_supplicant`, init supervises it and reads its
-  events, and the passphrase rides the stick beside the join token.
+  events, and the passphrase is stored on the stick beside the join token.
 * **63.** [eMMC storage](completed/63-emmc.md). A machine whose only
   disk is an eMMC module installs and boots the same way a SATA or
   NVMe machine does. PCI subclass `0805` reads as storage, the boot
@@ -254,21 +255,56 @@ dm-verity, secure boot, TPM-sealed secrets, and signed releases.
 
 ## Open problems
 
-These are the questions that liken owes an answer to. It does not have
-one yet. Each one has a document in [`open-problems/`](open-problems/).
+These documents separate implementation safeguards from decisions that
+change a user-visible contract. Focused work can still need coordination
+across processes and failure tests. It does not necessarily mean a small
+patch. A design question needs agreement on behavior before implementation.
 
-* [A missing firmware file reaches only the kernel
-  log](open-problems/a-missing-firmware-file-reaches-only-the-kernel-log.md).
-  A failed firmware request leaves the device degraded and the
-  `Machine` looking healthy; the gap doctrine and the operator's
-  kmsg cursor point at a status answer.
-* [Claiming unknown machines](open-problems/claiming-unknown-machines.md).
-  `liken.machine=` identifies a machine that somebody declared before
-  it booted, and nothing identifies the machine that nobody declared.
-* [A system pod's new mount wedges a follower-first rollout](open-problems/system-pod-mounts-wedge-follower-first-rollouts.md).
-  The follower runs the new binary inside the old pod spec, and the
-  new template only arrives when a leader boots the new release.
-* [Two cluster operators can run at once](open-problems/two-cluster-operators-can-run-at-once.md).
-  `replicas: 1` does not bound the cluster operator to one instance
-  under a partition or a `replicas` patch. A leader `Lease` in the
-  operator code makes a second instance harmless.
+### Implementation safeguards
+
+* [Protect system disks when facts are unavailable](open-problems/missing-facts-expose-system-disks.md).
+  Refuse unsafe device offers and preparation when storage protection
+  cannot be established. This enforces the existing isolation contract.
+* [Invalidate device grants after hardware removal](open-problems/removed-devices-retain-stale-grants.md).
+  Prevent a stale device path from granting access to replacement
+  hardware. Transparent hot-plug recovery is a separate design question.
+* [Keep staged releases consistent during retargeting](open-problems/retargeting-overwrites-staged-releases.md).
+  Coordinate slot writes, staged records, and reboot verification. The
+  fix must preserve release approval and fallback guarantees.
+* [Bound and cancel release downloads](open-problems/release-downloads-can-block-upgrades.md).
+  Add transfer deadlines, cancellation, and retry cleanup without
+  blocking reconciliation or allowing concurrent slot writers.
+* [Keep Node-read errors from bypassing the drain](open-problems/node-read-errors-bypass-draining.md).
+  Distinguish an expected demotion state from an API failure. Keep the
+  existing drain deadline and disruption policy.
+* [Pin CI executable inputs](open-problems/ci-executables-need-immutable-pins.md).
+  Verify the certificate tool against reviewed bytes and pin actions by
+  commit. This does not require a new release-signing design.
+* [Coordinate cluster-operator instances](open-problems/cluster-operator-leader-election.md).
+  Add leader election and safe handling of renewal failures and pending
+  writes. A `Lease` alone does not fence a paused former leader.
+
+### Design decisions and policy questions
+
+* [Make disruption approvals one-shot](open-problems/disruption-approvals-can-be-reused.md).
+  Choose how to identify or consume approvals without widening node
+  permissions. The design must account for annotation compatibility and
+  explicit approval of the same configuration on a later occasion.
+* [Restrict machine-operator credentials to one node](open-problems/machine-operator-credentials-have-fleet-wide-access.md).
+  Node-local authorization needs an identity and enforcement design.
+  The shared `ServiceAccount` currently has fleet-wide write permissions.
+* [Handle firmware that loses boot order across reset](open-problems/firmware-bootorder-persistence.md).
+  Refusing an unsafe trial is a safeguard. Establishing fallback
+  capability and defining recovery or overrides need explicit policy.
+* [Report missing firmware in machine status](open-problems/missing-firmware-status.md).
+  Log collection is implementation work. The status schema, retry
+  semantics, and effect on readiness need design decisions.
+* [Enroll undeclared machines automatically](open-problems/automatic-machine-enrollment.md).
+  Decide how unattended machines receive trusted identities and addresses.
+  This follows the proposed supervised enrollment flow.
+* [Keep system pods compatible during rollouts](open-problems/system-pod-template-compatibility.md).
+  The recorded mount failure has targeted mitigations. The remaining
+  question is how future template changes stay compatible across releases.
+* [Version system images without blocking scheduling](open-problems/system-image-versioning.md).
+  Immutable image references need a scheduling and credential design that
+  works during upgrades, fallback, image-store recovery, and old-media joins.
