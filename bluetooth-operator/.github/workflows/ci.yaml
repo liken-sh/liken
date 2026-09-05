@@ -1,8 +1,10 @@
-# Every pull request runs the tests and builds every image, and
-# pushes nothing. A push to main runs release.yaml instead, which
-# runs the same tests and then publishes a development build, so
-# this workflow does not run there: two workflows that test one push
-# would spend twice the runners for one answer.
+# Every pull request and every push to main runs the full gate: the
+# tests, the coverage floors, the docs checks, and a build of every
+# image. This workflow pushes nothing. On main, release.yaml runs
+# beside it and publishes a development build. release.yaml runs a
+# plain go test of its own as a guard before it pushes images, but
+# the coverage floors and the other checks live only here, so a
+# commit on main gets the same verdict a pull request would.
 #
 # There is no path filter. The tests are cheap next to the image
 # builds, and a filter that guessed wrong would leave a commit with
@@ -13,7 +15,10 @@
 name: ci
 
 on:
+  push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
