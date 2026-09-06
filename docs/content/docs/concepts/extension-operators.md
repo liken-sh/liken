@@ -15,10 +15,10 @@ installs none of them runs unchanged.
 
 Two families exist today. The hardware operators publish the
 machine's hardware as devices a workload can claim. The media
-operator composes those devices into media playback. The families
-layer in one direction: the media operator claims devices the way
-any workload does, and no hardware operator knows what runs above
-it.
+operators compose those devices into media playback, and keep the
+libraries that playback draws from. The families layer in one direction: a
+media operator claims devices the way any workload does, and no
+hardware operator knows what runs above it.
 
 ## The hardware operators
 
@@ -58,7 +58,10 @@ for its devices:
   The source is
   [liken-sh/audio-operator](https://github.com/liken-sh/audio-operator).
 
-## The media operator
+## The media operators
+
+Two operators share the media layer, and they layer in one direction
+too.
 
 The media operator is the routing and control of media playback on
 a cluster: which display and speakers form a unit, what plays on
@@ -66,22 +69,19 @@ it, and which controller drives it, all declared as Kubernetes
 resources. It publishes no devices of its own. It selects devices
 out of what the hardware operators publish, with the same CEL
 selectors a hand-written `ResourceClaim` would use, and it claims
-them only for the pods it runs.
-
-Its manual is [media.liken.sh](https://media.liken.sh): the
-resources, the install, and the MQTT message bus its pods and your
-own programs share. The source is
+them only for the pods it runs. Its manual is
+[media.liken.sh](https://media.liken.sh): the resources, the install,
+and the MQTT message bus its pods and your own programs share. The
+source is
 [liken-sh/media-operator](https://github.com/liken-sh/media-operator).
 
-## The library operator
-
-The library operator is the media libraries of a cluster, declared
+The library operator is the media libraries of that cluster, declared
 as Kubernetes resources: a root directory of movies or series on a
 volume, the catalog its scanners keep of what is there, and a media
 browser that takes the place of the idle screen on a `Player` the
 media operator owns. It publishes no devices, and it claims the
-display only through the `Player`'s own standing claim.
-
-Its manual is [library.liken.sh](https://library.liken.sh): the
-resources, the install, the scanners, and the browser. The source is
+display only through the `Player`'s own standing claim. The media
+operator never reads the library operator's resources. Its manual is
+[library.liken.sh](https://library.liken.sh): the resources, the
+install, the scanners, and the browser. The source is
 [liken-sh/library-operator](https://github.com/liken-sh/library-operator).
