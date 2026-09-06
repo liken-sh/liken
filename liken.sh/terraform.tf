@@ -204,7 +204,9 @@ resource "linode_domain_record" "www" {
 # composes those devices into playback, and its manual answers at
 # media.liken.sh the same way. git-csi-driver is a CSI driver, not
 # a device operator, and its manual answers at git.liken.sh, the
-# driver's name. A subdomain can CNAME where the apex
+# driver's name. library-operator publishes no devices, so its
+# manual answers at library.liken.sh, the name of what it operates:
+# the media libraries of a cluster. A subdomain can CNAME where the apex
 # cannot, so each name points at the organization's Pages hostname,
 # and GitHub routes the request to the repository that claims the
 # name as its custom domain. The Pages verification record below
@@ -218,6 +220,7 @@ resource "linode_domain_record" "extension_operators" {
     "audio",
     "media",
     "git",
+    "library",
   ])
 
   domain_id   = linode_domain.liken_sh.id
