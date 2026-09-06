@@ -81,7 +81,7 @@ func TestNodeGetInfoNamesTheNode(t *testing.T) {
 	}
 }
 
-func TestNodeGetCapabilitiesDeclaresTheFour(t *testing.T) {
+func TestNodeGetCapabilitiesDeclaresTheThree(t *testing.T) {
 	client := csi.NewNodeClient(startServer(t, io.Discard))
 	answer, err := client.NodeGetCapabilities(t.Context(), &csi.NodeGetCapabilitiesRequest{})
 	if err != nil {
@@ -94,7 +94,6 @@ func TestNodeGetCapabilitiesDeclaresTheFour(t *testing.T) {
 	want := []csi.NodeServiceCapability_RPC_Type{
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
-		csi.NodeServiceCapability_RPC_VOLUME_CONDITION,
 		csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
 	}
 	if len(got) != len(want) {
@@ -352,14 +351,10 @@ func TestNodePublishVolumePublishesAStaleTreeWhenTheVolumeAllowsIt(t *testing.T)
 		t.Errorf("the stale tree holds %v", got)
 	}
 
-	stats, err := answering.NodeGetVolumeStats(t.Context(), &csi.NodeGetVolumeStatsRequest{
-		VolumeId: "csi-2", VolumePath: second.TargetPath,
-	})
-	if err != nil {
-		t.Fatalf("NodeGetVolumeStats: %v", err)
-	}
-	if !stats.GetVolumeCondition().GetAbnormal() {
-		t.Error("a stale publish reported a normal condition")
+	abnormal, found := abnormalOf(t, answering.readings, "home", "csi-2")
+	if !found || abnormal != 1 {
+		t.Errorf("git_csi_volume_abnormal reads %v (found: %v) after a stale publish, want 1",
+			abnormal, found)
 	}
 	posted := eventsOf(t, answering)
 	if len(posted) != 1 || posted[0].Reason != reasonStale {
@@ -460,13 +455,6 @@ func TestNodeGetVolumeStatsReportsTheTreesSize(t *testing.T) {
 	}
 	if usage[0].GetAvailable() != 0 {
 		t.Errorf("NodeGetVolumeStats answered %d available, want 0", usage[0].GetAvailable())
-	}
-	condition := stats.GetVolumeCondition()
-	if condition.GetAbnormal() {
-		t.Errorf("NodeGetVolumeStats answered abnormal: %q", condition.GetMessage())
-	}
-	if !strings.HasPrefix(condition.GetMessage(), "main at ") {
-		t.Errorf("the condition says %q, want the ref and the commit", condition.GetMessage())
 	}
 }
 

@@ -44,10 +44,9 @@ A `Secret` with neither `ssh-privatekey` nor `token` is refused.
 | `GitVolumeStale` | The fetch failed and `offline: allowStale` published the node's copy. |
 | `GitFetchFailed` | A fetch failed after one that worked. Posted once, until a fetch succeeds. |
 
-## The condition
+## The gauge
 
-`NodeGetVolumeStats` reports the tree's size as used and a
-`VolumeCondition`. The condition is normal after a successful publish or
-fetch and says the ref and the commit. It is abnormal, with the error,
+`git_csi_volume_abnormal`, labeled `namespace` and `volume`, is one
 after a stale publish and after a failed fetch, until a fetch succeeds.
-The kubelet exposes it as `kubelet_volume_stats_health_status_abnormal`.
+The driver's log says what went wrong when the gauge rises and when it
+falls. `NodeGetVolumeStats` reports the tree's size as used.

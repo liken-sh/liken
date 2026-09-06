@@ -55,6 +55,9 @@ type volume struct {
 	diverged   string
 	refDeleted bool
 	abandoned  string
+	// What report() last said, so the gauge and the log carry a
+	// volume's health at the moment it turns and never on every poll.
+	abnormal bool
 }
 
 // reportDiverged records the side branch the volume pushes to.
@@ -165,6 +168,18 @@ func (v *volume) policyNow() *policy {
 	return v.rules
 }
 
+// namespace is where a person looks the volume up: the claim's
+// namespace for a persistent volume, and the pod's for an inline one,
+// which is the only namespace a read-only volume has.
+func (v *volume) namespace() string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.writeable {
+		return v.claim.namespace
+	}
+	return v.pod.namespace
+}
+
 // reading is what the gauges carry: the claim that labels them, whether
 // the volume is armed, and how many paths are pending.
 func (v *volume) reading() (claimReference, bool, int) {
@@ -227,13 +242,31 @@ func (v *volume) overdue(now time.Time) bool {
 		!v.oldest.IsZero() && now.Sub(v.oldest) > v.rules.maxLatency
 }
 
-// report is the condition every NodeGetVolumeStats answer carries. A
-// failure comes first, then a class the driver cannot read, then the
-// work the driver may not commit or has not pushed, then the commit the
-// tree stands on.
+// report is the one source of the volume's health, which the
+// gauge and the log carry. A failure comes first, then a class the
+// driver cannot read, then the work the driver may not commit or has
+// not pushed, then the commit the tree stands on.
 func (v *volume) report() (bool, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	return v.reportNow()
+}
+
+// takeHealth is the report and whether the abnormal flag moved
+// since the last call, which is the one moment the log says so.
+func (v *volume) takeHealth() (bool, string, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	abnormal, message := v.reportNow()
+	moved := abnormal != v.abnormal
+	v.abnormal = abnormal
+	return abnormal, message, moved
+}
+
+// reportNow is the report itself, read under the lock the two
+// callers above hold, so a health reading and the flag it moves come
+// from one look at the volume.
+func (v *volume) reportNow() (bool, string) {
 	switch {
 	case v.trouble != "":
 		return true, v.trouble
@@ -261,7 +294,6 @@ func (v *volume) report() (bool, string) {
 	return false, fmt.Sprintf("%s at %s", v.attributes.ref, short(v.commit))
 }
 
-// reportCommit records that the tree holds commit and nothing is wrong.
 // reportCommit records that the tree holds commit and nothing is wrong.
 // A resolved commit means the fetch reached the ref, so a deleted ref is
 // reported no longer.

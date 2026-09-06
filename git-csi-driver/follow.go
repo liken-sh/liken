@@ -148,7 +148,12 @@ func (f *follower) snapshot() []*volume {
 
 // refresh fetches the volume's ref and, when it moved, places the new
 // commit in the published tree.
+//
+// Every path out of a fetch changes what the volume reports, so
+// the gauge and the log take the answer here, once, rather than at each
+// of them.
 func (f *follower) refresh(ctx context.Context, held *volume) {
+	defer f.node.noteHealth(ctx, held)
 	env, remove, err := held.credentials.use(held.directory)
 	if err != nil {
 		f.trouble(ctx, held, err.Error())
@@ -179,9 +184,9 @@ func (f *follower) refresh(ctx context.Context, held *volume) {
 		"volume", held.id, "ref", held.attributes.ref, "commit", short(commit))
 }
 
-// trouble records a failed fetch. The first failure after a success
-// posts one Event, and the condition carries the failure until a fetch
-// works again.
+// trouble records a failed fetch. The first failure after a
+// success posts one Event, and the volume's report carries the failure
+// until a fetch works again.
 func (f *follower) trouble(ctx context.Context, held *volume, message string) {
 	if held.reportTrouble(message) {
 		f.node.events.post(ctx, held.attributes.pod, corev1.EventTypeWarning, reasonFailed, message)

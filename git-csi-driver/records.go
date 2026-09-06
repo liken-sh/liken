@@ -97,10 +97,10 @@ func (n *node) drop(ctx context.Context, held *record, directory string) {
 	}
 }
 
-// resumeOne rebuilds one volume and starts the loops it had. It holds
-// no credential: the Secret came with a call the kubelet makes again
-// only when the pod restarts, so a fetch that needs one fails and the
-// condition says so.
+// resumeOne rebuilds one volume and starts the loops it had. It
+// holds no credential: the Secret came with a call the kubelet makes
+// again only when the pod restarts, so a fetch that needs one fails and
+// the volume's report says so.
 func (n *node) resumeOne(ctx context.Context, held *record, directory string) {
 	parsed, err := parseVolumeContext(held.Attributes)
 	if err != nil {
@@ -121,6 +121,7 @@ func (n *node) resumeOne(ctx context.Context, held *record, directory string) {
 	if held.Credentials {
 		resumed.reportTrouble("the driver restarted and holds no credential for this volume")
 	}
+	n.noteHealth(ctx, resumed)
 
 	n.mu.Lock()
 	defer n.mu.Unlock()

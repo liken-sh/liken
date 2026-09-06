@@ -47,8 +47,8 @@ attribute, its values, and its default.
 By default a volume whose fetch fails at start is refused, and the pod
 stays in `ContainerCreating` with the reason in its events. Set
 `offline: allowStale` to publish the node's last copy of the ref
-instead. The volume's condition then reports the fetch error until a
-fetch succeeds. A repository the node has never fetched is refused
+instead. The abnormal gauge and the log then report the fetch error
+until a fetch succeeds. A repository the node has never fetched is refused
 under both settings, because there is nothing to publish.
 
 ## Private repositories
@@ -80,6 +80,6 @@ invocation, and the token never appears on a command line.
 
 A refused mount, a stale publish, and a fetch that fails after one that
 worked each post an `Event` on the pod. `kubectl describe pod` shows
-them. The volume's condition, which the kubelet exposes as
-`kubelet_volume_stats_health_status_abnormal`, is abnormal for a stale
-publish and for a failed fetch until the next fetch succeeds.
+them. The node plugin's gauge `git_csi_volume_abnormal`, labeled by the
+pod's namespace and the volume, is one after a stale publish and after
+a failed fetch, until the next fetch succeeds.

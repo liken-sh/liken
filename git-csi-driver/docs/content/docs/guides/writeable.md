@@ -118,13 +118,12 @@ later. At stage the driver compares the tree to the ref:
   rebase that conflicts is aborted, and the volume moves to a side
   branch.
 - **Uncommitted writes.** A tree with writes no commit carries yet is
-  left as it is, whatever upstream did, and the condition says upstream
-  moved.
+  left as it is, whatever upstream did, and the abnormal gauge and the
+  log say upstream moved.
 
 A push the forge rejects, or an aborted rebase, moves the volume to the
 branch `<ref>.<volumeHandle>`. Every push goes there until a person
-merges it into the ref on the forge. The condition says `Diverged` with
-both branch names, and commits continue, so no work stops. At the next
+merges it into the ref on the forge. The events and the log name both branches, and commits continue, so no work stops. At the next
 pod start after the merge, the volume is back on the ref and the side
 branch is deleted.
 
@@ -140,8 +139,8 @@ A work tree stays on the node after the pod stops, so the next stage on
 the same node is not a clone. Once an hour the driver removes work trees
 that nothing has staged for `--sweep-after`, 30 days by default, and
 whose every commit the remote holds. A tree with unpushed commits is
-never removed. Its age is named in the condition of the next volume of
-the same repository, so a person learns that work sits on the node with
+never removed. Its age is named in the log and the abnormal gauge of the
+next volume of the same repository, so a person learns that work sits on the node with
 no claim that reaches it.
 
 ## What the driver reports
@@ -149,10 +148,9 @@ no claim that reaches it.
 The pod's events and the claim's events carry `GitVolumeArmed`,
 `GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
 `GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeDiverged`,
-`GitVolumeHealed`, and `GitVolumeSwept`. The volume's condition is abnormal for an unarmed volume
-with pending paths, a failed push, a skipped file, and an unpushed
-commit older than `push.maxLatency`. The node plugin's `/metrics`
-listener exports `git_csi_armed`, `git_csi_pending_paths`,
+`GitVolumeHealed`, and `GitVolumeSwept`. The node plugin's `/metrics`
+listener exports `git_csi_volume_abnormal`, one while anything is wrong
+with a volume, and `git_csi_armed`, `git_csi_pending_paths`,
 `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,
 `git_csi_push_failures_total`, `git_csi_skipped_files`, and
 `git_csi_diverged`, labeled by namespace and claim.

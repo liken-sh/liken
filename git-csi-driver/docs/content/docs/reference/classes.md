@@ -13,7 +13,7 @@ first bad one.
 |---|---|---|
 | `push.quiesce` | A Go duration, at least `5s`. The driver commits and pushes after the tree has been quiet this long. | `30s` |
 | `push.maxLatency` | A Go duration, at least `push.quiesce`, or `never`. The driver pushes when the oldest unpushed commit is this old, whatever the tree is doing. | `5m`, or `push.quiesce` when that is longer |
-| `commit.maxFileSize` | A Kubernetes quantity such as `1Mi`, or `0` for no limit. A larger file is not committed and is named in the condition. | `1Mi` |
+| `commit.maxFileSize` | A Kubernetes quantity such as `1Mi`, or `0` for no limit. A larger file is not committed and is named in the events and the log. | `1Mi` |
 | `commit.author` | `Name <email>`. The author and committer of every commit. | `git-csi-driver <git-csi-driver@liken.sh>` |
 | `ignore` | Comma-separated `.gitignore` patterns, added to the repository's own. | empty |
 | `metadata` | `true` or `false`. Whether modes, owners, and empty directories are recorded on `refs/git-csi/metadata` and replayed at restore. | `true` |
@@ -32,14 +32,14 @@ first bad one.
 | `GitVolumeHealed` | Upstream took the side branch's work, and the volume is back on its ref. |
 | `GitVolumeSwept` | The sweep removed a work tree nothing had staged for `--sweep-after`. |
 
-## The condition
+## The abnormal gauge
 
-The condition is abnormal, with a message, for an unarmed volume with
-pending paths, a failed push, a skipped file, an unpushed commit older
-than `push.maxLatency`, an invalid class, a ref that moved upstream
-while the tree held uncommitted writes, a diverged volume, a ref the
-remote no longer holds, and an abandoned work tree of the same
-repository on the node.
+`git_csi_volume_abnormal`, labeled `namespace` and `volume`, is one for
+an unarmed volume with pending paths, a failed push, a skipped file, an
+unpushed commit older than `push.maxLatency`, an invalid class, a ref
+that moved upstream while the tree held uncommitted writes, a diverged
+volume, a ref the remote no longer holds, and an abandoned work tree of
+the same repository on the node. The driver's log says which.
 
 ## Metrics
 
@@ -54,3 +54,4 @@ Each gauge is labeled `namespace` and `claim`.
 | `git_csi_push_failures_total` | Pushes that failed. |
 | `git_csi_skipped_files` | Files over `commit.maxFileSize` in the tree. |
 | `git_csi_diverged` | One while the volume pushes to its side branch. |
+| `git_csi_volume_abnormal` | One while anything above is wrong. Labeled `namespace` and `volume`, not claim. |

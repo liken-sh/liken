@@ -286,6 +286,18 @@ func TestTheClassInForceIsTheOneTheStatusCarries(t *testing.T) {
 	}
 }
 
+// volumeNamed is a staged volume of the handle. Every volume the
+// driver holds has the attributes its stage parsed and the pod its
+// publish named, so a volume a test hands the arming loop has them too.
+func volumeNamed(id string) *volume {
+	return &volume{
+		id:         id,
+		attributes: &attributes{url: "file:///forge/" + id, ref: "main"},
+		writeable:  true,
+		pod:        podReference{name: "writer", namespace: "home"},
+	}
+}
+
 func TestTheArmingReportsWhatItCannotRead(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -301,7 +313,7 @@ func TestTheArmingReportsWhatItCannotRead(t *testing.T) {
 			if c.class != "" {
 				boundVolume(t, answering, "config", c.class)
 			}
-			answering.arms.read(t.Context(), &volume{id: "config"},
+			answering.arms.read(t.Context(), volumeNamed("config"),
 				claimReference{namespace: "home", name: "config"})
 			if !strings.Contains(logs.String(), c.says) {
 				t.Errorf("the log is %q, want %q in it", logs, c.says)
@@ -319,7 +331,7 @@ func TestThePassRestsWhenTheClusterRefusesTheWatch(t *testing.T) {
 			return true, nil, errors.New("the api server said no")
 		})
 
-	answering.arms.pass(t.Context(), &volume{id: "config"})
+	answering.arms.pass(t.Context(), volumeNamed("config"))
 	if !strings.Contains(logs.String(), "the claim is not watched") {
 		t.Errorf("the log is %q, want the refused watch in it", logs)
 	}
@@ -328,7 +340,7 @@ func TestThePassRestsWhenTheClusterRefusesTheWatch(t *testing.T) {
 func TestThePassRestsWhenThereIsNoClaim(t *testing.T) {
 	logs := &logbook{}
 	answering, _ := testNode(t, logs)
-	answering.arms.pass(t.Context(), &volume{id: "config"})
+	answering.arms.pass(t.Context(), volumeNamed("config"))
 	if !strings.Contains(logs.String(), "the claim was not found") {
 		t.Errorf("the log is %q, want the missing claim in it", logs)
 	}
@@ -347,7 +359,7 @@ func TestThePassEndsWhenTheWatchEnds(t *testing.T) {
 	over := make(chan struct{})
 	go func() {
 		defer close(over)
-		answering.arms.pass(t.Context(), &volume{id: "config"})
+		answering.arms.pass(t.Context(), volumeNamed("config"))
 	}()
 	ended.Stop()
 	select {
@@ -370,7 +382,7 @@ func TestThePassEndsWithTheDriver(t *testing.T) {
 	over := make(chan struct{})
 	go func() {
 		defer close(over)
-		answering.arms.follow(ctx, &volume{id: "config"})
+		answering.arms.follow(ctx, volumeNamed("config"))
 	}()
 	stop()
 	select {
@@ -423,7 +435,7 @@ func TestTheLoopReadsTheClaimAgainWhenItChanges(t *testing.T) {
 
 func TestTheVolumeThatLosesItsClassSaysSo(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
-	held := &volume{id: "config", pod: podReference{name: "writer", namespace: "home"}}
+	held := volumeNamed("config")
 	claim := claimReference{namespace: "home", name: "config"}
 
 	answering.armed(t.Context(), held, claim, "config-eager", &policy{}, "")
@@ -512,7 +524,7 @@ func TestThePassStartsAgainOnTheResync(t *testing.T) {
 	over := make(chan struct{})
 	go func() {
 		defer close(over)
-		answering.arms.pass(t.Context(), &volume{id: "config"})
+		answering.arms.pass(t.Context(), volumeNamed("config"))
 	}()
 	select {
 	case <-over:

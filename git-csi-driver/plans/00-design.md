@@ -115,7 +115,7 @@ parameters:
 |---|---|
 | `push.quiesce` | Push after this long with no writes. |
 | `push.maxLatency` | Push anyway when the oldest unpushed commit is this old. |
-| `commit.maxFileSize` | A larger file is not committed. It is named in the volume's condition. |
+| `commit.maxFileSize` | A larger file is not committed. It is named in the events and the log. |
 | `commit.author` | The author and committer of every commit. |
 | `ignore` | Patterns the driver adds to the repository's own `.gitignore`. |
 | `metadata` | `true` to record modes, owners, and empty directories. The default. |
@@ -194,6 +194,11 @@ refuses a bad parameter, and the `external-resizer` sidecar records the
 result on the claim. There is no `CreateVolume` and no
 `DeleteVolume`.
 
+**The node plugin** declares `STAGE_UNSTAGE_VOLUME`, `GET_VOLUME_STATS`,
+and `SINGLE_NODE_MULTI_WRITER`. The last one makes the kubelet send the
+access mode `ReadWriteOncePod` uses; without it the kubelet sends the
+legacy single-node mode to every driver.
+
 **The `CSIDriver` object** declares `Persistent` and `Ephemeral`
 lifecycle modes, `podInfoOnMount: true` so the node plugin knows the
 pod and can post events on it, and `fsGroupPolicy: None` so the driver
@@ -226,7 +231,7 @@ one writes there.
 A push rejected as non-fast-forward, or a rebase aborted at stage,
 moves the volume to `refs/heads/<ref>.<volumeHandle>`. The driver keeps
 committing and pushing there, so no work stops and no work is lost.
-The volume's condition says `Diverged` and names both branches. A
+The events and the log name both branches. A
 person merges on the forge. At the next stage local is behind the
 merged upstream, the volume fast-forwards back onto `<ref>`, and the
 driver deletes the side branch.
@@ -239,28 +244,27 @@ and empty directories replayed from the metadata ref.
 
 ## Observability
 
-Pure CSI has no status object, so the driver reports through the three
-channels CSI and Kubernetes give it.
+Pure CSI has no status object, so the driver reports through the two
+channels Kubernetes gives it. The CSI `VolumeCondition` was a third,
+and `plans/rejected/the-volume-condition.md` says why it is not used.
 
-- **`VolumeCondition`.** The node plugin declares `VOLUME_CONDITION`,
-  and every `NodeGetVolumeStats` answer carries `abnormal` and a
-  `message`. The kubelet exposes it as
-  `kubelet_volume_stats_health_status_abnormal`. The driver reports
-  abnormal for unpushed commits older than `push.maxLatency`, a failed
-  push, a diverged volume, a skipped file, an unarmed writeable
-  volume, and a read-only volume published from a stale cache.
 - **Events.** Every state change posts an `Event` on the pod and on
-  the claim: armed, pushed, push failed, diverged, healed, file
-  skipped.
-- **Metrics.** The node plugin exports per-volume metrics:
+  the claim: armed, unarmed, pending, pushed, push failed, file
+  skipped, diverged, healed, swept, and for a read-only volume refused,
+  stale, and fetch failed.
+- **Metrics.** The node plugin exports per-volume gauges labeled by
+  namespace and claim: `git_csi_armed`, `git_csi_pending_paths`,
   `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,
-  `git_csi_last_fetch_timestamp_seconds`,
-  `git_csi_push_failures_total`, `git_csi_diverged`,
-  `git_csi_skipped_files`, and `git_csi_armed`.
+  `git_csi_push_failures_total`, `git_csi_skipped_files`, and
+  `git_csi_diverged`. One more, `git_csi_volume_abnormal`, labeled by
+  namespace and volume, is one while anything is wrong with a volume:
+  a failed fetch or push, a stale publish, a skipped file, an unpushed
+  commit older than `push.maxLatency`, an unarmed volume with pending
+  paths, a diverged volume, or a ref the remote no longer holds.
 
-Every fault reaches all three. A cluster with alerting turns the
-metrics into pages. A cluster without it reads the events and the
-driver's log.
+Every fault reaches both, and the driver's log says what changed and
+why. A cluster with alerting turns the gauge into a page. A cluster
+without it reads the events.
 
 ## What the design accepts
 
@@ -291,6 +295,9 @@ driver's log.
 - Every failure the driver reports reaches the pod's events, the
   driver's log, and its metrics, which is the console-parity rule
   applied to a driver with no status object.
+- The driver builds on CSI spec 1.13. Kubernetes 1.36 vendors spec
+  1.9, and the two agree on the wire; the driver declares no capability
+  the kubelet does not read.
 
 ## What exists elsewhere
 

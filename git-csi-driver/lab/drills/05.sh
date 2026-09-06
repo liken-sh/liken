@@ -324,11 +324,6 @@ if git -C "$FORGE" ls-tree -r --name-only main | grep -q '^big.bin$'; then
 fi
 echo "drill 05: big.bin is on no branch"
 
-echo "drill 05: the volume conditions the kubelet holds"
-kube get --raw "/api/v1/nodes/node-1/proxy/metrics" 2>/dev/null |
-	grep 'kubelet_volume_stats_health_status_abnormal' ||
-	echo "drill 05: the kubelet has posted no volume stats yet"
-
 echo "drill 05: the modes and the empty directory a restore has to replay"
 kube exec -n "$NAMESPACE" writer -- sh -c \
 	'cd /config && echo secret > secret.yaml && chmod 600 secret.yaml && mkdir -p storage'

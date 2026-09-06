@@ -234,6 +234,12 @@ func TestAHealReportsASideBranchItCannotDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("head: %v", err)
 	}
+	// The arming loop reads what the volume reports, and that
+	// reads the attributes a stage set once, so the loop stops before the
+	// test points the volume at a forge that is not there.
+	answering.mu.Lock()
+	answering.disarm(held)
+	answering.mu.Unlock()
 	held.attributes = &attributes{url: fileURL(filepath.Join(t.TempDir(), "gone")), ref: "main"}
 
 	if err := answering.heal(t.Context(), held, "main.config", head, "main.config"); err != nil {

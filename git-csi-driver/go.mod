@@ -10,7 +10,7 @@ toolchain go1.27.0
 tool github.com/vladopajic/go-test-coverage/v2
 
 require (
-	github.com/container-storage-interface/spec v1.12.0
+	github.com/container-storage-interface/spec v1.13.0
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.83.2

@@ -276,6 +276,7 @@ func (w *watcher) scan(ctx context.Context) {
 	}
 	w.node.pushIfDue(ctx, w.volume, rules, quiet)
 	w.node.readings.record(w.volume)
+	w.node.noteHealth(ctx, w.volume)
 }
 
 // pendingMessage is what the Event says about a tree the driver has not

@@ -107,7 +107,7 @@ func (n *node) push(ctx context.Context, held *volume) {
 }
 
 // counted reads the unpushed commits and records them, which is
-// what the condition and the gauge carry.
+// what the volume's report and the gauges carry.
 func (n *node) counted(ctx context.Context, held *volume) (int, time.Time, error) {
 	count, oldest, err := held.work.unpushed(ctx, held.attributes.ref)
 	if err != nil {
@@ -119,8 +119,8 @@ func (n *node) counted(ctx context.Context, held *volume) (int, time.Time, error
 	return count, oldest, nil
 }
 
-// pushNow sends what the work tree holds and moves the mark. A failure
-// is the condition's message until a push works.
+// pushNow sends what the work tree holds and moves the mark. A
+// failure is the volume's report until a push works.
 // A push the remote rejects as non-fast-forward moves the volume
 // to its side branch and goes there at once, so the work reaches the
 // remote in the same call that found the ref moved.
@@ -160,6 +160,7 @@ func (n *node) pushNow(ctx context.Context, held *volume, count int) {
 	n.logger.InfoContext(ctx, "pushed",
 		"volume", held.id, "commits", count, "branch", remote, "commit", short(head))
 	n.readings.record(held)
+	n.noteHealth(ctx, held)
 }
 
 // sendTo opens the credential window, pushes, and closes it, so
@@ -173,13 +174,15 @@ func (n *node) sendTo(ctx context.Context, held *volume, remote string) (gitOutp
 	return held.work.pushTo(ctx, env, held.attributes.url, held.attributes.ref, remote)
 }
 
-// pushFailed reports the failure in all three places and posts
-// its Event once, at the first failure after a push that worked.
+// pushFailed reports the failure in every place a person reads
+// and posts its Event once, at the first failure after a push that
+// worked.
 func (n *node) pushFailed(ctx context.Context, held *volume, message string) {
 	if held.reportTrouble(message) {
 		claim, _, _ := held.reading()
 		n.report(ctx, held, claim, corev1.EventTypeWarning, reasonPushFailed, message)
 	}
 	n.readings.pushFailed(held)
+	n.noteHealth(ctx, held)
 	n.logger.WarnContext(ctx, "the push failed", "volume", held.id, "error", message)
 }

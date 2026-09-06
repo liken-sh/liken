@@ -71,6 +71,10 @@ func (n *node) NodeStageVolume(
 	if err := n.stageTree(ctx, arriving, repo); err != nil {
 		return nil, err
 	}
+	// A stage reconciles the tree, finds a deleted ref, and reads
+	// the work another tree left, so what the volume reports is taken
+	// once here, after all of it.
+	n.noteHealth(ctx, arriving)
 
 	n.mu.Lock()
 	n.staged[id] = arriving

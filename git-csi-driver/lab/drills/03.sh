@@ -168,12 +168,6 @@ make -C "$LAB" forge
 kube wait -n drill-03-refuse --for=condition=Ready pod/reader --timeout="${READY_DEADLINE}s"
 wait_for_greeting drill-03-refuse goodbye
 
-# The kubelet reads the condition through NodeGetVolumeStats on its own
-# schedule, so this prints what it holds now and waits on nothing.
-echo "drill 03: the volume conditions the kubelet holds"
-kube get --raw "/api/v1/nodes/node-1/proxy/metrics" 2>/dev/null |
-	grep 'kubelet_volume_stats_health_status_abnormal' || echo "drill 03: the kubelet has posted no volume stats yet"
-
 # kubectl top needs a metrics server. A lab without one still passes.
 echo "drill 03: the plugin's memory"
 kube top pod -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node ||

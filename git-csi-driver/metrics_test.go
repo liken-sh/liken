@@ -81,10 +81,108 @@ func TestForgetTakesTheVolumeOffTheGauges(t *testing.T) {
 	}
 }
 
+// abnormalOf is what git_csi_volume_abnormal reads for the volume, and
+// false when the volume is on no gauge.
+func abnormalOf(t *testing.T, readings *metrics, namespace, id string) (float64, bool) {
+	t.Helper()
+	families, err := readings.registry.Gather()
+	if err != nil {
+		t.Fatalf("gathering the metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "git_csi_volume_abnormal" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			if labels["namespace"] == namespace && labels["volume"] == id {
+				return metric.GetGauge().GetValue(), true
+			}
+		}
+	}
+	return 0, false
+}
+
+// mounted is a volume of each kind, which the health gauge labels
+// from a different namespace: the pod's for the inline volume, and the
+// claim's for the one a claim binds.
+func mounted(id string, writeable bool) *volume {
+	held := &volume{
+		id:         id,
+		attributes: &attributes{ref: "main"},
+		writeable:  writeable,
+		pod:        podReference{name: "reader", namespace: "home"},
+	}
+	if writeable {
+		held.claim = claimReference{namespace: "apps", name: "config"}
+	}
+	return held
+}
+
+func TestTheHealthGaugeCarriesTheNamespaceAndTheVolume(t *testing.T) {
+	readings := newMetrics()
+	inline := mounted("csi-1", false)
+	persistent := mounted("csi-2", true)
+	readings.health(inline, true)
+	readings.health(persistent, false)
+
+	if abnormal, found := abnormalOf(t, readings, "home", "csi-1"); !found || abnormal != 1 {
+		t.Errorf("git_csi_volume_abnormal reads %v (found: %v) for the inline volume, want 1",
+			abnormal, found)
+	}
+	if abnormal, found := abnormalOf(t, readings, "apps", "csi-2"); !found || abnormal != 0 {
+		t.Errorf("git_csi_volume_abnormal reads %v (found: %v) for the claim's volume, want 0",
+			abnormal, found)
+	}
+
+	readings.forget(inline)
+	if _, found := abnormalOf(t, readings, "home", "csi-1"); found {
+		t.Error("the volume is still on git_csi_volume_abnormal after it went")
+	}
+}
+
+func TestTheLogSaysWhenAVolumeTurnsAbnormalAndWhenItIsWellAgain(t *testing.T) {
+	logs := &logbook{}
+	answering, _ := testNode(t, logs)
+	held := mounted("csi-1", false)
+
+	answering.noteHealth(t.Context(), held)
+	if strings.Contains(logs.String(), "the volume is") {
+		t.Errorf("the log is %q, want no line for a volume that was well all along", logs)
+	}
+
+	held.reportTrouble("the forge answered nothing")
+	answering.noteHealth(t.Context(), held)
+	answering.noteHealth(t.Context(), held)
+	if got := strings.Count(logs.String(), "the volume is abnormal"); got != 1 {
+		t.Errorf("the log says the volume is abnormal %d times, want 1", got)
+	}
+	if !strings.Contains(logs.String(), "the forge answered nothing") {
+		t.Errorf("the log is %q, want the report in it", logs)
+	}
+	if abnormal, _ := abnormalOf(t, answering.readings, "home", "csi-1"); abnormal != 1 {
+		t.Errorf("git_csi_volume_abnormal reads %v while the fetch fails, want 1", abnormal)
+	}
+
+	held.reportCommit("0123456789")
+	answering.noteHealth(t.Context(), held)
+	answering.noteHealth(t.Context(), held)
+	if got := strings.Count(logs.String(), "the volume is normal"); got != 1 {
+		t.Errorf("the log says the volume is normal %d times, want 1", got)
+	}
+	if abnormal, _ := abnormalOf(t, answering.readings, "home", "csi-1"); abnormal != 0 {
+		t.Errorf("git_csi_volume_abnormal reads %v after a fetch that worked, want 0", abnormal)
+	}
+}
+
 func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
 	readings := newMetrics()
 	held := reported(claimReference{}, true, 1)
 	readings.record(held)
+	readings.health(held, true)
 	readings.forget(held)
 
 	families, err := readings.registry.Gather()
@@ -99,6 +197,7 @@ func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
 
 	var absent *metrics
 	absent.record(held)
+	absent.health(held, true)
 	absent.forget(held)
 }
 

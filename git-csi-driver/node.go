@@ -102,11 +102,10 @@ func (n *node) NodeGetInfo(
 	return &csi.NodeGetInfoResponse{NodeId: n.nodeID}, nil
 }
 
-// NodeGetCapabilities declares what the kubelet may ask of this node.
-// STAGE_UNSTAGE_VOLUME makes the kubelet stage a persistent volume
-// once per node before it publishes it per pod. GET_VOLUME_STATS makes
-// it poll NodeGetVolumeStats, and VOLUME_CONDITION makes it read the
-// condition in that answer.
+// NodeGetCapabilities declares what the kubelet may ask of this
+// node: STAGE_UNSTAGE_VOLUME makes the kubelet stage a persistent
+// volume once per node before it publishes it per pod, and
+// GET_VOLUME_STATS makes it poll NodeGetVolumeStats for the size.
 //
 // SINGLE_NODE_MULTI_WRITER is declared because the kubelet sends
 // the access modes ReadWriteOncePod uses only to a driver that declares
@@ -117,7 +116,6 @@ func (n *node) NodeGetCapabilities(
 	declared := []csi.NodeServiceCapability_RPC_Type{
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
-		csi.NodeServiceCapability_RPC_VOLUME_CONDITION,
 		csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
 	}
 	capabilities := make([]*csi.NodeServiceCapability, 0, len(declared))
@@ -275,6 +273,10 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 			fmt.Sprintf("%s is published from the node's copy at %s: %s",
 				mounting.attributes.ref, short(commit), fetchErr))
 	}
+	// A volume published from a stale copy starts abnormal, so
+	// the gauge and the log carry that from the first moment it is
+	// mounted and not from the first fetch after it.
+	n.noteHealth(ctx, mounting)
 	return nil
 }
 
@@ -321,11 +323,16 @@ func (n *node) NodeUnpublishVolume(
 			n.commit(ctx, published, rules)
 		}
 		n.push(ctx, published)
+		n.noteHealth(ctx, published)
 	}
 	if found && !published.writeable {
 		if err := os.RemoveAll(published.directory); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
+		// A read-only volume leaves the node with its mount, so
+		// its health gauge goes here, where a writeable volume's goes at
+		// unstage.
+		n.readings.forget(published)
 	}
 	n.logger.InfoContext(ctx, "unpublished", "volume", id)
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -334,8 +341,10 @@ func (n *node) NodeUnpublishVolume(
 // NodeGetVolumeStats reports the tree's size as used. A git volume has
 // no free space to report, so available is zero.
 //
-// The condition is what the volume reports, in its order: trouble, then
-// unarmed work, then the commit.
+// The answer carries the usage and nothing else; the volume's
+// health reaches a person through git_csi_volume_abnormal, the Events,
+// and the driver's log, because CSI spec 1.13 removed the condition
+// this answer used to carry.
 func (n *node) NodeGetVolumeStats(
 	_ context.Context, request *csi.NodeGetVolumeStatsRequest,
 ) (*csi.NodeGetVolumeStatsResponse, error) {
@@ -358,7 +367,6 @@ func (n *node) NodeGetVolumeStats(
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	abnormal, message := published.report()
 	return &csi.NodeGetVolumeStatsResponse{
 		Usage: []*csi.VolumeUsage{{
 			Unit:      csi.VolumeUsage_BYTES,
@@ -366,7 +374,6 @@ func (n *node) NodeGetVolumeStats(
 			Available: 0,
 			Total:     size,
 		}},
-		VolumeCondition: &csi.VolumeCondition{Abnormal: abnormal, Message: message},
 	}, nil
 }
 

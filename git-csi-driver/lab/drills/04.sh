@@ -190,12 +190,9 @@ wait_for_metric "git_csi_pending_paths\{claim=\"config\",namespace=\"$NAMESPACE\
 	"$PENDING_DEADLINE" "three paths pending"
 wait_for_metric "git_csi_armed\{claim=\"config\",namespace=\"$NAMESPACE\"\} 0" \
 	"$PENDING_DEADLINE" "the volume unarmed"
+wait_for_metric "git_csi_volume_abnormal\{namespace=\"$NAMESPACE\",volume=\"$HANDLE\"\} 1" \
+	"$PENDING_DEADLINE" "the volume abnormal"
 wait_for_event 'GitVolumePending' || true
-
-echo "drill 04: the volume conditions the kubelet holds"
-kube get --raw "/api/v1/nodes/node-1/proxy/metrics" 2>/dev/null |
-	grep 'kubelet_volume_stats_health_status_abnormal' ||
-	echo "drill 04: the kubelet has posted no volume stats yet"
 
 echo "drill 04: a claim with ReadWriteOnce is refused"
 kube apply -f - >/dev/null <<YAML

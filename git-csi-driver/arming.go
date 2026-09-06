@@ -221,4 +221,5 @@ func (n *node) armed(
 		n.report(ctx, staged, claim, corev1.EventTypeNormal, reason, message)
 	}
 	n.readings.record(staged)
+	n.noteHealth(ctx, staged)
 }

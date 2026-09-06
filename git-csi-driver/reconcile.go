@@ -23,11 +23,12 @@ func (n *node) reconcile(ctx context.Context, staging *volume, head, upstream, s
 	case staging.work.ancestor(ctx, upstream, head):
 		return nil
 	}
-	// A reset or a rebase rewrites the tree, and the tree may hold writes
-	// no commit carries yet: an unarmed volume's whole work, or an armed
-	// volume's last writes before the quiesce fired. The driver loses
-	// nothing, so such a tree is left as it is and the condition says
-	// upstream moved. The next stage after a commit reconciles it.
+	// A reset or a rebase rewrites the tree, and the tree may hold
+	// writes no commit carries yet: an unarmed volume's whole work, or an
+	// armed volume's last writes before the quiesce fired. The driver
+	// loses nothing, so such a tree is left as it is and the volume
+	// reports that upstream moved. The next stage after a commit
+	// reconciles it.
 	if pending, _ := staging.work.pending(ctx); len(pending) > 0 {
 		staging.reportTrouble(fmt.Sprintf(
 			"upstream moved: %s is at %s and the tree holds %d uncommitted paths",

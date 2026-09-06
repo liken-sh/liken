@@ -1,8 +1,8 @@
 package main
 
-// metrics.go holds the gauges the node plugin exports and the listener
-// that serves them. Every fact the driver reports reaches the
-// condition, the Events, and these numbers.
+// Metrics.go holds the gauges the node plugin exports and the
+// listener that serves them. Every fact the driver reports reaches the
+// Events, the driver's log, and these numbers.
 
 import (
 	"context"
@@ -34,10 +34,18 @@ type metrics struct {
 	// What a diverged volume adds: the side branch it pushes to
 	// instead of its ref.
 	diverged *prometheus.GaugeVec
+	// What every volume carries, read-only volumes included:
+	// whether the volume's report says something is wrong with it.
+	abnormal *prometheus.GaugeVec
 }
 
 // metricLabels name the claim a person would look up.
 var metricLabels = []string{"namespace", "claim"}
+
+// healthLabels name the volume a person would look up: the
+// namespace that holds it, and the CSI volume id, which is the one name
+// a read-only volume has.
+var healthLabels = []string{"namespace", "volume"}
 
 func newMetrics() *metrics {
 	readings := &metrics{
@@ -66,10 +74,14 @@ func newMetrics() *metrics {
 		// while it pushes to its ref.
 		diverged: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_diverged", Help: "One while the volume pushes to its side branch, zero while it pushes to its ref."}, metricLabels),
+		// One while the volume's report says something is wrong
+		// with it, zero while it says nothing is.
+		abnormal: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{Name: "git_csi_volume_abnormal", Help: "One while the volume's report says something is wrong with it, zero while it says nothing is."}, healthLabels),
 	}
 	readings.registry.MustRegister(readings.armed, readings.pending,
 		readings.unpushed, readings.lastPush, readings.pushFailures, readings.skipped,
-		readings.diverged)
+		readings.diverged, readings.abnormal)
 	return readings
 }
 
@@ -95,6 +107,36 @@ func (m *metrics) record(held *volume) {
 	}
 }
 
+// health puts the volume's report on the gauge. A volume whose
+// namespace the driver has not found has no labels, so it reports
+// nothing yet, the way the claim-labeled gauges do.
+func (m *metrics) health(held *volume, abnormal bool) {
+	namespace := held.namespace()
+	if m == nil || namespace == "" {
+		return
+	}
+	m.abnormal.WithLabelValues(namespace, held.id).Set(gauge(abnormal))
+}
+
+// noteHealth records the volume's health on the gauge and writes
+// one line the moment it turns, at Warn when the report says something
+// is wrong and at Info when it says nothing is. The Events carry the
+// same facts, so nothing here posts one.
+func (n *node) noteHealth(ctx context.Context, held *volume) {
+	abnormal, message, moved := held.takeHealth()
+	n.readings.health(held, abnormal)
+	if !moved {
+		return
+	}
+	if abnormal {
+		n.logger.WarnContext(ctx, "the volume is abnormal",
+			"volume", held.id, "report", message)
+		return
+	}
+	n.logger.InfoContext(ctx, "the volume is normal",
+		"volume", held.id, "report", message)
+}
+
 // pushFailed counts one failure, which is the only reading a
 // volume reports that never goes down.
 func (m *metrics) pushFailed(held *volume) {
@@ -108,8 +150,16 @@ func (m *metrics) pushFailed(held *volume) {
 // forget takes a volume off the gauges, so a claim that is gone stops
 // being reported.
 func (m *metrics) forget(held *volume) {
+	if m == nil {
+		return
+	}
+	// The health gauge is labeled by the volume, so it goes
+	// whether or not the driver ever found a claim for it.
+	if namespace := held.namespace(); namespace != "" {
+		m.abnormal.DeleteLabelValues(namespace, held.id)
+	}
 	claim, _, _ := held.reading()
-	if m == nil || claim.name == "" {
+	if claim.name == "" {
 		return
 	}
 	m.armed.DeleteLabelValues(claim.namespace, claim.name)

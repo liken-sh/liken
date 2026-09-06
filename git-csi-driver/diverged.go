@@ -70,8 +70,8 @@ func (w *workTree) deleteBranch(ctx context.Context, env []string, url, branch s
 }
 
 // diverge moves the volume to its side branch and reports it in
-// the three places, and a state it cannot write is still the state in
-// force for this run.
+// every place a person reads, and a state it cannot write is still the
+// state in force for this run.
 func (n *node) diverge(ctx context.Context, held *volume) {
 	branch := sideBranch(held.attributes.ref, held.id)
 	if err := held.work.markDiverged(ctx, branch); err != nil {
@@ -84,6 +84,7 @@ func (n *node) diverge(ctx context.Context, held *volume) {
 		fmt.Sprintf("diverged: every push goes to %s, not %s", branch, held.attributes.ref))
 	n.logger.WarnContext(ctx, "diverged", "volume", held.id, "branch", branch)
 	n.readings.record(held)
+	n.noteHealth(ctx, held)
 }
 
 // healOrHold answers the one question a stage asks a diverged
@@ -94,6 +95,7 @@ func (n *node) healOrHold(
 	if !staging.work.ancestor(ctx, head, upstream) {
 		staging.reportDiverged(branch)
 		n.readings.record(staging)
+		n.noteHealth(ctx, staging)
 		return nil
 	}
 	return n.heal(ctx, staging, branch, upstream, side)
@@ -125,6 +127,7 @@ func (n *node) heal(ctx context.Context, staging *volume, branch, upstream, side
 			staging.attributes.ref, branch))
 	n.logger.InfoContext(ctx, "healed", "volume", staging.id, "branch", branch)
 	n.readings.record(staging)
+	n.noteHealth(ctx, staging)
 	return nil
 }
 

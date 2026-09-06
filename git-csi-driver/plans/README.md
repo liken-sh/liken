@@ -51,6 +51,12 @@ problems and from what a demo teaches.
 
 ## Open problems
 
-* [The volume condition moved in CSI 1.13](open-problems/the-volume-condition-moved-in-csi-1-13.md).
-  Spec 1.13 replaced `VolumeCondition` with an alpha RPC the kubelet
-  does not call yet, so the driver pins spec 1.12.
+None open. [`open-problems/`](open-problems/) is where the next ones
+go.
+
+## Rejected
+
+* [The volume condition](rejected/the-volume-condition.md). CSI spec
+  1.13 removed it, the kubelet reads it only behind an alpha gate k3s
+  leaves off, and no kubelet calls its replacement yet. The driver
+  reports through events and the `git_csi_volume_abnormal` gauge.

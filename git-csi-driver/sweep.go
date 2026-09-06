@@ -26,7 +26,7 @@ const (
 const unstagedFile = "unstaged"
 
 // abandonedTree is a work tree the sweep kept because it holds
-// commits the remote does not, named in the condition of the next volume
+// commits the remote does not, named in the report of the next volume
 // that stages the same repository.
 type abandonedTree struct {
 	id       string
@@ -146,7 +146,7 @@ func (n *node) abandon(ctx context.Context, work *workTree, id string, when time
 }
 
 // noteAbandoned puts the age of another volume's work tree in
-// this volume's condition, which is where a person learns that work sits
+// this volume's report, which is where a person learns that work stays
 // on this node with no claim to reach it.
 func (n *node) noteAbandoned(staging *volume) {
 	n.mu.Lock()
@@ -179,7 +179,7 @@ func (n *node) swept(ctx context.Context, id string, when time.Time) {
 }
 
 // age is the whole hours since the moment, which is the number a
-// condition and an Event carry.
+// volume's report and an Event carry.
 func age(when time.Time) string {
 	return fmt.Sprintf("%dh", int(time.Since(when).Hours()))
 }

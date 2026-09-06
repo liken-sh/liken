@@ -116,7 +116,7 @@ func (s *server) serve(ctx context.Context) error {
 	case <-ctx.Done():
 		s.stop()
 		// A context that is over before Serve reaches the socket makes
-		// Serve return ErrServerStopped. That is the stop this run asked
+		// serve return ErrServerStopped. That is the stop this run asked
 		// for, not a failure.
 		if err := <-served; err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			return err
