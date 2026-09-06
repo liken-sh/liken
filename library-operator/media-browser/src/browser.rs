@@ -380,9 +380,9 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
             // nothing, because the strip is over the stack and not on it.
             "escape" if self.on_strip => self.on_strip = false,
             // The screen on top is asked first, because a search wall
-            // reads backspace as a deleted character and escape as the
-            // text cleared. Every other screen takes neither, and both
-            // words are then back.
+            // reads backspace as a deleted character, and escape as the
+            // grid closed or the text cleared. Every other screen takes
+            // neither, and both words are then back.
             "escape" | "backspace" => {
                 let top = self.stack.last_mut().unwrap_or(&mut self.home);
                 match top.escape(name, &mut self.source) {

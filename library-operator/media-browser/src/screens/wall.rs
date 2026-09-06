@@ -104,7 +104,8 @@ impl Wall {
     ///
     /// On a search wall, a letter, a digit, or the space types and hides
     /// the grid. While the grid is shown, the arrows move its focus and
-    /// select presses the focused cell into the field.
+    /// select presses the focused cell into the field. A down press off
+    /// the bottom of the grid hides it and lands on the first slot.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         if let Some(step) = self.typed(key, source) {
             return step;
@@ -220,9 +221,10 @@ impl Wall {
     }
 
     /// Fold in the press that leaves a screen. A search wall with text
-    /// in its field takes it and clears the text, or removes one
-    /// character on backspace. Otherwise the answer is nothing, and the
-    /// browser goes back.
+    /// in its field takes it: backspace removes one character, escape
+    /// over a shown grid closes the grid, and escape over a hidden grid
+    /// clears the text. Otherwise the answer is nothing, and the browser
+    /// goes back.
     pub fn escape(&mut self, key: &str, source: &mut dyn Source) -> Option<Step> {
         self.cleared(key, source)
     }

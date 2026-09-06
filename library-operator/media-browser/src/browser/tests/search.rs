@@ -277,3 +277,88 @@ fn a_select_on_the_strip_over_a_wall_pushes_an_empty_search_wall_with_the_grid()
     assert_eq!(search.field.text(), "");
     assert!(search.keyboard.is_some());
 }
+
+// Put the browser on a search wall with hits, the grid shown, and a
+// slot other than the first focused, so a test sees focus move.
+fn typing_over_hits(browser: &mut Browser<Catalog, NoPosters>) {
+    browser.key("s");
+    browser.key("right");
+    browser.key("up");
+    browser.key("enter");
+    assert!(grid(browser));
+    assert_eq!(searching(browser).slots.focus, 1);
+}
+
+#[test]
+fn a_down_press_off_the_bottom_of_the_grid_hides_it_and_lands_on_the_first_result() {
+    let mut browser = sampled();
+    typing_over_hits(&mut browser);
+    browser.key("down");
+    browser.key("down");
+    browser.key("down");
+    assert!(grid(&browser));
+
+    browser.key("down");
+
+    assert!(!grid(&browser));
+    assert_eq!(searching(&browser).slots.focus, 0);
+    assert!(searching(&browser).marks(true));
+    assert_eq!(typed(&browser), "s");
+    assert!(!browser.on_strip);
+    assert_eq!(browser.stack.len(), 1);
+}
+
+#[test]
+fn a_down_press_off_the_bottom_of_the_grid_over_an_empty_wall_moves_nothing() {
+    let mut browser = sampled();
+    browser.key("search");
+    browser.key("down");
+    browser.key("down");
+    browser.key("down");
+
+    assert!(!browser.key("down"));
+
+    assert!(grid(&browser));
+    assert_eq!(browser.stack.len(), 1);
+}
+
+#[test]
+fn escape_on_the_shown_grid_keeps_the_text_and_lands_on_the_first_result() {
+    let mut browser = sampled();
+    typing_over_hits(&mut browser);
+    let hits = searching(&browser).slots.items.len();
+
+    browser.key("escape");
+
+    assert!(!grid(&browser));
+    assert_eq!(typed(&browser), "s");
+    assert_eq!(searching(&browser).slots.items.len(), hits);
+    assert_eq!(searching(&browser).slots.focus, 0);
+    assert!(searching(&browser).marks(true));
+    assert_eq!(browser.stack.len(), 1);
+}
+
+#[test]
+fn escape_on_the_shown_grid_over_an_empty_field_leaves_the_wall() {
+    let mut browser = sampled();
+    browser.key("search");
+
+    browser.key("escape");
+
+    assert!(browser.stack.is_empty());
+}
+
+#[test]
+fn backspace_on_the_shown_grid_takes_one_character_back_and_keeps_the_grid() {
+    let mut browser = sampled();
+    browser.key("s");
+    browser.key("e");
+    browser.key("up");
+    browser.key("enter");
+
+    browser.key("backspace");
+
+    assert_eq!(typed(&browser), "s");
+    assert!(grid(&browser));
+    assert_eq!(browser.stack.len(), 1);
+}

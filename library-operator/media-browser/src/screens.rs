@@ -93,8 +93,9 @@ impl Screen {
     }
 
     /// Fold in the press that leaves a screen. Only a search wall takes
-    /// one for itself: backspace removes a character of the text and
-    /// escape clears it. Every other screen answers nothing, and the
+    /// one for itself: backspace removes a character of the text, escape
+    /// over a shown grid closes the grid, and escape over a hidden grid
+    /// clears the text. Every other screen answers nothing, and the
     /// browser then goes back.
     pub fn escape(&mut self, key: &str, source: &mut dyn Source) -> Option<Step> {
         match self {

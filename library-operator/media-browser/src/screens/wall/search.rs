@@ -9,7 +9,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
-use super::{Step, Wall};
+use super::{Focus, Step, Wall};
 use crate::catalog::{Query, Source};
 use crate::screens::Screen;
 use crate::views::band;
@@ -43,10 +43,11 @@ pub fn searched(text: &str, grid: bool, source: &mut dyn Source) -> Screen {
 
 impl Wall {
     // The presses a search wall takes for itself: a letter, a digit, or
-    // the space types and hides the grid, and while the grid is shown the
-    // arrows move it and enter presses its cell. The answer is nothing
-    // where the press was none of these, so it reaches the band and the
-    // slots the way it does on every other wall.
+    // the space types and hides the grid. While the grid is shown, the
+    // arrows move it, enter presses its cell, and a down press off its
+    // bottom closes it. The answer is nothing where the press was none
+    // of these, so it reaches the band and the slots the way it does on
+    // every other wall.
     pub(super) fn typed(&mut self, key: &str, source: &mut dyn Source) -> Option<Step> {
         let search = self.search.as_mut()?;
         let changed = if field::edits(key) {
@@ -59,8 +60,18 @@ impl Wall {
                     let word = grid.pick();
                     search.field.press(word)
                 }
-                // An arrow at the edge of the grid moves nothing, and
-                // the frame on the glass still draws it.
+                // A down press off the bottom of the grid is how a
+                // person with a remote accepts the text: the grid closes
+                // and focus lands on the first hit. A wall with no hits
+                // has nowhere to land, so the press moves nothing there.
+                Some(grid) if grid.exits(key) => {
+                    return Some(match self.slots.items.is_empty() {
+                        true => Step::Still,
+                        false => self.off_grid(),
+                    });
+                }
+                // An arrow at any other edge of the grid moves nothing,
+                // and the frame on the glass still draws it.
                 Some(grid) => return Some(step(grid.key(key))),
             }
         };
@@ -71,11 +82,17 @@ impl Wall {
     }
 
     // The press that leaves a screen, as a search wall reads it:
-    // backspace removes a character and escape clears the field, and
-    // both read the wall again. A wall that types nothing answers
-    // nothing, and the browser then goes back.
+    // backspace removes a character, escape over a shown grid closes the
+    // grid, and escape over a hidden grid clears the field. A wall that
+    // types nothing answers nothing, and the browser then goes back.
     pub(super) fn cleared(&mut self, key: &str, source: &mut dyn Source) -> Option<Step> {
         let search = self.search.as_mut()?;
+        // Escape over the grid closes it and keeps the text, so a person
+        // who typed with the grid does not lose the search on the way
+        // out. The query does not change, so the wall is not read again.
+        if key != "backspace" && search.keyboard.is_some() && !search.field.text().is_empty() {
+            return Some(self.off_grid());
+        }
         let changed = match key {
             "backspace" => search.field.press(key),
             _ => {
@@ -89,6 +106,17 @@ impl Wall {
         }
         self.retyped(source);
         Some(Step::Stay)
+    }
+
+    // Close the grid and put focus on the first hit, so one place on the
+    // screen holds focus.
+    fn off_grid(&mut self) -> Step {
+        if let Some(search) = &mut self.search {
+            search.keyboard = None;
+        }
+        self.slots.focus = 0;
+        self.focus = Focus::Slots;
+        Step::Stay
     }
 
     // Read the wall again over the text the field now holds. The query

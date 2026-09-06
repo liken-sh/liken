@@ -75,6 +75,13 @@ impl Keyboard {
         changed
     }
 
+    /// Whether the press is a down that would move focus off the bottom
+    /// edge of the grid. The last row is short, so the bottom edge also
+    /// runs under the cells of the row above it that have no cell below.
+    pub fn exits(&self, word: &str) -> bool {
+        word == "down" && self.focus + COLUMNS >= CELLS.len()
+    }
+
     /// The word of the focused cell, which the caller presses into the
     /// field.
     pub fn pick(&self) -> &'static str {
@@ -211,6 +218,28 @@ mod tests {
             let mut keyboard = Keyboard { focus: from };
             assert_eq!(keyboard.key(word), from != to, "{from} {word}");
             assert_eq!(keyboard.focus, to, "{from} {word}");
+        }
+    }
+
+    // The cell that holds focus, the word pressed, and whether the press
+    // would move focus off the bottom of the grid.
+    const EXITS: [(usize, &str, bool); 9] = [
+        (0, "down", false),
+        (19, "down", false),
+        (27, "down", false),
+        (28, "down", true),
+        (29, "down", true),
+        (30, "down", true),
+        (37, "down", true),
+        (30, "up", false),
+        (37, "right", false),
+    ];
+
+    #[test]
+    fn a_down_press_leaves_the_grid_from_the_last_row_and_from_over_its_short_end() {
+        for (focus, word, exits) in EXITS {
+            let keyboard = Keyboard { focus };
+            assert_eq!(keyboard.exits(word), exits, "{focus} {word}");
         }
     }
 

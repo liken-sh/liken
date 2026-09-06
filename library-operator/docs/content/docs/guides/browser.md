@@ -104,6 +104,14 @@ Search is a wall like any other. Every typed character rereads it.
 The index is built in memory from titles, original titles, people's
 names, episode titles, and descriptions, in that rank.
 
+The on-screen keyboard is a grid over the wall. The arrows move across
+it and enter types the focused cell. Down off the bottom row closes
+the grid and puts focus on the first hit, which is how a remote with
+no keyboard accepts the text. Back over the grid closes it and keeps
+the text. Back over the wall with the grid closed clears the text, and
+back over an empty search leaves the wall. Up from the first row of
+hits puts focus on the strip, and enter there opens the grid again.
+
 ## 6. Playback
 
 Enter on a title resolves what to play from the browser's own copy of
