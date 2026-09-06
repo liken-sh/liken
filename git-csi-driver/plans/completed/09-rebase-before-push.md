@@ -1,5 +1,19 @@
 # 09, Rebase before push
 
+Built on 2026-09-06 and drilled in the lab with development build
+`2026.09.06-001-dev-001-dd35dedc`: drill 08 passed, with the rebase
+that landed on `main`, the side branch after the overlapping write,
+and the heal at the pod's next push after a merge on the forge, and
+drills 03, 06, and 07 still passed. Three things changed from the
+design below while building it. The remote's record is fetched onto
+a ref of its own, `refs/git-csi/metadata.remote`, because a fetch
+replaces its destination and the re-parent needs the volume's own
+record beside it. The stage-time heal keeps its reset, because no pod
+holds the tree then and a `read-tree` there would refuse a tree with
+uncommitted writes and fail the stage. And the `GitVolumeRebased`
+Event is posted only when the rebase moved the tree, because a push
+the remote rejected for the record alone rebases nothing.
+
 ## The problem
 
 Plan 06 made the side branch the driver's first answer to a push the

@@ -18,10 +18,6 @@ they become.
 
 ## Planned
 
-* [09, Rebase before push](09-rebase-before-push.md). A push the
-  remote rejects rebases beside the pod's tree and tries again, so many
-  writers can share one repository through `subPath`. The side branch
-  becomes the fallback.
 * [10, Webhooks trigger a pull](10-webhooks-trigger-a-pull.md). Low
   fidelity. The controller accepts a forge's push webhook and marks
   the matching `PersistentVolume`s, and the node plugins fetch at
@@ -65,6 +61,11 @@ they become.
   Built, and drilled in the lab on 2026-09-06. At every sweep the
   driver deletes the refs under `refs/git-csi/` that no volume follows
   and runs `git gc` in each bare repository that stays.
+* [09, Rebase before push](completed/09-rebase-before-push.md). Built,
+  and drilled in the lab on 2026-09-06. A rejected push rebases in a
+  scratch tree and moves the pod's tree with `read-tree`, a diverged
+  volume heals at its next push, and the metadata record follows the
+  same rule, so many writers share one repository through `subPath`.
 
 ## Open problems
 
