@@ -1,5 +1,18 @@
 # 07, Read-only claims
 
+Built, and drilled in the lab on 2026-09-06 with development build
+`0000.00.00-000-dev-017-065b9986`. Two pods read a `ReadOnlyMany` claim;
+a push reached both inside a 15 second `pull`; a write in a pod failed
+on a read-only file system, and a pod that did not ask for read-only
+was refused with `GitVolumeRefused`; the driver's node pod was deleted,
+and the new one took the volume back and followed a second push; the
+last pod's exit removed the tree from the store; with the forge stopped,
+a claim with `offline: refuse` carried `GitVolumeRefused`, and the
+forge's return started its pod. The first run of the drill found the
+read-only rule: the container runtime binds a claim into a pod
+read-write unless the pod asks, whatever the driver's bind says. The
+same build serves the franchises library on a real cluster.
+
 ## The problem
 
 A workload that names its storage as a `PersistentVolumeClaim` cannot

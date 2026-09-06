@@ -18,8 +18,8 @@ they become.
 
 ## Planned
 
-Plan 07 is built and waits on its lab drill. The next plans come from
-the open problems and from what a demo teaches.
+Every numbered plan is built. The next plans come from the open
+problems and from what a demo teaches.
 
 ## Designs
 
@@ -48,10 +48,10 @@ the open problems and from what a demo teaches.
   Built, and drilled in the lab on 2026-09-05. The reconcile at stage,
   the side branch and its heal, the restore on a fresh node, and the
   sweep of work trees nothing stages.
-* [07, Read-only claims](07-read-only-claims.md). Built on 2026-09-05,
-  not yet drilled. A `ReadOnlyMany` `PersistentVolume` and its claim,
-  one staged tree per handle that every pod on the node publishes, and
-  the `Event`s and the gauge on the claim.
+* [07, Read-only claims](completed/07-read-only-claims.md). Built, and
+  drilled in the lab on 2026-09-06. A `ReadOnlyMany` `PersistentVolume`
+  and its claim, one staged tree per handle that every pod on the node
+  publishes read-only, and the `Event`s and the gauge on the claim.
 
 ## Open problems
 
