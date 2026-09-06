@@ -63,10 +63,9 @@ for its devices:
 Two operators share the media layer, and they layer in one direction
 too.
 
-The media operator is the routing and control of media playback on
-a cluster: which display and speakers form a unit, what plays on
-it, and which controller drives it, all declared as Kubernetes
-resources. It publishes no devices of its own. It selects devices
+The media operator routes and controls media playback on a cluster.
+Which display and speakers form a unit, what plays on it, and which
+controller drives it are all declared as Kubernetes resources. It publishes no devices of its own. It selects devices
 out of what the hardware operators publish, with the same CEL
 selectors a hand-written `ResourceClaim` would use, and it claims
 them only for the pods it runs. Its manual is
@@ -75,8 +74,8 @@ and the MQTT message bus its pods and your own programs share. The
 source is
 [liken-sh/media-operator](https://github.com/liken-sh/media-operator).
 
-The library operator is the media libraries of that cluster, declared
-as Kubernetes resources: a root directory of movies or series on a
+The library operator declares the media libraries of that cluster as
+Kubernetes resources: a root directory of movies or series on a
 volume, the catalog its scanners keep of what is there, and a media
 browser that takes the place of the idle screen on a `Player` the
 media operator owns. It publishes no devices, and it claims the
