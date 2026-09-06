@@ -22,6 +22,25 @@ a dash reads as an option to git. A URL of the form
 fetches as root on the node and the URL comes from a pod spec, so
 neither is accepted.
 
+## Access modes
+
+The access mode of a `PersistentVolume` decides what the driver stages.
+The kubelet sends `ReadWriteOncePod` as the CSI mode
+`SINGLE_NODE_SINGLE_WRITER`, and `ReadOnlyMany` as
+`MULTI_NODE_READER_ONLY`. The driver also stages a read-only claim under
+`SINGLE_NODE_READER_ONLY`, which the kubelet does not send. It refuses
+every other mode, and the message names the modes it serves. An inline
+volume carries no access mode and is always read-only.
+
+| Access mode | What the driver stages |
+|---|---|
+| `ReadWriteOncePod` | A writeable volume. |
+| `ReadOnlyMany` | A read-only claim, published to every pod on the node that mounts it. |
+
+A read-only claim takes `pull`, `depth`, and `offline`. A writeable
+volume refuses all three, because it follows its ref at stage alone. A
+read-only claim names its `Secret` through `nodeStageSecretRef`.
+
 ## Credentials
 
 `nodePublishSecretRef` names a `Secret` in the pod's namespace. The

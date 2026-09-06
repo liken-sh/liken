@@ -130,6 +130,23 @@ func (e *events) create(
 	}
 }
 
+// tell posts one fact about a volume where its kind says a person
+// reads it.
+//
+// An inline volume and a writeable volume report on the one pod that
+// holds them. A read-only claim reports on every pod it is published to
+// on this node, and on the claim the handle is bound to.
+func (n *node) tell(ctx context.Context, held *volume, kind, reason, message string) {
+	if held.kind != readOnlyClaim {
+		n.events.post(ctx, held.podRef(), kind, reason, message)
+		return
+	}
+	for _, pod := range held.boundPods() {
+		n.events.post(ctx, pod, kind, reason, message)
+	}
+	n.events.postClaim(ctx, held.claimNow(), kind, reason, message)
+}
+
 // report posts one fact in both places a person looks: on the pod that
 // mounts the volume and on the claim that binds it.
 func (n *node) report(

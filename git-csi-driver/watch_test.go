@@ -53,7 +53,7 @@ func TestTheWatchReadsTheTreeAfterTheQuiesce(t *testing.T) {
 	// The sweep is long, so the inotify watch is what reads the tree here.
 	answering.sweep = 30 * time.Second
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
 	writeFiles(t, published.tree, map[string]string{
 		"one.txt": "1", "two.txt": "22", "three.txt": "333",
@@ -76,7 +76,7 @@ func TestTheSweepReadsATreeTheWatchMissed(t *testing.T) {
 	answering.quiesce = 30 * time.Second
 	answering.sweep = 20 * time.Millisecond
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
 	writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
 	waitForPending(t, published, 1)
@@ -86,7 +86,7 @@ func TestTheWatchFollowsADirectoryThePodMade(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	answering.sweep = 30 * time.Second
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
 	// The write repeats, because the watch of a new directory is added
 	// after the create that made it.
@@ -110,7 +110,7 @@ func TestTheWatchPostsOneEventWhenTheTreeFirstHoldsWork(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	answering.sweep = 20 * time.Millisecond
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
 	writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
 	waitForPending(t, published, 1)
@@ -137,7 +137,7 @@ func TestTheWatchRunsWithNoInotify(t *testing.T) {
 	answering.inotify = func(int) (int, error) { return 0, errors.New("no inotify here") }
 	answering.sweep = 20 * time.Millisecond
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
 	writeFiles(t, published.tree, map[string]string{"one.txt": "1"})
 	waitForPending(t, published, 1)
@@ -257,7 +257,7 @@ func TestTheClassSetsTheQuiesceWithNoRemount(t *testing.T) {
 func TestAnUnarmedVolumeRestsForTheDriversOwnQuiesce(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	writeableVolume(t, answering, "config", fileURL(source))
+	stagedWriteable(t, answering, "config", fileURL(source))
 	answering.mu.Lock()
 	seeing := answering.watchers["config"]
 	answering.mu.Unlock()

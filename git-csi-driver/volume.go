@@ -5,9 +5,24 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+)
+
+// volumeKind is what the kubelet asked this node for.
+//
+// There are three kinds. An inline volume belongs to one pod and gets no
+// stage call. A read-only claim is staged once on the node, and many
+// pods publish from that one tree. A writeable volume is staged once
+// and one pod writes it.
+type volumeKind int
+
+const (
+	inlineVolume volumeKind = iota
+	readOnlyClaim
+	writeableVolume
 )
 
 // volume is one volume this node holds: the commit its tree stands on,
@@ -21,17 +36,25 @@ type volume struct {
 	directory   string
 	tree        string
 	target      string
-	// A writeable volume has a git directory and a staging path. A read-
-	// only volume has neither.
-	work      *workTree
-	staging   string
-	writeable bool
+	// A writeable volume has a git directory. Both staged kinds have a
+	// staging path. An inline volume has neither.
+	kind    volumeKind
+	work    *workTree
+	staging string
+	// The volume context the record carries. It stays on the volume so
+	// an unpublish can write the record again, because the unpublish
+	// call carries no attributes.
+	context map[string]string
 
 	mu      sync.Mutex
 	commit  string
 	trouble string
 	// The pod the kubelet named at publish. A stage call names no pod.
 	pod podReference
+	// Every target a read-only claim is bound at on this node, and the
+	// pod that asked for each one. Many pods publish one staged tree,
+	// and an Event about the tree goes to all of them.
+	targets map[string]podReference
 	// What the pod wrote and the driver has not committed, and the claim
 	// and class that say whether it may.
 	pending []change
@@ -130,6 +153,81 @@ func (v *volume) podRef() podReference {
 	return v.pod
 }
 
+// writeable reports the one kind the driver commits and pushes for.
+func (v *volume) writeable() bool {
+	return v.kind == writeableVolume
+}
+
+// bind records one more target and the pod that asked for it.
+//
+// The pod is kept per target, because every pod that publishes the
+// volume takes its Events.
+func (v *volume) bind(target string, pod podReference) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.targets[target] = pod
+	v.pod = pod
+}
+
+// boundAt reports whether the volume is already bound at the target.
+func (v *volume) boundAt(target string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	_, standing := v.targets[target]
+	return standing
+}
+
+// unbind takes one target away and answers how many are left.
+func (v *volume) unbind(target string) int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	delete(v.targets, target)
+	return len(v.targets)
+}
+
+// boundTargets is every target the volume is bound at, in order, which
+// is what the record carries.
+func (v *volume) boundTargets() []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	bound := make([]string, 0, len(v.targets))
+	for target := range v.targets {
+		bound = append(bound, target)
+	}
+	sort.Strings(bound)
+	return bound
+}
+
+// boundPods is every pod the volume is published to on this node.
+//
+// An Event about a read-only claim goes to all of them, because each one
+// reads the tree the Event is about.
+func (v *volume) boundPods() []podReference {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	pods := make([]podReference, 0, len(v.targets))
+	for _, pod := range v.targets {
+		pods = append(pods, pod)
+	}
+	return pods
+}
+
+// setClaim records the claim the volume handle is bound to, which
+// labels the gauge and takes the volume's Events.
+func (v *volume) setClaim(claim claimReference) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.claim = claim
+}
+
+// claimNow is that claim, and the empty one where the driver has not
+// found it.
+func (v *volume) claimNow() claimReference {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.claim
+}
+
 // reportPending records what the last scan found and reports whether
 // the set went from empty to not empty, which is the one moment an
 // Event is worth posting.
@@ -168,16 +266,18 @@ func (v *volume) policyNow() *policy {
 	return v.rules
 }
 
-// namespace is where a person looks the volume up: the claim's
-// namespace for a persistent volume, and the pod's for an inline one,
-// which is the only namespace a read-only volume has.
+// namespace is where a person looks the volume up.
+//
+// A staged volume of either kind is named by its claim. An inline volume
+// is named by the pod that mounts it, which is the only namespace an
+// inline volume has.
 func (v *volume) namespace() string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if v.writeable {
-		return v.claim.namespace
+	if v.kind == inlineVolume {
+		return v.pod.namespace
 	}
-	return v.pod.namespace
+	return v.claim.namespace
 }
 
 // reading is what the gauges carry: the claim that labels them, whether
@@ -284,7 +384,7 @@ func (v *volume) reportNow() (bool, string) {
 			v.unpushed, v.rules.maxLatency)
 	case v.abandoned != "":
 		return true, v.abandoned
-	case v.writeable && !v.armed && len(v.pending) > 0:
+	case v.kind == writeableVolume && !v.armed && len(v.pending) > 0:
 		return true, fmt.Sprintf("unarmed: %d paths pending, no class on claim %s/%s",
 			len(v.pending), v.claim.namespace, v.claim.name)
 	case len(v.pending) > 0:

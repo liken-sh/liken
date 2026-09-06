@@ -167,6 +167,13 @@ volumes:
 | `depth` | Clone depth. The default is a full clone. |
 | `offline` | `allowStale` publishes from the node's cache when the remote is unreachable. The default refuses. |
 
+A workload that names its storage as a claim cannot mount an inline
+volume. For that workload, the shared form of a read-only volume is a
+static `PersistentVolume` with the access mode `ReadOnlyMany` and the
+same attributes. One tree per volume handle on the node serves every pod
+that publishes it, and the claim takes the volume's `Event`s beside the
+pods.
+
 ### What git carries
 
 The repository carries two things for the driver and no configuration.

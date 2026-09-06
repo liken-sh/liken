@@ -42,6 +42,52 @@ write.
 The [attributes reference](../../reference/attributes/) lists every
 attribute, its values, and its default.
 
+## A claim on a repository
+
+A workload that names its storage as a `PersistentVolumeClaim` cannot
+mount an inline volume. For that workload, the driver serves a
+repository as a static `PersistentVolume` with the access mode
+`ReadOnlyMany`, and a claim binds it. The attributes are the ones the
+inline form takes.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: franchises
+spec:
+  capacity: {storage: 1Gi}
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: git.liken.sh
+    volumeHandle: franchises
+    readOnly: true
+    volumeAttributes:
+      url: https://tangled.org/guid.foo/fiction-franchises
+      ref: main
+      pull: 5m
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: franchises
+  namespace: default
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: ""
+  volumeName: franchises
+  resources: {requests: {storage: 1Gi}}
+```
+
+Many pods on one node publish one tree, each at its own mount, and the
+driver keeps the tree until the last of them stops. A private repository
+names its `Secret` through `nodeStageSecretRef`, with the keys the inline
+form takes through `nodePublishSecretRef`. The driver ignores a
+`VolumeAttributesClass` on such a claim, because a read-only volume
+commits nothing and pushes nothing.
+
 ## When the remote is unreachable
 
 By default a volume whose fetch fails at start is refused, and the pod
@@ -80,6 +126,9 @@ invocation, and the token never appears on a command line.
 
 A refused mount, a stale publish, and a fetch that fails after one that
 worked each post an `Event` on the pod. `kubectl describe pod` shows
-them. The node plugin's gauge `git_csi_volume_abnormal`, labeled by the
+them.
+A read-only claim posts each of those on every pod it is published to
+and on the claim, so `kubectl describe pvc` shows them too. The node
+plugin's gauge `git_csi_volume_abnormal`, labeled by the
 pod's namespace and the volume, is one after a stale publish and after
 a failed fetch, until the next fetch succeeds.

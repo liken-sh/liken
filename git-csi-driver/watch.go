@@ -58,7 +58,7 @@ type watcher struct {
 // watch starts the loops that read one published work tree. The caller
 // holds the node's lock.
 func (n *node) watch(published *volume) {
-	if !published.writeable {
+	if !published.writeable() {
 		return
 	}
 	ctx, cancel := context.WithCancel(n.base)

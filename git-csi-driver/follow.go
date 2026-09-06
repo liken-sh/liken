@@ -189,7 +189,7 @@ func (f *follower) refresh(ctx context.Context, held *volume) {
 // until a fetch works again.
 func (f *follower) trouble(ctx context.Context, held *volume, message string) {
 	if held.reportTrouble(message) {
-		f.node.events.post(ctx, held.attributes.pod, corev1.EventTypeWarning, reasonFailed, message)
+		f.node.tell(ctx, held, corev1.EventTypeWarning, reasonFailed, message)
 	}
 	f.node.logger.WarnContext(ctx, "the fetch failed",
 		"volume", held.id, "ref", held.attributes.ref, "error", message)

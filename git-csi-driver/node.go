@@ -129,9 +129,10 @@ func (n *node) NodeGetCapabilities(
 	return &csi.NodeGetCapabilitiesResponse{Capabilities: capabilities}, nil
 }
 
-// NodePublishVolume binds a tree under the pod: a read-only volume's
-// checkout of the ref, made here, or a writeable volume's work tree,
-// made at stage. A repeated call for a published volume answers
+// NodePublishVolume binds a tree under the pod. For an inline volume the
+// tree is a checkout of the ref made here. For a staged volume it is the
+// tree the stage made, bound read-only for a claim and read-write for a
+// writeable volume. A repeated call for a published volume answers
 // success, because the kubelet retries.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
@@ -184,6 +185,8 @@ func (n *node) NodePublishVolume(
 		directory:   directory,
 		tree:        filepath.Join(directory, "tree"),
 		target:      target,
+		kind:        inlineVolume,
+		context:     request.GetVolumeContext(),
 		pod:         parsed.pod,
 	}
 	if err := n.publish(ctx, mounting); err != nil {
@@ -191,7 +194,7 @@ func (n *node) NodePublishVolume(
 		_ = os.RemoveAll(directory)
 		return nil, err
 	}
-	n.record(ctx, mounting, request.GetVolumeContext())
+	n.record(ctx, mounting)
 
 	n.mu.Lock()
 	n.volumes[id] = mounting
@@ -269,7 +272,7 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	mounting.reportCommit(commit)
 	if fetchErr != nil {
 		mounting.reportTrouble(fetchErr.Error())
-		n.events.post(ctx, mounting.attributes.pod, corev1.EventTypeWarning, reasonStale,
+		n.tell(ctx, mounting, corev1.EventTypeWarning, reasonStale,
 			fmt.Sprintf("%s is published from the node's copy at %s: %s",
 				mounting.attributes.ref, short(commit), fetchErr))
 	}
@@ -280,10 +283,11 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	return nil
 }
 
-// NodeUnpublishVolume takes the mount away, and a read-only volume's
-// directory with it. A writeable volume's work tree stays for the next
-// pod on this node, and the bare repository stays for the next volume
-// of the same URL.
+// NodeUnpublishVolume takes one mount away. An inline volume's directory
+// goes with it. A read-only claim keeps its tree for the pods that still
+// read it, and gives it up at the unstage. A writeable volume's work tree
+// stays for the next pod on this node, and the bare repository stays for
+// the next volume of the same URL.
 func (n *node) NodeUnpublishVolume(
 	ctx context.Context, request *csi.NodeUnpublishVolumeRequest,
 ) (*csi.NodeUnpublishVolumeResponse, error) {
@@ -298,7 +302,15 @@ func (n *node) NodeUnpublishVolume(
 
 	n.mu.Lock()
 	published, found := n.volumes[id]
-	if found {
+	// A read-only claim keeps its tree, its fetch loop, and its other
+	// targets until the unstage, because other pods on this node still
+	// read it.
+	if found && published.kind == readOnlyClaim {
+		if published.unbind(target) == 0 {
+			delete(n.volumes, id)
+		}
+	}
+	if found && published.kind != readOnlyClaim {
 		delete(n.volumes, id)
 		n.unfollow(published)
 		n.unwatch(published)
@@ -311,10 +323,13 @@ func (n *node) NodeUnpublishVolume(
 	if err := os.RemoveAll(target); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	if found && published.kind == readOnlyClaim {
+		n.record(ctx, published)
+	}
 	// A writeable volume gives up only its record of the mount. It stays
 	// on the gauges while it is staged, because it is still this node's
 	// volume.
-	if found && published.writeable {
+	if found && published.writeable() {
 		n.forget(published)
 		// The pod is gone and nothing writes the tree now, so the
 		// last of its work is committed and pushed without waiting for a
@@ -325,7 +340,7 @@ func (n *node) NodeUnpublishVolume(
 		n.push(ctx, published)
 		n.noteHealth(ctx, published)
 	}
-	if found && !published.writeable {
+	if found && published.kind == inlineVolume {
 		if err := os.RemoveAll(published.directory); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}

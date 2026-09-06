@@ -92,7 +92,7 @@ func armedVolume(
 	t.Helper()
 	boundVolume(t, answering, id, "config-eager")
 	armingClass(t, answering, "config-eager", parameters)
-	held, _ := writeableVolume(t, answering, id, url)
+	held, _ := stagedWriteable(t, answering, id, url)
 	waitForArmed(t, held, true)
 	return held
 }
@@ -117,7 +117,7 @@ func TestAClassOfThisDriverArmsTheVolume(t *testing.T) {
 	attributesClass(t, answering, "config-eager", driverName)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 	waitForArmed(t, published, true)
 
 	claim, _, _ := published.reading()
@@ -137,7 +137,7 @@ func TestAClassOfAnotherDriverLeavesTheVolumeUnarmed(t *testing.T) {
 	boundVolume(t, answering, "config", "other-storage")
 	attributesClass(t, answering, "other-storage", "other.example.com")
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 
 	waitForClaim(t, published)
 	if _, armed, _ := published.reading(); armed {
@@ -293,7 +293,7 @@ func volumeNamed(id string) *volume {
 	return &volume{
 		id:         id,
 		attributes: &attributes{url: "file:///forge/" + id, ref: "main"},
-		writeable:  true,
+		kind:       writeableVolume,
 		pod:        podReference{name: "writer", namespace: "home"},
 	}
 }
@@ -399,7 +399,7 @@ func TestTheLoopReadsTheClaimAgainWhenItChanges(t *testing.T) {
 	boundVolume(t, answering, "config", "")
 	attributesClass(t, answering, "config-eager", driverName)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 	waitForClaim(t, published)
 
 	claim, err := cluster(t, answering).CoreV1().PersistentVolumeClaims("home").

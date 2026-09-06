@@ -287,7 +287,7 @@ func TestTheTimerReportsAWorkTreeItCannotCount(t *testing.T) {
 func TestAnOverdueCommitIsAbnormal(t *testing.T) {
 	held := &volume{
 		attributes: &attributes{ref: "main"},
-		writeable:  true,
+		kind:       writeableVolume,
 		armed:      true,
 		rules:      &policy{quiesce: 30 * time.Second, maxLatency: 5 * time.Minute},
 		unpushed:   3,

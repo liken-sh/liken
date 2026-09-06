@@ -1,8 +1,9 @@
 package main
 
-// stage.go holds the calls the kubelet makes for a writeable volume:
-// the stage that brings the work tree to the ref, and the publish that
-// binds it under the pod.
+// stage.go holds the calls the kubelet makes for a volume it stages: the
+// access mode that decides the kind, the stage that brings a writeable
+// volume's work tree to the ref, and the publish that binds it under the
+// pod. readonly.go holds what a read-only claim does with the same calls.
 
 import (
 	"context"
@@ -15,8 +16,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// NodeStageVolume fetches the ref, makes the work tree on the volume's
-// first stage on this node, and starts the loop that reads the claim.
+// NodeStageVolume reads the access mode, then stages what it names: the
+// tree of a read-only claim, or the work tree of a writeable volume, made
+// on its first stage on this node, with the loop that reads the claim
+// for its class.
 func (n *node) NodeStageVolume(
 	ctx context.Context, request *csi.NodeStageVolumeRequest,
 ) (*csi.NodeStageVolumeResponse, error) {
@@ -30,10 +33,11 @@ func (n *node) NodeStageVolume(
 	case staging == "":
 		return nil, status.Error(codes.InvalidArgument, "staging_target_path: the call names no path")
 	}
-	if err := checkAccessMode(request.GetVolumeCapability()); err != nil {
+	kind, err := stageKind(request.GetVolumeCapability())
+	if err != nil {
 		return nil, err
 	}
-	parsed, err := parseStageAttributes(request.GetVolumeContext())
+	parsed, err := parseStageAttributes(kind, request.GetVolumeContext())
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +56,9 @@ func (n *node) NodeStageVolume(
 		}
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
+	if kind == readOnlyClaim {
+		return n.stageReadOnly(ctx, request, parsed, holder)
+	}
 
 	directory := n.store.volumeDir(id)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -66,7 +73,8 @@ func (n *node) NodeStageVolume(
 		tree:        filepath.Join(directory, "tree"),
 		work:        n.store.workTree(repo, id),
 		staging:     staging,
-		writeable:   true,
+		kind:        writeableVolume,
+		context:     request.GetVolumeContext(),
 	}
 	if err := n.stageTree(ctx, arriving, repo); err != nil {
 		return nil, err
@@ -83,16 +91,27 @@ func (n *node) NodeStageVolume(
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
-// checkAccessMode refuses every mode but the one ReadWriteOncePod asks
-// for. The driver pushes what one writer wrote, and ReadWriteOnce
-// allows two pods on one node.
-func checkAccessMode(capability *csi.VolumeCapability) error {
-	mode := capability.GetAccessMode().GetMode()
-	if mode != csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER {
-		return status.Errorf(codes.InvalidArgument,
-			"access_mode: %s is not SINGLE_NODE_SINGLE_WRITER, which is ReadWriteOncePod", mode)
+// stageKind reads the kind of volume the access mode asks for.
+//
+// The access mode decides the kind. ReadWriteOncePod stages a writeable
+// volume. ReadOnlyMany, and the single-node read-only mode beside it,
+// stage a read-only claim. Every other mode is refused, because the
+// driver serves no other.
+func stageKind(capability *csi.VolumeCapability) (volumeKind, error) {
+	switch mode := capability.GetAccessMode().GetMode(); mode {
+	case csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER:
+		return writeableVolume, nil
+	case csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+		csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY:
+		return readOnlyClaim, nil
+	default:
+		// The message names the modes the driver serves, so a person
+		// who reads it in the pod's events can fix the claim.
+		return 0, status.Errorf(codes.InvalidArgument,
+			"access_mode: %s is not SINGLE_NODE_SINGLE_WRITER, which is ReadWriteOncePod, "+
+				"and not MULTI_NODE_READER_ONLY or SINGLE_NODE_READER_ONLY, which are ReadOnlyMany",
+			mode)
 	}
-	return nil
 }
 
 // stageTree fetches the ref into the shared bare repository and brings
@@ -246,12 +265,15 @@ func (n *node) NodeUnstageVolume(
 	n.mu.Unlock()
 	// Durability is the last push, so the volume leaves this node
 	// only after what it holds has reached the remote.
-	if found {
+	if found && staged.writeable() {
 		n.push(ctx, staged)
 		n.markUnstaged(ctx, staged)
 		n.mu.Lock()
 		n.disarm(staged)
 		n.mu.Unlock()
+	}
+	if found && staged.kind == readOnlyClaim {
+		n.unstageReadOnly(ctx, staged)
 	}
 	n.logger.InfoContext(ctx, "unstaged", "volume", id)
 	return &csi.NodeUnstageVolumeResponse{}, nil
@@ -274,6 +296,12 @@ func (n *node) publishStaged(
 	if !found {
 		return status.Errorf(codes.FailedPrecondition,
 			"volume_id: %s is not staged on this node", id)
+	}
+	if staged.kind == readOnlyClaim {
+		if err := n.publishReadOnly(ctx, staged, request, parsed); err != nil {
+			return n.refusedClaim(ctx, staged, err)
+		}
+		return nil
 	}
 	if standing {
 		if published.target != target {
@@ -299,7 +327,8 @@ func (n *node) publishStaged(
 		return status.Error(codes.Internal, err.Error())
 	}
 	staged.target = target
-	n.record(ctx, staged, request.GetVolumeContext())
+	staged.context = request.GetVolumeContext()
+	n.record(ctx, staged)
 
 	n.mu.Lock()
 	n.volumes[id] = staged

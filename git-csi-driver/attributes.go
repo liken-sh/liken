@@ -75,9 +75,14 @@ func parseAttributes(request *csi.NodePublishVolumeRequest) (*attributes, error)
 // accepts. A writeable volume follows its ref at stage and never after.
 var readOnlyAttributes = []string{"pull", "depth", "offline"}
 
-// parseStageAttributes reads a persistent volume's attributes and
-// refuses the read-only ones.
-func parseStageAttributes(context map[string]string) (*attributes, error) {
+// parseStageAttributes reads a persistent volume's attributes.
+//
+// A writeable stage refuses the read-only attributes. A read-only claim
+// takes the same attributes an inline volume takes.
+func parseStageAttributes(kind volumeKind, context map[string]string) (*attributes, error) {
+	if kind != writeableVolume {
+		return parseVolumeContext(context)
+	}
 	for _, key := range readOnlyAttributes {
 		if _, found := context[key]; found {
 			return nil, status.Errorf(codes.InvalidArgument,

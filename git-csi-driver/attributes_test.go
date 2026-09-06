@@ -251,7 +251,7 @@ func TestParseStageAttributesRefusesAReadOnlyAttribute(t *testing.T) {
 		"pull": "5m", "depth": "1", "offline": "allowStale",
 	} {
 		t.Run(attribute, func(t *testing.T) {
-			_, err := parseStageAttributes(map[string]string{
+			_, err := parseStageAttributes(writeableVolume, map[string]string{
 				"url": "https://example.com/data.git", attribute: value,
 			})
 			if got := status.Code(err); got != codes.InvalidArgument {
@@ -266,7 +266,7 @@ func TestParseStageAttributesRefusesAReadOnlyAttribute(t *testing.T) {
 }
 
 func TestParseStageAttributesTakesTheAttributesOfAWriteableVolume(t *testing.T) {
-	parsed, err := parseStageAttributes(map[string]string{
+	parsed, err := parseStageAttributes(writeableVolume, map[string]string{
 		"url": "https://example.com/data.git",
 		"ref": "release",
 	})

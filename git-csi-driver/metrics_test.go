@@ -109,14 +109,14 @@ func abnormalOf(t *testing.T, readings *metrics, namespace, id string) (float64,
 // mounted is a volume of each kind, which the health gauge labels
 // from a different namespace: the pod's for the inline volume, and the
 // claim's for the one a claim binds.
-func mounted(id string, writeable bool) *volume {
+func mounted(id string, kind volumeKind) *volume {
 	held := &volume{
 		id:         id,
 		attributes: &attributes{ref: "main"},
-		writeable:  writeable,
+		kind:       kind,
 		pod:        podReference{name: "reader", namespace: "home"},
 	}
-	if writeable {
+	if kind != inlineVolume {
 		held.claim = claimReference{namespace: "apps", name: "config"}
 	}
 	return held
@@ -124,8 +124,8 @@ func mounted(id string, writeable bool) *volume {
 
 func TestTheHealthGaugeCarriesTheNamespaceAndTheVolume(t *testing.T) {
 	readings := newMetrics()
-	inline := mounted("csi-1", false)
-	persistent := mounted("csi-2", true)
+	inline := mounted("csi-1", inlineVolume)
+	persistent := mounted("csi-2", writeableVolume)
 	readings.health(inline, true)
 	readings.health(persistent, false)
 
@@ -147,7 +147,7 @@ func TestTheHealthGaugeCarriesTheNamespaceAndTheVolume(t *testing.T) {
 func TestTheLogSaysWhenAVolumeTurnsAbnormalAndWhenItIsWellAgain(t *testing.T) {
 	logs := &logbook{}
 	answering, _ := testNode(t, logs)
-	held := mounted("csi-1", false)
+	held := mounted("csi-1", inlineVolume)
 
 	answering.noteHealth(t.Context(), held)
 	if strings.Contains(logs.String(), "the volume is") {

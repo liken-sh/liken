@@ -25,11 +25,11 @@ func stageRequest(t *testing.T, id, url string, extra map[string]string) *csi.No
 		VolumeId:          id,
 		StagingTargetPath: filepath.Join(t.TempDir(), "staging"),
 		VolumeContext:     attributes,
-		VolumeCapability:  writeableCapability(csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER),
+		VolumeCapability:  capabilityOf(csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER),
 	}
 }
 
-func writeableCapability(mode csi.VolumeCapability_AccessMode_Mode) *csi.VolumeCapability {
+func capabilityOf(mode csi.VolumeCapability_AccessMode_Mode) *csi.VolumeCapability {
 	return &csi.VolumeCapability{
 		AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}},
 		AccessMode: &csi.VolumeCapability_AccessMode{Mode: mode},
@@ -57,9 +57,9 @@ func persistentPublish(t *testing.T, staged *csi.NodeStageVolumeRequest) *csi.No
 	}
 }
 
-// writeableVolume stages and publishes one writeable volume and answers
+// stagedWriteable stages and publishes one writeable volume and answers
 // what the node holds for it.
-func writeableVolume(
+func stagedWriteable(
 	t *testing.T, answering *node, id, url string,
 ) (*volume, *csi.NodePublishVolumeRequest) {
 	t.Helper()
@@ -113,25 +113,48 @@ func TestNodeStageVolumeRefusesACallThatNamesTooLittle(t *testing.T) {
 	}
 }
 
-func TestNodeStageVolumeRefusesEveryAccessModeButOneWriter(t *testing.T) {
+func TestNodeStageVolumeRefusesEveryAccessModeButTheThreeItServes(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	for _, mode := range []csi.VolumeCapability_AccessMode_Mode{
 		csi.VolumeCapability_AccessMode_UNKNOWN,
 		csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 		csi.VolumeCapability_AccessMode_SINGLE_NODE_MULTI_WRITER,
 		csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-		csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+		csi.VolumeCapability_AccessMode_MULTI_NODE_SINGLE_WRITER,
 	} {
 		t.Run(mode.String(), func(t *testing.T) {
 			request := stageRequest(t, "config", "file:///nowhere", nil)
-			request.VolumeCapability = writeableCapability(mode)
+			request.VolumeCapability = capabilityOf(mode)
 			_, err := answering.NodeStageVolume(t.Context(), request)
 			if got := status.Code(err); got != codes.InvalidArgument {
 				t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.InvalidArgument)
 			}
-			if !strings.Contains(status.Convert(err).Message(), "ReadWriteOncePod") {
-				t.Errorf("NodeStageVolume said %q, want ReadWriteOncePod named",
-					status.Convert(err).Message())
+			for _, named := range []string{"ReadWriteOncePod", "ReadOnlyMany"} {
+				if !strings.Contains(status.Convert(err).Message(), named) {
+					t.Errorf("NodeStageVolume said %q, want %s named",
+						status.Convert(err).Message(), named)
+				}
+			}
+		})
+	}
+}
+
+func TestTheAccessModeDecidesTheKind(t *testing.T) {
+	for _, c := range []struct {
+		mode csi.VolumeCapability_AccessMode_Mode
+		want volumeKind
+	}{
+		{mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER, want: writeableVolume},
+		{mode: csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY, want: readOnlyClaim},
+		{mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_READER_ONLY, want: readOnlyClaim},
+	} {
+		t.Run(c.mode.String(), func(t *testing.T) {
+			got, err := stageKind(capabilityOf(c.mode))
+			if err != nil {
+				t.Fatalf("stageKind: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("stageKind answered %v, want %v", got, c.want)
 			}
 		})
 	}
@@ -198,7 +221,7 @@ func TestNodeStageVolumeMakesTheWorkTreeFromTheRef(t *testing.T) {
 	if !found {
 		t.Fatal("the node holds no staged volume")
 	}
-	if !staged.writeable || staged.staging != request.StagingTargetPath {
+	if !staged.writeable() || staged.staging != request.StagingTargetPath {
 		t.Errorf("the volume is %+v, want a writeable volume staged at %s",
 			staged, request.StagingTargetPath)
 	}
@@ -387,7 +410,7 @@ func TestNodeUnstageVolumeKeepsTheWorkTree(t *testing.T) {
 func TestNodePublishVolumeBindsTheWorkTreeReadWrite(t *testing.T) {
 	answering, calls := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, request := writeableVolume(t, answering, "config", fileURL(source))
+	published, request := stagedWriteable(t, answering, "config", fileURL(source))
 
 	if len(calls.mounts) != 1 {
 		t.Fatalf("the publish made %v, want one bind", calls.mounts)
@@ -497,7 +520,7 @@ func TestNodePublishVolumeReportsWhatItCannotBind(t *testing.T) {
 func TestNodeUnpublishVolumeKeepsAWriteableTree(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, request := writeableVolume(t, answering, "config", fileURL(source))
+	published, request := stagedWriteable(t, answering, "config", fileURL(source))
 	writeFiles(t, published.tree, map[string]string{"new.txt": "the pod wrote this"})
 
 	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{

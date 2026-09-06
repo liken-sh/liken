@@ -33,7 +33,7 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			held: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
-				writeable:  true,
+				kind:       writeableVolume,
 				claim:      claim,
 				pending:    []change{{path: "a.txt"}, {path: "b.txt"}},
 			},
@@ -45,7 +45,7 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			held: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
-				writeable:  true,
+				kind:       writeableVolume,
 				armed:      true,
 				claim:      claim,
 				pending:    []change{{path: "a.txt"}},
@@ -58,7 +58,7 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			held: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
-				writeable:  true,
+				kind:       writeableVolume,
 				refDeleted: true,
 			},
 			abnormal: true,
@@ -69,7 +69,7 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			held: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
-				writeable:  true,
+				kind:       writeableVolume,
 				diverged:   "main.config",
 			},
 			abnormal: true,
@@ -80,7 +80,7 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			held: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
-				writeable:  true,
+				kind:       writeableVolume,
 				abandoned:  "the work tree of old holds unpushed commits and was unstaged 745h ago",
 			},
 			abnormal: true,
@@ -91,7 +91,7 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			held: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
-				writeable:  true,
+				kind:       writeableVolume,
 				claim:      claim,
 				invalid:    "the class config-eager is not valid: metadata: \"yes\" is not true or false",
 			},

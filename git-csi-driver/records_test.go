@@ -65,7 +65,7 @@ func TestADriverThatRestartsTakesBackItsVolumes(t *testing.T) {
 	if _, err := answering.NodePublishVolume(t.Context(), inline); err != nil {
 		t.Fatalf("NodePublishVolume: %v", err)
 	}
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 	writeFiles(t, published.tree, map[string]string{"new.txt": "the pod wrote this"})
 
 	again := restarted(t, answering, true)
@@ -85,7 +85,7 @@ func TestADriverThatRestartsTakesBackItsVolumes(t *testing.T) {
 	if resumed.commit == "" {
 		t.Error("the writeable volume forgot the commit its tree stands on")
 	}
-	if resumed.target != published.target || !resumed.writeable {
+	if resumed.target != published.target || !resumed.writeable() {
 		t.Errorf("the volume is %+v, want the writeable volume at %s", resumed, published.target)
 	}
 }
@@ -112,7 +112,7 @@ func TestAStaleRecordOfAReadOnlyVolumeGoesWithItsDirectory(t *testing.T) {
 func TestAStaleRecordOfAWriteableVolumeKeepsItsTree(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := writeableVolume(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
 	writeFiles(t, published.tree, map[string]string{"new.txt": "the pod wrote this"})
 
 	again := restarted(t, answering, false)
@@ -192,7 +192,7 @@ func TestTheRecordReportsWhatItCannotWrite(t *testing.T) {
 	held := &volume{id: "csi-1", directory: directory}
 	readOnlyDir(t, directory)
 
-	answering.record(t.Context(), held, map[string]string{})
+	answering.record(t.Context(), held)
 	answering.forget(held)
 	if !strings.Contains(logs.String(), "the volume's record was not written") {
 		t.Errorf("the log is %q, want the record it could not write in it", logs)
