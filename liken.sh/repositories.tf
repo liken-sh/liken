@@ -57,6 +57,11 @@ locals {
       cname       = "git.liken.sh"
       topics      = ["liken", "kubernetes", "csi", "csi-driver", "git"]
     }
+    people-operator = {
+      description = "People as a fact of liken clusters: the Person CRD"
+      cname       = "people.liken.sh"
+      topics      = ["liken", "kubernetes", "crd", "identity"]
+    }
     log = {
       description = "The liken devlog"
       cname       = "log.liken.sh"
@@ -143,11 +148,11 @@ import {
 
 # The five manual sites predate this file, so their Pages
 # configurations import. A site added after adoption (the devlog, the
-# git CSI driver, the library operator) is created by the resource
-# instead, and an import for it would fail, because there is nothing
-# to import yet.
+# git CSI driver, the library operator, the people operator) is
+# created by the resource instead, and an import for it would fail,
+# because there is nothing to import yet.
 import {
-  for_each = { for name, repo in local.repositories : name => repo.cname if repo.cname != null && name != "log" && name != "git-csi-driver" && name != "library-operator" }
+  for_each = { for name, repo in local.repositories : name => repo.cname if repo.cname != null && name != "log" && name != "git-csi-driver" && name != "library-operator" && name != "people-operator" }
   to       = github_repository_pages.sites[each.key]
   id       = each.key
 }
