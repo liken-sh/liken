@@ -27,6 +27,10 @@ const endpointScheme = "unix://"
 type server struct {
 	grpc     *grpc.Server
 	listener net.Listener
+	// serveOn and stop are the gRPC server's own two calls, held
+	// as fields so a test can drive a Serve that fails after the stop.
+	serveOn func(net.Listener) error
+	stop    func()
 	// The gauges and the listener that serves them. An empty --metrics
 	// leaves the listener nil.
 	readings *metrics
@@ -34,13 +38,11 @@ type server struct {
 	logger   *slog.Logger
 }
 
-// newServer makes the store, takes the socket, and registers the
-// Identity and Node services. It fails before it listens when the store
-// cannot be made, because a driver with no store can hold no volume.
-//
-// newServer makes the store, takes the socket, and registers the
-// Identity and Node services. ctx is the driver's run, and every fetch
-// loop the Node service starts ends with it.
+// newServer takes the socket and registers the services: Identity and
+// Controller with --controller, Identity and Node otherwise. The node
+// plugin makes the store first and fails before it listens when it
+// cannot, because a driver with no store can hold no volume. ctx is the
+// driver's run, and every loop the Node service starts ends with it.
 func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, error) {
 	socket, found := strings.CutPrefix(cfg.endpoint, endpointScheme)
 	if !found {
@@ -62,14 +64,20 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 	}
 
 	readings := newMetrics()
-	answering := newNode(ctx, cfg, newEvents(cfg.nodeID, logger), readings, logger)
-	// The mounts outlive the driver, so a driver that starts takes back
-	// the volumes its store still records.
-	answering.resume(ctx)
-
 	registered := grpc.NewServer(grpc.UnaryInterceptor(logCalls(logger)))
-	csi.RegisterIdentityServer(registered, &identity{store: cfg.store})
-	csi.RegisterNodeServer(registered, answering)
+	csi.RegisterIdentityServer(registered,
+		&identity{store: cfg.store, controller: cfg.controller})
+	// One binary serves one service, because the controller holds
+	// no volume and the node plugin validates no class.
+	if cfg.controller {
+		csi.RegisterControllerServer(registered, &controller{})
+	} else {
+		answering := newNode(ctx, cfg, newEvents(cfg.nodeID, logger), readings, logger)
+		// The mounts outlive the driver, so a driver that starts takes back
+		// the volumes its store still records.
+		answering.resume(ctx)
+		csi.RegisterNodeServer(registered, answering)
+	}
 
 	metricsListener, err := readings.listen(cfg.metrics)
 	if err != nil {
@@ -79,6 +87,8 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 	return &server{
 		grpc:     registered,
 		listener: listener,
+		serveOn:  registered.Serve,
+		stop:     registered.GracefulStop,
 		readings: readings,
 		metrics:  metricsListener,
 		logger:   logger,
@@ -89,7 +99,7 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 // a call in flight finish.
 func (s *server) serve(ctx context.Context) error {
 	served := make(chan error, 1)
-	go func() { served <- s.grpc.Serve(s.listener) }()
+	go func() { served <- s.serveOn(s.listener) }()
 	if s.metrics != nil {
 		go serveMetrics(ctx, s.metrics, s.readings, s.logger)
 	}
@@ -97,7 +107,7 @@ func (s *server) serve(ctx context.Context) error {
 	case err := <-served:
 		return err
 	case <-ctx.Done():
-		s.grpc.GracefulStop()
+		s.stop()
 		// A context that is over before Serve reaches the socket makes
 		// Serve return ErrServerStopped. That is the stop this run asked
 		// for, not a failure.

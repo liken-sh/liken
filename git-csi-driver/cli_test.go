@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -172,5 +175,38 @@ func TestParseAnswersNothingForTheVersion(t *testing.T) {
 	}
 	if cfg != nil {
 		t.Errorf("parse = %+v, want no configuration", cfg)
+	}
+}
+
+func TestRunReportsAServeThatFails(t *testing.T) {
+	refused := errors.New("the socket went away")
+	out := &bytes.Buffer{}
+	code := runWith(t.Context(), append([]string{"--node-id", "node-1"}, temporaryFlags(t)...), out,
+		func(ctx context.Context, cfg *config, logger *slog.Logger) (*server, error) {
+			serving, err := newServer(ctx, cfg, logger)
+			if err != nil {
+				return nil, err
+			}
+			serving.serveOn = func(net.Listener) error { return refused }
+			return serving, nil
+		})
+	if code != 1 {
+		t.Errorf("run = %d, want 1", code)
+	}
+	if !strings.Contains(out.String(), refused.Error()) {
+		t.Errorf("run printed %q, want the failure in it", out)
+	}
+}
+
+func TestParseTakesTheControllerWithNoNode(t *testing.T) {
+	cfg, err := parse([]string{"--controller"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !cfg.controller {
+		t.Error("parse answered a configuration that is not the controller")
+	}
+	if cfg.nodeID != "" {
+		t.Errorf("parse answered the node %q, want none", cfg.nodeID)
 	}
 }

@@ -77,7 +77,7 @@ func TestNodeGetInfoNamesTheNode(t *testing.T) {
 	}
 }
 
-func TestNodeGetCapabilitiesDeclaresTheThree(t *testing.T) {
+func TestNodeGetCapabilitiesDeclaresTheFour(t *testing.T) {
 	client := csi.NewNodeClient(startServer(t, io.Discard))
 	answer, err := client.NodeGetCapabilities(t.Context(), &csi.NodeGetCapabilitiesRequest{})
 	if err != nil {
@@ -91,6 +91,7 @@ func TestNodeGetCapabilitiesDeclaresTheThree(t *testing.T) {
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
 		csi.NodeServiceCapability_RPC_VOLUME_CONDITION,
+		csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("NodeGetCapabilities answered %v, want %v", got, want)

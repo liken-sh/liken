@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"time"
 
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -156,7 +157,9 @@ func (a *arming) read(ctx context.Context, staged *volume, claim claimReference)
 		return
 	}
 
-	name, armed := className(held), false
+	name := className(held)
+	var rules *policy
+	invalid := ""
 	if name != "" {
 		class, err := a.client.StorageV1().VolumeAttributesClasses().
 			Get(ctx, name, metav1.GetOptions{})
@@ -164,11 +167,23 @@ func (a *arming) read(ctx context.Context, staged *volume, claim claimReference)
 		case err != nil:
 			a.logger.WarnContext(ctx, "the class was not read",
 				"class", name, "error", err)
+		case class.DriverName != driverName:
+			// A class of another driver says nothing about this
+			// volume, so it arms nothing and is not a failure.
 		default:
-			armed = class.DriverName == driverName
+			// A class the resizer let through is still read here,
+			// because the resizer may not be running, and a class the
+			// driver cannot read arms nothing.
+			rules, err = parsePolicy(class.Parameters)
+			if err != nil {
+				invalid = fmt.Sprintf("the class %s is not valid: %s",
+					name, status.Convert(err).Message())
+				a.logger.WarnContext(ctx, "the class is not valid",
+					"class", name, "error", err)
+			}
 		}
 	}
-	a.node.armed(ctx, staged, claim, name, armed)
+	a.node.armed(ctx, staged, claim, name, rules, invalid)
 }
 
 // className is the class in force: the one the claim's status carries,
@@ -188,12 +203,20 @@ func className(held *corev1.PersistentVolumeClaim) string {
 // armed records the answer and posts an Event on the pod and the claim
 // when the volume moved between armed and unarmed.
 func (n *node) armed(
-	ctx context.Context, staged *volume, claim claimReference, class string, armed bool,
+	ctx context.Context,
+	staged *volume,
+	claim claimReference,
+	class string,
+	rules *policy,
+	invalid string,
 ) {
-	if staged.reportArmed(claim, class, armed) {
+	if staged.reportArmed(claim, class, rules, invalid) {
 		reason, message := reasonArmed, fmt.Sprintf("armed by the class %s", class)
-		if !armed {
+		if rules == nil {
 			reason, message = reasonUnarmed, "unarmed: the claim names no class of "+driverName
+			if invalid != "" {
+				message = "unarmed: " + invalid
+			}
 		}
 		n.report(ctx, staged, claim, corev1.EventTypeNormal, reason, message)
 	}

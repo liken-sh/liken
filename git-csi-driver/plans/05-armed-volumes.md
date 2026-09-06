@@ -20,7 +20,7 @@ class arms a volume with the defaults.
 | Parameter | Values | Default |
 |---|---|---|
 | `push.quiesce` | A Go duration, at least `5s`. | `30s` |
-| `push.maxLatency` | A Go duration, at least `push.quiesce`, or `never`. | `5m` |
+| `push.maxLatency` | A Go duration, at least `push.quiesce`, or `never`. | `5m`, or `push.quiesce` when that is longer |
 | `commit.maxFileSize` | A Kubernetes quantity, or `0` for no limit. | `1Mi` |
 | `commit.author` | `Name <email>`. | `git-csi-driver <git-csi-driver@liken.sh>` |
 | `ignore` | Comma-separated `.gitignore` patterns. | empty |
@@ -91,8 +91,9 @@ record: `chmod`, `chown`, and `mkdir` for the empty directories.
 - The condition is abnormal for a failed push, for a skipped file
   (`N files over commit.maxFileSize: <paths>`), for an unpushed commit
   older than `push.maxLatency`, and for an invalid class.
-- Events on the pod and the claim: `Pushed` with the commit and the
-  count, `PushFailed` with the error, `FileSkipped` with the path.
+- Events on the pod and the claim: `GitVolumePushed` with the commit
+  and the count, `GitVolumePushFailed` with the error,
+  `GitVolumeFileSkipped` with the path.
 - Metrics from the design: `git_csi_unpushed_commits`,
   `git_csi_last_push_timestamp_seconds`, `git_csi_push_failures_total`,
   `git_csi_skipped_files`.

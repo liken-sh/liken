@@ -1,0 +1,119 @@
+# The controller plugin validates a VolumeAttributesClass and
+# holds no volume, so one replica serves the whole cluster and a restart
+# costs nothing.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: git-csi-driver-controller
+---
+# The rules the external-resizer's own release notes list. The
+# driver container in this pod reads nothing from the API; every rule
+# here is the sidecar's.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: git-csi-driver-controller
+rules:
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, list, watch, patch, update]
+  # The resizer records the class in force on the claim's status.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims/status]
+    verbs: [patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, list, watch, patch, update]
+  - apiGroups: [storage.k8s.io]
+    resources: [volumeattributesclasses]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: git-csi-driver-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: git-csi-driver-controller
+subjects:
+  - kind: ServiceAccount
+    name: git-csi-driver-controller
+    namespace: liken-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-csi-driver-controller
+spec:
+  # One replica, because the plugin changes nothing and a claim
+  # whose class is not validated for a minute costs nothing.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: git-csi-driver-controller
+  template:
+    metadata:
+      labels:
+        app: git-csi-driver-controller
+    spec:
+      serviceAccountName: git-csi-driver-controller
+      containers:
+        # The same binary as the node plugin, with --controller.
+        - name: driver
+          image: ghcr.io/liken-sh/git-csi-driver:latest
+          args:
+            - --controller
+            - --endpoint=unix:///csi/csi.sock
+          # The controller mounts nothing and holds no store, so it
+          # needs no privilege at all.
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: socket
+              mountPath: /csi
+        # The external-resizer sidecar carries a claim's class
+        # change to ControllerModifyVolume and records the answer on the
+        # claim.
+        - name: resizer
+          image: registry.k8s.io/sig-storage/csi-resizer:v2.2.1
+          args:
+            - --csi-address=/csi/csi.sock
+            # The sidecar turns the feature off by itself when the
+            # cluster serves no v1 VolumeAttributesClass, so the gate is
+            # named here to keep it on.
+            - --feature-gates=VolumeAttributesClass=true
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: socket
+              mountPath: /csi
+      volumes:
+        # The socket lives in the pod alone, because the kubelet
+        # never calls the controller plugin.
+        - name: socket
+          emptyDir: {}

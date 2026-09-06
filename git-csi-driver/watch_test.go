@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Logbook is a log a test reads while the driver's own loops write it.
@@ -218,5 +219,84 @@ func TestUnwatchPassesOverAVolumeItNeverWatched(t *testing.T) {
 	answering.watch(&volume{id: "csi-9"})
 	if got := len(answering.watchers); got != 0 {
 		t.Errorf("the node holds %d watches of a read-only volume, want 0", got)
+	}
+}
+
+func TestTheClassSetsTheQuiesceWithNoRemount(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	armedVolume(t, answering, "config",
+		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})),
+		map[string]string{quiesceParameter: "5s"})
+	answering.mu.Lock()
+	seeing := answering.watchers["config"]
+	answering.mu.Unlock()
+	if got := seeing.rest(); got != 5*time.Second {
+		t.Errorf("the watch rests for %s, want 5s", got)
+	}
+
+	classes := cluster(t, answering).StorageV1().VolumeAttributesClasses()
+	class, err := classes.Get(t.Context(), "config-eager", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("reading the class: %v", err)
+	}
+	class.Parameters = map[string]string{quiesceParameter: "10s"}
+	if _, err := classes.Update(t.Context(), class, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("changing the class: %v", err)
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if seeing.rest() == 10*time.Second {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the watch rests for %s within 30s, want the new quiesce of 10s", seeing.rest())
+}
+
+func TestAnUnarmedVolumeRestsForTheDriversOwnQuiesce(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	writeableVolume(t, answering, "config", fileURL(source))
+	answering.mu.Lock()
+	seeing := answering.watchers["config"]
+	answering.mu.Unlock()
+	if got := seeing.rest(); got != answering.quiesce {
+		t.Errorf("the watch rests for %s, want the driver's own %s", got, answering.quiesce)
+	}
+}
+
+func TestTheTreeIsCommittedAndPushedOnTheTimer(t *testing.T) {
+	remote := bareRemote(t, map[string]string{"a.txt": "one"})
+	answering, _ := testNode(t, io.Discard)
+	held := armedVolume(t, answering, "config", fileURL(remote),
+		map[string]string{quiesceParameter: "5s"})
+	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+
+	// The sweep reads the tree while the quiesce is still long, so the
+	// commit lands before the timer does.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")) == "Update 1 paths" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("the remote's main is at %q within 30s, want the driver's commit",
+		strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")))
+}
+
+func TestTheSweepCommitsNothingWhileTheTreeIsWritten(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	held := armedVolume(t, answering, "config",
+		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})),
+		map[string]string{quiesceParameter: "1h", maxLatencyParameter: neverLatency})
+	before := strings.TrimSpace(gitIn(t, held.work, "rev-parse", "HEAD"))
+
+	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+	waitForPending(t, held, 1)
+
+	if after := strings.TrimSpace(gitIn(t, held.work, "rev-parse", "HEAD")); after != before {
+		t.Errorf("the tree moved to %s before it rested, want %s", after, before)
 	}
 }

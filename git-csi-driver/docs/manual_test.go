@@ -15,6 +15,7 @@ import (
 // Each one is served by the site anyway: the deploy manifests
 // publish through a module mount in hugo.yaml.
 var exceptions = []string{
+	"/deploy/controller.yaml",
 	"/deploy/csidriver.yaml",
 	"/deploy/kustomization.yaml",
 	"/deploy/node.yaml",

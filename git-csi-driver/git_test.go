@@ -19,6 +19,17 @@ func repositoryWithACommit(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+// BareRemote is a bare repository with the files on main, which is what
+// a forge holds and what a push can reach.
+func bareRemote(t *testing.T, files map[string]string) string {
+	t.Helper()
+	source := repositoryWithACommit(t, files)
+	bare := t.TempDir()
+	git(t, bare, "init", "--quiet", "--bare", "--initial-branch=main")
+	git(t, source, "push", "--quiet", bare, "main")
+	return bare
+}
+
 // commitFiles adds every file to the repository and commits them,
 // returning the commit.
 func commitFiles(t *testing.T, dir string, files map[string]string) string {

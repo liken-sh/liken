@@ -122,6 +122,12 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 		if err := staging.work.create(ctx, staging.attributes.ref, commit); err != nil {
 			return status.Error(codes.Internal, err.Error())
 		}
+		// The mark starts at the commit the remote holds, so the
+		// first commit the driver makes is the first thing unpushed.
+		if err := staging.work.markPushed(ctx, commit); err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+		n.restore(ctx, staging)
 		staging.reportCommit(commit)
 		return nil
 	}
@@ -129,12 +135,42 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
+	// A work tree from a driver that made no commits carries no
+	// mark, and everything it holds is what the remote holds.
+	if staging.work.refCommit(ctx, pushedRef) == "" {
+		if err := staging.work.markPushed(ctx, head); err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+	}
 	staging.reportCommit(head)
 	if head != commit {
 		staging.reportTrouble(fmt.Sprintf("upstream moved: %s is at %s and the tree is at %s",
 			staging.attributes.ref, short(commit), short(head)))
 	}
 	return nil
+}
+
+// restore replays what a checkout cannot carry. The metadata ref
+// is fetched in a credential window of its own, and a restore that
+// fails is reported and does not fail the stage.
+func (n *node) restore(ctx context.Context, staging *volume) {
+	env, remove, err := staging.credentials.use(staging.directory)
+	if err != nil {
+		n.logger.WarnContext(ctx, "the metadata was not fetched",
+			"volume", staging.id, "error", err)
+		return
+	}
+	fetchErr := staging.work.fetchMetadata(ctx, env, staging.attributes.url)
+	remove()
+	if fetchErr != nil {
+		n.logger.InfoContext(ctx, "the remote holds no metadata",
+			"volume", staging.id, "reason", fetchErr)
+		return
+	}
+	if err := staging.work.replayMetadata(ctx, n.logger, os.Geteuid() == 0); err != nil {
+		n.logger.WarnContext(ctx, "the metadata was not replayed",
+			"volume", staging.id, "error", err)
+	}
 }
 
 // NodeUnstageVolume stops the loops and keeps the work tree, because
@@ -154,9 +190,16 @@ func (n *node) NodeUnstageVolume(
 	staged, found := n.staged[id]
 	if found {
 		delete(n.staged, id)
-		n.disarm(staged)
 	}
 	n.mu.Unlock()
+	// Durability is the last push, so the volume leaves this node
+	// only after what it holds has reached the remote.
+	if found {
+		n.push(ctx, staged)
+		n.mu.Lock()
+		n.disarm(staged)
+		n.mu.Unlock()
+	}
 	n.logger.InfoContext(ctx, "unstaged", "volume", id)
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }

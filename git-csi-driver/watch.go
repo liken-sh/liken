@@ -48,6 +48,11 @@ type watcher struct {
 	descriptor int
 	inotify    *os.File
 	watched    map[int32]string
+
+	// When the pod last changed the tree, which is what the
+	// quiesce is measured from.
+	mu      sync.Mutex
+	written time.Time
 }
 
 // watch starts the loops that read one published work tree. The caller
@@ -65,6 +70,7 @@ func (n *node) watch(published *volume) {
 		cancel:  cancel,
 		changes: make(chan struct{}, 1),
 		watched: map[int32]string{},
+		written: time.Now(),
 	}
 	n.watchers[published.id] = seeing
 	seeing.running.Add(2)
@@ -183,10 +189,30 @@ func trimZeros(name []byte) []byte {
 // nudge restarts the quiesce timer. The channel has one slot and the
 // send never blocks, so a burst of writes costs one nudge.
 func (w *watcher) nudge() {
+	w.mu.Lock()
+	w.written = time.Now()
+	w.mu.Unlock()
 	select {
 	case w.changes <- struct{}{}:
 	default:
 	}
+}
+
+// quietFor is how long the tree has rested, which is what the
+// push policy measures its quiesce against.
+func (w *watcher) quietFor() time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return time.Since(w.written)
+}
+
+// rest is the quiesce in force. A class that changes it reaches
+// the timer at the next nudge, so no remount is needed.
+func (w *watcher) rest() time.Duration {
+	if rules := w.volume.policyNow(); rules != nil {
+		return rules.quiesce
+	}
+	return w.quiesce
 }
 
 // run waits until the tree has been quiet for the quiesce, then reads
@@ -207,7 +233,7 @@ func (w *watcher) run(ctx context.Context) {
 			w.close()
 			return
 		case <-w.changes:
-			quiesce.Reset(w.quiesce)
+			quiesce.Reset(w.rest())
 		case <-quiesce.C:
 			w.scan(ctx)
 		case <-sweep.C:
@@ -224,10 +250,17 @@ func (w *watcher) close() {
 	}
 }
 
-// scan records what git finds in the tree. An unarmed volume commits
-// none of it. This is the report a person reads before a class arms the
-// volume.
+// scan commits and pushes what the class allows, then records what git
+// still finds in the tree. An unarmed volume commits none of it, and
+// its report is what a person reads before a class arms the volume.
 func (w *watcher) scan(ctx context.Context) {
+	rules, quiet := w.volume.policyNow(), w.quietFor()
+	// The sweep reads the tree on its own timer, so the rest is
+	// asked for again here: a commit before the tree has rested is a
+	// commit of a write the application has not finished.
+	if rules != nil && quiet >= rules.quiesce {
+		w.node.commit(ctx, w.volume, rules)
+	}
 	found, err := w.volume.work.pending(ctx)
 	if err != nil {
 		w.node.logger.WarnContext(ctx, "the tree was not read",
@@ -241,6 +274,7 @@ func (w *watcher) scan(ctx context.Context) {
 		w.node.report(ctx, w.volume, claim, corev1.EventTypeNormal, reasonPending,
 			pendingMessage(count))
 	}
+	w.node.pushIfDue(ctx, w.volume, rules, quiet)
 	w.node.readings.record(w.volume)
 }
 

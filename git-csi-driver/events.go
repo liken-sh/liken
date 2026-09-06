@@ -26,6 +26,11 @@ const (
 	reasonArmed   = "GitVolumeArmed"
 	reasonUnarmed = "GitVolumeUnarmed"
 	reasonPending = "GitVolumePending"
+	// The three an armed volume adds: a push worked, a push
+	// failed, and the size guard left a file out.
+	reasonPushed     = "GitVolumePushed"
+	reasonPushFailed = "GitVolumePushFailed"
+	reasonSkipped    = "GitVolumeFileSkipped"
 )
 
 // events posts Events through the cluster's API, or posts nothing when

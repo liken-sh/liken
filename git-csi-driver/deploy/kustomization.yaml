@@ -12,6 +12,7 @@ resources:
   - csidriver.yaml
   - rbac.yaml
   - node.yaml
+  - controller.yaml
 
 labels:
   - includeSelectors: false

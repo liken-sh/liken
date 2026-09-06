@@ -131,8 +131,24 @@ func (w *workTree) sizeOf(path string) int64 {
 // so the pod never sees a .git. The lock keeps a stage and a status of
 // the same tree apart.
 func (w *workTree) git(ctx context.Context, args ...string) (gitOutput, error) {
+	return w.gitWith(ctx, nil, args...)
+}
+
+// gitWith is git with an environment of its own, which is how the
+// author, the committer, and a credential reach one invocation.
+func (w *workTree) gitWith(ctx context.Context, env []string, args ...string) (gitOutput, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return runGit(ctx, w.directory, nil,
+	return runGit(ctx, w.directory, env,
 		append([]string{"--git-dir=" + w.gitDir, "--work-tree=" + w.tree}, args...)...)
+}
+
+// refCommit is the commit the ref names, and the empty string
+// where the git directory holds no such ref.
+func (w *workTree) refCommit(ctx context.Context, ref string) string {
+	output, err := w.git(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", ref)
+	if err != nil {
+		return ""
+	}
+	return trimLine(output.stdout)
 }

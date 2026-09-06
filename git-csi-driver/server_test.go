@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -192,5 +194,32 @@ func TestServeReportsASocketThatGoesAway(t *testing.T) {
 	}
 	if err := server.serve(t.Context()); err == nil {
 		t.Error("serve answered no error after the socket closed")
+	}
+}
+
+func TestServeReportsASocketThatFailsAfterTheStop(t *testing.T) {
+	dir := t.TempDir()
+	server, err := newServer(t.Context(), &config{
+		endpoint: "unix://" + filepath.Join(dir, "csi.sock"),
+		nodeID:   "node-1",
+		store:    filepath.Join(dir, "store"),
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	// The serve ends only when the stop lets it, so the run reads the
+	// context's end first and the failure after it.
+	released := make(chan struct{})
+	refused := errors.New("the socket went away")
+	server.serveOn = func(net.Listener) error {
+		<-released
+		return refused
+	}
+	server.stop = func() { close(released) }
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := server.serve(ctx); !errors.Is(err, refused) {
+		t.Errorf("serve answered %v, want %v", err, refused)
 	}
 }

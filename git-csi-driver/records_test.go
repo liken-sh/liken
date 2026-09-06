@@ -248,10 +248,32 @@ func TestTheMountTableSaysWhatIsStillMounted(t *testing.T) {
 }
 
 func TestTheKernelsOwnMountTableAnswers(t *testing.T) {
-	if !mountedNow("/") {
+	if !mountedNow(mountTable, "/") {
 		t.Error("the root is not a mount, and the kernel says it is")
 	}
-	if mountedNow(t.TempDir()) {
+	if mountedNow(mountTable, t.TempDir()) {
 		t.Error("a temporary directory is a mount")
+	}
+}
+
+func TestAMountTableTheDriverCannotReadHoldsNothing(t *testing.T) {
+	if mountedNow(filepath.Join(t.TempDir(), "mountinfo"), "/") {
+		t.Error("a mount table that is not there answered that the root is a mount")
+	}
+}
+
+func TestTheDriverReadsTheMountTableItIsGiven(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	table := filepath.Join(t.TempDir(), "mountinfo")
+	if err := os.WriteFile(table, []byte(
+		"36 35 0:32 / /var/lib/kubelet/pods/9b1c/volumes/config rw - tmpfs tmpfs rw\n"), 0o600); err != nil {
+		t.Fatalf("writing the mount table: %v", err)
+	}
+	answering.mountinfo = table
+	if !answering.mounted("/var/lib/kubelet/pods/9b1c/volumes/config") {
+		t.Error("the driver read no mount from the table it was given")
+	}
+	if answering.mounted("/var/lib/kubelet/pods/9b1c/volumes/other") {
+		t.Error("the driver read a mount the table does not carry")
 	}
 }

@@ -18,12 +18,19 @@ import (
 // metricsDeadline bounds a request's headers and the listener's stop.
 const metricsDeadline = 30 * time.Second
 
-// metrics is the registry the listener serves and the two gauges plan
-// 04 fills. Plan 05 adds the rest of the design's list.
+// metrics is the registry the listener serves and the gauges plans 04
+// and 05 fill.
 type metrics struct {
 	registry *prometheus.Registry
 	armed    *prometheus.GaugeVec
 	pending  *prometheus.GaugeVec
+	// What an armed volume adds: the commits the remote does not
+	// hold, when a push last worked, how many failed, and how many files
+	// the size guard left out.
+	unpushed     *prometheus.GaugeVec
+	lastPush     *prometheus.GaugeVec
+	pushFailures *prometheus.CounterVec
+	skipped      *prometheus.GaugeVec
 }
 
 // metricLabels name the claim a person would look up.
@@ -40,8 +47,21 @@ func newMetrics() *metrics {
 		// committed.
 		pending: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_pending_paths", Help: "Paths the last scan found that the driver has not committed."}, metricLabels),
+		// Commits the work tree holds that the remote does not.
+		unpushed: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{Name: "git_csi_unpushed_commits", Help: "Commits the work tree holds that the remote does not."}, metricLabels),
+		// When a push to the remote last worked.
+		lastPush: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{Name: "git_csi_last_push_timestamp_seconds", Help: "When a push to the remote last worked, in seconds since the epoch."}, metricLabels),
+		// Pushes that failed since the driver started.
+		pushFailures: prometheus.NewCounterVec(
+			prometheus.CounterOpts{Name: "git_csi_push_failures_total", Help: "Pushes to the remote that failed."}, metricLabels),
+		// Files the last commit left out, over the size guard.
+		skipped: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{Name: "git_csi_skipped_files", Help: "Files the last commit left out, over commit.maxFileSize."}, metricLabels),
 	}
-	readings.registry.MustRegister(readings.armed, readings.pending)
+	readings.registry.MustRegister(readings.armed, readings.pending,
+		readings.unpushed, readings.lastPush, readings.pushFailures, readings.skipped)
 	return readings
 }
 
@@ -58,6 +78,26 @@ func (m *metrics) record(held *volume) {
 	}
 	m.armed.WithLabelValues(claim.namespace, claim.name).Set(value)
 	m.pending.WithLabelValues(claim.namespace, claim.name).Set(float64(pending))
+
+	unpushed, lastPush, skipped := held.pushing()
+	m.unpushed.WithLabelValues(claim.namespace, claim.name).Set(float64(unpushed))
+	m.skipped.WithLabelValues(claim.namespace, claim.name).Set(float64(skipped))
+	// A volume that has never pushed reports no time, because zero
+	// would read as a push in 1970.
+	if !lastPush.IsZero() {
+		m.lastPush.WithLabelValues(claim.namespace, claim.name).
+			Set(float64(lastPush.Unix()))
+	}
+}
+
+// pushFailed counts one failure, which is the only reading a
+// volume reports that never goes down.
+func (m *metrics) pushFailed(held *volume) {
+	claim, _, _ := held.reading()
+	if m == nil || claim.name == "" {
+		return
+	}
+	m.pushFailures.WithLabelValues(claim.namespace, claim.name).Inc()
 }
 
 // forget takes a volume off the gauges, so a claim that is gone stops
@@ -69,6 +109,10 @@ func (m *metrics) forget(held *volume) {
 	}
 	m.armed.DeleteLabelValues(claim.namespace, claim.name)
 	m.pending.DeleteLabelValues(claim.namespace, claim.name)
+	m.unpushed.DeleteLabelValues(claim.namespace, claim.name)
+	m.lastPush.DeleteLabelValues(claim.namespace, claim.name)
+	m.pushFailures.DeleteLabelValues(claim.namespace, claim.name)
+	m.skipped.DeleteLabelValues(claim.namespace, claim.name)
 }
 
 // listen opens the address --metrics names. An empty address serves no

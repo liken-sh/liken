@@ -192,3 +192,45 @@ func TestTheWorkTreeReportsAnAlternatesFileItCannotWrite(t *testing.T) {
 		t.Error("create answered no error where the alternates cannot be written")
 	}
 }
+
+func TestTheWorkTreeReportsWhatItCannotMake(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		stand func(t *testing.T, work *workTree)
+	}{
+		{
+			name: "a git directory git will not take",
+			stand: func(t *testing.T, work *workTree) {
+				if err := os.WriteFile(work.gitDir, nil, 0o600); err != nil {
+					t.Fatalf("writing the git directory as a file: %v", err)
+				}
+			},
+		},
+		{
+			name: "an alternates file the driver cannot write",
+			stand: func(t *testing.T, work *workTree) {
+				if err := os.MkdirAll(
+					filepath.Join(work.gitDir, alternatesFile), 0o755); err != nil {
+					t.Fatalf("making the alternates a directory: %v", err)
+				}
+			},
+		},
+		{
+			name: "a tree the driver cannot make",
+			stand: func(t *testing.T, work *workTree) {
+				if err := os.WriteFile(work.tree, nil, 0o600); err != nil {
+					t.Fatalf("writing the tree as a file: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+			work, commit := workTreeOf(t, source)
+			c.stand(t, work)
+			if err := work.create(t.Context(), "main", commit); err == nil {
+				t.Error("create answered no error")
+			}
+		})
+	}
+}

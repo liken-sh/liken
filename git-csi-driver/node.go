@@ -38,7 +38,11 @@ type node struct {
 	sweep   time.Duration
 	// mounted asks the kernel whether a path is still a mount. A restarted
 	// driver asks it about every record.
-	mounted func(string) bool
+	//
+	// mountinfo is the file mounted reads. It is a field so a test can
+	// name a file of its own.
+	mounted   func(string) bool
+	mountinfo string
 	// inotify opens the file the watch reads. It is a seam, so a test can
 	// drive a driver whose kernel refused one.
 	inotify func(int) (int, error)
@@ -66,7 +70,7 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 		base:      base,
 		quiesce:   defaultQuiesce,
 		sweep:     defaultSweep,
-		mounted:   mountedNow,
+		mountinfo: mountTable,
 		inotify:   unix.InotifyInit1,
 		volumes:   map[string]*volume{},
 		followers: map[string]*follower{},
@@ -75,6 +79,7 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 		armings:   map[string]context.CancelFunc{},
 	}
 	answering.arms = newArming(answering, posting.client, logger)
+	answering.mounted = func(path string) bool { return mountedNow(answering.mountinfo, path) }
 	return answering
 }
 
@@ -92,6 +97,10 @@ func (n *node) NodeGetInfo(
 // once per node before it publishes it per pod. GET_VOLUME_STATS makes
 // it poll NodeGetVolumeStats, and VOLUME_CONDITION makes it read the
 // condition in that answer.
+//
+// SINGLE_NODE_MULTI_WRITER is declared because the kubelet sends
+// the access modes ReadWriteOncePod uses only to a driver that declares
+// it, and sends the legacy SINGLE_NODE_WRITER to every other driver.
 func (n *node) NodeGetCapabilities(
 	context.Context, *csi.NodeGetCapabilitiesRequest,
 ) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -99,6 +108,7 @@ func (n *node) NodeGetCapabilities(
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
 		csi.NodeServiceCapability_RPC_VOLUME_CONDITION,
+		csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
 	}
 	capabilities := make([]*csi.NodeServiceCapability, 0, len(declared))
 	for _, rpc := range declared {
@@ -294,6 +304,13 @@ func (n *node) NodeUnpublishVolume(
 	// volume.
 	if found && published.writeable {
 		n.forget(published)
+		// The pod is gone and nothing writes the tree now, so the
+		// last of its work is committed and pushed without waiting for a
+		// timer.
+		if rules := published.policyNow(); rules != nil {
+			n.commit(ctx, published, rules)
+		}
+		n.push(ctx, published)
 	}
 	if found && !published.writeable {
 		if err := os.RemoveAll(published.directory); err != nil {

@@ -183,3 +183,11 @@ func TestTheDriverServesTheMetricsItIsGivenAnAddressFor(t *testing.T) {
 		t.Error("newServer answered no error for an address it cannot take")
 	}
 }
+
+func TestAVolumeWithNoClaimCountsNoPushFailure(t *testing.T) {
+	readings := newMetrics()
+	readings.pushFailed(&volume{})
+	if _, found := counterOf(t, readings, "git_csi_push_failures_total", "", ""); found {
+		t.Error("a volume with no claim is on the counter")
+	}
+}

@@ -53,6 +53,18 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			abnormal: false,
 			says:     "main at d633176, 1 paths pending",
 		},
+		{
+			name: "a class the driver cannot read",
+			held: &volume{
+				attributes: &attributes{ref: "main"},
+				commit:     "d633176146e997",
+				writeable:  true,
+				claim:      claim,
+				invalid:    "the class config-eager is not valid: metadata: \"yes\" is not true or false",
+			},
+			abnormal: true,
+			says:     "the class config-eager is not valid: metadata: \"yes\" is not true or false",
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			abnormal, message := c.held.report()
@@ -83,16 +95,16 @@ func TestThePendingSetIsFirstWhenItGoesFromEmpty(t *testing.T) {
 func TestTheArmedStateChangesOnlyWhenTheClassDoes(t *testing.T) {
 	held := &volume{}
 	claim := claimReference{namespace: "home", name: "config"}
-	if held.reportArmed(claim, "", false) {
+	if held.reportArmed(claim, "", nil, "") {
 		t.Error("a volume that was never armed changed hands")
 	}
-	if !held.reportArmed(claim, "config-eager", true) {
+	if !held.reportArmed(claim, "config-eager", &policy{}, "") {
 		t.Error("a volume the class took did not change hands")
 	}
-	if held.reportArmed(claim, "config-eager", true) {
+	if held.reportArmed(claim, "config-eager", &policy{}, "") {
 		t.Error("a volume the same class holds changed hands")
 	}
-	if !held.reportArmed(claim, "", false) {
+	if !held.reportArmed(claim, "", nil, "") {
 		t.Error("a volume the class left did not change hands")
 	}
 }

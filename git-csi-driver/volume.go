@@ -5,7 +5,9 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 )
 
 // volume is one volume this node holds: the commit its tree stands on,
@@ -36,6 +38,16 @@ type volume struct {
 	claim   claimReference
 	class   string
 	armed   bool
+	// The rules the class resolved to, and the reason a class this
+	// driver cannot read arms nothing.
+	rules   *policy
+	invalid string
+	// What the size guard left out, what the remote does not hold
+	// yet, and when a push last worked.
+	skipped  []change
+	unpushed int
+	oldest   time.Time
+	lastPush time.Time
 }
 
 // setPod records the pod a publish named, so an Event from a loop that
@@ -63,16 +75,31 @@ func (v *volume) reportPending(found []change) bool {
 	return first
 }
 
-// reportArmed records the claim and the class and reports whether the
-// volume moved between armed and unarmed.
-func (v *volume) reportArmed(claim claimReference, class string, armed bool) bool {
+// reportArmed records the claim, the class, and the rules it resolved
+// to, and reports whether the volume moved between armed and unarmed. A
+// class the driver cannot read arms nothing and leaves its reason in
+// invalid.
+func (v *volume) reportArmed(
+	claim claimReference, class string, rules *policy, invalid string,
+) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	armed := rules != nil
 	changed := armed != v.armed
 	v.claim = claim
 	v.class = class
 	v.armed = armed
+	v.rules = rules
+	v.invalid = invalid
 	return changed
+}
+
+// policyNow is the rules in force, and nil on an unarmed volume,
+// so a loop that started before the class reads what the class says now.
+func (v *volume) policyNow() *policy {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.rules
 }
 
 // reading is what the gauges carry: the claim that labels them, whether
@@ -83,15 +110,77 @@ func (v *volume) reading() (claimReference, bool, int) {
 	return v.claim, v.armed, len(v.pending)
 }
 
+// reportSkipped records what the size guard left out and answers
+// the paths the last pass did not already hold, which is what an Event
+// is worth posting for.
+func (v *volume) reportSkipped(found []change) []change {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	standing := map[string]bool{}
+	for _, one := range v.skipped {
+		standing[one.path] = true
+	}
+	fresh := []change{}
+	for _, one := range found {
+		if !standing[one.path] {
+			fresh = append(fresh, one)
+		}
+	}
+	v.skipped = found
+	return fresh
+}
+
+// reportUnpushed records what the work tree holds that the remote
+// does not, and when the oldest of those commits was made.
+func (v *volume) reportUnpushed(count int, oldest time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.unpushed = count
+	v.oldest = oldest
+}
+
+// reportPushed records a push that worked, which leaves nothing
+// unpushed and ends the trouble the failures before it reported.
+func (v *volume) reportPushed(at time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.unpushed = 0
+	v.oldest = time.Time{}
+	v.lastPush = at
+	v.trouble = ""
+}
+
+// pushing is what the push gauges carry.
+func (v *volume) pushing() (int, time.Time, int) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.unpushed, v.lastPush, len(v.skipped)
+}
+
+// overdue reports whether the oldest unpushed commit has outlived
+// push.maxLatency. The caller holds the lock.
+func (v *volume) overdue(now time.Time) bool {
+	return v.unpushed > 0 && v.rules != nil && v.rules.maxLatency != 0 &&
+		!v.oldest.IsZero() && now.Sub(v.oldest) > v.rules.maxLatency
+}
+
 // report is the condition every NodeGetVolumeStats answer carries. A
-// failure comes first, then an unarmed volume with work the driver may
-// not commit, then the commit the tree stands on.
+// failure comes first, then a class the driver cannot read, then the
+// work the driver may not commit or has not pushed, then the commit the
+// tree stands on.
 func (v *volume) report() (bool, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	switch {
 	case v.trouble != "":
 		return true, v.trouble
+	case v.invalid != "":
+		return true, v.invalid
+	case len(v.skipped) > 0:
+		return true, skippedMessage(v.skipped)
+	case v.overdue(time.Now()):
+		return true, fmt.Sprintf("%d unpushed commits, the oldest older than %s",
+			v.unpushed, v.rules.maxLatency)
 	case v.writeable && !v.armed && len(v.pending) > 0:
 		return true, fmt.Sprintf("unarmed: %d paths pending, no class on claim %s/%s",
 			len(v.pending), v.claim.namespace, v.claim.name)
@@ -118,6 +207,17 @@ func (v *volume) reportTrouble(message string) bool {
 	first := v.trouble == ""
 	v.trouble = message
 	return first
+}
+
+// skippedMessage names every path the size guard left out, so a
+// person reads which files the commit does not carry.
+func skippedMessage(skipped []change) string {
+	paths := make([]string, 0, len(skipped))
+	for _, one := range skipped {
+		paths = append(paths, one.path)
+	}
+	return fmt.Sprintf("%d files over %s: %s",
+		len(skipped), maxFileSizeParameter, strings.Join(paths, ", "))
 }
 
 func (v *volume) condition() (string, string) {

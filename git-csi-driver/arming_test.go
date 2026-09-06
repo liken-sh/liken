@@ -69,6 +69,34 @@ func attributesClass(t *testing.T, answering *node, name, driver string) {
 	}
 }
 
+// ArmingClass writes a class of this driver with the parameters plan 05
+// reads.
+func armingClass(t *testing.T, answering *node, name string, parameters map[string]string) {
+	t.Helper()
+	class := &storagev1.VolumeAttributesClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		DriverName: driverName,
+		Parameters: parameters,
+	}
+	if _, err := cluster(t, answering).StorageV1().VolumeAttributesClasses().
+		Create(t.Context(), class, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("writing the class: %v", err)
+	}
+}
+
+// ArmedVolume stages and publishes a writeable volume whose claim names a
+// class with the parameters, and waits for the class to arm it.
+func armedVolume(
+	t *testing.T, answering *node, id, url string, parameters map[string]string,
+) *volume {
+	t.Helper()
+	boundVolume(t, answering, id, "config-eager")
+	armingClass(t, answering, "config-eager", parameters)
+	held, _ := writeableVolume(t, answering, id, url)
+	waitForArmed(t, held, true)
+	return held
+}
+
 // WaitForArmed waits until the volume reports the armed state, or fails on
 // the deadline.
 func waitForArmed(t *testing.T, held *volume, want bool) {
@@ -398,8 +426,8 @@ func TestTheVolumeThatLosesItsClassSaysSo(t *testing.T) {
 	held := &volume{id: "config", pod: podReference{name: "writer", namespace: "home"}}
 	claim := claimReference{namespace: "home", name: "config"}
 
-	answering.armed(t.Context(), held, claim, "config-eager", true)
-	answering.armed(t.Context(), held, claim, "", false)
+	answering.armed(t.Context(), held, claim, "config-eager", &policy{}, "")
+	answering.armed(t.Context(), held, claim, "", nil, "")
 
 	unarmed := []corev1.Event{}
 	for _, posted := range eventsOf(t, answering) {
@@ -425,5 +453,70 @@ func TestADriverOutsideAClusterArmsNothing(t *testing.T) {
 	answering.disarm(held)
 	if got := len(answering.armings); got != 0 {
 		t.Errorf("the node holds %d arming loops, want 0", got)
+	}
+}
+
+// WaitForCondition waits until the volume's condition carries the text.
+func waitForCondition(t *testing.T, held *volume, says string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, message := held.report(); strings.Contains(message, says) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_, message := held.report()
+	t.Fatalf("the condition is %q within 30s, want %q in it", message, says)
+}
+
+func TestAClassTheDriverCannotReadArmsNothing(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	held := armedVolume(t, answering, "config",
+		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
+
+	classes := cluster(t, answering).StorageV1().VolumeAttributesClasses()
+	class, err := classes.Get(t.Context(), "config-eager", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("reading the class: %v", err)
+	}
+	class.Parameters = map[string]string{quiesceParameter: "1s"}
+	if _, err := classes.Update(t.Context(), class, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("changing the class: %v", err)
+	}
+
+	waitForArmed(t, held, false)
+	want := "the class config-eager is not valid: push.quiesce: 1s is shorter than 5s"
+	waitForCondition(t, held, want)
+	if held.policyNow() != nil {
+		t.Error("a class the driver cannot read left the volume armed")
+	}
+	unarmed := eventsWithReason(t, answering, reasonUnarmed)
+	if len(unarmed) != 2 {
+		t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
+	}
+	if unarmed[0].Message != "unarmed: "+want {
+		t.Errorf("the event says %q, want %q", unarmed[0].Message, "unarmed: "+want)
+	}
+}
+
+func TestThePassStartsAgainOnTheResync(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	answering.arms.resync = 10 * time.Millisecond
+	boundVolume(t, answering, "config", "")
+	cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
+		func(k8stesting.Action) (bool, watch.Interface, error) {
+			return true, watch.NewFake(), nil
+		})
+
+	over := make(chan struct{})
+	go func() {
+		defer close(over)
+		answering.arms.pass(t.Context(), &volume{id: "config"})
+	}()
+	select {
+	case <-over:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the pass did not start again on the resync")
 	}
 }

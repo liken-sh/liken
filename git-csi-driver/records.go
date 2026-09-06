@@ -151,15 +151,18 @@ func readRecord(path string) (*record, error) {
 	return held, nil
 }
 
+// mountTable is where the kernel publishes what is mounted.
+const mountTable = "/proc/self/mountinfo"
+
 // mountedNow asks the kernel whether the path is still a mount. Only
 // the mount table says what is still there.
-func mountedNow(path string) bool {
-	table, err := os.Open("/proc/self/mountinfo")
+func mountedNow(table, path string) bool {
+	published, err := os.Open(table)
 	if err != nil {
 		return false
 	}
-	defer table.Close()
-	return mountedIn(table, path)
+	defer published.Close()
+	return mountedIn(published, path)
 }
 
 // mountedIn reads mountinfo. The fifth field of every line is the mount

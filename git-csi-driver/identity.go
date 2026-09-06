@@ -16,10 +16,14 @@ import (
 const driverName = "git.liken.sh"
 
 // identity answers the Identity service. Its only state is the store
-// path, because readiness is whether the store takes a write.
+// path, because readiness is whether the store takes a write, and
+// whether this process is the controller.
 type identity struct {
 	csi.UnimplementedIdentityServer
 	store string
+	// The controller declares CONTROLLER_SERVICE, and the node
+	// plugin declares nothing.
+	controller bool
 }
 
 func (i *identity) GetPluginInfo(
@@ -28,13 +32,23 @@ func (i *identity) GetPluginInfo(
 	return &csi.GetPluginInfoResponse{Name: driverName, VendorVersion: version}, nil
 }
 
-// GetPluginCapabilities declares nothing. The controller service
-// arrives with plan 05, and the driver has no topology, because a
-// checkout is made on whichever node publishes it.
+// GetPluginCapabilities declares the controller service on the
+// controller plugin and nothing on the node plugin. The driver has no
+// topology, because a checkout is made on whichever node publishes it.
 func (i *identity) GetPluginCapabilities(
 	context.Context, *csi.GetPluginCapabilitiesRequest,
 ) (*csi.GetPluginCapabilitiesResponse, error) {
-	return &csi.GetPluginCapabilitiesResponse{}, nil
+	answer := &csi.GetPluginCapabilitiesResponse{}
+	if i.controller {
+		answer.Capabilities = []*csi.PluginCapability{{
+			Type: &csi.PluginCapability_Service_{
+				Service: &csi.PluginCapability_Service{
+					Type: csi.PluginCapability_Service_CONTROLLER_SERVICE,
+				},
+			},
+		}}
+	}
+	return answer, nil
 }
 
 // Probe reports ready when the store takes a write. Every repository
