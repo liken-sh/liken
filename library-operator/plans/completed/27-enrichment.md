@@ -1,6 +1,8 @@
 # Enrichment
 
-Plan 27. The design for the operator's third responsibility, and the
+Plan 27. Complete on 2026-09-06: plans 28 to 31 and plan 25 are built.
+
+The design for the operator's third responsibility, and the
 contracts that plans 28 to 31 build on. It replaces plan 11 and plan
 24, which are in [`rejected/`](rejected/) with a note that says so.
 
@@ -113,7 +115,7 @@ test enforces them.
 A fact is the unit of enrichment: one gap in the catalog, one ledger
 file it writes, one entry in a provider's list of what it serves. The
 word was "concern" until plan 30 renamed it, on 2026-09-03, because
-"concern" was too general. [Plan 30](completed/30-facts-art-and-contributors.md)
+"concern" was too general. [Plan 30](30-facts-art-and-contributors.md)
 holds the vocabulary in dependency order: the file group, `identity`,
 the nfo group, the art group, and the people group.
 
@@ -202,20 +204,20 @@ is no rate limiter: a `429` is a cooldown inside the container. Plan
 
 ## The plans
 
-1. [Plan 28, the catalog pod](completed/28-the-catalog-pod.md). The standing
+1. [Plan 28, the catalog pod](28-the-catalog-pod.md). The standing
    pod and its reporter, the `runs` table and the echo a `Job` waits
    for, scan `Job`s, the `CronJob`, and the webhook that creates a
    `Job`.
-2. [Plan 29, identification](completed/29-identification.md). `MetadataProvider`,
+2. [Plan 29, identification](29-identification.md). `MetadataProvider`,
    the enricher `Job`, the `probe` and `identity` facts, the write
    package and its test, the `.liken/` reader, and the gap loop.
-3. [Plan 30, facts, art, and contributors](completed/30-facts-art-and-contributors.md).
+3. [Plan 30, facts, art, and contributors](30-facts-art-and-contributors.md).
    The word "fact", four providers, the nfo and art and people groups,
    the Jellyfin handover, `credits.yaml`, `.contributors/`, and
    trickplay.
 4. [Plan 31, franchises](31-franchises.md). The library kind, the
    file, the table, the join, and the page.
-5. [Plan 25, people on the screen](completed/25-people-on-the-screen.md), which
+5. [Plan 25, people on the screen](25-people-on-the-screen.md), which
    plan 30 unblocks.
 
 Plan 12, the organizer, stays apart. Imports and moves are a different

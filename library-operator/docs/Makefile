@@ -17,7 +17,7 @@ build: $(GENERATED)
 
 # The site's own tests: every internal link resolves before the build (manual_test.go passes this site's exceptions).
 .PHONY: test
-test:
+test: $(GENERATED)
 	go test ./...
 
 $(REFERENCE)/libraries.md: ../deploy/libraries-crd.yaml crdref/libraries-preamble.md crdref/libraries-postamble.md go.mod

@@ -1,6 +1,11 @@
 # The documentation site
 
-Plan 10. The operator's site, on its own subdomain like the other
+Plan 10. Built on 2026-09-06: nine guides, the front page, the Pages
+deploy in `ci.yaml`, and the DNS record and Pages site in the liken
+repository's terraform. The numbers from plan 09 were never kept, so
+the small-machine guide carries the numbers the later plans measured.
+
+The operator's site, on its own subdomain like the other
 operators', written after plan 09 has proved the design, so the site
 documents what runs.
 

@@ -1,6 +1,6 @@
 # Facts, art, and contributors
 
-Plan 30. The second enrichment build from [plan 27](../27-enrichment.md),
+Plan 30. The second enrichment build from [plan 27](27-enrichment.md),
 reshaped on 2026-09-03 after plan 29's drill. Once a title has an id,
 this plan fills everything else: the `.nfo` body, the art under Kodi's
 names, the credits with their people, and the people themselves in

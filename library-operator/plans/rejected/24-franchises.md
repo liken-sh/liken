@@ -1,4 +1,4 @@
-Superseded on 2026-09-02 by [plan 31](../31-franchises.md), which puts a franchise on the volume as a library kind instead of a cluster-owner resource, so a rebuilt catalog keeps it. The text below is the plan as it stood.
+Superseded on 2026-09-02 by [plan 31](../completed/31-franchises.md), which puts a franchise on the volume as a library kind instead of a cluster-owner resource, so a rebuilt catalog keeps it. The text below is the plan as it stood.
 
 # Franchises
 

@@ -1,7 +1,10 @@
 # The end-to-end drill
 
-Plan 09. The proof of plans 01 to 08 as one thing, on `liken-1`, from a
-cluster that has never run the operator to a movie playing from the media
+Plan 09. Complete on 2026-09-06: the drill ran on `liken-1` across the
+plans it proves, and no numbers were kept.
+
+The proof of plans 01 to 08 as one thing, on `liken-1`, from a cluster
+that has never run the operator to a movie playing from the media
 browser, with the numbers written down.
 
 ## The problem

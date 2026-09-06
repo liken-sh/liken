@@ -3,7 +3,7 @@
 Plan 28. One standing pod per namespace holds the durable catalog and
 reports what it holds, every scanner becomes a `Job` with an agent of
 its own, and a `Job` knows it is done when the standing pod says so.
-This is the first build of [plan 27](../27-enrichment.md), and it changes
+This is the first build of [plan 27](27-enrichment.md), and it changes
 what plans 02, 04, 15, 19, and 21 built.
 
 ## The problem

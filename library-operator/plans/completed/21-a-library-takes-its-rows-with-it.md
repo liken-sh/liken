@@ -4,6 +4,11 @@ Plan 21. A finalizer holds a deleted `Library` until a cleanup pod
 sweeps its rows out of the catalog, so a library's rows never outlive
 it.
 
+Amended by [plan 28](28-the-catalog-pod.md): the release gate is the
+namespace reporter's echo of the cleanup `Job`'s own run, in
+`depart.go` and `cleanupjob.go`, in place of the survivor-report check
+below. A namespace with no `Catalog` releases at once.
+
 ## The problem
 
 Nothing cleans a deleted `Library`'s rows out of the catalog. Each

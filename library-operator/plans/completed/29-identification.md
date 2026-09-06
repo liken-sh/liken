@@ -1,6 +1,6 @@
 # Identification
 
-Plan 29. The first enrichment build from [plan 27](../27-enrichment.md).
+Plan 29. The first enrichment build from [plan 27](27-enrichment.md).
 It answers one question for a fresh piece of media: what is it? A
 title with a sidecar answers from the sidecar. A title with none gets
 its answer from a provider search over the clues the volume holds, or

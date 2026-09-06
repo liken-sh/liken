@@ -1,6 +1,12 @@
 # Franchises
 
-Plan 31. The third enrichment build from [plan 27](completed/27-enrichment.md).
+Plan 31. Built on 2026-09-04 with development builds through
+`2026.09.04-003-dev-027`, and proved on `liken-1` on 2026-09-06 through
+[plan 38](38-franchises-from-a-claim.md), which moved the repository
+behind a git CSI claim. The refresh and the unreachable-forge cases in
+the proof below now belong to that driver.
+
+The third enrichment build from [plan 27](27-enrichment.md).
 A franchise is the films and series of one story in story order, a
 home of its own on the screen, and a file a person or an agent writes
 in a public repository.

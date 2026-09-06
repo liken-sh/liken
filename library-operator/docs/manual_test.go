@@ -16,6 +16,11 @@ import (
 // publish through a module mount in hugo.yaml.
 var exceptions = []string{
 	"/deploy/kustomization.yaml",
+	"/deploy/libraries-crd.yaml",
+	"/deploy/catalogs-crd.yaml",
+	"/deploy/metadataproviders-crd.yaml",
+	"/deploy/rbac.yaml",
+	"/deploy/operator.yaml",
 }
 
 func TestManualInternalLinks(t *testing.T) {

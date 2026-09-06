@@ -35,9 +35,9 @@ These plans are staged in order. Each keeps its number and moves to
 deliver one outcome: index a library, browse it on a screen, pick a
 movie, and play it on the same `Player`. Plan 10 documents that.
 
-* [09, The end-to-end drill](09-the-end-to-end-drill.md). The proof on
+* [09, The end-to-end drill](completed/09-the-end-to-end-drill.md). Complete. The proof on
   `liken-1`, with the numbers written down.
-* [10, The documentation site](10-the-documentation-site.md). The manual
+* [10, The documentation site](completed/10-the-documentation-site.md). Built. The manual
   and the generated reference, written after plan 09.
 
 * [37, Prometheus metrics](37-prometheus-metrics.md). Proposed.
@@ -61,12 +61,12 @@ for a later agent to shape.
 Enrichment is one design in five plans. Plan 27 states the contracts
 they share, and plans 28 to 31 build them in order.
 
-* [27, Enrichment](27-enrichment.md). The volume holds every fact and
+* [27, Enrichment](completed/27-enrichment.md). Complete. The volume holds every fact and
   the catalog is derived from it alone: ecosystem files first, a
   `.liken/` directory for what they cannot say, `.contributors/` for
   people, concerns as the unit of work, `MetadataProvider`, and the
   write rules.
-* [31, Franchises](31-franchises.md). A library kind whose files hold
+* [31, Franchises](completed/31-franchises.md). Built. A library kind whose files hold
   one story in story order, with a calendar and universes, resolved
   across the namespace by provider id.
 * [33, The IMDb datasets](33-the-imdb-datasets.md). A stub: a provider
@@ -288,6 +288,11 @@ that took a hearing-impaired flag for Hindi.
   A `Job` on a fresh claim pays one echo timeout on its first run,
   because its first write reaches the catalog pod minutes after the
   rest.
+* [Home and search do not cross the
+  bus](open-problems/home-and-search-do-not-cross-the-bus.md). The
+  `media-screen` crate forwards only the arrows, enter, and back to a
+  delegate, so a remote's home, search, and letter keys never reach
+  the browser.
 * [Richer file facts](open-problems/richer-file-facts.md). Plan 29's
   `probe` concern measures the duration, the codecs, the resolution,
   and the audio channel layout. The bitrate, the HDR format, and the

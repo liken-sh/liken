@@ -4,6 +4,12 @@ Plan 19. A way in. At the end of this plan Radarr, Sonarr, and Jellyfin
 can tell a scanner that a title arrived, and the `Library` says the
 address to send it to.
 
+Superseded in part by [plan 28](28-the-catalog-pod.md): the webhook
+server is on the operator's own pod, behind one `Service` in the
+operator's namespace with one path per `Library`, and the per-`Library`
+`Service` on a scanner pod is gone. The body parsing and the
+one-folder rescan below still describe what ships.
+
 ## The problem
 
 The scanner already accepts the webhook. It listens on port 8090, reads
