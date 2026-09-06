@@ -22,9 +22,6 @@ they become.
   fidelity. The controller accepts a forge's push webhook and marks
   the matching `PersistentVolume`s, and the node plugins fetch at
   once. Its open questions wait on rulings.
-* [11, A lean image](11-a-lean-image.md). The release image is
-  263 MB for a driver that runs `git` and `ssh`. A stripped binary and
-  a closure on scratch bring it to 79.9 MB.
 
 ## Designs
 
@@ -66,6 +63,10 @@ they become.
   scratch tree and moves the pod's tree with `read-tree`, a diverged
   volume heals at its next push, and the metadata record follows the
   same rule, so many writers share one repository through `subPath`.
+* [11, A lean image](completed/11-a-lean-image.md). Built, and
+  drilled in the lab on 2026-09-06. The image is a closure on scratch
+  with a stripped binary, 79.9 MB where the release before was 263 MB,
+  and the release gate runs git in it before a push.
 
 ## Open problems
 

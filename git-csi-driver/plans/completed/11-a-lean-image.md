@@ -1,5 +1,14 @@
 # 11, A lean image
 
+Built on 2026-09-06 and drilled in the lab with development build
+`2026.09.06-002-dev-001-d3085422`: drills 03, 06, 07, and 08 passed
+on the closure image, and the release gate's checks passed in CI. Two
+things changed from the low-fidelity draft while building it, and the
+design below says so where they apply: the image holds `/bin/sh`,
+because git runs the credential helper and `GIT_SSH_COMMAND` through
+a shell, and `git gc` runs no separate repack, pack-refs, or prune
+program on git 2.47.
+
 ## The problem
 
 The release image `2026.09.06-001` is 263 MB on disk. It is three
