@@ -1,7 +1,7 @@
 # 08, The store stays bounded
 
 Built on 2026-09-06 and drilled in the lab with development build
-`<!-- DEV -->`: drills 03 and 07 passed with the hourly sweep in place,
+`0000.00.00-000-dev-020-a3f6d3d9`: drills 03 and 07 passed with the hourly sweep in place,
 and the unit tests prove the ref deletion and the collection. Two
 things were measured while building it and changed the design below:
 `git gc --auto` detaches into the background unless told not to, and

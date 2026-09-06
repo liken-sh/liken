@@ -18,8 +18,8 @@ they become.
 
 ## Planned
 
-Every numbered plan is built, and plan 08 waits on its lab drill. The
-next plans come from the open problems and from what a demo teaches.
+Every numbered plan is built and drilled. The next plans come from the
+open problems and from what a demo teaches.
 
 ## Designs
 
@@ -52,8 +52,8 @@ next plans come from the open problems and from what a demo teaches.
   drilled in the lab on 2026-09-06. A `ReadOnlyMany` `PersistentVolume`
   and its claim, one staged tree per handle that every pod on the node
   publishes read-only, and the `Event`s and the gauge on the claim.
-* [08, The store stays bounded](08-the-store-stays-bounded.md). Built
-  on 2026-09-06, and waits on its lab drill. At every sweep the
+* [08, The store stays bounded](completed/08-the-store-stays-bounded.md).
+  Built, and drilled in the lab on 2026-09-06. At every sweep the
   driver deletes the refs under `refs/git-csi/` that no volume follows
   and runs `git gc` in each bare repository that stays.
 
