@@ -22,12 +22,12 @@ Measured on a one-gigabyte box, after the screen's catalog synced,
 the browser rested at 216 MiB, most of it the page-size backdrops in
 its cache. On a workstation, a walk through a wall with focus resting
 at every step peaked at 186 MiB and rested at 153 MiB. Two things in
-the browser keep those numbers where they are:
+the browser hold those numbers down:
 
 * It pins glibc's `mmap` and trim thresholds at 128 KiB, so a
   page-size decode comes from `mmap` and returns to the kernel when
   freed. Without the pin, decode buffers dirtied the allocator's
-  arenas, and the browser held up to 300 MiB it never gave back.
+  arenas, and the browser held up to 300 MiB it never released.
 * It decodes one page-size image at a time. Four at once dirtied four
   arenas on a one-gigabyte box.
 

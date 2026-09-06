@@ -96,9 +96,10 @@ title folder, `season02-poster.jpg` beside `tvshow.nfo`, and
 
 ### The `.liken/` directory
 
-Beside a title, a dot-named directory holds what the sidecar cannot
-say: one YAML file per fact, named for the fact. `identity.yaml` holds
-the provider ids, or the candidates left for a person to choose from.
+Beside a title, a dot-named directory holds what the sidecar has no
+element for: one YAML file per fact, named for the fact.
+`identity.yaml` holds the provider ids, or the candidates left for a
+person to choose from.
 `arrival.yaml` holds when each video file was first seen. Every other
 `<fact>.yaml` holds what that fact wrote, which provider answered, and
 its attempts. One file per writer is what lets several enrichers run
@@ -140,7 +141,7 @@ library the epoch did not mark, in batches of five hundred.
 Two guards keep a bad walk from emptying a library. A walk that could
 not read every directory, or that found less than half of what the
 catalog holds, is incomplete: it writes what it read and prunes
-nothing, and the log says so:
+nothing, and the log reports it:
 
     incomplete walk: could not read the whole volume, keeping the last counts
 
@@ -164,8 +165,8 @@ once the cleanup `Job` succeeded and the reporter echoed its run back.
 While this runs, the phase is `Departing`, and the `Departing`
 condition names the step: `ScanRunning`, `EnrichRunning`, `Sweeping`,
 `AwaitingEcho`, or `Blocked` when the cleanup `Job` keeps failing or
-the namespace holds two `Catalogs`. The operator never gives up on a
-timer. It reports the blocker for as long as the object is deleting.
+the namespace holds two `Catalogs`. There is no timeout. The operator
+reports the blocker for as long as the object is deleting.
 
 A namespace with no `Catalog` releases at once, because nothing there
 holds the rows. A library whose own catalog claim is already gone gets
@@ -183,6 +184,6 @@ A finished walk logs its counts:
 
 `status.unidentified` counts the folders cataloged by name.
 `status.waiting` counts the titles a provider returned candidates for,
-and a scan leaves those alone until a person names the right
+and a scan does not retry those until a person names the right
 `uniqueid` in the `.nfo`. `status.gaps` counts, per fact, the rows the
 enricher still has to fill.

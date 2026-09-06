@@ -5,7 +5,7 @@ weight: 60
 
 # Enrich a library
 
-Enrichment fills what the volume does not say: which title a folder
+Enrichment fills what the volume does not hold: which title a folder
 is, its plot, its ratings, its art, and its people. The operator asks
 metadata providers and writes the answers beside the media, as the
 `.nfo` sidecars and art files Kodi and Jellyfin read. The volume stays
@@ -95,8 +95,8 @@ the scrub-bar thumbnails when `spec.trickplay.enabled` is set.
 
 ### Identification
 
-The identity fact asks TMDb for the folder's title and climbs a
-ladder of tests: the title, then the year, then a year on either side,
+The identity fact asks TMDb for the folder's title and runs a fixed
+sequence of tests: the title, then the year, then a year on either side,
 then the runtime within five minutes. One survivor is the answer, and
 its reason is recorded. Several survivors become candidates in
 `.liken/identity.yaml`, and the title counts in `status.waiting` until
@@ -115,8 +115,8 @@ the genres, the studios, the premiere date, and the runtime. Each
 rating owns its one element. `credits` owns the actors, directors,
 and writers. Before a fact writes, it checks that the group still
 hashes to what it wrote last time. If another writer changed it, the
-fact records a fight and leaves the file alone. `status.fights`
-counts them.
+fact records a fight and writes nothing. `status.fights` counts
+them.
 
 An art file that already exists is never replaced. The fact records it
 as answered and downloads nothing.

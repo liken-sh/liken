@@ -6,8 +6,8 @@ weight: 20
 # Declare a library
 
 A `Library` is one root directory on one volume, holding media of one
-kind. This guide declares one, reads what it reports, and explains
-the rules that follow from where it is.
+kind. This guide declares one, reads what it reports, and describes
+what its namespace decides.
 
 ## The declaration
 
@@ -77,19 +77,19 @@ last scan `Job` failed and wrote no rows. `Offline` means the
 namespace's reporter has left the bus. `Departing` means a deleted
 `Library` is still removing its rows from the catalog.
 
-Four conditions say why a phase is what it is:
+Four conditions report why the phase is what it is:
 
 * `Bound` reports the storage. The reasons for `False` are
   `ClaimNotFound`, `ClaimUnbound`, and `VolumeNotFound`.
 * `Ready` reports the scanning path: the catalog pod runs, the
-  schedule stands, and the reporter has reported this library. The
+  `CronJob` exists, and the reporter has reported this library. The
   reasons for `False`, in the order they are checked, are `NotBound`,
   `NoCatalog`, `ManyCatalogs`, `CatalogPending`, `ScanPending`,
   `Offline`, and `NoReport`.
 * `Sources` reports `spec.sources`. It is absent on a library that
   names none.
 * `Departing` reports the teardown of a deleted library, for as long
-  as its finalizer holds the object open.
+  as its finalizer keeps the object from being removed.
 
 `status.runs` holds the last run of each worker: `scan`, `rescan`,
 `enrich`, and `cleanup`, with its `Job`, its times, and its failure if

@@ -8,12 +8,12 @@ weight: 50
 The media browser is a native Wayland client that draws the namespace's
 catalog on a screen, takes a remote's presses, and starts a `Play`.
 It takes the place of `media-operator`'s idle screen on a `Player`.
-This guide hands a `Player` to it and describes what a person sees.
+This guide names it on a `Player` and describes what a person sees.
 
 ## 1. Hand the idle screen to the operator
 
-A `Player`'s `spec.idle.controller` names who draws its screen when
-nothing plays. Set it to this operator's name:
+A `Player`'s `spec.idle.controller` names the operator that draws its
+screen when nothing plays. Set it to this operator's name:
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Player
@@ -30,7 +30,7 @@ The `Player` must be in the same namespace as the libraries it shows.
 [Hand the idle screen to another controller](https://media.liken.sh/docs/guides/handing-the-idle-screen-to-another-controller/)
 in the `media-operator` manual describes the delegation from its side.
 
-## 2. What the operator stands
+## 2. What the operator runs
 
 The operator creates a pod named `<player>-media-browser`, owned by
 the `Player`, so deleting the `Player` deletes the pod. It has two
@@ -64,8 +64,8 @@ names this `Player`. Starting a `Play` moves the mark to the `Play`'s
 is still there, showing its idle screen.
 
 Over the bus, the presses that reach the browser are the arrows,
-enter, and back. Volume and mute are handled before the browser sees
-them, and the browser draws the level as a fading row. Home, search,
+enter, and back. Volume and mute are handled before they reach the
+browser, and the browser draws the level as a fading row. Home, search,
 and letter keys reach the browser from a keyboard attached to the
 screen's machine.
 
@@ -117,4 +117,5 @@ ends, the browser is presented again on the page it left.
 
 Nothing scopes a `Player`'s screen to a subset of the namespace's
 libraries. A screen that should show fewer libraries needs a namespace
-of its own. See [The namespace is a boundary](/docs/guides/libraries/#the-namespace-is-a-boundary).
+of its own. See
+[The namespace is a boundary](/docs/guides/libraries/#the-namespace-is-a-boundary).

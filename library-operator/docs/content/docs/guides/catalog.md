@@ -9,12 +9,12 @@ The catalog is what the scanners write and what every screen reads. It
 is a SQLite database replicated by [Corrosion](https://github.com/superfly/corrosion),
 one cluster per namespace, with one standing member and a member in
 every pod that reads or writes it. This guide describes the `Catalog`
-resource that stands it, how a screen gets its copy, and how the
+resource that creates it, how a screen gets its copy, and how the
 counts reach a `Library`'s status.
 
 ## The Catalog resource
 
-One `Catalog` per namespace stands the catalog pod, sizes every
+One `Catalog` per namespace creates the catalog pod, sizes every
 catalog claim in the namespace, and owns the `Service` the cluster's
 members find each other through:
 
@@ -71,11 +71,11 @@ namespace, on UDP port 8787, and writes its `EndpointSlice` itself.
 The slice holds every pod in the namespace that carries the member
 label: the catalog pod, every running scan, enrich, and cleanup `Job`,
 and every screen. A starting agent is published before it is ready,
-because it is a gossip peer from its first moment. Every agent
+because it is a gossip peer as soon as it starts. Every agent
 bootstraps to `catalog:8787` and keeps re-resolving it for its whole
 life.
 
-## How a `Job` knows its rows landed
+## How a `Job` confirms its rows landed
 
 Every worker `Job` writes a `runs` row when it starts and one when it
 finishes, then subscribes to its `Library`'s report and waits until the
@@ -93,7 +93,7 @@ is named `<screen-pod>-catalog`, sized from the `Catalog`, and classed
 by `spec.screens.storageClassName`. A screen pod is pinned to the
 machine that holds its display, so a node-local class fits.
 
-The claim is what makes a restart cheap. On an `emptyDir`, a restarted
+The claim is what makes a restart fast. On an `emptyDir`, a restarted
 screen synced the whole catalog again every time. On a claim, the
 sync happens once, when the claim is fresh:
 

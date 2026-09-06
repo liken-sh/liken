@@ -133,7 +133,7 @@ exactly one `Catalog` in the namespace before the first `Library`. A
 
 An empty `storage` provisions a `1Gi` claim on the default class.
 [Catalog](/docs/reference/catalogs/) describes every field, and
-[The catalog](/docs/guides/catalog/) describes what the pod it stands
+[The catalog](/docs/guides/catalog/) describes what the pod it creates
 does.
 
 ## 4. Confirm it runs
@@ -149,8 +149,8 @@ A missing `LIBRARY_BUS_ADDRESS` or `OPERATOR_NAMESPACE` is an error at
 startup, printed to the log, and the pod exits. The served
 [`operator.yaml`](/deploy/operator.yaml) sets both.
 
-Now [declare a library](/docs/guides/libraries/). Once it stands, the
-listing shows its counts and its phase:
+Now [declare a library](/docs/guides/libraries/). Once it is `Ready`,
+the listing shows its counts and its phase:
 
     $ kubectl -n media get libraries
     NAME     KIND     TITLES   ITEMS   FILES   WAITING   STATUS   READY   AGE
