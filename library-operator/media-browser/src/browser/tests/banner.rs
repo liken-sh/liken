@@ -39,7 +39,6 @@ fn the_page_opens_on_the_banner_with_the_newest_release_and_the_newest_arrival()
     let browser = with_banner();
     let home = showing_home(&browser);
     assert_eq!(home.focus, 0);
-    assert_eq!(home.control, None);
     assert_eq!(names(&browser), ["The Serial", "Entry 1"]);
 
     let banner = banner(&browser);
@@ -122,9 +121,9 @@ fn a_title_with_no_backdrop_never_enters_the_banner_and_focus_skips_it() {
     assert_eq!(showing_home(&browser).focus, 1);
 
     browser.key("up");
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(browser.on_strip);
     browser.key("down");
-    assert_eq!(showing_home(&browser).control, None);
+    assert!(!browser.on_strip);
     assert_eq!(showing_home(&browser).focus, 1);
 }
 
@@ -142,15 +141,15 @@ fn left_and_right_move_across_the_banner_and_stop_at_its_ends() {
 }
 
 #[test]
-fn up_from_the_banner_reaches_the_band_and_down_returns_to_the_title_it_held() {
+fn up_from_the_banner_reaches_the_strip_and_down_returns_to_the_title_it_held() {
     let mut browser = with_banner();
     browser.key("right");
 
     browser.key("up");
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(browser.on_strip);
 
     browser.key("down");
-    assert_eq!(showing_home(&browser).control, None);
+    assert!(!browser.on_strip);
     assert_eq!(showing_home(&browser).focus, 0);
     assert_eq!(banner(&browser).focus, 1);
 }

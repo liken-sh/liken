@@ -52,7 +52,7 @@ impl Title {
         let title = match series {
             Some(id) => {
                 let details = source.series(&item.library, id)?;
-                let facts = series::facts_of(&details);
+                let facts = series::facts_without_genres(&details);
                 let genres = details.genres.join(", ");
                 let ratings = ratings::scores(&details.ratings);
                 Self {

@@ -75,6 +75,8 @@ pub struct Page<'a, P> {
     /// Whether the loading state has lifted the logo off the page, so the
     /// head leaves its box empty.
     pub lifted: bool,
+    /// Whether the page holds focus, or the browser's strip over it does.
+    pub held: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
@@ -118,10 +120,13 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 
         // The tagline is the film's own words, so it draws in the italic,
         // as a card's tagline does.
+        // The facts line is one line, cut with an ellipsis where a long
+        // list of genres runs past the column, so it never ends on a comma.
+        let facts = text::measured_cut(&movie.facts, look::FACTS, column);
         for (block, content, face, color) in [
             (
                 blocks.facts,
-                &movie.facts,
+                &facts,
                 (look::FACTS, iced_winit::core::Font::with_name(look::FONT)),
                 look::muted(),
             ),
@@ -147,12 +152,16 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             PLOT_LINES,
         );
 
+        // The page's focus while the page holds it, and none while the
+        // browser's strip does, so one mark draws on the glass.
+        let focus = self.held.then_some(movie.focus);
+
         buttons::draw(
             &mut frame,
             movie.buttons(),
             blocks.buttons.at(offset),
-            match movie.focus {
-                Focus::Buttons(index) => Some(index),
+            match focus {
+                Some(Focus::Buttons(index)) => Some(index),
                 _ => None,
             },
         );
@@ -164,8 +173,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 &strip::Strip {
                     members: &set.members,
                     current: Some(set.current),
-                    focus: match movie.focus {
-                        Focus::Strip(index) => Some(index),
+                    focus: match focus {
+                        Some(Focus::Strip(index)) => Some(index),
                         _ => None,
                     },
                     heading: &set.heading,
@@ -196,8 +205,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 &strip::Strip {
                     members: &band.members,
                     current: band.current,
-                    focus: match movie.focus {
-                        Focus::Franchise(strip, Place::Member(member)) if strip == index => {
+                    focus: match focus {
+                        Some(Focus::Franchise(strip, Place::Member(member))) if strip == index => {
                             Some(member)
                         }
                         _ => None,
@@ -207,8 +216,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     last: None,
                     lines: card::LINES,
                     headed: matches!(
-                        movie.focus,
-                        Focus::Franchise(strip, Place::Heading) if strip == index
+                        focus,
+                        Some(Focus::Franchise(strip, Place::Heading)) if strip == index
                     ),
                     region: area(
                         MARGIN,
@@ -232,8 +241,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 posters,
                 &people::Stripe {
                     people: &band.faces,
-                    focus: match movie.focus {
-                        Focus::Stripe(stripe, slot) if stripe == index => Some(slot),
+                    focus: match focus {
+                        Some(Focus::Stripe(stripe, slot)) if stripe == index => Some(slot),
                         _ => None,
                     },
                     heading: band.heading,
@@ -333,7 +342,7 @@ impl Blocks {
                 false => LOGO_HEIGHT,
             },
         );
-        let facts = place(0.0, lines(&movie.facts, look::FACTS, column, 0));
+        let facts = place(0.0, text::height(1, look::FACTS));
         let ratings = place(
             0.0,
             match movie.ratings.is_empty() {

@@ -3,6 +3,7 @@ use super::*;
 fn library(name: &str) -> Query {
     Query::Library {
         library: name.into(),
+        sort: Sort::default(),
     }
 }
 
@@ -16,6 +17,36 @@ fn the_counts_match_the_entries() {
     assert_eq!(serials.slots.len() as u64, libraries[1].items);
     assert_eq!(movies.name, "features");
     assert_eq!(serials.name, "serials");
+}
+
+#[test]
+fn a_library_wall_answers_each_of_its_three_orders() {
+    let mut catalog = Catalog;
+    let wall = |sort| {
+        Catalog
+            .wall(&Query::Library {
+                library: "sample/serials".into(),
+                sort,
+            })
+            .slots
+    };
+    let titled = wall(Sort::Title);
+    let newest = wall(Sort::Newest);
+    let oldest = wall(Sort::Oldest);
+    assert_eq!(titled.len(), catalog.libraries()[1].items as usize);
+    assert!(
+        titled
+            .windows(2)
+            .all(|pair| pair[0].title.to_lowercase() <= pair[1].title.to_lowercase())
+    );
+    assert!(
+        newest
+            .windows(2)
+            .all(|pair| pair[0].released >= pair[1].released)
+    );
+    let mut reversed = oldest.clone();
+    reversed.reverse();
+    assert_eq!(reversed, newest);
 }
 
 #[test]

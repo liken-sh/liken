@@ -1,21 +1,25 @@
-// The clock at the top right of every screen: the reading the browser
-// draws over whatever screen is on the stack, on the band's own middle
-// line and inside its margin. It is the browser's own layer, so no screen
-// knows about it and every screen carries it in the same place. The
-// reading draws over a halo of dark ink, the way a subtitle does, so it
-// reads over art of any brightness and nothing shows around it.
-
-use std::convert::Infallible;
+// The clock at the top right of every screen: the reading, the room it
+// reserves, and the halo of dark ink it draws over, the way a subtitle
+// does, so it reads over art of any brightness and nothing shows around
+// it.
+//
+// The clock is drawn by the strip, the browser's layer over every
+// screen, through `reading` here. This module keeps the glyph, the
+// halo, and the room the reading reserves.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
-use iced_winit::core::{Color, Point, Rectangle, Theme, mouse};
+use iced_winit::core::{Color, Point, Rectangle};
 
 use super::{band, label, text};
 use crate::clock::Time;
 use crate::look;
+
+// The strip module: the browser's layer over every screen, which draws
+// the search icon, the field it expands into, and the reading.
+pub mod strip;
 
 // The widest reading of the day. The clock reserves the room this one
 // takes, so the controls beside it hold their place as the minute turns.
@@ -61,56 +65,35 @@ pub fn room() -> f32 {
     text::width(WIDEST, look::CONTROL) * SLACK
 }
 
-/// The left edge of the clock in a frame this wide. The band's controls
-/// end a margin to the left of it.
+/// The left edge of the clock in a frame this wide. The strip's icon,
+/// and the field it expands into, end a margin to the left of it.
 pub fn left(width: f32) -> f32 {
     width - band::PAD - room()
 }
 
-/// The clock as one frame draws it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Face {
-    /// The reading the frame draws.
-    pub time: Time,
-}
-
-impl canvas::Program<Infallible, Theme, Renderer> for Face {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry<Renderer>> {
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let reading = self.time.twelve_hour();
-        let right = bounds.x + bounds.width - band::PAD;
-        let middle = bounds.y + band::HEIGHT / 2.0;
-
-        // The dark copies draw first and the bright reading over them, so
-        // the reading reads over art of any brightness and no shape shows
-        // around it.
-        let at = Point::new(right, middle);
-        let ink = |point: Point, color: Color| {
-            label(
-                &reading,
-                point,
-                look::CONTROL,
-                color,
-                Alignment::Right,
-                Vertical::Center,
-                room(),
-            )
-        };
-        for point in halo(at) {
-            frame.fill_text(ink(point, look::BACKGROUND));
-        }
-        frame.fill_text(ink(at, look::text()));
-        vec![frame.into_geometry()]
+// The reading in the room the clock reserves at the right of the frame.
+// The dark copies draw first and the bright reading over them, so the
+// reading reads over art of any brightness and no shape shows around it.
+pub(crate) fn reading(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, time: Time) {
+    let reading = time.twelve_hour();
+    let right = bounds.x + bounds.width - band::PAD;
+    let middle = bounds.y + band::HEIGHT / 2.0;
+    let at = Point::new(right, middle);
+    let ink = |point: Point, color: Color| {
+        label(
+            &reading,
+            point,
+            look::CONTROL,
+            color,
+            Alignment::Right,
+            Vertical::Center,
+            room(),
+        )
+    };
+    for point in halo(at) {
+        frame.fill_text(ink(point, look::BACKGROUND));
     }
+    frame.fill_text(ink(at, look::text()));
 }
 
 #[cfg(test)]

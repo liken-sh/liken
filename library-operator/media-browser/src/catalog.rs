@@ -31,8 +31,12 @@ pub mod draw;
 // art file beside it.
 pub mod art;
 
+// The search module: the in-memory index the `Search` query is answered
+// from, with its fold and its ranking.
+pub mod search;
+
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
-pub use query::{Answer, Fold, InSeries, Order, Query, Slot};
+pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
 pub const TILES: usize = 4;
@@ -460,6 +464,14 @@ pub trait Source {
     /// One person by the library and the directory that name them,
     /// or nothing where that library holds no such entry.
     fn person(&mut self, library: &str, path: &str) -> Option<Person>;
+
+    /// How large this source's search index is, or nothing where the
+    /// source holds none. The stats line reports the numbers, so a run
+    /// says what the index cost on the machine it ran on. A source that
+    /// answers `Search` from no index of its own answers nothing.
+    fn index_size(&mut self) -> Option<search::Size> {
+        None
+    }
 
     /// Whether anything changed since the last call.
     fn changed(&mut self) -> bool;

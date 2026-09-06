@@ -64,6 +64,8 @@ pub struct Page<'a, P> {
     pub person: &'a Person,
     /// The store the headshot and the posters come from.
     pub posters: &'a RefCell<P>,
+    /// Whether the page holds focus, or the browser's strip over it does.
+    pub held: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
@@ -107,7 +109,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             region.height + wall::HEAD,
         );
         frame.with_clip(clip, |frame| {
-            person.works.draw(frame, posters, region, true, LINES);
+            person.works.draw(frame, posters, region, self.held, LINES);
         });
 
         vec![frame.into_geometry()]

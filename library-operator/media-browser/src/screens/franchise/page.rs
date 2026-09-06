@@ -59,6 +59,8 @@ pub struct Page<'a, P> {
     pub franchise: &'a Franchise,
     /// The store the entries' art comes from.
     pub posters: &'a RefCell<P>,
+    /// Whether the page holds focus, or the browser's strip over it does.
+    pub held: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
@@ -73,6 +75,11 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let page = self.franchise;
+        // The page's focus while the page holds it, and none while the
+        // browser's strip does, so one mark draws on the glass. The scroll
+        // still follows the page's own focus, so the strip never moves the
+        // wall under it.
+        let focus = self.held.then_some(page.focus);
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let posters = &mut *self.posters.borrow_mut();
 
@@ -108,8 +115,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 &page.eras,
                 &tops,
                 down,
-                match page.focus {
-                    Focus::Rail(bar) => Some(bar),
+                match focus {
+                    Some(Focus::Rail(bar)) => Some(bar),
                     _ => None,
                 },
             );
@@ -136,7 +143,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         true => entry(frame, posters, &row.cell, bounds, cells, art),
                         false => thin(frame, &row.cell, bounds),
                     }
-                    if page.focus == Focus::Row(index) {
+                    if focus == Some(Focus::Row(index)) {
                         mark(frame, bounds);
                     }
                 }

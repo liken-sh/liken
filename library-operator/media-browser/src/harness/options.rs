@@ -41,7 +41,8 @@ media-browser [FLAGS]
   --help                   print this and exit
 
 The binary takes the same keys from a real keyboard, so it runs on a
-workstation with no flags at all. Quit with q.
+workstation with no flags at all. Escape ends the run, the forward slash
+is back, and the backtick is home.
 ";
 
 /// What the command line asked for.

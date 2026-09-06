@@ -4,7 +4,7 @@
 use super::*;
 use crate::catalog::pool::{Candidate, Kind};
 use crate::catalog::recency::{WORKS_FLOOR, date_seconds};
-use crate::catalog::{Answer, GenreEntry, Order};
+use crate::catalog::{Answer, GenreEntry, GenreSort, Order};
 
 const FILMS: &str = "default/films";
 const SHOWS: &str = "default/shows";
@@ -24,6 +24,7 @@ fn genre(name: &str, order: Order) -> Query {
     Query::Genre {
         name: name.into(),
         order,
+        sort: GenreSort::default(),
     }
 }
 
@@ -326,6 +327,7 @@ fn the_pool_holds_every_genre_weighed_with_its_leading_titles_twice() {
         Query::Genre {
             name: "Crime".into(),
             order: Order::Released,
+            sort: GenreSort::default(),
         }
     );
 }

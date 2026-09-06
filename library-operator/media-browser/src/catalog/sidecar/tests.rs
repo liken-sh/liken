@@ -8,7 +8,9 @@ mod plays;
 mod read_scope;
 mod recent;
 mod recent_queries;
+mod search;
 mod series;
+mod sorts;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,14 +22,15 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Answer, Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails, PlayItem, Presentation,
-    Query, Selection, SeriesDetails, Slot, Source,
+    Answer, Counts, Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails, PlayItem,
+    Presentation, Query, Selection, SeriesDetails, Slot, Sort, Source,
 };
 
 // One library's wall, as the libraries strip opens it.
 fn library(name: &str) -> Query {
     Query::Library {
         library: name.into(),
+        sort: Sort::default(),
     }
 }
 

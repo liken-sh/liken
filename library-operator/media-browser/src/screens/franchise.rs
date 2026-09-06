@@ -130,15 +130,17 @@ impl Franchise {
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
+        held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let wall = canvas(page::Page {
             franchise: self,
             posters,
+            held,
         })
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let band = band::layer(&self.title, &[], None);
+        let band = band::layer(&self.title);
         iced_widget::Stack::with_children(vec![wall, band])
             .width(Length::Fill)
             .height(Length::Fill)
@@ -149,6 +151,11 @@ impl Franchise {
     fn on_row(&mut self, row: usize, key: &str, source: &mut dyn Source) -> Step {
         if key == "enter" {
             return self.opened(row, source);
+        }
+        // Up from the first row moves nothing, which is how a press
+        // reaches the browser's strip.
+        if key == "up" && row == 0 {
+            return Step::Still;
         }
         self.focus = match key {
             "up" => Focus::Row(row.saturating_sub(1)),
@@ -166,6 +173,9 @@ impl Franchise {
     // select both jump to the first row the bar covers, which is what
     // the rail is for.
     fn on_rail(&mut self, bar: usize, key: &str) -> Step {
+        if key == "up" && bar == 0 {
+            return Step::Still;
+        }
         self.focus = match key {
             "up" | "down" => Focus::Rail(focus::list(bar, self.eras.len(), key)),
             "right" | "enter" => match self.eras.get(bar) {

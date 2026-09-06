@@ -1,82 +1,58 @@
-// The slots one query answers, as a wall of art under a band. The three
-// controls for sort, filter, and search reserve their place at the band's
-// right. Up from the first row of posters reaches the band, and down from
-// the band returns focus to the slot the wall remembers.
-//
-// A wall with a page of its own carries a head between the band and the
-// grid: the name of what the wall is about, and the counts of its slots
-// by kind. The band over such a wall carries the query's kind word and
-// not its heading, so the name reads once.
+// The wall screen: the slots one query answers, as a wall of art under
+// a band that carries the query's heading. A long wall draws a rail at
+// its right edge whose bars jump through the list and whose button
+// cycles the order. A wall over a `Search` holds the field a person
+// types into, which the browser's strip draws, and the grid a remote
+// with no keyboard picks letters from.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
-use iced_winit::core::{Element, Length, Point, Rectangle, Theme, mouse};
+use iced_winit::core::{Element, Length, Rectangle, Theme, mouse};
 
 use super::Step;
 use super::slots::Slots;
-use super::{Item, facts};
 use crate::catalog::{Query, Source};
 use crate::focus;
-use crate::look;
 use crate::posters::Posters;
-use crate::views::stack::Stack;
-use crate::views::{area, band, card, text, wall};
+use crate::views::{area, band, card, clip_marked, wall};
 
-// The margin at both sides of the head, the person page's own, so the
-// two heads line up.
-const MARGIN: f32 = 120.0;
+// The rail module: which walls draw one, what its bars say, and how it
+// draws beside the slots.
+mod rail;
+// The search module: what a wall over a `Search` holds, the presses it
+// takes for itself, and the layer it draws over the band.
+mod search;
 
-// The space over the head's name, the space under its facts before the
-// grid's region, and the space between the two lines.
-const TOP: f32 = 56.0;
-const FOOT: f32 = 36.0;
-const GAP: f32 = 12.0;
+pub use search::{Search, searched};
+use search::{Typing, grid_height};
 
-/// What a wall with a page of its own draws over the grid: the name of
-/// what the wall is about, and the counts of its slots by kind. It is a
-/// function of the query and its answer, so the wall for a genre is the
-/// genre's page wherever it opens from.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Head {
-    pub name: String,
-    pub facts: String,
+/// Where focus is on a wall: on the slots, or on one cell of the rail,
+/// which is the sort button where the wall has one and then the bars
+/// under it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Focus {
+    #[default]
+    Slots,
+    Rail(usize),
 }
 
-impl Head {
-    // The head over these slots, read off the query and its answer.
-    fn of(query: &Query, name: &str, items: &[Item]) -> Self {
-        let of_kind = |kind: &str| items.iter().filter(|item| item.kind == kind).count();
-        Self {
-            name: query.name(name),
-            facts: counted(of_kind("movies"), of_kind("series")),
-        }
-    }
-}
-
-// How many movies and how many series the wall holds, on one line. A
-// kind the wall holds none of leaves no words behind.
-fn counted(movies: usize, series: usize) -> String {
-    let counted = |count: usize, nouns| match count {
-        0 => String::new(),
-        count => facts::counted(count as i64, nouns),
-    };
-    facts::joined(&[&counted(movies, "movies"), &counted(series, "series")])
-}
-
-/// The wall screen: the slots the query answered, the head over the
-/// grid or nothing where the query has no page of its own, the heading
-/// as the band draws it, and the control that holds focus, or nothing
-/// while the slots hold it. The head and the heading are built at every
-/// read and not on every frame.
+/// The wall screen: the slots the query answered and the heading as the
+/// band draws it. The heading is built at every read and not on every
+/// frame. `search` is the field and the grid a wall over a `Search`
+/// types on, and nothing on every other wall.
 #[derive(Debug)]
 pub struct Wall {
     pub slots: Slots,
-    pub head: Option<Head>,
     pub heading: String,
-    pub control: Option<usize>,
+    pub search: Option<Search>,
+    /// The bars of the rail beside the slots, and none on a wall that
+    /// draws no rail.
+    pub bars: Vec<rail::Jump>,
+    /// Where focus is.
+    pub focus: Focus,
 }
 
 impl Wall {
@@ -84,11 +60,13 @@ impl Wall {
     pub fn open(query: Query, source: &mut dyn Source) -> Self {
         let mut wall = Self {
             slots: Slots::open(query, source),
-            head: None,
             heading: String::new(),
-            control: None,
+            search: None,
+            bars: Vec::new(),
+            focus: Focus::Slots,
         };
         wall.headed();
+        wall.railed();
         wall
     }
 
@@ -97,53 +75,163 @@ impl Wall {
     pub fn reread(&mut self, source: &mut dyn Source) {
         self.slots.reread(source);
         self.headed();
+        self.railed();
     }
 
-    // The head and the heading, both functions of the slots the read
-    // answered. A query with a page of its own puts its name in the head
-    // and its kind word in the band. Every other query heads nothing and
-    // puts its own heading in the band.
+    // The bars again, because the answer they name has changed. Focus
+    // returns to the slots where the rail no longer holds the cell it
+    // was on.
+    fn railed(&mut self) {
+        self.bars = rail::bars(&self.slots.items, &self.slots.query, rail::region());
+        if let Focus::Rail(cell) = self.focus {
+            let cells = rail::cells(&self.bars, &self.slots.query);
+            self.focus = match self.bars.is_empty() {
+                true => Focus::Slots,
+                false => Focus::Rail(cell.min(cells - 1)),
+            };
+        }
+    }
+
+    // The band carries every query's heading, and a genre's carries the
+    // counts by kind.
     fn headed(&mut self) {
-        let (head, heading) = match self.slots.query.kind_word() {
-            Some(word) => (
-                Some(Head::of(
-                    &self.slots.query,
-                    &self.slots.name,
-                    &self.slots.items,
-                )),
-                word.to_string(),
-            ),
-            None => (None, self.slots.heading()),
-        };
-        self.head = head;
-        self.heading = heading;
+        self.heading = self.slots.heading();
     }
 
-    /// Fold one press in. In the band, left and right move across the
-    /// controls, select does nothing because none of the three exists
-    /// yet, and down returns focus to the title the wall remembers. On
-    /// the wall, up from the first row reaches the band.
+    /// Fold one press in. The arrows move across the slots, and up from
+    /// the first row moves nothing, which is how a press reaches the
+    /// browser's strip.
+    ///
+    /// On a search wall, a letter, a digit, or the space types and hides
+    /// the grid. While the grid is shown, the arrows move its focus and
+    /// select presses the focused cell into the field.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
-        if let Some(control) = self.control {
-            match key {
-                "down" => self.control = None,
-                "enter" => {}
-                _ => self.control = Some(focus::row(control, band::CONTROLS.len(), key)),
-            }
+        if let Some(step) = self.typed(key, source) {
+            return step;
+        }
+        match self.focus {
+            Focus::Slots => self.on_slots(key, source),
+            Focus::Rail(cell) => self.on_rail(cell, key, source),
+        }
+    }
+
+    // One press while the slots hold focus. A right press at the right
+    // edge of a row moves onto the bar that covers the row.
+    fn on_slots(&mut self, key: &str, source: &mut dyn Source) -> Step {
+        if key == "right"
+            && let Some(cell) = self.onto()
+        {
+            self.focus = Focus::Rail(cell);
             return Step::Stay;
         }
         if key == "up" && self.slots.focus < wall::COLUMNS {
-            self.control = Some(0);
-            return Step::Stay;
+            return Step::Still;
         }
         self.slots.key(key, source)
+    }
+
+    // The cell of the rail a right press from the focused slot moves
+    // onto, or nothing where the slot is not at the right edge of its
+    // row or the wall draws no rail.
+    fn onto(&self) -> Option<usize> {
+        let last = self.slots.items.len().checked_sub(1)?;
+        let index = self.slots.focus;
+        if index % wall::COLUMNS != wall::COLUMNS - 1 && index != last {
+            return None;
+        }
+        let bar = rail::covering(&self.bars, index / wall::COLUMNS)?;
+        Some(bar + rail::first(&self.slots.query))
+    }
+
+    // One press while a cell of the rail holds focus: up and down along
+    // the cells, select on a bar onto the first slot it covers, select on
+    // the button into the next order, and left back to the slots. Up from
+    // the top cell moves nothing, and the browser's strip takes that
+    // press.
+    fn on_rail(&mut self, cell: usize, key: &str, source: &mut dyn Source) -> Step {
+        if key == "up" && cell == 0 {
+            return Step::Still;
+        }
+        match (key, rail::barred_at(cell, &self.slots.query)) {
+            ("up" | "down", _) => {
+                let cells = rail::cells(&self.bars, &self.slots.query);
+                self.focus = Focus::Rail(focus::list(cell, cells, key));
+                let standing = self.standing();
+                self.slots.stand(standing);
+            }
+            ("left" | "enter", Some(bar)) => {
+                let head = self.head(bar);
+                self.focus = Focus::Slots;
+                self.slots.focus = head;
+            }
+            ("enter", None) => self.resort(source),
+            ("left", None) => self.focus = Focus::Slots,
+            _ => {}
+        }
+        Step::Stay
+    }
+
+    /// Whether a slot of the wall carries the focus mark: only while the
+    /// slots hold focus and neither the keyboard grid, the rail, nor the
+    /// browser's strip has taken it. `held` is whether the wall holds
+    /// focus at all.
+    pub fn marks(&self, held: bool) -> bool {
+        held && self.grid().is_none() && self.focus == Focus::Slots
+    }
+
+    /// The cell of the rail that carries the mark, or nothing while the
+    /// slots or the browser's strip hold focus.
+    pub fn marked_cell(&self, held: bool) -> Option<usize> {
+        match (held, self.focus) {
+            (true, Focus::Rail(cell)) => Some(cell),
+            _ => None,
+        }
+    }
+
+    /// The slot the wall stands at: the focused slot, or the first item
+    /// of the focused bar while a bar holds focus, so a move along the
+    /// bars scrolls the wall to what a select on the bar lands on. The
+    /// sort button moves the wall nowhere.
+    pub fn standing(&self) -> usize {
+        match self.focus {
+            Focus::Slots => self.slots.focus,
+            Focus::Rail(cell) => match rail::barred_at(cell, &self.slots.query) {
+                Some(bar) => self.head(bar),
+                None => self.slots.focus,
+            },
+        }
+    }
+
+    // The slot a select on one bar lands on: the first item the bar
+    // covers, which is not the first item of its first row where a letter
+    // range or a run starts in the middle of a row.
+    fn head(&self, bar: usize) -> usize {
+        let item = self.bars.get(bar).map(|jump| jump.item).unwrap_or_default();
+        item.min(self.slots.items.len().saturating_sub(1))
+    }
+
+    // The same wall in the next order its button cycles to. The read
+    // answers the new order, the heading counts it again, and the bars
+    // are the new order's own.
+    fn resort(&mut self, source: &mut dyn Source) {
+        self.slots.query = self.slots.query.resorted();
+        self.slots.focus = 0;
+        self.reread(source);
+    }
+
+    /// Fold in the press that leaves a screen. A search wall with text
+    /// in its field takes it and clears the text, or removes one
+    /// character on backspace. Otherwise the answer is nothing, and the
+    /// browser goes back.
+    pub fn escape(&mut self, key: &str, source: &mut dyn Source) -> Option<Step> {
+        self.cleared(key, source)
     }
 
     /// Whether a rest of focus on this wall is worth a prefetch. It is
     /// while the posters hold focus, because a select on either kind
     /// opens a page over a backdrop.
     pub fn prefetches(&self) -> bool {
-        self.control.is_none()
+        self.grid().is_none()
     }
 
     /// The library and the backdrop the focused title's page draws over.
@@ -156,21 +244,40 @@ impl Wall {
         self.slots.resting(source)
     }
 
-    /// The view: the head and the wall of posters, and the band as a layer
-    /// over them.
+    // The height a layer of the wall's own takes under the band: the
+    // keyboard grid on a search wall, and nothing otherwise.
+    fn under_band(&self) -> f32 {
+        grid_height(self.grid().is_some())
+    }
+
+    /// The view: the wall of posters, and the band as a layer over them.
+    /// A search wall showing its grid draws a third layer over the band,
+    /// because a layer draws every fill before every text and the band
+    /// paints its own ground.
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
+        held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let grid = canvas(Program {
             wall: self,
             posters,
+            held,
         })
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let band = band::layer(&self.heading, &band::CONTROLS, self.control);
-        iced_widget::Stack::with_children(vec![grid, band])
+        let band = band::layer(&self.heading);
+        let mut layers = vec![grid, band];
+        if let Some(keyboard) = self.grid() {
+            layers.push(
+                canvas(Typing { keyboard })
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into(),
+            );
+        }
+        iced_widget::Stack::with_children(layers)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -181,6 +288,8 @@ impl Wall {
 struct Program<'a, P> {
     wall: &'a Wall,
     posters: &'a RefCell<P>,
+    // Whether the wall holds focus, or the browser's strip over it does.
+    held: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P> {
@@ -195,56 +304,48 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        if let Some(head) = &self.wall.head {
-            words(&mut frame, head, bounds.width);
-        }
-        let region = region(bounds, self.wall.head.as_ref());
-        self.wall.slots.draw(
+        // The rail takes its lane off the right of the region, and the
+        // slots keep the rest.
+        let whole = region(bounds, self.wall.under_band());
+        let region = rail::beside(whole, &self.wall.bars);
+        self.wall.slots.draw_at(
             &mut frame,
             &mut *self.posters.borrow_mut(),
             region,
-            self.wall.control.is_none(),
+            self.wall.standing(),
+            self.wall.marks(self.held),
             card::LINES,
         );
+        // The clip reaches past the region by the gap and the whole focus
+        // stroke, so the mark on the first bar and on the button draws
+        // whole.
+        frame.with_clip(clip_marked(whole), |frame| {
+            rail::draw(
+                frame,
+                whole,
+                &self.wall.bars,
+                &self.wall.slots.query,
+                self.wall.marked_cell(self.held),
+            );
+        });
         vec![frame.into_geometry()]
     }
 }
 
-// The head's two lines: the name at the title size, and the counts
-// under it, muted, the way the person page draws the words beside the
-// headshot.
-fn words(frame: &mut canvas::Frame<Renderer>, head: &Head, width: f32) {
-    let column = width - MARGIN * 2.0;
-    let mut stack = Stack::new(Point::new(MARGIN, band::HEIGHT + TOP), GAP);
-    for (content, size, color) in [
-        (&head.name, look::TITLE, look::text()),
-        (&head.facts, look::FACTS, look::muted()),
-    ] {
-        let taken = text::block(frame, content, stack.at(), size, color, column, 1);
-        stack.add(taken);
-    }
-}
-
-// The part of the frame the grid scrolls in: under the band, under the
-// head where the wall carries one, and under the space that keeps the
-// mark of a focused slot in the first row off what is over it.
-fn region(bounds: Rectangle, head: Option<&Head>) -> Rectangle {
-    let top = band::HEIGHT + height(head);
+// The part of the frame the grid scrolls in: under the band, and under
+// the space that keeps the mark of a focused slot in the first row off
+// what is over it.
+// `under` is the height a layer of the wall's own takes under the band,
+// the keyboard grid's, so the slots start under that layer
+// and never behind it.
+fn region(bounds: Rectangle, under: f32) -> Rectangle {
+    let top = band::HEIGHT + under;
     area(
         0.0,
         top + wall::HEAD,
         bounds.width,
         bounds.height - top - wall::HEAD,
     )
-}
-
-// The height a head takes, whatever its words, so the grid starts at
-// the same place on every headed wall. A wall with no head takes none.
-fn height(head: Option<&Head>) -> f32 {
-    match head {
-        Some(_) => TOP + text::height(1, look::TITLE) + GAP + text::height(1, look::FACTS) + FOOT,
-        None => 0.0,
-    }
 }
 
 #[cfg(test)]
@@ -259,52 +360,29 @@ mod tests {
         area(0.0, 0.0, WIDTH, HEIGHT)
     }
 
-    fn head() -> Head {
-        Head {
-            name: "Western".into(),
-            facts: "7 movies · 3 series".into(),
-        }
-    }
-
     #[test]
-    fn a_head_pushes_the_grid_down_and_a_wall_without_one_starts_under_the_band() {
-        let bare = region(frame(), None);
+    fn every_wall_starts_its_grid_under_the_band() {
+        let bare = region(frame(), 0.0);
         assert_eq!(bare.y, band::HEIGHT + wall::HEAD);
         assert_eq!(bare.y + bare.height, HEIGHT);
 
-        let headed = region(frame(), Some(&head()));
-        assert!(headed.y > bare.y, "{headed:?}");
-        assert_eq!(headed.y + headed.height, HEIGHT);
-        assert!(headed.y < HEIGHT / 2.0, "{headed:?}");
+        let under = region(frame(), 200.0);
+        assert!(under.y > bare.y, "{under:?}");
+        assert_eq!(under.y + under.height, HEIGHT);
     }
 
     #[test]
-    fn a_row_of_posters_fits_under_the_head() {
+    fn a_row_of_posters_fits_under_the_band() {
         let cells = wall::lined(WIDTH, wall::POSTER, wall::COLUMNS, 1);
-        assert!(cells.height <= region(frame(), Some(&head())).height);
+        assert!(cells.height <= region(frame(), 0.0).height);
     }
 
     #[test]
-    fn the_counts_leave_out_a_kind_the_wall_holds_none_of() {
-        let cases = [
-            (0, 0, ""),
-            (7, 0, "7 movies"),
-            (0, 3, "3 series"),
-            (1, 1, "1 movie · 1 series"),
-            (7, 3, "7 movies · 3 series"),
-        ];
-        for (movies, series, want) in cases {
-            assert_eq!(counted(movies, series), want, "{movies} and {series}");
-        }
-    }
-
-    #[test]
-    fn a_wall_whose_band_holds_focus_prefetches_nothing() {
-        let query = Query::Library {
-            library: "sample/features".into(),
-        };
+    fn a_wall_showing_its_keyboard_grid_prefetches_nothing() {
+        let query = Query::Search { text: "a".into() };
         let mut wall = Wall::open(query, &mut Catalog);
-        wall.control = Some(0);
+        wall.search = Some(search::Search::default());
+        wall.show_grid();
         assert!(!wall.prefetches());
         assert_eq!(wall.resting(&mut Catalog), None);
     }

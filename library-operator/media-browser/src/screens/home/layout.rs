@@ -71,8 +71,8 @@ impl Layout {
         ))
     }
 
-    /// How far the page has scrolled. None while the band or the banner
-    /// holds focus. The first strip keeps as much of the banner over it as
+    /// How far the page has scrolled. None while the banner holds
+    /// focus. The first strip keeps as much of the banner over it as
     /// the viewport holds, and scrolls only as far as it needs to stand
     /// whole in view, because a short viewport holds less than the banner
     /// and one strip. For every later row, the row's heading sits directly
@@ -81,9 +81,6 @@ impl Layout {
     /// more than what was passed. The scroll stops at the foot of the
     /// page, so the last rows never leave a gap under them.
     pub fn scroll(&self, home: &Home, page: f32, viewport: f32) -> f32 {
-        if home.control.is_some() {
-            return 0.0;
-        }
         let Some(top) = self.tops.get(home.focus).copied().flatten() else {
             return 0.0;
         };
@@ -208,14 +205,5 @@ mod tests {
             layout.content - viewport
         );
         assert_eq!(layout.scroll(&home, PAGE, layout.content + 100.0), 0.0);
-    }
-
-    #[test]
-    fn the_band_in_focus_scrolls_nothing() {
-        let mut home = home();
-        home.focus = 2;
-        home.control = Some(0);
-        let layout = Layout::of(&home, PAGE);
-        assert_eq!(layout.scroll(&home, PAGE, PAGE - band::HEIGHT), 0.0);
     }
 }

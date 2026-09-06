@@ -24,12 +24,8 @@ pub fn column(order: Order) -> &'static str {
 /// movie first when the order column, `library`, and `id` are equal.
 pub fn candidates(connection: &Connection, order: Order) -> rusqlite::Result<Vec<Candidate>> {
     let sql = candidate_sql(order);
-    collect(
-        connection,
-        &sql,
-        &[&((PAGES * CANDIDATES) as i64)],
-        candidate,
-    )
+    let limit = (PAGES * CANDIDATES) as i64;
+    collect(connection, &sql, &[&limit], candidate)
 }
 
 fn candidate_sql(order: Order) -> String {

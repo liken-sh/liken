@@ -5,7 +5,7 @@
 
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,11 +21,17 @@ const BACKOFF_CEILING: Duration = Duration::from_secs(5);
 const STOP_POLL: Duration = Duration::from_millis(50);
 
 // The one changed flag and the one waker that all three streams share
-// with the source.
+// with the source, plus the revision and the signal the search index's
+// build thread waits on. The browser clears `changed` when it re-reads,
+// so the build thread cannot share that flag without one side losing a
+// change. A count of changes lets the build thread compare against the
+// revision it last built, and the condvar wakes it on each change.
 pub(super) struct Shared {
     pub changed: AtomicBool,
     pub wake: Mutex<Option<Waker>>,
     pub stop: AtomicBool,
+    pub revision: Mutex<u64>,
+    pub signal: Condvar,
 }
 
 impl Default for Shared {
@@ -34,19 +40,33 @@ impl Default for Shared {
             changed: AtomicBool::new(false),
             wake: Mutex::new(None),
             stop: AtomicBool::new(false),
+            revision: Mutex::new(0),
+            signal: Condvar::new(),
         }
     }
 }
 
 impl Shared {
-    fn stopping(&self) -> bool {
+    pub(super) fn stopping(&self) -> bool {
         self.stop.load(Ordering::Acquire)
+    }
+
+    // Raise the stop flag and wake every waiting thread, so a dropped
+    // source ends its build thread now instead of at the next poll.
+    pub(super) fn halt(&self) {
+        self.stop.store(true, Ordering::Release);
+        self.signal.notify_all();
     }
 
     // The flag is set before the waker fires, so a woken loop always
     // reads changed as true.
-    fn mark(&self) {
+    pub(super) fn mark(&self) {
         self.changed.store(true, Ordering::Release);
+        *self
+            .revision
+            .lock()
+            .unwrap_or_else(|held| held.into_inner()) += 1;
+        self.signal.notify_all();
         let wake = self.wake.lock().unwrap().clone();
         if let Some(wake) = wake {
             wake();

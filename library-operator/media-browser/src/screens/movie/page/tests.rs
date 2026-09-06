@@ -76,6 +76,7 @@ fn crowded(focus: Focus) -> Movie {
                 kind: "movies".into(),
                 id: "one".into(),
                 name: "Film one".into(),
+                released: "1999".into(),
                 caption: "Film one".into(),
                 fitted: "Film one".into(),
                 line: facts::Line::of(&["Film one"]),

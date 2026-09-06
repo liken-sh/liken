@@ -257,7 +257,7 @@ fn an_episode_whose_series_row_is_missing_is_left_out() {
     assert!(
         source
             .wall(&Query::Released {
-                fold: Fold::Episodes
+                fold: Fold::Episodes,
             })
             .slots
             .is_empty()

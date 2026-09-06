@@ -88,6 +88,7 @@ fn characters(parts: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Sort;
 
     const LIBRARY: &str = "sample/features";
 
@@ -166,6 +167,7 @@ mod tests {
         let mut slots = [work("Director")];
         let library = Query::Library {
             library: LIBRARY.into(),
+            sort: Sort::default(),
         };
         assert_eq!(credit(&library, &mut slots), "");
         assert_eq!(slots[0].parts, "Director");

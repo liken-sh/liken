@@ -29,6 +29,7 @@ use self::series::seasons_of;
 use crate::catalog::{InSeries, Query, Selection, Slot, Source};
 use crate::posters::Posters;
 use crate::views::curtain::Curtain;
+use crate::views::field::TextField;
 use crate::views::{
     Card, card, strip,
     wall::{POSTER, STILL},
@@ -40,10 +41,10 @@ pub enum Screen {
     /// the stack.
     Home(home::Home),
     /// The slots one query answers, as a wall of art under a band that
-    /// carries the query's heading.
-    Wall(wall::Wall),
-    /// One movie's page. It is boxed because it is much the largest
-    /// variant, and every stack entry would otherwise carry its size.
+    /// carries the query's heading. It is boxed for the reason a page is.
+    Wall(Box<wall::Wall>),
+    /// One movie's page. Every page and the wall are boxed, so no stack
+    /// entry carries the size of the largest of them.
     Movie(Box<movie::Movie>),
     /// One series' page, boxed for the reason a movie's page is.
     Series(Box<series::Series>),
@@ -57,8 +58,12 @@ pub enum Screen {
 /// moves its own focus. Only the browser holds the stack and the bus, so
 /// a screen names the screen it opens and never pushes one itself.
 pub enum Step {
-    /// The press changed the screen alone, or changed nothing.
+    /// The press changed the screen alone.
     Stay,
+    /// The press changed nothing at all, so the frame on the glass still
+    /// draws what the screen holds. Only a press that moves no focus
+    /// answers it, such as an arrow at the edge of the keyboard grid.
+    Still,
     /// Push this screen over the one that answered.
     Open(Screen),
     /// Put this screen in the place of the one that answered, so back
@@ -84,6 +89,40 @@ impl Screen {
             Self::Series(screen) => screen.key(key, source),
             Self::Person(screen) => screen.key(key, source),
             Self::Franchise(screen) => screen.key(key, source),
+        }
+    }
+
+    /// Fold in the press that leaves a screen. Only a search wall takes
+    /// one for itself: backspace removes a character of the text and
+    /// escape clears it. Every other screen answers nothing, and the
+    /// browser then goes back.
+    pub fn escape(&mut self, key: &str, source: &mut dyn Source) -> Option<Step> {
+        match self {
+            Self::Wall(screen) => screen.escape(key, source),
+            _ => None,
+        }
+    }
+
+    /// Whether this screen is the search wall. A letter opens the search
+    /// wall from every other screen, and types on this one.
+    pub fn searching(&self) -> bool {
+        matches!(self, Self::Wall(screen) if screen.search.is_some())
+    }
+
+    /// The search wall's field, which the browser's strip draws, or
+    /// nothing on every other screen.
+    pub fn field(&self) -> Option<&TextField> {
+        match self {
+            Self::Wall(screen) => screen.search.as_ref().map(|search| &search.field),
+            _ => None,
+        }
+    }
+
+    /// Show the search wall's keyboard grid, which is what select on the
+    /// strip's field does. Every other screen shows nothing.
+    pub fn show_grid(&mut self) {
+        if let Self::Wall(screen) = self {
+            screen.show_grid();
         }
     }
 
@@ -140,18 +179,22 @@ impl Screen {
     /// The view of this screen, with its art drawn from the store. Only
     /// the two screens a title plays from draw the loading state, and
     /// every other screen ignores it.
+    /// `held` is whether the screen holds focus. The browser's strip
+    /// takes focus off the screen under it, and a screen that drew its
+    /// own mark then would put two marks on the glass.
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
         curtain: Option<Curtain>,
+        held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
-            Self::Home(screen) => screen.view(posters),
-            Self::Wall(screen) => screen.view(posters),
-            Self::Movie(screen) => screen.view(posters, curtain),
-            Self::Series(screen) => screen.view(posters, curtain),
-            Self::Person(screen) => screen.view(posters),
-            Self::Franchise(screen) => screen.view(posters),
+            Self::Home(screen) => screen.view(posters, held),
+            Self::Wall(screen) => screen.view(posters, held),
+            Self::Movie(screen) => screen.view(posters, curtain, held),
+            Self::Series(screen) => screen.view(posters, curtain, held),
+            Self::Person(screen) => screen.view(posters, held),
+            Self::Franchise(screen) => screen.view(posters, held),
         }
     }
 }
@@ -178,6 +221,9 @@ pub struct Item {
     pub kind: String,
     pub id: String,
     pub name: String,
+    /// The item's release date as the catalog holds it, which the wall's
+    /// rail reads its years and decades off.
+    pub released: String,
     pub caption: String,
     pub fitted: String,
     pub line: facts::Line,
@@ -263,6 +309,7 @@ impl Item {
             kind: slot.kind,
             id: slot.id,
             name: slot.title,
+            released: slot.released,
             fitted: caption.clone(),
             caption,
             line,
@@ -394,13 +441,14 @@ impl Card for Item {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::Fold;
+    use crate::catalog::{Fold, GenreSort, Sort};
 
     const LIBRARY: &str = "sample/features";
 
     fn library() -> Query {
         Query::Library {
             library: LIBRARY.into(),
+            sort: Sort::default(),
         }
     }
 
@@ -653,6 +701,7 @@ mod tests {
         let genre = Query::Genre {
             name: "Mystery".into(),
             order: crate::catalog::Order::Released,
+            sort: GenreSort::default(),
         };
         let item = Item::of(&genre, serial());
         assert_eq!(item.caption(), "Serial 03");
@@ -665,6 +714,7 @@ mod tests {
         let genre = Query::Genre {
             name: "Mystery".into(),
             order: crate::catalog::Order::Released,
+            sort: GenreSort::default(),
         };
         let one = Item::of(
             &genre,
@@ -734,6 +784,7 @@ mod tests {
         let genre = Query::Genre {
             name: "Western".into(),
             order: crate::catalog::Order::Released,
+            sort: GenreSort::default(),
         };
         let item = Item::of(&genre, specimen());
         assert_eq!(item.caption(), "Specimen 0001");

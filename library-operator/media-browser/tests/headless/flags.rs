@@ -12,7 +12,7 @@ fn the_scripted_quit_key_ends_the_run() {
         &dir,
         &[
             "--script",
-            "0.5:down,2.0:q",
+            "0.5:down,2.0:quit",
             "--stats",
             &text(&stats),
             "--size",
@@ -25,7 +25,7 @@ fn the_scripted_quit_key_ends_the_run() {
     assert_eq!(run.exit, "0", "{}", run.log);
     assert!(
         after_the_first_frame(&run, &stats) < 20.0,
-        "the q at 2.0 s ended the run, not the deadline at 25 s: {} s\n{}",
+        "the quit at 2.0 s ended the run, not the deadline at 25 s: {} s\n{}",
         after_the_first_frame(&run, &stats),
         run.log
     );
@@ -50,7 +50,7 @@ fn a_claimed_screen_names_the_window_and_stops_the_watchdog() {
         ],
         &[
             "--script",
-            "0.5:q",
+            "0.5:quit",
             "--stats",
             &text(&stats),
             "--size",
@@ -63,7 +63,7 @@ fn a_claimed_screen_names_the_window_and_stops_the_watchdog() {
     assert_eq!(run.exit, "0", "{}", run.log);
     assert!(
         after_the_first_frame(&run, &stats) < 20.0,
-        "the q at 0.5 s ended the run: {} s\n{}",
+        "the quit at 0.5 s ended the run: {} s\n{}",
         after_the_first_frame(&run, &stats),
         run.log
     );

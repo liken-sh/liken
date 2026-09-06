@@ -16,11 +16,11 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::super::franchise::strips::Place;
 use super::layout::{self, Layout};
-use super::{COLUMNS, Focus, Series};
+use super::{COLUMNS, Focus, Series, seasons};
 use crate::look;
 use crate::posters::Posters;
 use crate::views::stack::Stack;
-use crate::views::{area, card, divider, header, people, ratings, strip, text, wall};
+use crate::views::{area, card, divider, header, people, rail, ratings, strip, text, wall};
 
 // The margin at both sides of the header's text.
 const MARGIN: f32 = 120.0;
@@ -39,6 +39,8 @@ pub struct Page<'a, P> {
     /// Whether the loading state has lifted the logo off the page, so the
     /// head leaves its box empty.
     pub lifted: bool,
+    /// Whether the page holds focus, or the browser's strip over it does.
+    pub held: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
@@ -53,12 +55,18 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let series = self.series;
+        // The page's focus while the page holds it, and none while the
+        // browser's strip does, so one mark draws on the glass.
+        let focus = self.held.then_some(series.focus);
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let posters = &mut *self.posters.borrow_mut();
 
         self.header(&mut frame, posters, layout::header(bounds));
 
-        let region = layout::region(bounds);
+        // The rail takes the right edge of the region, and the wall keeps
+        // the rest.
+        let whole = layout::region(bounds);
+        let region = rail::beside_at(whole, &series.bars, rail::Side::Right);
         let cells = wall::lined(region.width, wall::STILL, COLUMNS, card::LINES);
         let inset = (cells.width - cells.poster_width) / 2.0;
         let width = region.width - 2.0 * inset;
@@ -69,7 +77,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             series.stripes.bands().len(),
             series.foot.height(width),
         );
-        let offset = layout.scroll(series.focus, &series.seasons, region.height);
+        let offset = layout.scroll(seasons::standing(series), &series.seasons, region.height);
 
         // The stills draw under the band a held divider keeps, and the
         // dividers over their own clip, because the renderer draws every
@@ -90,8 +98,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     posters,
                     &wall::Grid {
                         items: &series.stills[run.first..run.first + run.count],
-                        focus: match series.focus {
-                            Focus::Still(index)
+                        focus: match focus {
+                            Some(Focus::Still(index))
                                 if index >= run.first && index < run.first + run.count =>
                             {
                                 Some(index - run.first)
@@ -136,8 +144,10 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     &strip::Strip {
                         members: &band.members,
                         current: band.current,
-                        focus: match series.focus {
-                            Focus::Franchise(strip, Place::Member(member)) if strip == index => {
+                        focus: match focus {
+                            Some(Focus::Franchise(strip, Place::Member(member)))
+                                if strip == index =>
+                            {
                                 Some(member)
                             }
                             _ => None,
@@ -147,8 +157,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         last: None,
                         lines: card::LINES,
                         headed: matches!(
-                            series.focus,
-                            Focus::Franchise(strip, Place::Heading) if strip == index
+                            focus,
+                            Some(Focus::Franchise(strip, Place::Heading)) if strip == index
                         ),
                         region: area(
                             inset,
@@ -172,8 +182,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     posters,
                     &people::Stripe {
                         people: &band.faces,
-                        focus: match series.focus {
-                            Focus::Stripe(stripe, slot) if stripe == index => Some(slot),
+                        focus: match focus {
+                            Some(Focus::Stripe(stripe, slot)) if stripe == index => Some(slot),
                             _ => None,
                         },
                         heading: band.heading,
@@ -206,6 +216,20 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                     width - row.indent(),
                 );
             }
+        });
+
+        frame.with_clip(layout::rail_clip(whole), |frame| {
+            rail::draw_at(
+                frame,
+                whole,
+                &series.bars,
+                match focus {
+                    Some(Focus::Rail(bar)) => Some(bar),
+                    _ => None,
+                },
+                rail::Side::Right,
+                rail::Fit::Fitted,
+            );
         });
 
         vec![frame.into_geometry()]
@@ -255,9 +279,11 @@ impl<P: Posters> Page<'_, P> {
         });
         stack.add(layout::LOGO_HEIGHT);
 
+        // The facts line is one line, cut with an ellipsis where a long
+        // list of genres runs past the column, so it never ends on a comma.
         let taken = text::block(
             frame,
-            &series.facts,
+            &text::measured_cut(&series.facts, look::FACTS, column),
             stack.at(),
             look::FACTS,
             look::muted(),

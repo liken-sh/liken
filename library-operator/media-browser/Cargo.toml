@@ -71,6 +71,9 @@ media-screen = { git = "https://github.com/liken-sh/media-operator", tag = "2026
 # body and puts a timeout on every read; the defaults come off because the
 # agent answers on loopback with no TLS and no compression.
 ureq = { version = "=2.12.1", default-features = false }
+# The search fold decomposes every string (NFD) and drops the combining
+# marks, so "Amélie" answers to "amelie".
+unicode-normalization = "=0.1.25"
 
 [dev-dependencies]
 # tempfile holds the fixture databases and the fixture volumes the

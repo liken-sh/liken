@@ -7,7 +7,8 @@
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
 use crate::catalog::{
-    Fold, FranchiseEntry, GenreEntry, LibraryEntry, Order, Query, Source, library_name,
+    Fold, FranchiseEntry, GenreEntry, GenreSort, LibraryEntry, Order, Query, Sort, Source,
+    library_name,
 };
 use crate::screens;
 use crate::screens::wall::Wall;
@@ -28,9 +29,10 @@ pub(super) const LIBRARY: &str = "library";
 // the genre's page and never a title's.
 pub(super) const GENRE: &str = "genre";
 
-// The kind an item of the franchises strip carries, so a select on it opens
-// the franchise's page and never a title's.
-pub(super) const FRANCHISE: &str = "franchise";
+// The kind an item of the franchises strip carries. It is the slots
+// module's word because a search hit on a franchise carries the same
+// one, and both open the franchise's page.
+pub(super) use slots::FRANCHISE;
 
 /// One row of the page as a read: the banner, the slots of one query,
 /// the libraries themselves, the genres themselves, or the franchises
@@ -255,13 +257,15 @@ impl Strip {
         if item.kind == LIBRARY {
             let query = Query::Library {
                 library: item.library.clone(),
+                sort: Sort::default(),
             };
-            return Step::Open(Screen::Wall(Wall::open(query, source)));
+            return Step::Open(Screen::Wall(Box::new(Wall::open(query, source))));
         }
         if item.kind == GENRE {
             let query = Query::Genre {
                 name: item.id.clone(),
                 order: Order::Released,
+                sort: GenreSort::default(),
             };
             return slots::see_all(&query, source);
         }
@@ -295,6 +299,7 @@ fn library_item(entry: LibraryEntry) -> Item {
         caption: name.clone(),
         line: facts::Line::of(&[&name]),
         name,
+        released: String::new(),
         under_fitted: under.clone(),
         under,
         tagline: false,
@@ -319,6 +324,7 @@ fn genre_item(entry: GenreEntry) -> Item {
         caption: entry.name.clone(),
         line: facts::Line::of(&[&entry.name]),
         name: entry.name,
+        released: String::new(),
         under_fitted: titles.clone(),
         under: titles,
         tagline: false,
@@ -347,6 +353,7 @@ fn franchise_item(entry: FranchiseEntry) -> Item {
         caption: entry.title.clone(),
         line: facts::Line::of(&[&entry.title]),
         name: entry.title,
+        released: String::new(),
         under_fitted: under.clone(),
         under,
         tagline: false,
@@ -626,6 +633,7 @@ mod tests {
         let western = Query::Genre {
             name: "Western".into(),
             order: crate::catalog::Order::Released,
+            sort: GenreSort::default(),
         };
         let drawn = vec![Candidate {
             query: western.clone(),
@@ -658,7 +666,8 @@ mod tests {
         assert!(!Row::Franchises.recency());
         assert!(
             !Row::Query(Query::Library {
-                library: "sample/features".into()
+                library: "sample/features".into(),
+                sort: Sort::default(),
             })
             .recency()
         );
@@ -828,6 +837,7 @@ mod tests {
         let mut strip = Strip::new(Row::Query(Query::Genre {
             name: "Drama".into(),
             order: Order::Released,
+            sort: GenreSort::default(),
         }));
         strip.reread(&mut Catalog, 0, &[]);
         let serial = strip

@@ -39,7 +39,7 @@ impl Candidate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::Order;
+    use crate::catalog::{GenreSort, Order};
 
     #[test]
     fn a_candidates_kind_is_its_querys_shape() {
@@ -47,6 +47,7 @@ mod tests {
             query: Query::Genre {
                 name: "Western".into(),
                 order: Order::Released,
+                sort: GenreSort::default(),
             },
             name: "Western".into(),
             weight: 5,

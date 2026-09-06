@@ -126,13 +126,14 @@ pub fn draw(date: Date, pool: &[Candidate]) -> Vec<Candidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::{Order, Query};
+    use crate::catalog::{GenreSort, Order, Query};
 
     fn genre(name: &str, weight: u64) -> Candidate {
         Candidate {
             query: Query::Genre {
                 name: name.into(),
                 order: Order::Released,
+                sort: GenreSort::default(),
             },
             name: name.into(),
             weight,

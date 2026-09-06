@@ -49,7 +49,7 @@ fn a_select_on_a_series_opens_its_page() {
     let page = showing_series(&browser);
     assert_eq!(browser.stack.len(), 2);
     assert_eq!(page.id, "series:1");
-    assert_eq!(page.facts, "1980 · 2 seasons · TV-14");
+    assert_eq!(page.facts, "1980 · 2 seasons · TV-14 · Adventure, Mystery");
     assert_eq!(page.seasons.len(), 2);
     assert_eq!(page.stills.len(), 8);
     assert_eq!(page.stills[0].fitted, "Segment 1");
@@ -171,50 +171,40 @@ fn an_empty_wall_selects_nothing() {
 }
 
 #[test]
-fn up_from_the_first_row_reaches_the_band_and_down_gives_the_focus_back() {
+fn up_from_the_first_row_reaches_the_strip_and_down_gives_the_focus_back() {
     let mut browser = browser(20);
     browser.key("enter");
     browser.key("right");
 
     browser.key("up");
 
-    assert_eq!(showing_wall(&browser).control, Some(0));
+    assert!(browser.on_strip);
     browser.key("right");
-    assert_eq!(showing_wall(&browser).control, Some(1));
     browser.key("left");
-    browser.key("left");
-    assert_eq!(showing_wall(&browser).control, Some(0));
+    assert!(browser.on_strip);
 
     browser.key("down");
 
-    assert_eq!(showing_wall(&browser).control, None);
+    assert!(!browser.on_strip);
     assert_eq!(showing_wall(&browser).slots.focus, 1);
 }
 
 #[test]
-fn the_band_reaches_no_further_than_its_three_controls() {
-    let mut browser = browser(20);
-    browser.key("enter");
-    browser.key("up");
-    for _ in 0..band::CONTROLS.len() + 2 {
-        browser.key("right");
-    }
-    assert_eq!(
-        showing_wall(&browser).control,
-        Some(band::CONTROLS.len() - 1)
-    );
-}
-
-#[test]
-fn a_select_in_the_band_opens_nothing() {
+fn select_on_the_strip_over_a_wall_opens_search_with_the_grid() {
     let mut browser = browser(20);
     browser.key("enter");
     browser.key("up");
 
     browser.key("enter");
 
-    assert_eq!(browser.stack.len(), 1);
-    assert_eq!(showing_wall(&browser).control, Some(0));
+    assert!(!browser.on_strip);
+    assert_eq!(browser.stack.len(), 2);
+    let search = showing_wall(&browser)
+        .search
+        .as_ref()
+        .expect("the wall types");
+    assert_eq!(search.field.text(), "");
+    assert!(search.keyboard.is_some());
 }
 
 #[test]
@@ -225,7 +215,7 @@ fn up_from_a_later_row_stays_on_the_wall() {
 
     browser.key("up");
 
-    assert_eq!(showing_wall(&browser).control, None);
+    assert!(!browser.on_strip);
     assert_eq!(showing_wall(&browser).slots.focus, 0);
 }
 

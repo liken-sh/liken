@@ -4,6 +4,7 @@ use std::path::Path;
 
 use serde_json::json;
 
+use crate::catalog::search::Size;
 use crate::posters::PosterCounts;
 
 pub struct Stats {
@@ -21,6 +22,9 @@ pub struct Stats {
     rss_mib: Vec<f64>,
     next_rss_at: f64,
     poster_counts: PosterCounts,
+    /// How large the search index is, or nothing on a run whose source
+    /// holds none.
+    index: Option<Size>,
 }
 
 impl Stats {
@@ -36,6 +40,7 @@ impl Stats {
             rss_mib: Vec::new(),
             next_rss_at: 0.0,
             poster_counts: PosterCounts::default(),
+            index: None,
         }
     }
 
@@ -81,9 +86,16 @@ impl Stats {
         self.poster_counts = counts;
     }
 
+    /// Record how large the search index was at the end of the run. A
+    /// source that holds no index records nothing, and the report then
+    /// leaves both numbers out.
+    pub fn index_size(&mut self, size: Option<Size>) {
+        self.index = size;
+    }
+
     /// The measurements, as the file holds them.
     pub fn report(&self) -> serde_json::Value {
-        json!({
+        let mut report = json!({
             "backend": self.backend,
             "adapter": self.adapter,
             "width": self.size.0,
@@ -99,7 +111,15 @@ impl Stats {
             "loop_ms_p99": rounded(percentile(&self.loop_ms, 0.99), 3),
             "rss_mib": self.rss_mib.iter().map(|value| rounded(*value, 1)).collect::<Vec<_>>(),
             "rss_mib_max": rounded(self.rss_mib.iter().copied().fold(0.0_f64, f64::max), 1),
-        })
+        });
+        // The two search numbers stand in the report only where the run
+        // had an index, so a run on a source with none says nothing about
+        // one rather than reporting a zero it never measured.
+        if let Some(size) = self.index {
+            report["search_entries"] = json!(size.entries);
+            report["search_mib"] = rounded(size.bytes as f64 / MIB, 2);
+        }
+        report
     }
 
     pub fn write(&self, path: &Path) {
@@ -109,6 +129,9 @@ impl Stats {
         }
     }
 }
+
+// The bytes in a mebibyte, the unit the index's size reports in.
+const MIB: f64 = 1024.0 * 1024.0;
 
 /// A measured duration in milliseconds, the unit the frame numbers are kept in.
 pub fn millis(elapsed: std::time::Duration) -> f64 {
@@ -196,6 +219,24 @@ mod tests {
         assert_eq!(report["seconds_to_first_frame"], json!(1.0));
         assert_eq!(report["posters_from_cache"], json!(0));
         assert_eq!(report["posters_from_source"], json!(0));
+    }
+
+    #[test]
+    fn the_report_carries_the_search_index_only_where_the_run_had_one() {
+        let mut stats = measured();
+        assert_eq!(stats.report()["search_entries"], json!(null));
+        assert_eq!(stats.report()["search_mib"], json!(null));
+
+        stats.index_size(Some(Size {
+            entries: 4_096,
+            items: 900,
+            words: 3_000,
+            bytes: 3 * 1024 * 1024 / 2,
+        }));
+
+        let report = stats.report();
+        assert_eq!(report["search_entries"], json!(4_096));
+        assert_eq!(report["search_mib"], json!(1.5));
     }
 
     #[test]

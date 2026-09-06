@@ -76,13 +76,11 @@ impl Block {
     }
 }
 
-/// The home page: the heading as the band draws it, the control that
-/// holds focus or nothing while a row holds it, the rows in the page's
-/// order, and the row that holds focus.
+/// The home page: the heading as the band draws it, the rows in the
+/// page's order, and the row that holds focus.
 #[derive(Debug)]
 pub struct Home {
     pub heading: String,
-    pub control: Option<usize>,
     pub blocks: Vec<Block>,
     pub focus: usize,
 }
@@ -92,7 +90,6 @@ impl Home {
     pub fn open(source: &mut dyn Source) -> Self {
         let mut home = Self {
             heading: HEADING.to_string(),
-            control: None,
             blocks: Vec::new(),
             focus: 0,
         };
@@ -156,16 +153,15 @@ impl Home {
         })
     }
 
-    // Where focus lands after a read: the strip it was on, or the nearest
-    // strip below or above it that holds anything, or the band where no
-    // strip does.
+    // Where focus lands after a read: the row it was on, or the nearest
+    // row below or above it that holds anything, or where it was when
+    // no row holds anything.
     fn settle(&mut self) {
         if self.holds(self.focus) {
             return;
         }
-        match self.below(self.focus).or_else(|| self.above(self.focus)) {
-            Some(index) => self.focus = index,
-            None => self.control = Some(0),
+        if let Some(index) = self.below(self.focus).or_else(|| self.above(self.focus)) {
+            self.focus = index;
         }
     }
 
@@ -185,24 +181,21 @@ impl Home {
         (index + 1..self.blocks.len()).find(|index| self.holds(*index))
     }
 
-    /// Fold one press in. In the band, left and right move across the
-    /// controls, select does nothing, and down returns to the row the page
-    /// remembers. On the rows, up and down move between them, up from the
-    /// first reaches the band, left and right move inside one, and select
-    /// opens what the row names.
+    /// Focus back on the first row, the banner. Home pressed on the home
+    /// page lands here, so the key means the top everywhere.
+    pub fn top(&mut self) {
+        self.focus = 0;
+    }
+
+    /// Fold one press in. Up and down move between the rows, left and
+    /// right move inside one, and select opens what the row names. Up
+    /// from the first row moves nothing, which is how a press reaches
+    /// the browser's strip.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
-        if let Some(control) = self.control {
-            match key {
-                "down" if self.holds(self.focus) => self.control = None,
-                "down" | "enter" => {}
-                _ => self.control = Some(focus::row(control, band::SEARCH_ONLY.len(), key)),
-            }
-            return Step::Stay;
-        }
         match key {
             "up" => match self.above(self.focus) {
                 Some(index) => self.focus = index,
-                None => self.control = Some(0),
+                None => return Step::Still,
             },
             "down" => {
                 if let Some(index) = self.below(self.focus) {
@@ -225,14 +218,13 @@ impl Home {
     /// banner or a title holds focus, because a select opens a page over a
     /// backdrop.
     pub fn prefetches(&self) -> bool {
-        self.control.is_none()
-            && match self.blocks.get(self.focus) {
-                Some(Block::Banner(banner)) => !banner.is_empty(),
-                Some(Block::Strip(strip)) => strip
-                    .focused()
-                    .is_some_and(|item| item.kind != LIBRARY && item.kind != GENRE),
-                None => false,
-            }
+        match self.blocks.get(self.focus) {
+            Some(Block::Banner(banner)) => !banner.is_empty(),
+            Some(Block::Strip(strip)) => strip
+                .focused()
+                .is_some_and(|item| item.kind != LIBRARY && item.kind != GENRE),
+            None => false,
+        }
     }
 
     /// The library and the backdrop the focused title's page draws over,
@@ -255,6 +247,7 @@ impl Home {
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
+        held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let ground = canvas(Ground {
             home: self,
@@ -266,11 +259,12 @@ impl Home {
         let front = canvas(Program {
             home: self,
             posters,
+            held,
         })
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let band = band::layer(&self.heading, &band::SEARCH_ONLY, self.control);
+        let band = band::layer(&self.heading);
         Stack::with_children(vec![ground, front, band])
             .width(Length::Fill)
             .height(Length::Fill)
@@ -339,6 +333,8 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, P> 
 struct Program<'a, P> {
     home: &'a Home,
     posters: &'a RefCell<P>,
+    // Whether the page holds focus, or the browser's strip over it does.
+    held: bool,
 }
 
 impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P> {
@@ -365,7 +361,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                 if region.y + region.height < band::HEIGHT || region.y > bounds.height {
                     continue;
                 }
-                let focused = home.control.is_none() && home.focus == index;
+                let focused = self.held && home.focus == index;
                 match block {
                     Block::Banner(banner) => {
                         let Some(title) = banner.focused() else {
@@ -439,13 +435,8 @@ mod tests {
     }
 
     #[test]
-    fn the_band_prefetches_nothing_and_a_press_past_the_rows_moves_nothing() {
+    fn a_press_past_the_rows_prefetches_nothing_and_moves_nothing() {
         let mut home = Home::open(&mut Catalog);
-        home.control = Some(0);
-        assert!(!home.prefetches());
-        assert_eq!(home.resting(&mut Catalog), None);
-
-        home.control = None;
         home.focus = 99;
         assert!(!home.prefetches());
         assert!(matches!(home.key("enter", &mut Catalog), Step::Stay));

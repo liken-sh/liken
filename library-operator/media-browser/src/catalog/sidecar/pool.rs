@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use super::collect;
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::WORKS_FLOOR;
-use crate::catalog::{Order, Query};
+use crate::catalog::{GenreSort, Order, Query};
 
 /// Every candidate: the genres, then the people, then the sets, each
 /// with its weight. The order of the answer is fixed by name, so the draw
@@ -31,6 +31,7 @@ fn genres(connection: &Connection) -> rusqlite::Result<Vec<Candidate>> {
             query: Query::Genre {
                 name: name.clone(),
                 order: Order::Released,
+                sort: GenreSort::default(),
             },
             name,
             weight: weight(row.get(1)?),

@@ -3,10 +3,10 @@
 
 use super::{
     ARRIVALS_FROM, DAY, FEATURES, IMPORT_STEP_DAYS, IN_SETS, MOVIES, PER_SET, SERIALS,
-    SERIALS_LIBRARY, movie, movie_arrival, people, serial_slot,
+    SERIALS_LIBRARY, movie, movie_arrival, people, serial_slot, sorted,
 };
 use crate::catalog::pool::Candidate;
-use crate::catalog::{GenreEntry, Order, Query, Slot, TILE_CANDIDATES, unrepeated};
+use crate::catalog::{GenreEntry, GenreSort, Order, Query, Slot, TILE_CANDIDATES, unrepeated};
 
 // The invented genres. Every movie carries one or two of them by its
 // number, so every genre has titles that lead with it and titles that
@@ -37,31 +37,40 @@ fn serial_arrival(number: i64) -> i64 {
 }
 
 /// The genre query as the sample answers it: every movie and serial
-/// that carries the genre, the titles that lead with it first, then
-/// newest by the order's column, then by id, which is the sidecar's own
-/// order.
-pub fn titles(name: &str, order: Order) -> Vec<Slot> {
+/// that carries the genre, in the order the sort names, then by library
+/// and id, which is the sidecar's own order.
+// `Leads` keeps the rank-first order. The three plain sorts drop the
+// rank and read the way the library wall's do.
+pub fn titles(name: &str, order: Order, sort: GenreSort) -> Vec<Slot> {
     let mut found: Vec<(usize, i64, Slot)> = Vec::new();
     for number in 1..=MOVIES {
         if let Some(rank) = movie_genres(number).iter().position(|genre| genre == name) {
-            let slot = Slot::of(FEATURES, "movies", movie(number));
-            found.push((rank, movie_arrival(number), slot));
+            found.push((
+                rank,
+                movie_arrival(number),
+                Slot::of(FEATURES, "movies", movie(number)),
+            ));
         }
     }
     for number in 1..=SERIALS {
         if let Some(rank) = serial_genres().iter().position(|genre| genre == name) {
-            let slot = serial_slot(SERIALS_LIBRARY, number);
-            found.push((rank, serial_arrival(number), slot));
+            found.push((
+                rank,
+                serial_arrival(number),
+                serial_slot(SERIALS_LIBRARY, number),
+            ));
         }
     }
     found.sort_by(|(rank, added, slot), (other_rank, other_added, other)| {
-        rank.cmp(other_rank)
-            .then_with(|| match order {
+        match sort {
+            GenreSort::Leads => rank.cmp(other_rank).then_with(|| match order {
                 Order::Released => other.released.cmp(&slot.released),
                 Order::Added => other_added.cmp(added),
-            })
-            .then_with(|| slot.library.cmp(&other.library))
-            .then_with(|| slot.id.cmp(&other.id))
+            }),
+            GenreSort::By(plain) => sorted(plain, slot, other),
+        }
+        .then_with(|| slot.library.cmp(&other.library))
+        .then_with(|| slot.id.cmp(&other.id))
     });
     found.into_iter().map(|(_, _, slot)| slot).collect()
 }
@@ -75,7 +84,7 @@ pub fn genres() -> Vec<GenreEntry> {
     let mut entries: Vec<GenreEntry> = names
         .into_iter()
         .map(|name| {
-            let slots = titles(name, Order::Released);
+            let slots = titles(name, Order::Released, GenreSort::Leads);
             GenreEntry {
                 name: name.to_string(),
                 titles: slots.len() as u64,
@@ -108,6 +117,7 @@ pub fn pool() -> Vec<Candidate> {
                 query: Query::Genre {
                     name: name.to_string(),
                     order: Order::Released,
+                    sort: GenreSort::default(),
                 },
                 name: name.to_string(),
                 weight,
@@ -148,9 +158,9 @@ fn weight_of(genres: &[String], name: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::Source;
     use crate::catalog::pool::Kind;
     use crate::catalog::recency::WORKS_FLOOR;
+    use crate::catalog::{Sort, Source};
     use crate::sample::Catalog;
 
     #[test]
@@ -167,6 +177,7 @@ mod tests {
         let answer = catalog.wall(&Query::Genre {
             name: "Western".into(),
             order: Order::Released,
+            sort: GenreSort::Leads,
         });
         assert_eq!(answer.name, "Western");
         assert!(!answer.slots.is_empty());
@@ -188,7 +199,7 @@ mod tests {
 
     #[test]
     fn drama_reads_the_serials_beside_the_movies_and_by_arrival_on_request() {
-        let released = titles("Drama", Order::Released);
+        let released = titles("Drama", Order::Released, GenreSort::Leads);
         assert!(released.iter().any(|slot| slot.kind == "series"));
         let leading: Vec<&Slot> = released
             .iter()
@@ -202,10 +213,44 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0].released >= pair[1].released)
         );
-        let added = titles("Drama", Order::Added);
+        let added = titles("Drama", Order::Added, GenreSort::Leads);
         assert_eq!(added.len(), released.len());
         assert_ne!(added[0].id, released[0].id);
-        assert!(titles("Musical", Order::Released).is_empty());
+        assert!(titles("Musical", Order::Released, GenreSort::Leads).is_empty());
+    }
+
+    #[test]
+    fn a_genre_wall_answers_each_of_its_four_orders() {
+        let ids = |sort| -> Vec<String> {
+            titles("Western", Order::Released, sort)
+                .into_iter()
+                .map(|slot| slot.id)
+                .collect()
+        };
+        let leads = ids(GenreSort::Leads);
+        let newest = ids(GenreSort::By(Sort::Newest));
+        let oldest = ids(GenreSort::By(Sort::Oldest));
+        let titled = ids(GenreSort::By(Sort::Title));
+        assert_eq!(leads.len(), newest.len());
+        assert_ne!(leads, newest);
+
+        let released = |id: &str| movie(crate::sample::trailing(id)).released;
+        assert!(
+            newest
+                .windows(2)
+                .all(|pair| released(&pair[0]) >= released(&pair[1]))
+        );
+        assert!(
+            oldest
+                .windows(2)
+                .all(|pair| released(&pair[0]) <= released(&pair[1]))
+        );
+        let titles = |id: &str| movie(crate::sample::trailing(id)).title.to_lowercase();
+        assert!(
+            titled
+                .windows(2)
+                .all(|pair| titles(&pair[0]) <= titles(&pair[1]))
+        );
     }
 
     #[test]
@@ -267,7 +312,7 @@ mod tests {
             .expect("the sample invents Western");
         assert_eq!(
             western.titles,
-            titles("Western", Order::Released).len() as u64
+            titles("Western", Order::Released, GenreSort::Leads).len() as u64
         );
         assert!(western.art.iter().all(|(library, _)| library == FEATURES));
     }
@@ -282,7 +327,7 @@ mod tests {
         let leading = (1..=MOVIES)
             .filter(|number| movie_genres(*number)[0] == "Western")
             .count() as u64;
-        let carrying = titles("Western", Order::Released).len() as u64;
+        let carrying = titles("Western", Order::Released, GenreSort::Leads).len() as u64;
         assert_eq!(western.weight, carrying + leading);
     }
 }

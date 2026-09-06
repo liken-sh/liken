@@ -14,8 +14,9 @@ use iced_widget::canvas;
 use iced_winit::core::Rectangle;
 
 use super::wall::Wall;
-use super::{Item, Screen, Step, credits, movie, person, series};
-use crate::catalog::{Query, Source};
+use super::{Item, Screen, Step, credits, franchise, movie, person, series};
+use crate::catalog::search::PEOPLE;
+use crate::catalog::{Counts, Query, Source};
 use crate::focus;
 use crate::posters::Posters;
 use crate::views::wall;
@@ -63,13 +64,20 @@ impl Slots {
             .collect();
         self.cut = 0..0;
         self.focus = self.focus.min(self.items.len().saturating_sub(1));
-        self.fitted();
+        self.stand(self.focus);
     }
 
-    // Cut the cards of the page around the focus to the band one cell
+    /// Cut the cards of the page around this slot. The rail scrolls the
+    /// wall to rows the focus has not reached, and every card a frame
+    /// draws is cut at the read and never on the frame.
+    pub fn stand(&mut self, index: usize) {
+        self.fitted(index);
+    }
+
+    // Cut the cards of the page around one slot to the band one cell
     // holds, and leave the cards already cut as they are.
-    fn fitted(&mut self) {
-        let page = page(self.focus, self.items.len());
+    fn fitted(&mut self, index: usize) {
+        let page = page(index, self.items.len());
         let band = wall::band(wall::COLUMNS);
         let cut = self.cut.clone();
         for index in page.clone().filter(|index| !cut.contains(index)) {
@@ -84,7 +92,8 @@ impl Slots {
     /// The heading the band draws over these slots: the query's heading
     /// over the name and the count.
     pub fn heading(&self) -> String {
-        self.query.heading(&self.name, self.items.len())
+        let kinds = self.items.iter().map(|item| item.kind.as_str());
+        self.query.heading(&self.name, Counts::of(kinds))
     }
 
     /// Fold one press in. The arrows move across the grid, and select opens
@@ -92,7 +101,7 @@ impl Slots {
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         if key != "enter" {
             self.focus = focus::wall(self.focus, self.items.len(), wall::COLUMNS, key);
-            self.fitted();
+            self.fitted(self.focus);
             return Step::Stay;
         }
         match self.items.get(self.focus) {
@@ -119,20 +128,36 @@ impl Slots {
         marked: bool,
         lines: usize,
     ) {
+        self.draw_at(frame, posters, region, self.focus, marked, lines);
+    }
+
+    /// The same drawing, with the grid standing at the slot the caller
+    /// names instead of the focus. A wall whose rail holds focus stands
+    /// at the slot a select on the focused bar lands on, so the wall
+    /// follows the bar.
+    pub fn draw_at<P: Posters>(
+        &self,
+        frame: &mut canvas::Frame<Renderer>,
+        posters: &mut P,
+        region: Rectangle,
+        standing: usize,
+        marked: bool,
+        lines: usize,
+    ) {
         let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, lines);
         wall::draw(
             frame,
             posters,
             &wall::Grid {
                 items: &self.items,
-                focus: Some(self.focus),
+                focus: Some(standing),
                 marked,
                 library: "",
                 ratio: wall::POSTER,
                 columns: wall::COLUMNS,
                 lines,
                 offset: wall::scrolled(
-                    self.focus,
+                    standing,
                     self.items.len(),
                     wall::COLUMNS,
                     &cells,
@@ -169,14 +194,35 @@ pub fn see_all(query: &Query, source: &mut dyn Source) -> Step {
             None => Step::Stay,
         };
     }
-    Step::Open(Screen::Wall(Wall::open(query.all_titles(), source)))
+    Step::Open(Screen::Wall(Box::new(Wall::open(
+        query.all_titles(),
+        source,
+    ))))
 }
+
+/// The kind word a franchise slot carries, the one kind that opens a
+/// franchise page. The home page's franchises strip and a search hit both
+/// carry it.
+pub const FRANCHISE: &str = "franchise";
+
+/// The kind word a set's slot carries. A search answers one, and it
+/// opens the wall of the set's members.
+pub const SETS: &str = "sets";
 
 /// The page a select on one item opens, by the item's kind: a series
 /// page for a series, the series page focused on the episode for an
-/// episode, and a movie page for everything else. Nothing where the
-/// catalog no longer holds the item.
+/// episode, and a movie page for everything else. A search also answers
+/// three kinds no other wall holds: a set opens the wall of its members,
+/// a franchise opens its page, and a person opens theirs. Nothing where
+/// the catalog no longer holds the item.
 pub fn opened(item: &Item, source: &mut dyn Source) -> Step {
+    if item.kind == SETS {
+        let query = Query::Set {
+            library: item.library.clone(),
+            id: item.id.clone(),
+        };
+        return Step::Open(Screen::Wall(Box::new(Wall::open(query, source))));
+    }
     let page = match (item.kind.as_str(), &item.episode) {
         ("episodes", Some(place)) => series::Series::open_at(
             &item.library,
@@ -187,6 +233,10 @@ pub fn opened(item: &Item, source: &mut dyn Source) -> Step {
         .map(|page| Screen::Series(Box::new(page))),
         ("series", _) => series::Series::open(&item.library, &item.id, source)
             .map(|page| Screen::Series(Box::new(page))),
+        (FRANCHISE, _) => franchise::Franchise::open(&item.library, &item.id, source)
+            .map(|page| Screen::Franchise(Box::new(page))),
+        (PEOPLE, _) => person::Person::open(&item.library, &item.id, source)
+            .map(|page| Screen::Person(Box::new(page))),
         _ => movie::Movie::open(&item.library, &item.id, source)
             .map(|page| Screen::Movie(Box::new(page))),
     };
@@ -214,6 +264,7 @@ pub fn backdrop(item: &Item, source: &mut dyn Source) -> Option<(String, String)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Sort;
     use crate::sample::Catalog;
 
     const LIBRARY: &str = "sample/features";
@@ -232,12 +283,68 @@ mod tests {
     fn a_move_across_the_wall_cuts_the_row_it_reached_and_leaves_the_rest() {
         let query = Query::Library {
             library: LIBRARY.into(),
+            sort: Sort::default(),
         };
         let mut slots = Slots::open(query, &mut Catalog);
         assert_eq!(slots.cut, page(0, slots.items.len()));
         slots.key("down", &mut Catalog);
         assert_eq!(slots.cut, 0..page(slots.focus, slots.items.len()).end);
         assert_eq!(slots.cut.end, (PAGE + 2) * wall::COLUMNS);
+    }
+
+    // The first hit of one search of the invented catalog, which
+    // searches for real.
+    fn hit(text: &str, kind: &str) -> Item {
+        let query = Query::Search {
+            text: text.to_string(),
+        };
+        let slots = Slots::open(query, &mut Catalog);
+        slots
+            .items
+            .into_iter()
+            .find(|item| item.kind == kind)
+            .unwrap_or_else(|| panic!("{text} answers a {kind}"))
+    }
+
+    #[test]
+    fn a_set_a_search_answers_opens_the_wall_of_its_members() {
+        let item = hit("specimen cycle", SETS);
+
+        let Step::Open(Screen::Wall(wall)) = opened(&item, &mut Catalog) else {
+            panic!("a set opens a wall");
+        };
+
+        assert_eq!(
+            wall.slots.query,
+            Query::Set {
+                library: item.library,
+                id: item.id,
+            }
+        );
+        assert!(!wall.slots.items.is_empty());
+    }
+
+    #[test]
+    fn a_franchise_a_search_answers_opens_its_page() {
+        let item = hit("marsh", FRANCHISE);
+
+        let Step::Open(Screen::Franchise(page)) = opened(&item, &mut Catalog) else {
+            panic!("a franchise opens its page");
+        };
+
+        assert_eq!(page.title, "The Marsh Cycle");
+    }
+
+    #[test]
+    fn a_person_a_search_answers_opens_their_page() {
+        let item = hit("player 0001-1", PEOPLE);
+
+        let Step::Open(Screen::Person(page)) = opened(&item, &mut Catalog) else {
+            panic!("a person opens their page");
+        };
+
+        assert_eq!(page.name, item.name);
+        assert_eq!(page.path, item.id);
     }
 
     #[test]
@@ -253,11 +360,12 @@ mod tests {
     fn see_all_on_a_library_opens_a_wall_with_no_head() {
         let query = Query::Library {
             library: LIBRARY.into(),
+            sort: Sort::default(),
         };
         let Step::Open(Screen::Wall(wall)) = see_all(&query, &mut Catalog) else {
             panic!("a library opens a wall");
         };
         assert_eq!(wall.slots.query, query);
-        assert_eq!(wall.head, None);
+        assert_eq!(wall.heading, wall.slots.heading());
     }
 }

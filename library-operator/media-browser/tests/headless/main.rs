@@ -26,12 +26,34 @@ struct Run {
     seconds: f64,
 }
 
-// A directory of this run's own, so one run never reads another's frames.
-fn workspace(name: &str) -> PathBuf {
+// A directory of this run's own, so one run never reads another's
+// frames. The directory goes when the test ends, because the temp dir
+// is tmpfs and every run's frames would otherwise stay in memory. A
+// test that fails keeps its directory, so the frames are there to look
+// at.
+struct Workspace(PathBuf);
+
+impl std::ops::Deref for Workspace {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
+fn workspace(name: &str) -> Workspace {
     let dir = std::env::temp_dir().join(format!("media-browser-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the run needs a directory of its own");
-    dir
+    Workspace(dir)
 }
 
 // Run the media browser under cage with these flags and wait for it to end.

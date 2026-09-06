@@ -7,7 +7,7 @@ use crate::catalog::recency::{self, Candidate};
 use crate::catalog::{
     Answer, Credit, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
     LibraryEntry, Membership, MovieDetails, MovieSet, Person, PlayItem, Query, Selection,
-    SeriesDetails, Slot, Source, TILES, Title, library_name, pool,
+    SeriesDetails, Slot, Sort, Source, TILES, Title, library_name, pool,
 };
 use crate::harness::Waker;
 use crate::posters::{Art, Posters};
@@ -21,6 +21,10 @@ mod draw;
 // The invented franchises: the two orders the strip and the franchise
 // page draw.
 mod orders;
+
+// The search index over the invented rows, so a local run with no
+// catalog and a test search the way a run over a sidecar does.
+mod search;
 
 // Enough movies to exercise the wall's culling, near the
 // head-to-head's five thousand.
@@ -93,9 +97,9 @@ impl Source for Catalog {
 
     fn wall(&mut self, query: &Query) -> Answer {
         match query {
-            Query::Library { library } => Answer {
+            Query::Library { library, sort } => Answer {
                 name: library_name(library).to_string(),
-                slots: titles(library),
+                slots: titles(library, *sort),
             },
             Query::Person { library, path } => Answer {
                 name: people::person(library, path)
@@ -125,12 +129,20 @@ impl Source for Catalog {
                 name: String::new(),
                 slots: recency::filled(*fold, recent(added_of)),
             },
-            Query::Genre { name, order } => Answer {
+            Query::Genre { name, order, sort } => Answer {
                 name: name.clone(),
-                slots: draw::titles(name, *order),
+                slots: draw::titles(name, *order, *sort),
             },
             Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
+            Query::Search { text } => Answer {
+                name: String::new(),
+                slots: search::index().find(text),
+            },
         }
+    }
+
+    fn index_size(&mut self) -> Option<crate::catalog::search::Size> {
+        Some(search::index().size())
     }
 
     fn pool(&mut self) -> Vec<pool::Candidate> {
@@ -311,15 +323,32 @@ const PLOT: &str = "A survey party reaches the coppice at dusk and finds the gro
 // One library's invented slots: the movies for the features library,
 // and the serials for any other, each slot stamped with that library and
 // its kind.
-fn titles(library: &str) -> Vec<Slot> {
-    if library == FEATURES {
-        return (1..=MOVIES)
-            .map(|number| Slot::of(library, "movies", movie(number)))
-            .collect();
+// How one plain sort compares two invented slots, in the order the
+// sidecar's ORDER BY answers: the release, then the title, which takes
+// the place of the catalog's sort key here.
+pub(super) fn sorted(sort: Sort, one: &Slot, other: &Slot) -> std::cmp::Ordering {
+    let key = |slot: &Slot| slot.title.to_lowercase();
+    let title = || key(one).cmp(&key(other));
+    match sort {
+        Sort::Title => title(),
+        Sort::Newest => other.released.cmp(&one.released).then_with(title),
+        Sort::Oldest => one.released.cmp(&other.released).then_with(title),
     }
-    (1..=SERIALS)
-        .map(|number| serial_slot(library, number))
-        .collect()
+}
+
+// The sample has no SQL, so it sorts its invented rows here, in the
+// same order the sidecar's ORDER BY answers.
+fn titles(library: &str, sort: Sort) -> Vec<Slot> {
+    let mut slots: Vec<Slot> = match library == FEATURES {
+        true => (1..=MOVIES)
+            .map(|number| Slot::of(library, "movies", movie(number)))
+            .collect(),
+        false => (1..=SERIALS)
+            .map(|number| serial_slot(library, number))
+            .collect(),
+    };
+    slots.sort_by(|one, other| sorted(sort, one, other));
+    slots
 }
 
 // The tagline of one invented movie. Every third movie has none, so a

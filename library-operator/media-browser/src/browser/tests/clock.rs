@@ -1,5 +1,5 @@
-// The frame the clock at the top of every screen asks for, at the second
-// the minute turns.
+// The frame the strip at the top of every screen asks for, at the
+// second the minute turns.
 
 use super::*;
 
@@ -32,42 +32,42 @@ fn a_covered_browser_asks_for_no_frame_when_the_minute_turns() {
 
     assert!(browser.asleep());
     assert_eq!(browser.next_frame(1.0), None);
-    assert_eq!(browser.face(), None);
+    assert!(browser.strip().is_none());
 }
 
 #[test]
-fn the_clock_draws_over_every_screen_the_stack_holds() {
+fn the_strip_draws_over_every_screen_the_stack_holds() {
     let mut browser = browser(3);
     browser.source.people = true;
-    assert!(browser.face().is_some(), "the home page");
+    assert!(browser.strip().is_some(), "the home page");
 
     browser.key("enter");
     let _ = showing_wall(&browser);
-    assert!(browser.face().is_some(), "a wall");
+    assert!(browser.strip().is_some(), "a wall");
 
     browser.key("enter");
     let _ = showing_page(&browser);
-    assert!(browser.face().is_some(), "a movie page");
+    assert!(browser.strip().is_some(), "a movie page");
 
     browser.key("down");
     browser.key("enter");
     let _ = showing_person(&browser);
-    assert!(browser.face().is_some(), "a person's page");
+    assert!(browser.strip().is_some(), "a person's page");
 }
 
 #[test]
-fn the_clock_draws_over_a_series_page() {
+fn the_strip_draws_over_a_series_page() {
     let mut browser = browser(3);
     browser.key("right");
     browser.key("enter");
     browser.key("enter");
 
     let _ = showing_series(&browser);
-    assert!(browser.face().is_some());
+    assert!(browser.strip().is_some());
 }
 
 #[test]
-fn the_view_builds_with_the_clock_over_it() {
+fn the_view_builds_with_the_strip_over_it() {
     let mut browser = browser(3);
     browser.tick(1.0);
 

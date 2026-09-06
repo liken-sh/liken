@@ -1,5 +1,6 @@
 // The screens the browser draws under a real compositor: the wall and
-// its band, and a movie's page over the art a volume holds.
+// its band, the strip over every screen, and a movie's page over the art
+// a volume holds.
 
 use iced_winit::core::Color;
 
@@ -73,18 +74,19 @@ fn a_descent_draws_the_wall() {
     drawn(&frame, &run);
 }
 
-// Up from the first row of posters reaches the band, and the frame draws
-// with a control marked.
+// Up from the first row of posters moves nothing on the wall, so focus
+// reaches the strip, and the frame draws the mark around the search
+// icon.
 #[test]
-fn the_band_takes_focus_on_a_wall() {
-    let dir = workspace("band");
+fn the_strip_takes_focus_on_a_wall() {
+    let dir = workspace("strip");
     let frames = dir.join("frames");
 
     let run = headless(
         &dir,
         &[
             "--script",
-            "0.5:enter,0.9:up,1.1:right",
+            "0.5:enter,0.9:up",
             "--capture",
             &text(&frames),
             "--capture-at",
@@ -100,10 +102,69 @@ fn the_band_takes_focus_on_a_wall() {
     drawn(&frames.join("001.40.png"), &run);
 }
 
-// The clock is the browser's own layer over whatever screen is on the
-// stack, so the home page, a wall, and a movie page all carry it in the
-// same box. The box holds the reading alone: the band's controls end a
-// margin to the left of it, and a page draws nothing there.
+// The search wall draws the field a person types in, which is the
+// strip's layer, and, while it is shown, the grid a remote with no
+// keyboard picks from. The grid is between the band and the results, so
+// both frames draw the layer the wall stacks over its band.
+#[test]
+fn the_search_wall_draws_its_field_and_its_grid() {
+    let dir = workspace("search");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.5:search,0.9:right,1.1:enter,1.6:s,1.9:e",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "1.4,2.2",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    // The first frame carries the grid, and the second carries the
+    // results the typing narrowed to, with the grid gone.
+    drawn(&frames.join("001.40.png"), &run);
+    drawn(&frames.join("002.20.png"), &run);
+}
+
+// Up from the first row of a search wall puts focus on the strip, and
+// the mark then goes around the field the icon expanded into.
+#[test]
+fn the_field_takes_focus_on_a_search_wall() {
+    let dir = workspace("field");
+    let frames = dir.join("frames");
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            "0.5:s,0.9:e,1.3:up",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "1.6",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    drawn(&frames.join("001.60.png"), &run);
+}
+
+// The strip is the browser's layer over whatever screen is on the
+// stack, so the home page, a wall, and a movie page all carry the
+// reading in the same box. The box holds the reading alone: the search
+// icon ends a margin to the left of it, and a page draws nothing there.
 #[test]
 fn the_clock_draws_at_the_top_right_of_every_screen() {
     let dir = workspace("clock");
@@ -393,14 +454,21 @@ fn a_level_of(name: &str, payload: &str) -> Frame {
     assert_eq!(run.exit, "0", "{}", run.log);
     let path = frames.join("004.00.png");
     drawn(&path, &run);
-    Frame { path, run }
+    Frame {
+        path,
+        run,
+        _dir: dir,
+    }
 }
 
 // A captured frame, and the run that wrote it, so a failed reading reports
 // the log of the run it came from.
+// The run's directory is held here because it removes itself when it
+// drops, and the frame is read after `a_level_of` answers.
 struct Frame {
     path: PathBuf,
     run: Run,
+    _dir: Workspace,
 }
 
 // The row draws its parts at full opacity over the frame under it, so a

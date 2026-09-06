@@ -262,9 +262,34 @@ pub fn upward(
     size: f32,
     color: Color,
 ) {
+    turned(frame, content, at, size, color, -FRAC_PI_2);
+}
+
+/// The same quarter turn the other way, so the line reads from the head
+/// of the box to its foot, the way a title reads down the spine of a
+/// book. `upward` above says why the caller cuts the words to the box.
+pub fn downward(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    at: Rectangle,
+    size: f32,
+    color: Color,
+) {
+    turned(frame, content, at, size, color, FRAC_PI_2);
+}
+
+// One line turned this far about the middle of its box.
+fn turned(
+    frame: &mut canvas::Frame<Renderer>,
+    content: &str,
+    at: Rectangle,
+    size: f32,
+    color: Color,
+    angle: f32,
+) {
     frame.with_save(|frame| {
         frame.translate(Vector::new(at.center_x(), at.center_y()));
-        frame.rotate(-FRAC_PI_2);
+        frame.rotate(angle);
         frame.fill_text(label(
             content,
             Point::ORIGIN,

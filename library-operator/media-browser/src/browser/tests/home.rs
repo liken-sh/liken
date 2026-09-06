@@ -2,6 +2,7 @@
 // focus, what a select opens, and what a rest asks the store for.
 
 use super::*;
+use crate::catalog::{GenreSort, Sort};
 
 // A browser whose recency strips hold an airing episode, a folded
 // serial, and a movie.
@@ -60,7 +61,6 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
         ]
     );
     assert_eq!(home.focus, 1);
-    assert_eq!(home.control, None);
 
     let strips = strips(&browser);
     let released = strips[0];
@@ -121,7 +121,7 @@ fn right_reaches_see_all_and_no_further() {
 }
 
 #[test]
-fn up_from_the_first_strip_reaches_the_banner_then_the_band_and_down_returns() {
+fn up_from_the_first_strip_reaches_the_banner_then_the_strip_and_down_returns() {
     let mut browser = on_strips(3);
     browser.key("right");
 
@@ -129,31 +129,36 @@ fn up_from_the_first_strip_reaches_the_banner_then_the_band_and_down_returns() {
     assert_eq!(showing_home(&browser).focus, 0);
     browser.key("up");
 
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(browser.on_strip);
     browser.key("right");
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(browser.on_strip);
     browser.key("left");
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(browser.on_strip);
+    // Select on the strip opens the search wall, and back leaves the
+    // strip without focus, because the stack changed under it.
     browser.key("enter");
+    assert_eq!(browser.stack.len(), 1);
+    browser.key("escape");
     assert!(browser.stack.is_empty());
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(!browser.on_strip);
 
+    browser.key("up");
     browser.key("down");
 
-    assert_eq!(showing_home(&browser).control, None);
+    assert!(!browser.on_strip);
     assert_eq!(showing_home(&browser).focus, 0);
     browser.key("down");
     assert_eq!(at(&browser), (1, 1));
 }
 
 #[test]
-fn an_empty_strip_is_skipped_and_up_from_the_libraries_reaches_the_band() {
+fn an_empty_strip_is_skipped_and_up_from_the_libraries_reaches_the_strip() {
     let mut browser = browser(3);
     assert_eq!(at(&browser), (3, 0));
 
     browser.key("up");
 
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(browser.on_strip);
     browser.key("down");
     assert_eq!(at(&browser), (3, 0));
 }
@@ -275,11 +280,11 @@ fn a_select_on_a_library_opens_its_wall() {
 
     let wall = showing_wall(&browser);
     assert_eq!(wall.heading, "serials · 2");
-    assert_eq!(wall.head, None);
     assert_eq!(
         wall.slots.query,
         Query::Library {
-            library: SERIALS.into()
+            library: SERIALS.into(),
+            sort: Sort::default(),
         }
     );
 }
@@ -311,7 +316,7 @@ fn a_change_that_empties_the_focused_strip_moves_focus_to_the_next() {
 }
 
 #[test]
-fn a_change_that_empties_every_strip_leaves_focus_in_the_band() {
+fn a_change_that_empties_every_strip_leaves_focus_on_a_row_that_holds_titles() {
     let mut browser = with_recent(3);
     browser.source.recent = false;
     browser.source.movies = 0;
@@ -359,7 +364,7 @@ fn a_rest_on_an_episode_asks_for_its_series_backdrop() {
 }
 
 #[test]
-fn a_rest_on_see_all_and_in_the_band_asks_for_nothing() {
+fn a_rest_on_see_all_and_on_the_strip_asks_for_nothing() {
     let mut browser = on_strips(3);
     browser.tick(0.0);
     for _ in 0..3 {
@@ -373,7 +378,7 @@ fn a_rest_on_see_all_and_in_the_band_asks_for_nothing() {
 }
 
 #[test]
-fn the_view_builds_with_strips_and_with_the_band_in_focus() {
+fn the_view_builds_with_strips_and_with_the_strip_in_focus() {
     let mut browser = on_strips(3);
     let _ = browser.view();
     browser.key("down");
@@ -382,7 +387,7 @@ fn the_view_builds_with_strips_and_with_the_band_in_focus() {
     for _ in 0..4 {
         browser.key("up");
     }
-    assert_eq!(showing_home(&browser).control, Some(0));
+    assert!(browser.on_strip);
     let _ = browser.view();
     let _ = super::browser(0).view();
 }
@@ -496,17 +501,18 @@ fn see_all_on_a_genre_strip_opens_the_genre_page() {
     let browser = see_all_on("Western");
 
     let wall = showing_wall(&browser);
-    assert_eq!(wall.heading, "Genre");
+    assert_eq!(
+        wall.heading,
+        format!("Western · {MORE_THAN_SHOWN} movies, 1 series")
+    );
     assert_eq!(
         wall.slots.query,
         Query::Genre {
             name: "Western".into(),
             order: Order::Released,
+            sort: GenreSort::default(),
         }
     );
-    let head = wall.head.as_ref().expect("the genre page carries a head");
-    assert_eq!(head.name, "Western");
-    assert_eq!(head.facts, format!("{MORE_THAN_SHOWN} movies · 1 series"));
 }
 
 #[test]
@@ -517,11 +523,10 @@ fn a_reread_of_a_genre_page_counts_its_slots_again() {
     browser.source.changed = true;
     browser.pump(1.0);
 
-    let head = showing_wall(&browser)
-        .head
-        .as_ref()
-        .expect("the genre page carries a head");
-    assert_eq!(head.facts, "1 movie · 1 series");
+    assert_eq!(
+        showing_wall(&browser).heading,
+        "Western · 1 movie, 1 series"
+    );
 }
 
 #[test]
@@ -608,16 +613,13 @@ fn a_select_on_a_genre_opens_the_genres_page() {
     browser.key("enter");
 
     let wall = showing_wall(&browser);
-    assert_eq!(wall.heading, "Genre");
-    assert_eq!(
-        wall.head.as_ref().map(|head| head.name.as_str()),
-        Some("Western")
-    );
+    assert!(wall.heading.starts_with("Western · "), "{}", wall.heading);
     assert_eq!(
         wall.slots.query,
         Query::Genre {
             name: "Western".into(),
             order: Order::Released,
+            sort: GenreSort::default(),
         }
     );
 }

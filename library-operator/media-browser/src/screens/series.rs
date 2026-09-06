@@ -8,6 +8,7 @@
 
 mod layout;
 mod page;
+mod seasons;
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -19,11 +20,11 @@ use super::franchise::strips::{self, Move, Place, Strips};
 use super::movie::franchise_press;
 use super::{Screen, Step, facts, foot, person, stripes};
 use crate::catalog::draw::Date;
-use crate::catalog::{Episode, Selection, SeriesDetails, Source};
+use crate::catalog::{Selection, SeriesDetails, Source};
 use crate::focus::{self, Run};
 use crate::posters::Posters;
 use crate::views::curtain::{Curtain, Head, Layer};
-use crate::views::{Card, card, layers, ratings, wall};
+use crate::views::{Card, layers, rail, ratings};
 
 /// How many stills a row of the episode wall holds. A still is wider
 /// than a poster, so the wall holds fewer across.
@@ -34,6 +35,8 @@ pub const COLUMNS: usize = 4;
 pub enum Focus {
     /// One still of the episode wall.
     Still(usize),
+    /// One bar of the seasons rail.
+    Rail(usize),
     /// One rung of the franchise strips: which strip, and the heading or
     /// the member in it.
     Franchise(usize, Place),
@@ -146,6 +149,12 @@ pub struct Series {
     pub seasons: Vec<Season>,
     /// Every episode of the series, in aired order.
     pub stills: Vec<Still>,
+    /// The bars of the rail beside the wall, one per season or per range
+    /// of seasons, and none on a series of four seasons or fewer.
+    pub bars: Vec<rail::Bar>,
+    /// The still the wall last held, which a left press on the rail
+    /// returns to.
+    entered: usize,
     /// Where focus is.
     pub focus: Focus,
 }
@@ -186,7 +195,9 @@ impl Series {
     // The page before its foot is read, with focus on the first episode.
     fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.series(library, id)?;
-        let (stills, seasons) = wall_of(source.episodes(library, id), &Date::today().iso());
+        let (stills, seasons) =
+            seasons::wall_of(source.episodes(library, id), &Date::today().iso());
+        let bars = seasons::bars(&seasons, layout::rail_region());
         Some(Self {
             library: library.to_string(),
             id: id.to_string(),
@@ -203,6 +214,8 @@ impl Series {
             foot: foot::Foot::default(),
             seasons,
             stills,
+            bars,
+            entered: 0,
             focus: Focus::Still(0),
         })
     }
@@ -234,6 +247,8 @@ impl Series {
     fn hold(&self, focus: Focus) -> Focus {
         match focus {
             Focus::Still(index) => Focus::Still(index.min(self.stills.len().saturating_sub(1))),
+            Focus::Rail(..) if self.bars.is_empty() => Focus::Still(0),
+            Focus::Rail(bar) => Focus::Rail(bar.min(self.bars.len() - 1)),
             Focus::Franchise(strip, place) => match self.franchises.held((strip, place)) {
                 Some((strip, place)) => Focus::Franchise(strip, place),
                 None => Focus::Still(0),
@@ -251,7 +266,7 @@ impl Series {
     pub fn focused(&self) -> Option<&Still> {
         match self.focus {
             Focus::Still(index) => self.stills.get(index),
-            Focus::Franchise(..) | Focus::Stripe(..) => None,
+            Focus::Rail(..) | Focus::Franchise(..) | Focus::Stripe(..) => None,
         }
     }
 
@@ -260,20 +275,30 @@ impl Series {
     /// reaches the franchise strips and then the stripes, and select plays
     /// the episode and the rest of its season.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
-        match self.focus {
+        let held = self.focus;
+        let step = match self.focus {
             Focus::Still(index) => self.on_still(index, key, source),
+            Focus::Rail(bar) => self.on_rail(bar, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
+        };
+        // An up that moved nothing is the browser's: the strip over every
+        // screen takes focus on it.
+        match key == "up" && self.focus == held && matches!(step, Step::Stay) {
+            true => Step::Still,
+            false => step,
         }
     }
 
     fn on_still(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
         if key != "enter" {
-            let runs: Vec<Run> = self.seasons.iter().map(|season| season.run).collect();
-            let moved = focus::sectioned(index, &runs, COLUMNS, key);
-            self.focus = match (key, moved == index) {
-                ("down", true) => self.under_wall(moved),
-                _ => Focus::Still(moved),
+            self.entered = index;
+            self.focus = match key {
+                "right" => match seasons::onto(self, index) {
+                    Some(bar) => Focus::Rail(bar),
+                    None => self.moved(index, key),
+                },
+                _ => self.moved(index, key),
             };
             self.refoot(source);
             return Step::Stay;
@@ -289,6 +314,25 @@ impl Series {
                 episode: still.episode,
             },
         }
+    }
+
+    // Where one press inside the wall lands: a still, or the rung under
+    // the wall where down leaves the last row.
+    fn moved(&self, index: usize, key: &str) -> Focus {
+        let runs: Vec<Run> = self.seasons.iter().map(|season| season.run).collect();
+        let moved = focus::sectioned(index, &runs, COLUMNS, key);
+        match (key, moved == index) {
+            ("down", true) => self.under_wall(moved),
+            _ => Focus::Still(moved),
+        }
+    }
+
+    // One press while a bar of the rail holds focus. The foot is read
+    // again because a left or a select puts focus back on a still.
+    fn on_rail(&mut self, bar: usize, key: &str, source: &mut dyn Source) -> Step {
+        self.focus = seasons::key(self, bar, key);
+        self.refoot(source);
+        Step::Stay
     }
 
     // The rung under the last row of stills: the first franchise strip,
@@ -371,6 +415,7 @@ impl Series {
         &'a self,
         posters: &'a RefCell<P>,
         curtain: Option<Curtain>,
+        held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -381,6 +426,7 @@ impl Series {
                 series: self,
                 posters,
                 lifted: curtain.is_some(),
+                held,
             },
             over: curtain.map(|curtain| Layer {
                 library: &self.library,
@@ -402,62 +448,15 @@ impl Head for Series {
     }
 }
 
-// The wall and its dividers out of one read of the episodes. The rows
-// arrive in aired order, so a season starts wherever the season number
-// changes, and its year is the year of the first episode that aired in
-// it.
-fn wall_of(episodes: Vec<Episode>, today: &str) -> (Vec<Still>, Vec<Season>) {
-    let band = wall::band(COLUMNS);
-    let mut stills = Vec::with_capacity(episodes.len());
-    let mut seasons: Vec<Season> = Vec::new();
-    for (index, episode) in episodes.into_iter().enumerate() {
-        match seasons.last_mut() {
-            Some(season) if season.number == episode.season => season.run.count += 1,
-            _ => seasons.push(Season {
-                number: episode.season,
-                name: named(episode.season, facts::year(&episode.released)),
-                run: Run {
-                    first: index,
-                    count: 1,
-                },
-            }),
-        }
-        stills.push(still_of(episode, today, band));
-    }
-    (stills, seasons)
-}
-
-// The divider's heading, with the year of the season's first episode where
-// the catalog holds one.
-fn named(season: i64, year: &str) -> String {
-    match year.is_empty() {
-        true => format!("Season {season}"),
-        false => format!("Season {season} ({year})"),
-    }
-}
-
-fn still_of(episode: Episode, today: &str, band: f32) -> Still {
-    let season = format!("S{:02}", episode.season);
-    let numbered = format!("E{:02}", episode.episode);
-    let runtime = facts::runtime(episode.duration);
-    let under = facts::joined(&[&numbered, &runtime]);
-    Still {
-        id: episode.id,
-        fitted: card::cut(&episode.title, band),
-        under: card::under_cut(&under, band),
-        facts: facts::joined(&[&season, &numbered, &episode.title]),
-        aired: facts::joined(&[&runtime, &facts::date_worded(&episode.released, today)]),
-        season: episode.season,
-        episode: episode.episode,
-        name: episode.title,
-        plot: episode.plot,
-        art: episode.art,
-    }
-}
-
-/// The facts line of one series. The banner reads it too, because it
-/// draws a title the way the page's header does.
+/// The facts line of one series: the year, the season count, the
+/// content rating, and the genres, the way a film's line reads.
 pub(crate) fn facts_of(details: &SeriesDetails) -> String {
+    facts::joined(&[&facts_without_genres(details), &details.genres.join(", ")])
+}
+
+/// The same line without the genres, for the home page's banner, which
+/// draws the genres on a line of its own.
+pub(crate) fn facts_without_genres(details: &SeriesDetails) -> String {
     facts::joined(&[
         facts::year(&details.released),
         &seasons_of(details.seasons),

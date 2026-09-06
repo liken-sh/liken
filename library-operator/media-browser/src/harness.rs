@@ -38,10 +38,16 @@ use stats::Stats;
 use timeline::Timeline;
 use watchdog::Watchdog;
 
+use crate::catalog::search::Size;
 use crate::posters::PosterCounts;
 
-/// The key that ends a run, from the keyboard or from a script.
-pub const QUIT: &str = "q";
+/// The word that ends a run, from the keyboard or from a script. It is a
+/// word no screen binds and `key_of` never produces, so no remote can
+/// end a run. A letter cannot be the word because every letter opens or
+/// types into the search wall. On a laptop the Escape key gives this
+/// word and the forward slash gives back; a remote's KEY_BACK and
+/// KEY_ESC still reach the browser as its own escape.
+pub const QUIT: &str = "quit";
 
 /// A handle that wakes the screen's event loop from any thread. It is
 /// the crate's own type, because the bus hands one back to the browser
@@ -62,9 +68,12 @@ pub trait Screen {
     }
 
     /// One key press, named the way the script names it: a single
-    /// letter, or one of the names `key_name` gives the arrows,
-    /// `enter`, `escape`, and `backspace`.
-    fn key(&mut self, name: &str);
+    /// character, or one of the names `key_name` gives the arrows,
+    /// `enter`, `escape`, `backspace`, `home`, and `search`. The answer
+    /// is whether the press changed the screen, the way `pump` answers
+    /// whether a delivery did, so a press that moves nothing draws no
+    /// frame.
+    fn key(&mut self, name: &str) -> bool;
 
     /// Fold in what the screen's own sources delivered since the last call,
     /// at `at` seconds on the clock. The answer is whether anything folded,
@@ -121,6 +130,12 @@ pub trait Screen {
     /// Disk-cache hits and source decode attempts for this run.
     fn poster_counts(&self) -> PosterCounts {
         PosterCounts::default()
+    }
+
+    /// How large the screen's search index is, or nothing where the
+    /// screen holds none. The stats file reports it at exit.
+    fn index_size(&mut self) -> Option<Size> {
+        None
     }
 
     /// The new surface is up, on the frame at `at` seconds.
@@ -234,19 +249,37 @@ pub struct Ready<S: Screen> {
     pub(crate) finished: bool,
 }
 
-/// The script's name for a key. A letter or a digit is itself, and
-/// the arrows, enter, escape, and backspace carry the names a scripted
-/// timeline uses.
+/// The script's name for a key. The local layout in full: letters and
+/// digits type, the space bar types a space, Backspace deletes, the
+/// arrows move, Enter selects, the forward slash is back, the backtick
+/// and the Home key are home, F3 is search, and Escape ends the run.
 pub fn key_name(key: &Key) -> Option<String> {
     match key {
+        // A local run needs one key that ends it, and every letter now
+        // reaches the search wall, so Escape ends the run and the slash
+        // is back.
+        Key::Character(text) if text == "/" => Some("escape".into()),
+        // A laptop keyboard may have no Home key, so the backtick is home
+        // as well.
+        Key::Character(text) if text == "`" => Some("home".into()),
         Key::Character(text) => Some(text.to_lowercase()),
         Key::Named(NamedKey::ArrowUp) => Some("up".into()),
         Key::Named(NamedKey::ArrowDown) => Some("down".into()),
         Key::Named(NamedKey::ArrowLeft) => Some("left".into()),
         Key::Named(NamedKey::ArrowRight) => Some("right".into()),
         Key::Named(NamedKey::Enter) => Some("enter".into()),
-        Key::Named(NamedKey::Escape) => Some("escape".into()),
+        Key::Named(NamedKey::Escape) => Some(QUIT.into()),
         Key::Named(NamedKey::Backspace) => Some("backspace".into()),
+        // A remote sends KEY_HOMEPAGE and KEY_SEARCH, and a keyboard has
+        // no key of either name, so the Home key and the search keys a
+        // keyboard does have stand in for them.
+        Key::Named(NamedKey::Home) => Some("home".into()),
+        Key::Named(NamedKey::F3 | NamedKey::BrowserSearch | NamedKey::Find) => {
+            Some("search".into())
+        }
+        // The space bar gives the word KEY_SPACE gives, so a space from a
+        // keyboard and a space from a remote are one word.
+        Key::Named(NamedKey::Space) => Some(" ".into()),
         _ => None,
     }
 }
@@ -279,13 +312,55 @@ mod tests {
             Some("enter".to_string())
         );
         assert_eq!(
-            key_name(&Key::Named(NamedKey::Escape)),
-            Some("escape".to_string())
-        );
-        assert_eq!(
             key_name(&Key::Named(NamedKey::Backspace)),
             Some("backspace".to_string())
         );
+    }
+
+    // The two characters a local run binds a word to, and one letter to
+    // show that every other character is itself.
+    const TYPED: [(&str, &str); 3] = [("/", "escape"), ("`", "home"), ("q", "q")];
+
+    #[test]
+    fn escape_ends_the_run_and_the_two_bound_characters_carry_their_words() {
+        assert_eq!(key_name(&Key::Named(NamedKey::Escape)), Some(QUIT.into()));
+        for (character, word) in TYPED {
+            assert_eq!(
+                key_name(&Key::Character(SmolStr::new(character))),
+                Some(word.to_string()),
+                "{character}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_letter_the_run_once_ended_on_reaches_the_screen_as_a_letter() {
+        assert_eq!(
+            key_name(&Key::Character(SmolStr::new("Q"))),
+            Some("q".to_string())
+        );
+        assert_ne!(QUIT, "q");
+    }
+
+    // The named keys a laptop reaches home, search, and the space
+    // through, each with the word a remote's key gives.
+    const NAMED: [(NamedKey, &str); 5] = [
+        (NamedKey::Home, "home"),
+        (NamedKey::F3, "search"),
+        (NamedKey::BrowserSearch, "search"),
+        (NamedKey::Find, "search"),
+        (NamedKey::Space, " "),
+    ];
+
+    #[test]
+    fn the_home_and_search_keys_carry_the_words_a_remote_sends() {
+        for (key, name) in NAMED {
+            assert_eq!(
+                key_name(&Key::Named(key)),
+                Some(name.to_string()),
+                "{key:?}"
+            );
+        }
     }
 
     #[test]
@@ -298,7 +373,9 @@ mod tests {
     impl Screen for Still {
         type Message = ();
 
-        fn key(&mut self, _name: &str) {}
+        fn key(&mut self, _name: &str) -> bool {
+            true
+        }
 
         fn tick(&mut self, _at: f64) {}
 
@@ -315,10 +392,12 @@ mod tests {
         assert_eq!(still.next_frame(3.5), Some(3.5));
         assert!(!still.surface_due());
         assert_eq!(still.poster_counts(), PosterCounts::default());
+        assert_eq!(still.index_size(), None);
         still.wake_by(Arc::new(|| {}));
         still.update(());
         still.surfaced(2.0);
-        still.key("q");
+        assert!(still.key("q"));
+        assert!(still.key(QUIT));
         still.tick(2.0);
     }
 }

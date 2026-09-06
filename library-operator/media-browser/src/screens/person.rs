@@ -16,6 +16,7 @@ use super::slots::Slots;
 use super::{Step, facts};
 use crate::catalog::{self, Query, Source};
 use crate::posters::Posters;
+use crate::views::wall;
 
 // The file every contributor entry holds their headshot in, and
 // the file it holds their biography in.
@@ -114,9 +115,13 @@ impl Person {
         self.biography = text.chars().take(BIOGRAPHY_CHARS).collect();
     }
 
-    /// Fold one press in. The arrows move across the wall, and
-    /// select opens the title's own page.
+    /// Fold one press in. The arrows move across the wall and select
+    /// opens the title's own page. Up from the first row moves nothing,
+    /// which is how a press reaches the browser's strip.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
+        if key == "up" && self.works.focus < wall::COLUMNS {
+            return Step::Still;
+        }
         self.works.key(key, source)
     }
 
@@ -130,10 +135,12 @@ impl Person {
     pub fn view<'a, P: Posters>(
         &'a self,
         posters: &'a RefCell<P>,
+        held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         iced_widget::canvas(page::Page {
             person: self,
             posters,
+            held,
         })
         .width(Length::Fill)
         .height(Length::Fill)

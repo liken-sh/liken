@@ -1,16 +1,16 @@
-// The jump rail: one rotated bar per stretch of rows, at the left of a long
-// wall, so a person crosses a hundred rows in two presses. A bar names a
+// The jump rail: one rotated bar per stretch of rows, at one edge of a
+// long wall, so a person crosses a hundred rows in two presses. A bar names a
 // stretch by its first and its last row, and the rail reads no further into
 // what the stretch is: a franchise's eras, a series' seasons, and a wall's
 // years are all bars here. Bars that overlap draw in lanes, the caller
 // deciding which lane each one takes, and the rail draws at most LANES of
-// them. The words read bottom to top, because a bar is tall and narrow.
+// them. The words read top to bottom, because a bar is tall and narrow.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
-use iced_winit::core::Rectangle;
+use iced_winit::core::{Color, Rectangle};
 
-use super::{area, mark, rounded, stack, text};
+use super::{area, mark, rounded, text};
 use crate::look;
 
 /// One stretch of rows: the words on it, the first and the last row it covers,
@@ -24,6 +24,27 @@ pub struct Bar {
     pub lane: usize,
 }
 
+/// The edge of the region the rail draws at. The franchise page draws
+/// its eras at the left; a wall and a series page draw their jumps at
+/// the right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+/// The two geometries a rail draws with. `Scrolled` is a map of the
+/// whole wall: a bar covers the rows it names and moves with the scroll,
+/// which is how the franchise page draws story time. `Fitted` holds
+/// every bar on the screen at once, in equal shares of the region that
+/// the scroll never moves, which is what a jump through a long list
+/// needs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Fit<'a> {
+    Scrolled { tops: &'a [f32], offset: f32 },
+    Fitted,
+}
+
 /// The width of one lane.
 pub const LANE: f32 = 44.0;
 
@@ -31,9 +52,14 @@ pub const LANE: f32 = 44.0;
 /// so a bar the caller puts deeper draws in the last one.
 pub const LANES: usize = 2;
 
-// The space under a bar and to the right of its lane, so two bars in
-// one lane read as two and the wall stands clear of the rail.
+// The space under a bar and on the wall's side of its lane, so two bars
+// in one lane read as two and the wall stands clear of the rail.
 const GAP: f32 = 8.0;
+
+/// How far a rail at the right stands in from the region's edge: the
+/// focus stroke's room and a little more, so the mark on a bar draws
+/// whole and no part of it falls off the frame.
+pub const EDGE: f32 = look::MARK_GAP + look::MARK + 4.0;
 
 // The radius the bars are drawn with.
 const ROUND: f32 = 8.0;
@@ -61,6 +87,11 @@ pub fn lanes(bars: &[Bar]) -> usize {
 /// one ends, from the region's top, because those rows are not one
 /// height.
 pub fn bar(region: Rectangle, held: &Bar, tops: &[f32], offset: f32) -> Rectangle {
+    bar_at(region, held, tops, offset, Side::Left)
+}
+
+/// The same box, with the rail at the side the caller names.
+pub fn bar_at(region: Rectangle, held: &Bar, tops: &[f32], offset: f32, side: Side) -> Rectangle {
     let lane = held.lane.min(LANES - 1) as f32;
     let top = tops.get(held.first).copied().unwrap_or_default();
     let end = tops
@@ -69,11 +100,65 @@ pub fn bar(region: Rectangle, held: &Bar, tops: &[f32], offset: f32) -> Rectangl
         .copied()
         .unwrap_or(top);
     area(
-        region.x + lane * LANE,
+        lane_x(region, lane, side),
         region.y + top - offset,
         LANE - GAP,
         (end - top - GAP).max(0.0),
     )
+}
+
+// Where one lane starts, counted in from the rail's edge, so the gap
+// falls on the wall's side of the lane at either edge.
+fn lane_x(region: Rectangle, lane: f32, side: Side) -> f32 {
+    match side {
+        Side::Left => region.x + lane * LANE,
+        Side::Right => region.x + region.width - EDGE - (lane + 1.0) * LANE + GAP,
+    }
+}
+
+/// How many bars fit the region once the longest of their labels has
+/// room to read whole. A caller whose labels grow as its bars merge
+/// asks again with the labels of the count this answered.
+pub fn fits(region: Rectangle, longest: &str) -> usize {
+    holding(
+        region.height * TOLERANCE,
+        text::width(longest, look::HEADING) + SLACK + GAP,
+    )
+}
+
+// The labels are fitted against nine tenths of the region. A caller
+// counts its bars once, against the screen the browser is drawn for,
+// and draws them in whatever window is open. The tenth held back keeps
+// every label whole in a window up to a tenth shorter than that screen,
+// and costs one bar in ten on the screen itself.
+const TOLERANCE: f32 = 0.9;
+
+// How many bars of this height the room holds, and one for a room
+// shorter than one bar, because a rail of no bars leaves nothing to jump
+// by.
+fn holding(room: f32, height: f32) -> usize {
+    ((room / height) as usize).max(1)
+}
+
+/// The box of every bar of a fitted rail: equal shares of the region
+/// from its top, in list order, at the side the caller names.
+pub fn fitted(region: Rectangle, bars: &[Bar], side: Side) -> Vec<Rectangle> {
+    if bars.is_empty() {
+        return Vec::new();
+    }
+    let height = region.height / bars.len() as f32;
+    bars.iter()
+        .enumerate()
+        .map(|(index, held)| {
+            let lane = held.lane.min(LANES - 1) as f32;
+            area(
+                lane_x(region, lane, side),
+                region.y + index as f32 * height,
+                LANE - GAP,
+                (height - GAP).max(0.0),
+            )
+        })
+        .collect()
 }
 
 /// Draw the rail. `focus` names the bar that holds focus, or nothing
@@ -87,12 +172,31 @@ pub fn draw(
     offset: f32,
     focus: Option<usize>,
 ) {
-    for (index, held) in bars.iter().enumerate() {
-        let bounds = bar(region, held, tops, offset);
+    draw_at(
+        frame,
+        region,
+        bars,
+        focus,
+        Side::Left,
+        Fit::Scrolled { tops, offset },
+    );
+}
+
+/// The same draw, with the bars at the side and in the geometry the
+/// caller names.
+pub fn draw_at(
+    frame: &mut canvas::Frame<Renderer>,
+    region: Rectangle,
+    bars: &[Bar],
+    focus: Option<usize>,
+    side: Side,
+    fit: Fit,
+) {
+    for (index, (held, bounds)) in bars.iter().zip(boxes(region, bars, side, fit)).enumerate() {
         if bounds.y + bounds.height < region.y || bounds.y > region.y + region.height {
             continue;
         }
-        frame.fill(&rounded(bounds, ROUND), look::slot());
+        frame.fill(&rounded(bounds, ROUND), ink(focus == Some(index)));
         written(frame, bounds, region, &held.label);
         if focus == Some(index) {
             mark(frame, bounds);
@@ -100,16 +204,43 @@ pub fn draw(
     }
 }
 
-/// Where one bar's label draws: the head of a section, not the middle of the
-/// bar. An era of a hundred rows is taller than any screen, so a label at the
-/// bar's own middle is off screen for most of the scroll and the rail reads
-/// blank. The label sits at the bar's top end while that end is on screen,
-/// pins to the top of the region while the bar runs past it, and the bar's
-/// bottom end pushes it off, so a label never leaves its own bar. `length` is
-/// the label's own length along the bar, and a bar shorter than that carries
-/// as much of the label as it holds.
+// The fill under a bar's words. A rail draws over a page's art, so the
+// fill is the near-black ground the art reads through as a trace, and
+// the focused bar takes the lighter ground a focused row takes under its
+// mark.
+fn ink(focused: bool) -> Color {
+    match focused {
+        true => look::slot(),
+        false => look::ground(),
+    }
+}
+
+/// The box of every bar in the geometry the caller names.
+pub fn boxes(region: Rectangle, bars: &[Bar], side: Side, fit: Fit) -> Vec<Rectangle> {
+    match fit {
+        Fit::Scrolled { tops, offset } => bars
+            .iter()
+            .map(|held| bar_at(region, held, tops, offset, side))
+            .collect(),
+        Fit::Fitted => fitted(region, bars, side),
+    }
+}
+
+/// Where one bar's label draws: the middle of the part of the bar the
+/// region shows, not the middle of the whole bar. An era of a hundred
+/// rows is taller than any screen, so a label at the whole bar's middle
+/// is off screen for most of the scroll and the rail reads blank.
+/// The label stays inside its own bar at either end, so a bar that has
+/// scrolled almost away carries its label to the edge and no further.
+/// `length` is the label's own length along the bar, and a bar shorter
+/// than that carries as much of the label as it holds.
 pub fn label_box(bounds: Rectangle, region: Rectangle, length: f32) -> Rectangle {
-    stack::held(bounds, region, length)
+    let length = length.min(bounds.height);
+    let top = bounds.y.max(region.y);
+    let foot = (bounds.y + bounds.height).min(region.y + region.height);
+    let middle = (top + foot - length) / 2.0;
+    let top = middle.max(bounds.y).min(bounds.y + bounds.height - length);
+    area(bounds.x, top, bounds.width, length)
 }
 
 // One bar's words, cut to the bar's own length and turned to read from
@@ -122,19 +253,40 @@ fn written(
 ) {
     let shown = text::cut(content, look::HEADING, bounds.height);
     let at = label_box(bounds, region, text::width(&shown, look::HEADING) + SLACK);
-    text::upward(frame, &shown, at, look::HEADING, look::text());
+    text::downward(frame, &shown, at, look::HEADING, look::text());
 }
 
 /// The part of the region the wall beside the rail draws in: everything
 /// to the right of the last lane.
 pub fn beside(region: Rectangle, bars: &[Bar]) -> Rectangle {
+    beside_at(region, bars, Side::Left)
+}
+
+/// The same part of the region, with the lanes taken off the edge the
+/// caller names. A rail at the right also stands [`EDGE`] in from the
+/// region, and the wall gives up that much along with the lanes.
+pub fn beside_at(region: Rectangle, bars: &[Bar], side: Side) -> Rectangle {
     let taken = width(bars);
-    area(
-        region.x + taken,
-        region.y,
-        region.width - taken,
-        region.height,
-    )
+    match side {
+        Side::Left => area(
+            region.x + taken,
+            region.y,
+            region.width - taken,
+            region.height,
+        ),
+        Side::Right => {
+            let inset = match bars.is_empty() {
+                true => 0.0,
+                false => EDGE,
+            };
+            area(
+                region.x,
+                region.y,
+                region.width - taken - inset,
+                region.height,
+            )
+        }
+    }
 }
 
 /// The bar that covers one row, and the first one where two lanes cover
@@ -145,177 +297,4 @@ pub fn covering(bars: &[Bar], row: usize) -> Option<usize> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn bars() -> Vec<Bar> {
-        vec![
-            Bar {
-                label: "The Long Survey".into(),
-                first: 0,
-                last: 7,
-                lane: 0,
-            },
-            Bar {
-                label: "The Coppice Years".into(),
-                first: 4,
-                last: 5,
-                lane: 1,
-            },
-        ]
-    }
-
-    fn region() -> Rectangle {
-        area(100.0, 200.0, 1720.0, 800.0)
-    }
-
-    #[test]
-    fn a_rail_takes_one_lane_for_every_lane_its_bars_fill() {
-        assert_eq!(lanes(&bars()), 2);
-        assert_eq!(width(&bars()), 2.0 * LANE);
-        assert_eq!(lanes(&bars()[..1]), 1);
-        assert_eq!(width(&[]), 0.0);
-    }
-
-    // The tops of this many rows of one height, and where the last ends.
-    fn tops(rows: usize, height: f32) -> Vec<f32> {
-        (0..=rows).map(|row| row as f32 * height).collect()
-    }
-
-    #[test]
-    fn a_bar_deeper_than_the_last_lane_draws_in_the_last_lane() {
-        let deep = [Bar {
-            label: "Deeper".into(),
-            first: 0,
-            last: 1,
-            lane: 4,
-        }];
-        assert_eq!(lanes(&deep), LANES);
-        assert_eq!(
-            bar(region(), &deep[0], &tops(8, 100.0), 0.0).x,
-            region().x + LANE
-        );
-    }
-
-    #[test]
-    fn a_bar_stands_over_the_rows_it_covers() {
-        let rows = tops(8, 100.0);
-        let survey = bar(region(), &bars()[0], &rows, 0.0);
-        assert_eq!(survey.x, region().x);
-        assert_eq!(survey.y, region().y);
-        assert_eq!(survey.height, 8.0 * 100.0 - GAP);
-        assert_eq!(survey.width, LANE - GAP);
-
-        let years = bar(region(), &bars()[1], &rows, 0.0);
-        assert_eq!(years.x, region().x + LANE);
-        assert_eq!(years.y, region().y + 4.0 * 100.0);
-        assert_eq!(years.height, 2.0 * 100.0 - GAP);
-    }
-
-    #[test]
-    fn a_bar_over_rows_of_two_heights_reaches_the_end_of_its_last() {
-        let rows = [0.0, 300.0, 350.0, 650.0];
-        let over = bar(region(), &bars()[0], &rows, 0.0);
-        assert_eq!(over.height, 650.0 - GAP);
-        let short = bar(
-            region(),
-            &Bar {
-                first: 1,
-                last: 1,
-                ..Bar::default()
-            },
-            &rows,
-            0.0,
-        );
-        assert_eq!(short.y, region().y + 300.0);
-        assert_eq!(short.height, 50.0 - GAP);
-        assert_eq!(bar(region(), &bars()[0], &[], 0.0).height, 0.0);
-    }
-
-    #[test]
-    fn a_scrolled_rail_moves_with_its_wall() {
-        let scrolled = bar(region(), &bars()[1], &tops(8, 100.0), 250.0);
-        assert_eq!(scrolled.y, region().y + 4.0 * 100.0 - 250.0);
-    }
-
-    #[test]
-    fn the_wall_stands_to_the_right_of_the_last_lane() {
-        let wall = beside(region(), &bars());
-        assert_eq!(wall.x, region().x + 2.0 * LANE);
-        assert_eq!(wall.width, region().width - 2.0 * LANE);
-        assert_eq!(wall.x + wall.width, region().x + region().width);
-        assert_eq!(beside(region(), &[]), region());
-    }
-
-    #[test]
-    fn a_label_sits_at_the_top_of_its_bar_while_that_end_is_on_screen() {
-        let region = region();
-        let bar = area(region.x, region.y + 40.0, LANE, 2000.0);
-        let at = label_box(bar, region, 120.0);
-        assert_eq!(at.y, bar.y);
-        assert_eq!(at.height, 120.0);
-    }
-
-    #[test]
-    fn a_label_pins_to_the_top_of_the_region_while_its_bar_runs_past_it() {
-        let region = region();
-        let bar = area(region.x, region.y - 3000.0, LANE, 9000.0);
-        assert_eq!(label_box(bar, region, 120.0).y, region.y);
-    }
-
-    #[test]
-    fn the_bottom_end_of_a_bar_pushes_its_label_off_with_it() {
-        let region = region();
-        let bar = area(region.x, region.y - 3000.0, LANE, 3060.0);
-        let at = label_box(bar, region, 120.0);
-        assert_eq!(at.y, bar.y + bar.height - 120.0);
-        assert!(at.y < region.y);
-    }
-
-    #[test]
-    fn a_label_whose_bar_has_ended_above_the_region_is_not_drawn_at_the_top() {
-        let region = region();
-        let bar = area(region.x, region.y - 3000.0, LANE, 2900.0);
-        let at = label_box(bar, region, 120.0);
-        assert_eq!(at.y + at.height, bar.y + bar.height);
-        assert!(at.y + at.height < region.y);
-    }
-
-    #[test]
-    fn a_bar_shorter_than_its_label_carries_what_it_holds() {
-        let region = region();
-        let bar = area(region.x, region.y + 10.0, LANE, 60.0);
-        let at = label_box(bar, region, 120.0);
-        assert_eq!(at.y, bar.y);
-        assert_eq!(at.height, bar.height);
-    }
-
-    #[test]
-    fn a_label_of_a_bar_over_a_few_rows_stays_inside_those_rows() {
-        // A bar over rows 0 to 100 of a wall of 100-tall rows, with the
-        // region over rows 40 to 43.
-        let region = area(100.0, 200.0, 1720.0, 300.0);
-        let bar = bar(
-            region,
-            &Bar {
-                label: "The Long Saga".into(),
-                first: 0,
-                last: 100,
-                lane: 0,
-            },
-            &tops(101, 100.0),
-            4000.0,
-        );
-        let at = label_box(bar, region, 120.0);
-        assert!(at.y >= region.y);
-        assert!(at.y + at.height <= region.y + region.height);
-    }
-
-    #[test]
-    fn a_move_onto_the_rail_lands_on_the_widest_bar_over_the_row() {
-        assert_eq!(covering(&bars(), 0), Some(0));
-        assert_eq!(covering(&bars(), 4), Some(0));
-        assert_eq!(covering(&bars(), 9), None);
-        assert_eq!(covering(&[], 0), None);
-    }
-}
+mod tests;

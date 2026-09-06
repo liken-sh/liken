@@ -8,6 +8,9 @@
 //
 // A jump rail of rotated bars at the left of a long wall is one more.
 //
+// The text field a person types a search into, and the grid of letters
+// a remote with no keyboard picks from, are two more.
+//
 // The two lines under a slot are one primitive of their own, the card,
 // which the strip and the wall both draw.
 //
@@ -25,7 +28,9 @@ pub mod card;
 pub mod clock;
 pub mod curtain;
 pub mod divider;
+pub mod field;
 pub mod header;
+pub mod keyboard;
 pub mod layers;
 pub mod people;
 pub mod rail;
@@ -275,6 +280,20 @@ pub fn marked(slot: Rectangle) -> Rectangle {
         slot.y - OUTSET,
         slot.width + 2.0 * OUTSET,
         slot.height + 2.0 * OUTSET,
+    )
+}
+
+/// The rectangle a clip has to reach for the focus stroke on a slot to
+/// draw whole. The stroke is centered on `marked`'s edge, so a clip of
+/// that box cuts the stroke's outer half; this one reaches the gap and
+/// the whole stroke.
+pub fn clip_marked(slot: Rectangle) -> Rectangle {
+    let reach = OUTSET + look::MARK / 2.0;
+    area(
+        slot.x - reach,
+        slot.y - reach,
+        slot.width + 2.0 * reach,
+        slot.height + 2.0 * reach,
     )
 }
 

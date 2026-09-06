@@ -38,11 +38,14 @@ impl<S: Screen> Ready<S> {
         if let Some(start) = self.start {
             self.screen.tick(start.elapsed().as_secs_f64());
         }
-        // A key changes what the screen draws, so the frame on the glass is
-        // stale and the second named before the press no longer holds.
-        self.scheduled = None;
-        self.stale = true;
-        self.screen.key(name);
+        // A press that changes the screen makes the frame on the glass
+        // stale and drops the second the screen named before it. A press
+        // that changes nothing, such as an arrow at the edge of the
+        // keyboard grid, leaves both alone and draws no frame.
+        if self.screen.key(name) {
+            self.scheduled = None;
+            self.stale = true;
+        }
         false
     }
 
@@ -314,6 +317,7 @@ impl<S: Screen> Ready<S> {
         }
         self.finished = true;
         self.stats.poster_counts(self.screen.poster_counts());
+        self.stats.index_size(self.screen.index_size());
         if let Some(path) = &self.stats_path {
             self.stats.write(path);
         }

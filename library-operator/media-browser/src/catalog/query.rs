@@ -1,9 +1,10 @@
 // Every screen of titles is one Query and one wall. A Query is a value
 // of a closed set of shapes. Each shape has a heading a person reads, an
-// order, and a read the catalog answers from an index, and none is a
-// string of SQL: a string cannot be named in a heading and cannot promise
-// an indexed read. This module holds the Query, the Slot a read answers
-// with, and the Answer that names what the query is about.
+// order, and a read the source answers fast: from an index in SQL, or
+// for `Search`, from the in-memory index. None is a string of SQL: a
+// string cannot be named in a heading and cannot promise a fast read.
+// This module holds the Query, the Slot a read answers with, and the
+// Answer that names what the query is about.
 
 use super::{Title, library_name};
 
@@ -34,58 +35,177 @@ pub enum Order {
     Added,
 }
 
+/// The three orders a library wall can be read in, which the rail's
+/// button cycles. `Newest` and `Oldest` order by the release date and
+/// `Title` by the sort key, "The Matrix" under M. Title is a library
+/// wall's default, because a whole library is what a person walks by
+/// name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Sort {
+    Newest,
+    Oldest,
+    #[default]
+    Title,
+}
+
+impl Sort {
+    /// The word the rail's sort button shows.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Self::Newest => "Newest",
+            Self::Oldest => "Oldest",
+            Self::Title => "Title",
+        }
+    }
+
+    /// The next order in the cycle. The three orders are one ring, so a
+    /// fourth press is back at the first.
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Title => Self::Newest,
+            Self::Newest => Self::Oldest,
+            Self::Oldest => Self::Title,
+        }
+    }
+}
+
+/// The four orders a genre wall can be read in. `Leads` is the titles
+/// that lead with the genre first, then the rest, each run newest
+/// first; it is a genre wall's default and its own type, so a library
+/// wall cannot be asked for it. The other three are `Sort`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GenreSort {
+    #[default]
+    Leads,
+    By(Sort),
+}
+
+impl GenreSort {
+    /// The word the rail's sort button shows.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Self::Leads => "Genre",
+            Self::By(sort) => sort.word(),
+        }
+    }
+
+    /// The next order in the cycle. The four orders are one ring back to
+    /// `Leads`.
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Leads => Self::By(Sort::Newest),
+            Self::By(Sort::Newest) => Self::By(Sort::Oldest),
+            Self::By(Sort::Oldest) => Self::By(Sort::Title),
+            Self::By(Sort::Title) => Self::Leads,
+        }
+    }
+}
+
 /// The queries a wall can be fed. The set is closed and grows by one
 /// variant per plan. `Library` is one library in sort order. `Person` is
 /// every work of one person across the libraries. `Set` is the members of
 /// one set in release order. `Released` is movies and episodes newest
 /// release first, and `Added` is the same newest arrival first, both
 /// across every library and both folded by their `Fold`. `Genre` is every
-/// movie and series across every library that carries the genre, the
-/// titles that lead with it first, then newest by the order's column.
+/// movie and series across every library that carries the genre, in its
+/// `GenreSort`; in `Leads`, the titles that lead with it come first and
+/// the rest follow, each run newest by the order's column.
 /// `Franchise` is the members of one franchise that some library holds,
 /// in story order; it names the `Library` of kind franchises that holds
 /// the order, and never a member's own library.
+/// `Search` is the text a person typed, answered from the in-memory
+/// search index and never from SQL, best hit first.
+/// `Library` and `Genre` carry the order their rail's button cycles.
+/// The recency queries are newest first by definition and carry none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
-    Library { library: String },
-    Person { library: String, path: String },
-    Set { library: String, id: String },
-    Released { fold: Fold },
-    Added { fold: Fold },
-    Genre { name: String, order: Order },
-    Franchise { library: String, id: String },
+    Library {
+        library: String,
+        sort: Sort,
+    },
+    Person {
+        library: String,
+        path: String,
+    },
+    Set {
+        library: String,
+        id: String,
+    },
+    Released {
+        fold: Fold,
+    },
+    Added {
+        fold: Fold,
+    },
+    Genre {
+        name: String,
+        order: Order,
+        sort: GenreSort,
+    },
+    Franchise {
+        library: String,
+        id: String,
+    },
+    Search {
+        text: String,
+    },
 }
 
 impl Query {
     /// The heading without the count, which is what a strip draws over its
     /// slots. A person's, a set's, and a franchise's name comes with the
     /// answer, because only the catalog holds it.
+    /// A search is named by the text a person typed, which the query
+    /// holds, so no answer carries a name for it.
     pub fn name(&self, name: &str) -> String {
         match self {
-            Self::Library { library } => library_name(library).to_string(),
+            Self::Library { library, .. } => library_name(library).to_string(),
             Self::Person { .. } | Self::Set { .. } | Self::Franchise { .. } => name.to_string(),
             Self::Released { .. } => "Recently released".to_string(),
             Self::Added { .. } => "Recently added".to_string(),
             Self::Genre { name, .. } => name.clone(),
+            Self::Search { text } => text.clone(),
         }
     }
 
     /// The heading the band draws over this query's slots. A library's
     /// heading and a recency query's carry the count. A person's, a set's,
     /// and a franchise's carry the name alone.
-    pub fn heading(&self, name: &str, count: usize) -> String {
+    /// A genre's heading carries the counts by kind, "Science Fiction ·
+    /// 429 movies, 70 series", which is what the head over the wall
+    /// carried before the band took it.
+    pub fn heading(&self, name: &str, counts: Counts) -> String {
         match self {
             Self::Person { .. } | Self::Set { .. } | Self::Franchise { .. } => name.to_string(),
-            _ => format!("{} · {count}", self.name(name)),
+            Self::Genre { .. } => format!("{} · {}", self.name(name), counts.words()),
+            _ => format!("{} · {}", self.name(name), counts.items),
         }
     }
 
-    /// The word for what the query is about, where the query has a page
-    /// of its own. The band over that page carries the word, and the head
-    /// under the band carries the name, so the name reads once.
-    pub fn kind_word(&self) -> Option<&'static str> {
+    /// The same query in the next order its wall cycles to. A query with
+    /// no button is unchanged.
+    pub fn resorted(&self) -> Self {
+        match self.clone() {
+            Self::Library { library, sort } => Self::Library {
+                library,
+                sort: sort.next(),
+            },
+            Self::Genre { name, order, sort } => Self::Genre {
+                name,
+                order,
+                sort: sort.next(),
+            },
+            query => query,
+        }
+    }
+
+    /// The word the sort button shows, or nothing on a wall that draws no
+    /// button: the recency walls, a person, a set, a franchise, and a
+    /// search.
+    pub fn sort_word(&self) -> Option<&'static str> {
         match self {
-            Self::Genre { .. } => Some("Genre"),
+            Self::Library { sort, .. } => Some(sort.word()),
+            Self::Genre { sort, .. } => Some(sort.word()),
             _ => None,
         }
     }
@@ -95,11 +215,60 @@ impl Query {
     /// one ratio and no wall ever holds a still. Every other query opens
     /// itself.
     pub fn all_titles(&self) -> Self {
-        match self {
+        match self.clone() {
             Self::Released { .. } => Self::Released { fold: Fold::Titles },
             Self::Added { .. } => Self::Added { fold: Fold::Titles },
-            _ => self.clone(),
+            query => query,
         }
+    }
+}
+
+/// What a heading counts: every item, and the split by kind a genre's
+/// heading reads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counts {
+    pub items: usize,
+    pub movies: usize,
+    pub series: usize,
+}
+
+impl Counts {
+    /// The counts over the kind word of every item a wall holds.
+    pub fn of<'a>(kinds: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut counts = Self::default();
+        for kind in kinds {
+            counts.items += 1;
+            match kind {
+                "movies" => counts.movies += 1,
+                "series" => counts.series += 1,
+                _ => {}
+            }
+        }
+        counts
+    }
+
+    // The counts by kind as one phrase. A kind with no items is left
+    // out, and a wall of neither kind reads as its item count.
+    fn words(&self) -> String {
+        let mut words = Vec::new();
+        if self.movies > 0 {
+            words.push(format!("{} {}", self.movies, noun(self.movies, "movie")));
+        }
+        if self.series > 0 {
+            words.push(format!("{} series", self.series));
+        }
+        match words.is_empty() {
+            true => self.items.to_string(),
+            false => words.join(", "),
+        }
+    }
+}
+
+// The noun a count takes, singular at one.
+fn noun(count: usize, singular: &str) -> String {
+    match count {
+        1 => singular.to_string(),
+        _ => format!("{singular}s"),
     }
 }
 
@@ -189,165 +358,4 @@ pub struct Answer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_library_heading_carries_the_name_half_and_the_count() {
-        let query = Query::Library {
-            library: "screening/features".into(),
-        };
-        assert_eq!(query.heading("features", 42), "features · 42");
-    }
-
-    #[test]
-    fn a_franchise_is_headed_by_its_name_alone_and_carries_no_kind_word() {
-        let query = Query::Franchise {
-            library: "screening/franchises".into(),
-            id: "franchise:name:the-cycle".into(),
-        };
-        assert_eq!(query.name("The Cycle"), "The Cycle");
-        assert_eq!(query.heading("The Cycle", 9), "The Cycle");
-        assert_eq!(query.kind_word(), None);
-        assert_eq!(query.all_titles(), query);
-    }
-
-    #[test]
-    fn a_person_and_a_set_are_headed_by_their_name_alone() {
-        let person = Query::Person {
-            library: "screening/features".into(),
-            path: ".contributors/A Player".into(),
-        };
-        assert_eq!(person.heading("A Player", 3), "A Player");
-        let set = Query::Set {
-            library: "screening/features".into(),
-            id: "set:1".into(),
-        };
-        assert_eq!(set.heading("The Cycle", 3), "The Cycle");
-    }
-
-    #[test]
-    fn the_recency_queries_are_headed_by_their_words_and_the_count() {
-        let released = Query::Released { fold: Fold::Airing };
-        assert_eq!(released.name(""), "Recently released");
-        assert_eq!(released.heading("", 12), "Recently released · 12");
-        let added = Query::Added { fold: Fold::Titles };
-        assert_eq!(added.name("ignored"), "Recently added");
-        assert_eq!(added.heading("ignored", 3), "Recently added · 3");
-    }
-
-    #[test]
-    fn a_genre_is_headed_by_its_own_name_and_the_wall_adds_the_count() {
-        let query = Query::Genre {
-            name: "Western".into(),
-            order: Order::Released,
-        };
-        assert_eq!(query.name("ignored"), "Western");
-        assert_eq!(query.heading("ignored", 7), "Western · 7");
-        assert_eq!(query.all_titles(), query);
-    }
-
-    #[test]
-    fn only_a_genre_carries_a_kind_word() {
-        let genre = Query::Genre {
-            name: "Western".into(),
-            order: Order::Released,
-        };
-        assert_eq!(genre.kind_word(), Some("Genre"));
-        assert_eq!(
-            Query::Library {
-                library: "screening/features".into()
-            }
-            .kind_word(),
-            None
-        );
-        assert_eq!(Query::Released { fold: Fold::Titles }.kind_word(), None);
-    }
-
-    #[test]
-    fn a_library_names_itself_without_the_count() {
-        let query = Query::Library {
-            library: "screening/features".into(),
-        };
-        assert_eq!(query.name(""), "features");
-    }
-
-    #[test]
-    fn see_all_opens_a_recency_query_with_every_episode_folded() {
-        assert_eq!(
-            Query::Released { fold: Fold::Airing }.all_titles(),
-            Query::Released { fold: Fold::Titles }
-        );
-        assert_eq!(
-            Query::Added {
-                fold: Fold::Episodes
-            }
-            .all_titles(),
-            Query::Added { fold: Fold::Titles }
-        );
-        let library = Query::Library {
-            library: "screening/features".into(),
-        };
-        assert_eq!(library.all_titles(), library);
-    }
-
-    #[test]
-    fn an_episode_slot_is_a_still_and_every_other_slot_a_poster() {
-        let episode = Slot {
-            episode: Some(InSeries {
-                series: "series:1".into(),
-                name: "The Serial".into(),
-                season: 3,
-                episode: 4,
-            }),
-            ..Slot::default()
-        };
-        assert!(episode.still());
-        assert!(!Slot::default().still());
-    }
-
-    #[test]
-    fn a_slot_whose_id_is_its_series_is_the_whole_show_folded() {
-        let mut slot = Slot {
-            id: "episode:1".into(),
-            episode: Some(InSeries {
-                series: "series:1".into(),
-                name: "The Serial".into(),
-                season: 3,
-                episode: 4,
-            }),
-            ..Slot::default()
-        };
-        assert!(!slot.folded());
-        slot.id = "series:1".into();
-        assert!(slot.folded());
-        assert!(!Slot::default().folded());
-    }
-
-    #[test]
-    fn a_slot_of_a_title_carries_its_library_and_kind_and_no_parts() {
-        let slot = Slot::of(
-            "screening/features",
-            "movies",
-            Title {
-                id: "movie:1".into(),
-                title: "Specimen 0001".into(),
-                released: "1987".into(),
-                art: "1.jpg".into(),
-                duration: 5_820,
-                rating: "PG-13".into(),
-                tagline: "One of a kind.".into(),
-            },
-        );
-        assert_eq!(slot.library, "screening/features");
-        assert_eq!(slot.kind, "movies");
-        assert_eq!(slot.id, "movie:1");
-        assert_eq!(slot.title, "Specimen 0001");
-        assert_eq!(slot.duration, 5_820);
-        assert_eq!(slot.rating, "PG-13");
-        assert_eq!(slot.parts, "");
-        assert_eq!(slot.new, 0);
-        assert_eq!(slot.seasons, 0);
-        assert!(!slot.still());
-    }
-}
+mod tests;

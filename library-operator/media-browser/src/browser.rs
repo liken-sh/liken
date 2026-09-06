@@ -16,6 +16,7 @@ use media_screen::{Bus, Moment};
 
 use crate::bus::play;
 use crate::catalog::draw::Date;
+use crate::catalog::search::Size;
 use crate::catalog::{Selection, Source};
 use crate::clock;
 use crate::harness::{Screen, Waker};
@@ -24,7 +25,13 @@ use crate::posters::{PosterCounts, Posters};
 use crate::screens::{self, Step, home, loading, volume};
 use crate::views;
 
+mod keys;
 mod reader;
+// The stack module: the screens a person descended through, and every
+// move across them.
+mod stack;
+
+use keys::key_of;
 
 /// The browsing screen, generic over where its rows and its posters
 /// come from, so one browser draws the sidecar's file, a test fixture, and
@@ -77,8 +84,12 @@ pub struct Browser<S: Source, P: Posters> {
     // The volume row's state, which the level moments the bus delivers fold
     // into.
     level: volume::Level,
-    // The reading the clock layer draws, read at every tick.
+    // The reading the strip draws, read at every tick.
     time: clock::Time,
+    // Whether the strip over every screen holds focus. It is the
+    // browser's field and not a screen's, because the strip is the
+    // browser's layer, and it clears whenever the stack changes.
+    on_strip: bool,
     // The second on the loop's own clock at which the minute turns, or
     // nothing before the first tick. The clock draws a reading to the
     // minute, so this is the one frame it asks for.
@@ -124,6 +135,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
             loading: None,
             level: volume::Level::default(),
             time: clock::now(),
+            on_strip: false,
             minute: None,
         }
     }
@@ -202,21 +214,6 @@ impl<S: Source, P: Posters> Browser<S, P> {
         folded
     }
 
-    fn top(&self) -> &screens::Screen {
-        self.stack.last().unwrap_or(&self.home)
-    }
-
-    // Read the screen on top again. The home page goes through the
-    // reader, so the read that uncovers it never holds the frame thread.
-    fn reread_top(&mut self) {
-        let Some(top) = self.stack.last_mut() else {
-            self.refresh_home();
-            return;
-        };
-        top.reread(&mut self.source);
-        top.volume(&*self.posters.borrow());
-    }
-
     // Ask the reader for the home page, but only where the page is
     // behind: a change the source reported, or a day other than the one
     // it was read on. A read in place lands on this call, and a read on
@@ -244,31 +241,6 @@ impl<S: Source, P: Posters> Browser<S, P> {
         true
     }
 
-    // Do what the screen that took the press asked for. Only the browser
-    // holds the stack, so a screen names the screen it opens and never
-    // pushes one itself.
-    fn take(&mut self, step: Step) {
-        match step {
-            Step::Stay => {}
-            Step::Open(screen) => self.opened(screen),
-            Step::Replace(screen) => {
-                self.stack.pop();
-                self.opened(screen);
-            }
-            Step::Play { library, selection } => {
-                // The press enters the state in the frame it lands in.
-                // Nothing downstream is awaited: the request crosses the
-                // bus, the operator creates the `Play`, and the pod
-                // starts, and none of the three reaches this browser. A
-                // choice with no film behind it enters nothing, because
-                // no film will ever cover the page.
-                if self.request_play(&library, &selection) {
-                    self.loading = Some(loading::Loading::entered(self.clock));
-                }
-            }
-        }
-    }
-
     // The browser is on the screen again, whether the film played
     // through or the `Play` never started, so the page comes back.
     fn presented(&mut self) {
@@ -284,26 +256,6 @@ impl<S: Source, P: Posters> Browser<S, P> {
     // it with no draw of its own.
     fn lifted(&mut self) {
         self.refresh_home();
-    }
-
-    // Push a screen and read the files it draws off the volume,
-    // which the screen itself cannot reach: only the browser holds the
-    // store that resolves a library's root.
-    fn opened(&mut self, mut screen: screens::Screen) {
-        screen.volume(&*self.posters.borrow());
-        self.stack.push(screen);
-    }
-
-    // Ask the store for the backdrop of the page under the focused item,
-    // at the size the page draws it. The answer is dropped. The ask is
-    // the point: the decode lands in the cache before the page opens.
-    fn prefetch(&mut self) {
-        let top = self.stack.last().unwrap_or(&self.home);
-        let Some((library, art)) = top.resting(&mut self.source) else {
-            return;
-        };
-        let (width, height) = self.page;
-        let _ = self.posters.get_mut().poster(&library, &art, width, height);
     }
 
     // Resolve the choice through the catalog and publish it. The browser
@@ -341,31 +293,60 @@ impl<S: Source, P: Posters> Browser<S, P> {
         true
     }
 
-    // The clock the browser draws over whatever screen is on the stack,
-    // and nothing while the shade is down. No screen knows about it, so
-    // every screen carries it in the same place.
-    fn face(&self) -> Option<views::clock::Face> {
-        (!self.asleep).then_some(views::clock::Face { time: self.time })
+    // The strip the browser draws over whatever screen is on the stack,
+    // or nothing while the shade is down. No screen draws it, so every
+    // screen carries it in the same place. The field is the search
+    // wall's own, read off the top screen.
+    fn strip(&self) -> Option<views::clock::strip::Strip<'_>> {
+        (!self.asleep).then(|| views::clock::strip::Strip {
+            time: self.time,
+            field: self.top().field(),
+            focused: self.on_strip,
+        })
     }
 
-    // Back pops one descent and re-reads the screen it uncovers,
-    // because a change that landed while that screen was covered was
-    // folded into the screen that was shown at the time and not into
-    // this one. The home page is the one screen that is read only where
-    // it is behind, so back to it draws the page a person left at once.
-    //
-    // At the home page there is nowhere to climb, so a browser on a bus
-    // asks for the shade. Only the browser knows whether back has
-    // anywhere to go, which is why the crate never sleeps on back
-    // itself.
-    fn back(&mut self) {
-        if self.stack.pop().is_some() {
-            self.reread_top();
-            return;
+    // One press while the strip holds focus. Select opens the search
+    // wall with the grid, or shows the grid on a search wall. Down gives
+    // focus back to the screen. A word that edits the field types into
+    // it on a search wall and gives focus back with it. Every other
+    // word, the arrows included, moves nothing.
+    fn on_strip(&mut self, name: &str) -> bool {
+        match name {
+            "enter" => {
+                match self.top().searching() {
+                    true => {
+                        self.on_strip = false;
+                        let top = self.stack.last_mut().unwrap_or(&mut self.home);
+                        top.show_grid();
+                    }
+                    false => self.search("", true),
+                }
+                true
+            }
+            "down" => {
+                self.on_strip = false;
+                true
+            }
+            _ if views::field::edits(name) && self.top().searching() => {
+                self.on_strip = false;
+                self.on_screen(name)
+            }
+            _ => false,
         }
-        if let Some(bus) = &self.bus {
-            bus.sleep();
+    }
+
+    // One press the screen on top takes. An up the screen answers
+    // `Still` to moved nothing there, so it puts focus on the strip.
+    fn on_screen(&mut self, name: &str) -> bool {
+        let top = self.stack.last_mut().unwrap_or(&mut self.home);
+        let step = top.key(name, &mut self.source);
+        let still = matches!(step, Step::Still);
+        self.take(step);
+        if still && name == "up" {
+            self.on_strip = true;
+            return true;
         }
+        !still
     }
 }
 
@@ -383,7 +364,7 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         look::BACKGROUND
     }
 
-    fn key(&mut self, name: &str) {
+    fn key(&mut self, name: &str) -> bool {
         // A press during the loading state reaches no screen under it.
         // Back exits the state here and now, and cancels nothing: the
         // `Play` this browser asked for is the operator's to run.
@@ -391,19 +372,49 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
             if name == "escape" || name == "backspace" {
                 self.presented();
             }
-            return;
+            return true;
         }
-        if name == "escape" || name == "backspace" {
-            self.back();
-        } else {
-            let top = self.stack.last_mut().unwrap_or(&mut self.home);
-            let step = top.key(name, &mut self.source);
-            self.take(step);
+        let mut changed = true;
+        match name {
+            // Escape on the strip gives focus back to the screen and pops
+            // nothing, because the strip is over the stack and not on it.
+            "escape" if self.on_strip => self.on_strip = false,
+            // The screen on top is asked first, because a search wall
+            // reads backspace as a deleted character and escape as the
+            // text cleared. Every other screen takes neither, and both
+            // words are then back.
+            "escape" | "backspace" => {
+                let top = self.stack.last_mut().unwrap_or(&mut self.home);
+                match top.escape(name, &mut self.source) {
+                    Some(step) => self.take(step),
+                    None => self.back(),
+                }
+            }
+            "home" => self.home(),
+            // The search key opens the empty wall with the grid shown, and
+            // does nothing on a search wall.
+            "search" => match self.top().searching() {
+                true => changed = false,
+                false => self.search("", true),
+            },
+            // A letter or a digit opens the search wall seeded with the
+            // character and the grid hidden, because a person who typed a
+            // letter has a keyboard. It happens here and not in a screen,
+            // so every screen reaches search the same way. The wall is
+            // pushed, so back returns to the screen the person left. On
+            // the search wall the letter types.
+            _ if views::field::typed(name) && !self.top().searching() => {
+                self.search(name, false);
+            }
+            _ if self.on_strip => changed = self.on_strip(name),
+            _ => changed = self.on_screen(name),
         }
         // Every press starts the rest again, so the store decodes the
         // backdrop of the item a person stopped on and not of every item
-        // focus passed over.
-        self.rest = self.top().prefetches().then_some(self.clock + REST);
+        // focus passed over. A strip that holds focus asks for nothing,
+        // because no press there opens a page over art.
+        self.rest = (!self.on_strip && self.top().prefetches()).then_some(self.clock + REST);
+        changed
     }
 
     // A poster that landed changes the frame and not the rows, so a
@@ -449,6 +460,13 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         self.posters.borrow().counts()
     }
 
+    // The size of the source's search index, for the stats line. A
+    // source with no index answers nothing, and the line leaves the
+    // numbers out.
+    fn index_size(&mut self) -> Option<Size> {
+        self.source.index_size()
+    }
+
     // The clock is read here alone, so the rest is measured on the same
     // clock the harness drives every frame with.
     fn tick(&mut self, at: f64) {
@@ -467,21 +485,25 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer> {
         // The shade is down, so the frame is the clear color and nothing over
         // it. The screen and its focus are held for the wake.
-        let Some(face) = self.face() else {
+        let Some(strip) = self.strip() else {
             return Space::new().width(Length::Fill).height(Length::Fill).into();
         };
 
         let screen = self.top().view(
             &self.posters,
             self.loading.map(|state| state.curtain(self.clock)),
+            !self.on_strip,
         );
 
-        // The clock and the row are the browser's own layers over whatever
-        // screen is on the stack, so a page change under them neither
-        // resets them nor covers them.
+        // The strip and the row are the browser's own layers over
+        // whatever screen is on the stack, so a page change under them
+        // neither resets them nor covers them.
         let mut layers = vec![
             screen,
-            canvas(face).width(Length::Fill).height(Length::Fill).into(),
+            canvas(strip)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
         ];
         if let Some(row) = self.level.row(self.clock) {
             layers.push(canvas(row).width(Length::Fill).height(Length::Fill).into());
@@ -512,22 +534,6 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
             .into_iter()
             .flatten()
             .min_by(f64::total_cmp)
-    }
-}
-
-/// One kernel key name as the browser key it is. Several names reach one
-/// key, because remotes differ in the name they send for OK and for back.
-/// Select is enter and back is escape, so a press from a remote takes the
-/// path the keyboard and the script take.
-fn key_of(name: &str) -> Option<&'static str> {
-    match name {
-        "KEY_UP" => Some("up"),
-        "KEY_DOWN" => Some("down"),
-        "KEY_LEFT" => Some("left"),
-        "KEY_RIGHT" => Some("right"),
-        "KEY_ENTER" | "KEY_OK" | "KEY_SELECT" | "KEY_KPENTER" => Some("enter"),
-        "KEY_BACK" | "KEY_ESC" | "KEY_EXIT" => Some("escape"),
-        _ => None,
     }
 }
 

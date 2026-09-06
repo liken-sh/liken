@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags, Row};
 
@@ -15,7 +16,7 @@ use crate::catalog::recency::DRAWN;
 use crate::catalog::{
     Answer, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, LibraryEntry,
     Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Query, Selection, SeriesDetails,
-    Slot, Source, TILES, library_name, recency,
+    Slot, Sort, Source, TILES, library_name, recency,
 };
 use crate::harness::Waker;
 
@@ -28,6 +29,7 @@ mod people;
 mod play;
 mod pool;
 mod recent;
+mod search;
 mod series;
 mod updates;
 
@@ -38,6 +40,7 @@ pub struct SidecarSource {
     database: PathBuf,
     connection: Option<Connection>,
     shared: Arc<updates::Shared>,
+    shelf: Arc<search::Shelf>,
     page_reads: Option<PageReads>,
     // Whether this source owns the update streams. The source the browser
     // holds owns them and stops them when it drops. The second source over
@@ -59,14 +62,24 @@ impl SidecarSource {
     // from construction on, so an event before the first read still
     // marks a re-read and nothing lands unseen.
     pub fn new(database: impl Into<PathBuf>, api: &str) -> Self {
+        Self::quieting(database, api, search::QUIET)
+    }
+
+    // The same source with the search index's quiet period given, so a
+    // test can wait milliseconds for a build instead of two seconds.
+    fn quieting(database: impl Into<PathBuf>, api: &str, quiet: Duration) -> Self {
         let shared = Arc::new(updates::Shared::default());
         for table in ["movies", "series", "episodes"] {
             updates::follow(shared.clone(), api.to_string(), table);
         }
+        let database = database.into();
+        let shelf = Arc::new(search::Shelf::default());
+        search::follow(shelf.clone(), shared.clone(), database.clone(), quiet);
         Self {
-            database: database.into(),
+            database,
             connection: None,
             shared,
+            shelf,
             page_reads: None,
             streams: true,
         }
@@ -148,7 +161,7 @@ impl SidecarSource {
 impl Drop for SidecarSource {
     fn drop(&mut self) {
         if self.streams {
-            self.shared.stop.store(true, Ordering::Release);
+            self.shared.halt();
         }
     }
 }
@@ -169,7 +182,14 @@ fn item_table(kind: &str) -> Option<&'static str> {
 // kind's rows, each stamped with its kind. The library binds once as
 // `?1` for both halves, and the sort key is selected only to order the
 // union.
-fn library_slots(connection: &Connection, library: &str) -> rusqlite::Result<Vec<Slot>> {
+// The sort formats into the outer ORDER BY. Title reads off the
+// (library, sort_key) index and the two release orders off (library,
+// released), so no order scans.
+fn library_slots(
+    connection: &Connection,
+    library: &str,
+    sort: Sort,
+) -> rusqlite::Result<Vec<Slot>> {
     let sql = format!(
         "SELECT * FROM (\
            SELECT {columns}, {movies} AS seasons, 'movies' AS kind, sort_key \
@@ -177,10 +197,11 @@ fn library_slots(connection: &Connection, library: &str) -> rusqlite::Result<Vec
            UNION ALL \
            SELECT {columns}, {series} AS seasons, 'series' AS kind, sort_key \
            FROM series WHERE library = ?1\
-         ) ORDER BY sort_key",
+         ) ORDER BY {ordering}",
         columns = item::COLUMNS,
         movies = item::seasons("movies"),
         series = item::seasons("series"),
+        ordering = ordering(sort),
     );
     collect(connection, &sql, &[&library], |row| {
         let kind: String = row.get(item::WIDTH + 1)?;
@@ -189,6 +210,17 @@ fn library_slots(connection: &Connection, library: &str) -> rusqlite::Result<Vec
             ..Slot::of(library, &kind, item::title(row)?)
         })
     })
+}
+
+// The ORDER BY one sort names. The closed match is all that can reach
+// the SQL text, and the sort key breaks every tie so a read answers the
+// same order every time.
+fn ordering(sort: Sort) -> &'static str {
+    match sort {
+        Sort::Title => "sort_key",
+        Sort::Newest => "released DESC, sort_key",
+        Sort::Oldest => "released ASC, sort_key",
+    }
 }
 
 // The posters of one library's newest-added titles that have one, in the
@@ -268,9 +300,9 @@ impl Source for SidecarSource {
 
     fn wall(&mut self, query: &Query) -> Answer {
         match query {
-            Query::Library { library } => Answer {
+            Query::Library { library, sort } => Answer {
                 name: library_name(library).to_string(),
-                slots: self.read(|connection| library_slots(connection, library)),
+                slots: self.read(|connection| library_slots(connection, library, *sort)),
             },
             Query::Person { library, path } => {
                 let name = self
@@ -315,17 +347,27 @@ impl Source for SidecarSource {
                     self.read(|connection| recent::candidates(connection, Order::Added)),
                 ),
             },
-            Query::Genre { name, order } => {
+            Query::Genre { name, order, sort } => {
                 let kinds = self.library_kinds();
                 Answer {
                     name: name.clone(),
                     slots: kinds.map_or_else(Vec::new, |kinds| {
-                        self.read(|connection| genres::titles(connection, name, *order, &kinds))
+                        self.read(|connection| {
+                            genres::titles(connection, name, *order, *sort, &kinds)
+                        })
                     }),
                 }
             }
             Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
+            Query::Search { text } => Answer {
+                name: String::new(),
+                slots: self.shelf.find(text),
+            },
         }
+    }
+
+    fn index_size(&mut self) -> Option<crate::catalog::search::Size> {
+        Some(self.shelf.held()?.size())
     }
 
     fn pool(&mut self) -> Vec<Candidate> {
@@ -421,6 +463,7 @@ impl Source for SidecarSource {
             database: self.database.clone(),
             connection: None,
             shared: self.shared.clone(),
+            shelf: self.shelf.clone(),
             page_reads: None,
             streams: false,
         }))

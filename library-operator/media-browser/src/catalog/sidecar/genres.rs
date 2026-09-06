@@ -12,26 +12,31 @@ use std::collections::{BTreeMap, HashMap};
 use rusqlite::Connection;
 
 use super::{collect, item, item_table};
-use crate::catalog::{GenreEntry, Order, Slot, TILE_CANDIDATES, unrepeated};
+use crate::catalog::{GenreEntry, GenreSort, Order, Slot, Sort, TILE_CANDIDATES, unrepeated};
 
-/// Every title across every library that carries the genre, the titles
-/// that lead with it first, then newest by the order's column, then by
-/// library and id so the order is the same on every read.
+/// Every title across every library that carries the genre, in the
+/// order the sort names, then by library and id so the order is the
+/// same on every read.
+// `Leads` is the order the genre wall opens in: the titles that lead
+// with the genre first. The three plain sorts drop the rank and order by
+// the release or the sort key alone.
 pub fn titles(
     connection: &Connection,
     name: &str,
     order: Order,
+    sort: GenreSort,
     kinds: &HashMap<String, String>,
 ) -> rusqlite::Result<Vec<Slot>> {
     let mut kinds: Vec<(&String, &String)> = kinds.iter().collect();
     kinds.sort();
-    let mut found: Vec<(i64, i64, Slot)> = Vec::new();
+    let mut found: Vec<(Keys, Slot)> = Vec::new();
     for (library, kind) in kinds {
         let Some(table) = item_table(kind) else {
             continue;
         };
         let sql = format!(
-            "SELECT {columns}, {seasons} AS seasons, genres.rank, {table}.added \
+            "SELECT {columns}, {seasons} AS seasons, genres.rank, {table}.added, \
+                    {table}.sort_key \
              FROM genres JOIN {table} ON {table}.library = genres.library \
              AND {table}.id = genres.item \
              WHERE genres.library = ?1 AND genres.genre = ?2",
@@ -40,8 +45,11 @@ pub fn titles(
         );
         let rows = collect(connection, &sql, &[&library, &name], |row| {
             Ok((
-                row.get::<_, i64>(item::WIDTH + 1)?,
-                row.get::<_, i64>(item::WIDTH + 2)?,
+                Keys {
+                    rank: row.get(item::WIDTH + 1)?,
+                    added: row.get(item::WIDTH + 2)?,
+                    sort_key: row.get(item::WIDTH + 3)?,
+                },
                 Slot {
                     seasons: row.get(item::WIDTH)?,
                     ..Slot::of(library, kind, item::title(row)?)
@@ -50,16 +58,43 @@ pub fn titles(
         })?;
         found.extend(rows);
     }
-    found.sort_by(|(rank, added, slot), (other_rank, other_added, other)| {
-        rank.cmp(other_rank)
-            .then_with(|| match order {
-                Order::Released => other.released.cmp(&slot.released),
-                Order::Added => other_added.cmp(added),
-            })
+    found.sort_by(|(keys, slot), (other_keys, other)| {
+        ordered(sort, order, (keys, slot), (other_keys, other))
             .then_with(|| slot.library.cmp(&other.library))
             .then_with(|| slot.id.cmp(&other.id))
     });
-    Ok(found.into_iter().map(|(_, _, slot)| slot).collect())
+    Ok(found.into_iter().map(|(_, slot)| slot).collect())
+}
+
+// The three keys a genre row carries beyond its slot, which the four
+// orders compare on.
+struct Keys {
+    rank: i64,
+    added: i64,
+    sort_key: String,
+}
+
+// How one sort compares two genre rows. `Leads` compares the rank
+// first and then the order's own column. The three plain sorts drop the
+// rank.
+fn ordered(
+    sort: GenreSort,
+    order: Order,
+    one: (&Keys, &Slot),
+    other: (&Keys, &Slot),
+) -> std::cmp::Ordering {
+    let (keys, slot) = one;
+    let (other_keys, other_slot) = other;
+    let newest = || match order {
+        Order::Released => other_slot.released.cmp(&slot.released),
+        Order::Added => other_keys.added.cmp(&keys.added),
+    };
+    match sort {
+        GenreSort::Leads => keys.rank.cmp(&other_keys.rank).then_with(newest),
+        GenreSort::By(Sort::Newest) => other_slot.released.cmp(&slot.released),
+        GenreSort::By(Sort::Oldest) => slot.released.cmp(&other_slot.released),
+        GenreSort::By(Sort::Title) => keys.sort_key.cmp(&other_keys.sort_key),
+    }
 }
 
 // One candidate poster of a genre: whether the title leads with the

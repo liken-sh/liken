@@ -7,13 +7,17 @@
 mod banner;
 mod clock;
 mod home;
+mod keys;
 mod loading;
 mod moments;
 mod paging;
 mod plays;
 mod poster_counts;
 mod prefetch;
+mod rail;
 mod reader;
+mod search;
+mod strip;
 mod volume;
 
 use std::sync::Arc;
@@ -25,15 +29,15 @@ use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
     Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, Franchise, FranchiseEntry,
-    GenreEntry, InSeries, LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person,
-    PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
+    GenreEntry, GenreSort, InSeries, LibraryEntry, Membership, MovieDetails, MovieSet, Order,
+    Person, PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
 };
 use crate::posters::{Art, PosterCounts};
 use crate::screens::home::Home;
 use crate::screens::movie::Focus;
 use crate::screens::series::Focus as SeriesFocus;
 use crate::screens::wall::Wall;
-use crate::views::{band, wall};
+use crate::views::wall;
 
 // The topic the operator names on a screen pod, so a test reads what the
 // browser published on the topic a cluster would give it.
@@ -287,7 +291,7 @@ impl Source for Fake {
     fn wall(&mut self, query: &Query) -> Answer {
         self.calls.push("wall");
         match query {
-            Query::Library { library } => {
+            Query::Library { library, .. } => {
                 let kind = match library.as_str() {
                     "screening/films" => "movies",
                     _ => "series",
@@ -347,7 +351,7 @@ impl Source for Fake {
             Query::Franchise { library, id } => {
                 crate::catalog::franchise::answer(self.franchise(library, id))
             }
-            Query::Released { fold } | Query::Added { fold } => self.recency(*fold),
+            Query::Released { fold, .. } | Query::Added { fold, .. } => self.recency(*fold),
             Query::Genre { name, .. } => Answer {
                 name: name.clone(),
                 slots: (1..=self.movies)
@@ -355,6 +359,9 @@ impl Source for Fake {
                     .chain(std::iter::once(serial()))
                     .collect(),
             },
+            // This fixture indexes nothing, so a search answers nothing.
+            // The search tests run over the sample source instead.
+            Query::Search { .. } => Answer::default(),
         }
     }
 
@@ -369,6 +376,7 @@ impl Source for Fake {
                 query: Query::Genre {
                     name: "Western".into(),
                     order: Order::Released,
+                    sort: GenreSort::default(),
                 },
                 name: "Western".into(),
                 weight: 200,
@@ -377,6 +385,7 @@ impl Source for Fake {
                 query: Query::Genre {
                     name: "Drama".into(),
                     order: Order::Released,
+                    sort: GenreSort::default(),
                 },
                 name: "Drama".into(),
                 weight: 40,

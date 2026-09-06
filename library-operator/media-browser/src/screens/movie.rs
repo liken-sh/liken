@@ -187,6 +187,7 @@ impl Movie {
         &'a self,
         posters: &'a RefCell<P>,
         curtain: Option<Curtain>,
+        held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -197,6 +198,7 @@ impl Movie {
                 movie: self,
                 posters,
                 lifted: curtain.is_some(),
+                held,
             },
             over: curtain.map(|curtain| Layer {
                 library: &self.library,
@@ -217,6 +219,9 @@ impl Movie {
                 library: self.library.clone(),
                 selection: self.chosen(index),
             },
+            // The buttons are the topmost focus, so up moves nothing and
+            // the press reaches the browser's strip.
+            "up" => Step::Still,
             "down" => {
                 self.focus = self.below(index);
                 Step::Stay

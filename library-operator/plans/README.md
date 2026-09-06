@@ -212,6 +212,18 @@ that took a hearing-impaired flag for Hindi.
   and only where there is more to see, the home band shows Search
   alone, and a clock in the household's zone sits top-right on every
   screen.
+* [39, Search and the keyboard](completed/39-search-and-the-keyboard.md).
+  Shaped and built on 2026-09-05 and 2026-09-06 in the working tree and
+  drilled on this workstation from `local/browse`. Home and search
+  keys, a search wall that answers as a person types from an in-memory
+  index, and an on-screen keyboard that hides when a physical letter
+  arrives. The `liken-1` drill with the X6's Keymap rows is still owed.
+* [40, The rail and the strip](completed/40-the-rail-and-the-strip.md).
+  Shaped and built on 2026-09-06 and drilled on this workstation from
+  `local/browse`. A right-hand rail on long walls that jumps by letter,
+  year, or decade and cycles the order from its button, a seasons rail
+  on long series, the genre head folded into the band, and a search
+  icon by the clock on every screen. The `liken-1` drill is still owed.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds
