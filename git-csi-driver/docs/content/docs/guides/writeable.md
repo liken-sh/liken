@@ -101,20 +101,53 @@ empty directories are recorded on a ref of the driver's own,
 `refs/git-csi/metadata`, which never appears in the tree or on the
 forge's file view.
 
+## When upstream moves
+
+The application's tree changes only when the application writes it.
+Upstream reaches the tree at stage, when the pod starts, and never
+later. At stage the driver compares the tree to the ref:
+
+- **Behind.** The tree takes upstream.
+- **Ahead.** Nothing changes. The next push carries the commits.
+- **Diverged.** The driver rebases the tree's commits onto upstream. A
+  rebase that conflicts is aborted, and the volume moves to a side
+  branch.
+- **Uncommitted writes.** A tree with writes no commit carries yet is
+  left as it is, whatever upstream did, and the condition says upstream
+  moved.
+
+A push the forge rejects, or an aborted rebase, moves the volume to the
+branch `<ref>.<volumeHandle>`. Every push goes there until a person
+merges it into the ref on the forge. The condition says `Diverged` with
+both branch names, and commits continue, so no work stops. At the next
+pod start after the merge, the volume is back on the ref and the side
+branch is deleted.
+
 ## Restore
 
 Delete the claim, make a `PersistentVolume` against the same URL, and
 bind a new claim to it. The pod starts on any node from the last push,
 with its modes and empty directories replayed.
 
+## Work trees the node keeps
+
+A work tree stays on the node after the pod stops, so the next stage on
+the same node is not a clone. Once an hour the driver removes work trees
+that nothing has staged for `--sweep-after`, 30 days by default, and
+whose every commit the remote holds. A tree with unpushed commits is
+never removed. Its age is named in the condition of the next volume of
+the same repository, so a person learns that work sits on the node with
+no claim that reaches it.
+
 ## What the driver reports
 
 The pod's events and the claim's events carry `GitVolumeArmed`,
-`GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`, `GitVolumePushFailed`,
-and `GitVolumeFileSkipped`. The volume's condition is abnormal for an unarmed volume
+`GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
+`GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeDiverged`,
+`GitVolumeHealed`, and `GitVolumeSwept`. The volume's condition is abnormal for an unarmed volume
 with pending paths, a failed push, a skipped file, and an unpushed
 commit older than `push.maxLatency`. The node plugin's `/metrics`
 listener exports `git_csi_armed`, `git_csi_pending_paths`,
 `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,
-`git_csi_push_failures_total`, and `git_csi_skipped_files`, labeled by
-namespace and claim.
+`git_csi_push_failures_total`, `git_csi_skipped_files`, and
+`git_csi_diverged`, labeled by namespace and claim.

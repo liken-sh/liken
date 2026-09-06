@@ -17,7 +17,12 @@ GUEST_FORGE="git://10.0.2.2:9418/hello.git"
 IMAGE="${IMAGE:-debian:12-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-04
-HANDLE=drill-04
+# The store on the node keeps a work tree per handle, and the forge is
+# reseeded on every run, so a handle carries a run's own stamp. A handle
+# reused across runs would find the last run's tree and push against a
+# history the forge no longer holds.
+RUN="$(date +%s)"
+HANDLE="drill-04-$RUN"
 CLASS=drill-04
 
 # Every wait in this drill has a deadline, in seconds.
@@ -254,7 +259,8 @@ echo "drill 04: the pod is deleted and made again, and finds its files"
 kube delete -n "$NAMESPACE" pod/writer --timeout="${READY_DEADLINE}s"
 writer
 kube wait -n "$NAMESPACE" --for=condition=Ready pod/writer --timeout="${READY_DEADLINE}s"
-found="$(kube exec -n "$NAMESPACE" writer -- sh -c 'ls -1 /config/*.yaml | wc -l')"
+found="$(kube exec -n "$NAMESPACE" writer -- sh -c \
+	'ls -1 /config/one.yaml /config/two.yaml /config/three.yaml 2>/dev/null | wc -l')"
 if [ "$(echo "$found" | tr -d '[:space:]')" != "3" ]; then
 	echo "drill 04: the new pod found $found files, want 3" >&2
 	kube exec -n "$NAMESPACE" writer -- ls -la /config >&2 || true

@@ -19,10 +19,15 @@ FORGE="$LAB/forge/hello.git"
 IMAGE="${IMAGE:-debian:12-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-05
-HANDLE=drill-05
+# The store on the node keeps a work tree per handle, and the forge is
+# reseeded on every run, so a handle carries a run's own stamp. A handle
+# reused across runs would find the last run's tree and push against a
+# history the forge no longer holds.
+RUN="$(date +%s)"
+HANDLE="drill-05-$RUN"
 # The restore is a volume the node has never held, so it takes a handle
 # of its own against the same repository.
-RESTORE_HANDLE=drill-05-restore
+RESTORE_HANDLE="drill-05-restore-$RUN"
 CLASS=drill-05
 
 # Every wait in this drill has a deadline, in seconds.
@@ -183,6 +188,9 @@ spec:
   capacity: {storage: 1Gi}
   accessModes: [ReadWriteOncePod]
   persistentVolumeReclaimPolicy: Retain
+  # The binder pairs a claim and a volume only when both name the same
+  # class, so the volume carries the class the claim will name.
+  volumeAttributesClassName: $CLASS
   csi:
     driver: git.liken.sh
     volumeHandle: $1

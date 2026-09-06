@@ -19,7 +19,12 @@ FORGE="$LAB/forge/hello.git"
 IMAGE="${IMAGE:-debian:12-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-06
-HANDLE=drill-06
+# The store on the node keeps a work tree per handle, and the forge is
+# reseeded on every run, so a handle carries a run's own stamp. A handle
+# reused across runs would find the last run's tree and push against a
+# history the forge no longer holds.
+RUN="$(date +%s)"
+HANDLE="drill-06-$RUN"
 CLASS=drill-06
 # The side branch the driver takes is the ref and the volume's
 # handle, which is what plan 06 names.

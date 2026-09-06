@@ -28,13 +28,18 @@ first bad one.
 | `GitVolumePushed` | A push succeeded, with the commit and the count of paths. |
 | `GitVolumePushFailed` | A push failed, with git's error. |
 | `GitVolumeFileSkipped` | A file over `commit.maxFileSize` was left out of a commit. |
+| `GitVolumeDiverged` | The volume moved to its side branch, after a rejected push or an aborted rebase. |
+| `GitVolumeHealed` | Upstream took the side branch's work, and the volume is back on its ref. |
+| `GitVolumeSwept` | The sweep removed a work tree nothing had staged for `--sweep-after`. |
 
 ## The condition
 
 The condition is abnormal, with a message, for an unarmed volume with
 pending paths, a failed push, a skipped file, an unpushed commit older
-than `push.maxLatency`, an invalid class, and a ref that moved upstream
-while the tree held local work.
+than `push.maxLatency`, an invalid class, a ref that moved upstream
+while the tree held uncommitted writes, a diverged volume, a ref the
+remote no longer holds, and an abandoned work tree of the same
+repository on the node.
 
 ## Metrics
 
@@ -48,3 +53,4 @@ Each gauge is labeled `namespace` and `claim`.
 | `git_csi_last_push_timestamp_seconds` | When the last push succeeded. |
 | `git_csi_push_failures_total` | Pushes that failed. |
 | `git_csi_skipped_files` | Files over `commit.maxFileSize` in the tree. |
+| `git_csi_diverged` | One while the volume pushes to its side branch. |
