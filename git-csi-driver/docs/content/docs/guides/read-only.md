@@ -81,6 +81,20 @@ spec:
   resources: {requests: {storage: 1Gi}}
 ```
 
+A pod mounts the claim with `readOnly: true` on its volume. The
+container runtime binds a volume into a pod read-write unless the pod
+asks for read-only, whatever the driver's own mount says, so the driver
+refuses a pod that does not ask, with `GitVolumeRefused` in the pod's
+events.
+
+```yaml
+volumes:
+  - name: franchises
+    persistentVolumeClaim:
+      claimName: franchises
+      readOnly: true
+```
+
 Many pods on one node publish one tree, each at its own mount, and the
 driver keeps the tree until the last of them stops. A private repository
 names its `Secret` through `nodeStageSecretRef`, with the keys the inline

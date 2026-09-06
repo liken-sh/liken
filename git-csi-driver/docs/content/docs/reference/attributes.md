@@ -39,7 +39,9 @@ volume carries no access mode and is always read-only.
 
 A read-only claim takes `pull`, `depth`, and `offline`. A writeable
 volume refuses all three, because it follows its ref at stage alone. A
-read-only claim names its `Secret` through `nodeStageSecretRef`.
+read-only claim names its `Secret` through `nodeStageSecretRef`, and a
+pod mounts it with `readOnly: true` on its `persistentVolumeClaim`
+volume, or the publish is refused.
 
 ## Credentials
 

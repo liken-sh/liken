@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Drill 07. A ReadOnlyMany claim on the forge's repository. Two pods in
 # one namespace read the tree, and a push reaches both inside pull. A
-# write in a pod fails. The driver pod is deleted, and the new one takes
+# write in a pod fails, and a pod that does not ask for read-only is
+# refused. The driver pod is deleted, and the new one takes
 # the volume back and follows the next push. The last pod's exit removes
 # the tree from the node. With the forge stopped, a claim with
 # offline: refuse stays refused, and the forge's return starts its pod.
@@ -106,9 +107,11 @@ spec:
 YAML
 }
 
-# Reader makes one pod that mounts the claim.
+# Reader makes one pod that mounts the claim read-only. A pod has to ask
+# for read-only, or the driver refuses it, because the container runtime
+# binds the volume into the pod read-write otherwise.
 reader() {
-	local name="$1" claimName="$2"
+	local name="$1" claimName="$2" readOnly="${3:-true}"
 	kube apply -n "$NAMESPACE" -f - >/dev/null <<YAML
 apiVersion: v1
 kind: Pod
@@ -129,6 +132,7 @@ spec:
     - name: hello
       persistentVolumeClaim:
         claimName: $claimName
+        readOnly: $readOnly
 YAML
 }
 
@@ -215,6 +219,15 @@ if kube exec -n "$NAMESPACE" reader-a -- sh -c 'echo no > /hello/written.yaml' 2
 	exit 1
 fi
 echo "drill 07: the mount is read-only"
+
+echo "drill 07: a pod that does not ask for read-only is refused"
+reader writer hello false
+wait_for_event "involvedObject.kind=Pod,involvedObject.name=writer" 'GitVolumeRefused'
+if kube get -n "$NAMESPACE" pod/writer -o jsonpath='{.status.phase}' | grep -q Running; then
+	echo "drill 07: the writer pod is running, and it must not be" >&2
+	exit 1
+fi
+kube delete pod -n "$NAMESPACE" writer --wait=false >/dev/null
 
 echo "drill 07: the driver's node pod is deleted"
 kube delete pod -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node --timeout="${READY_DEADLINE}s"

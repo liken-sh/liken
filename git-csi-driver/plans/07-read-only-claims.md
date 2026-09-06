@@ -92,7 +92,12 @@ fails, and `allowStale` stages what the store holds and reports the
 failure.
 
 A publish of a staged read-only volume bind-mounts the tree read-only
-onto the pod's target path. Many pods on one node publish the same
+onto the pod's target path. The pod has to ask for read-only, with
+`readOnly: true` on its `persistentVolumeClaim` volume, because the
+container runtime binds the target into the pod read-write otherwise,
+whatever the driver's own bind says. A publish that does not ask is
+refused with `InvalidArgument`, the way an inline volume without
+`readOnly: true` is refused. Many pods on one node publish the same
 staged volume, each at its own target, and the driver keeps every
 target it bound. An unpublish removes one target. The unstage, which
 the kubelet sends after the last unpublish on the node, removes the
@@ -137,7 +142,9 @@ Drill 07 in the lab, `lab/drills/07.sh`:
    repository with a 15 second `pull`, and two pods in one namespace
    that mount the claim. Both pods start, and both read the greeting.
 2. Push to the forge. Both pods read the new greeting inside `pull`.
-3. Write in one pod. The write fails with a read-only file system.
+3. Write in one pod. The write fails with a read-only file system. A
+   third pod that mounts the claim without `readOnly: true` is refused
+   with `GitVolumeRefused` and never runs.
 4. Delete the driver's node pod. The two pods keep their mounts, the
    new driver pod resumes the follower, and a second push reaches
    both pods.

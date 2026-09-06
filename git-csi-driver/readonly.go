@@ -79,6 +79,15 @@ func (n *node) publishReadOnly(
 	request *csi.NodePublishVolumeRequest,
 	parsed *attributes,
 ) error {
+	// The kubelet binds the target into the pod read-write unless the
+	// pod asked for read-only, whatever this driver's own bind says, so
+	// a pod that did not ask would write into the tree the follower
+	// replaces. The pod asks with readOnly: true on its claim volume.
+	if !request.GetReadonly() {
+		return status.Error(codes.InvalidArgument,
+			"readOnly: a claim on this driver has to be mounted read-only; "+
+				"set readOnly: true on the pod's persistentVolumeClaim volume")
+	}
 	target := request.GetTargetPath()
 	if staged.boundAt(target) {
 		return nil

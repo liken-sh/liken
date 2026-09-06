@@ -351,6 +351,41 @@ func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
 	}
 }
 
+// The container runtime binds a volume into the pod read-write unless
+// the pod asks for read-only, whatever the driver's own bind says, so
+// a publish that does not ask is refused before anything is bound.
+func TestAReadOnlyClaimRefusesAPodThatDoesNotAskForReadOnly(t *testing.T) {
+	answering, calls := testNode(t, io.Discard)
+	boundVolume(t, answering, "franchises", "")
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+		map[string]string{"pull": "never"})
+	request := readOnlyPublish(t, staged, "reader-a")
+	request.Readonly = false
+	before := len(calls.mounts)
+
+	_, err := answering.NodePublishVolume(t.Context(), request)
+
+	if got := status.Code(err); got != codes.InvalidArgument {
+		t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.InvalidArgument)
+	}
+	if !strings.Contains(err.Error(), "readOnly") {
+		t.Errorf("the refusal reads %q, want it to name readOnly", err)
+	}
+	if len(calls.mounts) != before {
+		t.Errorf("the refused publish made %d mounts, want none", len(calls.mounts)-before)
+	}
+	onPod := false
+	for _, posted := range eventsOf(t, answering) {
+		if posted.Reason == reasonRefused && posted.InvolvedObject.Kind == "Pod" {
+			onPod = true
+		}
+	}
+	if !onPod {
+		t.Errorf("the refused publish posted %v, want a refusal on the pod", eventsOf(t, answering))
+	}
+}
+
 func TestADriverThatRestartsTakesBackAReadOnlyClaim(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	boundVolume(t, answering, "franchises", "")
