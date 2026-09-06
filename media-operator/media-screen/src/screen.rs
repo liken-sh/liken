@@ -44,9 +44,11 @@ const RE_PRESENT: &str = "re-present";
 /// mark landed on, by its place in `spec.remotes`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Moment {
-    /// One navigation press, under the kernel's name for the control. The
-    /// client holds its own table from these names to what they do there.
-    Press(&'static str),
+    /// One press this crate does not act on itself, under the kernel's
+    /// name for the control. The client holds its own table from these
+    /// names to what they do there, so a letter key on a remote with a
+    /// keyboard reaches a client that types.
+    Press(String),
     /// The quiet window ran out, or the client asked for the shade.
     Sleep,
     /// A press, a live mark, or a starting `Play` lifted the shade.
@@ -344,13 +346,14 @@ impl Screen {
         })]
     }
 
-    /// Fold one key event. A sleeping screen wakes on any press, so a person
-    /// gets the screen back with whatever control they touched, and that press
-    /// does nothing else. A navigation key, while the unit plays nothing,
-    /// reaches the client. A level key, while the unit plays nothing and the
-    /// screen is awake, publishes the unit's next level. The cycle key asks
-    /// the operator to move the mark and does nothing else. Every other press
-    /// restarts the quiet window.
+    /// Fold one key event. The checks run in this order. The cycle key
+    /// asks the operator to move the mark and does nothing else. A
+    /// sleeping screen wakes on any other press, so a person gets the
+    /// screen back with whatever control they touched, and that press
+    /// does nothing else. A level key, while the unit plays nothing,
+    /// publishes the unit's next level. Every other key, while the unit
+    /// plays nothing, reaches the client. Every press restarts the quiet
+    /// window.
     ///
     /// A press acts only while the remote's mark names this `Player`. A pad
     /// pointed at another room touches nothing here, not the shade and not
@@ -373,12 +376,10 @@ impl Screen {
         } else if self.asleep {
             self.asleep = false;
             moment = Some(Moment::Wake);
-        } else if self.idle
-            && let Some(key) = keys::navigation(&press.key)
-        {
-            forwarded = Some(key);
-        } else if self.idle {
+        } else if self.idle && keys::owned(&press.key) {
             publish = self.level(&press);
+        } else if self.idle {
+            forwarded = Some(press.key);
         }
 
         self.rearm(now);

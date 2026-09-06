@@ -297,14 +297,12 @@ fn a_press_wakes_a_sleeping_screen_and_does_nothing_else() {
 }
 
 #[test]
-fn a_key_this_crate_hands_no_client_states_nothing() {
+fn a_press_this_crate_hands_the_client_states_nothing() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
     assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_PLAYPAUSE", 1), false, now)
-            .is_empty()
+        publishes(screen.deliver(SOFA_EVENTS, &key("KEY_PLAYPAUSE", 1), false, now)).is_empty()
     );
 }
 
@@ -397,17 +395,47 @@ fn the_client_brings_no_shade_down_while_a_play_runs() {
     assert!(screen.sleep(now).is_empty());
 }
 
-// The navigation keys, which reach the client under the kernel's name.
+// Which keys reach the client, and which ones this crate answers itself.
 
 #[test]
-fn every_navigation_key_reaches_the_client() {
+fn every_key_this_crate_acts_on_no_further_reaches_the_client() {
     let now = Instant::now();
-    for name in keys::NAVIGATION {
+    for name in [
+        "KEY_UP",
+        "KEY_DOWN",
+        "KEY_LEFT",
+        "KEY_RIGHT",
+        "KEY_ENTER",
+        "KEY_OK",
+        "KEY_SELECT",
+        "KEY_KPENTER",
+        "KEY_A",
+        "KEY_1",
+        "KEY_SPACE",
+        "KEY_BACKSPACE",
+        "KEY_HOMEPAGE",
+        "KEY_SEARCH",
+        "KEY_PLAYPAUSE",
+    ] {
         for value in [1, 2] {
             let mut screen = idling(&wiring(), now);
             assert_eq!(
                 moments(screen.deliver(SOFA_EVENTS, &key(name, value), false, now)),
-                [Moment::Press(name)],
+                [Moment::Press(name.into())],
+                "{name} at value {value}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_keys_this_crate_answers_itself_reach_no_client() {
+    let now = Instant::now();
+    for name in [keys::CYCLE, "KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE"] {
+        for value in [1, 2] {
+            let mut screen = idling(&wiring(), now);
+            assert!(
+                moments(screen.deliver(SOFA_EVENTS, &key(name, value), false, now)).is_empty(),
                 "{name} at value {value}"
             );
         }
@@ -417,13 +445,16 @@ fn every_navigation_key_reaches_the_client() {
 #[test]
 fn a_release_reaches_no_client() {
     let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
+    for name in ["KEY_UP", "KEY_A", "KEY_HOMEPAGE", "KEY_BACKSPACE"] {
+        let mut screen = idling(&wiring(), now);
 
-    assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_UP", 0), false, now)
-            .is_empty()
-    );
+        assert!(
+            screen
+                .deliver(SOFA_EVENTS, &key(name, 0), false, now)
+                .is_empty(),
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -433,26 +464,29 @@ fn a_back_press_reaches_the_client_and_leaves_the_shade_up() {
         let mut screen = idling(&wiring(), now);
         assert_eq!(
             moments(screen.deliver(SOFA_EVENTS, &key(name, 1), false, now)),
-            [Moment::Press(name)]
+            [Moment::Press(name.into())]
         );
         assert!(!screen.asleep);
     }
 }
 
 #[test]
-fn a_navigation_press_on_a_sleeping_screen_only_wakes_it() {
+fn a_press_on_a_sleeping_screen_only_wakes_it() {
     let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.asleep = true;
+    for name in ["KEY_UP", "KEY_A", "KEY_HOMEPAGE"] {
+        let mut screen = idling(&wiring(), now);
+        screen.asleep = true;
 
-    assert_eq!(
-        moments(screen.deliver(SOFA_EVENTS, &key("KEY_UP", 1), false, now)),
-        [Moment::Wake]
-    );
+        assert_eq!(
+            moments(screen.deliver(SOFA_EVENTS, &key(name, 1), false, now)),
+            [Moment::Wake],
+            "{name}"
+        );
+    }
 }
 
 #[test]
-fn a_navigation_press_reaches_no_client_while_a_play_runs() {
+fn a_press_reaches_no_client_while_a_play_runs() {
     let now = Instant::now();
     let mut screen = focused(&wiring());
     screen.deliver(STATUS, &status("Playing"), true, now);
@@ -739,7 +773,7 @@ fn the_retained_catch_up_still_opens_the_gate() {
 
     assert_eq!(
         moments(screen.deliver(SOFA_EVENTS, &key("KEY_UP", 1), false, now)),
-        [Moment::Press("KEY_UP")]
+        [Moment::Press("KEY_UP".into())]
     );
 }
 
@@ -829,7 +863,7 @@ fn the_mark_stands_across_a_bus_session() {
 
     assert_eq!(
         moments(screen.deliver(SOFA_EVENTS, &key("KEY_UP", 1), false, now)),
-        [Moment::Press("KEY_UP")]
+        [Moment::Press("KEY_UP".into())]
     );
 }
 

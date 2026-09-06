@@ -295,6 +295,34 @@ fn the_clock_runs_the_windows_and_ends_with_the_client() {
 }
 
 #[test]
+fn a_clock_with_no_client_ends_at_once() {
+    let (reader, threads) = reader();
+    drop(reader);
+
+    clock(&threads);
+
+    assert!(threads.screen().is_none());
+}
+
+#[test]
+fn a_clock_whose_client_dropped_its_channel_ends_the_thread() {
+    let (mut reader, threads) = reader_over(Wiring {
+        fade_after: Duration::from_millis(5),
+        ..wiring()
+    });
+    idling(&reader);
+    let (sender, closed) = mpsc::channel();
+    reader.moments = closed;
+    drop(sender);
+
+    clock(&threads);
+
+    // The window brought the shade down, but the client had dropped its
+    // channel, so nothing waits to be drained.
+    assert!(reader.drain().is_empty());
+}
+
+#[test]
 fn a_debug_line_names_the_reader_and_nothing_inside_it() {
     let (reader, _threads) = reader();
 

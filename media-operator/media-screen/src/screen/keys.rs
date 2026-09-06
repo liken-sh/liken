@@ -1,14 +1,12 @@
-// This crate's table from key names to what they do while nothing plays,
-// beside the playback pod's table in `media-operator`'s `keybindings.go`. The
-// two tables share the level keys and the cycle key. They part on navigation:
-// the navigation keys reach the client that drew the list, and the playback
-// pod's reach a display script.
-//
-// The crate holds a table rather than passing every key through,
-// because three kinds of key are its own: the cycle key it answers for
-// the operator, and the two level keys and mute, which step a state no
-// client draws a list for. Every other key a screen client acts on is a
-// navigation key, and the client binds it.
+// The keys this crate answers itself while nothing plays, beside the
+// playback pod's table in `media-operator`'s `keybindings.go`. The two
+// share the level keys and the cycle key. This crate owns those four
+// because no client draws a list for them: the cycle key is answered
+// for the operator, and the level keys step a state the crate holds.
+// Every other key passes through to the client under the kernel's
+// name, and the client binds it. The crate holds no table of the keys
+// a client may want, because a remote with a keyboard sends letters,
+// and only the client knows what a letter does on its screen.
 
 use super::press::Press;
 use crate::volume::{STEP, Volume};
@@ -17,33 +15,24 @@ use crate::volume::{STEP, Volume};
 /// is the same name during a film and between films.
 pub const CYCLE: &str = "KEY_CYCLEWINDOWS";
 
-/// The navigation keys a client answers: the arrows, the select synonyms, and
-/// the back synonyms. Back is one of them, so this crate never sleeps the
-/// screen on a press. Only the client knows whether back has anywhere to go,
-/// and the client asks for the shade with [`super::Screen::sleep`].
-pub const NAVIGATION: [&str; 11] = [
-    "KEY_UP",
-    "KEY_DOWN",
-    "KEY_LEFT",
-    "KEY_RIGHT",
-    "KEY_ENTER",
-    "KEY_OK",
-    "KEY_SELECT",
-    "KEY_KPENTER",
-    "KEY_BACK",
-    "KEY_ESC",
-    "KEY_EXIT",
-];
+/// The three keys that step the level. They are named once here, so the
+/// level rule and the owned check read the same names.
+pub const VOLUME_UP: &str = "KEY_VOLUMEUP";
+pub const VOLUME_DOWN: &str = "KEY_VOLUMEDOWN";
+pub const MUTE: &str = "KEY_MUTE";
 
-/// The three back synonyms among the navigation keys. A shell sends whichever
-/// one it was built with, so a client that sleeps on back reads all three.
+/// The three back synonyms. A shell sends whichever one it was built
+/// with, so a client reads all three. This crate never sleeps the
+/// screen on a press: only the client knows whether back has anywhere
+/// to go, and the client asks for the shade with
+/// [`super::Screen::sleep`].
 pub const BACK: [&str; 3] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT"];
 
-/// One kernel key name as the navigation key it is, and nothing for a key
-/// this crate hands no client. The answer is the table's own name, so the
-/// client reads the kernel's name for the control and holds its own table.
-pub fn navigation(key: &str) -> Option<&'static str> {
-    NAVIGATION.into_iter().find(|name| *name == key)
+/// Whether this crate acts on the key itself. This is the one check
+/// that keeps a key from the client; every key it refuses passes
+/// through.
+pub fn owned(key: &str) -> bool {
+    matches!(key, CYCLE | VOLUME_UP | VOLUME_DOWN | MUTE)
 }
 
 /// Whether one kernel key name is a back synonym.
@@ -58,9 +47,9 @@ pub fn back(key: &str) -> bool {
 /// under the hand.
 pub fn level(press: &Press, held: Volume) -> Option<Volume> {
     match press.key.as_str() {
-        "KEY_VOLUMEUP" => Some(held.stepped(STEP)),
-        "KEY_VOLUMEDOWN" => Some(held.stepped(-STEP)),
-        "KEY_MUTE" if press.down() => Some(held.toggled()),
+        VOLUME_UP => Some(held.stepped(STEP)),
+        VOLUME_DOWN => Some(held.stepped(-STEP)),
+        MUTE if press.down() => Some(held.toggled()),
         _ => None,
     }
 }
@@ -77,25 +66,33 @@ mod tests {
     }
 
     #[test]
-    fn every_navigation_key_reaches_the_client_under_its_own_name() {
-        for key in NAVIGATION {
-            assert_eq!(navigation(key), Some(key));
+    fn the_cycle_key_and_the_level_keys_are_this_crates_own() {
+        for key in [CYCLE, VOLUME_UP, VOLUME_DOWN, MUTE] {
+            assert!(owned(key));
         }
     }
 
     #[test]
-    fn a_key_this_crate_hands_no_client_is_no_navigation_key() {
-        assert_eq!(navigation("KEY_PLAYPAUSE"), None);
-        assert_eq!(navigation("KEY_VOLUMEUP"), None);
-        assert_eq!(navigation(CYCLE), None);
-        assert_eq!(navigation(""), None);
+    fn a_key_this_crate_acts_on_no_further_is_none_of_its_own() {
+        for key in [
+            "KEY_UP",
+            "KEY_ENTER",
+            "KEY_BACK",
+            "KEY_A",
+            "KEY_HOMEPAGE",
+            "KEY_BACKSPACE",
+            "KEY_PLAYPAUSE",
+            "",
+        ] {
+            assert!(!owned(key));
+        }
     }
 
     #[test]
-    fn the_three_back_synonyms_are_navigation_keys_too() {
+    fn the_three_back_synonyms_are_the_clients_to_answer() {
         for key in BACK {
             assert!(back(key));
-            assert_eq!(navigation(key), Some(key));
+            assert!(!owned(key));
         }
         assert!(!back("KEY_UP"));
     }

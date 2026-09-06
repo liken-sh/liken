@@ -95,11 +95,12 @@ impl Client {
         if moment == Moment::Present {
             self.surface_due = true;
         }
-        // The stock idle screen draws no list, so the arrows and select
-        // reach nothing, and back is the shade. The client decides this
-        // and not the crate, because a client with levels sleeps at its
-        // top level alone, and only the client reads its levels.
-        if let Moment::Press(key) = moment
+        // Every key the crate does not own reaches this client. The stock
+        // idle screen draws no list, so every key but back reaches
+        // nothing, and back is the shade. The client decides this and not
+        // the crate, because a client with levels sleeps at its top level
+        // alone, and only the client reads its levels.
+        if let Moment::Press(key) = &moment
             && media_screen::screen::keys::back(key)
             && let Some(bus) = &self.bus
         {
@@ -292,12 +293,12 @@ mod tests {
         let (_sender, slept) = on_a_channel(&mut client);
 
         for key in media_screen::screen::keys::BACK {
-            client.receive(Moment::Press(key), 1.0);
+            client.receive(Moment::Press(key.into()), 1.0);
         }
         // The arrows and select reach nothing, because this screen draws no
         // list to move through.
-        client.receive(Moment::Press("KEY_UP"), 2.0);
-        client.receive(Moment::Press("KEY_ENTER"), 2.0);
+        client.receive(Moment::Press("KEY_UP".into()), 2.0);
+        client.receive(Moment::Press("KEY_ENTER".into()), 2.0);
 
         assert_eq!(
             slept.load(Ordering::SeqCst),
@@ -309,7 +310,7 @@ mod tests {
     fn a_client_with_no_bus_asks_no_one_for_the_shade() {
         let mut client = seeded();
 
-        client.receive(Moment::Press("KEY_BACK"), 1.0);
+        client.receive(Moment::Press("KEY_BACK".into()), 1.0);
 
         assert!(client.bus.is_none());
     }
