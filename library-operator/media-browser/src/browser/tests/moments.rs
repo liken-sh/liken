@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn a_press_on_the_bus_moves_focus_like_the_keyboard() {
-    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_RIGHT")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_RIGHT".into())]);
 
     assert!(browser.pump(1.0));
 
@@ -14,7 +14,7 @@ fn a_press_on_the_bus_moves_focus_like_the_keyboard() {
 
 #[test]
 fn select_on_the_bus_descends() {
-    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_SELECT")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_SELECT".into())]);
 
     assert!(browser.pump(1.0));
 
@@ -47,7 +47,7 @@ fn every_name_a_remote_gives_back_is_escape() {
 fn a_press_this_browser_binds_no_key_for_changes_nothing() {
     assert_eq!(key_of("KEY_PLAYPAUSE"), None);
 
-    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_PLAYPAUSE")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Press("KEY_PLAYPAUSE".into())]);
 
     assert!(browser.pump(1.0));
 
@@ -75,7 +75,7 @@ fn the_shade_covers_the_browser_and_lifts_it() {
 
 #[test]
 fn a_press_that_arrives_asleep_keeps_the_focus() {
-    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep, Moment::Press("KEY_RIGHT")]);
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep, Moment::Press("KEY_RIGHT".into())]);
 
     browser.pump(1.0);
 

@@ -176,7 +176,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
     fn receive(&mut self, moment: Moment) {
         match moment {
             Moment::Press(name) => {
-                if let Some(key) = key_of(name) {
+                if let Some(key) = key_of(&name) {
                     self.key(key);
                 }
             }

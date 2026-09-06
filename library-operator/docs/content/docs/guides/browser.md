@@ -63,11 +63,13 @@ names this `Player`. Starting a `Play` moves the mark to the `Play`'s
 `Player`. A `Play` ending moves nothing, because the `Player` it names
 is still there, showing its idle screen.
 
-Over the bus, the presses that reach the browser are the arrows,
-enter, and back. Volume and mute are handled before they reach the
-browser, and the browser draws the level as a fading row. Home, search,
-and letter keys reach the browser from a keyboard attached to the
-screen's machine.
+Over the bus, every key a remote sends reaches the browser under the
+kernel's name, except volume, mute, and the cycle key. Those three are
+handled before they reach the browser, and the browser draws the level
+as a fading row. So a remote with a keyboard types into search, and
+its home and search buttons work once a `Keymap` names them. The same
+keys reach the browser from a keyboard attached to the screen's
+machine.
 
 ## 4. The keys
 
