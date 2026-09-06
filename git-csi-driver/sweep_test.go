@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -229,6 +230,142 @@ func TestTheSweepReportsWhatItCannotRemove(t *testing.T) {
 	if !strings.Contains(logs.String(), "the work tree stayed") ||
 		!strings.Contains(logs.String(), "the repository stayed") {
 		t.Errorf("the log is %q, want both failures in it", logs)
+	}
+}
+
+// storeRefs is every ref the bare repository holds in the driver's own
+// namespace, read with the tests' own git.
+func storeRefs(t *testing.T, repo *repository) string {
+	t.Helper()
+	listed := git(t, repo.dir, "for-each-ref", "--format=%(refname)", refPrefix)
+	return strings.Join(strings.Fields(listed), " ")
+}
+
+func TestTheSweepDeletesTheRefsNoVolumeFollows(t *testing.T) {
+	logs := &logbook{}
+	answering, remote := sweepingNode(t, logs)
+	git(t, remote, "branch", "v1", "main")
+	publishedVolume(t, answering, "data", fileURL(remote), nil)
+	publishedVolume(t, answering, "docs", fileURL(remote), map[string]string{"ref": "v1"})
+	repo := answering.store.repository(fileURL(remote))
+	// The ref a volume followed until its claim went, which nothing on
+	// this node names now.
+	git(t, repo.dir, "update-ref", refPrefix+"gone", refPrefix+"main")
+
+	answering.sweepStore(t.Context())
+
+	want := refPrefix + "main " + refPrefix + "v1"
+	if got := storeRefs(t, repo); got != want {
+		t.Errorf("the repository holds %q, want %q", got, want)
+	}
+	if !strings.Contains(logs.String(), "swept the ref") {
+		t.Errorf("the log is %q, want the ref it deleted in it", logs)
+	}
+}
+
+func TestTheSweepKeepsTheRefAWorkTreeInTheStoreFollows(t *testing.T) {
+	answering, remote := sweepingNode(t, io.Discard)
+	// A stage that was never published leaves a work tree and no record,
+	// so HEAD is the whole evidence of the ref it follows.
+	unstagedVolume(t, answering, "config", fileURL(remote))
+	repo := answering.store.repository(fileURL(remote))
+
+	answering.sweepStore(t.Context())
+
+	if got := storeRefs(t, repo); got != refPrefix+"main" {
+		t.Errorf("the repository holds %q, want %q", got, refPrefix+"main")
+	}
+}
+
+func TestTheSweepReportsARefItCannotDelete(t *testing.T) {
+	logs := &logbook{}
+	answering, remote := sweepingNode(t, logs)
+	unstagedVolume(t, answering, "config", fileURL(remote))
+	repo := answering.store.repository(fileURL(remote))
+	git(t, repo.dir, "update-ref", refPrefix+"gone", refPrefix+"main")
+	readOnlyDir(t, repo.dir)
+
+	answering.sweepStore(t.Context())
+
+	if !strings.Contains(logs.String(), "the ref stayed") {
+		t.Errorf("the log is %q, want the ref it could not delete in it", logs)
+	}
+}
+
+// collectable makes the repository one that git gc --auto decides to
+// work on: a second pack, and a limit of one pack.
+func collectable(t *testing.T, repo *repository, remote string) {
+	t.Helper()
+	git(t, repo.dir, "repack", "--quiet", "-d")
+	remoteCommit(t, remote, map[string]string{"b.txt": "two"})
+	git(t, repo.dir, "fetch", "--quiet", "--no-tags", remote, "+main:"+refPrefix+"main")
+	git(t, repo.dir, "repack", "--quiet", "-d")
+	git(t, repo.dir, "config", "gc.autoPackLimit", "1")
+}
+
+// unreachableObject writes an object no ref names, aged through the
+// mtime that git's prune reads.
+func unreachableObject(t *testing.T, repo *repository, content string, age time.Duration) string {
+	t.Helper()
+	source := filepath.Join(t.TempDir(), "object")
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing the object: %v", err)
+	}
+	name := trimLine(git(t, repo.dir, "hash-object", "-w", "--", source))
+	path := filepath.Join(repo.dir, "objects", name[:2], name[2:])
+	when := time.Now().Add(-age)
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatalf("aging the object: %v", err)
+	}
+	return name
+}
+
+// holdsObject answers whether the repository still holds the object,
+// loose or in a pack. The answer no is an answer, not a failure.
+func holdsObject(t *testing.T, repo *repository, name string) bool {
+	t.Helper()
+	command := exec.Command("git", "cat-file", "-e", name)
+	command.Dir = repo.dir
+	command.Env = gitEnvironment()
+	return command.Run() == nil
+}
+
+func TestTheSweepCollectsTheRepositoryThatStays(t *testing.T) {
+	answering, remote := sweepingNode(t, io.Discard)
+	publishedVolume(t, answering, "data", fileURL(remote), nil)
+	repo := answering.store.repository(fileURL(remote))
+	collectable(t, repo, remote)
+	stale := unreachableObject(t, repo, "stale", 2*time.Hour)
+	fresh := unreachableObject(t, repo, "fresh", 0)
+
+	answering.sweepStore(t.Context())
+
+	if holdsObject(t, repo, stale) {
+		t.Error("an unreachable object older than the sweep age stayed")
+	}
+	if !holdsObject(t, repo, fresh) {
+		t.Error("an unreachable object younger than the sweep age went")
+	}
+}
+
+func TestTheSweepReportsARepositoryItCannotCollect(t *testing.T) {
+	logs := &logbook{}
+	answering, remote := sweepingNode(t, logs)
+	unstagedVolume(t, answering, "config", fileURL(remote))
+	repo := answering.store.repository(fileURL(remote))
+	// A repository whose objects directory is a file is one git reads as
+	// no repository at all.
+	if err := os.RemoveAll(filepath.Join(repo.dir, "objects")); err != nil {
+		t.Fatalf("removing the objects directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.dir, "objects"), nil, 0o600); err != nil {
+		t.Fatalf("writing the objects file: %v", err)
+	}
+
+	answering.sweepStore(t.Context())
+
+	if !strings.Contains(logs.String(), "the repository was not collected") {
+		t.Errorf("the log is %q, want the repository it could not collect in it", logs)
 	}
 }
 

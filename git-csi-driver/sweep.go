@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -201,10 +202,13 @@ func (n *node) sweepRepositories(ctx context.Context) {
 
 // sweepRepository removes one bare repository under the same lock
 // a stage takes, so a repository a stage is fetching into is never
-// removed under it.
+// removed under it. A repository that stays loses the refs no volume
+// follows and is collected, under that same lock.
 func (n *node) sweepRepository(ctx context.Context, repo *repository) {
 	defer repo.lock()()
 	if n.usesRepository(repo.dir) {
+		n.sweepRefs(ctx, repo)
+		n.collect(ctx, repo)
 		return
 	}
 	if err := os.RemoveAll(repo.dir); err != nil {
@@ -234,6 +238,108 @@ func (n *node) usesRepository(dir string) bool {
 		}
 	}
 	return false
+}
+
+// sweepRefs deletes every ref in the driver's own namespace that no
+// volume follows. A repository followed at a tag per release would
+// otherwise keep every release's history alive for as long as the
+// repository stays.
+func (n *node) sweepRefs(ctx context.Context, repo *repository) {
+	followed := n.followedRefs(ctx, repo.dir)
+	for _, ref := range repo.refs(ctx) {
+		if followed[ref] {
+			continue
+		}
+		if err := repo.deleteRef(ctx, ref); err != nil {
+			// The log says which ref stayed and why, and the pass goes on
+			// to the next ref.
+			n.logger.WarnContext(ctx, "the ref stayed",
+				"repository", repo.name, "ref", ref, "error", err)
+			continue
+		}
+		// The log says which ref went from which repository.
+		n.logger.InfoContext(ctx, "swept the ref", "repository", repo.name, "ref", ref)
+	}
+}
+
+// followedRefs is every ref a volume of this repository follows: the
+// volumes the node holds, and the records and work trees the store
+// holds for the volumes it does not.
+func (n *node) followedRefs(ctx context.Context, dir string) map[string]bool {
+	followed := map[string]bool{}
+	for _, held := range n.held() {
+		if n.store.repository(held.attributes.url).dir == dir {
+			followed[refPrefix+held.attributes.ref] = true
+		}
+	}
+	// A store with no volumes directory holds no volume, so nothing
+	// follows its refs.
+	entries, _ := os.ReadDir(filepath.Join(n.store.root, "volumes"))
+	for _, entry := range entries {
+		n.followedInStore(ctx, followed, dir, entry.Name())
+	}
+	return followed
+}
+
+// followedInStore adds the ref one volume directory follows. The
+// directory can name it twice: in the record the publish wrote, and in
+// the HEAD of the work tree that reads this repository's objects. A
+// stage that was never published leaves the work tree alone.
+func (n *node) followedInStore(ctx context.Context, followed map[string]bool, dir, id string) {
+	if held, err := readRecord(filepath.Join(n.store.volumeDir(id), recordFile)); err == nil {
+		if parsed, err := parseVolumeContext(held.Attributes); err == nil &&
+			n.store.repository(parsed.url).dir == dir {
+			followed[refPrefix+parsed.ref] = true
+		}
+	}
+	work := n.store.tree(id)
+	if work.alternate() != dir {
+		return
+	}
+	if ref := work.followedRef(ctx); ref != "" {
+		followed[refPrefix+ref] = true
+	}
+}
+
+// refs is every ref the repository holds in the driver's own namespace,
+// and none where git cannot read the repository.
+func (r *repository) refs(ctx context.Context) []string {
+	output, err := runGit(ctx, r.dir, nil, "for-each-ref", "--format=%(refname)", refPrefix)
+	if err != nil {
+		return nil
+	}
+	// A ref name holds no space, so the fields of the output are the refs.
+	return strings.Fields(output.stdout)
+}
+
+// deleteRef removes one ref from the repository.
+func (r *repository) deleteRef(ctx context.Context, ref string) error {
+	_, err := runGit(ctx, r.dir, nil, "update-ref", "-d", "--end-of-options", ref)
+	return err
+}
+
+// collect packs the repository and prunes the objects no ref has named
+// since the sweep age. --auto costs nothing on a pass where nothing
+// changed. gc.autoDetach=false keeps the work in the foreground, under
+// the repository's lock, and brings a failure back to this log instead
+// of a gc.log file in the repository.
+func (n *node) collect(ctx context.Context, repo *repository) {
+	_, err := runGit(ctx, repo.dir, nil, "-c", "gc.autoDetach=false",
+		"gc", "--quiet", "--auto", "--prune="+pruneDate(n.sweepAfter))
+	if err != nil {
+		// A repository that was not collected is logged, and the pass
+		// finishes.
+		n.logger.WarnContext(ctx, "the repository was not collected",
+			"repository", repo.name, "error", err)
+	}
+}
+
+// pruneDate is the sweep age before now, written as a timestamp. Git's
+// own age forms are unsafe here: it reads "720h" as this moment, and a
+// count of seconds above 99999999 as a second of the epoch. A date says
+// the age the driver means for every value of --sweep-after.
+func pruneDate(after time.Duration) string {
+	return time.Now().Add(-after).UTC().Format(time.RFC3339)
 }
 
 // held is every volume this node has published or staged.

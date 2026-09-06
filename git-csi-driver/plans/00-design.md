@@ -30,6 +30,10 @@ the application starts from its last push.
 - It is not a database. A volume holds text a person would also want
   to read as history. Databases, caches, and media do not belong on
   it, and the size guard exists to keep them off.
+- It is not all of git. A checkout is one ref of one repository. A
+  submodule's directory is empty, a Git LFS pointer is checked out as
+  the pointer, and a writeable volume takes no `depth`. Each becomes a
+  plan when a use asks for it.
 
 ## The invariants
 
@@ -195,6 +199,10 @@ commits, and pushes. Its store holds one bare repository per URL and
 one work tree per writeable volume. On `liken` the store is on the
 pod-storage partition, beside every other volume on the node. The plugin watches the claims bound to its
 volumes to learn their current class.
+Once an hour it sweeps the store: work trees nothing stages, bare
+repositories nothing names, the refs under `refs/git-csi/` that no
+volume follows, and a `git gc` in each repository that stays, so a node
+that serves one repository for a year stays bounded.
 
 **The controller plugin** is one small `Deployment`. It implements
 `ControllerModifyVolume` and nothing else. It validates a class and
@@ -288,6 +296,12 @@ without it reads the events.
 - **The node plugin never learns that a `PersistentVolume` was
   deleted.** An age-based sweep removes work trees that are fully
   pushed and have not been staged for a long time.
+- **An upstream rewrite older than the sweep age can take an object a
+  work tree needs.** A work tree reads the repository's objects through
+  alternates, and `git gc` at the sweep prunes what no ref has named
+  for `--sweep-after`. An object stays reachable from the followed
+  ref's history until upstream rewrites that history, and a rewrite
+  older than the sweep age is the one case the store does not protect.
 - **A forge inside the cluster is a loop.** A cluster that hosts its
   own forge cannot restore a volume onto a fresh node while the forge
   is down. `offline: allowStale` and the node's cache cover a restart.

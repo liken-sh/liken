@@ -18,8 +18,8 @@ they become.
 
 ## Planned
 
-Every numbered plan is built. The next plans come from the open
-problems and from what a demo teaches.
+Every numbered plan is built, and plan 08 waits on its lab drill. The
+next plans come from the open problems and from what a demo teaches.
 
 ## Designs
 
@@ -52,11 +52,26 @@ problems and from what a demo teaches.
   drilled in the lab on 2026-09-06. A `ReadOnlyMany` `PersistentVolume`
   and its claim, one staged tree per handle that every pod on the node
   publishes read-only, and the `Event`s and the gauge on the claim.
+* [08, The store stays bounded](08-the-store-stays-bounded.md). Built
+  on 2026-09-06, and waits on its lab drill. At every sweep the
+  driver deletes the refs under `refs/git-csi/` that no volume follows
+  and runs `git gc` in each bare repository that stays.
 
 ## Open problems
 
-None open. [`open-problems/`](open-problems/) is where the next ones
-go.
+Each one is a question the current work does not answer, written down
+so the next plan can start from the facts.
+
+* [Credentials after a restart](open-problems/credentials-after-a-restart.md).
+  A writeable volume resumes with no credential, so every push fails
+  until its pod restarts.
+* [The store on the wrong filesystem](open-problems/the-store-on-the-wrong-filesystem.md).
+  A node without the pod-storage partition puts the store on the RAM
+  overlay, and nothing says so until the reboot.
+* [Monitoring](open-problems/monitoring.md). The gauges exist, and
+  nothing in `deploy/` scrapes them or alerts on them.
+* [What git the driver does not serve](open-problems/what-git-the-driver-does-not-serve.md).
+  Submodules, LFS, and a shallow writeable volume.
 
 ## Rejected
 

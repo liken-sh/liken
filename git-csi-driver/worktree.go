@@ -170,6 +170,13 @@ func (w *workTree) gitWith(ctx context.Context, env []string, args ...string) (g
 		append([]string{"--git-dir=" + w.gitDir, "--work-tree=" + w.tree}, args...)...)
 }
 
+// followedRef is the ref the work tree follows, which create wrote into
+// HEAD, and the empty string where the directory is no work tree.
+func (w *workTree) followedRef(ctx context.Context) string {
+	output, _ := w.git(ctx, "symbolic-ref", "--quiet", "HEAD")
+	return strings.TrimPrefix(trimLine(output.stdout), "refs/heads/")
+}
+
 // refCommit is the commit the ref names, and the empty string
 // where the git directory holds no such ref.
 func (w *workTree) refCommit(ctx context.Context, ref string) string {

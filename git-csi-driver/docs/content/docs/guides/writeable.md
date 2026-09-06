@@ -143,6 +143,16 @@ never removed. Its age is named in the log and the abnormal gauge of the
 next volume of the same repository, so a person learns that work sits on the node with
 no claim that reaches it.
 
+The same hourly pass deletes the refs under `refs/git-csi/` that no
+volume follows and runs `git gc` in each bare repository that stays, so
+the node's store does not grow with every ref a volume ever followed.
+
+## What the driver does not serve
+
+A checkout is one ref of one repository. A submodule's directory is
+empty, a Git LFS pointer file is checked out as the pointer and not the
+object it names, and a writeable volume takes no `depth`.
+
 ## What the driver reports
 
 The pod's events and the claim's events carry `GitVolumeArmed`,

@@ -137,6 +137,12 @@ driver reads two kinds of credential from it:
 The credential reaches the node's disk only for the length of one git
 invocation, and the token never appears on a command line.
 
+## What the driver does not serve
+
+A checkout is one ref of one repository. A submodule's directory is
+empty, and a Git LFS pointer file is checked out as the pointer and not
+the object it names.
+
 ## What the driver reports
 
 A refused mount, a stale publish, and a fetch that fails after one that
