@@ -11,6 +11,7 @@ metadata:
   name: thora
 spec:
   displayName: Thora
+  nickname: Thora
 ```
 
 The resource is small because its value is in who references it. A

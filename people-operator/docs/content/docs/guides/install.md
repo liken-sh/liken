@@ -19,7 +19,8 @@ resources:
 ```
 
 Then declare each person. The name is what other operators reference,
-so choose it once. The display name is what a screen shows.
+so choose it once. The display name is what a screen shows, and the
+nickname is the one-word form of it.
 
 ```yaml
 apiVersion: people.liken.sh/v1alpha1
@@ -28,6 +29,7 @@ metadata:
   name: thora
 spec:
   displayName: Thora
+  nickname: Thora
 ```
 
 `kubectl get people` lists them. No controller runs, so a `Person` has

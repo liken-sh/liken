@@ -30,6 +30,9 @@ spec:
         - name: Name
           type: string
           jsonPath: .spec.displayName
+        - name: Nickname
+          type: string
+          jsonPath: .spec.nickname
         - name: UID
           type: integer
           jsonPath: .spec.uid
@@ -48,6 +51,14 @@ spec:
                   type: string
                   minLength: 1
                   description: "The name a screen shows for this person."
+                nickname:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    The short name for this person, for a screen with
+                    room for one word: a first name, or what the house
+                    calls them. Optional; a screen falls back to the
+                    display name.
                 avatar:
                   type: string
                   description: >-

@@ -11,8 +11,8 @@ this person" has nowhere to point.
 ## The `Person`
 
 `Person` is a cluster-scoped CRD in `people.liken.sh/v1alpha1`. It
-holds a display name, a picture, a Linux uid, and a link to an
-outside login. It says nothing about age or what a person may watch;
+holds a display name, a nickname, a picture, a Linux uid, and a link
+to an outside login. It says nothing about age or what a person may watch;
 that is a later plan's, if the house wants it. That is the whole resource. No controller ships
 with it.
 
