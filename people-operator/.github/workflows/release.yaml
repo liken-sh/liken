@@ -3,12 +3,12 @@
 # kustomize base to it with ?ref=. This workflow checks the tag's
 # shape and refuses a tag whose commit did not pass the gate in
 # ci.yaml, so a name that reads as a release always names a tested
-# commit. It then pushes deploy/ to ghcr.io under the same tag as an
-# OCI artifact, for a cluster that takes releases through flux's
-# image automation: an ImageRepository scans a registry for tags and
-# never a git remote, so without the artifact there is nothing for
-# it to find. The site publishes from ci.yaml on every push to main,
-# not from here.
+# commit. It then pushes an image under the same tag, and under
+# :latest, for a cluster that takes releases through flux's image
+# automation: an ImageRepository scans a registry for tags and never
+# a git remote, so without an image there is nothing for it to find.
+# The Dockerfile says what the image holds. The site publishes from
+# ci.yaml on every push to main, not from here.
 name: release
 
 on:
@@ -19,7 +19,7 @@ permissions:
   contents: read
   # actions: read lets the gate step read the state of the ci run for
   # this commit through the workflow's own token, and packages: write
-  # lets the last step push the artifact.
+  # lets the last step push the image.
   actions: read
   packages: write
 
@@ -72,13 +72,7 @@ jobs:
           echo "the ci run for $commit did not finish within ten minutes" >&2
           exit 1
 
-      # deploy/ becomes an artifact in flux's own format, so a cluster
-      # pulls it through an OCIRepository as a source and the tag is
-      # what its image policy bumps. The revision names the tag and
-      # the commit, as flux's own artifacts do, so the cluster reports
-      # both. The flux CLI is pinned to the flux release the artifact
-      # format is proven against, and nothing here needs a newer one.
-      - uses: fluxcd/flux2/action@v2.9.4
+      - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -86,10 +80,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: push the deploy base as an artifact
-        run: |
-          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
-          flux push artifact "oci://ghcr.io/$GITHUB_REPOSITORY:$GITHUB_REF_NAME" \
-            --path=./deploy \
-            --source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --revision="$GITHUB_REF_NAME@sha1:$commit"
+      # The gate above passed, so the image ships. :latest marks the
+      # newest release; there are no development builds here, because
+      # nothing runs the image and a build between releases would
+      # name no manifests a cluster pins to.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/liken-sh/people-operator:${{ github.ref_name }}
+            ghcr.io/liken-sh/people-operator:latest
