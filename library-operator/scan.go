@@ -48,6 +48,9 @@ const (
 	topicBaseVariable        = "LIBRARY_TOPIC_BASE"
 	catalogAPIVariable       = "LIBRARY_CATALOG_API"
 	libraryIgnoreVariable    = "LIBRARY_IGNORE"
+	// LIBRARY_ART is where the art claim is mounted, for a franchises
+	// scanner alone. Every other kind reads it empty and downloads nothing.
+	libraryArtVariable = "LIBRARY_ART"
 )
 
 // The one folder a scan Job rescans, in the form the webhook
@@ -92,11 +95,10 @@ const defaultCatalogAPI = "http://127.0.0.1:8080"
 // and the mount point is this operator's choice.
 const libraryMountPath = "/library"
 
-// checkoutMountPath is where the operator mounts a franchises Job's checkout,
-// beside the claim. It is an emptyDir the clone fills, and the Job exits with
-// it. A franchise's directory in the checkout and its art directory on the
-// claim carry the same name.
-const checkoutMountPath = "/checkout"
+// artMountPath is where the operator mounts a franchises Job's art claim,
+// beside the read-only storage claim. A franchise's directory in the
+// checkout and its art directory on the art claim carry the same name.
+const artMountPath = "/art"
 
 // catalogWriteTimeout bounds a walk's writes to the catalog agent, so a
 // stuck agent cannot hold a walk open forever.
@@ -112,16 +114,12 @@ type scanner struct {
 	library     string
 	kind        string
 	ignore      ignoreSet
-	// git is the repository a franchises library reads, and empty for a
-	// library that reads a claim.
-	git LibraryGit
-	// checkout is the directory a franchises scan clones into. It is the
-	// emptyDir the operator mounts, and empty for a library that reads a claim
-	// alone.
-	checkout string
-	catalog  *Catalog
-	bus      *Bus
-	echo     *echoWaiter
+	// art is the mount a franchises scan writes its art into, and empty
+	// for every other kind.
+	art     string
+	catalog *Catalog
+	bus     *Bus
+	echo    *echoWaiter
 	// The Job this container runs, the folder it rescans, and how
 	// long it waits for the reporter to publish its run back.
 	job         string
@@ -140,10 +138,6 @@ type scanner struct {
 	// walk ended, and whether the walk could read it.
 	counts     libraryCounts
 	countsRead bool
-	// commit is the commit this library's catalog holds. The Job reads it
-	// out of its own runs row before it clones, and writes it back when
-	// the scan succeeds.
-	commit string
 
 	// One walk runs at a time, so the reconciliation reads a
 	// settled catalog whichever caller drives the walk.
@@ -214,8 +208,7 @@ func newScanner(started time.Time, log io.Writer) (*scanner, error) {
 		library:     libraryKey(namespace, name),
 		kind:        kind,
 		ignore:      ignore,
-		git:         LibraryGit{URL: os.Getenv(libraryGitURLVariable), Ref: os.Getenv(libraryGitRefVariable)},
-		checkout:    checkoutMountPath,
+		art:         os.Getenv(libraryArtVariable),
 		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
 		log:         log,
 		report:      libraryReport{LastWalk: started, LastChange: started},
@@ -240,19 +233,6 @@ func newScanner(started time.Time, log io.Writer) (*scanner, error) {
 // every row this Job wrote.
 func (s *scanner) runJob(ctx context.Context) error {
 	run := libraryRun{Worker: s.worker(), Job: s.job, Started: time.Now().UTC()}
-	// The commit the last scan of this library read. A scan of an
-	// unchanged repository compares against it, and a failed scan keeps
-	// it.
-	last, err := s.catalog.lastScan(ctx, s.library)
-	if err != nil {
-		// A read that failed leaves the mark unknown to this Job. The Job
-		// then names no commit, and the row keeps the one it holds, so a
-		// franchises scan reads the repository again rather than losing
-		// the mark.
-		s.logf("could not read the commit the last scan left: %v", err)
-	}
-	s.noteCommit(last.Commit)
-	run.Commit = last.Commit
 	if err := s.catalog.UpsertRun(ctx, s.library, run); err != nil {
 		return fmt.Errorf("writing the run of %s: %w", s.library, err)
 	}
@@ -260,7 +240,6 @@ func (s *scanner) runJob(ctx context.Context) error {
 	walked := s.walkOnce(ctx)
 
 	run.Finished = time.Now().UTC()
-	run.Commit = s.lastCommit()
 	if walked != nil {
 		run.Failure = walked.Error()
 	}

@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -105,7 +106,7 @@ func TestTheSchemaAdmitsTheKindsTheOperatorServes(t *testing.T) {
 			t.Errorf("the kind %s names no settings block", name)
 		}
 		if settings := (LibrarySpec{Kind: name, Movies: &LibrarySettings{}, Series: &LibrarySettings{},
-			Franchises: &LibrarySettings{}}).settings(); settings == nil {
+			Franchises: &LibraryFranchises{}}).settings(); settings == nil {
 			t.Errorf("the operator resolves no settings block for the kind %s", name)
 		}
 	}
@@ -114,8 +115,8 @@ func TestTheSchemaAdmitsTheKindsTheOperatorServes(t *testing.T) {
 	}
 }
 
-// Every kind names a claim, so the storage block requires it. The git block is
-// the franchises addition beside the claim, and it requires a url and a ref.
+// Every kind names a claim, so the storage block requires it, and it names
+// nothing else: a franchises library's checkout is a claim like any other.
 func TestTheSchemaTakesAClaimForEveryKind(t *testing.T) {
 	storage := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
 		"spec", "properties", "storage")
@@ -123,9 +124,24 @@ func TestTheSchemaTakesAClaimForEveryKind(t *testing.T) {
 	if required := requiredOf(t, storage); !slices.Equal(required, []string{"claim"}) {
 		t.Errorf("storage requires %v, want the claim every kind names", required)
 	}
-	git := storage.(map[string]any)["properties"].(map[string]any)["git"]
-	if required := requiredOf(t, git); !slices.Equal(required, []string{"url", "ref"}) {
-		t.Errorf("git requires %v, want the url and the ref", required)
+	fields := storage.(map[string]any)["properties"].(map[string]any)
+	if len(fields) != 2 || fields["claim"] == nil || fields["root"] == nil {
+		t.Errorf("storage holds %v, want the claim and the root alone", slices.Sorted(maps.Keys(fields)))
+	}
+}
+
+// The art claim is required inside the franchises block, so a franchises
+// library that names none is refused at apply.
+func TestTheSchemaRequiresTheArtClaimOfAFranchisesLibrary(t *testing.T) {
+	franchises := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+		"spec", "properties", "franchises")
+
+	if required := requiredOf(t, franchises); !slices.Equal(required, []string{"art"}) {
+		t.Errorf("the franchises block requires %v, want the art block", required)
+	}
+	art := franchises.(map[string]any)["properties"].(map[string]any)["art"]
+	if required := requiredOf(t, art); !slices.Equal(required, []string{"claim"}) {
+		t.Errorf("art requires %v, want the claim", required)
 	}
 }
 
@@ -141,16 +157,15 @@ func requiredOf(t *testing.T, field any) []string {
 	return names
 }
 
-// The kind rule names one clause per settings block. A franchises library
-// names a git repository beside its claim, and every other kind names a claim
-// alone.
-func TestTheSchemaTiesTheKindToItsBlockAndItsStorage(t *testing.T) {
+// The kind rule names one clause per settings block, and a franchises library
+// names the art claim beside it.
+func TestTheSchemaTiesTheKindToItsBlockAndItsArtClaim(t *testing.T) {
 	spec := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties", "spec")
 
 	rules := rulesOf(t, spec)
 	for _, want := range []string{
 		"has(self.movies) == (self.kind == 'movies') && has(self.series) == (self.kind == 'series') && has(self.franchises) == (self.kind == 'franchises')",
-		"has(self.storage.git) == (self.kind == 'franchises')",
+		"self.kind != 'franchises' || (has(self.franchises) && has(self.franchises.art))",
 	} {
 		if !slices.Contains(rules, want) {
 			t.Errorf("the spec rules are %v, want %q among them", rules, want)
@@ -158,21 +173,21 @@ func TestTheSchemaTiesTheKindToItsBlockAndItsStorage(t *testing.T) {
 	}
 }
 
-// The storage the API server admits is the one the operator reads back: a
-// franchises library carries a claim, a url, and a ref.
-func TestTheOperatorReadsAGitStorageTheSchemaAdmits(t *testing.T) {
+// The spec the API server admits is the one the operator reads back: a
+// franchises library carries a storage claim for the checkout and an art
+// claim of its own.
+func TestTheOperatorReadsAFranchisesSpecTheSchemaAdmits(t *testing.T) {
 	spec := LibrarySpec{}
-	body := `{"kind":"franchises","franchises":{},` +
-		`"storage":{"claim":"franchise-art","root":"/",` +
-		`"git":{"url":"https://tangled.org/guid.foo/fiction-franchises","ref":"main"}}}`
+	body := `{"kind":"franchises","franchises":{"art":{"claim":"franchise-art"}},` +
+		`"storage":{"claim":"franchises","root":"/"}}`
 	if err := json.Unmarshal([]byte(body), &spec); err != nil {
 		t.Fatal(err)
 	}
 
-	if !spec.fromGit() {
-		t.Fatalf("spec.fromGit() = false, want a library that reads a repository")
+	if spec.Storage.Claim != "franchises" || spec.Franchises.Art.Claim != "franchise-art" {
+		t.Errorf("spec = %+v, want the checkout claim beside the art claim", spec)
 	}
-	if spec.Storage.Git.Ref != "main" || spec.Storage.Claim != "franchise-art" {
-		t.Errorf("storage = %+v, want the ref main beside the claim", spec.Storage)
+	if spec.screenClaim() != "franchise-art" {
+		t.Errorf("screenClaim = %q, want the art claim", spec.screenClaim())
 	}
 }

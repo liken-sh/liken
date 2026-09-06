@@ -21,10 +21,10 @@ const (
 
 	libraryVolumeName = "library"
 	catalogVolumeName = "catalog"
-	// checkoutVolumeName is the checkout a franchises scan clones into, beside
-	// the claim. It is an emptyDir, so the Job exits with the checkout and
-	// nothing keeps a copy of a repository that is a few hundred kilobytes.
-	checkoutVolumeName = "checkout"
+	// artVolumeName is the art claim a franchises scan mounts beside its
+	// storage claim. The storage holds the checkout and is read-only, so
+	// the art the scan downloads lands on a claim of its own.
+	artVolumeName = "art"
 )
 
 // CatalogStatePath is where the catalog agent writes its database, its
@@ -105,23 +105,25 @@ func scanPodTemplate(library *Library, scanPath, scannerImage, corrosionImage, b
 	// The library volume is the scanner's alone; the cleanup worker
 	// reads no media, so it mounts none.
 	//
-	// The claim is read-only for a movies or series library, which reads the
-	// volume and writes nothing to it. It is writable for a franchises
-	// library, which downloads the art each franchise.yaml links to into the
-	// claim.
+	// Every kind mounts its storage claim read-only, because every scanner
+	// reads the storage and writes nothing to it.
 	template.Spec.Volumes = append(template.Spec.Volumes, Volume{
 		Name: libraryVolumeName,
 		PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
 			ClaimName: library.Spec.Storage.Claim,
-			ReadOnly:  !library.Spec.fromGit(),
+			ReadOnly:  true,
 		},
 	})
-	// A franchises library clones into an emptyDir beside its claim. The
-	// checkout holds the story orders, and the claim holds the art the scan
-	// derives from them.
-	if library.Spec.fromGit() {
-		template.Spec.Volumes = append(template.Spec.Volumes,
-			Volume{Name: checkoutVolumeName, EmptyDir: &EmptyDirVolumeSource{}})
+	// A franchises library mounts its art claim writable beside the
+	// read-only storage, because the scan downloads the art that each
+	// franchise.yaml links to.
+	if claim := library.Spec.artClaim(); claim != "" {
+		template.Spec.Volumes = append(template.Spec.Volumes, Volume{
+			Name: artVolumeName,
+			PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
+				ClaimName: claim,
+			},
+		})
 	}
 	return template
 }
@@ -209,8 +211,7 @@ func scannerSidecar(library *Library, scanPath, image, busAddress, topicBase str
 			{Name: topicBaseVariable, Value: topicBase},
 			{Name: catalogAPIVariable, Value: defaultCatalogAPI},
 			{Name: libraryIgnoreVariable, Value: ignoreValue(library)},
-			{Name: libraryGitURLVariable, Value: gitURLOf(library)},
-			{Name: libraryGitRefVariable, Value: gitRefOf(library)},
+			{Name: libraryArtVariable, Value: artPathOf(library)},
 			{Name: scanPathVariable, Value: scanPath},
 			{Name: jobNameVariable, ValueFrom: &EnvVarSource{
 				FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
@@ -295,34 +296,27 @@ func unprivileged() *SecurityContext {
 	}
 }
 
-// scannerMounts are the claim every scanner mounts, and the checkout a
-// franchises scanner mounts beside it. The claim is writable for a franchises
-// library alone, because its scan writes the art into it.
+// scannerMounts are the storage claim every scanner mounts read-only, and
+// the art claim a franchises scanner mounts writable beside it.
 func scannerMounts(library *Library) []VolumeMount {
 	mounts := []VolumeMount{
-		{Name: libraryVolumeName, MountPath: libraryMountPath, ReadOnly: !library.Spec.fromGit()},
+		{Name: libraryVolumeName, MountPath: libraryMountPath, ReadOnly: true},
 	}
-	if library.Spec.fromGit() {
-		mounts = append(mounts, VolumeMount{Name: checkoutVolumeName, MountPath: checkoutMountPath})
+	if library.Spec.artClaim() != "" {
+		mounts = append(mounts, VolumeMount{Name: artVolumeName, MountPath: artMountPath})
 	}
 	return mounts
 }
 
-// gitURLOf and gitRefOf are the repository and the ref a franchises
-// scanner clones. Both are empty for a library that names a claim, and
-// the scanner then walks its mount.
-func gitURLOf(library *Library) string {
-	if !library.Spec.fromGit() {
+// artPathOf is where the art claim is mounted. The scanner learns it from
+// its environment alone, because the pod carries no credential to read
+// the Library with. It is empty for a library that names no art claim, and
+// that scanner downloads nothing.
+func artPathOf(library *Library) string {
+	if library.Spec.artClaim() == "" {
 		return ""
 	}
-	return library.Spec.Storage.Git.URL
-}
-
-func gitRefOf(library *Library) string {
-	if !library.Spec.fromGit() {
-		return ""
-	}
-	return library.Spec.Storage.Git.Ref
+	return artMountPath
 }
 
 // The ignore list travels as one JSON value, so a folder name of any

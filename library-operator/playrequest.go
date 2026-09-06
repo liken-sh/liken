@@ -128,7 +128,7 @@ func (r playRequest) play(players []Player, libraries []Library) (*Play, error) 
 	if library == nil {
 		return nil, fmt.Errorf("namespace %s holds no library %s", r.Namespace, r.Library)
 	}
-	if library.Spec.Storage.Claim == "" {
+	if library.Spec.screenClaim() == "" {
 		return nil, fmt.Errorf("library %s names no claim", r.Library)
 	}
 
@@ -277,16 +277,16 @@ func (i playRequestItem) stamped(library *Library) (PlayItem, error) {
 	return item, nil
 }
 
-// reference is the media reference one relative path becomes. The
-// claim scheme mounts the Library's own claim read-only on the
-// playback pod, so a file plays from the volume the scanner walked and
-// no second claim is created.
+// reference is the media reference one relative path becomes. The claim
+// scheme mounts the claim a screen reads read-only on the playback pod, so
+// a file plays from the volume the screen showed and no second claim is
+// created.
 func reference(library *Library, relative string) (string, error) {
 	if !inside(relative) {
 		return "", fmt.Errorf("the path %q is not inside the library", relative)
 	}
-	return "claim://" + library.Spec.Storage.Claim + "/" +
-		path.Join(library.Spec.Storage.Root, relative), nil
+	return "claim://" + library.Spec.screenClaim() + "/" +
+		path.Join(library.Spec.screenRoot(), relative), nil
 }
 
 // inside reports whether a path names a file under the library root.

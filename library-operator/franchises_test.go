@@ -9,8 +9,8 @@ import (
 )
 
 // franchiseCheckout is a checkout of the franchises repository: one directory
-// per franchise, each holding the files the test names, the way a shallow
-// clone leaves it.
+// per franchise, each holding the files the test names, the way the claim
+// carries it.
 func franchiseCheckout(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()

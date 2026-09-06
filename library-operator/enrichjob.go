@@ -189,8 +189,10 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 				}},
 				// The enricher mounts the volume read-write, where every scan Job mounts
 				// it read-only, because the facts it fills in are files beside the media.
+				// The volume is the claim a screen reads, so an enricher of a franchises
+				// library writes beside the art and never into the checkout.
 				{Name: libraryVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-					ClaimName: library.Spec.Storage.Claim,
+					ClaimName: library.Spec.screenClaim(),
 				}},
 			},
 		},

@@ -181,6 +181,44 @@ func TestALibraryWithNoRootStampsThePathAlone(t *testing.T) {
 	}
 }
 
+// A reference names the claim that holds the files a screen reads: the art
+// claim of a franchises library, and the storage claim of every other kind.
+func TestAReferenceNamesTheClaimAScreenReads(t *testing.T) {
+	cases := []struct {
+		name    string
+		library *Library
+		want    string
+	}{
+		{
+			name:    "a movies library",
+			library: studioMovies(),
+			want:    "claim://movies//movies/Some Film (1999)/poster.jpg",
+		},
+		{
+			name:    "a franchises library",
+			library: studioFranchises(),
+			want:    "claim://franchise-art//Star Wars/poster.jpg",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			relative := "Star Wars/poster.jpg"
+			if testCase.library.Spec.Kind == libraryKindMovies {
+				relative = "Some Film (1999)/poster.jpg"
+			}
+
+			got, err := reference(testCase.library, relative)
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != testCase.want {
+				t.Errorf("reference = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestAPassLeavesNoRequestBehindIt(t *testing.T) {
 	operator, _ := playingHouse(t)
 	publishPlay(operator, filmRequest(film(testFilmPath)))

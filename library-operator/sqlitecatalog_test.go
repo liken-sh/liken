@@ -681,39 +681,6 @@ func TestPruneScopeStopsAtTheStepItsCatalogRefuses(t *testing.T) {
 	}
 }
 
-// The Job reads the commit and the failure its own last run left, so a scan
-// of an unchanged repository writes no row. A library whose scan has never
-// run reads both as empty.
-func TestTheJobReadsTheCommitItsLastRunLeft(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	ctx := t.Context()
-	if err := catalog.UpsertRun(ctx, "house/franchises", libraryRun{
-		Worker: workerScan, Job: "franchises-scan-1",
-		Commit: "9b1c0a7f2d3e4b5a6c7d8e9f0a1b2c3d4e5f6a7b", Failure: "the forge answered nothing",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	held, err := catalog.lastScan(ctx, "house/franchises")
-	if err != nil {
-		t.Fatal(err)
-	}
-	none, err := catalog.lastScan(ctx, "house/movies")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if held.Commit != "9b1c0a7f2d3e4b5a6c7d8e9f0a1b2c3d4e5f6a7b" {
-		t.Errorf("commit = %q, want the one the last run read", held.Commit)
-	}
-	if held.Failure != "the forge answered nothing" {
-		t.Errorf("failure = %q, want the one the last run left", held.Failure)
-	}
-	if none.Commit != "" || none.Failure != "" {
-		t.Errorf("a library with no scan run reads %+v, want both empty", none)
-	}
-}
-
 // A full walk whose catalog refuses a write fails the Job and prunes nothing,
 // so the rows the last good walk left stand. Every write of the walk answers
 // the same way, whichever one is refused.
@@ -864,49 +831,5 @@ func TestARescanSweepsACreditTheFolderNoLongerNames(t *testing.T) {
 
 	if held := agent.rowsFor(t, "credits", "house/movies"); held != 1 {
 		t.Errorf("credits holds %d rows, want the one the folder names now", held)
-	}
-}
-
-// A run that names no commit keeps the one the last run left, so a scan that
-// could not read the mark, and a scan that failed, both leave it where it is.
-// A run that names one writes it, which is how a scan that read a new commit
-// moves the mark.
-func TestARunThatNamesNoCommitKeepsTheOneTheLastRunLeft(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	ctx := t.Context()
-	if err := catalog.UpsertRun(ctx, "house/franchises", libraryRun{
-		Worker: workerScan, Job: "franchises-scan-1", Commit: "abc123",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := catalog.UpsertRun(ctx, "house/franchises", libraryRun{
-		Worker: workerScan, Job: "franchises-scan-2", Failure: "the forge answered nothing",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	kept, err := catalog.lastScan(ctx, "house/franchises")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if kept.Commit != "abc123" {
-		t.Errorf("commit = %q, want the mark the last good run left", kept.Commit)
-	}
-	if kept.Failure != "the forge answered nothing" {
-		t.Errorf("failure = %q, want the one the failed run wrote", kept.Failure)
-	}
-
-	if err := catalog.UpsertRun(ctx, "house/franchises", libraryRun{
-		Worker: workerScan, Job: "franchises-scan-3", Commit: "def456",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	moved, err := catalog.lastScan(ctx, "house/franchises")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if moved.Commit != "def456" || moved.Failure != "" {
-		t.Errorf("the run reads %+v, want the new commit and no failure", moved)
 	}
 }

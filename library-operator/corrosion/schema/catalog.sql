@@ -262,6 +262,9 @@ CREATE INDEX aliases_library_item ON aliases (library, item);
 -- One row per library and worker, holding the Job that ran, when
 -- it started and finished, and what it left behind; a Job writes it last
 -- and waits for the reporter to echo it.
+--
+-- Nothing reads or writes commit_id. Corrosion refuses to remove a
+-- column, so the column stays, and every insert leaves it at its default.
 CREATE TABLE runs (
     library TEXT NOT NULL DEFAULT '',
     worker TEXT NOT NULL DEFAULT '',

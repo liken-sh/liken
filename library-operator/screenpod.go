@@ -154,12 +154,15 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 	})
 
 	volumes := []Volume{}
+	// Each Library brings the claim that holds the files this screen
+	// reads: the art claim of a franchises library, and the storage claim
+	// of every other kind.
 	for index := range shown {
 		library := &shown[index]
 		volumes = append(volumes, Volume{
 			Name: libraryVolumeName + "-" + library.Metadata.Name,
 			PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-				ClaimName: library.Spec.Storage.Claim,
+				ClaimName: library.Spec.screenClaim(),
 				ReadOnly:  true,
 			},
 		})
@@ -256,10 +259,10 @@ func browserSidecar(player *Player, libraries []Library, image, topicBase, timeZ
 		})
 		// The browser keys a title's library by namespace and name, the
 		// same key the catalog rows carry, and reads that library's files
-		// under the Library's own root inside the mount.
+		// under the library's root inside the claim it mounts.
 		args = append(args, "--library-root", fmt.Sprintf("%s/%s=%s",
 			library.Metadata.Namespace, library.Metadata.Name,
-			path.Join(mountPath, library.Spec.Storage.Root)))
+			path.Join(mountPath, library.Spec.screenRoot())))
 	}
 
 	claims := []ResourceClaim{}

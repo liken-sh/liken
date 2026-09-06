@@ -97,10 +97,10 @@ func franchiseID(directory string) string {
 
 // walkFranchises reads a whole checkout into one walkResult, one directory
 // at a time. The directories are read in name order, so two walks of one
-// commit write the same rows in the same order. A directory with no
+// checkout write the same rows in the same order. A directory with no
 // franchise.yaml is not a franchise, which is how the repository's own
 // .git directory is passed over. The checkout holds the franchise.yaml
-// files, and the claim holds the art the scan downloaded from the links
+// files, and the art claim holds the art the scan downloaded from the links
 // each one carries; a franchise's directory carries the same name in both.
 func walkFranchises(checkout, artRoot, library string) *walkResult {
 	result := &walkResult{}
@@ -116,7 +116,7 @@ func walkFranchises(checkout, artRoot, library string) *walkResult {
 }
 
 // franchiseDirectories are the directories of one checkout, in name order, so
-// two walks of one commit read them the same way. A dot name is passed over,
+// two walks of one checkout read them the same way. A dot name is passed over,
 // which is how the repository's own .git directory is left out.
 func franchiseDirectories(checkout string) ([]string, error) {
 	entries, err := os.ReadDir(checkout)

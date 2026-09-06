@@ -105,6 +105,22 @@ func TestEnrichJobMountsTheVolumeReadWrite(t *testing.T) {
 	}
 }
 
+// A franchises library's enricher mounts the art claim, because the art is
+// the file set an enricher writes for this kind and the storage claim holds
+// the checkout.
+func TestEnrichJobMountsTheArtClaimOfAFranchisesLibrary(t *testing.T) {
+	job := testEnrichJob(studioFranchises(), "", readyProvider("tmdb", "house", factIdentity))
+
+	claims := map[string]string{}
+	for _, volume := range job.Spec.Template.Spec.Volumes {
+		claims[volume.Name] = volume.PersistentVolumeClaim.ClaimName
+	}
+
+	if claims[libraryVolumeName] != "franchise-art" {
+		t.Errorf("library volume = %q, want the art claim", claims[libraryVolumeName])
+	}
+}
+
 // the key reaches the identity container through a secretKeyRef, so no
 // container reads the API server.
 func TestEnrichJobPassesTheKeyThroughASecretKeyRef(t *testing.T) {

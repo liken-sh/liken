@@ -21,7 +21,7 @@ const (
 )
 
 // UpsertFranchises writes the franchises rows. A repeat write updates the
-// row in place, so a re-walk of an unchanged commit changes no row and
+// row in place, so a re-walk of an unchanged checkout changes no row and
 // broadcasts nothing. The conflict target is the whole primary key, and the
 // update names no key column, because cr-sqlite reads a change to a key
 // column as a delete and a create.

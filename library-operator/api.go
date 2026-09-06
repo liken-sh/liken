@@ -144,9 +144,9 @@ type LibrarySpec struct {
 	Kind    string           `json:"kind"`
 	Movies  *LibrarySettings `json:"movies,omitempty"`
 	Series  *LibrarySettings `json:"series,omitempty"`
-	// Franchises is the settings block of the franchises kind. It carries
-	// the same one field the other blocks carry.
-	Franchises *LibrarySettings `json:"franchises,omitempty"`
+	// Franchises is the settings block of the franchises kind: the image
+	// every block carries, and the art claim that this kind alone names.
+	Franchises *LibraryFranchises `json:"franchises,omitempty"`
 
 	// The metadata providers to ask about a title, in the order they
 	// are asked. Enrichment reads the list; nothing acts on it yet.
@@ -206,9 +206,9 @@ func (s LibrarySpec) scanSchedule() string {
 const (
 	libraryKindMovies = "movies"
 	libraryKindSeries = "series"
-	// A franchises library reads franchise.yaml files from a git
-	// repository. It is the one kind whose storage is git and never a
-	// claim.
+	// A franchises library walks the franchise.yaml files on its storage
+	// claim, and writes the art it downloads into the second claim that
+	// its settings block names.
 	libraryKindFranchises = "franchises"
 )
 
@@ -223,25 +223,53 @@ func (s LibrarySpec) settings() *LibrarySettings {
 	case libraryKindSeries:
 		return s.Series
 	case libraryKindFranchises:
-		return s.Franchises
+		if s.Franchises == nil {
+			return nil
+		}
+		return &s.Franchises.LibrarySettings
 	}
 	return nil
 }
 
-// LibraryStorage is the volume and the directory inside it. The
-// scanner of a movies or series library mounts the claim read-only, and
-// the scanner of a franchises library mounts it writable, because the
-// scan writes the art it downloads into it. The operator reads the
-// PersistentVolume behind the claim for the volume's kind and address.
+// artClaim is the claim a franchises scan writes its art into, and empty
+// for every other kind. The checkout is read-only, so the art has to land
+// on a claim of its own.
+func (s LibrarySpec) artClaim() string {
+	if s.Kind != libraryKindFranchises || s.Franchises == nil {
+		return ""
+	}
+	return s.Franchises.Art.Claim
+}
+
+// screenClaim is the claim that holds the files a screen reads: the art
+// claim of a franchises library, and the storage claim of every other
+// kind. The screen pod, the play request, and the enrich Job all ask it,
+// so no one of them decides the question on its own.
+func (s LibrarySpec) screenClaim() string {
+	if claim := s.artClaim(); claim != "" {
+		return claim
+	}
+	return s.Storage.Claim
+}
+
+// screenRoot is the directory inside the screen's claim that holds this
+// library's files. The storage root applies to the storage claim alone,
+// and the art of a franchises library lands at the root of its own claim,
+// so a screen and a play reference read the art from there.
+func (s LibrarySpec) screenRoot() string {
+	if s.artClaim() != "" {
+		return "/"
+	}
+	return s.Storage.Root
+}
+
+// LibraryStorage is the volume and the directory inside it. Every kind
+// mounts the claim read-only, a franchises library included, because the
+// claim holds the truth the scan walks and the scan writes nothing to it.
+// The operator reads the PersistentVolume behind the claim for the
+// volume's kind and address.
 type LibraryStorage struct {
 	Claim string `json:"claim,omitempty"`
-
-	// Git is the repository a franchises library reads for the story
-	// orders it derives. Every kind names a claim, and a franchises
-	// library writes the art it downloads into its claim. The CRD's rule
-	// has(self.storage.git) == (self.kind == 'franchises') makes the
-	// repository present exactly when the kind is franchises.
-	Git *LibraryGit `json:"git,omitempty"`
 
 	// The directory inside the claim this library starts at, always an
 	// absolute path from the root of the volume. The CRD defaults it
@@ -250,30 +278,30 @@ type LibraryStorage struct {
 	Root string `json:"root,omitempty"`
 }
 
-// LibraryGit names the repository a scan clones. URL is the repository,
-// reached over anonymous HTTPS, and Ref is the branch or the tag. Both are
-// required. The clone is shallow, into an emptyDir, and the Job exits with
-// the checkout.
-type LibraryGit struct {
-	URL string `json:"url"`
-	Ref string `json:"ref"`
-}
-
-// fromGit reports whether this Library reads a git repository rather than
-// a claim. The kind rule of the CRD keeps this in step with the kind.
-func (s LibrarySpec) fromGit() bool {
-	return s.Storage.Git != nil
-}
-
-// LibrarySettings is one kind's settings block. One struct serves both
-// kinds, because in this plan each block holds the same one field. The
-// naming conventions each kind needs are the scanner plan's, and they
-// split this into a struct per kind when they arrive.
+// LibrarySettings is the one setting every kind's block carries. The
+// movies and series blocks are this struct alone, and the franchises block
+// embeds it beside the art claim.
 type LibrarySettings struct {
 	// The scanner image to run in place of the one the project ships
 	// for the kind, which is how a person supplies a scanner of their
 	// own. Empty means the operator's own image.
 	Image string `json:"image,omitempty"`
+}
+
+// LibraryFranchises is the settings block of the franchises kind: the
+// image every block carries, and the art claim that this kind alone names.
+// The CRD requires the art claim, because a franchises scan always
+// downloads art and the checkout cannot take it.
+type LibraryFranchises struct {
+	LibrarySettings
+	Art LibraryArt `json:"art,omitzero"`
+}
+
+// LibraryArt names the writable claim, in the Library's namespace, that a
+// franchises scan downloads the art into. It is the claim a screen mounts
+// for this library, because the art is what a screen reads of a franchise.
+type LibraryArt struct {
+	Claim string `json:"claim,omitempty"`
 }
 
 // LibraryStatus is what the operator reports on a Library: the volume
@@ -321,11 +349,7 @@ type LibraryStatus struct {
 	// Webhook is the URL of this Library's webhook endpoint on the
 	// operator, the address a person gives to Radarr, Sonarr, or
 	// Jellyfin.
-	Webhook string `json:"webhook,omitempty"`
-	// Commit is the commit the last successful scan of a git library
-	// read. A scan that finds this commit again writes no row. It is
-	// empty for a library whose storage is a claim.
-	Commit     string      `json:"commit,omitempty"`
+	Webhook    string      `json:"webhook,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
@@ -572,8 +596,7 @@ const (
 	phaseIdle      = "Idle"
 	phaseDeparting = "Departing"
 	// Failed means the last scan of this library failed and wrote no
-	// rows. A franchises library reads it when the clone could not reach
-	// the forge. The tables hold what the last good scan left.
+	// rows. The tables hold what the last good scan left.
 	phaseFailed = "Failed"
 )
 

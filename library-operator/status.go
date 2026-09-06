@@ -71,9 +71,6 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 		status.Waiting = latest.Waiting
 		status.Unresolved = latest.Unresolved
 		status.Fights = latest.Fights
-		// The commit the last scan of a git library read, from the scan
-		// run the reporter published.
-		status.Commit = scanRunOf(latest).Commit
 	}
 
 	// The conditions are built on a copy of the ones the Library

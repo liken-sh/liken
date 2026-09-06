@@ -14,32 +14,34 @@ TMDB collections hold films only, in release order, and no source
 agrees on where a series sits between two films. So a person or an
 agent writes the order into a file, and the file is the truth.
 
-A `Library` of kind `franchises` names a git repository under
-`spec.storage.git`, a `url` and a `ref`, and a claim under
-`spec.storage.claim`. The repository holds one directory per
-franchise. Each directory holds `franchise.yaml` and an `AGENTS.md`
-that says how the author built the order. The repository holds no
-image: an `art` block in the file links to the art, and the scan
-downloads it into the claim under the same directory name. The
-scanner reads the YAML file and ignores the rest. An agent that edits
-the directory reads `AGENTS.md` first, as its context for the work.
+A `Library` of kind `franchises` names a claim under
+`spec.storage.claim` that holds the checkout, one directory per franchise,
+and a second claim under `spec.franchises.art.claim` that the scan writes
+the art into. Each directory holds `franchise.yaml` and an `AGENTS.md` that
+says how the author built the order. The repository holds no image: an `art`
+block in the file links to the art. The scanner reads the YAML file and
+ignores the rest. An agent that edits the directory reads `AGENTS.md` first,
+as its context for the work.
 
-Each scan clones the `ref` shallow, reads it, and exits with the
-checkout, so nothing keeps a copy. Before it reads the rows, it
-downloads the art the files link to into the claim, so a row draws
-the file it just wrote. A link the last scan already read is not read
-again. A file the scan did not write is the owner's, and it is kept.
-A link that fails is logged and asked again on the next scan, and it
-never fails the walk. `status.commit` holds the commit
-the last scan read, and a scan that finds the same commit again
-writes no row. `spec.refresh` sets the period, as it does for the
-other kinds. A clone that fails reports `Failed` and leaves the
-catalog as it was.
+Every scan walks the whole checkout, because the files are a few hundred
+kilobytes on a mounted claim. Before it reads the rows, it downloads
+the art the files link to into the art claim, so a row draws the file it just
+wrote. A link the last scan already read is not read again. A file the scan
+did not write is the owner's, and it is kept. A link that fails is logged and
+asked again on the next scan, and it never fails the walk. `spec.refresh`
+sets the period, as it does for the other kinds.
+
+How the checkout arrives on the claim is the cluster owner's choice, and
+any volume that holds one directory per franchise serves. The
+[git CSI driver](https://git.liken.sh/) serves a repository as a read-only
+claim that follows its ref, and
+[its read-only guide](https://git.liken.sh/docs/guides/read-only/) shows
+the `PersistentVolume` and claim.
 
 The first files live at
 [tangled.org/guid.foo/fiction-franchises](https://tangled.org/guid.foo/fiction-franchises).
-A fork is a second `Library` with another `url`, and two libraries
-that both define one franchise are two rows on the screen.
+A fork is a second `Library` over another checkout, and two libraries that
+both define one franchise are two rows on the screen.
 
 The file validates against
 [`franchise.schema.json`](https://library.liken.sh/franchise.schema.json). Put this line at
@@ -97,7 +99,7 @@ order:
 | `universe` | The franchise's own home universe, one name. An entry that names no universes is in this one. |
 | `eras` | Named stretches of the timeline, each with a span. Needs a calendar. Spans may overlap. |
 | `order` | The story order, first to last. |
-| `art` | Links to the franchise's own art, under Kodi's names: `poster`, `fanart`, `landscape`, `logo`, and `banner`, each optional and each an `https` URL. The scan downloads each one into the claim under the name the same art kind takes for a film, and a file already there wins over the link. The poster is what the screen draws first. |
+| `art` | Links to the franchise's own art, under Kodi's names: `poster`, `fanart`, `landscape`, `logo`, and `banner`, each optional and each an `https` URL. The scan downloads each one into the art claim under the name the same art kind takes for a film, and a file already there wins over the link. The poster is what the screen draws first. |
 
 ## Entries
 

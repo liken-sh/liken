@@ -8,10 +8,11 @@
 # Usage:
 #   local/scan <media-directory> [kind]   walk the directory into the catalog;
 #                                         kind is movies (the default) or series
-#   local/scan <art-directory> franchises <git-url> [ref]
-#                                         clone the repository into the catalog
-#                                         as a franchises library, downloading
-#                                         its art into the directory; ref is main
+#   local/scan <checkout-directory> franchises <art-directory>
+#                                         walk the checkout into the catalog
+#                                         as a franchises library, and
+#                                         download its art into the art
+#                                         directory
 set -euo pipefail
 
 # The repository is the directory above this file, so every path resolves
@@ -39,18 +40,17 @@ run_seconds="${RUN_SECONDS:-600}"
 
 # The mount point inside the container, the path the pod mounts the claim
 # at. The root is the whole mount, so the scanner reads the workstation
-# directory the way it reads a claim. A movies or series run mounts the
-# directory read-only. A franchises run mounts it writable, because the
-# scan downloads the art each franchise.yaml links to into it.
+# directory the way it reads a claim. Every kind mounts the directory
+# read-only, a franchises checkout included.
 container_mount="/library"
 
-# Where a franchises run clones the repository, the path the pod mounts
-# the emptyDir at. It is a tmpfs here, because the checkout lives for the
-# length of the run and nothing keeps it.
-container_checkout="/checkout"
+# Where a franchises run writes the art it downloads, the path the pod
+# mounts the art claim at. It is a second workstation directory, because
+# the art outlives the run the way the art claim does.
+container_art="/art"
 
 usage() {
-  sed -n '8,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '8,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -58,25 +58,27 @@ media="${1:-}"
 kind="${2:-movies}"
 [ -n "$media" ] || usage
 
-# A franchises library names both a directory and a repository: the
-# directory is the claim the art lands in, and the repository holds the
-# story orders. The checkout is a tmpfs, the way the Job's emptyDir is in
-# the cluster, so nothing keeps it. The directory is mounted writable for
-# this kind, because the scan downloads the art into it.
-git_url=""
-git_ref=""
+# A franchises library names two directories: the first holds the
+# checkout, one directory per franchise, and the second stands in for the
+# art claim the scan downloads into. The checkout is mounted read-only, the
+# way every kind's storage is, and the art directory is mounted writable.
+art_mount=""
 if [ ! -d "$media" ]; then
   echo "local/scan: $media is not a directory" >&2
   exit 1
 fi
 media="$(cd "$media" && pwd)"
+source_volume=(--volume "$media:$container_mount:ro")
 if [ "$kind" = franchises ]; then
-  git_url="${3:-}"
-  git_ref="${4:-main}"
-  [ -n "$git_url" ] || usage
-  source_volume=(--volume "$media:$container_mount" --tmpfs "$container_checkout")
-else
-  source_volume=(--volume "$media:$container_mount:ro")
+  art="${3:-}"
+  [ -n "$art" ] || usage
+  if [ ! -d "$art" ]; then
+    echo "local/scan: $art is not a directory" >&2
+    exit 1
+  fi
+  art="$(cd "$art" && pwd)"
+  art_mount="$container_art"
+  source_volume+=(--volume "$art:$container_art")
 fi
 
 # The local cluster must be up, because the scanner writes through an
@@ -114,8 +116,7 @@ docker run --detach --name "$container" \
   --user "$(id -u):$(id -g)" \
   "${source_volume[@]}" \
   --env LIBRARY_NAMESPACE=local \
-  --env LIBRARY_GIT_URL="$git_url" \
-  --env LIBRARY_GIT_REF="$git_ref" \
+  --env LIBRARY_ART="$art_mount" \
   --env LIBRARY_NAME="$kind" \
   --env LIBRARY_KIND="$kind" \
   --env LIBRARY_ROOT=/ \

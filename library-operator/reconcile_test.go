@@ -493,22 +493,22 @@ func TestReconcileStartsNoWalkWhenAScanHasRun(t *testing.T) {
 	}
 }
 
-// A franchises Library binds its claim the way every other kind does, and
-// reports the volume behind it. The repository is the scan Job's own work, and
-// the operator never reads it.
-func TestReconcileBindsTheClaimOfALibraryThatNamesARepository(t *testing.T) {
+// A franchises Library binds its storage claim the way every other kind
+// does, and reports the volume behind it. That claim holds the checkout the
+// scan walks, so Bound reports the truth this library is built on.
+func TestReconcileBindsTheStorageClaimOfAFranchisesLibrary(t *testing.T) {
 	cluster := newFakeCluster()
 	library := studioFranchises()
 	cluster.libraries["franchises"] = library
 	seedCatalog(cluster, "house-catalog", "house")
-	cluster.claims["franchise-art"] = &PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "franchise-art", Namespace: "house"},
-		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-franchise-art"},
+	cluster.claims["franchises"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "franchises", Namespace: "house"},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-franchises"},
 		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 	}
-	cluster.volumes["pv-franchise-art"] = `{"metadata":{"name":"pv-franchise-art"},"spec":` +
-		`{"capacity":{"storage":"1Gi"},"accessModes":["ReadWriteOnce"],` +
-		`"local":{"path":"/srv/franchise-art"}}}`
+	cluster.volumes["pv-franchises"] = `{"metadata":{"name":"pv-franchises"},"spec":` +
+		`{"capacity":{"storage":"1Gi"},"accessModes":["ReadOnlyMany"],` +
+		`"csi":{"driver":"git.liken.sh"}}}`
 
 	if err := testOperator(t, cluster).reconcile(t.Context(), library,
 		standingCatalog(), nil, nil, testNow); err != nil {
@@ -520,10 +520,10 @@ func TestReconcileBindsTheClaimOfALibraryThatNamesARepository(t *testing.T) {
 	if bound.Status != ConditionTrue || bound.Reason != reasonBound {
 		t.Errorf("Bound = %+v, want True with the reason %s", bound, reasonBound)
 	}
-	if status.Volume == nil || status.Volume.Name != "pv-franchise-art" {
+	if status.Volume == nil || status.Volume.Name != "pv-franchises" {
 		t.Errorf("volume = %+v, want the one behind the claim", status.Volume)
 	}
 	if cluster.heldCronJob("house", scanCronJobName("franchises")) == nil {
-		t.Error("the pass stood no schedule for a library that names a repository")
+		t.Error("the pass stood no schedule for a franchises library")
 	}
 }

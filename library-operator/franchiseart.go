@@ -1,7 +1,7 @@
 package main
 
 // franchiseart.go downloads the art each franchise.yaml links to into the
-// Library's own claim, under the same directory name the checkout uses. The
+// Library's art claim, under the same directory name the checkout uses. The
 // repository holds links and no bytes, because a franchise is an opinion about
 // a story and the art belongs to whoever published it. The files land under
 // Kodi's names, the names plan 30's art facts write, so the rows read them

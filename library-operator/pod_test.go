@@ -194,8 +194,7 @@ func TestScannerContainerCarriesTheLibrarysEnvironment(t *testing.T) {
 		topicBaseVariable:        defaultTopicBase,
 		catalogAPIVariable:       defaultCatalogAPI,
 		libraryIgnoreVariable:    "null",
-		libraryGitURLVariable:    "",
-		libraryGitRefVariable:    "",
+		libraryArtVariable:       "",
 		scanPathVariable:         "",
 		jobNameVariable:          "",
 	}
@@ -554,25 +553,25 @@ func TestDeletePodTreatsAnAbsentPodAsDone(t *testing.T) {
 	}
 }
 
-// studioFranchises is a Library of franchises: a claim for the art it derives,
-// and a repository for the story orders it derives it from.
+// studioFranchises is a Library of franchises: a claim that holds the
+// checkout, and a claim of its own for the art the scan derives from it.
 func studioFranchises() *Library {
 	return &Library{
 		Metadata: ObjectMeta{Name: "franchises", Namespace: "house", UID: "franchises-uid"},
 		Spec: LibrarySpec{
-			Storage: LibraryStorage{Claim: "franchise-art", Root: "/", Git: &LibraryGit{
-				URL: "https://tangled.org/guid.foo/fiction-franchises", Ref: "main"}},
-			Kind:       libraryKindFranchises,
-			Franchises: &LibrarySettings{},
+			Storage: LibraryStorage{Claim: "franchises", Root: "/orders"},
+			Kind:    libraryKindFranchises,
+			Franchises: &LibraryFranchises{
+				Art: LibraryArt{Claim: "franchise-art"},
+			},
 		},
 	}
 }
 
-// A franchises scan Job mounts its claim writable, because the scan downloads
-// the art each franchise.yaml links to into it. It clones into an emptyDir
-// beside the claim, so the Job exits with the checkout and nothing keeps a
-// copy.
-func TestTheFranchisesScanPodMountsItsClaimAndAnEmptyDir(t *testing.T) {
+// A franchises scan Job mounts its storage claim read-only, because the
+// checkout is the truth it walks, and its art claim writable beside it,
+// because the scan downloads the art each franchise.yaml links to.
+func TestTheFranchisesScanPodMountsTheCheckoutAndTheArtClaim(t *testing.T) {
 	pod := testScanPod(studioFranchises())
 
 	volumes := map[string]Volume{}
@@ -580,32 +579,34 @@ func TestTheFranchisesScanPodMountsItsClaimAndAnEmptyDir(t *testing.T) {
 		volumes[volume.Name] = volume
 	}
 	claim := volumes[libraryVolumeName].PersistentVolumeClaim
-	if claim == nil || claim.ClaimName != "franchise-art" || claim.ReadOnly {
-		t.Errorf("the library volume is %+v, want the claim, writable", volumes[libraryVolumeName])
+	if claim == nil || claim.ClaimName != "franchises" || !claim.ReadOnly {
+		t.Errorf("the library volume is %+v, want the checkout claim, read-only",
+			volumes[libraryVolumeName])
 	}
-	if volumes[checkoutVolumeName].EmptyDir == nil {
-		t.Errorf("volumes = %+v, want an emptyDir for the checkout", pod.Spec.Volumes)
+	art := volumes[artVolumeName].PersistentVolumeClaim
+	if art == nil || art.ClaimName != "franchise-art" || art.ReadOnly {
+		t.Errorf("the art volume is %+v, want the art claim, writable", volumes[artVolumeName])
 	}
 	mounts := pod.Spec.Containers[0].VolumeMounts
 	if len(mounts) != 2 {
-		t.Fatalf("volumeMounts = %+v, want the claim and the checkout", mounts)
+		t.Fatalf("volumeMounts = %+v, want the checkout and the art claim", mounts)
 	}
-	if mounts[0].MountPath != libraryMountPath || mounts[0].ReadOnly {
-		t.Errorf("mount = %+v, want %s writable", mounts[0], libraryMountPath)
+	if mounts[0].MountPath != libraryMountPath || !mounts[0].ReadOnly {
+		t.Errorf("mount = %+v, want %s read-only", mounts[0], libraryMountPath)
 	}
-	if mounts[1].MountPath != checkoutMountPath || mounts[1].Name != checkoutVolumeName {
-		t.Errorf("mount = %+v, want the checkout at %s", mounts[1], checkoutMountPath)
+	if mounts[1].MountPath != artMountPath || mounts[1].Name != artVolumeName || mounts[1].ReadOnly {
+		t.Errorf("mount = %+v, want the art claim at %s, writable", mounts[1], artMountPath)
 	}
 }
 
-// A movies or series scan Job mounts its claim read-only and no checkout,
-// because it reads a volume and clones nothing.
+// A movies or series scan Job mounts its claim read-only and no art claim,
+// because it reads a volume and downloads nothing into one.
 func TestTheMoviesScanPodMountsItsClaimAlone(t *testing.T) {
 	pod := testScanPod(studioMovies())
 
 	for _, volume := range pod.Spec.Volumes {
-		if volume.Name == checkoutVolumeName {
-			t.Errorf("volumes = %+v, want no checkout for a library that reads a claim",
+		if volume.Name == artVolumeName {
+			t.Errorf("volumes = %+v, want no art claim for a library that names none",
 				pod.Spec.Volumes)
 		}
 	}
@@ -615,18 +616,17 @@ func TestTheMoviesScanPodMountsItsClaimAlone(t *testing.T) {
 	}
 }
 
-// The scanner learns the repository from its environment alone, because the
-// pod holds no API credential to read the Library with.
-func TestTheFranchisesScannerReadsTheRepositoryFromItsEnvironment(t *testing.T) {
+// The scanner learns where the art claim is mounted from its environment
+// alone, because the pod holds no API credential to read the Library with.
+func TestTheFranchisesScannerReadsTheArtMountFromItsEnvironment(t *testing.T) {
 	environment := map[string]string{}
 	for _, variable := range testScanPod(studioFranchises()).Spec.Containers[0].Env {
 		environment[variable.Name] = variable.Value
 	}
 
 	want := map[string]string{
-		libraryKindVariable:   libraryKindFranchises,
-		libraryGitURLVariable: "https://tangled.org/guid.foo/fiction-franchises",
-		libraryGitRefVariable: "main",
+		libraryKindVariable: libraryKindFranchises,
+		libraryArtVariable:  artMountPath,
 	}
 	for name, value := range want {
 		if environment[name] != value {
@@ -635,11 +635,11 @@ func TestTheFranchisesScannerReadsTheRepositoryFromItsEnvironment(t *testing.T) 
 	}
 }
 
-// A library that names a claim carries no repository in its environment.
-func TestTheMoviesScannerCarriesNoRepository(t *testing.T) {
+// A library that names no art claim carries no art mount in its environment.
+func TestTheMoviesScannerCarriesNoArtMount(t *testing.T) {
 	for _, variable := range testScanPod(studioMovies()).Spec.Containers[0].Env {
-		if variable.Name == libraryGitURLVariable && variable.Value != "" {
-			t.Errorf("%s = %q, want none for a library that names a claim",
+		if variable.Name == libraryArtVariable && variable.Value != "" {
+			t.Errorf("%s = %q, want none for a library that names no art claim",
 				variable.Name, variable.Value)
 		}
 	}
