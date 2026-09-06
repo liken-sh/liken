@@ -43,6 +43,10 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [37, Prometheus metrics](37-prometheus-metrics.md). Proposed.
   Enrichment progress, work needing attention, worker outcomes, and
   observation health, with optional collection and quiet idle libraries.
+* [41, The people on the screen](41-the-people-on-the-screen.md). The
+  screen half of plan 14: a second agent on every screen pod, the
+  browser asks who is watching and sends the answer with every play
+  request, and continue watching and history draw from the local copy.
 
 ## Future
 
@@ -53,10 +57,6 @@ for a later agent to shape.
   a library's naming convention.
 * [13, More kinds](13-more-kinds.md). Music, photos, audiobooks, books,
   and games.
-* [14, Watch state and people](14-watch-state-and-people.md). A
-  cluster-scoped `Person` in a repository of its own, a `Watch` that
-  names the set of people on one item, and a progress store every
-  screen replicates, fed from the bus and healed from `Play` status.
 * [23, Motion](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
 
@@ -226,6 +226,15 @@ that took a hearing-impaired flag for Hindi.
   year, or decade and cycles the order from its button, a seasons rail
   on long series, the genre head folded into the band, and a search
   icon by the clock on every screen. The `liken-1` drill is still owed.
+* [14, Watch state and people](completed/14-watch-state-and-people.md).
+  Built and drilled on `liken-1` on 2026-09-06. A cluster-scoped
+  `Person` in a repository of its own, `people-operator`; a `Watch`
+  that names the set of people on one item; a `Play` that names its
+  people and its `Watch` through owner references and the work through
+  alias annotations; and a progress store, a second `Corrosion` cluster
+  per namespace fed from the bus, that a standing pod holds beside the
+  catalog pod. The operator is the only API client and holds a
+  finalizer on every `Play` and every `Person` until the store answers.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds

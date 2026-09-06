@@ -1,5 +1,20 @@
 # 14, Watch state and people
 
+Built, and drilled on `liken-1` on 2026-09-06 with development build
+`2026.09.04-003-dev-035-9e7e4edd`. The progress pod, its claim, and
+the `progress` `Service` stood within a minute of the apply. A
+four-minute short film requested over the bus as one `Person` came up
+as a `Play` carrying the finalizer, the owner reference, and two
+alias annotations; the store wrote a row a second from the sidecar's
+reports; the final off the API closed the row at the position the
+`Play` status held, 3 s behind the last live report; and the delete
+released the finalizer and left no retained topic. A second `Play`
+under a `Watch` with two people projected into the `Watch` status
+within a pass, and deleting one of the two people removed their rows
+from the store, took them off the `Watch`'s owners, and left the
+`Play` and the `Watch` with the other. This plan is the backend half;
+[plan 41](../41-the-people-on-the-screen.md) is the screen's.
+
 Every `Play` starts at the beginning. Nothing records that a movie was
 half watched, that a season is on episode four, or who was in the room.
 This plan adds a `Person` to the cluster, a `Watch` to the library, and
@@ -250,7 +265,7 @@ nothing in this plan.
   fine backup and too slow for the sync between screens. `Corrosion` on
   the progress pod's claim is the durable copy.
 - **dqlite.** Weighed for this shape and set aside; see
-  [`rejected/dqlite.md`](rejected/dqlite.md).
+  [`rejected/dqlite.md`](../rejected/dqlite.md).
 - **A `Zone` resource.** A room is `Player.spec.zone`, a string.
   Presence, who is in which room now, is a later design and this plan
   does not wait on it.
@@ -284,3 +299,8 @@ nothing in this plan.
 - **The local harness.** `local/catalog` stands one catalog agent and
   one reporter, and no progress agent. A local round on the browser's
   continue-watching row needs one.
+- **The write cadence.** The playback sidecar reports every second,
+  and the store writes a row and gossips it on every report. One film
+  is one write a second to every peer. Whether the recorder should
+  write every tenth report, and the final on every one, is a
+  measurement on a screen, not a ruling.
