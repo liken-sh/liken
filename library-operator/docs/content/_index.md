@@ -4,8 +4,9 @@ title: library.liken.sh
 
 # `library.liken.sh`
 
-`library-operator` is the media libraries of a cluster, as Kubernetes
-resources, and a media browser for them on every screen. It runs on a
+`library-operator` declares the media libraries of a cluster as
+Kubernetes resources, and puts a media browser for them on every
+screen. It runs on a
 [`liken`](https://liken.sh/docs/) cluster above
 [`media-operator`](https://media.liken.sh), which owns the players,
 the plays, and the remotes. This operator owns what there is to play.
