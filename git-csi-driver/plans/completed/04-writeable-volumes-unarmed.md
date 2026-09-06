@@ -1,6 +1,15 @@
 # 04, Writeable volumes, unarmed
 
-Proposed. Full fidelity.
+Built, and drilled in the lab on 2026-09-05 with development build
+`0000.00.00-000-dev-012-ab33d059`. A pod wrote three files; the
+condition, the metrics, and the events named them pending and the
+volume unarmed; a `ReadWriteOnce` claim was refused with the mode in
+its events; a pod deleted and made again found its files; a class on
+the claim armed the volume. The first drill found that the kubelet
+sends the `ReadWriteOncePod` access mode only to a driver that declares
+`SINGLE_NODE_MULTI_WRITER`, and the driver declares it now. The record
+file this plan added closes the open problem on a driver that forgets
+its volumes when it restarts.
 
 ## The problem
 

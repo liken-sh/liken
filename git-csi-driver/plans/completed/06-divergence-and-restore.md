@@ -1,6 +1,13 @@
 # 06, Divergence and restore
 
-Proposed. Full fidelity.
+Built, and drilled in the lab on 2026-09-05 with development build
+`0000.00.00-000-dev-012-ab33d059`. A conflicting push on the forge and
+a pod deletion put the volume on its side branch, visible on the forge
+and in the condition; a merge on the forge and a pod restart brought it
+back to `main` with the side branch gone; a fresh guest, installed from
+nothing, restored the tree with its modes and empty directory from the
+last push. A tree with uncommitted writes is never reset or rebased,
+which the build added to the reconcile table.
 
 ## The problem
 

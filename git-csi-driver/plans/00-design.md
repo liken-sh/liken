@@ -123,7 +123,10 @@ parameters:
 ### The `PersistentVolumeClaim` binds and chooses
 
 The claim names the volume and the class. Setting the class arms the
-volume.
+volume. The binder pairs a claim and a static volume only when both
+name the same class, so a claim that names a class before it binds
+needs the same `volumeAttributesClassName` on the `PersistentVolume`.
+A bound claim takes a class change on its own.
 
 ```yaml
 apiVersion: v1

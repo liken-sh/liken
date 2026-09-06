@@ -87,6 +87,11 @@ parameters:
 kubectl patch pvc config -n home -p '{"spec":{"volumeAttributesClassName":"config-eager"}}'
 ```
 
+Set the class after the claim is bound. The binder pairs a claim and a
+static volume only when both name the same class, so a claim that names
+a class before it binds needs the same `volumeAttributesClassName` on
+the `PersistentVolume`. A bound claim takes a class change without that.
+
 The [class reference](../../reference/classes/) lists every parameter,
 its values, and its default.
 

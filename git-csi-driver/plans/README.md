@@ -18,16 +18,8 @@ they become.
 
 ## Planned
 
-* [04, Writeable volumes, unarmed](04-writeable-volumes-unarmed.md).
-  Proposed. A static `PersistentVolume` and a `ReadWriteOncePod`
-  claim, a work tree per volume, and a driver that watches and reports
-  but commits nothing.
-* [05, Armed volumes](05-armed-volumes.md). Proposed. The
-  `VolumeAttributesClass`, the controller plugin that accepts it, and
-  commit, push, and the metadata ref.
-* [06, Divergence and restore](06-divergence-and-restore.md).
-  Proposed. The side branch, the rebase at stage, the restore drill,
-  and the sweep of work trees nothing stages any more.
+Every numbered plan is built. The next plans come from the open
+problems and from what a demo teaches.
 
 ## Designs
 
@@ -43,12 +35,22 @@ they become.
   and drilled in the lab on 2026-09-05. Inline volumes that follow a
   ref from one bare repository per URL, with `pull`, `depth`, and
   `offline`, replaced file by file under the mount.
+* [04, Writeable volumes, unarmed](completed/04-writeable-volumes-unarmed.md).
+  Built, and drilled in the lab on 2026-09-05. A static
+  `PersistentVolume` and a `ReadWriteOncePod` claim, a work tree per
+  volume, a driver that watches and reports but commits nothing, and
+  the record that survives a restart.
+* [05, Armed volumes](completed/05-armed-volumes.md). Built, and
+  drilled in the lab on 2026-09-05. The `VolumeAttributesClass`, the
+  controller plugin that validates it, and commit, push, the metadata
+  ref, and restore.
+* [06, Divergence and restore](completed/06-divergence-and-restore.md).
+  Built, and drilled in the lab on 2026-09-05. The reconcile at stage,
+  the side branch and its heal, the restore on a fresh node, and the
+  sweep of work trees nothing stages.
 
 ## Open problems
 
 * [The volume condition moved in CSI 1.13](open-problems/the-volume-condition-moved-in-csi-1-13.md).
   Spec 1.13 replaced `VolumeCondition` with an alpha RPC the kubelet
   does not call yet, so the driver pins spec 1.12.
-* [The driver forgets its volumes when it restarts](open-problems/the-driver-forgets-its-volumes-when-it-restarts.md).
-  Published volumes live in memory, so a restarted driver follows
-  nothing until the kubelet publishes again.

@@ -29,6 +29,7 @@ HANDLE="drill-05-$RUN"
 # of its own against the same repository.
 RESTORE_HANDLE="drill-05-restore-$RUN"
 CLASS=drill-05
+SECOND_CLASS=drill-05-eager
 
 # Every wait in this drill has a deadline, in seconds.
 READY_DEADLINE="${READY_DEADLINE:-240}"
@@ -48,7 +49,7 @@ cleanup() {
 	kube delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 	kube delete persistentvolume "$HANDLE" "$RESTORE_HANDLE" \
 		--ignore-not-found --wait=false >/dev/null 2>&1 || true
-	kube delete volumeattributesclass "$CLASS" --ignore-not-found >/dev/null 2>&1 || true
+	kube delete volumeattributesclass "$CLASS" "$SECOND_CLASS" --ignore-not-found >/dev/null 2>&1 || true
 	return "$status"
 }
 trap cleanup EXIT
@@ -262,15 +263,17 @@ fi
 wait_for_event "GitVolumePushed" || true
 
 echo "drill 05: a changed class takes effect with no restart"
-# The class changes two parameters at once. The shorter quiesce is what
-# plan 05 asks the drill to change, and the new author is what proves the
-# change reached the running plugin: the next commit carries it.
+# A class's parameters are immutable, so a policy change is a second
+# class and a claim that names it. The second class changes two
+# parameters at once. The shorter quiesce is what plan 05 asks the drill
+# to change, and the new author is what proves the change reached the
+# running plugin: the next commit carries it.
 before="$(driver_pod)"
 kube apply -f - >/dev/null <<YAML
 apiVersion: storage.k8s.io/v1
 kind: VolumeAttributesClass
 metadata:
-  name: $CLASS
+  name: $SECOND_CLASS
 driverName: git.liken.sh
 parameters:
   push.quiesce: 5s
@@ -279,6 +282,8 @@ parameters:
   commit.author: The lab again <lab@liken.sh>
   ignore: "*.log"
 YAML
+kube patch pvc config -n "$NAMESPACE" --type merge \
+	-p "{\"spec\":{\"volumeAttributesClassName\":\"$SECOND_CLASS\"}}" >/dev/null
 kube exec -n "$NAMESPACE" writer -- sh -c \
 	'cd /config && echo two > two.yaml && echo three > three.yaml'
 wait_for_forge "Update 2 paths" "$PUSH_DEADLINE" "the commit the changed class pushed"

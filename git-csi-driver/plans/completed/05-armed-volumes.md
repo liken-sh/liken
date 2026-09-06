@@ -1,6 +1,18 @@
 # 05, Armed volumes
 
-Proposed. Full fidelity.
+Built, and drilled in the lab on 2026-09-05 with development build
+`0000.00.00-000-dev-012-ab33d059`. The commit landed on the host forge
+inside the quiesce with the class's author; a second class on the claim
+took effect with no restart of the plugin; the ignore list kept a path
+off every branch; a file over the size guard was skipped and named in
+the condition, the metrics, and the events; a pod deleted mid-timer
+pushed at unpublish; a volume made again from nothing restored the tree
+with a `0600` file and an empty directory. Two things the drill taught:
+a class's parameters are immutable, so a policy change is a second
+class, and a static volume binds a claim only when both name the same
+class. The resizer sidecar probes `NodeGetCapabilities` on the
+controller's socket, so controller mode serves a Node service that
+declares nothing.
 
 ## The problem
 

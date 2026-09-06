@@ -8,9 +8,12 @@ with an alpha `NodeGetVolumeHealth` RPC that the kubelet does not call
 yet.
 
 The driver pins spec 1.12.0, the newest release that carries the
-condition, and the kubelet's own client still reads it. What is not
-known is when the kubelet moves to the new RPC, and whether it keeps
-reading the old field for a driver that still sends it.
+condition. Kubernetes 1.36.3 itself vendors spec 1.9.0, and its kubelet
+reads `VolumeCondition` from every driver that declares
+`VOLUME_CONDITION`, so the driver is ahead of the kubelet, not behind
+it, and the two agree on the wire. A driver built on spec 1.13 would
+stop sending the field the kubelet reads. What is not known is when
+the kubelet moves to the new RPC.
 
 Until that is known, the condition stays where the design puts it, and
 the events and the metrics carry the same facts, so nothing is reported
