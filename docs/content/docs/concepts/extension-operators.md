@@ -72,3 +72,16 @@ Its manual is [media.liken.sh](https://media.liken.sh): the
 resources, the install, and the MQTT message bus its pods and your
 own programs share. The source is
 [liken-sh/media-operator](https://github.com/liken-sh/media-operator).
+
+## The library operator
+
+The library operator is the media libraries of a cluster, declared
+as Kubernetes resources: a root directory of movies or series on a
+volume, the catalog its scanners keep of what is there, and a media
+browser that takes the place of the idle screen on a `Player` the
+media operator owns. It publishes no devices, and it claims the
+display only through the `Player`'s own standing claim.
+
+Its manual is [library.liken.sh](https://library.liken.sh): the
+resources, the install, the scanners, and the browser. The source is
+[liken-sh/library-operator](https://github.com/liken-sh/library-operator).
