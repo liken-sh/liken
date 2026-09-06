@@ -1,10 +1,14 @@
-# A pushed tag is a release of the CRD. This repository ships no
-# image, so the release is the tag itself: a version in liken's
-# calendar scheme, 2026.09.03-007, that a cluster pins the kustomize
-# base to with ?ref=. This workflow checks the tag's shape and refuses
-# a tag whose commit did not pass the gate in ci.yaml, so a name that
-# reads as a release always names a tested commit. The site publishes
-# from ci.yaml on every push to main, not from here.
+# A pushed tag is a release of the CRD. The tag names a version in
+# liken's calendar scheme, 2026.09.03-007, and a cluster pins the
+# kustomize base to it with ?ref=. This workflow checks the tag's
+# shape and refuses a tag whose commit did not pass the gate in
+# ci.yaml, so a name that reads as a release always names a tested
+# commit. It then pushes deploy/ to ghcr.io under the same tag as an
+# OCI artifact, for a cluster that takes releases through flux's
+# image automation: an ImageRepository scans a registry for tags and
+# never a git remote, so without the artifact there is nothing for
+# it to find. The site publishes from ci.yaml on every push to main,
+# not from here.
 name: release
 
 on:
@@ -14,8 +18,10 @@ on:
 permissions:
   contents: read
   # actions: read lets the gate step read the state of the ci run for
-  # this commit through the workflow's own token.
+  # this commit through the workflow's own token, and packages: write
+  # lets the last step push the artifact.
   actions: read
+  packages: write
 
 jobs:
   release:
@@ -65,3 +71,25 @@ jobs:
           done
           echo "the ci run for $commit did not finish within ten minutes" >&2
           exit 1
+
+      # deploy/ becomes an artifact in flux's own format, so a cluster
+      # pulls it through an OCIRepository as a source and the tag is
+      # what its image policy bumps. The revision names the tag and
+      # the commit, as flux's own artifacts do, so the cluster reports
+      # both. The flux CLI is pinned to the flux release the artifact
+      # format is proven against, and nothing here needs a newer one.
+      - uses: fluxcd/flux2/action@v2.9.4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: push the deploy base as an artifact
+        run: |
+          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
+          flux push artifact "oci://ghcr.io/$GITHUB_REPOSITORY:$GITHUB_REF_NAME" \
+            --path=./deploy \
+            --source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --revision="$GITHUB_REF_NAME@sha1:$commit"
