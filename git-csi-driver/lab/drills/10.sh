@@ -255,14 +255,17 @@ hold_greeting() {
 }
 
 # wait_for_event waits until the pod's events carry the pattern, or
-# fails at the deadline.
+# fails at the deadline. It reads one line per event, because the YAML
+# emitter folds a long message across lines and a fold splits the
+# pattern.
 wait_for_event() {
 	local name="$1" pattern="$2" deadline
 	deadline=$(($(date +%s) + EVENT_DEADLINE))
 	while [ "$(date +%s)" -lt "$deadline" ]; do
 		if kube get events -n "$NAMESPACE" \
 			--field-selector "involvedObject.kind=Pod,involvedObject.name=$name" \
-			-o yaml 2>/dev/null | grep -qE "$pattern"; then
+			-o jsonpath='{range .items[*]}{.reason} {.message}{"\n"}{end}' 2>/dev/null |
+			grep -qE "$pattern"; then
 			echo "drill 10: $name reported $pattern"
 			return 0
 		fi

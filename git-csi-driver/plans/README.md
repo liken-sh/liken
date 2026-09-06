@@ -18,13 +18,8 @@ they become.
 
 ## Planned
 
-* [10, Pull on demand](10-pull-on-demand.md). An annotation on a
-  `PersistentVolume` demands a pull, `pull: on-demand` names a volume
-  that pulls only then, and a restart pulls once.
-* [12, Webhooks demand a pull](12-webhooks-demand-a-pull.md). The
-  controller accepts a forge's push webhook, verified against a
-  `Secret` the claim's namespace owns, and marks the matching
-  `PersistentVolume`s. `controller` and `node` become subcommands.
+Nothing is planned. The next work comes out of
+[`open-problems/`](open-problems/).
 
 ## Designs
 
@@ -66,6 +61,16 @@ they become.
   scratch tree and moves the pod's tree with `read-tree`, a diverged
   volume heals at its next push, and the metadata record follows the
   same rule, so many writers share one repository through `subPath`.
+* [12, Webhooks demand a pull](completed/12-webhooks-demand-a-pull.md).
+  Built, and drilled in the lab on 2026-09-06. The controller accepts a
+  forge's push webhook, verified against a `Secret` the claim's
+  namespace owns through the `webhookSecret` attribute, and marks the
+  matching `PersistentVolume`s. `controller` and `node` are
+  subcommands.
+* [10, Pull on demand](completed/10-pull-on-demand.md). Built, and
+  drilled in the lab on 2026-09-06. An annotation on a
+  `PersistentVolume` demands a pull, `pull: on-demand` names a volume
+  that pulls only then, and a restart pulls once.
 * [11, A lean image](completed/11-a-lean-image.md). Built, and
   drilled in the lab on 2026-09-06. The image is a closure on scratch
   with a stripped binary, 79.9 MB where the release before was 263 MB,

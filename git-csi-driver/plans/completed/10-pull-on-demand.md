@@ -1,5 +1,14 @@
 # 10, Pull on demand
 
+Built on 2026-09-06 and drilled in the lab with development build
+`2026.09.06-002-dev-003-50be2024`: drill 10 passed, with one pull and
+one move from a burst of twenty demands, and drills 03 and 07 still
+pass. One thing changed from the draft while building it. The report
+with the last demand and the last pull reaches a person through the
+driver's log alone, because `NodeGetVolumeStats` carries no message
+in this CSI version. Plan 12 drilled the controller's half of the
+restart rule.
+
 ## The problem
 
 A read-only volume finds that its ref moved when its `pull` timer

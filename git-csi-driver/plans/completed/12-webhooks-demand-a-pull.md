@@ -1,5 +1,13 @@
 # 12, Webhooks demand a pull
 
+Built on 2026-09-06 and drilled in the lab with development build
+`2026.09.06-002-dev-003-50be2024`: drill 12 passed, and drills 03, 07,
+and 10 still pass. One answer was added while building it. A request
+that verified, where the controller then could not list the volumes or
+read the cluster, answers `500` and counts `result="failed"`, because
+a `202` with a count of zero would read as a repository nothing
+follows.
+
 ## The problem
 
 Plan 10 gives the driver a channel: an annotation on a
