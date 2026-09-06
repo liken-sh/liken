@@ -11,7 +11,6 @@ metadata:
   name: thora
 spec:
   displayName: Thora
-  child: true
 ```
 
 The resource is small because its value is in who references it. A

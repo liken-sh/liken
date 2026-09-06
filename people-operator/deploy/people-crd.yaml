@@ -30,9 +30,6 @@ spec:
         - name: Name
           type: string
           jsonPath: .spec.displayName
-        - name: Child
-          type: boolean
-          jsonPath: .spec.child
         - name: UID
           type: integer
           jsonPath: .spec.uid
@@ -58,13 +55,6 @@ spec:
                     screen to draw. A `claim://<claim>/<path>`
                     reference names a file on a claim, the way a
                     `Play` names media.
-                child:
-                  type: boolean
-                  default: false
-                  description: >-
-                    True for a child. An operator that shows this
-                    person a library, or asks them a question, reads
-                    it.
                 uid:
                   type: integer
                   format: int64

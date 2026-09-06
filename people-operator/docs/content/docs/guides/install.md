@@ -28,7 +28,6 @@ metadata:
   name: thora
 spec:
   displayName: Thora
-  child: true
 ```
 
 `kubectl get people` lists them. No controller runs, so a `Person` has

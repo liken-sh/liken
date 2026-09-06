@@ -101,7 +101,7 @@ func TestCRDPrinterColumns(t *testing.T) {
 	crd := loadCRD(t)
 	columns := crd.Spec.Versions[0].AdditionalPrinterColumns
 
-	want := []string{"Name", "Child", "UID", "Age"}
+	want := []string{"Name", "UID", "Age"}
 	for _, name := range want {
 		t.Run(name, func(t *testing.T) {
 			for _, col := range columns {
@@ -156,14 +156,13 @@ func TestCRDValidatesExamples(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "a child with a stated uid and an identity",
+			name: "a person with a stated uid and an identity",
 			person: map[string]any{
 				"apiVersion": "people.liken.sh/v1alpha1",
 				"kind":       "Person",
 				"metadata":   map[string]any{"name": "sam"},
 				"spec": map[string]any{
 					"displayName": "Sam",
-					"child":       true,
 					"uid":         int64(2000),
 					"identity": map[string]any{
 						"issuer":  "https://idp.example/",

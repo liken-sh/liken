@@ -5,14 +5,15 @@
 Kubernetes has no user object. A user is a name on a certificate or a
 token, and RBAC binds to that name. A `liken` cluster in a house has
 people in it: someone picks up a remote, someone is halfway through a
-series, someone is a child. Every operator that wants to say "for
+series, someone picks the film. Every operator that wants to say "for
 this person" has nowhere to point.
 
 ## The `Person`
 
 `Person` is a cluster-scoped CRD in `people.liken.sh/v1alpha1`. It
-holds a display name, a picture, a child flag, a Linux uid, and a link
-to an outside login. That is the whole resource. No controller ships
+holds a display name, a picture, a Linux uid, and a link to an
+outside login. It says nothing about age or what a person may watch;
+that is a later plan's, if the house wants it. That is the whole resource. No controller ships
 with it.
 
 The value is in the references. A `Person` is a subject the way a
