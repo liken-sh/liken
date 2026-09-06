@@ -154,6 +154,57 @@ func (w *workTree) sizeOf(path string) int64 {
 	return info.Size()
 }
 
+// scratchTree is the directory, beside the tree the pod holds, where
+// a rebase runs. A rebase checks out upstream and replays the commits
+// on it, and in the pod's own tree that would rewrite the pod's files
+// twice.
+const scratchTree = "scratch"
+
+// scratch adds a detached work tree that shares the volume's
+// objects, and answers its directory with the function that removes
+// it.
+func (w *workTree) scratch(ctx context.Context) (string, func(), error) {
+	dir := filepath.Join(w.directory, scratchTree)
+	// A driver killed mid-rebase leaves its scratch tree behind,
+	// and git refuses a second work tree at the same path, so the
+	// old one goes first.
+	w.removeScratch(ctx, dir)
+	if _, err := w.git(ctx, "worktree", "add", "--detach", "--quiet",
+		"--end-of-options", dir, "HEAD"); err != nil {
+		return "", nil, err
+	}
+	return dir, func() { w.removeScratch(ctx, dir) }, nil
+}
+
+// removeScratch deletes the scratch tree and git's record of it.
+// A removal that finds nothing is the state it was asked for.
+func (w *workTree) removeScratch(ctx context.Context, dir string) {
+	_, _ = w.git(ctx, "worktree", "remove", "--force", "--end-of-options", dir)
+	_ = os.RemoveAll(dir)
+	_, _ = w.git(ctx, "worktree", "prune")
+}
+
+// take moves the mounted tree from one commit to the next in one
+// step. read-tree with two trees writes only the paths that differ
+// between them, so the pod's own files, which are the same in both,
+// are never touched. It refuses when a path the pod wrote since the
+// last commit differs between the two, which is a write that overlaps
+// another writer's, and the caller falls back to the side branch.
+func (w *workTree) take(ctx context.Context, old, new string) error {
+	if _, err := w.git(ctx, "read-tree", "-m", "-u", "--end-of-options", old, new); err != nil {
+		return err
+	}
+	_, err := w.git(ctx, "update-ref", "refs/heads/"+w.followedRef(ctx), new)
+	return err
+}
+
+// changedPaths are the paths that differ between two commits, which
+// are the paths take rewrote. A pair git cannot read names none.
+func (w *workTree) changedPaths(ctx context.Context, old, new string) []string {
+	output, _ := w.git(ctx, "diff-tree", "-r", "-z", "--name-only", "--end-of-options", old, new)
+	return splitZero(output.stdout)
+}
+
 // git runs git against the work tree with the git directory beside it,
 // so the pod never sees a .git. The lock keeps a stage and a status of
 // the same tree apart.

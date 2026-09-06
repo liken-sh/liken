@@ -1,7 +1,7 @@
 package main
 
-// diverged.go holds the side branch: the state a volume takes
-// when upstream and the tree have both moved, where its pushes go while
+// diverged.go holds the side branch: the state a volume takes when
+// a rebase cannot put its work on the ref, where its pushes go while
 // it holds that state, and what ends it.
 
 import (
@@ -18,7 +18,8 @@ import (
 const divergedKey = "git-csi.diverged"
 
 // rejectionWords are how git states a rejected push. A rejection is
-// the one push failure the driver answers with a branch of its own.
+// the one push failure the driver answers with a rebase, and with a
+// branch of its own when the rebase cannot land.
 var rejectionWords = []string{"rejected", "non-fast-forward", "fetch first"}
 
 // sideBranch names the ref and the volume, so two volumes of one
@@ -69,9 +70,10 @@ func (w *workTree) deleteBranch(ctx context.Context, env []string, url, branch s
 	return err
 }
 
-// diverge moves the volume to its side branch and reports it in
-// every place a person reads, and a state it cannot write is still the
-// state in force for this run.
+// diverge moves the volume to its side branch, after a rebase could
+// not put its work on the ref, and reports it in every place a person
+// reads. A state it cannot write is still the state in force for this
+// run.
 func (n *node) diverge(ctx context.Context, held *volume) {
 	branch := sideBranch(held.attributes.ref, held.id)
 	if err := held.work.markDiverged(ctx, branch); err != nil {
@@ -112,22 +114,71 @@ func (n *node) heal(ctx context.Context, staging *volume, branch, upstream, side
 	}
 	n.restore(ctx, staging)
 	if side != "" {
-		if err := n.deleteSide(ctx, staging, branch); err != nil {
-			n.logger.WarnContext(ctx, "the side branch stayed on the remote",
-				"volume", staging.id, "branch", branch, "error", err)
-		}
+		n.removeSide(ctx, staging, branch)
 	}
-	if err := staging.work.clearDiverged(ctx); err != nil {
+	return n.healed(ctx, staging, branch)
+}
+
+// healIfMerged fetches the ref before a diverged volume pushes, and
+// ends the divergence when upstream holds the side branch's work,
+// which is a person's merge. The pod keeps running through it, so
+// a merge no longer waits for the next restart.
+func (n *node) healIfMerged(ctx context.Context, held *volume, branch string) bool {
+	upstream, err := n.fetchUpstream(ctx, held)
+	if err != nil {
+		n.logger.WarnContext(ctx, "the ref was not fetched",
+			"volume", held.id, "error", err)
+		return false
+	}
+	// The pushed mark is the last commit the side branch took.
+	// Upstream holds it after the person's merge and at no other time.
+	if !held.work.ancestor(ctx, pushedRef, upstream) {
+		return false
+	}
+	if err := n.healInTree(ctx, held, branch, upstream); err != nil {
+		n.logger.WarnContext(ctx, "the volume was not healed",
+			"volume", held.id, "error", err)
+		return false
+	}
+	return true
+}
+
+// healInTree ends a divergence while a pod holds the tree. The
+// scratch rebase moves the tree, and not a reset, because a reset
+// rewrites every file under the pod. The pushed mark moves with the
+// push that follows.
+func (n *node) healInTree(ctx context.Context, held *volume, branch, upstream string) error {
+	if err := n.rebaseAside(ctx, held, upstream); err != nil {
 		return err
 	}
-	staging.reportHealed()
-	claim := n.claimFor(ctx, staging)
-	n.report(ctx, staging, claim, corev1.EventTypeNormal, reasonHealed,
+	n.removeSide(ctx, held, branch)
+	return n.healed(ctx, held, branch)
+}
+
+// removeSide deletes the side branch on the remote. A branch that
+// stays there is logged and does not stop the heal, because the tree
+// is back on its ref either way.
+func (n *node) removeSide(ctx context.Context, held *volume, branch string) {
+	if err := n.deleteSide(ctx, held, branch); err != nil {
+		n.logger.WarnContext(ctx, "the side branch stayed on the remote",
+			"volume", held.id, "branch", branch, "error", err)
+	}
+}
+
+// healed clears the diverged state and reports the end of the
+// divergence in every place a person reads.
+func (n *node) healed(ctx context.Context, held *volume, branch string) error {
+	if err := held.work.clearDiverged(ctx); err != nil {
+		return err
+	}
+	held.reportHealed()
+	claim := n.claimFor(ctx, held)
+	n.report(ctx, held, claim, corev1.EventTypeNormal, reasonHealed,
 		fmt.Sprintf("healed: the tree is back on %s and %s is gone",
-			staging.attributes.ref, branch))
-	n.logger.InfoContext(ctx, "healed", "volume", staging.id, "branch", branch)
-	n.readings.record(staging)
-	n.noteHealth(ctx, staging)
+			held.attributes.ref, branch))
+	n.logger.InfoContext(ctx, "healed", "volume", held.id, "branch", branch)
+	n.readings.record(held)
+	n.noteHealth(ctx, held)
 	return nil
 }
 

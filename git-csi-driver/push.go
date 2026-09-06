@@ -61,11 +61,13 @@ func (w *workTree) pushTo(
 	return w.gitWith(ctx, env, append([]string{"push", "--quiet", url}, specs...)...)
 }
 
-// fetchMetadata takes the record the remote holds, which is what
-// a restore replays.
-func (w *workTree) fetchMetadata(ctx context.Context, env []string, url string) error {
+// fetchMetadata takes the record the remote holds, onto the ref the
+// caller names. A restore fetches it over the volume's own record,
+// and a rebase fetches it beside the volume's own, so the caller
+// says which.
+func (w *workTree) fetchMetadata(ctx context.Context, env []string, url, into string) error {
 	_, err := w.gitWith(ctx, env, "fetch", "--quiet", "--no-tags", url,
-		"+"+metadataRef+":"+metadataRef)
+		"+"+metadataRef+":"+into)
 	return err
 }
 
@@ -121,9 +123,10 @@ func (n *node) counted(ctx context.Context, held *volume) (int, time.Time, error
 
 // pushNow sends what the work tree holds and moves the mark. A
 // failure is the volume's report until a push works.
-// A push the remote rejects as non-fast-forward moves the volume
-// to its side branch and goes there at once, so the work reaches the
-// remote in the same call that found the ref moved.
+// A push the remote rejects as non-fast-forward means another
+// writer pushed first. The driver rebases onto what the remote holds
+// now and pushes again, and takes its side branch only when that
+// fails too.
 func (n *node) pushNow(ctx context.Context, held *volume, count int) {
 	if held.refIsDeleted() {
 		return
@@ -135,15 +138,27 @@ func (n *node) pushNow(ctx context.Context, held *volume, count int) {
 		return
 	}
 	branch := held.divergedFrom()
+	if branch != "" && n.healIfMerged(ctx, held, branch) {
+		branch = ""
+		head = held.work.refCommit(ctx, "HEAD")
+	}
 	remote := held.attributes.ref
 	if branch != "" {
 		remote = branch
 	}
 	output, pushErr := n.sendTo(ctx, held, remote)
 	if pushErr != nil && branch == "" && rejectedPush(output) {
-		n.diverge(ctx, held)
-		remote = held.divergedFrom()
-		_, pushErr = n.sendTo(ctx, held, remote)
+		if rebased, landed := n.rebaseAndRetry(ctx, held, count); landed {
+			head, pushErr = rebased, nil
+		} else {
+			n.diverge(ctx, held)
+			remote = held.divergedFrom()
+			// A retry that rebased and still lost moved the branch,
+			// so the side branch's mark is the commit the tree holds
+			// now, not the one the push started from.
+			head = held.work.refCommit(ctx, "HEAD")
+			_, pushErr = n.sendTo(ctx, held, remote)
+		}
 	}
 	if pushErr != nil {
 		n.pushFailed(ctx, held, pushErr.Error())
@@ -161,6 +176,77 @@ func (n *node) pushNow(ctx context.Context, held *volume, count int) {
 		"volume", held.id, "commits", count, "branch", remote, "commit", short(head))
 	n.readings.record(held)
 	n.noteHealth(ctx, held)
+}
+
+// rebaseAttempts bounds the retry. A loss is a race with another
+// writer, and three losses in a row say the writers race faster
+// than a rebase settles.
+const rebaseAttempts = 3
+
+// rebaseAndRetry puts the volume's commits on top of the ref the
+// remote holds now and pushes again. It answers the commit that
+// landed, or false when the volume has to take its side branch.
+func (n *node) rebaseAndRetry(ctx context.Context, held *volume, count int) (string, bool) {
+	for range rebaseAttempts {
+		upstream, err := n.fetchUpstream(ctx, held)
+		if err != nil {
+			n.logger.WarnContext(ctx, "the ref was not fetched",
+				"volume", held.id, "error", err)
+			return "", false
+		}
+		before := held.work.refCommit(ctx, "HEAD")
+		if err := n.rebaseAside(ctx, held, upstream); err != nil {
+			n.logger.WarnContext(ctx, "the rebase was aborted",
+				"volume", held.id, "error", err)
+			return "", false
+		}
+		// The record goes on top of the remote's in the same pass,
+		// because a push sends the branch and the record together
+		// and the remote accepts or rejects each on its own.
+		if err := held.work.reparentMetadata(ctx, held.authorEnv()); err != nil {
+			n.logger.WarnContext(ctx, "the record was not put on top of the remote's",
+				"volume", held.id, "error", err)
+			return "", false
+		}
+		head := held.work.refCommit(ctx, "HEAD")
+		if _, err := n.sendTo(ctx, held, held.attributes.ref); err != nil {
+			continue
+		}
+		// The Event goes out after the push it describes, and only
+		// when the rebase moved the tree. A push the remote rejected
+		// for the record alone rebased nothing.
+		if head != before {
+			claim, _, _ := held.reading()
+			n.report(ctx, held, claim, corev1.EventTypeNormal, reasonRebased,
+				fmt.Sprintf("rebased %d commits onto %s and pushed to %s",
+					count, short(upstream), held.attributes.ref))
+			n.logger.InfoContext(ctx, "rebased", "volume", held.id,
+				"commits", count, "onto", short(upstream))
+		}
+		return head, true
+	}
+	return "", false
+}
+
+// fetchUpstream takes what the remote holds on the ref now, under
+// the repository's lock and in a credential window of its own, the
+// way a stage does.
+func (n *node) fetchUpstream(ctx context.Context, held *volume) (string, error) {
+	repo := held.work.repository
+	defer repo.lock()()
+
+	env, remove, err := held.credentials.use(held.directory)
+	if err != nil {
+		return "", err
+	}
+	defer remove()
+	if err := repo.fetch(ctx, env, held.attributes.ref, 0); err != nil {
+		return "", err
+	}
+	// The record comes in the same window as the ref. A remote
+	// that holds none leaves the rebase nothing to replay.
+	_ = held.work.fetchMetadata(ctx, env, held.attributes.url, remoteMetadataRef)
+	return repo.resolve(ctx, held.attributes.ref)
 }
 
 // sendTo opens the credential window, pushes, and closes it, so

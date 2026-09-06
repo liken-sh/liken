@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -24,6 +25,12 @@ const (
 	metadataRecordFile = "metadata.record"
 	metadataIndexFile  = "metadata.index"
 )
+
+// remoteMetadataRef is where a fetch puts the record the remote
+// holds, beside the volume's own record. A rebase needs both: the
+// other writer's modes to replay, and their record to put the
+// volume's own record on top of.
+const remoteMetadataRef = metadataRef + ".remote"
 
 // metadataMessage is the message every commit on the metadata ref
 // carries, because the record is the whole change.
@@ -173,15 +180,16 @@ func (w *workTree) recordMetadata(ctx context.Context, rules *policy) error {
 		return err
 	}
 	content := metadataContent(records)
-	if standing, err := w.metadataRecord(ctx); err == nil && standing == content {
+	if standing, err := w.metadataRecord(ctx, metadataRef); err == nil && standing == content {
 		return nil
 	}
 	return w.commitMetadata(ctx, rules, content)
 }
 
-// metadataRecord is the record the metadata ref holds now.
-func (w *workTree) metadataRecord(ctx context.Context) (string, error) {
-	output, err := w.git(ctx, "show", "--no-textconv", metadataRef+":"+metadataFile)
+// metadataRecord is the record the ref holds now: the volume's own,
+// or the one fetched from the remote.
+func (w *workTree) metadataRecord(ctx context.Context, ref string) (string, error) {
+	output, err := w.git(ctx, "show", "--no-textconv", ref+":"+metadataFile)
 	if err != nil {
 		return "", err
 	}
@@ -243,23 +251,88 @@ func (w *workTree) commitMetadata(ctx context.Context, rules *policy, content st
 // is not root, and a chown it cannot make is not a failure of the
 // restore.
 func (w *workTree) replayMetadata(ctx context.Context, logger *slog.Logger, owners bool) error {
-	content, err := w.metadataRecord(ctx)
+	content, err := w.metadataRecord(ctx, metadataRef)
 	if err != nil {
 		return err
 	}
+	w.replayRecords(ctx, logger, owners, parseMetadataContent(content))
+	return nil
+}
+
+// replayMetadataFor replays the remote's record for the paths an
+// update rewrote, and no other path. Those paths are another writer's
+// files, so their modes come from that writer's record, and the modes
+// the pod set on its own files stand.
+func (w *workTree) replayMetadataFor(
+	ctx context.Context, logger *slog.Logger, owners bool, changed []string,
+) error {
+	content, err := w.metadataRecord(ctx, remoteMetadataRef)
+	if err != nil {
+		return err
+	}
+	w.replayRecords(ctx, logger, owners, recordsUnder(parseMetadataContent(content), changed))
+	return nil
+}
+
+// recordsUnder selects the records of the paths an update rewrote:
+// the paths themselves, the directories that hold them, and the
+// directories the record names inside those, which is where an empty
+// directory another writer added is. The root's own children are
+// never selected, so a record line for one of the pod's own top-level
+// paths is not replayed.
+func recordsUnder(records []metadataRecord, changed []string) []metadataRecord {
+	rewritten, holding := map[string]bool{}, map[string]bool{}
+	for _, one := range changed {
+		rewritten[one] = true
+		for dir := path.Dir(one); dir != "."; dir = path.Dir(dir) {
+			holding[dir] = true
+		}
+	}
+	found := []metadataRecord{}
+	for _, one := range records {
+		inside := one.directory && (holding[one.path] || holding[path.Dir(one.path)])
+		if rewritten[one.path] || inside {
+			found = append(found, one)
+		}
+	}
+	return found
+}
+
+// reparentMetadata makes the volume's record a child of the record
+// the remote holds now. A record is a snapshot of the whole tree, so
+// a new parent is the whole rebase it needs, and it can never
+// conflict. A record already on top of the remote's is left alone.
+func (w *workTree) reparentMetadata(ctx context.Context, author []string) error {
+	remote, local := w.refCommit(ctx, remoteMetadataRef), w.refCommit(ctx, metadataRef)
+	if remote == "" || local == "" || w.ancestor(ctx, remote, local) {
+		return nil
+	}
+	steps := &gitSteps{work: w}
+	tree := steps.run(ctx, nil, "rev-parse", "--verify", "--end-of-options", local+"^{tree}")
+	commit := steps.run(ctx, author, "commit-tree", "-m", metadataMessage, "-p", remote, tree)
+	steps.run(ctx, nil, "update-ref", metadataRef, commit)
+	return steps.err
+}
+
+// replayRecords writes what a checkout cannot carry, one record at
+// a time. A record it cannot write is logged and does not stop the
+// ones after it.
+func (w *workTree) replayRecords(
+	ctx context.Context, logger *slog.Logger, owners bool, records []metadataRecord,
+) {
 	if !owners {
 		logger.InfoContext(ctx, "the owners are not replayed", "tree", w.tree)
 	}
-	for _, one := range parseMetadataContent(content) {
-		path := filepath.Join(w.tree, filepath.FromSlash(one.path))
+	for _, one := range records {
+		where := filepath.Join(w.tree, filepath.FromSlash(one.path))
 		if one.directory {
-			if err := os.MkdirAll(path, one.mode); err != nil {
+			if err := os.MkdirAll(where, one.mode); err != nil {
 				logger.WarnContext(ctx, "the directory was not made",
 					"path", one.path, "error", err)
 				continue
 			}
 		}
-		if err := os.Chmod(path, one.mode); err != nil {
+		if err := os.Chmod(where, one.mode); err != nil {
 			logger.WarnContext(ctx, "the mode was not replayed",
 				"path", one.path, "error", err)
 			continue
@@ -267,10 +340,9 @@ func (w *workTree) replayMetadata(ctx context.Context, logger *slog.Logger, owne
 		if !owners {
 			continue
 		}
-		if err := os.Lchown(path, one.uid, one.gid); err != nil {
+		if err := os.Lchown(where, one.uid, one.gid); err != nil {
 			logger.WarnContext(ctx, "the owner was not replayed",
 				"path", one.path, "error", err)
 		}
 	}
-	return nil
 }

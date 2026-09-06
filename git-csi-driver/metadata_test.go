@@ -132,7 +132,7 @@ func TestTheRecordIsCommittedOnlyWhenItChanges(t *testing.T) {
 	if first == "" {
 		t.Fatal("the metadata ref names no commit")
 	}
-	content, err := work.metadataRecord(t.Context())
+	content, err := work.metadataRecord(t.Context(), metadataRef)
 	if err != nil {
 		t.Fatalf("metadataRecord: %v", err)
 	}

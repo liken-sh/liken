@@ -199,7 +199,7 @@ func TestAClassThatRecordsMetadataMakesTheRef(t *testing.T) {
 	}
 	answering.commit(t.Context(), held, held.policyNow())
 
-	content, err := held.work.metadataRecord(t.Context())
+	content, err := held.work.metadataRecord(t.Context(), metadataRef)
 	if err != nil {
 		t.Fatalf("metadataRecord: %v", err)
 	}

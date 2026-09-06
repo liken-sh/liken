@@ -40,13 +40,14 @@ the application starts from its last push.
 1. **The driver is the only committer.** The repository lives in the
    driver's store on the node. The pod gets a bind mount of the work
    tree, with no `.git` inside it.
-2. **While a pod holds the tree, only the application changes it.**
-   Upstream changes reach the tree at stage, before the pod starts,
-   and never later. An application reads its configuration at start,
-   so this is the one moment a pull is safe.
-3. **The driver merges nothing and loses nothing.** At stage it
-   fast-forwards, or it rebases local commits onto upstream. A rebase
-   that conflicts is aborted, and the volume moves to a side branch.
+2. **While a pod holds the tree, only the application changes it,
+   and a rejected push.** Upstream changes reach the tree at stage,
+   before the pod starts, and after a push the remote rejects. The
+   rebase then happens beside the pod's tree, and the tree takes the
+   result in one step that rewrites only the files upstream changed.
+3. **The driver merges nothing and loses nothing.** It fast-forwards,
+   or it rebases local commits onto upstream. A rebase that conflicts
+   is aborted, and the volume moves to a side branch.
 4. **Durability is the last push.** Commits are local and frequent.
    Pushes follow the policy, and every unpublish pushes without
    condition.
@@ -190,7 +191,9 @@ The repository carries two things for the driver and no configuration.
   stores none of them, and a restore without them gives an
   application files with the wrong permissions and none of the empty
   directories it expects. The ref never appears in the checkout or in
-  the forge's file view.
+  the forge's file view. A record the remote rejects is rebuilt on
+  the record the remote holds, so many writers of one repository
+  share the ref.
 
 ## The components
 
@@ -233,7 +236,9 @@ owns file modes.
 3. **Run.** A write starts the quiesce timer. When it fires on an
    armed volume the driver records metadata, stages every change under
    the size guard, and commits. It pushes when `push.quiesce` or
-   `push.maxLatency` says so.
+   `push.maxLatency` says so. A push the remote rejects fetches,
+   rebases in a scratch tree, moves the pod's tree to the result with
+   `read-tree -m -u`, and pushes again, three times at most.
 4. **Unpublish.** Unmount. Commit what is pending, then push now.
 5. **Unstage.** Push again if the last push failed. Keep the work tree
    for the next stage on this node.
@@ -244,13 +249,14 @@ one writes there.
 
 ### Divergence
 
-A push rejected as non-fast-forward, or a rebase aborted at stage,
-moves the volume to `refs/heads/<ref>.<volumeHandle>`. The driver keeps
+A push still rejected after three rebases, an aborted rebase, or a
+tree update that would overwrite a file the application and upstream
+both changed moves the volume to `refs/heads/<ref>.<volumeHandle>`. The driver keeps
 committing and pushing there, so no work stops and no work is lost.
 The events and the log name both branches. A
-person merges on the forge. At the next stage local is behind the
-merged upstream, the volume fast-forwards back onto `<ref>`, and the
-driver deletes the side branch.
+person merges on the forge. At the next push, or the next stage,
+upstream holds the side branch's head, the volume moves back onto
+`<ref>`, and the driver deletes the side branch.
 
 ### Restore
 

@@ -231,7 +231,7 @@ func (n *node) restore(ctx context.Context, staging *volume) {
 			"volume", staging.id, "error", err)
 		return
 	}
-	fetchErr := staging.work.fetchMetadata(ctx, env, staging.attributes.url)
+	fetchErr := staging.work.fetchMetadata(ctx, env, staging.attributes.url, metadataRef)
 	remove()
 	if fetchErr != nil {
 		n.logger.InfoContext(ctx, "the remote holds no metadata",

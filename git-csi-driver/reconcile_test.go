@@ -190,28 +190,71 @@ func reasonsOf(t *testing.T, answering *node) string {
 }
 
 func TestARebaseThatCannotStartDiverges(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		stand func(t *testing.T, held *volume)
+	}{
+		{
+			name: "a scratch work tree git will not add",
+			stand: func(t *testing.T, held *volume) {
+				if err := os.WriteFile(
+					filepath.Join(held.work.gitDir, "worktrees"), nil, 0o600); err != nil {
+					t.Fatalf("writing the worktrees directory as a file: %v", err)
+				}
+			},
+		},
+		{
+			name: "a branch the driver cannot move",
+			stand: func(t *testing.T, held *volume) {
+				if err := os.MkdirAll(filepath.Join(held.work.gitDir,
+					"refs", "heads", "main.lock"), 0o755); err != nil {
+					t.Fatalf("making the lock directory: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			remote := bareRemote(t, map[string]string{"a.txt": "one"})
+			logs := &logbook{}
+			answering, _ := testNode(t, logs)
+			held, request := stagedVolume(t, answering, "config", fileURL(remote))
+			driverCommit(t, answering, held, map[string]string{"c.txt": "three"})
+			remoteCommit(t, remote, map[string]string{"b.txt": "two"})
+			c.stand(t, held)
+
+			again := restaged(t, answering, request)
+
+			if got := again.divergedFrom(); got != "main.config" {
+				t.Errorf("the volume pushes to %q, want main.config", got)
+			}
+			if !strings.Contains(logs.String(), "the rebase was aborted") {
+				t.Errorf("the log is %q, want the aborted rebase in it", logs)
+			}
+			if !strings.Contains(logs.String(), "the volume names no claim") {
+				t.Errorf("the log is %q, want the claim it could not find in it", logs)
+			}
+		})
+	}
+}
+
+func TestAStageRebasesBesideTheTreeAndLeavesNothing(t *testing.T) {
 	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	logs := &logbook{}
-	answering, _ := testNode(t, logs)
+	answering, _ := testNode(t, io.Discard)
 	held, request := stagedVolume(t, answering, "config", fileURL(remote))
 	driverCommit(t, answering, held, map[string]string{"c.txt": "three"})
 	remoteCommit(t, remote, map[string]string{"b.txt": "two"})
-	// A rebase left half done by a driver that died is a rebase no new
-	// rebase will start beside.
-	if err := os.MkdirAll(filepath.Join(held.work.gitDir, "rebase-merge"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
 
 	again := restaged(t, answering, request)
 
-	if got := again.divergedFrom(); got != "main.config" {
-		t.Errorf("the volume pushes to %q, want main.config", got)
+	want := map[string]string{"a.txt": "one", "b.txt": "two", "c.txt": "three"}
+	if got := readTree(t, again.tree); !sameTree(got, want) {
+		t.Errorf("the tree holds %v, want %v", got, want)
 	}
-	if !strings.Contains(logs.String(), "the rebase was aborted") {
-		t.Errorf("the log is %q, want the aborted rebase in it", logs)
+	if got := again.divergedFrom(); got != "" {
+		t.Errorf("the volume pushes to %q, want the ref", got)
 	}
-	if !strings.Contains(logs.String(), "the volume names no claim") {
-		t.Errorf("the log is %q, want the claim it could not find in it", logs)
+	if _, err := os.Stat(filepath.Join(again.directory, scratchTree)); !os.IsNotExist(err) {
+		t.Errorf("the volume directory holds a scratch work tree: %v", err)
 	}
 }
 

@@ -108,9 +108,9 @@ forge's file view.
 
 ## When upstream moves
 
-The application's tree changes only when the application writes it.
-Upstream reaches the tree at stage, when the pod starts, and never
-later. At stage the driver compares the tree to the ref:
+The application's tree changes only when the application writes it,
+with one exception below. Upstream reaches the tree at stage, when the
+pod starts. At stage the driver compares the tree to the ref:
 
 - **Behind.** The tree takes upstream.
 - **Ahead.** Nothing changes. The next push carries the commits.
@@ -121,11 +121,29 @@ later. At stage the driver compares the tree to the ref:
   left as it is, whatever upstream did, and the abnormal gauge and the
   log say upstream moved.
 
-A push the forge rejects, or an aborted rebase, moves the volume to the
+The exception is a push the forge rejects because the ref moved. The
+driver then fetches, rebases the tree's commits onto upstream beside
+the pod's tree, and pushes again, three times at most. The pod's tree
+takes the result in one step that rewrites only the files upstream
+changed. A file the application wrote since the last commit is kept,
+unless upstream changed that same file. The claim's events carry
+`GitVolumeRebased` when this lands.
+
+A push still rejected after the third rebase, an aborted rebase, or a
+file the application and upstream both changed moves the volume to the
 branch `<ref>.<volumeHandle>`. Every push goes there until a person
-merges it into the ref on the forge. The events and the log name both branches, and commits continue, so no work stops. At the next
-pod start after the merge, the volume is back on the ref and the side
-branch is deleted.
+merges it into the ref on the forge. The events and the log name both
+branches, and commits continue, so no work stops. At the volume's next
+push after the merge, or its next pod start, the volume is back on the
+ref and the side branch is deleted.
+
+## Many writers on one repository
+
+One repository can hold the configuration of many applications, each
+with its own writeable volume and its own directory mounted with
+`subPath`. [Give many applications one
+repository](../one-repository-many-apps/) gives the manifests and the
+rules.
 
 ## Restore
 
@@ -157,8 +175,8 @@ object it names, and a writeable volume takes no `depth`.
 
 The pod's events and the claim's events carry `GitVolumeArmed`,
 `GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
-`GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeDiverged`,
-`GitVolumeHealed`, and `GitVolumeSwept`. The node plugin's `/metrics`
+`GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeRebased`,
+`GitVolumeDiverged`, `GitVolumeHealed`, and `GitVolumeSwept`. The node plugin's `/metrics`
 listener exports `git_csi_volume_abnormal`, one while anything is wrong
 with a volume, and `git_csi_armed`, `git_csi_pending_paths`,
 `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,

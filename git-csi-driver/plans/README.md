@@ -18,8 +18,17 @@ they become.
 
 ## Planned
 
-Every numbered plan is built and drilled. The next plans come from the
-open problems and from what a demo teaches.
+* [09, Rebase before push](09-rebase-before-push.md). A push the
+  remote rejects rebases beside the pod's tree and tries again, so many
+  writers can share one repository through `subPath`. The side branch
+  becomes the fallback.
+* [10, Webhooks trigger a pull](10-webhooks-trigger-a-pull.md). Low
+  fidelity. The controller accepts a forge's push webhook and marks
+  the matching `PersistentVolume`s, and the node plugins fetch at
+  once. Its open questions wait on rulings.
+* [11, A lean image](11-a-lean-image.md). Low fidelity. The release
+  image is 263 MB for a driver that runs `git` and `ssh`. A stripped
+  binary and a closure on scratch, with measurements.
 
 ## Designs
 

@@ -37,6 +37,9 @@ const (
 	reasonDiverged = "GitVolumeDiverged"
 	reasonHealed   = "GitVolumeHealed"
 	reasonSwept    = "GitVolumeSwept"
+	// A push the remote rejected was rebased onto what the remote
+	// holds now, and landed on the ref.
+	reasonRebased = "GitVolumeRebased"
 )
 
 // events posts Events through the cluster's API, or posts nothing when
