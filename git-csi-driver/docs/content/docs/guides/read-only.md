@@ -3,9 +3,10 @@ title: Mount a repository read-only
 weight: 20
 ---
 
-A read-only volume is an inline CSI volume in the pod spec. It needs no
-`PersistentVolume` and no claim, so any pod in any namespace can mount
-any repository the node can reach.
+A read-only volume has two forms. The inline form is a CSI volume in
+the pod spec. It needs no `PersistentVolume` and no claim, so any pod in
+any namespace can mount any repository the node can reach. The claim
+form, below, is for a workload that names its storage as a claim.
 
 ```yaml
 apiVersion: v1

@@ -145,6 +145,7 @@ spec:
 
 A read-only volume needs no `PersistentVolume` and no claim. The pod
 spec is the mutable home, so read-only policy lives in the attributes.
+The claim form at the end of this section takes the same attributes.
 
 ```yaml
 volumes:

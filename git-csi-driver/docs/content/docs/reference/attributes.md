@@ -3,10 +3,10 @@ title: Volume attributes
 weight: 10
 ---
 
-A read-only volume is described by the `volumeAttributes` of an inline
-CSI volume. The driver refuses an unknown attribute, a malformed value,
-and an inline volume without `readOnly: true`, with a message that
-names the attribute.
+A read-only volume is described by its `volumeAttributes`, in the `csi`
+block of an inline volume or of a `ReadOnlyMany` `PersistentVolume`. The
+driver refuses an unknown attribute, a malformed value, and a volume
+without `readOnly: true`, with a message that names the attribute.
 
 | Attribute | Values | Default |
 |---|---|---|
