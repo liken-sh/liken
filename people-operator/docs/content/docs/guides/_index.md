@@ -3,4 +3,5 @@ title: Guides
 weight: 10
 ---
 
-One guide: install the CRD and declare the people of the cluster.
+There is one guide. It installs the resource definition and declares
+the people of a cluster.

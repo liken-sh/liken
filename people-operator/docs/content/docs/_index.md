@@ -2,6 +2,7 @@
 title: Manual
 ---
 
-The manual has two parts. The guide installs the CRD and declares the
-first people. The reference lists every field of the `Person`, taken
-from the CRD's own descriptions.
+The manual has two parts. The guide shows how to install the
+resource definition and declare people. The reference lists every
+field of a `Person`, with the description each field carries in the
+definition itself.

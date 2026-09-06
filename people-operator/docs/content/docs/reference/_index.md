@@ -3,4 +3,5 @@ title: Reference
 weight: 20
 ---
 
-The fields of the `Person`, generated from the CRD in the repository.
+The reference has one page, the fields of a `Person`. It is
+generated from the resource definition in the repository.

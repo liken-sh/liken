@@ -1,8 +1,8 @@
-# A Person is a fact of the whole cluster: someone the household
-# names once, so every operator can name them again. The resource is
-# small because its value is in who references it. A `Play` names the
-# people who watched, a `Watch` names the people who share a series,
-# and a `Player` names the people who usually sit in front of it. No
+# A Person names one person who uses the cluster. It is cluster-scoped
+# because the same person appears in every namespace. The resource
+# holds little on its own; other operators refer to it by name and
+# attach their own facts to it. A `Play` names the people who watched
+# it, and a `Watch` names the people who watch a series together. No
 # controller ships with this CRD.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -55,52 +55,51 @@ spec:
                   type: string
                   minLength: 1
                   description: >-
-                    The short name for this person, for a screen with
-                    room for one word: a first name, or what the house
-                    calls them. Optional; a screen falls back to the
-                    display name.
+                    A short name, one word, for a screen with little
+                    room: a first name, or what people call this
+                    person. Optional. A screen shows the display name
+                    when this is unset.
                 avatar:
                   type: string
                   description: >-
-                    A reference to this person's picture, for a
-                    screen to draw. A `claim://<claim>/<path>`
-                    reference names a file on a claim, the way a
-                    `Play` names media.
+                    This person's picture, as a `claim://<claim>/<path>`
+                    reference to a file on a claim. It is the same
+                    form a `Play` uses to name media. Optional.
                 uid:
                   type: integer
                   format: int64
                   minimum: 1000
                   maximum: 4294967294
                   description: >-
-                    The Linux uid this person's files are owned by.
-                    State it for a person whose files already exist
-                    under one on a NAS. Leave it unset and a later
-                    controller assigns one from a reserved range.
+                    The Linux uid that owns this person's files. Set
+                    it when this person's files already exist under a
+                    uid, on a NAS for example. Optional. Nothing
+                    assigns one yet.
                 identity:
                   type: object
                   required: [issuer, subject]
                   description: >-
-                    An outside login this person is, as an OIDC
-                    issuer URL and subject. Nothing in liken reads it
-                    yet.
+                    This person's login at an outside identity
+                    provider, as an OIDC issuer URL and subject.
+                    Optional. Nothing reads it yet.
                   properties:
                     issuer:
                       type: string
                       format: uri
                       minLength: 1
-                      description: "The issuer URL, as the provider's discovery document states it."
+                      description: "The issuer URL, exactly as the provider's discovery document states it."
                     subject:
                       type: string
                       minLength: 1
-                      description: "The subject claim that provider issues for this person."
+                      description: "The subject claim, `sub`, that the issuer gives this person."
             status:
               type: object
-              # Nothing writes this yet; a later controller assigns
-              # uid the way it does in the spec's own description.
+              # Nothing writes this yet. It is declared so a controller
+              # that assigns uids has a place to report them.
               properties:
                 uid:
                   type: integer
                   format: int64
                   description: >-
-                    The uid this person holds, stated in the spec or
-                    assigned by a controller.
+                    The uid in effect for this person. Nothing writes
+                    it yet.

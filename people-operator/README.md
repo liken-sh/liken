@@ -1,8 +1,8 @@
 # people-operator
 
-A `Person` is a fact of a `liken` cluster: someone the household names
-once, so every operator can name them again. This repository ships the
-CRD, `people.liken.sh/v1alpha1`, and no controller.
+A `Person` names one person who uses a `liken` cluster. This
+repository is the definition of that resource, `people.liken.sh/v1alpha1`,
+and nothing more. No program runs.
 
 ```yaml
 apiVersion: people.liken.sh/v1alpha1
@@ -14,18 +14,15 @@ spec:
   nickname: Thora
 ```
 
-The resource is small because its value is in who references it. A
-`Watch` in [`library-operator`](https://github.com/liken-sh/library-operator)
-names the people who share a series. A `Play` names the people who
-watched it, through owner references. A `Player` in
-[`media-operator`](https://github.com/liken-sh/media-operator) names
-the people who usually sit in front of it. Each reference is a plan in
-the operator that makes it.
+Other operators refer to a `Person` by name and attach their own
+facts to it. The `Watch` in
+[`library-operator`](https://github.com/liken-sh/library-operator)
+names the people who watch a series together, and a `Play` names the
+people who watched it, through owner references.
 
-Two fields wait for a controller. `spec.uid` is the Linux uid a
-person's files are owned by, stated by hand today and assigned from a
-reserved range later. `spec.identity` names an outside login as an
-OIDC issuer and subject, and nothing reads it yet.
+Two fields wait for a controller. `uid` is the Linux uid that owns a
+person's files. `identity` is a login at an outside identity provider,
+as an OIDC issuer and subject. Nothing reads either yet.
 
 The manual is at [people.liken.sh](https://people.liken.sh/).
 `plans/00-design.md` is the design, and `plans/README.md` indexes the
