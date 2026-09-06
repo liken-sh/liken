@@ -11,7 +11,7 @@ part of normal operation.
 
 [`radio.go`](../radio.go) reads BlueZ link and battery properties.
 [`peripheral.go`](../peripheral.go) derives peripheral status, including
-the `Connected` condition. [Plan 06](06-peripherals-and-the-input-relay.md)
+the `Connected` condition. [Plan 06](completed/06-peripherals-and-the-input-relay.md)
 describes the peripheral inventory and the kernel battery source. Metrics
 must reuse the resulting observations and their unknown-state rules.
 

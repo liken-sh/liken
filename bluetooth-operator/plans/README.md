@@ -40,8 +40,8 @@ considered and why.
   media bus as an exclusive DRA device, the hostPath behind the bus
   socket, and the mount-and-variable delivery. This operator's half
   of liken's milestone 60.
-* [06, Peripherals and the input relay](06-peripherals-and-the-input-relay.md).
-  Proposed. The Pairing becomes the Peripheral, the object for one
+* [06, Peripherals and the input relay](completed/06-peripherals-and-the-input-relay.md).
+  Built. The Pairing becomes the Peripheral, the object for one
   bonded device with its bond, its battery level, and a `Connected`
   condition. A uinput relay per controller gives every claim a stable
   node. Answers and replaces the open problems "BLE devices connect on

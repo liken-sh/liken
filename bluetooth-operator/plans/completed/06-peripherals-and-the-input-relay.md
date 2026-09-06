@@ -1,6 +1,7 @@
 # 06, Peripherals and the input relay
 
-Proposed.
+Built, and drilled on liken-1 on 2026-09-02, with release 2026.09.02-001
+through 2026.09.02-003.
 
 This plan answers two open problems at once: BLE devices connect on
 demand, and battery levels are not reported. The two share one cause.
