@@ -45,7 +45,6 @@ metadata:
 spec:
   displayName: Thora
   avatar: claim://portraits/thora.png
-  child: true
 ```
 
 The resource is small because its value is in who names it. A
