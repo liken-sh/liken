@@ -36,6 +36,9 @@ spec:
         - name: driver
           image: ghcr.io/liken-sh/git-csi-driver:latest
           args:
+            # The node subcommand takes the node plugin's flags, and the
+            # controller subcommand takes the controller's.
+            - node
             - --endpoint=unix:///csi/csi.sock
             - --node-id=$(NODE_NAME)
             - --store=/var/lib/liken/pod-storage/git-csi

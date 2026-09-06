@@ -31,6 +31,7 @@ func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
 			nodeID:     "node-1",
 			store:      filepath.Join(t.TempDir(), "store"),
 			sweepAfter: defaultSweepAfter,
+			demandMin:  defaultDemandMin,
 		},
 		fakeEvents(t, logs),
 		newMetrics(),
@@ -40,6 +41,7 @@ func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
 	answering.quiesce = 20 * time.Millisecond
 	answering.sweep = 100 * time.Millisecond
 	answering.arms.resync = 20 * time.Millisecond
+	answering.demands.resync = 20 * time.Millisecond
 	return answering, calls
 }
 

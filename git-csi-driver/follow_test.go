@@ -51,20 +51,41 @@ func TestTheIntervalIsTheShortestPullOfTheVolumesThatShare(t *testing.T) {
 	url := fileURL(source)
 
 	loop := followerOf(answering, url)
-	if got := loop.interval(); got != defaultPull {
-		t.Errorf("a follower of no volumes answered %v, want %v", got, defaultPull)
+	if got, timed := loop.interval(); timed {
+		t.Errorf("a follower of no volumes answered %v, want no timer", got)
 	}
-	loop.add(&volume{id: "csi-1", attributes: &attributes{pull: time.Hour}})
-	if got := loop.interval(); got != time.Hour {
-		t.Errorf("the interval is %v, want %v", got, time.Hour)
+	loop.add(&volume{id: "csi-1", attributes: &attributes{pull: pullPolicy{mode: pullOnDemand}}})
+	if got, timed := loop.interval(); timed {
+		t.Errorf("a follower of a volume that pulls on demand answered %v, want no timer", got)
 	}
-	loop.add(&volume{id: "csi-2", attributes: &attributes{pull: time.Minute}})
-	if got := loop.interval(); got != time.Minute {
-		t.Errorf("the interval is %v, want %v", got, time.Minute)
+	loop.add(&volume{id: "csi-2", attributes: &attributes{pull: pullEvery(time.Hour)}})
+	if got, timed := loop.interval(); !timed || got != time.Hour {
+		t.Errorf("the interval is %v (timed: %v), want %v", got, timed, time.Hour)
 	}
-	loop.remove(&volume{id: "csi-2", attributes: &attributes{pull: time.Minute}})
-	if got := loop.interval(); got != time.Hour {
-		t.Errorf("the interval is %v, want %v", got, time.Hour)
+	loop.add(&volume{id: "csi-3", attributes: &attributes{pull: pullEvery(time.Minute)}})
+	if got, timed := loop.interval(); !timed || got != time.Minute {
+		t.Errorf("the interval is %v (timed: %v), want %v", got, timed, time.Minute)
+	}
+	loop.remove(&volume{id: "csi-3", attributes: &attributes{pull: pullEvery(time.Minute)}})
+	if got, timed := loop.interval(); !timed || got != time.Hour {
+		t.Errorf("the interval is %v (timed: %v), want %v", got, timed, time.Hour)
+	}
+}
+
+func TestAVolumeThatPullsOnDemandJoinsTheLoopWithNoTimer(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
+	url := fileURL(source)
+	demandedVolume(t, answering, "franchises", url, "on-demand")
+
+	answering.mu.Lock()
+	loop, found := answering.followers[answering.store.repository(url).name]
+	answering.mu.Unlock()
+	if !found {
+		t.Fatal("a volume that pulls on demand joined no loop")
+	}
+	if got, timed := loop.interval(); timed {
+		t.Errorf("the loop set a timer of %v, want none", got)
 	}
 }
 
@@ -129,7 +150,7 @@ func TestUnfollowPassesOverARepositoryWithNoLoop(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	answering.mu.Lock()
 	defer answering.mu.Unlock()
-	answering.unfollow(&volume{id: "csi-9", attributes: &attributes{pull: time.Hour, url: "file:///gone"}})
+	answering.unfollow(&volume{id: "csi-9", attributes: &attributes{pull: pullEvery(time.Hour), url: "file:///gone"}})
 }
 
 func TestRefreshMovesThePublishedTreeInsideTheDirectoryThePodHolds(t *testing.T) {

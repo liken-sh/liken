@@ -37,10 +37,21 @@ type metrics struct {
 	// What every volume carries, read-only volumes included:
 	// whether the volume's report says something is wrong with it.
 	abnormal *prometheus.GaugeVec
+	// The pulls a demand started, per volume.
+	demandedPulls *prometheus.CounterVec
+	// What the controller's webhook listener answered, and the
+	// PersistentVolumes a verified push marked. The controller alone
+	// registers these two.
+	webhookRequests *prometheus.CounterVec
+	webhookMarks    prometheus.Counter
 }
 
 // metricLabels name the claim a person would look up.
 var metricLabels = []string{"namespace", "claim"}
+
+// webhookLabels name what the listener answered: accepted,
+// unauthenticated, malformed, or failed.
+var webhookLabels = []string{"result"}
 
 // healthLabels name the volume a person would look up: the
 // namespace that holds it, and the CSI volume id, which is the one name
@@ -78,11 +89,28 @@ func newMetrics() *metrics {
 		// with it, zero while it says nothing is.
 		abnormal: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_volume_abnormal", Help: "One while the volume's report says something is wrong with it, zero while it says nothing is."}, healthLabels),
+		// Pulls a demand on the volume's PersistentVolume started. A
+		// counter, because it never goes down.
+		demandedPulls: prometheus.NewCounterVec(
+			prometheus.CounterOpts{Name: "git_csi_demanded_pulls_total", Help: "Pulls a demand on the volume's PersistentVolume started."}, healthLabels),
+		// The webhook requests the controller answered, by what it
+		// answered.
+		webhookRequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{Name: "git_csi_webhook_requests_total", Help: "Webhook requests the controller answered, by what it answered."}, webhookLabels),
+		// The PersistentVolumes a verified push marked.
+		webhookMarks: prometheus.NewCounter(
+			prometheus.CounterOpts{Name: "git_csi_webhook_marked_total", Help: "PersistentVolumes a verified push marked."}),
 	}
 	readings.registry.MustRegister(readings.armed, readings.pending,
 		readings.unpushed, readings.lastPush, readings.pushFailures, readings.skipped,
-		readings.diverged, readings.abnormal)
+		readings.diverged, readings.abnormal, readings.demandedPulls)
 	return readings
+}
+
+// registerWebhook puts the listener's two counters on the registry. A
+// node plugin answers no webhook, so its registry carries neither.
+func (m *metrics) registerWebhook() {
+	m.registry.MustRegister(m.webhookRequests, m.webhookMarks)
 }
 
 // record puts the volume's state on the gauges. A volume whose claim
@@ -137,6 +165,27 @@ func (n *node) noteHealth(ctx context.Context, held *volume) {
 		"volume", held.id, "report", message)
 }
 
+// demanded counts one pull a demand started, under the labels
+// git_csi_volume_abnormal takes.
+func (m *metrics) demanded(held *volume) {
+	namespace := held.namespace()
+	if m == nil || namespace == "" {
+		return
+	}
+	m.demandedPulls.WithLabelValues(namespace, held.id).Inc()
+}
+
+// webhookAnswered counts one request by what the listener answered.
+func (m *metrics) webhookAnswered(result string) {
+	m.webhookRequests.WithLabelValues(result).Inc()
+}
+
+// webhookMarked counts the PersistentVolumes one verified push marked,
+// which is zero when the push matched nothing.
+func (m *metrics) webhookMarked(count int) {
+	m.webhookMarks.Add(float64(count))
+}
+
 // pushFailed counts one failure, which is the only reading a
 // volume reports that never goes down.
 func (m *metrics) pushFailed(held *volume) {
@@ -157,6 +206,7 @@ func (m *metrics) forget(held *volume) {
 	// whether or not the driver ever found a claim for it.
 	if namespace := held.namespace(); namespace != "" {
 		m.abnormal.DeleteLabelValues(namespace, held.id)
+		m.demandedPulls.DeleteLabelValues(namespace, held.id)
 	}
 	claim, _, _ := held.reading()
 	if claim.name == "" {

@@ -5,14 +5,36 @@ package main
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
-// controller is the whole controller plugin. It holds no state, because
-// validating a class reads nothing but the class.
+// controller is the CSI Controller service. Validating a class reads
+// nothing but the class, so this service holds no state. The webhook
+// listener beside it holds the client and the Secret cache.
 type controller struct {
 	csi.UnimplementedControllerServer
+}
+
+// clusterClient reads the controller's own credentials from the pod it
+// runs in. A controller that finds no cluster still validates a class
+// and says once that it serves no webhook, because the sidecar does
+// not need the webhook.
+func clusterClient(logger *slog.Logger, load func() (*rest.Config, error)) kubernetes.Interface {
+	config, err := load()
+	if err != nil {
+		logger.Warn("no webhook", "reason", err)
+		return nil
+	}
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		logger.Warn("no webhook", "reason", err)
+		return nil
+	}
+	return client
 }
 
 // controllerNode exists because the external-resizer sidecar calls

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ import (
 )
 
 // startController is the controller plugin on a socket of its own, which
-// is the same binary with --controller.
+// is the same binary under its controller subcommand.
 func startController(t *testing.T) *grpc.ClientConn {
 	t.Helper()
 	dir := t.TempDir()
@@ -241,5 +242,18 @@ func TestTheControllerHoldsNoVolume(t *testing.T) {
 	_, err := client.NodeGetInfo(t.Context(), &csi.NodeGetInfoRequest{})
 	if got := status.Code(err); got != codes.Unimplemented {
 		t.Errorf("NodeGetInfo answered %v, want %v", got, codes.Unimplemented)
+	}
+}
+
+func TestTheControllerReportsAWebhookAddressItCannotTake(t *testing.T) {
+	dir := t.TempDir()
+	_, err := newServer(t.Context(), &config{
+		endpoint:   "unix://" + filepath.Join(dir, "csi.sock"),
+		store:      filepath.Join(dir, "store"),
+		controller: true,
+		webhook:    "127.0.0.1:-1",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Error("newServer answered no error for an address it cannot take")
 	}
 }

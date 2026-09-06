@@ -35,11 +35,14 @@ type server struct {
 	// leaves the listener nil.
 	readings *metrics
 	metrics  net.Listener
-	logger   *slog.Logger
+	// hooks is the webhook listener, which the controller alone holds.
+	hooks  *webhook
+	logger *slog.Logger
 }
 
-// newServer takes the socket and registers the services: Identity and
-// Controller with --controller, Identity and Node otherwise. The node
+// newServer takes the socket and registers the services the subcommand
+// asks for: Identity and Controller for the controller, Identity and
+// Node for the node plugin. The node
 // plugin makes the store first and fails before it listens when it
 // cannot, because a driver with no store can hold no volume. ctx is the
 // driver's run, and every loop the Node service starts ends with it.
@@ -64,6 +67,8 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 	}
 
 	readings := newMetrics()
+	var hooks *webhook
+	var webhookListener net.Listener
 	registered := grpc.NewServer(grpc.UnaryInterceptor(logCalls(logger)))
 	csi.RegisterIdentityServer(registered,
 		&identity{store: cfg.store, controller: cfg.controller})
@@ -75,11 +80,22 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 		// this socket before it modifies a volume, so the controller
 		// answers that call and declares nothing.
 		csi.RegisterNodeServer(registered, controllerNode{})
+		// The listener a forge posts a push to, and the client that
+		// writes the mark.
+		hooks, err = newWebhook(cfg, readings, logger)
+		if err != nil {
+			closeAll(listener)
+			return nil, err
+		}
+		webhookListener = hooks.listener
 	} else {
 		answering := newNode(ctx, cfg, newEvents(cfg.nodeID, logger), readings, logger)
 		// The mounts outlive the driver, so a driver that starts takes back
 		// the volumes its store still records.
 		answering.resume(ctx)
+		// One watch on PersistentVolumes for the whole node, which is
+		// how a demand from outside the node reaches a volume.
+		go answering.demands.follow(ctx)
 		// The store grows until the sweep removes what nothing
 		// stages any more, so the walk runs for the driver's whole life.
 		go answering.sweeping(ctx)
@@ -88,7 +104,7 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 
 	metricsListener, err := readings.listen(cfg.metrics)
 	if err != nil {
-		_ = listener.Close()
+		closeAll(listener, webhookListener)
 		return nil, err
 	}
 	return &server{
@@ -98,8 +114,19 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 		stop:     registered.GracefulStop,
 		readings: readings,
 		metrics:  metricsListener,
+		hooks:    hooks,
 		logger:   logger,
 	}, nil
+}
+
+// closeAll closes the listeners a failed start opened. An empty
+// address left its listener nil, and nil closes nothing.
+func closeAll(listeners ...net.Listener) {
+	for _, listener := range listeners {
+		if listener != nil {
+			_ = listener.Close()
+		}
+	}
 }
 
 // serve blocks until the context ends, then stops the server and lets
@@ -109,6 +136,9 @@ func (s *server) serve(ctx context.Context) error {
 	go func() { served <- s.serveOn(s.listener) }()
 	if s.metrics != nil {
 		go serveMetrics(ctx, s.metrics, s.readings, s.logger)
+	}
+	if s.hooks != nil {
+		go s.hooks.serve(ctx)
 	}
 	select {
 	case err := <-served:

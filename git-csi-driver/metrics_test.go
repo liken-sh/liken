@@ -144,6 +144,22 @@ func TestTheHealthGaugeCarriesTheNamespaceAndTheVolume(t *testing.T) {
 	}
 }
 
+func TestTheDemandedPullsCounterCarriesTheNamespaceAndTheVolume(t *testing.T) {
+	readings := newMetrics()
+	held := mounted("csi-2", readOnlyClaim)
+	readings.demanded(held)
+	readings.demanded(held)
+
+	counted, found := demandedOf(t, readings, "apps", "csi-2")
+	if !found || counted != 2 {
+		t.Errorf("git_csi_demanded_pulls_total reads %v (found: %v), want 2", counted, found)
+	}
+	readings.forget(held)
+	if _, found := demandedOf(t, readings, "apps", "csi-2"); found {
+		t.Error("the volume is still on git_csi_demanded_pulls_total after it went")
+	}
+}
+
 func TestTheLogSaysWhenAVolumeTurnsAbnormalAndWhenItIsWellAgain(t *testing.T) {
 	logs := &logbook{}
 	answering, _ := testNode(t, logs)
@@ -183,6 +199,7 @@ func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
 	held := reported(claimReference{}, true, 1)
 	readings.record(held)
 	readings.health(held, true)
+	readings.demanded(held)
 	readings.forget(held)
 
 	families, err := readings.registry.Gather()
@@ -198,6 +215,7 @@ func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
 	var absent *metrics
 	absent.record(held)
 	absent.health(held, true)
+	absent.demanded(held)
 	absent.forget(held)
 }
 

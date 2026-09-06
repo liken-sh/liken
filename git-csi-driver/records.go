@@ -209,10 +209,12 @@ func (n *node) resumeOne(ctx context.Context, held *record, directory string, mo
 	if resumed.kind == readOnlyClaim {
 		n.staged[resumed.id] = resumed
 		n.follow(resumed)
+		n.resumePull(resumed)
 		return
 	}
 	if resumed.kind == inlineVolume {
 		n.follow(resumed)
+		n.resumePull(resumed)
 		return
 	}
 	resumed.work = n.store.workTree(n.store.repository(parsed.url), resumed.id)

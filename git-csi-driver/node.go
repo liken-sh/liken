@@ -28,6 +28,10 @@ type node struct {
 	mounts mountSyscalls
 	events *events
 	arms   *arming
+	// demands is the watch that reads a demand off a PersistentVolume.
+	// demandMin is the interval that bounds a burst of them.
+	demands   *demanding
+	demandMin time.Duration
 	// The gauges every volume reports itself on.
 	readings *metrics
 	logger   *slog.Logger
@@ -79,6 +83,7 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 		sweep:      defaultSweep,
 		sweepAfter: cfg.sweepAfter,
 		sweepEvery: defaultSweepEvery,
+		demandMin:  cfg.demandMin,
 		mountinfo:  mountTable,
 		inotify:    unix.InotifyInit1,
 		volumes:    map[string]*volume{},
@@ -89,6 +94,7 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 		abandoned:  map[string]abandonedTree{},
 	}
 	answering.arms = newArming(answering, posting.client, logger)
+	answering.demands = newDemanding(answering, posting.client, logger)
 	answering.mounted = func(path string) bool { return mountedNow(answering.mountinfo, path) }
 	return answering
 }
@@ -396,6 +402,15 @@ func (n *node) NodeExpandVolume(
 	context.Context, *csi.NodeExpandVolumeRequest,
 ) (*csi.NodeExpandVolumeResponse, error) {
 	return nil, unimplemented("NodeExpandVolume", "never; git volumes have no size")
+}
+
+// stagedVolume is the volume this node staged under the handle, and
+// nil when the node holds none. A demand names a handle, and only the
+// node that staged it acts.
+func (n *node) stagedVolume(handle string) *volume {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.staged[handle]
 }
 
 // refused posts the refusal on the pod, so a person who describes the

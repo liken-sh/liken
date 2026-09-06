@@ -49,7 +49,7 @@ func TestRunExitCodes(t *testing.T) {
 		{
 			name: "a node id and a place to serve",
 			args: func(t *testing.T) []string {
-				return append([]string{"--node-id", "node-1"}, temporaryFlags(t)...)
+				return append([]string{"node", "--node-id", "node-1"}, temporaryFlags(t)...)
 			},
 			code: 0,
 		},
@@ -64,9 +64,19 @@ func TestRunExitCodes(t *testing.T) {
 			code: 1,
 		},
 		{
+			name: "a subcommand the binary does not serve",
+			args: func(*testing.T) []string { return []string{"sidecar"} },
+			code: 1,
+		},
+		{
+			name: "a flag of the other subcommand",
+			args: func(*testing.T) []string { return []string{"controller", "--node-id", "node-1"} },
+			code: 1,
+		},
+		{
 			name: "an endpoint the driver cannot serve",
 			args: func(*testing.T) []string {
-				return []string{"--node-id", "node-1", "--endpoint", "tcp://127.0.0.1:9000"}
+				return []string{"node", "--node-id", "node-1", "--endpoint", "tcp://127.0.0.1:9000"}
 			},
 			code: 1,
 		},
@@ -91,7 +101,7 @@ func TestRunPrintsTheVersion(t *testing.T) {
 
 func TestRunSaysNothingOnAGoodCommandLine(t *testing.T) {
 	out := &bytes.Buffer{}
-	run(stopped(t), append([]string{"--node-id", "node-1"}, temporaryFlags(t)...), out)
+	run(stopped(t), append([]string{"node", "--node-id", "node-1"}, temporaryFlags(t)...), out)
 	if out.String() != "" {
 		t.Errorf("run printed %q, want nothing", out)
 	}
@@ -99,7 +109,7 @@ func TestRunSaysNothingOnAGoodCommandLine(t *testing.T) {
 
 func TestRunReportsAMissingNodeID(t *testing.T) {
 	out := &bytes.Buffer{}
-	run(stopped(t), nil, out)
+	run(stopped(t), []string{"node"}, out)
 	if !strings.Contains(out.String(), "--node-id is required") {
 		t.Errorf("run printed %q, want the missing node id reported", out)
 	}
@@ -115,7 +125,7 @@ func TestRunReportsAnUnknownFlag(t *testing.T) {
 
 func TestRunReportsAnEndpointItCannotServe(t *testing.T) {
 	out := &bytes.Buffer{}
-	run(stopped(t), []string{"--node-id", "node-1", "--endpoint", "tcp://127.0.0.1:9000"}, out)
+	run(stopped(t), []string{"node", "--node-id", "node-1", "--endpoint", "tcp://127.0.0.1:9000"}, out)
 	if !strings.Contains(out.String(), "unix://") {
 		t.Errorf("run printed %q, want the endpoint reported", out)
 	}
@@ -123,7 +133,7 @@ func TestRunReportsAnEndpointItCannotServe(t *testing.T) {
 
 func TestRunServesUntilTheContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	args := append([]string{"--node-id", "node-1"}, temporaryFlags(t)...)
+	args := append([]string{"node", "--node-id", "node-1"}, temporaryFlags(t)...)
 	codes := make(chan int, 1)
 	go func() { codes <- run(ctx, args, &bytes.Buffer{}) }()
 	cancel()
@@ -133,7 +143,7 @@ func TestRunServesUntilTheContextEnds(t *testing.T) {
 }
 
 func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
-	cfg, err := parse([]string{"--node-id", "node-1"}, &bytes.Buffer{})
+	cfg, err := parse([]string{"node", "--node-id", "node-1"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -143,6 +153,7 @@ func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
 		store:      "/var/lib/liken/pod-storage/git-csi",
 		metrics:    ":9808",
 		sweepAfter: defaultSweepAfter,
+		demandMin:  defaultDemandMin,
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)
@@ -151,11 +162,13 @@ func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
 
 func TestParseTakesEveryFlag(t *testing.T) {
 	cfg, err := parse([]string{
+		"node",
 		"--endpoint", "unix:///run/csi/csi.sock",
 		"--node-id", "node-1",
 		"--store", "/srv/git-csi",
 		"--metrics", "127.0.0.1:9808",
 		"--sweep-after", "48h",
+		"--demand-min-interval", "30s",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -166,6 +179,7 @@ func TestParseTakesEveryFlag(t *testing.T) {
 		store:      "/srv/git-csi",
 		metrics:    "127.0.0.1:9808",
 		sweepAfter: 48 * time.Hour,
+		demandMin:  30 * time.Second,
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)
@@ -185,7 +199,7 @@ func TestParseAnswersNothingForTheVersion(t *testing.T) {
 func TestRunReportsAServeThatFails(t *testing.T) {
 	refused := errors.New("the socket went away")
 	out := &bytes.Buffer{}
-	code := runWith(t.Context(), append([]string{"--node-id", "node-1"}, temporaryFlags(t)...), out,
+	code := runWith(t.Context(), append([]string{"node", "--node-id", "node-1"}, temporaryFlags(t)...), out,
 		func(ctx context.Context, cfg *config, logger *slog.Logger) (*server, error) {
 			serving, err := newServer(ctx, cfg, logger)
 			if err != nil {
@@ -202,15 +216,85 @@ func TestRunReportsAServeThatFails(t *testing.T) {
 	}
 }
 
-func TestParseTakesTheControllerWithNoNode(t *testing.T) {
-	cfg, err := parse([]string{"--controller"}, &bytes.Buffer{})
+func TestTheControllerSubcommandNamesNoNode(t *testing.T) {
+	cfg, err := parse([]string{"controller"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if !cfg.controller {
-		t.Error("parse answered a configuration that is not the controller")
+	want := config{
+		endpoint:   "unix:///csi/csi.sock",
+		store:      defaultStore,
+		metrics:    ":9808",
+		webhook:    defaultWebhook,
+		controller: true,
 	}
-	if cfg.nodeID != "" {
-		t.Errorf("parse answered the node %q, want none", cfg.nodeID)
+	if *cfg != want {
+		t.Errorf("parse = %+v, want %+v", *cfg, want)
+	}
+}
+
+func TestTheControllerSubcommandTakesEveryFlag(t *testing.T) {
+	cfg, err := parse([]string{
+		"controller",
+		"--endpoint", "unix:///run/csi/csi.sock",
+		"--metrics", "127.0.0.1:9808",
+		"--webhook", "127.0.0.1:8080",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	want := config{
+		endpoint:   "unix:///run/csi/csi.sock",
+		store:      defaultStore,
+		metrics:    "127.0.0.1:9808",
+		webhook:    "127.0.0.1:8080",
+		controller: true,
+	}
+	if *cfg != want {
+		t.Errorf("parse = %+v, want %+v", *cfg, want)
+	}
+}
+
+func TestEachSubcommandRefusesTheOtherFlags(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+	}{
+		{name: "the node takes no webhook", args: []string{"node", "--node-id", "n", "--webhook", ":8080"}},
+		{name: "the controller takes no node id", args: []string{"controller", "--node-id", "n"}},
+		{name: "the controller takes no store", args: []string{"controller", "--store", "/srv"}},
+		{name: "the controller takes no sweep", args: []string{"controller", "--sweep-after", "1h"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			if _, err := parse(c.args, out); err == nil {
+				t.Errorf("parse(%q) answered no error", c.args)
+			}
+			if !strings.Contains(out.String(), "not defined") {
+				t.Errorf("parse printed %q, want the flag reported", out)
+			}
+		})
+	}
+}
+
+func TestParseReportsAMissingSubcommand(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "no arguments", args: nil, want: "a subcommand is required"},
+		{name: "flags alone", args: []string{"--"}, want: "a subcommand is required"},
+		{name: "a subcommand the binary does not serve", args: []string{"sidecar"}, want: "is not a subcommand"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out := &bytes.Buffer{}
+			if _, err := parse(c.args, out); err == nil {
+				t.Errorf("parse(%q) answered no error", c.args)
+			}
+			if !strings.Contains(out.String(), c.want) {
+				t.Errorf("parse printed %q, want %q in it", out, c.want)
+			}
+		})
 	}
 }

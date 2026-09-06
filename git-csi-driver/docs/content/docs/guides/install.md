@@ -40,8 +40,12 @@ kubectl get csinode -o custom-columns=NODE:.metadata.name,DRIVERS:.spec.drivers[
 
 ## The plugin's flags
 
-The base sets every flag the plugins need. Change one through a
-kustomize patch on the container's `args`.
+One binary serves both plugins, and a subcommand picks which. The base
+passes `node` to the `DaemonSet` and `controller` to the `Deployment`,
+and each subcommand accepts only its own flags. Change a flag through
+a kustomize patch on the container's `args`.
+
+`git-csi-driver node` takes these flags.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -50,5 +54,19 @@ kustomize patch on the container's `args`.
 | `--store` | `/var/lib/liken/pod-storage/git-csi` | Where the node plugin keeps its bare repositories, trees, and records. On `liken` this is the pod-storage partition. |
 | `--metrics` | `:9808` | Where the node plugin serves its Prometheus gauges. |
 | `--sweep-after` | `720h` | How long a work tree nothing stages is kept, and how old an object no ref names has to be before `git gc` prunes it. |
-| `--controller` | off | Run the controller plugin instead of the node plugin. |
-| `--version` | | Print the version and exit. |
+| `--demand-min-interval` | `10s` | How long a demanded pull waits after the last pull of the same repository on the node. A burst of demands inside it costs one pull. |
+
+`git-csi-driver controller` takes these flags.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--endpoint` | `unix:///csi/csi.sock` | The socket the sidecars call. |
+| `--metrics` | `:9808` | Where the controller serves its Prometheus counters. |
+| `--webhook` | `:8080` | Where the controller serves the webhook listener. Empty serves none. |
+
+`git-csi-driver --version` prints the version and exits.
+
+The controller pod declares both ports, and the base holds a
+`Service` named `git-csi-driver-webhook` on port 80 in front of the
+webhook port. The [read-only guide](../read-only/#webhooks) says how a
+forge reaches it.

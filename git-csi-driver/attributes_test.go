@@ -39,7 +39,7 @@ func TestParseAttributesDefaultsEverythingButTheURL(t *testing.T) {
 	want := attributes{
 		url:       "https://example.com/data.git",
 		ref:       "main",
-		pull:      5 * time.Minute,
+		pull:      pullEvery(5 * time.Minute),
 		depth:     0,
 		offline:   offlineRefuse,
 		ephemeral: true,
@@ -59,42 +59,42 @@ func TestParseAttributesTakesEveryAttribute(t *testing.T) {
 		{
 			name:    "a ref of its own",
 			context: map[string]string{"ref": "release"},
-			want:    attributes{ref: "release", pull: 5 * time.Minute, offline: offlineRefuse},
+			want:    attributes{ref: "release", pull: pullEvery(5 * time.Minute), offline: offlineRefuse},
 		},
 		{
 			name:    "a pull of its own",
 			context: map[string]string{"pull": "30s"},
-			want:    attributes{ref: "main", pull: 30 * time.Second, offline: offlineRefuse},
+			want:    attributes{ref: "main", pull: pullEvery(30 * time.Second), offline: offlineRefuse},
 		},
 		{
 			name:    "a pull of never",
 			context: map[string]string{"pull": "never"},
-			want:    attributes{ref: "main", pull: 0, offline: offlineRefuse},
+			want:    attributes{ref: "main", pull: pullPolicy{mode: pullNever}, offline: offlineRefuse},
 		},
 		{
 			name:    "a depth of one",
 			context: map[string]string{"depth": "1"},
-			want:    attributes{ref: "main", pull: 5 * time.Minute, depth: 1, offline: offlineRefuse},
+			want:    attributes{ref: "main", pull: pullEvery(5 * time.Minute), depth: 1, offline: offlineRefuse},
 		},
 		{
 			name:    "a depth of zero",
 			context: map[string]string{"depth": "0"},
-			want:    attributes{ref: "main", pull: 5 * time.Minute, depth: 0, offline: offlineRefuse},
+			want:    attributes{ref: "main", pull: pullEvery(5 * time.Minute), depth: 0, offline: offlineRefuse},
 		},
 		{
 			name:    "a stale publish allowed",
 			context: map[string]string{"offline": "allowStale"},
-			want:    attributes{ref: "main", pull: 5 * time.Minute, offline: offlineAllowStale},
+			want:    attributes{ref: "main", pull: pullEvery(5 * time.Minute), offline: offlineAllowStale},
 		},
 		{
 			name:    "a stale publish refused",
 			context: map[string]string{"offline": "refuse"},
-			want:    attributes{ref: "main", pull: 5 * time.Minute, offline: offlineRefuse},
+			want:    attributes{ref: "main", pull: pullEvery(5 * time.Minute), offline: offlineRefuse},
 		},
 		{
 			name:    "the service account the kubelet names",
 			context: map[string]string{serviceAccountKey: "default"},
-			want:    attributes{ref: "main", pull: 5 * time.Minute, offline: offlineRefuse},
+			want:    attributes{ref: "main", pull: pullEvery(5 * time.Minute), offline: offlineRefuse},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -138,7 +138,21 @@ func TestParseAttributesRefuses(t *testing.T) {
 		{
 			name:    "a pull that is not a duration",
 			request: inlineRequest(map[string]string{"url": "u", "pull": "often"}),
-			says:    `pull: "often" is not a duration or never`,
+			says:    `pull: "often" is not a duration, on-demand, or never`,
+		},
+		{
+			name: "an inline volume that names a webhook Secret",
+			request: inlineRequest(map[string]string{
+				"url": "u", "webhookSecret": "x-webhook",
+			}),
+			says: "webhookSecret: a webhook marks a PersistentVolume, " +
+				"and an inline volume is none",
+		},
+		{
+			name:    "an inline volume that pulls on demand",
+			request: inlineRequest(map[string]string{"url": "u", "pull": "on-demand"}),
+			says: "pull: on-demand names a demand on a PersistentVolume, " +
+				"and an inline volume has none",
 		},
 		{
 			name:    "a pull of zero",
@@ -249,6 +263,7 @@ func TestParseAttributesTakesTheURLsGitReallyServes(t *testing.T) {
 func TestParseStageAttributesRefusesAReadOnlyAttribute(t *testing.T) {
 	for attribute, value := range map[string]string{
 		"pull": "5m", "depth": "1", "offline": "allowStale",
+		"webhookSecret": "x-webhook",
 	} {
 		t.Run(attribute, func(t *testing.T) {
 			_, err := parseStageAttributes(writeableVolume, map[string]string{
@@ -265,6 +280,25 @@ func TestParseStageAttributesRefusesAReadOnlyAttribute(t *testing.T) {
 	}
 }
 
+func TestParseStageAttributesTakesAPullOnDemand(t *testing.T) {
+	parsed, err := parseStageAttributes(readOnlyClaim, map[string]string{
+		"url":  "https://example.com/data.git",
+		"pull": "on-demand",
+	})
+	if err != nil {
+		t.Fatalf("parseStageAttributes: %v", err)
+	}
+	if parsed.pull != (pullPolicy{mode: pullOnDemand}) {
+		t.Errorf("parseStageAttributes answered %+v, want a pull on demand", parsed.pull)
+	}
+	if !parsed.pull.follows() {
+		t.Error("a volume that pulls on demand joined no loop")
+	}
+	if every, timed := parsed.pull.timer(); timed {
+		t.Errorf("a volume that pulls on demand set a timer of %v", every)
+	}
+}
+
 func TestParseStageAttributesTakesTheAttributesOfAWriteableVolume(t *testing.T) {
 	parsed, err := parseStageAttributes(writeableVolume, map[string]string{
 		"url": "https://example.com/data.git",
@@ -278,5 +312,18 @@ func TestParseStageAttributesTakesTheAttributesOfAWriteableVolume(t *testing.T) 
 	}
 	if parsed.ephemeral {
 		t.Error("a staged volume is ephemeral")
+	}
+}
+
+func TestParseStageAttributesTakesAWebhookSecret(t *testing.T) {
+	parsed, err := parseStageAttributes(readOnlyClaim, map[string]string{
+		"url":           "https://example.com/data.git",
+		"webhookSecret": "x-webhook",
+	})
+	if err != nil {
+		t.Fatalf("parseStageAttributes: %v", err)
+	}
+	if parsed.webhookSecret != "x-webhook" {
+		t.Errorf("parseStageAttributes answered the Secret %q, want x-webhook", parsed.webhookSecret)
 	}
 }

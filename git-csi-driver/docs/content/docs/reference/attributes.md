@@ -12,9 +12,18 @@ without `readOnly: true`, with a message that names the attribute.
 |---|---|---|
 | `url` | A URL git accepts: `https://`, `ssh://`, `git://`, `file://`, or `user@host:path`. Required. | none |
 | `ref` | A branch or tag name. | `main` |
-| `pull` | A Go duration such as `5m` or `30s`, or `never`. | `5m` |
+| `pull` | A Go duration such as `5m` or `30s`, `on-demand`, or `never`. | `5m` |
 | `depth` | A whole number of commits, or `0` for a full clone. It applies to the first fetch of a repository on a node. | `0` |
 | `offline` | `refuse` or `allowStale`. | `refuse` |
+| `webhookSecret` | The name of a `Secret` in the claim's namespace. The controller verifies a forge's push against its `secret` key before it demands a pull on this volume. | none |
+
+`pull` takes one of three values.
+
+| Value | Meaning |
+|---|---|
+| `never` | No timer and no demand. The volume holds the commit it staged for its whole life. |
+| `on-demand` | No timer. The volume pulls only when something demands it. An inline volume refuses this value, because a demand is an annotation on a `PersistentVolume` and an inline volume has none. |
+| A duration such as `5m` | The volume pulls at least that often, and it pulls when something demands it. |
 
 Two URL shapes are refused before git sees them. A URL that starts with
 a dash reads as an option to git. A URL of the form
@@ -37,9 +46,9 @@ volume carries no access mode and is always read-only.
 | `ReadWriteOncePod` | A writeable volume. |
 | `ReadOnlyMany` | A read-only claim, published to every pod on the node that mounts it. |
 
-A read-only claim takes `pull`, `depth`, and `offline`. A writeable
-volume refuses all three, because it follows its ref at stage alone. A
-read-only claim names its `Secret` through `nodeStageSecretRef`, and a
+A read-only claim takes `pull`, `depth`, `offline`, and
+`webhookSecret`. A writeable volume refuses all four, because it
+follows its ref at stage alone. A read-only claim names its `Secret` through `nodeStageSecretRef`, and a
 pod mounts it with `readOnly: true` on its `persistentVolumeClaim`
 volume, or the publish is refused.
 

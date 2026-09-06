@@ -103,6 +103,109 @@ form takes through `nodePublishSecretRef`. The driver ignores a
 `VolumeAttributesClass` on such a claim, because a read-only volume
 commits nothing and pushes nothing.
 
+## Pulling on demand
+
+`pull` says when a volume looks for a new commit. It takes one of
+three values.
+
+| Value | Meaning |
+|---|---|
+| `never` | No timer and no demand. The volume holds the commit it staged for its whole life. |
+| `on-demand` | No timer. The volume pulls only when something demands it. |
+| A duration such as `5m` | The volume pulls at least that often, and it pulls when something demands it. |
+
+A demand is an annotation on the `PersistentVolume`. Any value the
+driver has not acted on yet is a demand, and the convention is the
+time:
+
+```console
+kubectl annotate pv franchises git.liken.sh/pull-requested-at="$(date -u +%FT%TZ)" --overwrite
+```
+
+The node that holds the volume pulls at once, and every volume of the
+same URL on that node moves with it. Twenty demands inside
+`--demand-min-interval`, which defaults to ten seconds, cost one pull
+at the end of the interval, not twenty. A driver that restarts pulls
+once for every volume that is not `never`, because a demand that came
+while it was down is lost.
+
+An inline volume has no `PersistentVolume`, so nothing can demand it.
+An inline volume with `pull: on-demand` is refused, and the pod's
+events say why. A writeable volume ignores a demand, because only the
+application changes a mounted writeable tree.
+
+## Webhooks
+
+A forge sends an HTTP request on every push, and the controller turns
+that request into a demand. Four things make it work: a `Secret`, an
+attribute, an `Ingress`, and the webhook on the forge.
+
+The `Secret` lives in the claim's namespace and holds one key,
+`secret`, whose value is the string you type into the forge's webhook
+form:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: franchises-webhook
+  namespace: sites
+stringData:
+  secret: <the string you gave the forge>
+```
+
+The `PersistentVolume` names that `Secret` with `webhookSecret`, beside
+`url` and `ref`:
+
+```yaml
+spec:
+  csi:
+    driver: git.liken.sh
+    volumeAttributes:
+      url: https://code.example.com/data/franchises.git
+      ref: main
+      pull: on-demand
+      webhookSecret: franchises-webhook
+```
+
+The base holds a `Service` named `git-csi-driver-webhook` in the
+driver's namespace, on port 80. Write an `Ingress` in front of it, with
+TLS, and give the forge the URL
+`https://<your host>/webhook/<namespace>/<name>`, here
+`/webhook/sites/franchises-webhook`. On GitHub, GitLab, Gitea, and
+Forgejo, choose the push event and paste the same string into the
+secret field.
+
+On every push the controller reads that one `Secret`, verifies the
+request against it, and demands a pull on every read-only volume that
+names the `Secret`, is bound to a claim in that namespace, and follows
+the repository and ref the push names. A push that verifies against
+one namespace's `Secret` never reaches another namespace's volumes.
+The answer names how many volumes it marked, so `marked 0` after a
+push means the URL or the ref matched nothing.
+
+| Answer | Meaning |
+|---|---|
+| `202` | The request verified. The body reads `marked <count>`. |
+| `401` | The path names no `Secret`, the request carries no signature the controller checks, or the signature is wrong. |
+| `400` | The body is not the JSON of a push, or it is over 1 MiB. |
+| `500` | The controller could not read the cluster. Try the push again. |
+
+The controller compares repositories by host and path, with the
+scheme, the user, the port, and a trailing `.git` removed, so a volume
+that clones over `ssh://` matches a forge that advertises `https://`.
+It compares the ref against `refs/heads/<ref>` and `refs/tags/<ref>`.
+
+A webhook that arrives while the controller restarts is lost, so the
+controller demands a pull on every read-only volume when it starts. A
+writeable volume never takes a demand, and an inline volume has no
+`PersistentVolume` to mark, so `webhookSecret` is refused on both.
+
+The controller's log writes one line per request with the `Secret`,
+the forge, the ref, and the count. The counters
+`git_csi_webhook_requests_total`, by result, and
+`git_csi_webhook_marked_total` are on the controller's metrics port.
+
 ## When the remote is unreachable
 
 By default a volume whose fetch fails at start is refused, and the pod
@@ -152,4 +255,9 @@ A read-only claim posts each of those on every pod it is published to
 and on the claim, so `kubectl describe pvc` shows them too. The node
 plugin's gauge `git_csi_volume_abnormal`, labeled by the
 pod's namespace and the volume, is one after a stale publish and after
-a failed fetch, until the next fetch succeeds.
+a failed fetch, until the next fetch succeeds. The log line the node
+plugin writes when a volume's health turns ends with when a demand
+last named the volume and when it last pulled, so one line says
+whether a demand arrived and whether the pull that followed worked.
+The counter `git_csi_demanded_pulls_total`, with the same labels,
+counts the pulls a demand started.

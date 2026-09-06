@@ -18,10 +18,13 @@ they become.
 
 ## Planned
 
-* [10, Webhooks trigger a pull](10-webhooks-trigger-a-pull.md). Low
-  fidelity. The controller accepts a forge's push webhook and marks
-  the matching `PersistentVolume`s, and the node plugins fetch at
-  once. Its open questions wait on rulings.
+* [10, Pull on demand](10-pull-on-demand.md). An annotation on a
+  `PersistentVolume` demands a pull, `pull: on-demand` names a volume
+  that pulls only then, and a restart pulls once.
+* [12, Webhooks demand a pull](12-webhooks-demand-a-pull.md). The
+  controller accepts a forge's push webhook, verified against a
+  `Secret` the claim's namespace owns, and marks the matching
+  `PersistentVolume`s. `controller` and `node` become subcommands.
 
 ## Designs
 

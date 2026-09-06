@@ -65,6 +65,10 @@ type volume struct {
 	// driver cannot read arms nothing.
 	rules   *policy
 	invalid string
+	// When a demand last named this volume, and when a pull last ran
+	// for it.
+	lastDemand time.Time
+	lastPull   time.Time
 	// What the size guard left out, what the remote does not hold
 	// yet, and when a push last worked.
 	skipped  []change
@@ -366,7 +370,18 @@ func (v *volume) takeHealth() (bool, string, bool) {
 // reportNow is the report itself, read under the lock the two
 // callers above hold, so a health reading and the flag it moves come
 // from one look at the volume.
+//
+// Every report ends with the last demand and the last pull, so the
+// line that says a pull failed also says when it was asked for.
 func (v *volume) reportNow() (bool, string) {
+	abnormal, message := v.standingReport()
+	return abnormal, message + v.pulling()
+}
+
+// standingReport is what the volume's state says. A failure comes
+// first, then a class the driver cannot read, then work the driver may
+// not commit or has not pushed, then the commit the tree stands on.
+func (v *volume) standingReport() (bool, string) {
 	switch {
 	case v.trouble != "":
 		return true, v.trouble
@@ -392,6 +407,34 @@ func (v *volume) reportNow() (bool, string) {
 			v.attributes.ref, short(v.commit), len(v.pending))
 	}
 	return false, fmt.Sprintf("%s at %s", v.attributes.ref, short(v.commit))
+}
+
+// reportDemanded records when a demand named this volume.
+func (v *volume) reportDemanded(at time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.lastDemand = at
+}
+
+// reportPulled records when a pass of the loop last ran for this
+// volume, whether a timer or a demand started it.
+func (v *volume) reportPulled(at time.Time) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.lastPull = at
+}
+
+// pulling is the two times the report carries, and nothing for a
+// volume that nothing has demanded or pulled yet.
+func (v *volume) pulling() string {
+	said := ""
+	if !v.lastDemand.IsZero() {
+		said += ", demanded " + v.lastDemand.UTC().Format(time.RFC3339)
+	}
+	if !v.lastPull.IsZero() {
+		said += ", pulled " + v.lastPull.UTC().Format(time.RFC3339)
+	}
+	return said
 }
 
 // reportCommit records that the tree holds commit and nothing is wrong.

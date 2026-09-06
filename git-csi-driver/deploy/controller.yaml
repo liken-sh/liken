@@ -6,9 +6,11 @@ kind: ServiceAccount
 metadata:
   name: git-csi-driver-controller
 ---
-# The rules the external-resizer's own release notes list. The
-# driver container in this pod reads nothing from the API; every rule
-# here is the sidecar's.
+# The rules the external-resizer's own release notes list, and the two
+# the driver container needs beside them. The driver patches a
+# PersistentVolume to demand a pull, and it reads the Secret a webhook
+# path names. RBAC cannot narrow the Secret rule to the ones a volume
+# names, so the driver holds get on every Secret in the cluster.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -30,6 +32,11 @@ rules:
   - apiGroups: [""]
     resources: [events]
     verbs: [create, list, watch, patch, update]
+  # The driver container verifies a webhook against the Secret the
+  # request's path names, in the namespace of the claim.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
   - apiGroups: [storage.k8s.io]
     resources: [volumeattributesclasses]
     verbs: [get, list, watch]
@@ -46,6 +53,21 @@ subjects:
   - kind: ServiceAccount
     name: git-csi-driver-controller
     namespace: liken-system
+---
+# The one address a forge posts to. The listener speaks plain HTTP, and
+# the Ingress the person writes terminates TLS, because that is where
+# the cluster already holds its certificates.
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-csi-driver-webhook
+spec:
+  selector:
+    app: git-csi-driver-controller
+  ports:
+    - name: webhook
+      port: 80
+      targetPort: webhook
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -65,12 +87,23 @@ spec:
     spec:
       serviceAccountName: git-csi-driver-controller
       containers:
-        # The same binary as the node plugin, with --controller.
+        # The same binary as the node plugin, under its controller
+        # subcommand.
         - name: driver
           image: ghcr.io/liken-sh/git-csi-driver:latest
           args:
-            - --controller
+            - controller
             - --endpoint=unix:///csi/csi.sock
+            - --metrics=:9808
+            - --webhook=:8080
+          # The metrics and the webhook are on the pod's own address. A
+          # forge outside the cluster reaches the webhook port through
+          # the Service above and an Ingress the person writes.
+          ports:
+            - name: metrics
+              containerPort: 9808
+            - name: webhook
+              containerPort: 8080
           # The controller mounts nothing and holds no store, so it
           # needs no privilege at all.
           securityContext:

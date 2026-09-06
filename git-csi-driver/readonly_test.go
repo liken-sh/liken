@@ -96,7 +96,7 @@ func TestAReadOnlyStageTakesTheAttributesAnInlineVolumeTakes(t *testing.T) {
 	_, held := stagedReadOnly(t, answering, "franchises", fileURL(source),
 		map[string]string{"pull": "never", "offline": "allowStale"})
 
-	if held.attributes.pull != 0 || held.attributes.offline != offlineAllowStale {
+	if held.attributes.pull.follows() || held.attributes.offline != offlineAllowStale {
 		t.Errorf("the volume is %+v, want pull never and offline allowStale", held.attributes)
 	}
 	answering.mu.Lock()

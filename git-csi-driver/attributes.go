@@ -38,6 +38,41 @@ const (
 	defaultPull = 5 * time.Minute
 )
 
+// pullMode is which of the three things pull says.
+type pullMode int
+
+const (
+	pullNever pullMode = iota
+	pullOnDemand
+	pullTimed
+)
+
+// pullPolicy is what pull says. pullNever is the zero value, so a
+// volume with no policy follows nothing. every is the interval, and it
+// counts under pullTimed alone.
+type pullPolicy struct {
+	mode  pullMode
+	every time.Duration
+}
+
+// pullEvery is the policy of a volume that names a duration.
+func pullEvery(interval time.Duration) pullPolicy {
+	return pullPolicy{mode: pullTimed, every: interval}
+}
+
+// follows reports whether the volume joins its repository's loop,
+// where a timer or a demand reaches it. A volume with pull never joins
+// none.
+func (p pullPolicy) follows() bool {
+	return p.mode != pullNever
+}
+
+// timer is the interval the loop's timer takes, and false when nothing
+// but a demand pulls the volume.
+func (p pullPolicy) timer() (time.Duration, bool) {
+	return p.every, p.mode == pullTimed
+}
+
 // podReference is the pod the kubelet named, where an Event goes.
 type podReference struct {
 	name      string
@@ -49,11 +84,15 @@ type podReference struct {
 type attributes struct {
 	url       string
 	ref       string
-	pull      time.Duration
+	pull      pullPolicy
 	depth     int
 	offline   offlinePolicy
 	ephemeral bool
 	pod       podReference
+	// webhookSecret names the Secret in the claim's namespace that the
+	// controller verifies a forge's push against before it marks this
+	// volume.
+	webhookSecret string
 }
 
 // parseAttributes reads the volume context. It refuses an unknown
@@ -68,12 +107,26 @@ func parseAttributes(request *csi.NodePublishVolumeRequest) (*attributes, error)
 		return nil, status.Error(codes.InvalidArgument,
 			"readOnly: an inline volume of this driver has to be read-only")
 	}
+	// A webhook marks a PersistentVolume, and an inline volume is
+	// written into the pod spec, so no push ever reaches one.
+	if parsed.ephemeral && parsed.webhookSecret != "" {
+		return nil, status.Error(codes.InvalidArgument,
+			"webhookSecret: a webhook marks a PersistentVolume, "+
+				"and an inline volume is none")
+	}
+	// A demand is an annotation on a PersistentVolume, and an inline
+	// volume has none, so nothing could ever demand it.
+	if parsed.ephemeral && parsed.pull.mode == pullOnDemand {
+		return nil, status.Error(codes.InvalidArgument,
+			"pull: on-demand names a demand on a PersistentVolume, "+
+				"and an inline volume has none")
+	}
 	return parsed, nil
 }
 
 // readOnlyAttributes are the attributes a read-only volume alone
 // accepts. A writeable volume follows its ref at stage and never after.
-var readOnlyAttributes = []string{"pull", "depth", "offline"}
+var readOnlyAttributes = []string{"pull", "depth", "offline", "webhookSecret"}
 
 // parseStageAttributes reads a persistent volume's attributes.
 //
@@ -95,7 +148,7 @@ func parseStageAttributes(kind volumeKind, context map[string]string) (*attribut
 // parseVolumeContext reads the attributes both a stage call and a
 // publish call carry.
 func parseVolumeContext(context map[string]string) (*attributes, error) {
-	parsed := &attributes{ref: defaultRef, pull: defaultPull, offline: offlineRefuse}
+	parsed := &attributes{ref: defaultRef, pull: pullEvery(defaultPull), offline: offlineRefuse}
 
 	for key, value := range context {
 		switch key {
@@ -115,6 +168,8 @@ func parseVolumeContext(context map[string]string) (*attributes, error) {
 				return nil, err
 			}
 			parsed.depth = depth
+		case "webhookSecret":
+			parsed.webhookSecret = value
 		case "offline":
 			switch offlinePolicy(value) {
 			case offlineRefuse, offlineAllowStale:
@@ -169,21 +224,26 @@ func checkURL(url string) error {
 // ssh, git, or file URL has two colons after its first word.
 var transportHelper = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+.\-]*::`)
 
-// parsePull reads pull. never is zero: no fetch after the publish.
-func parsePull(value string) (time.Duration, error) {
-	if value == "never" {
-		return 0, nil
+// parsePull reads pull. never pulls nothing after the publish, on a
+// timer or on a demand. on-demand pulls on a demand alone. A duration
+// pulls on the timer and on a demand.
+func parsePull(value string) (pullPolicy, error) {
+	switch value {
+	case "never":
+		return pullPolicy{mode: pullNever}, nil
+	case "on-demand":
+		return pullPolicy{mode: pullOnDemand}, nil
 	}
 	pull, err := time.ParseDuration(value)
 	if err != nil {
-		return 0, status.Errorf(codes.InvalidArgument,
-			"pull: %q is not a duration or never", value)
+		return pullPolicy{}, status.Errorf(codes.InvalidArgument,
+			"pull: %q is not a duration, on-demand, or never", value)
 	}
 	if pull <= 0 {
-		return 0, status.Errorf(codes.InvalidArgument,
+		return pullPolicy{}, status.Errorf(codes.InvalidArgument,
 			"pull: %q is not longer than zero", value)
 	}
-	return pull, nil
+	return pullEvery(pull), nil
 }
 
 // parseDepth reads depth. Zero is a full clone.

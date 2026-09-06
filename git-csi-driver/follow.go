@@ -19,9 +19,17 @@ type follower struct {
 	repository *repository
 	cancel     context.CancelFunc
 	wake       chan struct{}
+	// demanded is the second wake. It runs a pass at once instead of
+	// reading the interval again. demand.go sends on it.
+	demanded chan struct{}
 
 	mu      sync.Mutex
 	volumes map[string]*volume
+	// wanted is the volumes a demand named that no pass has answered
+	// yet. lastPull is when the last pass ran, which is what a demand
+	// waits on.
+	wanted   map[string]*volume
+	lastPull time.Time
 }
 
 // follow adds a volume to its repository's loop, starting the loop on
@@ -29,7 +37,7 @@ type follower struct {
 // pull never joins no loop, so a repository every volume pins fetches
 // nothing.
 func (n *node) follow(mounting *volume) {
-	if mounting.attributes.pull == 0 {
+	if !mounting.attributes.pull.follows() {
 		return
 	}
 	repo := n.store.repository(mounting.attributes.url)
@@ -41,7 +49,9 @@ func (n *node) follow(mounting *volume) {
 			repository: repo,
 			cancel:     cancel,
 			wake:       make(chan struct{}, 1),
+			demanded:   make(chan struct{}, 1),
 			volumes:    map[string]*volume{},
+			wanted:     map[string]*volume{},
 		}
 		n.followers[repo.name] = loop
 		go loop.run(ctx)
@@ -52,7 +62,7 @@ func (n *node) follow(mounting *volume) {
 // unfollow removes a volume from its loop and stops the loop when the
 // last volume of the repository goes. The caller holds the node's lock.
 func (n *node) unfollow(published *volume) {
-	if published.attributes.pull == 0 {
+	if !published.attributes.pull.follows() {
 		return
 	}
 	repo := n.store.repository(published.attributes.url)
@@ -93,45 +103,82 @@ func (f *follower) nudge() {
 }
 
 // interval is the shortest pull among the volumes that share the
-// repository.
-func (f *follower) interval() time.Duration {
+// repository, and false when every one of them pulls on demand alone.
+func (f *follower) interval() (time.Duration, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	shortest := time.Duration(0)
 	for _, held := range f.volumes {
-		if shortest == 0 || held.attributes.pull < shortest {
-			shortest = held.attributes.pull
+		every, timed := held.attributes.pull.timer()
+		if timed && (shortest == 0 || every < shortest) {
+			shortest = every
 		}
 	}
-	if shortest == 0 {
-		shortest = defaultPull
-	}
-	return shortest
+	return shortest, shortest != 0
 }
 
 // run fetches on the interval until the context ends. The context
 // descends from the driver's run, so the pod's stop ends every loop.
+//
+// The second timer is the one a demand inside --demand-min-interval
+// waits on. While it waits, a pull is already scheduled, so every
+// further demand until it runs is dropped.
 func (f *follower) run(ctx context.Context) {
-	timer := time.NewTimer(f.interval())
+	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
+	delay := time.NewTimer(time.Hour)
+	defer delay.Stop()
+	delay.Stop()
+	waiting := false
+	f.arm(timer)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-f.wake:
-			timer.Reset(f.interval())
+			f.arm(timer)
+		case <-f.demanded:
+			if waiting {
+				break
+			}
+			if wait := f.demandWait(time.Now()); wait > 0 {
+				delay.Reset(wait)
+				waiting = true
+				break
+			}
+			f.tick(ctx)
+			f.arm(timer)
+		case <-delay.C:
+			waiting = false
+			f.tick(ctx)
+			f.arm(timer)
 		case <-timer.C:
 			f.tick(ctx)
-			timer.Reset(f.interval())
+			f.arm(timer)
 		}
+	}
+}
+
+// arm sets the timer to the interval, and leaves it stopped when no
+// volume of the repository names one.
+func (f *follower) arm(timer *time.Timer) {
+	timer.Stop()
+	if every, timed := f.interval(); timed {
+		timer.Reset(every)
 	}
 }
 
 // tick is one pass over the volumes of this repository, under the
 // repository's lock, so a fetch never races a publish.
+//
+// The pass is timed from its start, so the demands that arrive while it
+// fetches are answered by the next pass.
 func (f *follower) tick(ctx context.Context) {
 	defer f.repository.lock()()
+	now := time.Now()
+	f.answered(now)
 	for _, held := range f.snapshot() {
+		held.reportPulled(now)
 		f.refresh(ctx, held)
 	}
 }
