@@ -206,13 +206,16 @@ left it.
 
 ## Watch state and people
 
-The operator records what each `Play` reached: the item index and the
-position inside it, taken from the `Play` status. It records them per
-`Player`, and per person once a person is a resource. A `Person` is a
-fact of the whole cluster, owned by an operator of its own: a display
-name, an avatar, a flag for a child, and a link to an identity provider.
-A screen takes the person from a picker or from a default per room, and
-the media browser puts the person on its `Play` request.
+Progress belongs to a set of people, not to one person. A `Person`
+is a fact of the whole cluster, a cluster-scoped CRD in a repository
+of its own, `people-operator`, with no controller. A `Watch` in this
+operator is a set of people on one item, and its progress is one
+record. A `Play` names its people and its `Watch` through owner
+references, and the work's aliases through annotations. A second
+`Corrosion` cluster per namespace, the progress store, records every
+`Play` from the bus, keyed on aliases and `Person` names and never on
+catalog ids, and every screen holds a copy. Plan 14 states the
+contracts.
 
 ## Dependencies point one way
 

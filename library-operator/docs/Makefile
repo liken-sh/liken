@@ -9,7 +9,7 @@ CRDREF := go tool crdref
 
 REFERENCE := content/docs/reference
 
-GENERATED := $(REFERENCE)/libraries.md $(REFERENCE)/catalogs.md $(REFERENCE)/metadataproviders.md
+GENERATED := $(REFERENCE)/libraries.md $(REFERENCE)/catalogs.md $(REFERENCE)/metadataproviders.md $(REFERENCE)/watches.md
 
 .PHONY: build
 build: $(GENERATED)
@@ -28,3 +28,6 @@ $(REFERENCE)/catalogs.md: ../deploy/catalogs-crd.yaml crdref/catalogs-preamble.m
 
 $(REFERENCE)/metadataproviders.md: ../deploy/metadataproviders-crd.yaml crdref/metadataproviders-preamble.md go.mod
 	$(CRDREF) -title "Metadata providers" -weight 30 $< $@ crdref/metadataproviders-preamble.md
+
+$(REFERENCE)/watches.md: ../deploy/watches-crd.yaml crdref/watches-preamble.md go.mod
+	$(CRDREF) -title Watches -weight 40 $< $@ crdref/watches-preamble.md

@@ -212,15 +212,22 @@ func readyCondition(seen libraryObservation, generation int64) Condition {
 }
 
 // everyContainerReady reports whether the kubelet marks every
-// container in the pod ready. A pod the kubelet has said nothing about
-// is not ready: an empty list is a pod that is still starting, not a
-// pod whose containers all passed.
-//
-// The catalog agent counts here as much as the container beside it, and
-// the kubelet reports it under initContainerStatuses because it is a
-// native sidecar. A pod whose agent has not opened its API is not up.
+// container of a catalog pod ready.
 func everyContainerReady(pod *Pod) bool {
-	if !containerReady(pod.Status.InitContainerStatuses, catalogContainer) {
+	return everyContainerReadyBeside(pod, catalogContainer)
+}
+
+// everyContainerReadyBeside reports whether the kubelet marks every
+// container in the pod ready, where agent names the Corrosion agent's
+// own container. A pod the kubelet has said nothing about is not ready:
+// an empty list is a pod that is still starting, not a pod whose
+// containers all passed.
+//
+// The agent counts here as much as the container beside it, and the
+// kubelet reports it under initContainerStatuses because it is a native
+// sidecar. A pod whose agent has not opened its API is not up.
+func everyContainerReadyBeside(pod *Pod, agent string) bool {
+	if !containerReady(pod.Status.InitContainerStatuses, agent) {
 		return false
 	}
 	if len(pod.Status.ContainerStatuses) == 0 {

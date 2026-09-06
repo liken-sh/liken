@@ -196,6 +196,85 @@ func watchMetadataProviders(c *Client, resourceVersion string, wake chan<- struc
 	}
 }
 
+// This watcher wakes the loop on every Play change, so a Play that
+// media-operator created, finished, or is deleting is held, published,
+// or released without a backstop tick's delay. The recovery is
+// watchPlayers's, and so is the list that fails on a cluster with no
+// media-operator.
+func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := playsAllPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause.get())
+		list, err := ListPlays(watchContext(), c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing plays to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
+// This watcher wakes the loop on every Watch change, so a Watch a
+// person or the browser just wrote is tied to its people without a
+// backstop tick's delay. The recovery is watchLibraries's.
+func watchWatches(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := watchesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause.get())
+		list, err := ListWatches(watchContext(), c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing watches to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
+// This watcher wakes the loop on every Person change, so a person a
+// house just declared is held, and one on the way out is asked for,
+// without a backstop tick's delay. The recovery is watchPlayers's: a
+// cluster with no people-operator fails the list on every turn, and the
+// pause between turns is what keeps that from spinning.
+func watchPeople(c *Client, resourceVersion string, wake chan<- struct{}) {
+	for {
+		path := peoplePath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
+		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resourceVersion = readWatchStream(resp, resourceVersion, wake)
+		}
+		if resp != nil {
+			drain(resp.Body)
+		}
+
+		time.Sleep(watchRetryPause.get())
+		list, err := ListPeople(watchContext(), c)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "listing people to resume the watch: %v\n", err)
+			continue
+		}
+		resourceVersion = list.Metadata.ResourceVersion
+		poke(wake)
+	}
+}
+
 // WatchPods wakes the loop on every change to a pod that holds a
 // catalog agent, and the label selector keeps the stream to those pods.
 // Every event earns a wake here, because a Library is Ready only while

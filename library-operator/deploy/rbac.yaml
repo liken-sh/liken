@@ -67,6 +67,19 @@ rules:
   - apiGroups: [library.liken.sh]
     resources: [catalogs/status]
     verbs: [update]
+  # The Watches, across every namespace and on the same terms as the
+  # libraries. A person declares a Watch, or the browser creates one,
+  # and the patch is for the owner references alone: one Person per
+  # name the Watch holds, so the garbage collector takes the Watch when
+  # the last of them goes.
+  - apiGroups: [library.liken.sh]
+    resources: [watches]
+    verbs: [get, list, watch, patch]
+  # Only the status half, which is the projection of the progress store
+  # the operator folds off the bus.
+  - apiGroups: [library.liken.sh]
+    resources: [watches/status]
+    verbs: [update]
   # The operator reads the MetadataProviders of every namespace and
   # writes only their status: the verdict of the one reachability
   # check it runs per pass. A person declares a provider, and the
@@ -100,13 +113,25 @@ rules:
     resources: [mediapreferences]
     verbs: [get, list, watch]
   # The Plays this operator creates, one per request a screen publishes
-  # on the bus. Create alone: the operator never reads, edits, or
-  # deletes a Play, because media-operator owns its whole life once it
-  # exists. The grant is cluster-wide because a Play is created in the
-  # Player's namespace, and a Player can be in any namespace.
+  # on the bus with the audience already on its metadata, and every
+  # other Play in the cluster, which it reads to record what was
+  # watched. The patch covers one field: the finalizer it holds until
+  # the namespace's progress store has that Play's last position.
+  # There is no update and no delete, because media-operator owns a
+  # Play's spec and status and the garbage collector takes a Play whose
+  # owners are gone. The grant is cluster-wide because a Play is
+  # created in the Player's namespace, and a Player can be in any
+  # namespace.
   - apiGroups: [media.liken.sh]
     resources: [plays]
-    verbs: [create]
+    verbs: [get, list, watch, create, patch]
+  # The people, cluster-scoped and owned by people-operator, read for
+  # the names a Play and a Watch point at. The patch is for the
+  # finalizer alone, which keeps a delete from outrunning the sweep of
+  # that person's rows out of every namespace's progress store.
+  - apiGroups: [people.liken.sh]
+    resources: [people]
+    verbs: [get, list, watch, patch]
   # The media claim each Library names, read by name to learn whether
   # it is bound and which volume it is bound to. The catalog claims the
   # operator provisions: one per Library for its Jobs, one per Catalog for

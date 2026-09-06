@@ -27,10 +27,23 @@ import (
 // Catalog in it Blocked and stands nothing new. A failure in one
 // namespace is reported, and the rest still stand.
 //
+// Each namespace stands a second Corrosion cluster beside the catalog,
+// the progress store, with a pod, a claim, a Service, and a slice of
+// its own. The two clusters never mix: the catalog is rebuilt by a
+// rescan and progress is not, so they hold different durability rules.
+//
 // The members the pass hands in are every pod that holds a catalog
 // agent, read once for the whole pass: the catalog pod, the pods of the
-// Jobs that are running, and the screen pods.
+// Jobs that are running, and the screen pods. The progress agents are
+// read here, because they are this step's alone.
 func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string][]*NamespaceCatalog, members []Pod, now time.Time) {
+	// A list that fails costs this pass its progress slices and nothing
+	// else. The pods stand, and the next pass writes the slices.
+	progressMembers, err := ListProgressMemberPods(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing progress member pods: %v\n", err)
+		progressMembers = &PodList{}
+	}
 	for _, namespace := range slices.Sorted(maps.Keys(byNamespace)) {
 		catalogs := byNamespace[namespace]
 		if len(catalogs) != 1 {
@@ -56,6 +69,15 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		}
 		if err := o.standCatalogEndpoints(ctx, namespace, owners, members); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the catalog endpoints in %s: %v\n", namespace, err)
+		}
+		if _, err := o.standProgressPod(ctx, catalog); err != nil {
+			fmt.Fprintf(os.Stderr, "standing the progress pod in %s: %v\n", namespace, err)
+		}
+		if err := o.standProgressService(ctx, namespace, owners); err != nil {
+			fmt.Fprintf(os.Stderr, "standing the progress service in %s: %v\n", namespace, err)
+		}
+		if err := o.standProgressEndpoints(ctx, namespace, owners, progressMembers.Items); err != nil {
+			fmt.Fprintf(os.Stderr, "standing the progress endpoints in %s: %v\n", namespace, err)
 		}
 		if err := o.writeCatalogStatus(ctx, catalog, standingCatalogStatus(catalog, pod, members, now)); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the catalog status in %s: %v\n", namespace, err)

@@ -138,18 +138,23 @@ func (s *PersistentVolumeSpec) UnmarshalJSON(data []byte) error {
 // Library an object belongs to, and the worker label names which worker
 // a Job runs. The member label is on every pod that holds a catalog
 // agent, whatever kind of pod it is, and it is what the catalog
-// EndpointSlice is written over. The annotation carries the hash of the
-// template an object was built from, which is how a pass tells a live
-// object from the one it would build now.
+// EndpointSlice is written over. The progress member label is the same
+// mark for the progress cluster, on a key of its own, because a pod may
+// hold an agent of either cluster or of both. The annotation carries
+// the hash of the template an object was built from, which is how a
+// pass tells a live object from the one it would build now.
 const (
-	scannerLabelKey        = "app.kubernetes.io/name"
-	workerLabelValue       = "library-worker"
-	catalogLabelValue      = "library-catalog"
-	libraryLabelKey        = "library.liken.sh/library"
-	workerLabelKey         = "library.liken.sh/worker"
-	memberLabelKey         = "library.liken.sh/catalog"
-	memberLabelValue       = "member"
-	templateHashAnnotation = "library.liken.sh/template-hash"
+	scannerLabelKey          = "app.kubernetes.io/name"
+	workerLabelValue         = "library-worker"
+	catalogLabelValue        = "library-catalog"
+	progressLabelValue       = "library-progress"
+	libraryLabelKey          = "library.liken.sh/library"
+	workerLabelKey           = "library.liken.sh/worker"
+	memberLabelKey           = "library.liken.sh/catalog"
+	memberLabelValue         = "member"
+	progressMemberLabelKey   = "library.liken.sh/progress"
+	progressMemberLabelValue = "member"
+	templateHashAnnotation   = "library.liken.sh/template-hash"
 )
 
 // The label pair that names one Library's objects, on the
@@ -174,6 +179,15 @@ func workerLabels(library, worker string) map[string]string {
 func withMemberLabel(labels map[string]string) map[string]string {
 	marked := maps.Clone(labels)
 	marked[memberLabelKey] = memberLabelValue
+	return marked
+}
+
+// The same mark for the progress cluster, so the progress
+// EndpointSlice is written over the pods that hold a progress agent and
+// over no others.
+func withProgressMemberLabel(labels map[string]string) map[string]string {
+	marked := maps.Clone(labels)
+	marked[progressMemberLabelKey] = progressMemberLabelValue
 	return marked
 }
 

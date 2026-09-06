@@ -53,8 +53,10 @@ for a later agent to shape.
   a library's naming convention.
 * [13, More kinds](13-more-kinds.md). Music, photos, audiobooks, books,
   and games.
-* [14, Watch state and people](14-watch-state-and-people.md). Positions,
-  history, and who was watching.
+* [14, Watch state and people](14-watch-state-and-people.md). A
+  cluster-scoped `Person` in a repository of its own, a `Watch` that
+  names the set of people on one item, and a progress store every
+  screen replicates, fed from the bus and healed from `Play` status.
 * [23, Motion](23-motion.md). Focus that slides, walls that glide, and
   pages that open, on a loop that still draws only when it must.
 

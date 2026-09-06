@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # The Corrosion sidecar's image. A Corrosion agent runs beside every
-# scanner and every media browser and replicates the catalog to them.
+# scanner and every media browser and replicates the catalog to them,
+# and a second agent from the same image replicates the progress store.
 # The project builds it from one pinned upstream commit, so every
 # agent in a cluster runs the same bytes, and a move to a newer
 # commit is a change to this file that a release carries.
@@ -43,17 +44,19 @@ FROM gcr.io/distroless/cc-debian12@sha256:e5d81ddde149641e2a9ba55be4545bc125c67d
 # pod's network.
 COPY --from=build /usr/src/corrosion/target/release/corrosion /corrosion
 
-# The configuration and the schema arrive in the image because the pod
-# has no shell to render a file and no `ConfigMap` for the sidecar. The
-# schema directory holds `catalog.sql`, so every agent this image
-# starts loads the same catalog schema.
+# The configurations and the schemas arrive in the image because the
+# pod has no shell to render a file and no `ConfigMap` for the sidecar.
+# Each cluster has a pair: `config.toml` with `schema/` for the catalog,
+# and `progress.toml` with `progress-schema/` for the progress store.
+# So every agent this image starts loads the same schema as its peers.
 COPY config.toml /etc/corrosion/config.toml
 COPY schema/ /etc/corrosion/schema/
+COPY progress.toml /etc/corrosion/progress.toml
+COPY progress-schema/ /etc/corrosion/progress-schema/
 
 # The entrypoint is the bare binary, so `corrosion cluster members` and
 # the other commands still run from this image with their own
-# arguments. The default command is the agent, so a pod that names
-# neither a command nor arguments runs the agent on the configuration
-# above.
+# arguments. The default command is the catalog agent, and a progress
+# agent names `progress.toml` in its own arguments.
 ENTRYPOINT ["/corrosion"]
 CMD ["agent", "--config", "/etc/corrosion/config.toml"]

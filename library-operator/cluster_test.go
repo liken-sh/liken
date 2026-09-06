@@ -54,6 +54,10 @@ type fakeCluster struct {
 	// are a list and not a map, because every Play takes a name the API
 	// server mints.
 	plays []Play
+	// The Watches and the people the progress half reads, by name. A
+	// Person is cluster-scoped, so its name is its whole identity.
+	watches map[string]*Watch
+	people  map[string]*Person
 
 	// A PersistentVolume is held as the body the API server serves,
 	// because a volume names its storage with a key on the spec and
@@ -90,6 +94,8 @@ func newFakeCluster() *fakeCluster {
 		services:  map[string]*Service{},
 		jobs:      map[string]*Job{},
 		cronJobs:  map[string]*CronJob{},
+		watches:   map[string]*Watch{},
+		people:    map[string]*Person{},
 		broken:    map[string]int{},
 		parked:    make(chan struct{}),
 	}
@@ -156,6 +162,32 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 			list.Items = append(list.Items, *f.preferences)
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case r.URL.Path == playsAllPath:
+		list := PlayList{Metadata: ListMeta{ResourceVersion: "1"}, Items: slices.Clone(f.plays)}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
+		f.patchPlay(w, r, name)
+	case r.URL.Path == watchesPath:
+		list := WatchList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.watches) {
+			list.Items = append(list.Items, *f.watches[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case strings.Contains(r.URL.Path, "/watches/") && strings.HasSuffix(r.URL.Path, "/status"):
+		var written Watch
+		_ = json.NewDecoder(r.Body).Decode(&written)
+		f.watches[written.Metadata.Name] = &written
+		_ = json.NewEncoder(w).Encode(written)
+	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/watches/"):
+		f.patchWatch(w, r, name)
+	case r.URL.Path == peoplePath:
+		list := PersonList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.people) {
+			list.Items = append(list.Items, *f.people[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/people/"):
+		f.patchPerson(w, r, name)
 	case r.URL.Path == metadataProvidersPath:
 		list := MetadataProviderList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.providers) {
@@ -400,6 +432,107 @@ func (f *fakeCluster) patchLibrary(w http.ResponseWriter, r *http.Request, name 
 		delete(f.libraries, name)
 	}
 	_ = json.NewEncoder(w).Encode(held)
+}
+
+// The metadata a merge patch of this operator's carries: the
+// conditional resourceVersion, and the three fields it owns. A field
+// the patch does not state is left as it stands, the way the API server
+// reads a merge patch.
+type metadataPatch struct {
+	Metadata struct {
+		ResourceVersion string            `json:"resourceVersion"`
+		Finalizers      *[]string         `json:"finalizers"`
+		OwnerReferences *[]OwnerReference `json:"ownerReferences"`
+		Annotations     map[string]string `json:"annotations"`
+	} `json:"metadata"`
+}
+
+// ApplyMetadataPatch answers the way the API server does: a patch
+// against a stale resourceVersion is a conflict, and one that matches
+// writes the fields it states and produces the next version.
+func applyMetadataPatch(w http.ResponseWriter, r *http.Request, metadata *ObjectMeta) bool {
+	var patch metadataPatch
+	_ = json.NewDecoder(r.Body).Decode(&patch)
+	if patch.Metadata.ResourceVersion != metadata.ResourceVersion {
+		w.WriteHeader(http.StatusConflict)
+		return false
+	}
+	if patch.Metadata.Finalizers != nil {
+		metadata.Finalizers = *patch.Metadata.Finalizers
+	}
+	if patch.Metadata.OwnerReferences != nil {
+		metadata.OwnerReferences = *patch.Metadata.OwnerReferences
+	}
+	if patch.Metadata.Annotations != nil {
+		metadata.Annotations = patch.Metadata.Annotations
+	}
+	metadata.ResourceVersion = nextVersion(metadata.ResourceVersion)
+	return true
+}
+
+// PatchPlay writes one Play's metadata, and removes a deleting Play
+// whose last finalizer is gone, which is the act the operator's release
+// is waiting on.
+func (f *fakeCluster) patchPlay(w http.ResponseWriter, r *http.Request, name string) {
+	for index := range f.plays {
+		play := &f.plays[index]
+		if play.Metadata.Name != name || play.Metadata.Namespace != namespaceOf(r.URL.Path) {
+			continue
+		}
+		if !applyMetadataPatch(w, r, &play.Metadata) {
+			return
+		}
+		written := *play
+		if written.Metadata.deleting() && len(written.Metadata.Finalizers) == 0 {
+			f.plays = slices.Delete(f.plays, index, index+1)
+		}
+		_ = json.NewEncoder(w).Encode(written)
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+// PatchWatch writes one Watch's metadata, which is the owner references
+// the operator ties to its people.
+func (f *fakeCluster) patchWatch(w http.ResponseWriter, r *http.Request, name string) {
+	held := f.watches[name]
+	if held == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if !applyMetadataPatch(w, r, &held.Metadata) {
+		return
+	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// PatchPerson writes one Person's finalizer list, and removes a
+// deleting Person whose last finalizer is gone.
+func (f *fakeCluster) patchPerson(w http.ResponseWriter, r *http.Request, name string) {
+	held := f.people[name]
+	if held == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if !applyMetadataPatch(w, r, &held.Metadata) {
+		return
+	}
+	if held.Metadata.deleting() && len(held.Metadata.Finalizers) == 0 {
+		delete(f.people, name)
+	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+func (f *fakeCluster) heldWatch(name string) *Watch {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.watches[name]
+}
+
+func (f *fakeCluster) heldPerson(name string) *Person {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.people[name]
 }
 
 // The resourceVersion a write produces, which every later conditional

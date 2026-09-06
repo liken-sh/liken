@@ -24,6 +24,19 @@ const (
 // and writes none, so the group appears here for the read path alone.
 const playerAPIVersion = "media.liken.sh/v1alpha1"
 
+// The group people-operator serves. A Person is a subject of the whole
+// cluster, and this operator holds a finalizer on each one and writes
+// nothing else.
+const personAPIVersion = "people.liken.sh/v1alpha1"
+
+// The kinds this operator names in an owner reference, and reads back
+// off a Play. A Play's owners say who watched it and which Watch it
+// belongs to, which is what an audience is.
+const (
+	watchKind  = "Watch"
+	personKind = "Person"
+)
+
 // The finalizer this operator holds on every Library. It keeps a
 // deleted Library open until the departure in depart.go has swept
 // the library's rows out of every surviving agent's catalog. The
@@ -496,13 +509,116 @@ type PlayerIdleRemote struct {
 }
 
 // Play is media-operator's unit of playback: the Players it plays on
-// and the items it plays in order. This operator creates Plays and
-// reads none, so the type carries no status.
+// and the items it plays in order. This operator creates a Play, stamps
+// its audience onto the metadata, and reads its status back for the
+// last position of a Play that ended.
 type Play struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`
 	Metadata   ObjectMeta `json:"metadata"`
 	Spec       PlaySpec   `json:"spec"`
+	Status     PlayStatus `json:"status,omitempty"`
+}
+
+// The collection ListPlays answers, across every namespace.
+type PlayList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Play   `json:"items"`
+}
+
+// PlayStatus is what media-operator reports about a Play, in the fields
+// this operator reads: which item was playing and where the playhead
+// reached. The bus carries the same numbers while the Play runs, and
+// these are where they stand once it ends.
+type PlayStatus struct {
+	Phase string `json:"phase,omitempty"`
+	Item  int    `json:"item,omitempty"`
+	// The playhead and the item's length, as H:MM:SS.
+	Position string `json:"position,omitempty"`
+	Duration string `json:"duration,omitempty"`
+}
+
+// The two phases that end a Play, which are media-operator's own
+// words. The operator publishes a Play's last status once it reads
+// one of them, and never again after that.
+const (
+	playPhaseFinished = "Finished"
+	playPhaseFailed   = "Failed"
+)
+
+// ended reports that this Play will report no further position: it
+// finished, it failed, or somebody deleted it mid-run.
+func (p *Play) ended() bool {
+	return p.Status.Phase == playPhaseFinished || p.Status.Phase == playPhaseFailed ||
+		p.Metadata.deleting()
+}
+
+// A Watch is a set of people on one item, and the record of where that
+// set reached. The operator writes the owner references and the status;
+// a person or the browser writes the spec.
+type Watch struct {
+	APIVersion string      `json:"apiVersion,omitempty"`
+	Kind       string      `json:"kind,omitempty"`
+	Metadata   ObjectMeta  `json:"metadata"`
+	Spec       WatchSpec   `json:"spec"`
+	Status     WatchStatus `json:"status"`
+}
+
+type WatchList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Watch  `json:"items"`
+}
+
+// WatchSpec is the set of people and the item they watch. Progress
+// belongs to the set, so two Watches on one item with different people
+// are two records.
+type WatchSpec struct {
+	People []string  `json:"people,omitempty"`
+	Item   WatchItem `json:"item"`
+}
+
+// WatchItem names the item as the catalog names it: the Library in the
+// Watch's own namespace, and the slug of a movie or a series inside it.
+type WatchItem struct {
+	Library string `json:"library"`
+	Slug    string `json:"slug"`
+}
+
+// WatchStatus is the projection of the progress store the operator
+// writes. Every field describes the last Play recorded against this
+// Watch, so the whole block is one observation and the operator writes
+// it whole.
+type WatchStatus struct {
+	Play         string `json:"play,omitempty"`
+	Item         int    `json:"item,omitempty"`
+	Position     string `json:"position,omitempty"`
+	Duration     string `json:"duration,omitempty"`
+	Season       int    `json:"season,omitempty"`
+	Episode      int    `json:"episode,omitempty"`
+	Ended        bool   `json:"ended,omitempty"`
+	LastRecorded string `json:"lastRecorded,omitempty"`
+}
+
+// A Person is a subject of the cluster, cluster-scoped and owned by
+// people-operator. A Play names the people who watched it and a Watch
+// the people who share it, both through owner references, so this
+// operator reads a Person for its name and its uid alone.
+type Person struct {
+	APIVersion string     `json:"apiVersion,omitempty"`
+	Kind       string     `json:"kind,omitempty"`
+	Metadata   ObjectMeta `json:"metadata"`
+	Spec       PersonSpec `json:"spec"`
+}
+
+type PersonList struct {
+	Metadata ListMeta `json:"metadata"`
+	Items    []Person `json:"items"`
+}
+
+// The one field of a Person this operator reads, for the name a screen
+// shows in place of the object's own.
+type PersonSpec struct {
+	DisplayName string `json:"displayName,omitempty"`
 }
 
 // PlaySpec names the Players and the items. A request from one screen

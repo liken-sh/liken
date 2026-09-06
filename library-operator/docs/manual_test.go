@@ -19,6 +19,7 @@ var exceptions = []string{
 	"/deploy/libraries-crd.yaml",
 	"/deploy/catalogs-crd.yaml",
 	"/deploy/metadataproviders-crd.yaml",
+	"/deploy/watches-crd.yaml",
 	"/deploy/rbac.yaml",
 	"/deploy/operator.yaml",
 }

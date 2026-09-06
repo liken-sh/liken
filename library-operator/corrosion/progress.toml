@@ -1,0 +1,57 @@
+# The progress agent's configuration, in the image at
+# `/etc/corrosion/progress.toml`. Progress is a second Corrosion cluster
+# beside the catalog, because the catalog is rebuilt by a rescan and
+# progress is not, so the two hold different durability rules.
+#
+# Every path and every port here differs from `config.toml`'s. A screen
+# pod runs both agents side by side in one pod, and two agents that
+# shared a database directory or a port would refuse to start.
+
+[db]
+# The pod mounts the durable progress claim on this directory. The agent
+# writes the database, its write-ahead log, its subscription files, and
+# its admin socket under this one directory.
+path = "/var/lib/progress/state.db"
+
+# Every agent of the progress cluster loads the same schema. The
+# directory holds one file, `progress.sql`, which defines the plays
+# table and the two tables that hang off it.
+schema_paths = ["/etc/corrosion/progress-schema"]
+
+# The SQLite page cache, in KiB as a negative number. It matches the
+# catalog agent's, because a screen pod runs both and pays for each.
+cache_size_kib = -65536
+
+[api]
+# The HTTP API answers on loopback only, on the port beside the catalog
+# agent's 8080. The progress role posts its writes to it from another
+# container in the same pod.
+addr = "127.0.0.1:8081"
+
+[gossip]
+# Agents replicate to each other over QUIC on this port, one above the
+# catalog cluster's 8787. The pod sets `GOSSIP__ADDR` to
+# `<pod IP>:8788` from the downward API, so the agent binds the pod's
+# own address and announces that address to its peers.
+addr = "0.0.0.0:8788"
+
+# Gossip carries no TLS. The traffic stays inside the cluster network,
+# and TLS needs a certificate per pod that nothing in this project
+# mints.
+plaintext = true
+
+# The bootstrap list names `progress`, a short name with no namespace,
+# which the pod's own search path resolves to the `progress` `Service`
+# in the pod's namespace. The operator creates that `Service` in every
+# namespace that holds a `Catalog` and writes its `EndpointSlice` over
+# that namespace's progress agents.
+#
+# The list is in this file and not in the pod, because Corrosion cannot
+# parse a list from an environment variable.
+bootstrap = ["progress:8788"]
+
+[admin]
+# The admin socket answers `corrosion cluster members` and the other
+# operator commands. It sits under the one mounted directory, so the
+# container can run with a read-only root filesystem.
+path = "/var/lib/progress/admin.sock"

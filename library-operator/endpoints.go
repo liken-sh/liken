@@ -40,6 +40,13 @@ const (
 	catalogPort         = 8787
 )
 
+// The catalog cluster, as the builders below take it.
+var catalogGossip = gossipCluster{
+	service:   catalogServiceName,
+	port:      catalogPort,
+	container: catalogContainer,
+}
+
 // The two labels the slice carries. The service-name label is how a
 // Service's slices are found, and it is the whole tie between this
 // slice and the Service, which names no selector. The managed-by
@@ -114,6 +121,13 @@ type EndpointPort struct {
 // owns the slice, so the garbage collector removes it with that
 // Catalog.
 func buildCatalogEndpoints(namespace string, owners []OwnerReference, members []Pod) *EndpointSlice {
+	return buildGossipEndpoints(catalogGossip, namespace, owners, members)
+}
+
+// buildGossipEndpoints builds the slice behind either cluster's
+// Service. The caller hands in the members of the one it stands, which
+// are the pods that carry that cluster's member label.
+func buildGossipEndpoints(cluster gossipCluster, namespace string, owners []OwnerReference, members []Pod) *EndpointSlice {
 	endpoints := []Endpoint{}
 	for index := range members {
 		pod := &members[index]
@@ -128,7 +142,7 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, members []
 		}
 		endpoints = append(endpoints, Endpoint{
 			Addresses:  []string{pod.Status.PodIP},
-			Conditions: EndpointConditions{Ready: everyContainerReady(pod)},
+			Conditions: EndpointConditions{Ready: everyContainerReadyBeside(pod, cluster.container)},
 			NodeName:   pod.Spec.NodeName,
 			TargetRef: &ObjectReference{
 				Kind:      "Pod",
@@ -145,10 +159,10 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, members []
 		APIVersion: endpointSliceAPIVersion,
 		Kind:       "EndpointSlice",
 		Metadata: ObjectMeta{
-			Name:      catalogServiceName,
+			Name:      cluster.service,
 			Namespace: namespace,
 			Labels: map[string]string{
-				serviceNameLabel: catalogServiceName,
+				serviceNameLabel: cluster.service,
 				managedByLabel:   endpointSliceManager,
 			},
 			OwnerReferences: owners,
@@ -156,7 +170,7 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, members []
 		AddressType: endpointSliceAddressType,
 		Endpoints:   endpoints,
 		Ports: []EndpointPort{
-			{Name: catalogPortName, Protocol: catalogPortProtocol, Port: catalogPort},
+			{Name: catalogPortName, Protocol: catalogPortProtocol, Port: cluster.port},
 		},
 	}
 }
@@ -174,9 +188,14 @@ func buildCatalogEndpoints(namespace string, owners []OwnerReference, members []
 // writer got there first, which is success: the next pass reads what
 // that writer wrote.
 func (o *operator) standCatalogEndpoints(ctx context.Context, namespace string, owners []OwnerReference, members []Pod) error {
-	desired := buildCatalogEndpoints(namespace, owners, members)
+	return o.standGossipEndpoints(ctx, catalogGossip, namespace, owners, members)
+}
 
-	live, err := GetEndpointSlice(ctx, o.client, namespace, catalogServiceName)
+// standGossipEndpoints is the same rule for either cluster's slice.
+func (o *operator) standGossipEndpoints(ctx context.Context, cluster gossipCluster, namespace string, owners []OwnerReference, members []Pod) error {
+	desired := buildGossipEndpoints(cluster, namespace, owners, members)
+
+	live, err := GetEndpointSlice(ctx, o.client, namespace, cluster.service)
 	if errors.Is(err, ErrNotFound) {
 		_, err := CreateEndpointSlice(ctx, o.client, desired)
 		if errors.Is(err, ErrConflict) {

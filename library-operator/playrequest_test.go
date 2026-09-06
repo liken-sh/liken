@@ -8,7 +8,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net"
+	"slices"
 	"testing"
 )
 
@@ -417,18 +419,29 @@ func operatorsBroker(t *testing.T, operator *operator) *fakeBroker {
 	return broker
 }
 
-func TestTheOperatorSubscribesToEveryPlayersPlayTopic(t *testing.T) {
+// Every subscription the operator remembers, which a fresh connection
+// re-sends in sorted order: the reports it folds, the requests it
+// serves, and the three marks the progress store publishes.
+func TestTheOperatorSubscribesToEveryTopicItActsOn(t *testing.T) {
 	operator, _ := playingHouse(t)
 	broker := operatorsBroker(t, operator)
-
-	filters := map[string]bool{}
-	for range 3 {
-		filters[waitForString(t, broker.subs)] = true
+	want := []string{
+		catalogAvailabilityFilter(defaultTopicBase),
+		libraryStatusFilter(defaultTopicBase),
+		personForgottenFilter(defaultTopicBase),
+		playRequestFilter(defaultTopicBase),
+		playRecordedFilter(defaultTopicBase),
+		watchProgressFilter(defaultTopicBase),
 	}
 
-	if !filters[playRequestFilter(defaultTopicBase)] {
-		t.Errorf("filters = %v, want %q among them",
-			filters, playRequestFilter(defaultTopicBase))
+	filters := []string{}
+	for range want {
+		filters = append(filters, waitForString(t, broker.subs))
+	}
+
+	slices.Sort(filters)
+	if !slices.Equal(filters, want) {
+		t.Errorf("the operator subscribed to %v, want %v", filters, want)
 	}
 }
 
@@ -532,5 +545,145 @@ func TestAPlayWithNoUsableSlugNamesThePlayerAlone(t *testing.T) {
 	}
 	if got := playGenerateName(testPlayer, "((( )))"); got != testPlayer+"-" {
 		t.Errorf("name = %q, want %q", got, testPlayer+"-")
+	}
+}
+
+// The audience the browser named, and the identity it read out of the
+// catalog beside it, as one request carries them.
+func audienceRequest(watch string, people ...string) []byte {
+	request := playRequest{
+		Library: testLibraryKey,
+		Slug:    "the-office-s03e05",
+		Items:   []playRequestItem{film(testFilmPath)},
+		People:  people,
+		Watch:   watch,
+		Aliases: map[string]string{"tmdb": "2316", "imdb": "tt0386676"},
+		Season:  3,
+		Episode: 5,
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+// Owner references rather than a field, because then the Play's schema
+// stays media-operator's own, and the garbage collector deletes the
+// Play only when every owner is gone.
+func TestAPlayCarriesItsAudienceAsOwnerReferences(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	seedPerson(cluster, "chris")
+	seedPerson(cluster, "thora")
+	seedWatch(cluster, "the-girls", "chris", "thora")
+	publishPlay(operator, audienceRequest("the-girls", "chris", "thora"))
+
+	operator.pass()
+
+	owners := cluster.heldPlays()[0].Metadata.OwnerReferences
+	if len(owners) != 3 {
+		t.Fatalf("owners = %+v, want the watch and the two people", owners)
+	}
+	if owners[0].Kind != watchKind || owners[0].Name != "the-girls" || owners[0].UID != "the-girls-uid" {
+		t.Errorf("owner = %+v, want the Watch with its uid", owners[0])
+	}
+	if owners[0].APIVersion != libraryAPIVersion || owners[0].Controller {
+		t.Errorf("owner = %+v, want this operator's group and no controller flag", owners[0])
+	}
+	if owners[1].Name != "chris" || owners[2].Name != "thora" {
+		t.Errorf("owners = %+v, want one Person per name the request carried", owners[1:])
+	}
+}
+
+// Annotations rather than labels, because a label value stops at 63
+// characters and an alias list has no such rule.
+func TestAPlayCarriesTheWorksIdentityAsAnnotations(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, audienceRequest(""))
+
+	operator.pass()
+
+	annotations := cluster.heldPlays()[0].Metadata.Annotations
+	want := map[string]string{
+		libraryAnnotation:              "movies",
+		aliasAnnotationPrefix + "tmdb": "2316",
+		aliasAnnotationPrefix + "imdb": "tt0386676",
+		seasonAnnotation:               "3",
+		episodeAnnotation:              "5",
+	}
+	if !maps.Equal(annotations, want) {
+		t.Errorf("annotations = %v, want %v", annotations, want)
+	}
+}
+
+// A movie has no season and no episode, and the annotations say so by
+// carrying neither.
+func TestAMovieCarriesNoSeasonAndNoEpisode(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, filmRequest(film(testFilmPath)))
+
+	operator.pass()
+
+	annotations := cluster.heldPlays()[0].Metadata.Annotations
+	if !maps.Equal(annotations, map[string]string{libraryAnnotation: "movies"}) {
+		t.Errorf("annotations = %v, want the library alone", annotations)
+	}
+}
+
+// A person at the screen is waiting for the film, so a name the cluster
+// does not hold is dropped and the Play still plays.
+func TestANameNobodyHoldsIsDroppedAndThePlayStillPlays(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	seedPerson(cluster, "chris")
+	publishPlay(operator, audienceRequest("no-such-watch", "chris", "nobody"))
+
+	operator.pass()
+
+	plays := cluster.heldPlays()
+	if len(plays) != 1 {
+		t.Fatalf("plays = %+v, want the one the request asked for", plays)
+	}
+	owners := plays[0].Metadata.OwnerReferences
+	if len(owners) != 1 || owners[0].Name != "chris" {
+		t.Errorf("owners = %+v, want the one person the cluster holds", owners)
+	}
+}
+
+// One request as play reads it, with the house's Player and its movies
+// library around it.
+func housePlay(t *testing.T, request playRequest, catalog bool) *Play {
+	t.Helper()
+	cluster := newFakeCluster()
+	library := boundHouse(cluster)
+	player := seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
+	request.Namespace, request.Player = testLibraryNamespace, testPlayer
+	request.Library, request.Items = testLibraryKey, []playRequestItem{film(testFilmPath)}
+
+	play, err := request.play([]Player{*player}, []Library{*library}, nil, nil, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return play
+}
+
+// The store that releases the finalizer stands beside the namespace's
+// Catalog, so a namespace with none takes no finalizer at all.
+func TestAPlayCarriesTheFinalizerOnlyWhereAStoreStands(t *testing.T) {
+	cases := []struct {
+		name    string
+		catalog bool
+		want    []string
+	}{
+		{name: "a namespace with a catalog", catalog: true, want: []string{progressFinalizer}},
+		{name: "a namespace with none", catalog: false, want: nil},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			play := housePlay(t, playRequest{}, testCase.catalog)
+
+			if !slices.Equal(play.Metadata.Finalizers, testCase.want) {
+				t.Errorf("finalizers = %v, want %v", play.Metadata.Finalizers, testCase.want)
+			}
+		})
 	}
 }

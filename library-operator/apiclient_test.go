@@ -529,6 +529,25 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 		}},
 		{name: "GetPersistentVolume", call: func(c *Client) error { _, err := GetPersistentVolume(t.Context(), c, "pv-movies"); return err }},
 		{name: "ListPlayers", call: func(c *Client) error { _, err := ListPlayers(t.Context(), c); return err }},
+		{name: "ListPlays", call: func(c *Client) error { _, err := ListPlays(t.Context(), c); return err }},
+		{name: "PatchPlayMetadata", call: func(c *Client) error {
+			_, err := PatchPlayMetadata(t.Context(), c, "house", "den-tv-b2k9x", "1", ObjectMeta{})
+			return err
+		}},
+		{name: "ListWatches", call: func(c *Client) error { _, err := ListWatches(t.Context(), c); return err }},
+		{name: "PatchWatchOwnerReferences", call: func(c *Client) error {
+			_, err := PatchWatchOwnerReferences(t.Context(), c, "house", "the-girls", "1", nil)
+			return err
+		}},
+		{name: "UpdateWatchStatus", call: func(c *Client) error {
+			_, err := UpdateWatchStatus(t.Context(), c, &Watch{})
+			return err
+		}},
+		{name: "ListPeople", call: func(c *Client) error { _, err := ListPeople(t.Context(), c); return err }},
+		{name: "PatchPersonFinalizers", call: func(c *Client) error {
+			_, err := PatchPersonFinalizers(t.Context(), c, "chris", "1", nil)
+			return err
+		}},
 		{name: "ListCatalogMemberPods", call: func(c *Client) error { _, err := ListCatalogMemberPods(t.Context(), c); return err }},
 		{name: "ListWorkerJobs", call: func(c *Client) error { _, err := ListWorkerJobs(t.Context(), c); return err }},
 		{name: "CreateJob", call: func(c *Client) error { _, err := CreateJob(t.Context(), c, &Job{}); return err }},

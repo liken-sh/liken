@@ -104,13 +104,15 @@ every capability dropped. The `Service` is the address every
 The `ClusterRole` is cluster-wide because a `Library` can be in any
 namespace. Its grants are read and status writes on this operator's
 own resources, read on `media-operator`'s `Player` and
-`MediaPreferences`, create on `Play`, and create and delete on the
-claims, pods, `Jobs`, `CronJobs`, and `Services` it owns.
+`MediaPreferences`, create and patch on `Play`, patch on
+`people.liken.sh`'s `Person` for one finalizer, and create and delete
+on the claims, pods, `Jobs`, `CronJobs`, and `Services` it owns.
 
 This site serves the same files as raw YAML, so a clone is never
 needed: [`libraries-crd.yaml`](/deploy/libraries-crd.yaml),
 [`catalogs-crd.yaml`](/deploy/catalogs-crd.yaml),
 [`metadataproviders-crd.yaml`](/deploy/metadataproviders-crd.yaml),
+[`watches-crd.yaml`](/deploy/watches-crd.yaml),
 [`rbac.yaml`](/deploy/rbac.yaml), and
 [`operator.yaml`](/deploy/operator.yaml).
 

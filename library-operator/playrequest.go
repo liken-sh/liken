@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -31,6 +32,20 @@ type playRequest struct {
 	// request that carries none still plays.
 	Slug  string            `json:"slug"`
 	Items []playRequestItem `json:"items"`
+
+	// Who is watching, as Person names, and the Watch this play belongs
+	// to. Both become owner references on the Play, so the Play's schema
+	// stays media-operator's own.
+	People []string `json:"people,omitempty"`
+	Watch  string   `json:"watch,omitempty"`
+
+	// The work's ids by provider, and the numbers of an episode, which
+	// the browser reads out of the catalog beside it. They become the
+	// Play's annotations, and they are the identity the store keys on: a
+	// rename or a 4K upgrade is a new file and the same position.
+	Aliases map[string]string `json:"aliases,omitempty"`
+	Season  int               `json:"season,omitempty"`
+	Episode int               `json:"episode,omitempty"`
 }
 
 // playRequestItem is one item of the list. Every path is relative to
@@ -101,9 +116,10 @@ func (o *operator) readPlayRequest(namespace, player, topic string, payload []by
 // Library must be one the Player's namespace holds. A request that
 // fails a check is reported and dropped, because the screen has no way
 // to answer and the pod log is where a person looks.
-func (o *operator) createPlays(ctx context.Context, players []Player, libraries []Library) {
+func (o *operator) createPlays(ctx context.Context, players []Player, libraries []Library,
+	people []Person, watches []Watch, catalogs map[string]bool) {
 	for _, request := range o.plays.take() {
-		play, err := request.play(players, libraries)
+		play, err := request.play(players, libraries, people, watches, catalogs[request.Namespace])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "playing on %s/%s: %v\n",
 				request.Namespace, request.Player, err)
@@ -119,7 +135,8 @@ func (o *operator) createPlays(ctx context.Context, players []Player, libraries 
 // play is the Play one request becomes, or the reason it becomes none.
 // Every refusal here is a request that named something the screen may
 // not reach.
-func (r playRequest) play(players []Player, libraries []Library) (*Play, error) {
+func (r playRequest) play(players []Player, libraries []Library, people []Person,
+	watches []Watch, catalog bool) (*Play, error) {
 	player := r.player(players)
 	if player == nil {
 		return nil, fmt.Errorf("no player of this operator's answers to that name")
@@ -144,15 +161,70 @@ func (r playRequest) play(players []Player, libraries []Library) (*Play, error) 
 		return nil, fmt.Errorf("the request named nothing to play")
 	}
 
+	metadata := ObjectMeta{
+		GenerateName:    playGenerateName(r.Player, r.Slug),
+		Namespace:       r.Namespace,
+		Annotations:     r.annotations(library),
+		OwnerReferences: r.owners(people, watches),
+	}
+	// The finalizer goes on only where the namespace holds a Catalog,
+	// because the store that releases it stands beside that Catalog. A
+	// finalizer nobody releases would hold the Play forever.
+	if catalog {
+		metadata.Finalizers = []string{progressFinalizer}
+	}
+
 	return &Play{
 		APIVersion: playerAPIVersion,
 		Kind:       "Play",
-		Metadata: ObjectMeta{
-			GenerateName: playGenerateName(r.Player, r.Slug),
-			Namespace:    r.Namespace,
-		},
-		Spec: PlaySpec{Players: []string{r.Player}, Items: items},
+		Metadata:   metadata,
+		Spec:       PlaySpec{Players: []string{r.Player}, Items: items},
 	}, nil
+}
+
+// owners is the audience of the Play, as owner references: the Watch it
+// belongs to, and one Person per name the request carries. A name the
+// cluster does not hold is reported and dropped, and the Play still
+// plays, because a person at the screen is waiting for the film and not
+// for the record of it.
+func (r playRequest) owners(people []Person, watches []Watch) []OwnerReference {
+	owners := []OwnerReference{}
+	if r.Watch != "" {
+		if watch := watchNamed(watches, r.Namespace, r.Watch); watch != nil {
+			owners = append(owners, watchOwner(watch))
+		} else {
+			fmt.Fprintf(os.Stderr, "playing on %s/%s: the namespace holds no watch %s\n",
+				r.Namespace, r.Player, r.Watch)
+		}
+	}
+	for _, name := range r.People {
+		person := personNamed(people, name)
+		if person == nil {
+			fmt.Fprintf(os.Stderr, "playing on %s/%s: the cluster holds no person %s\n",
+				r.Namespace, r.Player, name)
+			continue
+		}
+		owners = append(owners, personOwner(person))
+	}
+	return owners
+}
+
+// annotations are the work's identity on the Play: one alias per
+// provider, the numbers of an episode, and the Library the items came
+// from. The store reads them back off any Play it sees, so a Play
+// written by hand with the same annotations is recorded the same way.
+func (r playRequest) annotations(library *Library) map[string]string {
+	annotations := map[string]string{libraryAnnotation: library.Metadata.Name}
+	for provider, id := range r.Aliases {
+		annotations[aliasAnnotationPrefix+provider] = id
+	}
+	if r.Season != 0 {
+		annotations[seasonAnnotation] = strconv.Itoa(r.Season)
+	}
+	if r.Episode != 0 {
+		annotations[episodeAnnotation] = strconv.Itoa(r.Episode)
+	}
+	return annotations
 }
 
 // The longest prefix the operator asks the API server to mint a name

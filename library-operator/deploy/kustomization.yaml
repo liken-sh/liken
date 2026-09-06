@@ -12,6 +12,7 @@ resources:
   - libraries-crd.yaml
   - catalogs-crd.yaml
   - metadataproviders-crd.yaml
+  - watches-crd.yaml
   - rbac.yaml
   - operator.yaml
 

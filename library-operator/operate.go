@@ -94,6 +94,21 @@ type operator struct {
 	// screen pod holds no credential of its own.
 	plays *playRequests
 
+	// The marks the progress store publishes, folded by the bus handler
+	// and read by the pass: what each Play recorded, each Watch's
+	// projection, and which namespaces have forgotten a person.
+	marks *storeMarks
+
+	// What this operator last published on each retained progress
+	// topic, so a pass that changed nothing publishes nothing. The pass
+	// is its only reader and writer.
+	published map[string]string
+
+	// The base of media-operator's topic tree, which every progress
+	// pod reads each Play's position from. The operator passes it
+	// down, so a cluster that moved that tree names it once, here.
+	mediaTopicBase string
+
 	// Wake is the loop's own wake channel, and one channel serves the
 	// two watches and the bus handler, because a wake says nothing
 	// beyond "read the collection again".
@@ -125,6 +140,9 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 		reporters:      newReporters(wake),
 		paths:          newHeldPaths(wake),
 		plays:          newPlayRequests(wake),
+		marks:          newStoreMarks(wake),
+		published:      map[string]string{},
+		mediaTopicBase: defaultMediaTopicBase,
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
 		providerBases:  defaultProviderBases(),
@@ -139,6 +157,12 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 	library.bus.Subscribe(libraryStatusFilter(topicBase))
 	library.bus.Subscribe(catalogAvailabilityFilter(topicBase))
 	library.bus.Subscribe(playRequestFilter(topicBase))
+	// The three marks the progress store publishes. The operator holds
+	// the credential, so every write the store's rows call for is made
+	// on the pass that reads these.
+	library.bus.Subscribe(playRecordedFilter(topicBase))
+	library.bus.Subscribe(watchProgressFilter(topicBase))
+	library.bus.Subscribe(personForgottenFilter(topicBase))
 	return library
 }
 
@@ -165,6 +189,7 @@ func operate() error {
 	if topicBase == "" {
 		topicBase = defaultTopicBase
 	}
+	mediaTopicBase := mediaTopicBaseOf(os.Getenv(mediaTopicBaseVariable))
 	// The port the webhook endpoint answers on, with a default,
 	// because a cluster that takes the manifest as it ships needs no
 	// policy for it.
@@ -194,8 +219,10 @@ func operate() error {
 		return err
 	}
 
-	return newOperator(client, stamped.scanner, stamped.corrosion, stamped.browser,
-		busAddress, topicBase, namespace, ":"+port).run(stopped, os.Stdout)
+	library := newOperator(client, stamped.scanner, stamped.corrosion, stamped.browser,
+		busAddress, topicBase, namespace, ":"+port)
+	library.mediaTopicBase = mediaTopicBase
+	return library.run(stopped, os.Stdout)
 }
 
 // Run is the operator without the process around it, so a test drives
@@ -247,6 +274,25 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
 		providers = &MetadataProviderList{}
 	}
+	// The three collections of the progress half, read on the Players'
+	// terms: the list proves what the operator may read and gives each
+	// watch its resume point, and a collection a cluster does not serve
+	// costs a line and an empty version.
+	plays, err := ListPlays(startup, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
+		plays = &PlayList{}
+	}
+	watches, err := ListWatches(startup, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing watches: %v\n", err)
+		watches = &WatchList{}
+	}
+	people, err := ListPeople(startup, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing people: %v\n", err)
+		people = &PersonList{}
+	}
 	fmt.Fprintf(report, "library.liken.sh: operating %d libraries over %s\n",
 		len(libraries.Items), o.busAddress)
 
@@ -256,6 +302,9 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake)
 	go watchMediaPreferences(o.client, preferences.Metadata.ResourceVersion, o.wake)
 	go watchMetadataProviders(o.client, providers.Metadata.ResourceVersion, o.wake)
+	go watchPlays(o.client, plays.Metadata.ResourceVersion, o.wake)
+	go watchWatches(o.client, watches.Metadata.ResourceVersion, o.wake)
+	go watchPeople(o.client, people.Metadata.ResourceVersion, o.wake)
 
 	// The webhook endpoint runs for the life of the operator. A
 	// failure to listen ends the loop, because an operator that reports
@@ -348,7 +397,30 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
 		providers = &MetadataProviderList{}
 	}
+	// The Plays, the people, and the Watches of the whole cluster, for
+	// the progress half of the pass. Each is read on the Players' terms:
+	// a cluster that runs no media-operator serves no Plays, and one
+	// that runs no people-operator serves no people, and its libraries
+	// are still scanned and still reported.
+	plays, err := ListPlays(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
+		plays = &PlayList{}
+	}
+	people, err := ListPeople(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing people: %v\n", err)
+		people = &PersonList{}
+	}
+	watches, err := ListWatches(ctx, o.client)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing watches: %v\n", err)
+		watches = &WatchList{}
+	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
+	// The namespaces a progress store stands in, which are the ones
+	// whose Plays the operator holds a finalizer on.
+	stores := storeNamespaces(byNamespace)
 	now := time.Now().UTC()
 	// The succeeded Jobs of every namespace go first, so what a person sees in
 	// kubectl get pods is what runs now and what failed.
@@ -417,7 +489,11 @@ func (o *operator) pass() {
 	// The play requests are served last, on the collections this pass
 	// already read. A request is one moment: the pass creates its Play
 	// now or drops it, and the person presses again.
-	o.createPlays(ctx, players.Items, libraries.Items)
+	o.createPlays(ctx, players.Items, libraries.Items, people.Items, watches.Items, stores)
+	// The progress half runs on the Plays this pass read, so a Play the
+	// call above created is held and published on the next pass, after
+	// the API server has minted its name.
+	o.reconcileProgress(ctx, plays.Items, people.Items, watches.Items, stores, now)
 
 	o.reconcileCatalogs(ctx, byNamespace, members.Items, now)
 }
@@ -433,6 +509,29 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	// the bus reader's goroutine makes none.
 	if namespace, player, ok := parsePlayRequestTopic(o.topicBase, topic); ok {
 		o.readPlayRequest(namespace, player, topic, payload)
+		return
+	}
+	// The three marks the progress store publishes. Each is folded onto
+	// the desk the next pass reads, and an empty payload drops what the
+	// desk holds.
+	if namespace, name, kind, ok := parsePlayTopic(o.topicBase, topic); ok {
+		if kind == playRecordedKind {
+			foldMark(topic, payload, func(recorded *playRecorded) {
+				o.marks.markRecorded(namespace, name, recorded)
+			})
+		}
+		return
+	}
+	if namespace, name, ok := parseWatchTopic(o.topicBase, topic); ok {
+		foldMark(topic, payload, func(progress *watchProgress) {
+			o.marks.markProgress(namespace, name, progress)
+		})
+		return
+	}
+	if person, kind, namespace, ok := parsePersonTopic(o.topicBase, topic); ok {
+		if kind == personForgottenKind {
+			o.marks.markForgotten(person, namespace, len(payload) != 0)
+		}
 		return
 	}
 	// A namespace's reporter says online or offline on a topic of

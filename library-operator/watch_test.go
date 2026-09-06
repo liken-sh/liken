@@ -443,3 +443,95 @@ func TestTheWatcherRetriesAfterAListThatFails(t *testing.T) {
 		t.Errorf("the next watch resumed from %q, want the list's 150", got)
 	}
 }
+
+// A Play change wakes the loop, so a Play that just finished is
+// published and released without a backstop tick's delay. The watcher
+// lists the Plays to resume and wakes on the list.
+func TestThePlayWatchListsAndWakes(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{})
+	api.answersLists(listTurn{version: "150"})
+
+	wake := startWatch(t, api, watchPlays, "42")
+
+	nextWatchRequest(t, api)
+	if got := nextListRequest(t, api); got != playsAllPath {
+		t.Errorf("listed %q, want %q", got, playsAllPath)
+	}
+	waitForWatchWake(t, wake)
+	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
+		t.Errorf("the second watch resumed from %q, want the list's 150", got)
+	}
+}
+
+// A Watch change wakes the loop, so a Watch a person just wrote is tied
+// to its people without a backstop tick's delay.
+func TestTheWatchWatchListsAndWakes(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{})
+	api.answersLists(listTurn{version: "150"})
+
+	wake := startWatch(t, api, watchWatches, "42")
+
+	nextWatchRequest(t, api)
+	if got := nextListRequest(t, api); got != watchesPath {
+		t.Errorf("listed %q, want %q", got, watchesPath)
+	}
+	waitForWatchWake(t, wake)
+	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
+		t.Errorf("the second watch resumed from %q, want the list's 150", got)
+	}
+}
+
+// A Person change wakes the loop, so a person on the way out is asked
+// for without a backstop tick's delay.
+func TestThePeopleWatchListsAndWakes(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{})
+	api.answersLists(listTurn{version: "150"})
+
+	wake := startWatch(t, api, watchPeople, "42")
+
+	nextWatchRequest(t, api)
+	if got := nextListRequest(t, api); got != peoplePath {
+		t.Errorf("listed %q, want %q", got, peoplePath)
+	}
+	waitForWatchWake(t, wake)
+	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
+		t.Errorf("the second watch resumed from %q, want the list's 150", got)
+	}
+}
+
+// A cluster that serves neither collection answers both the watch and
+// the list with a 404. Each watcher waits its pause and tries again
+// from the version it holds, and it wakes the loop for nothing it could
+// not read.
+func TestAWatchOnACollectionNobodyServesCarriesOn(t *testing.T) {
+	cases := []struct {
+		name    string
+		watcher func(*Client, string, chan<- struct{})
+	}{
+		{name: "no media-operator serves the plays", watcher: watchPlays},
+		{name: "no people-operator serves the people", watcher: watchPeople},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			useWatchRetryPause(t)
+			api := newWatchAPI()
+			api.answersWatches(watchTurn{status: http.StatusNotFound})
+			api.answersLists(listTurn{status: http.StatusNotFound})
+
+			wake := startWatch(t, api, testCase.watcher, "42")
+
+			nextWatchRequest(t, api)
+			nextListRequest(t, api)
+			if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "42" {
+				t.Errorf("the watch after the failed list resumed from %q, want the unchanged 42", got)
+			}
+			expectNoWatchWake(t, wake)
+		})
+	}
+}

@@ -33,6 +33,9 @@ func main() {
 		case enrichMode:
 			runEnrich()
 			return
+		case progressMode:
+			runProgress()
+			return
 		}
 	}
 

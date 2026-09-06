@@ -17,6 +17,17 @@ import (
 	"slices"
 )
 
+// gossipCluster is one of the two Corrosion clusters a namespace
+// stands: the catalog and the progress store. It names everything that
+// tells them apart, which is the Service their agents bootstrap to, the
+// port they gossip on, and the container the agent runs in. Everything
+// else about the pair is the same, so the builders below serve both.
+type gossipCluster struct {
+	service   string
+	port      int32
+	container string
+}
+
 // The API group the Service belongs to, and the clusterIP value that
 // makes a Service headless. None is the word Kubernetes uses for
 // "assign no address": the name resolves to the endpoints themselves.
@@ -66,11 +77,17 @@ type ServicePort struct {
 // garbage collector removes it with that Catalog, and the operator needs
 // no delete verb.
 func buildCatalogService(namespace string, owners []OwnerReference) *Service {
+	return buildGossipService(catalogGossip, namespace, owners)
+}
+
+// buildGossipService builds the headless Service one Corrosion cluster
+// finds itself through.
+func buildGossipService(cluster gossipCluster, namespace string, owners []OwnerReference) *Service {
 	return &Service{
 		APIVersion: serviceAPIVersion,
 		Kind:       "Service",
 		Metadata: ObjectMeta{
-			Name:            catalogServiceName,
+			Name:            cluster.service,
 			Namespace:       namespace,
 			OwnerReferences: owners,
 		},
@@ -78,7 +95,7 @@ func buildCatalogService(namespace string, owners []OwnerReference) *Service {
 			ClusterIP:                headlessClusterIP,
 			PublishNotReadyAddresses: true,
 			Ports: []ServicePort{
-				{Name: catalogPortName, Protocol: catalogPortProtocol, Port: catalogPort},
+				{Name: catalogPortName, Protocol: catalogPortProtocol, Port: cluster.port},
 			},
 		},
 	}
@@ -94,9 +111,14 @@ func buildCatalogService(namespace string, owners []OwnerReference) *Service {
 // are immutable and the API server assigned them, so the write carries
 // back what the read answered.
 func (o *operator) standCatalogService(ctx context.Context, namespace string, owners []OwnerReference) error {
-	desired := buildCatalogService(namespace, owners)
+	return o.standGossipService(ctx, catalogGossip, namespace, owners)
+}
 
-	live, err := GetService(ctx, o.client, namespace, catalogServiceName)
+// standGossipService is the same rule for either cluster's Service.
+func (o *operator) standGossipService(ctx context.Context, cluster gossipCluster, namespace string, owners []OwnerReference) error {
+	desired := buildGossipService(cluster, namespace, owners)
+
+	live, err := GetService(ctx, o.client, namespace, cluster.service)
 	if errors.Is(err, ErrNotFound) {
 		_, err := CreateService(ctx, o.client, desired)
 		if errors.Is(err, ErrConflict) {
