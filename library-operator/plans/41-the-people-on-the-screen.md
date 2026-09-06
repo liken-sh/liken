@@ -2,8 +2,7 @@
 
 [Plan 14](completed/14-watch-state-and-people.md) built the record: a
 `Person`, a `Watch`, and a progress store that every namespace writes
-from the bus. Nothing on a screen reads it
-yet. This plan puts the record on the screen: the browser asks who is
+from the bus. Nothing on a screen reads it yet. This plan puts the record on the screen: the browser asks who is
 watching, sends the answer with every play request, and draws
 continue watching and history from its own copy of the store.
 
@@ -22,8 +21,8 @@ the middle of.
 The screen pod gains a second Corrosion agent beside the catalog
 agent, on the progress configuration in the same image, bootstrapping
 to the `progress` `Service` on port 8788 and answering on 8081. Its
-file lives on the screen's local-path claim beside the catalog's, so
-the browser starts with progress already on disk. The pod carries the
+file is on the screen's local-path claim beside the catalog's, so the
+browser starts with progress already on disk. The pod carries the
 progress member label, so the namespace's progress `EndpointSlice`
 names it.
 

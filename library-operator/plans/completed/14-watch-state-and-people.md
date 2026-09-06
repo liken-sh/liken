@@ -22,17 +22,17 @@ a store of progress that every screen holds a copy of.
 
 ## The problem
 
-A household watches in subsets. Three people are on season three of one
-series together, two of them are on episode nine of another, and one of
-them is on season seven of the first series alone. Every service that
-records progress keys it on one account, so a shared series is wrong
-for everyone who shares it. The record has to belong to the set of
-people who watched, and a person has to be a fact of the cluster before
-a set of them can be.
+People watch in groups, and the groups overlap. Three people are on
+season three of one series together, two of them are on episode nine
+of another, and one of them is on season seven of the first series
+alone. Every service that records progress keys it on one account, so
+a shared series is wrong for everyone who shares it. The record has to
+belong to the set of people who watched, and a person has to be a
+resource in the cluster before a set of them can be named.
 
 ## The design
 
-### A `Person` is a cluster fact
+### A `Person` is a cluster-scoped resource
 
 A new repository, `people-operator`, ships one cluster-scoped CRD and no
 controller: `Person` in `people.liken.sh/v1alpha1`.
@@ -47,19 +47,18 @@ spec:
   avatar: claim://portraits/thora.png
 ```
 
-The resource is small because its value is in who names it. A
-`Person` is a subject the way a `ServiceAccount` is: a `Play` names the
-people who watched it, a `Watch` names the people who share it, and a
-later `MediaPreferences`, `Remote`, or `RoleBinding` can name one too.
-Each of those is a plan in the operator that reads the `Person`. This
-repository is the first.
+The resource holds little on its own. Other operators refer to it by
+name and attach their own facts to it, the way workloads refer to a
+`ServiceAccount`. In this plan, a `Play` names the people who watched
+it and a `Watch` names the people who share a series. A
+`MediaPreferences`, a `Remote`, or a `RoleBinding` can name one later,
+each in a plan of the operator that owns it.
 
-Two fields are named now and filled by later plans. `spec.uid` is a
-Linux uid, so files written for a person are owned by that person from
-the first write. A person may state their own, for a NAS that already
-holds their files under it. A later controller assigns one from a
-reserved range when none is stated. `spec.identity` names an outside
-login, an OIDC issuer and subject, and nothing reads it yet.
+Two fields are declared now and nothing fills them yet. `spec.uid` is
+a Linux uid, so files written for a person are owned by that person
+from the first write. A person sets their own when a NAS already holds
+their files under it. `spec.identity` is a login at an outside
+identity provider, an OIDC issuer and subject, and nothing reads it.
 
 ### A `Watch` is a set of people on one item
 
@@ -193,17 +192,18 @@ names the topics and the payloads.
 The playback pod's sidecar already publishes each `Play`'s report on
 `liken/media/plays/<namespace>/<name>/status`: the item, the position,
 the duration, and the paused flag, retained. The operator publishes
-what the sidecar cannot know on `liken/library/plays/<namespace>/<name>/audience`:
+what the sidecar does not have on `liken/library/plays/<namespace>/<name>/audience`:
 the `Player`, the `Watch`, the people, and the aliases, read off the
 `Play`'s owner references and annotations. The progress pod subscribes
 to both for its namespace, writes the rows, and publishes what it
 wrote last on the `Play`'s `recorded` topic.
 
-The playback pod learns nothing of people. The browser writes nothing.
+The playback pod has no field for people. The browser writes nothing.
 The three are joined only by the topics and the table.
 
-The bus drops what nobody hears. If the progress pod restarts in the
-middle of a film, the reports in that window are gone. Two things close
+A message on the bus reaches only the subscribers connected at that
+moment. If the progress pod restarts in the middle of a film, the
+reports in that window are gone. Two things close
 the gap. When a `Play`'s phase is `Finished` or `Failed`, the operator
 publishes its `status.position` off the API on the `Play`'s `final`
 topic, and the progress pod records it and marks the row ended. And
@@ -226,23 +226,22 @@ stays as a `Player`'s row. A shared `Watch` keeps the people who
 remain. The garbage collector removes the `Play`s and `Watch`es that
 named only that person.
 
-### The home screen asks who is watching
+### The screen is the next plan
 
-When the browser wakes from the idle screen after a long enough sleep,
-it shows the `Person` list and asks who is watching. The answer becomes
-the people on every play request until the next sleep.
-
-The home screen gains a continue-watching row from the store, and a
-history page reads the same rows backward. `media-operator` changes
+The browser does not read the store or name people yet. The second
+agent on every screen pod, the question of who is watching, the play
+request that carries the answer, and the continue-watching row are
+[plan 41](../41-the-people-on-the-screen.md). `media-operator` changes
 nothing in this plan.
 
 ## Failure
 
-- **The broker is down.** No reports arrive. The progress pod reconciles
-  from `Play` status when the broker returns, so the end position lands
-  and the positions between are lost.
-- **The progress pod is down.** Same gap, same heal. Screens read their
-  local copy and see progress up to the last row that reached them.
+- **The broker is down.** No reports arrive. When the broker returns,
+  the operator publishes each ended `Play`'s final position off the
+  API, so the end position lands and the positions between are lost.
+- **The progress pod is down.** The same gap, closed the same way.
+  Screens read their local copy and see progress up to the last row
+  that reached them.
 - **A screen's claim is lost.** The browser's agent syncs the store from
   its peers on first start, as the catalog agent does.
 - **The progress pod's claim is lost.** The durable copy is gone. The
