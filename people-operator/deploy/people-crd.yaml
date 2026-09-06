@@ -1,0 +1,105 @@
+# A Person is a fact of the whole cluster: someone the household
+# names once, so every operator can name them again. The resource is
+# small because its value is in who references it. A `Play` names the
+# people who watched, a `Watch` names the people who share a series,
+# and a `Player` names the people who usually sit in front of it. No
+# controller ships with this CRD.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: people.people.liken.sh
+spec:
+  group: people.liken.sh
+  names:
+    kind: Person
+    listKind: PersonList
+    plural: people
+    singular: person
+    categories: [people]
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only a controller writes
+      # status.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Name
+          type: string
+          jsonPath: .spec.displayName
+        - name: Child
+          type: boolean
+          jsonPath: .spec.child
+        - name: UID
+          type: integer
+          jsonPath: .spec.uid
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [displayName]
+              properties:
+                displayName:
+                  type: string
+                  minLength: 1
+                  description: "The name a screen shows for this person."
+                avatar:
+                  type: string
+                  description: >-
+                    A reference to this person's picture, for a
+                    screen to draw. A `claim://<claim>/<path>`
+                    reference names a file on a claim, the way a
+                    `Play` names media.
+                child:
+                  type: boolean
+                  default: false
+                  description: >-
+                    True for a child. An operator that shows this
+                    person a library, or asks them a question, reads
+                    it.
+                uid:
+                  type: integer
+                  format: int64
+                  minimum: 1000
+                  maximum: 4294967294
+                  description: >-
+                    The Linux uid this person's files are owned by.
+                    State it for a person whose files already exist
+                    under one on a NAS. Leave it unset and a later
+                    controller assigns one from a reserved range.
+                identity:
+                  type: object
+                  required: [issuer, subject]
+                  description: >-
+                    An outside login this person is, as an OIDC
+                    issuer URL and subject. Nothing in liken reads it
+                    yet.
+                  properties:
+                    issuer:
+                      type: string
+                      format: uri
+                      minLength: 1
+                      description: "The issuer URL, as the provider's discovery document states it."
+                    subject:
+                      type: string
+                      minLength: 1
+                      description: "The subject claim that provider issues for this person."
+            status:
+              type: object
+              # Nothing writes this yet; a later controller assigns
+              # uid the way it does in the spec's own description.
+              properties:
+                uid:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The uid this person holds, stated in the spec or
+                    assigned by a controller.

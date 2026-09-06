@@ -1,0 +1,67 @@
+# A pushed tag is a release of the CRD. This repository ships no
+# image, so the release is the tag itself: a version in liken's
+# calendar scheme, 2026.09.03-007, that a cluster pins the kustomize
+# base to with ?ref=. This workflow checks the tag's shape and refuses
+# a tag whose commit did not pass the gate in ci.yaml, so a name that
+# reads as a release always names a tested commit. The site publishes
+# from ci.yaml on every push to main, not from here.
+name: release
+
+on:
+  push:
+    tags: ["**"]
+
+permissions:
+  contents: read
+  # actions: read lets the gate step read the state of the ci run for
+  # this commit through the workflow's own token.
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # A tag of any other shape stops the run, so nothing calls
+      # itself a release under a name no machine can order against
+      # the others.
+      - name: check the tag's shape
+        run: |
+          echo "$GITHUB_REF_NAME" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$' || {
+            echo "the tag '$GITHUB_REF_NAME' is not a release version; a release tag looks like 2026.08.20-001"
+            exit 1
+          }
+
+      # A tag's ci run finished when its commit landed on main, so
+      # this rarely waits. A tag on a commit older than the run
+      # retention finds no run and fails, and the answer is to re-run
+      # ci on that commit and push the tag again. GITHUB_SHA names the
+      # tag object for an annotated tag, and the ci run is keyed by
+      # the commit, so the lookup resolves the commit first.
+      - name: require the gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse "${GITHUB_SHA}^{commit}")
+          for _ in $(seq 1 40); do
+            state=$(gh run list --workflow ci.yaml --commit "$commit" --event push \
+              --json status,conclusion \
+              --jq '.[0] | "\(.status) \(.conclusion)"')
+            case "$state" in
+              "completed success")
+                exit 0 ;;
+              "completed "*)
+                echo "the ci run for $commit ended with ${state#completed }; a red gate is no release" >&2
+                exit 1 ;;
+              "")
+                echo "no ci run exists for $commit; re-run ci on that commit, then push the tag again" >&2
+                exit 1 ;;
+              *)
+                echo "the ci run for $commit is $state" ;;
+            esac
+            sleep 15
+          done
+          echo "the ci run for $commit did not finish within ten minutes" >&2
+          exit 1

@@ -1,0 +1,17 @@
+# This is the coverage gate, enforced in CI (see
+# .github/workflows/ci.yaml).
+#
+# The gate measures on a pinned toolchain. The Makefile says why.
+
+profile: coverage.out
+
+# go test never calls main(), so its one statement never runs under
+# the gate. The gate measures every other file and asks for all of
+# it.
+exclude:
+  paths:
+    - ^main\.go$
+
+threshold:
+  # One package, so the total is the whole gate.
+  total: 100
