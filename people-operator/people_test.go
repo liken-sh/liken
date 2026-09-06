@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"slices"
 	"testing"
 
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
@@ -74,7 +75,7 @@ func TestCRDSchema(t *testing.T) {
 	spec := schema.Properties["spec"]
 
 	t.Run("displayName is required", func(t *testing.T) {
-		if !contains(spec.Required, "displayName") {
+		if !slices.Contains(spec.Required, "displayName") {
 			t.Errorf("spec.required = %v, want it to contain displayName", spec.Required)
 		}
 	})
@@ -88,10 +89,10 @@ func TestCRDSchema(t *testing.T) {
 
 	t.Run("identity requires issuer and subject", func(t *testing.T) {
 		identity := spec.Properties["identity"]
-		if !contains(identity.Required, "issuer") {
+		if !slices.Contains(identity.Required, "issuer") {
 			t.Errorf("spec.properties.identity.required = %v, want it to contain issuer", identity.Required)
 		}
-		if !contains(identity.Required, "subject") {
+		if !slices.Contains(identity.Required, "subject") {
 			t.Errorf("spec.properties.identity.required = %v, want it to contain subject", identity.Required)
 		}
 	})
@@ -101,15 +102,16 @@ func TestCRDPrinterColumns(t *testing.T) {
 	crd := loadCRD(t)
 	columns := crd.Spec.Versions[0].AdditionalPrinterColumns
 
-	want := []string{"Name", "Nickname", "UID", "Age"}
-	for _, name := range want {
+	names := make([]string, 0, len(columns))
+	for _, column := range columns {
+		names = append(names, column.Name)
+	}
+
+	for _, name := range []string{"Name", "Nickname", "UID", "Age"} {
 		t.Run(name, func(t *testing.T) {
-			for _, col := range columns {
-				if col.Name == name {
-					return
-				}
+			if !slices.Contains(names, name) {
+				t.Errorf("printer columns %v, want one named %q", names, name)
 			}
-			t.Errorf("no printer column named %q", name)
 		})
 	}
 }
@@ -215,13 +217,4 @@ func TestCRDValidatesExamples(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(list []string, want string) bool {
-	for _, got := range list {
-		if got == want {
-			return true
-		}
-	}
-	return false
 }

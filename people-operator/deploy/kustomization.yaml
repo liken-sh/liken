@@ -1,8 +1,8 @@
 # The kustomize base for people-operator.
 #
-# This base is for the cluster owner to take. liken does not apply it
-# and does not name it. Take it through your own GitOps with patches
-# of your own, or read it and write your own manifests.
+# This base is for the cluster owner to take. `liken` does not apply
+# it and does not name it. Take it through your own GitOps with
+# patches of your own, or read it and write your own manifests.
 #
 # The CRD is cluster-scoped, so this base names no namespace.
 apiVersion: kustomize.config.k8s.io/v1beta1

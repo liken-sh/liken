@@ -1,8 +1,8 @@
 # The root Makefile names the checks a change must pass, and delegates
 # each one to the domain that owns it. `make test` runs every check CI
 # runs, in the same commands, so a change that passes here passes
-# there. The Go module is the module at the root, so its checks are
-# here; the docs are their own domain with their own Makefile.
+# there. The Go module is at the root, so its checks are here. The
+# docs are their own domain with their own Makefile.
 #
 # The coverage floor is the one number the gate enforces, in
 # .testcoverage.yml. CI reads the same file, so the floor moves in one
@@ -26,8 +26,8 @@ test: test-go test-docs
 COVERAGE_TOOLCHAIN := go1.26.7
 
 # A package with no test file writes no rows to the profile, so the
-# gate never counts it: its number is not low, it is missing. This
-# lists such packages, and test-go fails on the first one.
+# gate never measures it and cannot fail it. This lists such
+# packages, and test-go fails on the first one.
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
 .PHONY: test-go

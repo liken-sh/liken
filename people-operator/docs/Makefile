@@ -15,7 +15,8 @@ GENERATED := $(REFERENCE)/people.md
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
 
-# The site's own tests: every internal link resolves before the build (manual_test.go passes this site's exceptions).
+# The site's own test: every internal link resolves before the build.
+# manual_test.go names the links that no content file answers for.
 .PHONY: test
 test: $(GENERATED)
 	go test ./...
