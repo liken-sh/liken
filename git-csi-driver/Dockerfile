@@ -1,6 +1,7 @@
-# The driver runs the git binary, so the final stage is Debian with git
-# installed. A closure on scratch, the way audio-operator ships its
-# daemons, is a later plan.
+# The image is a closure on scratch. The driver runs git and ssh and
+# reads one CA bundle, and git-closure.sh collects those and the files
+# they open into a tree the final stage copies whole. What the driver
+# never runs is not in the image.
 
 FROM golang:1.27.0-bookworm AS build
 WORKDIR /src
@@ -14,9 +15,14 @@ COPY *.go ./
 ARG VERSION=dev
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /git-csi-driver .
+#
+# -s -w drops the symbol table and the DWARF data, which are 20 MB
+# of the binary. The driver reports its version through --version and
+# its log, and a panic's stack trace keeps its function names without
+# the symbol table, so nothing this project reads is lost.
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /git-csi-driver .
 
-FROM debian:trixie-slim
+FROM debian:trixie-slim AS closure
 # git is the program the driver runs. openssh-client is the transport a
 # deploy key uses. ca-certificates verifies an HTTPS forge.
 RUN apt-get update \
@@ -25,6 +31,11 @@ RUN apt-get update \
         openssh-client \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+COPY git-closure.sh /
+RUN sh /git-closure.sh /out
+
+FROM scratch
+COPY --from=closure /out /
 
 COPY --from=build /git-csi-driver /usr/local/bin/git-csi-driver
 

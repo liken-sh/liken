@@ -22,9 +22,9 @@ they become.
   fidelity. The controller accepts a forge's push webhook and marks
   the matching `PersistentVolume`s, and the node plugins fetch at
   once. Its open questions wait on rulings.
-* [11, A lean image](11-a-lean-image.md). Low fidelity. The release
-  image is 263 MB for a driver that runs `git` and `ssh`. A stripped
-  binary and a closure on scratch, with measurements.
+* [11, A lean image](11-a-lean-image.md). The release image is
+  263 MB for a driver that runs `git` and `ssh`. A stripped binary and
+  a closure on scratch bring it to 79.9 MB.
 
 ## Designs
 
