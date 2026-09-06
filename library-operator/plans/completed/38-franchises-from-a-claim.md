@@ -1,5 +1,18 @@
 # 38, Franchises from a claim
 
+Built, and proved on `liken-1` on 2026-09-06 with development build
+`2026.09.04-003-dev-029-2b5e3245` beside the git CSI driver's plan 07
+build. The old `Library` and its claim were deleted, a `ReadOnlyMany`
+claim on the public franchises repository and an NFS claim for the art
+took their places, and the new `Library` reported `Bound` over a `csi`
+volume and `Ready` with 34 titles. The first scan pod walked all 34
+franchises in one second and then failed on the catalog echo: its
+catalog sidecar started on a new claim and synced the whole namespace
+catalog for 2 minutes and 5 seconds, past the 2 minute echo timeout,
+and the Job's second pod completed. That first-scan cost is open, and
+it is the catalog's and not this plan's. The screen pod mounts the art
+claim read-only.
+
 ## The problem
 
 A `Library` of kind `franchises` is the one kind that names no volume
