@@ -55,14 +55,7 @@ type policy struct {
 // InvalidArgument and the parameter's name. The parameters are read in
 // sorted order, so the first bad one is the same on every pass.
 func parsePolicy(parameters map[string]string) (*policy, error) {
-	resolved := &policy{
-		quiesce:     defaultQuiesce,
-		maxLatency:  defaultMaxLatency,
-		maxFileSize: defaultMaxFileSize,
-		authorName:  defaultAuthorName,
-		authorEmail: defaultAuthorEmail,
-		metadata:    true,
-	}
+	resolved := defaultPolicy()
 
 	_, latencySet := parameters[maxLatencyParameter]
 	names := make([]string, 0, len(parameters))
@@ -107,6 +100,20 @@ func parsePolicy(parameters map[string]string) (*policy, error) {
 			maxLatencyParameter, resolved.maxLatency, quiesceParameter, resolved.quiesce)
 	}
 	return resolved, nil
+}
+
+// defaultPolicy is what every parameter resolves to before a
+// class states it, and what a rebase at stage commits under where no
+// class arms the volume.
+func defaultPolicy() *policy {
+	return &policy{
+		quiesce:     defaultQuiesce,
+		maxLatency:  defaultMaxLatency,
+		maxFileSize: defaultMaxFileSize,
+		authorName:  defaultAuthorName,
+		authorEmail: defaultAuthorEmail,
+		metadata:    true,
+	}
 }
 
 // parseQuiesce reads push.quiesce. It has a floor, because a shorter

@@ -30,13 +30,40 @@ type workTree struct {
 // workTree is the work tree of a volume, sharing the bare repository of
 // its URL.
 func (s *store) workTree(repo *repository, id string) *workTree {
+	work := s.tree(id)
+	work.repository = repo
+	return work
+}
+
+// tree is the work tree of a volume named by its directory alone,
+// which is all the sweep knows about a volume no claim reaches.
+func (s *store) tree(id string) *workTree {
 	directory := s.volumeDir(id)
 	return &workTree{
-		repository: repo,
-		directory:  directory,
-		gitDir:     filepath.Join(directory, "git"),
-		tree:       filepath.Join(directory, "tree"),
+		directory: directory,
+		gitDir:    filepath.Join(directory, "git"),
+		tree:      filepath.Join(directory, "tree"),
 	}
+}
+
+// alternate is the bare repository the work tree reads its
+// objects from, and the empty string where the file names none.
+func (w *workTree) alternate() string {
+	content, err := os.ReadFile(filepath.Join(w.gitDir, alternatesFile))
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(trimLine(string(content)))
+}
+
+// originURL is the remote the work tree follows, read from the
+// bare repository the alternates file names.
+func (w *workTree) originURL() string {
+	content, err := os.ReadFile(filepath.Join(w.alternate(), repositoryURLFile))
+	if err != nil {
+		return ""
+	}
+	return trimLine(string(content))
 }
 
 // exists reports whether create finished. HEAD is what create writes

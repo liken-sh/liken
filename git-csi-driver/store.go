@@ -32,6 +32,10 @@ func newStore(root string) *store {
 	return &store{root: root, locks: map[string]*sync.Mutex{}}
 }
 
+// repositoryURLFile is the file a bare repository carries beside its
+// objects, so a person and the sweep both read the remote without hashing anything.
+const repositoryURLFile = "url"
+
 // repository is one bare repository, shared by every volume of the same
 // URL on this node.
 type repository struct {
@@ -90,7 +94,7 @@ func (r *repository) create(ctx context.Context) error {
 	if _, err := runGit(ctx, r.dir, nil, "init", "--quiet", "--bare"); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(r.dir, "url"), []byte(r.url+"\n"), 0o644)
+	return os.WriteFile(filepath.Join(r.dir, repositoryURLFile), []byte(r.url+"\n"), 0o644)
 }
 
 // fetch moves the driver's own ref to what the remote holds now. depth

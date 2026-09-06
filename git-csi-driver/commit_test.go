@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// Unwatched stops the volume's own loops, so a test drives one pass of
+// unwatched stops the volume's own loops, so a test drives one pass of
 // the driver's work with nothing running beside it.
 func unwatched(t *testing.T, answering *node, held *volume) {
 	t.Helper()
@@ -21,7 +21,7 @@ func unwatched(t *testing.T, answering *node, held *volume) {
 	answering.unwatch(held)
 }
 
-// CommitOnce arms a volume with the parameters, writes the files into its
+// commitOnce arms a volume with the parameters, writes the files into its
 // tree, and runs one pass of the driver's own work.
 func commitOnce(
 	t *testing.T, parameters, files map[string]string,
@@ -32,7 +32,7 @@ func commitOnce(
 	return answering, held
 }
 
-// WrittenVolume is an armed volume whose watch is stopped and whose tree
+// writtenVolume is an armed volume whose watch is stopped and whose tree
 // holds the files.
 func writtenVolume(
 	t *testing.T, logs io.Writer, parameters, files map[string]string,
@@ -95,7 +95,7 @@ func TestTheSizeGuardLeavesABigFileOut(t *testing.T) {
 	}
 }
 
-// EventsWithReason is every Event the node posted for one reason.
+// eventsWithReason is every Event the node posted for one reason.
 func eventsWithReason(t *testing.T, answering *node, reason string) []corev1.Event {
 	t.Helper()
 	found := []corev1.Event{}
@@ -223,7 +223,7 @@ func TestOneAddCarriesEveryPathABatchHolds(t *testing.T) {
 func TestAPathOutsideTheTreeIsNotStaged(t *testing.T) {
 	work := createdWorkTree(t, map[string]string{"a.txt": "one"})
 	_, _, err := work.stageChanges(t.Context(),
-		[]change{{path: "../escape.yaml"}}, defaultPolicy(t))
+		[]change{{path: "../escape.yaml"}}, defaultPolicy())
 	if err == nil {
 		t.Error("stageChanges answered no error for a path outside the tree")
 	}
@@ -268,7 +268,7 @@ func TestTheCommitReportsWhatGitWouldNotDo(t *testing.T) {
 	}
 }
 
-// ReplaceWithDirectory puts a directory where a file git writes stands,
+// replaceWithDirectory puts a directory where a file git writes stands,
 // so the next write of it fails.
 func replaceWithDirectory(t *testing.T, path string) {
 	t.Helper()

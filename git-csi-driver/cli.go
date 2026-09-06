@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 // version is the release the binary was built from. The Dockerfile sets
@@ -62,6 +63,9 @@ type config struct {
 	nodeID   string
 	store    string
 	metrics  string
+	// sweepAfter is how long a work tree nothing stages is kept before
+	// the sweep removes it.
+	sweepAfter time.Duration
 	// controller serves the Controller service in place of the Node
 	// service, from the same binary.
 	controller bool
@@ -83,6 +87,10 @@ func parse(args []string, out io.Writer) (*config, error) {
 	// An empty --metrics serves no metrics.
 	metrics := flags.String("metrics", ":9808",
 		"the address the metrics listener takes; empty serves none")
+	// The node plugin never learns that a PersistentVolume was
+	// deleted, so a work tree nothing stages for this long is removed.
+	sweepAfter := flags.Duration("sweep-after", defaultSweepAfter,
+		"how long a work tree nothing stages is kept before it is removed")
 	controller := flags.Bool("controller", false,
 		"serve the controller plugin, which validates a class and holds no volume")
 	showVersion := flags.Bool("version", false, "print the version and exit")
@@ -105,6 +113,7 @@ func parse(args []string, out io.Writer) (*config, error) {
 		nodeID:     *nodeID,
 		store:      *store,
 		metrics:    *metrics,
+		sweepAfter: *sweepAfter,
 		controller: *controller,
 	}, nil
 }

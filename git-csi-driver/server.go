@@ -71,11 +71,18 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 	// no volume and the node plugin validates no class.
 	if cfg.controller {
 		csi.RegisterControllerServer(registered, &controller{})
+		// The resizer sidecar reads the node's capabilities from
+		// this socket before it modifies a volume, so the controller
+		// answers that call and declares nothing.
+		csi.RegisterNodeServer(registered, controllerNode{})
 	} else {
 		answering := newNode(ctx, cfg, newEvents(cfg.nodeID, logger), readings, logger)
 		// The mounts outlive the driver, so a driver that starts takes back
 		// the volumes its store still records.
 		answering.resume(ctx)
+		// The store grows until the sweep removes what nothing
+		// stages any more, so the walk runs for the driver's whole life.
+		go answering.sweeping(ctx)
 		csi.RegisterNodeServer(registered, answering)
 	}
 

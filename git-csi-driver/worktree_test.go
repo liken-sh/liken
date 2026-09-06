@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// WorkTreeOf makes the bare repository of the source, fetches the ref, and
+// workTreeOf makes the bare repository of the source, fetches the ref, and
 // answers the work tree of one volume on it.
 func workTreeOf(t *testing.T, source string) (*workTree, string) {
 	t.Helper()

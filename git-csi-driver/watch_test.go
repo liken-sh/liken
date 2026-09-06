@@ -15,7 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Logbook is a log a test reads while the driver's own loops write it.
+// logbook is a log a test reads while the driver's own loops write it.
 type logbook struct {
 	mu      sync.Mutex
 	written bytes.Buffer
@@ -33,7 +33,7 @@ func (l *logbook) String() string {
 	return l.written.String()
 }
 
-// WaitForPending waits until the volume's pending set holds the count, or
+// waitForPending waits until the volume's pending set holds the count, or
 // fails on the deadline.
 func waitForPending(t *testing.T, held *volume, want int) {
 	t.Helper()
@@ -193,7 +193,7 @@ func TestTheEventsCarryTheDirectoryThePodMade(t *testing.T) {
 	}
 }
 
-// InotifyRecord is one event as the kernel writes it: the watch, the mask,
+// inotifyRecord is one event as the kernel writes it: the watch, the mask,
 // the cookie, the name's length, and the name padded to a word with zeros.
 func inotifyRecord(descriptor int32, mask uint32, name string) []byte {
 	padded := []byte{}

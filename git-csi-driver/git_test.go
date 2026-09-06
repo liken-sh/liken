@@ -19,7 +19,7 @@ func repositoryWithACommit(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// BareRemote is a bare repository with the files on main, which is what
+// bareRemote is a bare repository with the files on main, which is what
 // a forge holds and what a push can reach.
 func bareRemote(t *testing.T, files map[string]string) string {
 	t.Helper()

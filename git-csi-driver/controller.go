@@ -15,6 +15,30 @@ type controller struct {
 	csi.UnimplementedControllerServer
 }
 
+// controllerNode exists because the external-resizer sidecar calls
+// NodeGetCapabilities on the controller's own socket to learn whether the plugin expands a volume
+// on the node, and a socket that serves no Node service answers
+// Unimplemented for the service itself, which the sidecar treats as a
+// failure and exits on. This is the Node service the controller serves:
+// no capability, so nothing expands, and no node of its own.
+type controllerNode struct {
+	csi.UnimplementedNodeServer
+}
+
+// NodeGetCapabilities declares nothing, the answer of a plugin that expands nothing
+// and stages nothing on the node where the controller runs.
+func (controllerNode) NodeGetCapabilities(
+	context.Context, *csi.NodeGetCapabilitiesRequest,
+) (*csi.NodeGetCapabilitiesResponse, error) {
+	return &csi.NodeGetCapabilitiesResponse{}, nil
+}
+
+func (controllerNode) NodeGetInfo(
+	context.Context, *csi.NodeGetInfoRequest,
+) (*csi.NodeGetInfoResponse, error) {
+	return nil, unimplemented("NodeGetInfo", "the controller plugin holds no node's volumes")
+}
+
 // ControllerGetCapabilities declares MODIFY_VOLUME alone, because the
 // driver provisions nothing and attaches nothing.
 func (c *controller) ControllerGetCapabilities(

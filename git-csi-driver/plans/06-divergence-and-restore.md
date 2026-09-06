@@ -24,6 +24,12 @@ compares the local branch to the upstream ref:
 | Ahead | Nothing. The next push carries it. |
 | Diverged | `git rebase` local onto upstream. On success, replay metadata. On conflict, `git rebase --abort`, keep local, and mark the volume diverged. |
 
+A tree with writes no commit carries yet is never reset or rebased,
+because a reset would discard them. An unarmed volume holds all its work
+this way, and an armed one holds its last writes until the quiesce
+fires. Such a tree is left as it is, and the condition says upstream
+moved. The next stage after a commit reconciles it.
+
 A stage that finds the ref deleted upstream keeps local, marks the
 condition abnormal, and pushes nothing until the ref exists again.
 

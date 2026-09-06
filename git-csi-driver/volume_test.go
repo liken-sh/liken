@@ -54,6 +54,39 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			says:     "main at d633176, 1 paths pending",
 		},
 		{
+			name: "a ref the remote no longer holds",
+			held: &volume{
+				attributes: &attributes{ref: "main"},
+				commit:     "d633176146e997",
+				writeable:  true,
+				refDeleted: true,
+			},
+			abnormal: true,
+			says:     "RefDeleted: the remote holds no main",
+		},
+		{
+			name: "a volume on its side branch",
+			held: &volume{
+				attributes: &attributes{ref: "main"},
+				commit:     "d633176146e997",
+				writeable:  true,
+				diverged:   "main.config",
+			},
+			abnormal: true,
+			says:     "Diverged: the tree pushes to main.config, not main",
+		},
+		{
+			name: "a work tree the sweep kept",
+			held: &volume{
+				attributes: &attributes{ref: "main"},
+				commit:     "d633176146e997",
+				writeable:  true,
+				abandoned:  "the work tree of old holds unpushed commits and was unstaged 745h ago",
+			},
+			abnormal: true,
+			says:     "the work tree of old holds unpushed commits and was unstaged 745h ago",
+		},
+		{
 			name: "a class the driver cannot read",
 			held: &volume{
 				attributes: &attributes{ref: "main"},
@@ -73,6 +106,44 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 					abnormal, message, c.abnormal, c.says)
 			}
 		})
+	}
+}
+
+func TestTheSideBranchIsHeldUntilAHeal(t *testing.T) {
+	held := &volume{attributes: &attributes{ref: "main"}}
+	if got := held.divergedFrom(); got != "" {
+		t.Errorf("a volume on its ref names the branch %q, want none", got)
+	}
+	held.reportDiverged("main.config")
+	if got := held.divergedFrom(); got != "main.config" {
+		t.Errorf("the volume names the branch %q, want main.config", got)
+	}
+	held.reportHealed()
+	if got := held.divergedFrom(); got != "" {
+		t.Errorf("a healed volume names the branch %q, want none", got)
+	}
+}
+
+func TestAFetchThatReachesTheRefEndsTheDeletedReport(t *testing.T) {
+	held := &volume{attributes: &attributes{ref: "main"}}
+	held.reportRefDeleted("d633176146e997")
+	if !held.refIsDeleted() {
+		t.Error("the volume does not report the ref the remote no longer holds")
+	}
+	held.reportCommit("d633176146e997")
+	if held.refIsDeleted() {
+		t.Error("a fetch that reached the ref still reports it deleted")
+	}
+}
+
+func TestTheAuthorIsTheClassWhereAClassArmsTheVolume(t *testing.T) {
+	held := &volume{}
+	if got := held.authorEnv(); got[0] != "GIT_AUTHOR_NAME="+defaultAuthorName {
+		t.Errorf("an unarmed volume commits as %q, want the driver's own name", got[0])
+	}
+	held.reportArmed(claimReference{}, "config-eager", &policy{authorName: "The lab"}, "")
+	if got := held.authorEnv(); got[0] != "GIT_AUTHOR_NAME=The lab" {
+		t.Errorf("an armed volume commits as %q, want the class's author", got[0])
 	}
 }
 

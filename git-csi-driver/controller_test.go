@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// StartController is the controller plugin on a socket of its own, which
+// startController is the controller plugin on a socket of its own, which
 // is the same binary with --controller.
 func startController(t *testing.T) *grpc.ClientConn {
 	t.Helper()
@@ -54,6 +54,29 @@ func TestTheControllerDeclaresModifyVolumeAlone(t *testing.T) {
 	}
 	if got := declared[0].GetRpc().GetType(); got != csi.ControllerServiceCapability_RPC_MODIFY_VOLUME {
 		t.Errorf("ControllerGetCapabilities declared %v, want MODIFY_VOLUME", got)
+	}
+}
+
+func TestTheControllerDeclaresNoNodeCapability(t *testing.T) {
+	client := csi.NewNodeClient(startController(t))
+	answer, err := client.NodeGetCapabilities(t.Context(),
+		&csi.NodeGetCapabilitiesRequest{})
+	if err != nil {
+		t.Fatalf("NodeGetCapabilities: %v", err)
+	}
+	if declared := answer.GetCapabilities(); len(declared) != 0 {
+		t.Errorf("NodeGetCapabilities answered %v, want none", declared)
+	}
+}
+
+func TestTheControllerHoldsNoNodesVolumes(t *testing.T) {
+	client := csi.NewNodeClient(startController(t))
+	_, err := client.NodeGetInfo(t.Context(), &csi.NodeGetInfoRequest{})
+	if got := status.Code(err); got != codes.Unimplemented {
+		t.Fatalf("NodeGetInfo answered %v, want %v", got, codes.Unimplemented)
+	}
+	if got := status.Convert(err).Message(); !strings.Contains(got, "NodeGetInfo") {
+		t.Errorf("NodeGetInfo said %q, want the call named", got)
 	}
 }
 

@@ -48,16 +48,17 @@ func (w *workTree) markPushed(ctx context.Context, commit string) error {
 	return err
 }
 
-// pushTo sends the branch and the metadata ref beside it, and
-// names the metadata ref only when the work tree holds one.
-func (w *workTree) pushTo(ctx context.Context, env []string, url, ref string) error {
-	branch := "refs/heads/" + ref
-	specs := []string{branch + ":" + branch}
+// pushTo sends the branch to remote, the branch it takes on the remote,
+// which is the ref itself until the volume takes a side branch. The
+// metadata ref goes beside it when the work tree holds one.
+func (w *workTree) pushTo(
+	ctx context.Context, env []string, url, ref, remote string,
+) (gitOutput, error) {
+	specs := []string{"refs/heads/" + ref + ":refs/heads/" + remote}
 	if w.refCommit(ctx, metadataRef) != "" {
 		specs = append(specs, metadataRef+":"+metadataRef)
 	}
-	_, err := w.gitWith(ctx, env, append([]string{"push", "--quiet", url}, specs...)...)
-	return err
+	return w.gitWith(ctx, env, append([]string{"push", "--quiet", url}, specs...)...)
 }
 
 // fetchMetadata takes the record the remote holds, which is what
@@ -120,20 +121,30 @@ func (n *node) counted(ctx context.Context, held *volume) (int, time.Time, error
 
 // pushNow sends what the work tree holds and moves the mark. A failure
 // is the condition's message until a push works.
+// A push the remote rejects as non-fast-forward moves the volume
+// to its side branch and goes there at once, so the work reaches the
+// remote in the same call that found the ref moved.
 func (n *node) pushNow(ctx context.Context, held *volume, count int) {
+	if held.refIsDeleted() {
+		return
+	}
 	head, err := held.work.head(ctx)
 	if err != nil {
 		n.logger.WarnContext(ctx, "the tree's commit was not read",
 			"volume", held.id, "error", err)
 		return
 	}
-	env, remove, err := held.credentials.use(held.directory)
-	if err != nil {
-		n.pushFailed(ctx, held, err.Error())
-		return
+	branch := held.divergedFrom()
+	remote := held.attributes.ref
+	if branch != "" {
+		remote = branch
 	}
-	pushErr := held.work.pushTo(ctx, env, held.attributes.url, held.attributes.ref)
-	remove()
+	output, pushErr := n.sendTo(ctx, held, remote)
+	if pushErr != nil && branch == "" && rejectedPush(output) {
+		n.diverge(ctx, held)
+		remote = held.divergedFrom()
+		_, pushErr = n.sendTo(ctx, held, remote)
+	}
 	if pushErr != nil {
 		n.pushFailed(ctx, held, pushErr.Error())
 		return
@@ -145,10 +156,21 @@ func (n *node) pushNow(ctx context.Context, held *volume, count int) {
 	held.reportPushed(time.Now())
 	claim, _, _ := held.reading()
 	n.report(ctx, held, claim, corev1.EventTypeNormal, reasonPushed,
-		fmt.Sprintf("pushed %d commits to %s at %s", count, held.attributes.ref, short(head)))
+		fmt.Sprintf("pushed %d commits to %s at %s", count, remote, short(head)))
 	n.logger.InfoContext(ctx, "pushed",
-		"volume", held.id, "commits", count, "commit", short(head))
+		"volume", held.id, "commits", count, "branch", remote, "commit", short(head))
 	n.readings.record(held)
+}
+
+// sendTo opens the credential window, pushes, and closes it, so
+// no key file outlives the invocation that reads it.
+func (n *node) sendTo(ctx context.Context, held *volume, remote string) (gitOutput, error) {
+	env, remove, err := held.credentials.use(held.directory)
+	if err != nil {
+		return gitOutput{}, err
+	}
+	defer remove()
+	return held.work.pushTo(ctx, env, held.attributes.url, held.attributes.ref, remote)
 }
 
 // pushFailed reports the failure in all three places and posts

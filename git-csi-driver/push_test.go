@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// PushedVolume is an armed volume against a bare remote, with one commit
+// pushedVolume is an armed volume against a bare remote, with one commit
 // of its own that the remote does not hold.
 func pushedVolume(t *testing.T, logs io.Writer, parameters map[string]string) (*node, *volume, string) {
 	t.Helper()
@@ -162,7 +162,7 @@ func TestAPushThatFailsIsTheConditionUntilOneWorks(t *testing.T) {
 	}
 }
 
-// CounterOf is what one counter reads for the claim.
+// counterOf is what one counter reads for the claim.
 func counterOf(t *testing.T, readings *metrics, name, namespace, claim string) (float64, bool) {
 	t.Helper()
 	families, err := readings.registry.Gather()

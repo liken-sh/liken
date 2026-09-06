@@ -17,13 +17,13 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// Cluster is the fake API server the node's events and arming share.
+// cluster is the fake API server the node's events and arming share.
 func cluster(t *testing.T, answering *node) *fake.Clientset {
 	t.Helper()
 	return answering.events.client.(*fake.Clientset)
 }
 
-// BoundVolume writes the PersistentVolume that carries the handle and the
+// boundVolume writes the PersistentVolume that carries the handle and the
 // claim it is bound to.
 func boundVolume(t *testing.T, answering *node, handle, class string) {
 	t.Helper()
@@ -56,7 +56,7 @@ func boundVolume(t *testing.T, answering *node, handle, class string) {
 	}
 }
 
-// AttributesClass writes a VolumeAttributesClass of the driver it names.
+// attributesClass writes a VolumeAttributesClass of the driver it names.
 func attributesClass(t *testing.T, answering *node, name, driver string) {
 	t.Helper()
 	class := &storagev1.VolumeAttributesClass{
@@ -69,7 +69,7 @@ func attributesClass(t *testing.T, answering *node, name, driver string) {
 	}
 }
 
-// ArmingClass writes a class of this driver with the parameters plan 05
+// armingClass writes a class of this driver with the parameters plan 05
 // reads.
 func armingClass(t *testing.T, answering *node, name string, parameters map[string]string) {
 	t.Helper()
@@ -84,7 +84,7 @@ func armingClass(t *testing.T, answering *node, name string, parameters map[stri
 	}
 }
 
-// ArmedVolume stages and publishes a writeable volume whose claim names a
+// armedVolume stages and publishes a writeable volume whose claim names a
 // class with the parameters, and waits for the class to arm it.
 func armedVolume(
 	t *testing.T, answering *node, id, url string, parameters map[string]string,
@@ -97,7 +97,7 @@ func armedVolume(
 	return held
 }
 
-// WaitForArmed waits until the volume reports the armed state, or fails on
+// waitForArmed waits until the volume reports the armed state, or fails on
 // the deadline.
 func waitForArmed(t *testing.T, held *volume, want bool) {
 	t.Helper()
@@ -145,7 +145,7 @@ func TestAClassOfAnotherDriverLeavesTheVolumeUnarmed(t *testing.T) {
 	}
 }
 
-// WaitForClaim waits until the loop has found the claim, which is the
+// waitForClaim waits until the loop has found the claim, which is the
 // first thing a pass does.
 func waitForClaim(t *testing.T, held *volume) {
 	t.Helper()
@@ -456,7 +456,7 @@ func TestADriverOutsideAClusterArmsNothing(t *testing.T) {
 	}
 }
 
-// WaitForCondition waits until the volume's condition carries the text.
+// waitForCondition waits until the volume's condition carries the text.
 func waitForCondition(t *testing.T, held *volume, says string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)

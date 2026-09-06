@@ -31,6 +31,12 @@ const (
 	reasonPushed     = "GitVolumePushed"
 	reasonPushFailed = "GitVolumePushFailed"
 	reasonSkipped    = "GitVolumeFileSkipped"
+	// The three the side branch and the sweep add: the volume
+	// moved to its side branch, a person merged it back, and the sweep
+	// removed a work tree nothing stages.
+	reasonDiverged = "GitVolumeDiverged"
+	reasonHealed   = "GitVolumeHealed"
+	reasonSwept    = "GitVolumeSwept"
 )
 
 // events posts Events through the cluster's API, or posts nothing when

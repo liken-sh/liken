@@ -36,6 +36,10 @@ type node struct {
 	// how often it reads that anyway.
 	quiesce time.Duration
 	sweep   time.Duration
+	// How long a work tree nothing stages is kept, and how often
+	// the driver walks the store to find one.
+	sweepAfter time.Duration
+	sweepEvery time.Duration
 	// mounted asks the kernel whether a path is still a mount. A restarted
 	// driver asks it about every record.
 	//
@@ -55,28 +59,34 @@ type node struct {
 	staged   map[string]*volume
 	watchers map[string]*watcher
 	armings  map[string]context.CancelFunc
+	// The work trees the sweep kept because they hold commits the
+	// remote does not, by the repository each one follows.
+	abandoned map[string]abandonedTree
 }
 
 // newNode builds the service. base is the driver's run, so every fetch
 // loop ends when the pod stops.
 func newNode(base context.Context, cfg *config, posting *events, readings *metrics, logger *slog.Logger) *node {
 	answering := &node{
-		nodeID:    cfg.nodeID,
-		store:     newStore(cfg.store),
-		mounts:    kernelMounts{},
-		events:    posting,
-		readings:  readings,
-		logger:    logger,
-		base:      base,
-		quiesce:   defaultQuiesce,
-		sweep:     defaultSweep,
-		mountinfo: mountTable,
-		inotify:   unix.InotifyInit1,
-		volumes:   map[string]*volume{},
-		followers: map[string]*follower{},
-		staged:    map[string]*volume{},
-		watchers:  map[string]*watcher{},
-		armings:   map[string]context.CancelFunc{},
+		nodeID:     cfg.nodeID,
+		store:      newStore(cfg.store),
+		mounts:     kernelMounts{},
+		events:     posting,
+		readings:   readings,
+		logger:     logger,
+		base:       base,
+		quiesce:    defaultQuiesce,
+		sweep:      defaultSweep,
+		sweepAfter: cfg.sweepAfter,
+		sweepEvery: defaultSweepEvery,
+		mountinfo:  mountTable,
+		inotify:    unix.InotifyInit1,
+		volumes:    map[string]*volume{},
+		followers:  map[string]*follower{},
+		staged:     map[string]*volume{},
+		watchers:   map[string]*watcher{},
+		armings:    map[string]context.CancelFunc{},
+		abandoned:  map[string]abandonedTree{},
 	}
 	answering.arms = newArming(answering, posting.client, logger)
 	answering.mounted = func(path string) bool { return mountedNow(answering.mountinfo, path) }

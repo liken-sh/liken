@@ -13,7 +13,9 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // startServer is the fixture every service test uses: a server on a
@@ -63,6 +65,33 @@ func TestTheServerAnswersOnTheSocket(t *testing.T) {
 	}
 	if info.GetName() != driverName {
 		t.Errorf("GetPluginInfo named %q, want %q", info.GetName(), driverName)
+	}
+}
+
+func TestTheServerRegistersTheServicesOfItsMode(t *testing.T) {
+	// The controller serves the Node service as well, because the
+	// resizer sidecar reads the node's capabilities from the controller's
+	// own socket and exits when that service is not there.
+	controlling := startController(t)
+	if _, err := csi.NewNodeClient(controlling).NodeGetCapabilities(
+		t.Context(), &csi.NodeGetCapabilitiesRequest{}); err != nil {
+		t.Errorf("the controller serves no Node service: %v", err)
+	}
+	if _, err := csi.NewControllerClient(controlling).ControllerGetCapabilities(
+		t.Context(), &csi.ControllerGetCapabilitiesRequest{}); err != nil {
+		t.Errorf("the controller serves no Controller service: %v", err)
+	}
+
+	answering := startServer(t, io.Discard)
+	if _, err := csi.NewNodeClient(answering).NodeGetCapabilities(
+		t.Context(), &csi.NodeGetCapabilitiesRequest{}); err != nil {
+		t.Errorf("the node plugin serves no Node service: %v", err)
+	}
+	_, err := csi.NewControllerClient(answering).ControllerGetCapabilities(
+		t.Context(), &csi.ControllerGetCapabilitiesRequest{})
+	if got := status.Code(err); got != codes.Unimplemented {
+		t.Errorf("the node plugin answered %v for a Controller call, want %v",
+			got, codes.Unimplemented)
 	}
 }
 

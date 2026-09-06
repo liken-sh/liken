@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// RecordOf reads the record a volume's directory carries.
+// recordOf reads the record a volume's directory carries.
 func recordOf(t *testing.T, answering *node, id string) *record {
 	t.Helper()
 	held, err := readRecord(filepath.Join(answering.store.volumeDir(id), recordFile))
@@ -19,7 +19,7 @@ func recordOf(t *testing.T, answering *node, id string) *record {
 	return held
 }
 
-// Restarted is a second driver on the same store, which is what a rollout
+// restarted is a second driver on the same store, which is what a rollout
 // of the DaemonSet leaves.
 func restarted(t *testing.T, answering *node, mounted bool) *node {
 	t.Helper()

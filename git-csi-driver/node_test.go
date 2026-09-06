@@ -27,7 +27,11 @@ func testNode(t *testing.T, logs io.Writer) (*node, *recordedMounts) {
 	calls := &recordedMounts{}
 	answering := newNode(
 		t.Context(),
-		&config{nodeID: "node-1", store: filepath.Join(t.TempDir(), "store")},
+		&config{
+			nodeID:     "node-1",
+			store:      filepath.Join(t.TempDir(), "store"),
+			sweepAfter: defaultSweepAfter,
+		},
 		fakeEvents(t, logs),
 		newMetrics(),
 		slog.New(slog.NewTextHandler(logs, nil)),

@@ -48,6 +48,69 @@ type volume struct {
 	unpushed int
 	oldest   time.Time
 	lastPush time.Time
+	// The side branch every push goes to while the tree and
+	// upstream have both moved, whether the remote holds the ref at all,
+	// and the work tree the sweep left on this node with commits nothing
+	// pushed.
+	diverged   string
+	refDeleted bool
+	abandoned  string
+}
+
+// reportDiverged records the side branch the volume pushes to.
+func (v *volume) reportDiverged(branch string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.diverged = branch
+}
+
+// reportHealed records that the ref holds the work again.
+func (v *volume) reportHealed() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.diverged = ""
+}
+
+// divergedFrom is the side branch, and the empty string on a
+// volume that pushes to its ref.
+func (v *volume) divergedFrom() string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.diverged
+}
+
+// reportRefDeleted records a fetch that found the remote holds
+// the ref no longer, and the commit the tree keeps.
+func (v *volume) reportRefDeleted(commit string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.commit = commit
+	v.refDeleted = true
+}
+
+// refIsDeleted reports the ref the remote no longer holds, which
+// is what stops every push.
+func (v *volume) refIsDeleted() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.refDeleted
+}
+
+// reportAbandoned records the work tree of this repository the
+// sweep found with commits nothing pushed.
+func (v *volume) reportAbandoned(message string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.abandoned = message
+}
+
+// authorEnv is the class's author where a class arms the volume,
+// and the driver's own where none does.
+func (v *volume) authorEnv() []string {
+	if rules := v.policyNow(); rules != nil {
+		return rules.author()
+	}
+	return defaultPolicy().author()
 }
 
 // setPod records the pod a publish named, so an Event from a loop that
@@ -174,6 +237,11 @@ func (v *volume) report() (bool, string) {
 	switch {
 	case v.trouble != "":
 		return true, v.trouble
+	case v.refDeleted:
+		return true, fmt.Sprintf("RefDeleted: the remote holds no %s", v.attributes.ref)
+	case v.diverged != "":
+		return true, fmt.Sprintf("Diverged: the tree pushes to %s, not %s",
+			v.diverged, v.attributes.ref)
 	case v.invalid != "":
 		return true, v.invalid
 	case len(v.skipped) > 0:
@@ -181,6 +249,8 @@ func (v *volume) report() (bool, string) {
 	case v.overdue(time.Now()):
 		return true, fmt.Sprintf("%d unpushed commits, the oldest older than %s",
 			v.unpushed, v.rules.maxLatency)
+	case v.abandoned != "":
+		return true, v.abandoned
 	case v.writeable && !v.armed && len(v.pending) > 0:
 		return true, fmt.Sprintf("unarmed: %d paths pending, no class on claim %s/%s",
 			len(v.pending), v.claim.namespace, v.claim.name)
@@ -192,11 +262,15 @@ func (v *volume) report() (bool, string) {
 }
 
 // reportCommit records that the tree holds commit and nothing is wrong.
+// reportCommit records that the tree holds commit and nothing is wrong.
+// A resolved commit means the fetch reached the ref, so a deleted ref is
+// reported no longer.
 func (v *volume) reportCommit(commit string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.commit = commit
 	v.trouble = ""
+	v.refDeleted = false
 }
 
 // reportTrouble records a failure and reports whether it is the first

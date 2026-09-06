@@ -18,8 +18,8 @@ import (
 // metricsDeadline bounds a request's headers and the listener's stop.
 const metricsDeadline = 30 * time.Second
 
-// metrics is the registry the listener serves and the gauges plans 04
-// and 05 fill.
+// metrics is the registry the listener serves and the gauges
+// every volume reports itself on.
 type metrics struct {
 	registry *prometheus.Registry
 	armed    *prometheus.GaugeVec
@@ -31,6 +31,9 @@ type metrics struct {
 	lastPush     *prometheus.GaugeVec
 	pushFailures *prometheus.CounterVec
 	skipped      *prometheus.GaugeVec
+	// What a diverged volume adds: the side branch it pushes to
+	// instead of its ref.
+	diverged *prometheus.GaugeVec
 }
 
 // metricLabels name the claim a person would look up.
@@ -59,9 +62,14 @@ func newMetrics() *metrics {
 		// Files the last commit left out, over the size guard.
 		skipped: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_skipped_files", Help: "Files the last commit left out, over commit.maxFileSize."}, metricLabels),
+		// One while the volume pushes to its side branch, zero
+		// while it pushes to its ref.
+		diverged: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{Name: "git_csi_diverged", Help: "One while the volume pushes to its side branch, zero while it pushes to its ref."}, metricLabels),
 	}
 	readings.registry.MustRegister(readings.armed, readings.pending,
-		readings.unpushed, readings.lastPush, readings.pushFailures, readings.skipped)
+		readings.unpushed, readings.lastPush, readings.pushFailures, readings.skipped,
+		readings.diverged)
 	return readings
 }
 
@@ -72,16 +80,13 @@ func (m *metrics) record(held *volume) {
 	if m == nil || claim.name == "" {
 		return
 	}
-	value := 0.0
-	if armed {
-		value = 1
-	}
-	m.armed.WithLabelValues(claim.namespace, claim.name).Set(value)
+	m.armed.WithLabelValues(claim.namespace, claim.name).Set(gauge(armed))
 	m.pending.WithLabelValues(claim.namespace, claim.name).Set(float64(pending))
 
 	unpushed, lastPush, skipped := held.pushing()
 	m.unpushed.WithLabelValues(claim.namespace, claim.name).Set(float64(unpushed))
 	m.skipped.WithLabelValues(claim.namespace, claim.name).Set(float64(skipped))
+	m.diverged.WithLabelValues(claim.namespace, claim.name).Set(gauge(held.divergedFrom() != ""))
 	// A volume that has never pushed reports no time, because zero
 	// would read as a push in 1970.
 	if !lastPush.IsZero() {
@@ -113,6 +118,15 @@ func (m *metrics) forget(held *volume) {
 	m.lastPush.DeleteLabelValues(claim.namespace, claim.name)
 	m.pushFailures.DeleteLabelValues(claim.namespace, claim.name)
 	m.skipped.DeleteLabelValues(claim.namespace, claim.name)
+	m.diverged.DeleteLabelValues(claim.namespace, claim.name)
+}
+
+// gauge carries a state as one or zero.
+func gauge(state bool) float64 {
+	if state {
+		return 1
+	}
+	return 0
 }
 
 // listen opens the address --metrics names. An empty address serves no

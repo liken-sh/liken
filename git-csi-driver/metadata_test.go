@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// CreatedWorkTree is a work tree of the source, checked out on main.
+// createdWorkTree is a work tree of the source, checked out on main.
 func createdWorkTree(t *testing.T, files map[string]string) *workTree {
 	t.Helper()
 	work, commit := workTreeOf(t, repositoryWithACommit(t, files))
@@ -17,16 +17,6 @@ func createdWorkTree(t *testing.T, files map[string]string) *workTree {
 		t.Fatalf("create: %v", err)
 	}
 	return work
-}
-
-// DefaultPolicy is the class every parameter defaults to.
-func defaultPolicy(t *testing.T) *policy {
-	t.Helper()
-	rules, err := parsePolicy(nil)
-	if err != nil {
-		t.Fatalf("parsePolicy: %v", err)
-	}
-	return rules
 }
 
 func TestTheWalkRecordsWhatACheckoutCannotCarry(t *testing.T) {
@@ -130,7 +120,7 @@ func TestALineTheDriverCannotReadIsNoRecord(t *testing.T) {
 
 func TestTheRecordIsCommittedOnlyWhenItChanges(t *testing.T) {
 	work := createdWorkTree(t, map[string]string{"a.txt": "one"})
-	rules := defaultPolicy(t)
+	rules := defaultPolicy()
 	if err := os.Chmod(filepath.Join(work.tree, "a.txt"), 0o600); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
@@ -173,7 +163,7 @@ func TestTheRecordIsCommittedOnlyWhenItChanges(t *testing.T) {
 	}
 }
 
-// GitIn runs the tests' own git against the work tree's git directory.
+// gitIn runs the tests' own git against the work tree's git directory.
 func gitIn(t *testing.T, work *workTree, args ...string) string {
 	t.Helper()
 	return git(t, work.directory,
@@ -218,7 +208,7 @@ func TestTheRecordIsNotCommittedWhenGitCannotHoldIt(t *testing.T) {
 				t.Fatalf("chmod: %v", err)
 			}
 			c.stand(t, work)
-			if err := work.recordMetadata(t.Context(), defaultPolicy(t)); err == nil {
+			if err := work.recordMetadata(t.Context(), defaultPolicy()); err == nil {
 				t.Error("recordMetadata answered no error")
 			}
 		})
@@ -227,7 +217,7 @@ func TestTheRecordIsNotCommittedWhenGitCannotHoldIt(t *testing.T) {
 
 func TestTheReplayGivesTheTreeItsModesAndEmptyDirectories(t *testing.T) {
 	work := createdWorkTree(t, map[string]string{"a.txt": "one", "docs/b.txt": "two"})
-	rules := defaultPolicy(t)
+	rules := defaultPolicy()
 	if err := os.Chmod(filepath.Join(work.tree, "a.txt"), 0o600); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
@@ -270,7 +260,7 @@ func TestTheReplayTakesTheOwnerWhereTheDriverMay(t *testing.T) {
 	if err := os.Chmod(filepath.Join(work.tree, "a.txt"), 0o600); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
-	if err := work.recordMetadata(t.Context(), defaultPolicy(t)); err != nil {
+	if err := work.recordMetadata(t.Context(), defaultPolicy()); err != nil {
 		t.Fatalf("recordMetadata: %v", err)
 	}
 	logs := &logbook{}
@@ -322,11 +312,11 @@ func TestTheReplayReportsWhatItCannotGive(t *testing.T) {
 	}
 }
 
-// RecordOnRef puts the content on the metadata ref, which is what a
+// recordOnRef puts the content on the metadata ref, which is what a
 // restore reads.
 func recordOnRef(t *testing.T, work *workTree, content string) {
 	t.Helper()
-	if err := work.commitMetadata(t.Context(), defaultPolicy(t), content); err != nil {
+	if err := work.commitMetadata(t.Context(), defaultPolicy(), content); err != nil {
 		t.Fatalf("commitMetadata: %v", err)
 	}
 }
@@ -343,7 +333,7 @@ func TestTheRecordIsNotMadeFromATreeThatIsGone(t *testing.T) {
 	if err := os.RemoveAll(work.tree); err != nil {
 		t.Fatalf("removing the tree: %v", err)
 	}
-	if err := work.recordMetadata(t.Context(), defaultPolicy(t)); err == nil {
+	if err := work.recordMetadata(t.Context(), defaultPolicy()); err == nil {
 		t.Error("recordMetadata answered no error for a tree that is not there")
 	}
 }

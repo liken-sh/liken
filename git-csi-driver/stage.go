@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,9 +92,10 @@ func checkAccessMode(capability *csi.VolumeCapability) error {
 }
 
 // stageTree fetches the ref into the shared bare repository and brings
-// the work tree to it. A tree that already exists is left as the last
-// pod left it. A ref that moved under it is reported in the condition;
-// plan 06 reconciles it.
+// the work tree to it.
+// A tree the node already holds is reconciled with what the fetch
+// found, and a remote that holds the ref no longer leaves the tree as it
+// is and stops every push until the ref exists again.
 func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository) error {
 	defer repo.lock()()
 
@@ -109,14 +109,19 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 		return status.Error(codes.Internal, err.Error())
 	}
 	fetchErr := repo.fetch(ctx, env, staging.attributes.ref, 0)
+	side := n.fetchSide(ctx, env, repo, staging)
 	remove()
 	if fetchErr != nil {
+		if staging.work.exists() && strings.Contains(fetchErr.Error(), missingRef) {
+			return n.refDeleted(ctx, staging)
+		}
 		return status.Error(codes.Unavailable, fetchErr.Error())
 	}
 	commit, err := repo.resolve(ctx, staging.attributes.ref)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
+	n.noteAbandoned(staging)
 
 	if !staging.work.exists() {
 		if err := staging.work.create(ctx, staging.attributes.ref, commit); err != nil {
@@ -143,10 +148,53 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 		}
 	}
 	staging.reportCommit(head)
-	if head != commit {
-		staging.reportTrouble(fmt.Sprintf("upstream moved: %s is at %s and the tree is at %s",
-			staging.attributes.ref, short(commit), short(head)))
+	if err := n.reconcile(ctx, staging, head, commit, side); err != nil {
+		return status.Error(codes.Internal, err.Error())
 	}
+	// A reconcile that moved the tree leaves nothing wrong with it. One
+	// that left the tree alone may have said why, and that stands.
+	if moved := staging.work.refCommit(ctx, "HEAD"); moved != head {
+		staging.reportCommit(moved)
+	}
+	return nil
+}
+
+// missingRef is how git states a ref the remote does not hold.
+const missingRef = "couldn't find remote ref"
+
+// fetchSide takes the side branch of a diverged volume, so the
+// stage knows whether the remote still holds it. A remote that holds it
+// no longer is a person who merged and deleted it, which is not a
+// failure of the stage.
+func (n *node) fetchSide(
+	ctx context.Context, env []string, repo *repository, staging *volume,
+) string {
+	if !staging.work.exists() {
+		return ""
+	}
+	branch := staging.work.divergedBranch(ctx)
+	if branch == "" {
+		return ""
+	}
+	if err := repo.fetch(ctx, env, branch, 0); err != nil {
+		n.logger.InfoContext(ctx, "the remote holds no side branch",
+			"volume", staging.id, "branch", branch, "reason", err)
+		return ""
+	}
+	return branch
+}
+
+// refDeleted keeps the tree and reports the ref the remote no
+// longer holds, because a push to a ref a person deleted would put it
+// back.
+func (n *node) refDeleted(ctx context.Context, staging *volume) error {
+	head, err := staging.work.head(ctx)
+	if err != nil {
+		return status.Error(codes.Internal, err.Error())
+	}
+	staging.reportRefDeleted(head)
+	n.logger.WarnContext(ctx, "the remote holds no ref",
+		"volume", staging.id, "ref", staging.attributes.ref)
 	return nil
 }
 
@@ -196,6 +244,7 @@ func (n *node) NodeUnstageVolume(
 	// only after what it holds has reached the remote.
 	if found {
 		n.push(ctx, staged)
+		n.markUnstaged(ctx, staged)
 		n.mu.Lock()
 		n.disarm(staged)
 		n.mu.Unlock()

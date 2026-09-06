@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// StageRequest is the stage call the kubelet makes for a persistent volume
+// stageRequest is the stage call the kubelet makes for a persistent volume
 // of the URL.
 func stageRequest(t *testing.T, id, url string, extra map[string]string) *csi.NodeStageVolumeRequest {
 	t.Helper()
@@ -36,7 +36,7 @@ func writeableCapability(mode csi.VolumeCapability_AccessMode_Mode) *csi.VolumeC
 	}
 }
 
-// PersistentPublish is the publish call the kubelet makes after the stage,
+// persistentPublish is the publish call the kubelet makes after the stage,
 // which carries the pod and the same attributes.
 func persistentPublish(t *testing.T, staged *csi.NodeStageVolumeRequest) *csi.NodePublishVolumeRequest {
 	t.Helper()
@@ -57,7 +57,7 @@ func persistentPublish(t *testing.T, staged *csi.NodeStageVolumeRequest) *csi.No
 	}
 }
 
-// WriteableVolume stages and publishes one writeable volume and answers
+// writeableVolume stages and publishes one writeable volume and answers
 // what the node holds for it.
 func writeableVolume(
 	t *testing.T, answering *node, id, url string,
@@ -173,7 +173,7 @@ func TestNodeStageVolumeRefusesWhatItCannotRead(t *testing.T) {
 	}
 }
 
-// MustFail runs the stage and fails the test when it works.
+// mustFail runs the stage and fails the test when it works.
 func mustFail(t *testing.T, answering *node, request *csi.NodeStageVolumeRequest) error {
 	t.Helper()
 	_, err := answering.NodeStageVolume(t.Context(), request)
@@ -208,44 +208,6 @@ func TestNodeStageVolumeMakesTheWorkTreeFromTheRef(t *testing.T) {
 	abnormal, message := staged.report()
 	if abnormal {
 		t.Errorf("a first stage reported %q", message)
-	}
-}
-
-func TestNodeStageVolumeLeavesATreeItAlreadyMade(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	request := stageRequest(t, "config", fileURL(source), nil)
-	if _, err := answering.NodeStageVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
-	}
-	answering.mu.Lock()
-	staged := answering.staged["config"]
-	answering.mu.Unlock()
-	writeFiles(t, staged.tree, map[string]string{"a.txt": "the pod wrote this"})
-
-	// The driver restarted and the kubelet staged the volume again, with
-	// the ref moved under it.
-	moved := commitFiles(t, source, map[string]string{"a.txt": "two"})
-	answering.mu.Lock()
-	delete(answering.staged, "config")
-	answering.mu.Unlock()
-	if _, err := answering.NodeStageVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodeStageVolume again: %v", err)
-	}
-
-	answering.mu.Lock()
-	again := answering.staged["config"]
-	answering.mu.Unlock()
-	want := map[string]string{"a.txt": "the pod wrote this"}
-	if got := readTree(t, again.tree); !sameTree(got, want) {
-		t.Errorf("the tree holds %v, want %v", got, want)
-	}
-	abnormal, message := again.report()
-	if !abnormal {
-		t.Fatalf("a ref that moved reported %q", message)
-	}
-	if !strings.Contains(message, short(moved)) || !strings.Contains(message, "upstream moved") {
-		t.Errorf("the condition says %q, want both commits named", message)
 	}
 }
 
@@ -719,7 +681,7 @@ func TestNodeStageVolumeReportsAMarkItCannotMove(t *testing.T) {
 	}
 }
 
-// LockTheMark puts a directory where git writes the mark's lock file, so
+// lockTheMark puts a directory where git writes the mark's lock file, so
 // the next move of the mark fails.
 func lockTheMark(t *testing.T, answering *node, id string) {
 	t.Helper()

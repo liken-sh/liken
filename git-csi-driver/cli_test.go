@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stopped is a context that is already over, so run serves and stops
@@ -137,10 +138,11 @@ func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	want := config{
-		endpoint: "unix:///csi/csi.sock",
-		nodeID:   "node-1",
-		store:    "/var/lib/liken/pod-storage/git-csi",
-		metrics:  ":9808",
+		endpoint:   "unix:///csi/csi.sock",
+		nodeID:     "node-1",
+		store:      "/var/lib/liken/pod-storage/git-csi",
+		metrics:    ":9808",
+		sweepAfter: defaultSweepAfter,
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)
@@ -153,15 +155,17 @@ func TestParseTakesEveryFlag(t *testing.T) {
 		"--node-id", "node-1",
 		"--store", "/srv/git-csi",
 		"--metrics", "127.0.0.1:9808",
+		"--sweep-after", "48h",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	want := config{
-		endpoint: "unix:///run/csi/csi.sock",
-		nodeID:   "node-1",
-		store:    "/srv/git-csi",
-		metrics:  "127.0.0.1:9808",
+		endpoint:   "unix:///run/csi/csi.sock",
+		nodeID:     "node-1",
+		store:      "/srv/git-csi",
+		metrics:    "127.0.0.1:9808",
+		sweepAfter: 48 * time.Hour,
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)

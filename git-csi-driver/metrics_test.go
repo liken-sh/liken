@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// GaugeOf is what one gauge reads for the claim, and false when the claim
+// gaugeOf is what one gauge reads for the claim, and false when the claim
 // is on no gauge.
 func gaugeOf(t *testing.T, readings *metrics, name, namespace, claim string) (float64, bool) {
 	t.Helper()
@@ -36,7 +36,7 @@ func gaugeOf(t *testing.T, readings *metrics, name, namespace, claim string) (fl
 	return 0, false
 }
 
-// Reported is a volume that has been read once, which is what the gauges
+// reported is a volume that has been read once, which is what the gauges
 // take.
 func reported(claim claimReference, armed bool, pending int) *volume {
 	held := &volume{claim: claim, armed: armed}
