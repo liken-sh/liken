@@ -199,6 +199,21 @@ fn a_playing_status_covers_the_page_and_asks_for_no_frame() {
 }
 
 #[test]
+fn a_delivery_under_the_film_draws_no_frame() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Status(Status {
+        activity: Activity::Playing,
+        ..Status::default()
+    })];
+    browser.pump(PRESS + 1.0);
+
+    browser.store.get_mut().delivers = true;
+
+    assert!(!browser.pump(PRESS + 2.0));
+}
+
+#[test]
 fn the_present_after_a_covered_film_draws_the_return() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");

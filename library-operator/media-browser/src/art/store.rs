@@ -184,6 +184,16 @@ impl Store {
         None
     }
 
+    /// Move the memory budget, evicting down to it at once where it
+    /// shrank.
+    pub fn resize(&mut self, budget: usize) {
+        let (lock, _) = &*self.shared;
+        lock.lock()
+            .expect("the store mutex is never poisoned")
+            .cache
+            .resize(budget);
+    }
+
     // Take the mark a worker left, so the caller reads that a decode
     // landed and the mark is clear for the decodes after it.
     pub fn delivered(&mut self) -> bool {

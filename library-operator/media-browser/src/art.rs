@@ -47,11 +47,13 @@ pub trait Art {
     /// The art for one item at the size it is drawn.
     fn covered(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Image>;
 
-    /// How many physical pixels one logical pixel spans. Every size a view
-    /// asks for is logical, and a store decodes at the physical size under
-    /// it, so a 4K panel at scale 2 draws art at its own resolution. A
-    /// store with nothing to decode ignores it.
-    fn scaled(&mut self, _scale: f32) {}
+    /// The window's physical size, and how many physical pixels one
+    /// logical pixel spans. Every size a view asks for is logical, and a
+    /// store decodes at the physical size under it, so a 4K panel at scale
+    /// 2 draws art at its own resolution. The physical size bounds the
+    /// store's memory, because the art of one page grows with the window.
+    /// A store with nothing to decode ignores both.
+    fn scaled(&mut self, _physical: (u32, u32), _scale: f32) {}
 
     /// The art fitted inside the box at its own ratio. A logo is wide and
     /// would lose its ends to a cover crop. A store with no fit answers

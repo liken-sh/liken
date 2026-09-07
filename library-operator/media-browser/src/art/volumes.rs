@@ -128,8 +128,9 @@ impl Art for Volumes {
         self.decoded(library, art, width, height, Fit::Contain)
     }
 
-    fn scaled(&mut self, scale: f32) {
+    fn scaled(&mut self, physical: (u32, u32), scale: f32) {
         self.scale = scale;
+        self.store.resize(budget(physical));
     }
 
     fn file(&self, library: &str, path: &str) -> Option<PathBuf> {
@@ -235,7 +236,7 @@ mod tests {
     fn a_store_at_scale_two_decodes_twice_the_pixels_and_reports_the_logical_size() {
         let dir = TempDir::new().unwrap();
         let mut volumes = volume(&dir);
-        volumes.scaled(2.0);
+        volumes.scaled((3840, 2160), 2.0);
         let (sender, receiver) = mpsc::channel();
         volumes.wake_by(Arc::new(move || {
             let _ = sender.send(());

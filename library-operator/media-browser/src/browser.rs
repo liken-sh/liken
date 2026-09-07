@@ -593,7 +593,10 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // the film, which is already spent.
         self.clock = at;
         let folded = self.drain_bus();
-        let delivered = self.store.get_mut().delivered();
+        // A decode that lands under a film draws no frame: nobody sees it,
+        // and the frame would ask for more art, so a page whose art
+        // outgrows the cache would decode without end under the film.
+        let delivered = self.store.get_mut().delivered() && !self.covered;
         let landed = self.landed_home();
         if self.source.changed() {
             // A change marks the home page behind whether or not a page
@@ -628,10 +631,15 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     }
 
     // The page's backdrop is decoded at the logical size of the window,
-    // and the store scales every ask to the panel.
+    // and the store scales every ask to the panel and bounds its memory
+    // by the panel's size.
     fn scaled(&mut self, logical: (u32, u32), scale: f32) {
         self.page = logical;
-        self.store.get_mut().scaled(scale);
+        let physical = (
+            (logical.0 as f32 * scale).round() as u32,
+            (logical.1 as f32 * scale).round() as u32,
+        );
+        self.store.get_mut().scaled(physical, scale);
     }
 
     fn wake_by(&mut self, wake: Waker) {

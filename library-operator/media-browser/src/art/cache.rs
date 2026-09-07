@@ -55,19 +55,7 @@ impl<K: Clone + Eq + Hash> Cache<K> {
             self.forget_a_failure();
         }
         let incoming = bytes(&value);
-        while self.used + incoming > self.budget {
-            let Some(evict) = self
-                .slots
-                .iter()
-                .filter(|(_, slot)| bytes(&slot.value) > 0)
-                .min_by_key(|(_, slot)| slot.last_used)
-                .map(|(key, _)| key.clone())
-            else {
-                break;
-            };
-            let gone = self.slots.remove(&evict).expect("the key was just found");
-            self.used -= bytes(&gone.value);
-        }
+        self.make_room(incoming);
         self.tick += 1;
         self.used += incoming;
         self.slots.insert(
@@ -86,6 +74,35 @@ const FAILED: usize = 1024;
 impl<K: Clone + Eq + Hash> Cache<K> {
     // Drops the least recently asked failed entry once the failed entries
     // reach their bound, so the next one has a place.
+    /// Move the budget. A window that grew asks for larger decodes, and a
+    /// budget sized for the smaller window would hold too few of them to
+    /// draw one page, so every delivery evicts art the page still draws
+    /// and the decodes never end. A budget that shrank evicts down to it
+    /// at once.
+    pub(crate) fn resize(&mut self, budget: usize) {
+        self.budget = budget;
+        self.make_room(0);
+    }
+
+    // Evict the least recently drawn art until this many more bytes fit.
+    // An entry larger than the whole budget still lands, because the
+    // loop stops when nothing is left to evict.
+    fn make_room(&mut self, incoming: usize) {
+        while self.used + incoming > self.budget {
+            let Some(evict) = self
+                .slots
+                .iter()
+                .filter(|(_, slot)| bytes(&slot.value) > 0)
+                .min_by_key(|(_, slot)| slot.last_used)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            let gone = self.slots.remove(&evict).expect("the key was just found");
+            self.used -= bytes(&gone.value);
+        }
+    }
+
     fn forget_a_failure(&mut self) {
         let failed = self
             .slots
@@ -172,6 +189,26 @@ mod tests {
         cache.insert("b", scaled(256));
         assert!(is_ready(cache.get(&"a")));
         assert!(is_ready(cache.get(&"b")));
+    }
+
+    #[test]
+    fn a_smaller_budget_evicts_down_to_it_and_a_larger_one_keeps_everything() {
+        let mut cache = Cache::new(300);
+        cache.insert("a", scaled(100));
+        cache.insert("b", scaled(100));
+        cache.insert("c", scaled(100));
+        cache.get(&"a");
+
+        cache.resize(200);
+        assert!(is_ready(cache.get(&"a")));
+        assert!(!is_ready(cache.get(&"b")));
+        assert!(is_ready(cache.get(&"c")));
+
+        cache.resize(1000);
+        cache.insert("d", scaled(100));
+        assert!(is_ready(cache.get(&"a")));
+        assert!(is_ready(cache.get(&"c")));
+        assert!(is_ready(cache.get(&"d")));
     }
 
     #[test]

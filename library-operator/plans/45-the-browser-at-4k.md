@@ -59,10 +59,14 @@ and the browser ignored it.
   window, so a return started at the `Present` ran out before the
   first frame anyone saw. That is why the return was never seen on the
   house `Player`.
-- **The budgets stay.** The art claim and the in-memory budget keep
-  their sizes. Art at scale 2 carries four times the pixels, and the
-  browser's memory on the 4K panel is read in the drill before either
-  budget moves.
+- **The memory budget follows the window.** The store's in-memory
+  budget is computed from the window's physical size on every resize,
+  the same count of posters and backdrops at the size the panel draws
+  them. The pod passes no window size, so a budget fixed at the
+  default 1080p held too little at 4K to draw one series page: every
+  delivery evicted art the page still drew, and the decodes never
+  ended. A delivery under a film draws no frame for the same reason.
+  The art claim keeps its size.
 
 ## What was considered
 
