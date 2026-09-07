@@ -50,6 +50,14 @@ const librariesMountPath = "/libraries"
 // resource claims refer to the same name.
 const displayClaimName = "devices"
 
+// How long the kubelet waits between the SIGTERM and the kill on a
+// screen pod. The browser writes nothing to the catalog, and the agent
+// beside it holds only rows its peers replicate to it, so a kill costs
+// a re-sync and no data. The browser runs as PID 1 with no SIGTERM
+// handler, so it never exits on its own and every stop waits out the
+// whole grace. A short grace keeps a screen's restart short.
+const screenGracePeriod = 15
+
 // The seconds the browser waits for a window before it exits 7 and the
 // kubelet restarts it. The container reads the variable; a run outside a pod
 // sets none and waits forever.
@@ -134,7 +142,7 @@ func playerOwner(player *Player) OwnerReference {
 // pod, which is what makes the template hash mean anything. The Libraries are
 // read in name order for the same reason.
 func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatalog, browserImage, corrosionImage, topicBase, timeZone string) *Pod {
-	grace := int64(scannerGracePeriod)
+	grace := int64(screenGracePeriod)
 	// The browser holds no Kubernetes credential. It reads the catalog
 	// from the agent beside it, and nothing in the pod speaks to the API
 	// server.

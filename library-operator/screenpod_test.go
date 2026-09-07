@@ -85,11 +85,12 @@ func TestScreenPodBelongsToItsPlayer(t *testing.T) {
 	}
 }
 
-// A screen is a standing service, so the pod restarts in place, and the
-// grace period is the scanner pod's, long enough for a busy catalog
-// agent to finish its exit. The pod holds no ServiceAccount token,
-// because nothing in it speaks to the API server.
-func TestScreenPodStandsAndStopsSlowly(t *testing.T) {
+// A screen is a standing service, so the pod restarts in place, and it
+// stops on the screen's own short grace and not the scanner's minute,
+// because a screen's agent holds no work a longer wait would finish.
+// The pod holds no ServiceAccount token, because nothing in it speaks
+// to the API server.
+func TestScreenPodStandsAndStopsQuickly(t *testing.T) {
 	pod := testScreenPod(denScreen(), houseLibraries())
 
 	if pod.Spec.RestartPolicy != "Always" {
@@ -98,9 +99,14 @@ func TestScreenPodStandsAndStopsSlowly(t *testing.T) {
 	if pod.Spec.TerminationGracePeriodSeconds == nil {
 		t.Fatal("terminationGracePeriodSeconds is unset")
 	}
-	if *pod.Spec.TerminationGracePeriodSeconds != scannerGracePeriod {
-		t.Errorf("terminationGracePeriodSeconds = %d, want %d",
-			*pod.Spec.TerminationGracePeriodSeconds, scannerGracePeriod)
+	if *pod.Spec.TerminationGracePeriodSeconds != 15 {
+		t.Errorf("terminationGracePeriodSeconds = %d, want 15",
+			*pod.Spec.TerminationGracePeriodSeconds)
+	}
+	// The scanner pod keeps its minute, because a change to the screen's
+	// grace must never reach the pods that flush a database on the way out.
+	if scannerGracePeriod != 60 {
+		t.Errorf("scannerGracePeriod = %d, want 60", scannerGracePeriod)
 	}
 	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
 		t.Error("automountServiceAccountToken is not false; the browser holds no credential")
