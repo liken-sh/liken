@@ -20,8 +20,9 @@ A workload that is neither has no use for this class. A plain file
 written on one node is not on the next, and nothing here carries it
 over.
 
-The driver defines no custom resources and has no controller. A
-`PersistentVolume` names the driver and the handle, and a
+The driver name is `per-node.liken.sh`, and the StorageClass is
+`per-node`. The driver defines no custom resources and has no
+controller. A `PersistentVolume` names the driver and the handle, and a
 `PersistentVolumeClaim` binds to it.
 
 Start with the [manual](docs/). The design and the plans are in the
