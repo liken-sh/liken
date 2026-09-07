@@ -43,6 +43,11 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [37, Prometheus metrics](37-prometheus-metrics.md). Proposed.
   Enrichment progress, work needing attention, worker outcomes, and
   observation health, with optional collection and quiet idle libraries.
+* [43, Durable and ephemeral claims](43-durable-and-ephemeral-claims.md).
+  Built. `spec.progress` sizes and classes the progress claim, and
+  `spec.libraries` classes a `Library`'s two working copies, so a
+  cluster keeps its two central stores on a durable class and every
+  copy on a node-local one. Each field defaults to `spec.storage`.
 * [41, The people on the screen](41-the-people-on-the-screen.md). The
   screen half of plan 14: a second agent on every screen pod, the
   browser asks who is watching and sends the answer with every play

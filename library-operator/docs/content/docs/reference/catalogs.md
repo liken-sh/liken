@@ -47,18 +47,37 @@ Where the catalog is stored and how large each agent's copy is.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | The volume every catalog agent in the namespace takes. |
+| <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | The catalog pod's claim, the catalog of record every other agent copies. Its size is also the size of every copy, and its class is the default class for the progress and libraries claims. |
+| <span id="spec--progress"></span>`progress` | [object](#specprogress) | no | The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size. |
+| <span id="spec--libraries"></span>`libraries` | [object](#speclibraries) | no | The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. |
 | <span id="spec--screens"></span>`screens` | [object](#specscreens) | no | The settings every screen pod in the namespace takes. |
 
 ### spec.storage
 
-The volume every catalog agent in the namespace takes.
+The catalog pod's claim, the catalog of record every other agent copies. Its size is also the size of every copy, and its class is the default class for the progress and libraries claims.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specstorage--size"></span>`size` | string | no | The size of each agent's catalog volume. Small by default. Default: `1Gi`. |
 | <span id="specstorage--storageclassname"></span>`storageClassName` | string | no | The StorageClass each agent's catalog volume binds to. Omitted, the cluster's default binds it. |
 | <span id="specstorage--claimname"></span>`claimName` | string | no | An existing PersistentVolumeClaim in this namespace for the catalog pod to mount, in place of the one the operator provisions; the operator creates none when it is set. |
+
+### spec.progress
+
+The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specprogress--size"></span>`size` | string | no | The size of the progress claim, in a binary unit such as 256Mi. The progress rows are small next to the catalog, so a namespace that keeps both central stores on a durable class names a smaller size here. Omitted, the claim takes storage.size. A size change reaches a new claim and not a standing one, because a bound claim's spec is immutable; delete the standing claim and the next pass creates it at the new size. |
+| <span id="specprogress--storageclassname"></span>`storageClassName` | string | no | The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it. |
+
+### spec.libraries
+
+The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="speclibraries--storageclassname"></span>`storageClassName` | string | no | The StorageClass a Library's scan and enrichment claims bind to. Omitted, they take storage.storageClassName, and when that is also omitted the cluster's default binds them. There is no size here: every agent holds the whole catalog, so both claims take storage.size. |
 
 ### spec.screens
 

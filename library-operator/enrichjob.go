@@ -26,7 +26,8 @@ func enrichCatalogClaimName(library string) string {
 // The volume the enricher's agent runs on. It is separate from the scan Jobs'
 // claim, so a folder enrich never waits on the ReadWriteOnce a scan holds,
 // and it keeps the agent's actor id and rows between runs, so a run syncs a
-// delta.
+// delta. It binds to the libraries' class, as the scan claim does,
+// because it is a working copy and not the catalog of record.
 func buildEnrichClaim(library *Library, catalog *NamespaceCatalog) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
@@ -42,7 +43,7 @@ func buildEnrichClaim(library *Library, catalog *NamespaceCatalog) *PersistentVo
 			Resources: VolumeResourceRequirements{
 				Requests: map[string]string{"storage": catalogStorageSize(catalog)},
 			},
-			StorageClassName: catalog.Spec.Storage.StorageClassName,
+			StorageClassName: libraryStorageClass(catalog),
 		},
 	}
 }

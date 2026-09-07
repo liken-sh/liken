@@ -32,8 +32,9 @@ func scannerCatalogClaimName(library string) string {
 // It is ReadWriteOnce, because one agent writes one SQLite database. It is
 // sized from the namespace Catalog, because each agent holds the whole
 // namespace's catalog. It is owned by the Library, so it survives a pod roll
-// and is collected with the Library. An empty StorageClassName is omitted,
-// so the cluster's default StorageClass binds it.
+// and is collected with the Library. It binds to the libraries' class,
+// because it is a working copy and not the catalog of record. An empty
+// class is omitted, so the cluster's default StorageClass binds it.
 func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
@@ -49,7 +50,7 @@ func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentV
 			Resources: VolumeResourceRequirements{
 				Requests: map[string]string{"storage": catalogStorageSize(catalog)},
 			},
-			StorageClassName: catalog.Spec.Storage.StorageClassName,
+			StorageClassName: libraryStorageClass(catalog),
 		},
 	}
 }

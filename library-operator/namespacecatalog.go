@@ -36,8 +36,32 @@ type CatalogList struct {
 // with room for the catalog-wide settings the design grows into.
 type CatalogSpec struct {
 	Storage CatalogStorage `json:"storage"`
+	// The claim the progress store's pod takes.
+	Progress CatalogProgress `json:"progress,omitzero"`
+	// The claims each Library's scan and enrichment Jobs take.
+	Libraries CatalogLibraries `json:"libraries,omitzero"`
 	// The settings every screen pod in the namespace takes.
 	Screens CatalogScreens `json:"screens,omitzero"`
+}
+
+// The progress store's claim. It has a size and a class of its own,
+// because the progress rows are small next to the catalog, and a
+// namespace that keeps its two central stores on a durable class does
+// not want a catalog-sized volume for them. Each field defaults to the
+// field of the same name under spec.storage.
+type CatalogProgress struct {
+	Size             string `json:"size,omitempty"`
+	StorageClassName string `json:"storageClassName,omitempty"`
+}
+
+// The class each Library's scanner and enrichment claims bind to. A
+// Library's claims are working copies: a Job rebuilds one from the
+// catalog of record, so they belong on a local class when the catalog
+// of record is on a durable one. There is no size, because every agent
+// holds the whole catalog and takes spec.storage.size. An empty value
+// defaults to spec.storage.storageClassName.
+type CatalogLibraries struct {
+	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
 // The screens' half of the Catalog. StorageClassName classes both of a
@@ -105,6 +129,38 @@ func catalogStorageSize(catalog *NamespaceCatalog) string {
 		return catalog.Spec.Storage.Size
 	}
 	return defaultCatalogSize
+}
+
+// progressStorageSize resolves the size the progress claim takes: the
+// spec.progress value, or the catalog's size when it names none.
+func progressStorageSize(catalog *NamespaceCatalog) string {
+	if catalog.Spec.Progress.Size != "" {
+		return catalog.Spec.Progress.Size
+	}
+	return catalogStorageSize(catalog)
+}
+
+// progressStorageClass resolves the class the progress claim binds to:
+// the spec.progress value, or the catalog's class when it names none.
+// An empty result makes the builder omit the class, so the cluster's
+// default StorageClass binds the claim.
+func progressStorageClass(catalog *NamespaceCatalog) string {
+	if catalog.Spec.Progress.StorageClassName != "" {
+		return catalog.Spec.Progress.StorageClassName
+	}
+	return catalog.Spec.Storage.StorageClassName
+}
+
+// libraryStorageClass resolves the class a Library's scanner and
+// enrichment claims bind to: the spec.libraries value, or the
+// catalog's class when it names none. An empty result makes the
+// builders omit the class, so the cluster's default StorageClass binds
+// the claims.
+func libraryStorageClass(catalog *NamespaceCatalog) string {
+	if catalog.Spec.Libraries.StorageClassName != "" {
+		return catalog.Spec.Libraries.StorageClassName
+	}
+	return catalog.Spec.Storage.StorageClassName
 }
 
 // The default art cache size. Scaled art is larger than the rows it

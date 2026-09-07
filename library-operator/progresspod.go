@@ -181,8 +181,9 @@ func progressRole(catalog *NamespaceCatalog, image, busAddress, topicBase, media
 
 // The claim the progress pod holds, owned by the Catalog, so the
 // garbage collector takes it with the Catalog and the store survives
-// every roll of the pod. It takes the Catalog's own size and storage
-// class, because every agent of the cluster holds the whole store.
+// every roll of the pod. It takes spec.progress's size and class, and
+// each falls back to the catalog's, so a namespace can keep the store
+// on a durable class at a size of its own.
 //
 // A Catalog that names a claim of its own names the catalog's claim,
 // never this one, so the operator always provisions the progress claim.
@@ -199,9 +200,9 @@ func buildProgressClaim(catalog *NamespaceCatalog) *PersistentVolumeClaim {
 		Spec: PersistentVolumeClaimSpec{
 			AccessModes: []string{accessModeReadWriteOnce},
 			Resources: VolumeResourceRequirements{
-				Requests: map[string]string{"storage": catalogStorageSize(catalog)},
+				Requests: map[string]string{"storage": progressStorageSize(catalog)},
 			},
-			StorageClassName: catalog.Spec.Storage.StorageClassName,
+			StorageClassName: progressStorageClass(catalog),
 		},
 	}
 }

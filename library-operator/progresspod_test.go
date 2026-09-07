@@ -162,26 +162,48 @@ func envOf(container Container) map[string]string {
 // The progress store keeps a claim of its own, sized and classed by the
 // namespace's Catalog, so a rebuilt cluster starts from it and no
 // rescan touches it.
-func TestProgressClaimIsTheCatalogsSizeAndClass(t *testing.T) {
+// The progress claim takes spec.progress's own size and class, so a
+// namespace puts its central stores on a durable class at a size of
+// their own while every working copy stays on the local class.
+func TestProgressClaimTakesItsOwnSizeAndClass(t *testing.T) {
 	catalog := housekeepingCatalog()
+	catalog.Spec.Storage.Size = "4Gi"
 	catalog.Spec.Storage.StorageClassName = "local-path"
+	catalog.Spec.Progress.Size = "256Mi"
+	catalog.Spec.Progress.StorageClassName = "synology-iscsi"
 
 	claim := buildProgressClaim(catalog)
 
 	if claim.Metadata.Name != "house-catalog-progress" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the progress claim in the Catalog's namespace", claim.Metadata)
 	}
-	if claim.Spec.StorageClassName != "local-path" {
-		t.Errorf("storageClassName = %q, want the Catalog's own", claim.Spec.StorageClassName)
+	if claim.Spec.StorageClassName != "synology-iscsi" {
+		t.Errorf("storageClassName = %q, want spec.progress's own", claim.Spec.StorageClassName)
 	}
-	if got := claim.Spec.Resources.Requests["storage"]; got != catalogStorageSize(catalog) {
-		t.Errorf("storage = %q, want the Catalog's size %q", got, catalogStorageSize(catalog))
+	if got := claim.Spec.Resources.Requests["storage"]; got != "256Mi" {
+		t.Errorf("storage = %q, want spec.progress's own size", got)
 	}
 	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
 		t.Errorf("accessModes = %v, want ReadWriteOnce", claim.Spec.AccessModes)
 	}
 	if len(claim.Metadata.OwnerReferences) != 1 || claim.Metadata.OwnerReferences[0].Kind != "Catalog" {
 		t.Errorf("owners = %+v, want the Catalog", claim.Metadata.OwnerReferences)
+	}
+}
+
+// A Catalog with no spec.progress block keeps today's shape: the
+// progress claim takes the catalog's size and class.
+func TestProgressClaimDefaultsToTheCatalogsSizeAndClass(t *testing.T) {
+	catalog := housekeepingCatalog()
+	catalog.Spec.Storage.StorageClassName = "local-path"
+
+	claim := buildProgressClaim(catalog)
+
+	if claim.Spec.StorageClassName != "local-path" {
+		t.Errorf("storageClassName = %q, want the catalog's class", claim.Spec.StorageClassName)
+	}
+	if got := claim.Spec.Resources.Requests["storage"]; got != catalogStorageSize(catalog) {
+		t.Errorf("storage = %q, want the catalog's size %q", got, catalogStorageSize(catalog))
 	}
 }
 

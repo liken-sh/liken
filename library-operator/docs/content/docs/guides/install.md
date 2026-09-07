@@ -66,15 +66,26 @@ downloads. [Franchises](/docs/guides/franchises/) covers it.
 
 The catalog is SQLite, and one agent writes each copy. So the operator
 provisions every catalog claim as `ReadWriteOnce`, and the namespace's
-`Catalog` names the class: `spec.storage.storageClassName` for the
-durable catalog, and `spec.screens.storageClassName` for the copy each
-screen holds. Either one left empty binds to the cluster's default
-class.
+`Catalog` names the class of each kind of claim:
 
-A SQLite file on NFS can corrupt when its node is lost, so give the
-durable catalog a class that binds node-local storage. A screen pod is
-already pinned to the machine that holds its display, so a node-local
-class such as `local-path` fits the screens too.
+* `spec.storage.storageClassName` for the catalog pod's claim, the
+  catalog of record every other agent syncs from.
+* `spec.progress.storageClassName` for the progress store's claim,
+  the record of who watched what. It defaults to the catalog's class,
+  and `spec.progress.size` gives the store a size of its own.
+* `spec.libraries.storageClassName` for the scan and enrichment claims
+  of every `Library`. It defaults to the catalog's class.
+* `spec.screens.storageClassName` for both claims of every screen.
+
+A class left empty binds to the cluster's default class.
+
+The catalog of record and the progress store are the two claims worth
+keeping, so give them a class that survives a lost node, such as
+block storage from a SAN. A SQLite file on NFS can corrupt when its
+node is lost, so do not use an NFS class. A `Library`'s claims are
+working copies that a `Job` rebuilds from the catalog of record, and a
+screen pod is pinned to the machine that holds its display, so a
+node-local class such as `local-path` fits both.
 
 ## 2. Apply the manifests
 

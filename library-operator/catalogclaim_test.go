@@ -46,6 +46,23 @@ func TestBuildCatalogClaimIsOwnedByItsLibraryAndSizedByTheCatalog(t *testing.T) 
 	}
 }
 
+// A Library's scanner claim takes spec.libraries.storageClassName when
+// the Catalog names one, so the working copies leave the class the
+// catalog of record is on.
+func TestBuildCatalogClaimTakesTheLibrariesClass(t *testing.T) {
+	catalog := testCatalogWithSize("2Gi", "synology-iscsi")
+	catalog.Spec.Libraries.StorageClassName = "local-path"
+
+	claim := buildCatalogClaim(studioMovies(), catalog)
+
+	if claim.Spec.StorageClassName != "local-path" {
+		t.Errorf("storageClassName = %q, want spec.libraries's class", claim.Spec.StorageClassName)
+	}
+	if got := claim.Spec.Resources.Requests["storage"]; got != "2Gi" {
+		t.Errorf("storage = %q, want the catalog's size, because every agent holds the whole catalog", got)
+	}
+}
+
 // An empty storageClassName is omitted, so the cluster's default
 // StorageClass binds the claim, and the default size fills in when the
 // Catalog names none.

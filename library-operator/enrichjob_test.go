@@ -291,6 +291,24 @@ func TestStandEnrichClaimCreatesItOnce(t *testing.T) {
 	}
 }
 
+// The enricher's claim takes spec.libraries.storageClassName when the
+// Catalog names one, and keeps the catalog's size.
+func TestEnrichClaimTakesTheLibrariesClass(t *testing.T) {
+	catalog := testNamespaceCatalog()
+	catalog.Spec.Storage.Size = "2Gi"
+	catalog.Spec.Storage.StorageClassName = "synology-iscsi"
+	catalog.Spec.Libraries.StorageClassName = "local-path"
+
+	claim := buildEnrichClaim(studioMovies(), catalog)
+
+	if claim.Spec.StorageClassName != "local-path" {
+		t.Errorf("storageClassName = %q, want spec.libraries's class", claim.Spec.StorageClassName)
+	}
+	if got := claim.Spec.Resources.Requests["storage"]; got != "2Gi" {
+		t.Errorf("storage = %q, want the catalog's size", got)
+	}
+}
+
 func slicesContainsOwner(owners []OwnerReference, name string) bool {
 	for _, owner := range owners {
 		if owner.Name == name {
