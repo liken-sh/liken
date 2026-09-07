@@ -1,0 +1,17 @@
+# The lab's own sweep tick. A drill waits seconds for a copy to go, not
+# the ten minutes of the default.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: per-node-csi-driver-node
+spec:
+  template:
+    spec:
+      containers:
+        - name: driver
+          args:
+            - --endpoint=unix:///csi/csi.sock
+            - --node-id=$(NODE_NAME)
+            - --store=/var/lib/liken/pod-storage/per-node
+            - --metrics=:9808
+            - --sweep-every=15s

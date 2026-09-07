@@ -1,0 +1,32 @@
+# The CSIDriver object tells the kubelet and the scheduler how to treat
+# per-node.liken.sh. Its name is the driver name every volume names.
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: per-node.liken.sh
+spec:
+  # There is no attach step. A publish is a mkdir and a bind mount on
+  # the node the pod runs on.
+  attachRequired: false
+
+  # The node plugin receives the pod's name and namespace with each
+  # publish, so it can post events on the pod.
+  podInfoOnMount: true
+
+  # Every copy is created with mode 0777, so a pod that runs as any user
+  # writes it. A recursive chown of a large database on every start
+  # would cost time and change nothing.
+  fsGroupPolicy: None
+
+  # Every volume of this driver is a PersistentVolume that a person or
+  # an operator wrote. There is no inline form.
+  volumeLifecycleModes:
+    - Persistent
+
+  # The driver publishes once, so the kubelet never repeats
+  # NodePublishVolume.
+  requiresRepublish: false
+
+  # The driver provisions nothing, so it reports no capacity for the
+  # scheduler to weigh.
+  storageCapacity: false
