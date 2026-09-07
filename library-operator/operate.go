@@ -118,6 +118,12 @@ type operator struct {
 	// keyed the way the report desk keys a Library, and dropped when
 	// the Library goes.
 	cleanupStands map[string]cleanupStand
+
+	// Which of the classes this pass has read are served by the per-node
+	// driver, by class name. The pass clears it when it starts, so an
+	// answer is one pass old at most and the operator watches no
+	// storageclasses.
+	perNodeClasses map[string]bool
 }
 
 // NewOperator builds the operator and the two things it listens
@@ -145,6 +151,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 		mediaTopicBase: defaultMediaTopicBase,
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
+		perNodeClasses: map[string]bool{},
 		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
 	}
@@ -344,6 +351,10 @@ func (o *operator) pass() {
 	ctx, done := context.WithTimeout(context.Background(), passTimeout)
 	defer done()
 
+	// The class answers are this pass's own, so a class a person edits
+	// is read again on the next pass.
+	clear(o.perNodeClasses)
+
 	libraries, err := ListLibraries(ctx, o.client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing libraries: %v\n", err)
@@ -496,6 +507,12 @@ func (o *operator) pass() {
 	o.reconcileProgress(ctx, plays.Items, people.Items, watches.Items, stores, now)
 
 	o.reconcileCatalogs(ctx, byNamespace, members.Items, now)
+
+	// The sweep goes last, after every reconcile, so a sweep the server
+	// refuses costs the pass its volume cleanup and nothing else.
+	if err := o.sweepReleasedVolumes(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "sweeping the released volumes: %v\n", err)
+	}
 }
 
 // HandleBusMessage folds one message from the broker onto the place

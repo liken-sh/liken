@@ -92,7 +92,15 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		if err := o.standProgressEndpoints(ctx, namespace, owners, progressMembers.Items); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the progress endpoints in %s: %v\n", namespace, err)
 		}
-		status := standingCatalogStatus(catalog, catalogPods, progressPods, members, now)
+		// The classes are read before the status is built, so a Catalog
+		// that asks for copies a class cannot hold reports that on the
+		// same pass.
+		reason, message, err := o.blockedStore(ctx, catalog)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reading the storage classes in %s: %v\n", namespace, err)
+		}
+		status := standingCatalogStatus(catalog, catalogPods, progressPods, members,
+			blocker{reason: reason, message: message}, now)
 		if err := o.writeCatalogStatus(ctx, catalog, status); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the catalog status in %s: %v\n", namespace, err)
 		}
@@ -123,8 +131,11 @@ func catalogObjectOwner(catalog *NamespaceCatalog) OwnerReference {
 // pods hold the catalog and report it. A Job's pod comes and goes, and a
 // screen pod holds a copy, so neither decides whether the namespace's
 // catalog stands. Ready is True when every copy is up, and False on the
-// first copy that is not, with that copy's own reason.
-func standingCatalogStatus(catalog *NamespaceCatalog, catalogPods, progressPods []*Pod, pods []Pod, now time.Time) CatalogStatus {
+// first copy that is not, with that copy's own reason. A Catalog that
+// asks for copies on a class that cannot hold them is False with the
+// class verdict before any copy is read.
+func standingCatalogStatus(catalog *NamespaceCatalog, catalogPods, progressPods []*Pod, pods []Pod,
+	blocked blocker, now time.Time) CatalogStatus {
 	members := catalogMembers(catalog.Metadata.Namespace, pods)
 	condition := Condition{
 		Type:               catalogConditionReady,
@@ -133,7 +144,7 @@ func standingCatalogStatus(catalog *NamespaceCatalog, catalogPods, progressPods 
 		Reason:             catalogReasonStanding,
 		Message:            fmt.Sprintf("the namespace catalog stands with %d member agents", len(members)),
 	}
-	if reason, message := catalogPodsBlocker(catalogPods); reason != "" {
+	if reason, message := blocked.or(catalogPodsBlocker(catalogPods)); reason != "" {
 		condition.Status = ConditionFalse
 		condition.Reason = reason
 		condition.Message = message
@@ -148,6 +159,25 @@ func standingCatalogStatus(catalog *NamespaceCatalog, catalogPods, progressPods 
 		Screens:    catalogScreens(catalog.Metadata.Namespace, pods),
 		Conditions: SetCondition(slices.Clone(catalog.Status.Conditions), condition, now),
 	}
+}
+
+// blocker is one verdict on why a Catalog is not Ready: the reason a
+// program matches on, and the message a person reads. An empty reason is
+// no verdict.
+type blocker struct {
+	reason  string
+	message string
+}
+
+// or returns this verdict when it holds one, and the verdict passed in
+// when it does not. The class verdict comes first, because a copy the
+// operator never stood is the reason the Catalog waits, and a pod
+// verdict says nothing about the copies that are missing.
+func (b blocker) or(reason, message string) (string, string) {
+	if b.reason != "" {
+		return b.reason, b.message
+	}
+	return reason, message
 }
 
 // The first copy of the catalog that is not up, so the condition names

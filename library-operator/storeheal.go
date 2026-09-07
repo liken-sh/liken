@@ -1,11 +1,16 @@
 package main
 
-// The heal for a durable copy stranded on a node that is gone. A copy
-// holds a ReadWriteOnce claim, and a node-local class binds that claim to
-// the machine the copy first landed on, so a copy on a machine that never
-// comes back waits there for good. The heal deletes the copy and its
-// claim, and the reconcile stands both again wherever the scheduler can
-// place them. The peers hold the rows, so the fresh copy syncs from them.
+// The heal for a durable copy stranded on a node that is gone. A
+// node-local class binds a claim to the machine the copy first landed
+// on, so a copy on a machine that never comes back waits there for good.
+// The heal deletes the copy, and its claim with it on a class that pins
+// the claim, and the reconcile stands the copy again wherever the
+// scheduler can place it. The peers hold the rows, so the fresh copy
+// syncs from them.
+//
+// On a per-node class the claim is the store's own and every copy mounts
+// it, so the heal deletes the pod alone. The copy stands again on another
+// node with a fresh directory there.
 
 import (
 	"context"
@@ -112,18 +117,26 @@ func notReadyPastGrace(node *Node, now time.Time) bool {
 // Take down one stranded copy: the pod first, its claim after, so the
 // volume is released before it is deleted. The pod delete is forced,
 // because the kubelet that would confirm a graceful one is the thing that
-// is gone; a pod left Terminating would hold its claim through the claim
-// protection finalizer, and the copy would never move. The claim carries
-// the same store label as the pod it served, and that label guards the
-// delete: a claim a person made and named in the Catalog carries none,
-// and the heal leaves it alone.
+// is gone. A pod left Terminating would hold its claim through the claim
+// protection finalizer, and the copy would never move.
+//
+// The claim is the one the pod itself mounts, and two guards hold before
+// its delete. First, the claim carries the same store label as the pod
+// it served. A claim a person made and named in the Catalog carries none,
+// and the heal leaves it alone. Second, the claim's class is not
+// per-node. A claim on a per-node class pins no pod, and the copies that
+// still mount it need it, so the heal leaves it in place.
 func (o *operator) healStoreReplica(ctx context.Context, pod *Pod) error {
 	namespace, name := pod.Metadata.Namespace, pod.Metadata.Name
 
 	if err := ForceDeletePod(ctx, o.client, namespace, name); err != nil {
 		return err
 	}
-	claim, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
+	mounted := storeClaimOf(pod)
+	if mounted == "" {
+		return nil
+	}
+	claim, err := GetPersistentVolumeClaim(ctx, o.client, namespace, mounted)
 	if errors.Is(err, ErrNotFound) {
 		return nil
 	}
@@ -133,5 +146,21 @@ func (o *operator) healStoreReplica(ctx context.Context, pod *Pod) error {
 	if claim.Metadata.Labels[storeLabelKey] != pod.Metadata.Labels[storeLabelKey] {
 		return nil
 	}
-	return DeletePersistentVolumeClaim(ctx, o.client, namespace, name)
+	perNode, err := o.classIsPerNode(ctx, claim.Spec.StorageClassName)
+	if err != nil || perNode {
+		return err
+	}
+	return DeletePersistentVolumeClaim(ctx, o.client, namespace, mounted)
+}
+
+// storeClaimOf names the claim one copy mounts, read off the pod, because
+// the pod is what states which claim it runs on. A copy holds one claim
+// and no other volume, so the first claim volume is the one.
+func storeClaimOf(pod *Pod) string {
+	for _, volume := range pod.Spec.Volumes {
+		if volume.PersistentVolumeClaim != nil {
+			return volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	return ""
 }

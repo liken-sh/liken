@@ -257,15 +257,15 @@ func TestTheStoreAnswersABaseItCannotBuildARequestFrom(t *testing.T) {
 	}
 }
 
-// The claim and the pod both stop on the failure the API server gives,
+// The claim and the pods both stop on the failure the API server gives,
 // so a pass reports it and the next pass tries again.
 func TestStandProgressStopsOnTheFailureTheAPIGives(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
-	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-progress-0"] =
+	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-progress"] =
 		http.StatusInternalServerError
 
-	if _, err := testOperator(t, cluster).standProgressPod(t.Context(), catalog, 0); err == nil {
+	if _, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog); err == nil {
 		t.Error("the pass stood a progress pod over a claim it could not read")
 	}
 }

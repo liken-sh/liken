@@ -4,8 +4,9 @@ package main
 // Catalog holds a catalog claim and an art claim of its own, both sized
 // from that Catalog and classed by its screens block, so a screen that
 // restarts syncs a delta and draws the wall from art it already scaled.
-// A screen the scheduler cannot place where its volumes are loses the
-// pod and both claims, and the next pass creates them again.
+// On a node-local class, a screen the scheduler cannot place where its
+// volumes are loses the pod and both claims, and the next pass creates
+// them again.
 
 import (
 	"context"
@@ -35,11 +36,12 @@ func screenClaimLabels(player string) map[string]string {
 	}
 }
 
-// One of a screen's claims. It is ReadWriteOnce, because one writer
-// holds one volume. It is classed by spec.screens.storageClassName, so
-// both claims land on the machine that holds the display, and owned by
-// the Player as the pod is. An empty StorageClassName is omitted, so
-// the cluster's default binds it.
+// buildScreenClaim builds one of a screen's claims. It asks for
+// ReadWriteOnce, and standClaim writes ReadWriteMany in its place on a
+// per-node class. It is classed by spec.screens.storageClassName, and on
+// a node-local class that puts both claims on the machine that holds the
+// display. It is owned by the Player as the pod is. An empty
+// StorageClassName is omitted, so the cluster's default binds it.
 func buildScreenClaim(player *Player, catalog *NamespaceCatalog, name, size string) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
@@ -75,32 +77,11 @@ func screenClaims(player *Player, catalog *NamespaceCatalog) []*PersistentVolume
 // pass.
 func (o *operator) standScreenClaims(ctx context.Context, player *Player, catalog *NamespaceCatalog) error {
 	for _, claim := range screenClaims(player, catalog) {
-		if err := o.standScreenClaim(ctx, claim); err != nil {
+		if err := o.standClaim(ctx, claim); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// A claim is created when there is none and left alone when it
-// stands, the rule standCatalogClaim follows, because a claim's spec is
-// immutable once it binds. A conflict on the create means another writer got
-// there first, which is success.
-func (o *operator) standScreenClaim(ctx context.Context, claim *PersistentVolumeClaim) error {
-	namespace, name := claim.Metadata.Namespace, claim.Metadata.Name
-
-	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	_, err = CreatePersistentVolumeClaim(ctx, o.client, claim)
-	if errors.Is(err, ErrConflict) {
-		return nil
-	}
-	return err
 }
 
 // How long a screen pod may carry PodScheduled False before the
@@ -167,6 +148,10 @@ func (o *operator) deleteScreenClaim(ctx context.Context, player *Player, name s
 // the pod, the catalog claim, and the art claim, and the next pass
 // creates all three on the new node. The catalog claim is the one the
 // recovery reads, because it is the claim the pod cannot start without.
+//
+// A claim on a per-node class pins no pod, so the recovery never fires
+// for one. The scheduler refused that pod for another reason, and
+// deleting the claim would fix nothing.
 func (o *operator) recoverUnschedulableScreen(ctx context.Context, player *Player, pod *Pod, now time.Time) (bool, error) {
 	if pod == nil || !unschedulablePastGrace(pod, now) {
 		return false, nil
@@ -182,6 +167,10 @@ func (o *operator) recoverUnschedulableScreen(ctx context.Context, player *Playe
 	}
 	if !screenClaimIsRecoverable(claim, player, name) {
 		return false, nil
+	}
+	perNode, err := o.classIsPerNode(ctx, claim.Spec.StorageClassName)
+	if err != nil || perNode {
+		return false, err
 	}
 	if err := DeletePod(ctx, o.client, namespace, pod.Metadata.Name); err != nil {
 		return false, err

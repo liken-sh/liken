@@ -229,6 +229,10 @@ const (
 	volumesPath   = "/api/v1/persistentvolumes"
 	podsAllPath   = "/api/v1/pods"
 
+	// The StorageClasses, cluster-scoped in the storage group, read by
+	// name for the provisioner behind the class a claim names.
+	storageClassesPath = "/apis/storage.k8s.io/v1/storageclasses"
+
 	// The slices behind the catalog Services, one in every namespace that
 	// holds a Library.
 	endpointSlicePrefix = "/apis/" + endpointSliceAPIVersion + "/namespaces/"
@@ -456,6 +460,54 @@ func GetPersistentVolume(ctx context.Context, c *Client, name string) (*Persiste
 		return nil, err
 	}
 	return volume, nil
+}
+
+// GetStorageClass reads the class a claim names, for its provisioner. A
+// class the cluster does not serve is ErrNotFound, which the caller reads
+// as a class that is not per-node.
+func GetStorageClass(ctx context.Context, c *Client, name string) (*StorageClass, error) {
+	class := &StorageClass{}
+	if err := c.RequestJSON(ctx, http.MethodGet, storageClassesPath+"/"+name, nil, class); err != nil {
+		return nil, err
+	}
+	return class, nil
+}
+
+// CreatePersistentVolume writes the volume a per-node claim binds to. The
+// operator writes it before the claim, because the claim names it and no
+// provisioner answers a claim of that class.
+func CreatePersistentVolume(ctx context.Context, c *Client, volume *PersistentVolume) (*PersistentVolume, error) {
+	body, err := json.Marshal(volume)
+	if err != nil {
+		return nil, err
+	}
+	created := &PersistentVolume{}
+	if err := c.RequestJSON(ctx, http.MethodPost, volumesPath, body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+// ListPersistentVolumes reads the volumes one label selector names, which
+// is how the sweep finds the volumes this operator wrote. A
+// PersistentVolume is cluster-scoped, so the path carries no namespace.
+func ListPersistentVolumes(ctx context.Context, c *Client, labelSelector string) (*PersistentVolumeList, error) {
+	list := &PersistentVolumeList{}
+	if err := c.RequestJSON(ctx, http.MethodGet, volumesPath+"?"+labelSelector, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// DeletePersistentVolume removes a volume this operator wrote whose claim
+// is gone. A volume that is already absent is success, because two
+// passes may sweep the same volume.
+func DeletePersistentVolume(ctx context.Context, c *Client, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, volumesPath+"/"+name, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // ListCatalogMemberPods reads every pod that holds a catalog

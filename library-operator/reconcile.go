@@ -271,14 +271,14 @@ func (o *operator) standPod(ctx context.Context, desired *Pod) (*Pod, error) {
 	// it completes, so one divergence causes one delete and not one
 	// delete per pass.
 	//
-	// this wait is also the ReadWriteOnce handoff for the catalog pod,
-	// whose claim admits one pod at a time: the pass creates the
-	// replacement only after the old pod releases the claim, which is the
-	// create on the not-found branch above.
+	// On a class that is not per-node this wait is also the ReadWriteOnce
+	// handoff for the catalog pod, whose claim admits one pod at a time:
+	// the pass creates the replacement only after the old pod releases
+	// the claim, which is the create on the not-found branch above.
 	//
-	// A screen pod's catalog claim is ReadWriteOnce as well, so the
-	// same wait is its handoff: the replacement mounts the claim only after
-	// the pod before it has released it.
+	// A screen pod's catalog claim is ReadWriteOnce on such a class as
+	// well, so the same wait is its handoff: the replacement mounts the
+	// claim only after the pod before it has released it.
 	if live.Metadata.DeletionTimestamp != "" {
 		return live, nil
 	}

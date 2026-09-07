@@ -156,8 +156,9 @@ func workerPodTemplate(library *Library, worker string, container Container, cor
 				// The agent's state is the Library's own durable claim.
 				// It keeps the agent's actor id and its rows between
 				// runs, so a run syncs a delta rather than the whole
-				// namespace, and its ReadWriteOnce is what serializes
-				// one library's workers.
+				// namespace. On a class that is not per-node its
+				// ReadWriteOnce is what serializes one library's
+				// workers.
 				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
 					ClaimName: scannerCatalogClaimName(library.Metadata.Name),
 				}},

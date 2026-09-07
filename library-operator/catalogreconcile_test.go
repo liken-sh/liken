@@ -7,6 +7,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -29,7 +30,7 @@ func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 	if cluster.heldPod("house-catalog-catalog-0") == nil {
 		t.Fatal("the pass stood no catalog pod")
 	}
-	if cluster.heldClaim("house-catalog-catalog-0") == nil {
+	if cluster.heldClaim("house-catalog-catalog") == nil {
 		t.Fatal("the pass provisioned no claim for the catalog pod")
 	}
 	service := cluster.heldService("house", catalogServiceName)
@@ -56,13 +57,14 @@ func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 	}
 }
 
-// A Catalog that asks for more than one copy of a store stands one pod
-// and one claim per copy, the first under the store's own name and
-// every copy after it numbered, and the status says how many it asks
-// for.
+// A Catalog on a per-node class that asks for more than one copy of a
+// store stands one numbered pod per copy, all on the store's one claim,
+// and the status says how many it asks for.
 func TestReconcileCatalogsStandsEveryCopyOfBothStores(t *testing.T) {
 	cluster := newFakeCluster()
+	seedStorageClass(cluster, "per-node", perNodeProvisioner)
 	catalog := seedCatalog(cluster, "house-catalog", "house")
+	catalog.Spec.Storage.StorageClassName = "per-node"
 	catalog.Spec.Storage.Replicas = 3
 	catalog.Spec.Progress.Replicas = 2
 
@@ -75,6 +77,8 @@ func TestReconcileCatalogsStandsEveryCopyOfBothStores(t *testing.T) {
 		if cluster.heldPod(name) == nil {
 			t.Errorf("the pass stood no pod %s", name)
 		}
+	}
+	for _, name := range []string{"house-catalog-catalog", "house-catalog-progress"} {
 		if cluster.heldClaim(name) == nil {
 			t.Errorf("the pass provisioned no claim %s", name)
 		}
@@ -88,8 +92,40 @@ func TestReconcileCatalogsStandsEveryCopyOfBothStores(t *testing.T) {
 	}
 }
 
+// A Catalog that asks for copies on a class that is not per-node stands
+// one copy of each store and reports ClassNotPerNode, because one claim
+// on such a class binds to one node.
+func TestReconcileCatalogsStandsOneCopyOnAClassThatIsNotPerNode(t *testing.T) {
+	cluster := newFakeCluster()
+	seedStorageClass(cluster, "local-path", "rancher.io/local-path")
+	catalog := seedCatalog(cluster, "house-catalog", "house")
+	catalog.Spec.Storage.StorageClassName = "local-path"
+	catalog.Spec.Storage.Replicas = 3
+
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+
+	if cluster.heldPod("house-catalog-catalog-0") == nil {
+		t.Error("the pass stood no catalog pod")
+	}
+	if cluster.heldPod("house-catalog-catalog-1") != nil {
+		t.Error("the pass stood a second copy on a class that binds a claim to one node")
+	}
+	status := cluster.heldCatalog("house-catalog").Status
+	ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
+	if ready.Status != ConditionFalse || ready.Reason != catalogReasonClassNotPerNode {
+		t.Fatalf("Ready = %+v, want False with ClassNotPerNode", ready)
+	}
+	if !strings.Contains(ready.Message, "local-path") {
+		t.Errorf("message = %q, want the class named", ready.Message)
+	}
+	if status.Replicas.Catalog.Wanted != 3 {
+		t.Errorf("wanted = %d, want the count the Catalog asks for", status.Replicas.Catalog.Wanted)
+	}
+}
+
 // A Catalog that asks for fewer copies than it stands loses the pods
-// and the claims above the count it asks for, and keeps the first.
+// above the count it asks for, keeps the first, and keeps the claim
+// every copy mounts.
 func TestReconcileCatalogsTakesDownTheCopiesItNoLongerAsksFor(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
@@ -97,11 +133,11 @@ func TestReconcileCatalogsTakesDownTheCopiesItNoLongerAsksFor(t *testing.T) {
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 
-	if cluster.heldPod("house-catalog-catalog-0") == nil || cluster.heldClaim("house-catalog-catalog-0") == nil {
+	if cluster.heldPod("house-catalog-catalog-0") == nil || cluster.heldClaim("house-catalog-catalog") == nil {
 		t.Error("the pass took down the copy the Catalog still asks for")
 	}
 	for _, name := range []string{"house-catalog-catalog-1", "house-catalog-catalog-2"} {
-		if cluster.heldPod(name) != nil || cluster.heldClaim(name) != nil {
+		if cluster.heldPod(name) != nil {
 			t.Errorf("%s stands, want it taken down", name)
 		}
 	}
@@ -124,7 +160,7 @@ func TestStandingCatalogStatusCountsTheCopiesOfBothStores(t *testing.T) {
 			starting,
 		},
 		[]*Pod{progressPodAt("house-catalog-progress-0", "house", "10.42.0.5"), nil},
-		nil, testNow)
+		nil, blocker{}, testNow)
 
 	if status.Replicas.Catalog != (StoreReplicas{Ready: 2, Wanted: 3}) {
 		t.Errorf("catalog copies = %+v, want two of three up", status.Replicas.Catalog)
@@ -151,7 +187,7 @@ func TestStandingCatalogStatusReportsAPendingCopy(t *testing.T) {
 	pending.Status = PodStatus{Phase: podPending, Message: "no node fits the pod's anti-affinity"}
 
 	status := standingCatalogStatus(catalog,
-		[]*Pod{readyCatalogPod("house-catalog", "house"), pending}, nil, nil, testNow)
+		[]*Pod{readyCatalogPod("house-catalog", "house"), pending}, nil, nil, blocker{}, testNow)
 
 	ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
 	if ready.Status != ConditionFalse || ready.Reason != catalogReasonPodPending {
@@ -268,7 +304,7 @@ func TestStandingCatalogStatusReportsTheNamespacesMembers(t *testing.T) {
 		scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1"),
 	}
 
-	status := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, pods, testNow)
+	status := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, pods, blocker{}, testNow)
 
 	want := []string{"movies-scanner", "shows-scanner"}
 	if len(status.Members) != 2 || status.Members[0] != want[0] || status.Members[1] != want[1] {
@@ -302,7 +338,7 @@ func TestStandingCatalogStatusReportsTheScreens(t *testing.T) {
 		*onAnEmptyDir,
 		*onAClaim,
 		screenPodAt("studio-tv-media-browser", "studio", "10.42.3.9", "nuc-3"),
-	}, testNow)
+	}, blocker{}, testNow)
 
 	want := []CatalogScreen{
 		{
@@ -351,7 +387,7 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	seedCatalog(cluster, "house-catalog", "house")
 	operator := testOperator(t, cluster)
 	catalog := cluster.heldCatalog("house-catalog")
-	settled := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, nil, testNow)
+	settled := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, nil, blocker{}, testNow)
 
 	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
 		t.Fatal(err)
@@ -392,7 +428,7 @@ func TestWriteCatalogStatusReadsAConflictAsSuccessAndReportsAFailure(t *testing.
 			catalog := cluster.heldCatalog("house-catalog")
 
 			err := operator.writeCatalogStatus(t.Context(), catalog,
-				standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, nil, testNow))
+				standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, nil, blocker{}, testNow))
 
 			if testCase.wantErr && err == nil {
 				t.Fatal("err = nil, want the server's refusal")
@@ -432,7 +468,7 @@ func TestStandingCatalogStatusFollowsTheCatalogPod(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			catalog := &NamespaceCatalog{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}
 
-			status := standingCatalogStatus(catalog, []*Pod{one.pod}, nil, nil, testNow)
+			status := standingCatalogStatus(catalog, []*Pod{one.pod}, nil, nil, blocker{}, testNow)
 
 			ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
 			if ready.Status != one.status || ready.Reason != one.reason {

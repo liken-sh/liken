@@ -347,9 +347,9 @@ func remoteTopics(remotes []PlayerIdleRemote) []EnvVar {
 //
 // The operator sends two other deletes here. media-operator deletes
 // the pod itself when the claim under it must be replaced, and the next pass
-// creates it again. A screen the scheduler has refused for longer than the
-// grace loses its pod and both of its claims, which is the recovery in
-// screenclaim.go.
+// creates it again. On a node-local class, a screen the scheduler has
+// refused for longer than the grace loses its pod and both of its claims,
+// which is the recovery in screenclaim.go.
 //
 // A failure on one Player is reported and the pass carries on, because
 // one broken screen must not hold up another room's.

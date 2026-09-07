@@ -7,7 +7,9 @@
 # deletes an object to replace a stale one, to end a run, to recover a
 # screen the scheduler cannot place, to take down a copy the Catalog no
 # longer asks for, or to free a copy stranded on a node that stays
-# NotReady. Each of the last three takes a claim with the pod.
+# NotReady. A recovered screen loses its claims with its pod, and a
+# stranded copy loses the claim under it only on a class that binds the
+# claim to the node.
 # Every other teardown is the garbage collector's, through the
 # ownerReferences the pods, the claims, the CronJob, and the catalog
 # objects carry. It deletes no
@@ -136,23 +138,33 @@ rules:
     verbs: [get, list, watch, patch]
   # The media claim each Library names, read by name to learn whether it
   # is bound and which volume it is bound to. The claims the operator
-  # provisions: one per Library for its Jobs, one per durable copy of
-  # each of a Catalog's two stores, and one per screen, each owned by the
+  # provisions: two per Library, one for its scan Jobs and one for its
+  # enricher, one for each of a Catalog's two stores, which every copy
+  # of that store mounts, and two per screen. Each is owned by the
   # object it belongs to, so the garbage collector removes it with that
   # owner. There is no update, because a claim's spec is immutable once
   # it binds.
   #
-  # The delete covers three claims, each guarded by the labels and the
-  # name the operator itself wrote: the catalog claim of a screen the
-  # scheduler has refused for longer than the grace, a copy of a store
-  # the Catalog no longer asks for, and a copy stranded on a node that
-  # has stayed NotReady past the grace.
+  # The delete covers two cases, each guarded by the labels and the name
+  # the operator itself wrote: the two claims of a screen the scheduler
+  # has refused for longer than the grace, and the claim of a store
+  # whose copy is stranded on a node that has stayed NotReady past the
+  # grace. Neither delete fires on a per-node class, where the claim
+  # pins no pod to a node.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, create, delete]
+  # The StorageClass every claim names, read by name for one answer: the
+  # provisioner behind it. A class the per-node driver serves is the one
+  # the operator writes the volume for itself. The operator never
+  # matches a class by name.
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get]
   # The nodes, read for the Ready verdict of the machine each durable
   # copy of a store runs on. A copy on a node that stays NotReady is
-  # deleted with its claim, so it can stand elsewhere.
+  # deleted, with its claim on a class that binds the claim to the
+  # node, so it can stand elsewhere.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get, list, watch]
@@ -161,9 +173,18 @@ rules:
   # Playing a title from the library needs that, so the operator reads
   # it once per pass and reports it in the status. PersistentVolumes
   # are cluster-scoped, which is why this rule needs a ClusterRole.
+  #
+  # The create is the volume the operator writes for a claim on a
+  # per-node class, because that driver provisions nothing, and a claim
+  # of that class binds only to a volume something wrote first.
+  #
+  # The list reads the volumes the operator's own labels name, once per
+  # pass, and the delete takes the ones whose claim is gone. A volume is
+  # cluster-scoped, so no ownerReference ties it to a Catalog, a
+  # Library, or a Player, and those labels take an owner's place.
   - apiGroups: [""]
     resources: [persistentvolumes]
-    verbs: [get]
+    verbs: [get, list, create, delete]
   # The pods this operator stands itself: the catalog pod of each
   # namespace that holds a Catalog, and one screen pod per delegated
   # Player. Both are created, read back on every pass, and deleted to

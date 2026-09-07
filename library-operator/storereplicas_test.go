@@ -126,9 +126,9 @@ func containerNames(containers []Container) string {
 	return strings.Join(names, " ")
 }
 
-// A Catalog that asks for fewer copies loses the pods and the claims
-// above the count it asks for, in that order, and the first copy is
-// left alone.
+// A Catalog that asks for fewer copies loses the pods above the count it
+// asks for. The first copy stays, and so does the claim every copy
+// mounts.
 func TestScalingDownTakesEveryCopyAboveTheCountAsked(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
@@ -138,21 +138,19 @@ func TestScalingDownTakesEveryCopyAboveTheCountAsked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-catalog-0") == nil || cluster.heldClaim("house-catalog-catalog-0") == nil {
+	if cluster.heldPod("house-catalog-catalog-0") == nil {
 		t.Error("the sweep took the first copy, which the Catalog still asks for")
 	}
 	for _, name := range []string{"house-catalog-catalog-1", "house-catalog-catalog-2"} {
 		if cluster.heldPod(name) != nil {
 			t.Errorf("the pod %s stands, want it taken down", name)
 		}
-		if cluster.heldClaim(name) != nil {
-			t.Errorf("the claim %s stands, want it taken down", name)
-		}
 	}
-	pods := cluster.firstRequest(http.MethodDelete, "pods")
-	claims := cluster.firstRequest(http.MethodDelete, "persistentvolumeclaims")
-	if pods < 0 || claims < 0 || pods > claims {
-		t.Errorf("the pod went at %d and the claim at %d, want the pod first", pods, claims)
+	if cluster.heldClaim("house-catalog-catalog") == nil {
+		t.Error("the sweep took the claim the copies that remain mount")
+	}
+	if got := cluster.countRequests(http.MethodDelete, "persistentvolumeclaims"); got != 0 {
+		t.Errorf("claim deletes = %d, want none: one claim serves every copy", got)
 	}
 }
 
@@ -172,16 +170,13 @@ func TestASettledStoreTakesNothingDown(t *testing.T) {
 	}
 }
 
-// The store label is the guard on the delete: a pod or a claim that
-// takes a copy's name and carries no store label is another writer's,
-// and the sweep leaves it where it is.
+// The store label is the guard on the delete: a pod that takes a copy's
+// name and carries no store label is another writer's, and the sweep
+// leaves it where it is.
 func TestTheSweepLeavesWhatCarriesNoStoreLabel(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	cluster.pods["house-catalog-catalog-1"] = &Pod{
-		Metadata: ObjectMeta{Name: "house-catalog-catalog-1", Namespace: "house"},
-	}
-	cluster.claims["house-catalog-catalog-1"] = &PersistentVolumeClaim{
 		Metadata: ObjectMeta{Name: "house-catalog-catalog-1", Namespace: "house"},
 	}
 
@@ -189,40 +184,31 @@ func TestTheSweepLeavesWhatCarriesNoStoreLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-catalog-1") == nil || cluster.heldClaim("house-catalog-catalog-1") == nil {
-		t.Error("the sweep took an object that carries no store label")
+	if cluster.heldPod("house-catalog-catalog-1") == nil {
+		t.Error("the sweep took a pod that carries no store label")
 	}
 }
 
 // A read the server refuses ends the sweep, so the pass reports the
 // failure rather than reading an absent copy as one that is gone.
 func TestTheSweepReportsAReadTheServerRefuses(t *testing.T) {
-	cases := []struct {
-		name string
-		path string
-	}{
-		{name: "the pod", path: "/api/v1/namespaces/house/pods/house-catalog-catalog-1"},
-		{name: "the claim", path: "/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog-1"},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			catalog := housekeepingCatalog()
-			cluster.broken[one.path] = http.StatusInternalServerError
+	cluster := newFakeCluster()
+	catalog := housekeepingCatalog()
+	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-catalog-1"] = http.StatusInternalServerError
 
-			err := testOperator(t, cluster).sweepStoreReplicas(t.Context(), catalog, catalogStoreOf(catalog), 1)
+	err := testOperator(t, cluster).sweepStoreReplicas(t.Context(), catalog, catalogStoreOf(catalog), 1)
 
-			if err == nil {
-				t.Fatal("err = nil, want the failure the sweep could not read past")
-			}
-		})
+	if err == nil {
+		t.Fatal("err = nil, want the failure the sweep could not read past")
 	}
 }
 
-// StandingCatalogCopies puts the pods and the claims of one catalog
-// store into the cluster, so a test scales down from a store that
-// stands.
+// standingCatalogCopies puts the pods of one catalog store and the claim
+// they mount into the cluster, so a test scales down from a store that
+// exists.
 func standingCatalogCopies(cluster *fakeCluster, catalog *NamespaceCatalog, copies int) {
+	claim := buildCatalogPodClaim(catalog)
+	cluster.claims[claim.Metadata.Name] = claim
 	for index := range copies {
 		pod := testCatalogPod(catalog, index)
 		// The stamp is what a pass compares against, so a copy without
@@ -232,36 +218,88 @@ func standingCatalogCopies(cluster *fakeCluster, catalog *NamespaceCatalog, copi
 			panic(err)
 		}
 		cluster.pods[pod.Metadata.Name] = pod
-		claim := buildCatalogPodClaim(catalog, index)
-		cluster.claims[claim.Metadata.Name] = claim
+	}
+}
+
+// The message a Catalog carries while it asks for copies a class cannot
+// hold names that class, the store, and the count it asked for. A
+// Catalog that names no class is told the cluster's default class.
+func TestTheBlockedMessageNamesTheClassAndTheCount(t *testing.T) {
+	cases := []struct {
+		name  string
+		class string
+		want  string
+	}{
+		{name: "a class the Catalog names", class: "local-path", want: `the class "local-path"`},
+		{name: "no class at all", want: "the cluster's default class"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			catalog := housekeepingCatalog()
+			catalog.Spec.Storage.StorageClassName = one.class
+
+			message := blockedCopiesMessage(catalogStoreOf(catalog), 3)
+
+			if !strings.Contains(message, one.want) {
+				t.Errorf("message = %q, want it to name %s", message, one.want)
+			}
+			if !strings.Contains(message, "house-catalog-catalog") || !strings.Contains(message, "3") {
+				t.Errorf("message = %q, want the store and the count it asked for", message)
+			}
+		})
+	}
+}
+
+// Both stores are read, so a Catalog whose progress store alone is on a
+// class that is not per-node reports the progress store.
+func TestTheProgressStoreBlocksOnItsOwnClass(t *testing.T) {
+	cluster := newFakeCluster()
+	seedStorageClass(cluster, "per-node", perNodeProvisioner)
+	seedStorageClass(cluster, "local-path", "rancher.io/local-path")
+	catalog := housekeepingCatalog()
+	catalog.Spec.Storage.StorageClassName = "per-node"
+	catalog.Spec.Storage.Replicas = 2
+	catalog.Spec.Progress.StorageClassName = "local-path"
+	catalog.Spec.Progress.Replicas = 2
+
+	reason, message, err := testOperator(t, cluster).blockedStore(t.Context(), catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if reason != catalogReasonClassNotPerNode || !strings.Contains(message, "house-catalog-progress") {
+		t.Errorf("reason = %q, message = %q, want the progress store blocked", reason, message)
+	}
+}
+
+// A class the API server refuses to answer is the failure the pass
+// reports, from the verdict as from the count.
+func TestTheCopiesReportAClassTheServerRefuses(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := housekeepingCatalog()
+	catalog.Spec.Storage.StorageClassName = "per-node"
+	catalog.Spec.Storage.Replicas = 2
+	cluster.broken[storageClassesPath+"/per-node"] = http.StatusInternalServerError
+
+	_, _, err := testOperator(t, cluster).blockedStore(t.Context(), catalog)
+
+	if err == nil {
+		t.Fatal("err = nil, want the failure the pass could not read past")
 	}
 }
 
 // A delete the server refuses ends the sweep, so the pass reports the
 // failure and the next pass takes the copy down.
 func TestTheSweepReportsADeleteTheServerRefuses(t *testing.T) {
-	cases := []struct {
-		name    string
-		request string
-	}{
-		{name: "the pod", request: "DELETE /api/v1/namespaces/house/pods/house-catalog-catalog-1"},
-		{
-			name:    "the claim",
-			request: "DELETE /api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog-1",
-		},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			catalog := housekeepingCatalog()
-			standingCatalogCopies(cluster, catalog, 2)
-			cluster.broken[one.request] = http.StatusInternalServerError
+	cluster := newFakeCluster()
+	catalog := housekeepingCatalog()
+	standingCatalogCopies(cluster, catalog, 2)
+	cluster.broken["DELETE /api/v1/namespaces/house/pods/house-catalog-catalog-1"] =
+		http.StatusInternalServerError
 
-			err := testOperator(t, cluster).sweepStoreReplicas(t.Context(), catalog, catalogStoreOf(catalog), 1)
+	err := testOperator(t, cluster).sweepStoreReplicas(t.Context(), catalog, catalogStoreOf(catalog), 1)
 
-			if err == nil {
-				t.Fatal("err = nil, want the refusal the sweep could not read past")
-			}
-		})
+	if err == nil {
+		t.Fatal("err = nil, want the refusal the sweep could not read past")
 	}
 }

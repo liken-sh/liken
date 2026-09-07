@@ -11,7 +11,7 @@ package main
 // The departure is a ladder, read from the top on every pass. The
 // schedule goes first, then the departure waits out any scan that is
 // still running, because a scan rewrites the rows the sweep deletes and
-// holds the ReadWriteOnce claim the cleanup Job needs. The finalizer
+// holds the claim the cleanup Job needs. The finalizer
 // goes only when the cleanup Job exited zero and the reporter echoed
 // that same Job back over the bus.
 //
@@ -82,7 +82,7 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 	}
 
 	// A scan that is still running rewrites the rows the sweep deletes,
-	// and it holds the ReadWriteOnce claim the cleanup Job needs. The
+	// and it holds the claim the cleanup Job needs. The
 	// guard reads the Job and not its pods, because a scan Job between
 	// the pods of its backoff has no pod running, and its next pod writes
 	// the rows the sweep deleted.

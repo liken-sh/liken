@@ -66,8 +66,11 @@ type fakeCluster struct {
 	// because a volume names its storage with a key on the spec and
 	// not with a field beside it, and reading that key back is the
 	// operator's own work.
-	volumes  map[string]string
-	requests []string
+	volumes map[string]string
+	// The StorageClasses, by name. A test seeds the ones its cluster
+	// serves, and the server answers 404 for a class no test seeded.
+	storageClasses map[string]*StorageClass
+	requests       []string
 	// The pods deleted with no grace period, by path. A heal of a copy
 	// on a dead node is the one delete that must be forced.
 	forcedDeletes []string
@@ -95,16 +98,18 @@ func newFakeCluster() *fakeCluster {
 		secrets:   map[string]*Secret{},
 		claims:    map[string]*PersistentVolumeClaim{},
 		volumes:   map[string]string{},
-		pods:      map[string]*Pod{},
-		slices:    map[string]*EndpointSlice{},
-		services:  map[string]*Service{},
-		jobs:      map[string]*Job{},
-		cronJobs:  map[string]*CronJob{},
-		watches:   map[string]*Watch{},
-		people:    map[string]*Person{},
-		nodes:     map[string]*Node{},
-		broken:    map[string]int{},
-		parked:    make(chan struct{}),
+
+		storageClasses: map[string]*StorageClass{},
+		pods:           map[string]*Pod{},
+		slices:         map[string]*EndpointSlice{},
+		services:       map[string]*Service{},
+		jobs:           map[string]*Job{},
+		cronJobs:       map[string]*CronJob{},
+		watches:        map[string]*Watch{},
+		people:         map[string]*Person{},
+		nodes:          map[string]*Node{},
+		broken:         map[string]int{},
+		parked:         make(chan struct{}),
 	}
 }
 
@@ -259,13 +264,12 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(list)
 	case strings.Contains(r.URL.Path, "/persistentvolumeclaims/"):
 		f.serveClaim(w, r, name)
+	case strings.Contains(r.URL.Path, "/storageclasses/"):
+		answer(w, f.storageClasses[name])
+	case r.URL.Path == volumesPath:
+		f.serveVolumes(w, r)
 	case strings.Contains(r.URL.Path, "/persistentvolumes/"):
-		body, held := f.volumes[name]
-		if !held {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_, _ = io.WriteString(w, body)
+		f.serveVolume(w, r, name)
 	case strings.Contains(r.URL.Path, "/endpointslices"):
 		f.serveEndpointSlice(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case strings.Contains(r.URL.Path, "/services"):
@@ -288,8 +292,11 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// A claim is read by name, and the one delete this operator sends
-// takes a screen's catalog claim; an absent claim is a 404.
+// A claim is read by name and deleted by name, and an absent claim is a
+// 404. A deleted claim leaves the volume behind it Released with the
+// claim's uid in the claimRef, the way the binder does, because the
+// volumes this operator writes are Retain and the sweep reads that
+// phase.
 func (f *fakeCluster) serveClaim(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodDelete {
 		answer(w, f.claims[name])
@@ -299,7 +306,108 @@ func (f *fakeCluster) serveClaim(w http.ResponseWriter, r *http.Request, name st
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	held := f.claims[name]
 	delete(f.claims, name)
+	f.releaseVolumeOf(namespaceOf(r.URL.Path), name, held.Metadata.UID)
+}
+
+// The uid the fake binder writes into a claimRef for a claim that carries
+// none of its own, so a Released volume names a claim the way a Bound
+// one does.
+const boundClaimUID = "bound-claim-uid"
+
+// releaseVolumeOf turns Released every volume whose claimRef names one
+// claim, and writes the uid of that claim into the claimRef, which is
+// what the binder writes when it binds.
+func (f *fakeCluster) releaseVolumeOf(namespace, claim, uid string) {
+	if uid == "" {
+		uid = boundClaimUID
+	}
+	for name, body := range f.volumes {
+		volume := decodeVolume(body)
+		if volume.Spec.ClaimRef == nil ||
+			volume.Spec.ClaimRef.Namespace != namespace || volume.Spec.ClaimRef.Name != claim {
+			continue
+		}
+		volume.Status.Phase = volumeReleased
+		volume.Spec.ClaimRef.UID = uid
+		f.volumes[name] = encodeVolume(volume)
+	}
+}
+
+// The volumes collection. A create stores the body the operator sent,
+// and a list answers the volumes one label selector names, in name
+// order.
+func (f *fakeCluster) serveVolumes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		list := PersistentVolumeList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, name := range sortedVolumeNames(f.volumes) {
+			volume := decodeVolume(f.volumes[name])
+			if !selectsLabels(r.URL.Query().Get("labelSelector"), volume.Metadata.Labels) {
+				continue
+			}
+			list.Items = append(list.Items, *volume)
+		}
+		_ = json.NewEncoder(w).Encode(list)
+		return
+	}
+	body, _ := io.ReadAll(r.Body)
+	name := decodeVolume(string(body)).Metadata.Name
+	// A volume of that name already stands, so the API server refuses
+	// the create the way it refuses any duplicate name.
+	if _, held := f.volumes[name]; held || f.refuseCreate {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	f.volumes[name] = string(body)
+	_, _ = w.Write(body)
+}
+
+// One volume by name: the body the cluster holds on a read, and the
+// delete the sweep sends.
+func (f *fakeCluster) serveVolume(w http.ResponseWriter, r *http.Request, name string) {
+	body, held := f.volumes[name]
+	if !held {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		delete(f.volumes, name)
+		return
+	}
+	_, _ = io.WriteString(w, body)
+}
+
+func decodeVolume(body string) *PersistentVolume {
+	volume := &PersistentVolume{}
+	_ = json.Unmarshal([]byte(body), volume)
+	return volume
+}
+
+func encodeVolume(volume *PersistentVolume) string {
+	body, _ := json.Marshal(volume)
+	return string(body)
+}
+
+// heldVolume decodes the volume the cluster holds, so a test reads what a
+// pass wrote.
+func (f *fakeCluster) heldVolume(name string) *PersistentVolume {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	body, held := f.volumes[name]
+	if !held {
+		return nil
+	}
+	return decodeVolume(body)
+}
+
+// seedStorageClass puts one class into the cluster, so a test chooses the
+// provisioner the operator reads behind the class name a Catalog states.
+func seedStorageClass(cluster *fakeCluster, name, provisioner string) {
+	cluster.storageClasses[name] = &StorageClass{
+		Metadata:    ObjectMeta{Name: name},
+		Provisioner: provisioner,
+	}
 }
 
 // ServeJob answers a Job the way the API server does: a create stores
@@ -410,16 +518,32 @@ func (f *fakeCluster) createPlay(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(created)
 }
 
-// Selects answers the way the API server answers a label selector: an
-// equality selector keeps the pods that carry the pair, and an empty
-// selector keeps every pod. The operator sends one pair and no other form,
-// so a list of scanner pods never answers with a screen pod.
+// Selects answers a label selector over one pod's labels, the way
+// selectsLabels does, so a list of scanner pods never answers with a
+// screen pod.
 func selects(selector string, pod *Pod) bool {
+	return selectsLabels(selector, pod.Metadata.Labels)
+}
+
+// selectsLabels answers a label selector of the two forms the operator
+// sends. A key with a value keeps the objects that carry that pair. A key
+// alone keeps the objects that carry the key with any value. An empty
+// selector keeps everything. Terms are separated by commas, and every
+// term must hold.
+func selectsLabels(selector string, labels map[string]string) bool {
 	if selector == "" {
 		return true
 	}
-	key, value, _ := strings.Cut(selector, "=")
-	return pod.Metadata.Labels[key] == value
+	for _, term := range strings.Split(selector, ",") {
+		key, value, stated := strings.Cut(term, "=")
+		if stated && labels[key] != value {
+			return false
+		}
+		if !stated && labels[key] == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // The API server's own behavior: conditional on the stated
@@ -754,6 +878,18 @@ func answer[T any](w http.ResponseWriter, held *T) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(held)
+}
+
+// sortedVolumeNames returns the volume names in order, so one list reads
+// the same way every time. The volumes are held as bodies and not as
+// objects, so sortedNames cannot sort them.
+func sortedVolumeNames(volumes map[string]string) []string {
+	names := make([]string, 0, len(volumes))
+	for name := range volumes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func sortedNames[T any](objects map[string]*T) []string {

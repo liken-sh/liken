@@ -55,9 +55,10 @@ spec:
                   default: {}
                   description: >-
                     The catalog of record every other agent copies,
-                    held on one claim per durable copy. The size is also
-                    the size of every working copy, and the class is the
-                    default class for the progress and libraries claims.
+                    held on one claim that every durable copy mounts.
+                    The size is also the size of every working copy,
+                    and the class is the default class for the progress
+                    and libraries claims.
                   properties:
                     size:
                       type: string
@@ -71,11 +72,17 @@ spec:
                       description: >-
                         The StorageClass each agent's catalog volume
                         binds to. Omitted, the cluster's default binds
-                        it.
+                        it. A class the per-node driver serves, whose
+                        provisioner is per-node.liken.sh, lets the
+                        namespace stand more than one copy of the
+                        catalog, because every copy then holds a
+                        directory of its own on the node it runs on.
+                        The operator reads the provisioner of the class
+                        and never matches its name.
                     claimName:
                       type: string
                       minLength: 1
-                      description: "An existing PersistentVolumeClaim in this namespace for the catalog pod to mount, in place of the one the operator provisions; the operator creates none when it is set."
+                      description: "An existing PersistentVolumeClaim in this namespace for every copy of the catalog to mount, in place of the one the operator provisions. The operator creates no claim and no volume when it is set."
                     replicas:
                       type: integer
                       minimum: 1
@@ -83,15 +90,21 @@ spec:
                       description: >-
                         How many durable copies of the catalog the
                         namespace stands. The copies are peers that
-                        Corrosion syncs from one another, and each one
-                        holds a claim of its own at size. No two copies
-                        share a node, so a copy the scheduler cannot
-                        place stays Pending and the Catalog is not Ready.
-                        A copy on a node that stays NotReady for ten
-                        minutes is deleted with its claim and stood
-                        again elsewhere. A copy taken away by a lower
-                        count loses its claim with its pod; a backup is
-                        a deliberate act outside this operator.
+                        Corrosion syncs from one another, and every copy
+                        mounts one claim of storage.size, named after
+                        the Catalog with the suffix -catalog. More than
+                        one copy needs a per-node class. On any other
+                        class the namespace stands one copy, and the
+                        Ready condition is False with the reason
+                        ClassNotPerNode. No two copies share a node, so
+                        a copy the scheduler cannot place stays Pending
+                        and the Catalog is not Ready. A copy on a node
+                        that stays NotReady for ten minutes is deleted
+                        and stood again elsewhere. It takes the claim
+                        with it only on a class that binds the claim to
+                        the node. A copy taken away by a lower count
+                        loses its pod alone, because the claim serves
+                        the copies that remain.
                 progress:
                   type: object
                   default: {}
@@ -103,7 +116,7 @@ spec:
                     storageClassName:
                       type: string
                       minLength: 1
-                      description: "The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it."
+                      description: "The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it. A per-node class lets the namespace stand more than one copy of the progress store, on the same terms as storage.storageClassName."
                     replicas:
                       type: integer
                       minimum: 1
@@ -111,9 +124,14 @@ spec:
                       description: >-
                         How many durable copies of the progress store
                         the namespace stands, on the same terms as
-                        storage.replicas. The first copy records what
-                        crosses the bus; every copy after it holds the
-                        rows.
+                        storage.replicas, against the class this block
+                        names. Every copy mounts one claim, named after
+                        the Catalog with the suffix -progress. More than
+                        one copy needs a per-node class here as well,
+                        and on any other class the Ready condition is
+                        False with the reason ClassNotPerNode. The first
+                        copy records what crosses the bus, and every
+                        copy after it holds the rows.
                 libraries:
                   type: object
                   default: {}
@@ -131,7 +149,7 @@ spec:
                     storageClassName:
                       type: string
                       minLength: 1
-                      description: "The StorageClass both of a screen's claims bind to. Omitted, the cluster's default binds them. A node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display."
+                      description: "The StorageClass both of a screen's claims bind to. Omitted, the cluster's default binds them. A node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display. On such a class, a screen the scheduler refuses for five minutes loses its pod and both claims, and the next pass creates them again where the display is. On a per-node class the claims pin the pod to no node, and the operator never deletes them."
                     artCache:
                       type: object
                       default: {}
@@ -170,7 +188,7 @@ spec:
                           description: "How many copies run with every container ready."
                         wanted:
                           type: integer
-                          description: "How many copies the Catalog asks for, from storage.replicas."
+                          description: "How many copies the Catalog asks for, from storage.replicas. The count is the one the Catalog states, so a Catalog whose class cannot hold more than one copy reports the copies it asked for beside the one that is up."
                     progress:
                       type: object
                       description: "The copies of the progress store."
@@ -199,13 +217,13 @@ spec:
                         description: "The claim the screen's art cache is on, or empty for a screen on an emptyDir."
                       node:
                         type: string
-                        description: "The node the screen pod runs on, which is the node both of its claims are bound to."
+                        description: "The node the screen pod runs on. On a node-local class it is the node both of its claims are bound to."
                       phase:
                         type: string
                         description: "The screen pod's phase, as the kubelet reports it."
                 conditions:
                   type: array
-                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up."
+                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

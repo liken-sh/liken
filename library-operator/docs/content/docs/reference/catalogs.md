@@ -47,20 +47,21 @@ Where the catalog is stored and how large each agent's copy is.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | The catalog pod's claim, the catalog of record every other agent copies. Its size is also the size of every copy, and its class is the default class for the progress and libraries claims. |
+| <span id="spec--storage"></span>`storage` | [object](#specstorage) | yes | The catalog of record every other agent copies, held on one claim that every durable copy mounts. The size is also the size of every working copy, and the class is the default class for the progress and libraries claims. |
 | <span id="spec--progress"></span>`progress` | [object](#specprogress) | no | The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size. |
 | <span id="spec--libraries"></span>`libraries` | [object](#speclibraries) | no | The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. |
 | <span id="spec--screens"></span>`screens` | [object](#specscreens) | no | The settings every screen pod in the namespace takes. |
 
 ### spec.storage
 
-The catalog pod's claim, the catalog of record every other agent copies. Its size is also the size of every copy, and its class is the default class for the progress and libraries claims.
+The catalog of record every other agent copies, held on one claim that every durable copy mounts. The size is also the size of every working copy, and the class is the default class for the progress and libraries claims.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specstorage--size"></span>`size` | string | no | The size of each agent's catalog volume. Small by default. Default: `1Gi`. |
-| <span id="specstorage--storageclassname"></span>`storageClassName` | string | no | The StorageClass each agent's catalog volume binds to. Omitted, the cluster's default binds it. |
-| <span id="specstorage--claimname"></span>`claimName` | string | no | An existing PersistentVolumeClaim in this namespace for the catalog pod to mount, in place of the one the operator provisions; the operator creates none when it is set. |
+| <span id="specstorage--storageclassname"></span>`storageClassName` | string | no | The StorageClass each agent's catalog volume binds to. Omitted, the cluster's default binds it. A class the per-node driver serves, whose provisioner is per-node.liken.sh, lets the namespace stand more than one copy of the catalog, because every copy then holds a directory of its own on the node it runs on. The operator reads the provisioner of the class and never matches its name. |
+| <span id="specstorage--claimname"></span>`claimName` | string | no | An existing PersistentVolumeClaim in this namespace for every copy of the catalog to mount, in place of the one the operator provisions. The operator creates no claim and no volume when it is set. |
+| <span id="specstorage--replicas"></span>`replicas` | integer | no | How many durable copies of the catalog the namespace stands. The copies are peers that Corrosion syncs from one another, and every copy mounts one claim of storage.size, named after the Catalog with the suffix -catalog. More than one copy needs a per-node class. On any other class the namespace stands one copy, and the Ready condition is False with the reason ClassNotPerNode. No two copies share a node, so a copy the scheduler cannot place stays Pending and the Catalog is not Ready. A copy on a node that stays NotReady for ten minutes is deleted and stood again elsewhere. It takes the claim with it only on a class that binds the claim to the node. A copy taken away by a lower count loses its pod alone, because the claim serves the copies that remain. Default: `1`. |
 
 ### spec.progress
 
@@ -69,7 +70,8 @@ The claim the progress store runs on: who watched what, and how far. Each field 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specprogress--size"></span>`size` | string | no | The size of the progress claim, in a binary unit such as 256Mi. The progress rows are small next to the catalog, so a namespace that keeps both central stores on a durable class names a smaller size here. Omitted, the claim takes storage.size. A size change reaches a new claim and not a standing one, because a bound claim's spec is immutable; delete the standing claim and the next pass creates it at the new size. |
-| <span id="specprogress--storageclassname"></span>`storageClassName` | string | no | The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it. |
+| <span id="specprogress--storageclassname"></span>`storageClassName` | string | no | The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it. A per-node class lets the namespace stand more than one copy of the progress store, on the same terms as storage.storageClassName. |
+| <span id="specprogress--replicas"></span>`replicas` | integer | no | How many durable copies of the progress store the namespace stands, on the same terms as storage.replicas, against the class this block names. Every copy mounts one claim, named after the Catalog with the suffix -progress. More than one copy needs a per-node class here as well, and on any other class the Ready condition is False with the reason ClassNotPerNode. The first copy records what crosses the bus, and every copy after it holds the rows. Default: `1`. |
 
 ### spec.libraries
 
@@ -85,7 +87,7 @@ The settings every screen pod in the namespace takes.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specscreens--storageclassname"></span>`storageClassName` | string | no | The StorageClass both of a screen's claims bind to. Omitted, the cluster's default binds them. A node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display. |
+| <span id="specscreens--storageclassname"></span>`storageClassName` | string | no | The StorageClass both of a screen's claims bind to. Omitted, the cluster's default binds them. A node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display. On such a class, a screen the scheduler refuses for five minutes loses its pod and both claims, and the next pass creates them again where the display is. On a per-node class the claims pin the pod to no node, and the operator never deletes them. |
 | <span id="specscreens--artcache"></span>`artCache` | [object](#specscreensartcache) | no | The volume each screen's browser keeps its scaled art on: posters, backdrops, episode stills, logos, and headshots. A screen that restarts draws the wall from art it already scaled. |
 
 #### spec.screens.artCache
@@ -102,10 +104,38 @@ The cluster the Catalog stands, written only by the library operator.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--members"></span>`members` | []string | no | The pods that are members of the namespace's catalog cluster: the catalog pod, the pods of the Jobs that are running, and the screen pods. |
+| <span id="status--members"></span>`members` | []string | no | The pods that are members of the namespace's catalog cluster: the durable copies of the catalog, the pods of the Jobs that are running, and the screen pods. |
 | <span id="status--storagesize"></span>`storageSize` | string | no | The storage size the agents were given. |
+| <span id="status--replicas"></span>`replicas` | [object](#statusreplicas) | no | The durable copies of the namespace's two stores: for each, the count that is up beside the count the Catalog asks for. |
 | <span id="status--screens"></span>`screens` | [\[\]object](#statusscreens) | no | One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the claim its art cache is on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on emptyDirs and names neither claim. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up. |
+
+### status.replicas
+
+The durable copies of the namespace's two stores: for each, the count that is up beside the count the Catalog asks for.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusreplicas--catalog"></span>`catalog` | [object](#statusreplicascatalog) | no | The copies of the catalog. |
+| <span id="statusreplicas--progress"></span>`progress` | [object](#statusreplicasprogress) | no | The copies of the progress store. |
+
+#### status.replicas.catalog
+
+The copies of the catalog.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusreplicascatalog--ready"></span>`ready` | integer | no | How many copies run with every container ready. |
+| <span id="statusreplicascatalog--wanted"></span>`wanted` | integer | no | How many copies the Catalog asks for, from storage.replicas. The count is the one the Catalog states, so a Catalog whose class cannot hold more than one copy reports the copies it asked for beside the one that is up. |
+
+#### status.replicas.progress
+
+The copies of the progress store.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusreplicasprogress--ready"></span>`ready` | integer | no | How many copies run with every container ready. |
+| <span id="statusreplicasprogress--wanted"></span>`wanted` | integer | no | How many copies the Catalog asks for, from progress.replicas. |
 
 ### status.screens[]
 
@@ -116,12 +146,12 @@ One entry per screen pod in the namespace, in Player order: the Player it draws 
 | <span id="statusscreens--player"></span>`player` | string | no | The Player the screen draws for. |
 | <span id="statusscreens--claim"></span>`claim` | string | no | The claim the screen's catalog agent runs on, or empty for a screen on an emptyDir. |
 | <span id="statusscreens--artclaim"></span>`artClaim` | string | no | The claim the screen's art cache is on, or empty for a screen on an emptyDir. |
-| <span id="statusscreens--node"></span>`node` | string | no | The node the screen pod runs on, which is the node both of its claims are bound to. |
+| <span id="statusscreens--node"></span>`node` | string | no | The node the screen pod runs on. On a node-local class it is the node both of its claims are bound to. |
 | <span id="statusscreens--phase"></span>`phase` | string | no | The screen pod's phase, as the kubelet reports it. |
 
 ### status.conditions[]
 
-The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs.
+The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

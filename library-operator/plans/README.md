@@ -47,6 +47,10 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   screen half of plan 14: a second agent on every screen pod, the
   browser asks who is watching and sends the answer with every play
   request, and continue watching and history draw from the local copy.
+* [44, Copies on per-node volumes](44-copies-on-per-node-volumes.md).
+  Every claim can bind to a `per-node` volume the operator writes up
+  front; the copies of a store share one claim, and the heal shrinks
+  to a pod delete.
 
 ## Future
 

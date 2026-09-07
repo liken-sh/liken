@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 )
 
@@ -23,11 +22,11 @@ func enrichCatalogClaimName(library string) string {
 	return enrichJobName(library) + "-catalog"
 }
 
-// The volume the enricher's agent runs on. It is separate from the scan Jobs'
-// claim, so a folder enrich never waits on the ReadWriteOnce a scan holds,
-// and it keeps the agent's actor id and rows between runs, so a run syncs a
-// delta. It binds to the libraries' class, as the scan claim does,
-// because it is a working copy and not the catalog of record.
+// The volume the enricher's agent runs on. It is separate from the scan
+// Jobs' claim, so a folder enrich never waits on the claim a scan holds,
+// and it keeps the agent's actor id and rows between runs, so a run
+// syncs a delta. It binds to the libraries' class, as the scan claim
+// does, because it is a working copy and not the catalog of record.
 func buildEnrichClaim(library *Library, catalog *NamespaceCatalog) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
@@ -48,25 +47,10 @@ func buildEnrichClaim(library *Library, catalog *NamespaceCatalog) *PersistentVo
 	}
 }
 
-// The claim is provisioned once and never rewritten, the rule
-// standCatalogClaim follows, because a claim's spec is immutable once it
-// binds.
+// The claim is provisioned once and never rewritten, the rule standClaim
+// holds, because a claim's spec is immutable once it binds.
 func (o *operator) standEnrichClaim(ctx context.Context, library *Library, catalog *NamespaceCatalog) error {
-	namespace := library.Metadata.Namespace
-	name := enrichCatalogClaimName(library.Metadata.Name)
-
-	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildEnrichClaim(library, catalog))
-	if errors.Is(err, ErrConflict) {
-		return nil
-	}
-	return err
+	return o.standClaim(ctx, buildEnrichClaim(library, catalog))
 }
 
 // The enricher Job. The name is the caller's, because a Library runs the

@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 )
 
@@ -16,23 +17,33 @@ import (
 const hostnameTopologyKey = "kubernetes.io/hostname"
 
 // One of the two durable stores a Catalog stands: the name every copy of
-// it is numbered from, and the store label value every copy carries. The
-// two travel together, so no caller can pair one store's name with the
-// other store's label.
+// it is numbered from, the store label value every copy carries, and the
+// class the store's claim binds to. The name is the store's one claim as
+// well, which every copy mounts. The three travel together, so no caller
+// can pair one store's name with the other store's label or class.
 type durableStore struct {
 	base  string
 	label string
+	class string
 }
 
 func catalogStoreOf(catalog *NamespaceCatalog) durableStore {
-	return durableStore{base: catalogStoreName(catalog.Metadata.Name), label: catalogStoreLabelValue}
+	return durableStore{
+		base:  catalogStoreName(catalog.Metadata.Name),
+		label: catalogStoreLabelValue,
+		class: catalog.Spec.Storage.StorageClassName,
+	}
 }
 
 func progressStoreOf(catalog *NamespaceCatalog) durableStore {
-	return durableStore{base: progressStoreName(catalog.Metadata.Name), label: progressStoreLabelValue}
+	return durableStore{
+		base:  progressStoreName(catalog.Metadata.Name),
+		label: progressStoreLabelValue,
+		class: progressStorageClass(catalog),
+	}
 }
 
-// The name one copy's pod and its claim take. Every copy carries its
+// The name one copy's pod takes. Every copy carries its
 // number, copy zero included, so one rule names them all and a person
 // reads a copy's number off the pod in front of them.
 func (s durableStore) replicaName(index int) string {
@@ -65,11 +76,11 @@ func replicaAgent(agent Container) Container {
 	return agent
 }
 
-// Take down every copy of one store at or above the count the Catalog
-// asks for. The walk goes upward from that count until it finds neither a
-// pod nor a claim, because the copies are numbered from zero with no gaps.
-// A copy that goes takes its claim with it: a backup is a deliberate act
-// elsewhere, and the peers hold the rows.
+// sweepStoreReplicas takes down every copy of one store at or above the
+// count the Catalog asks for. The walk goes upward from that count until
+// it finds no pod, because the copies are numbered from zero with no
+// gaps. The claim stays, because one claim serves every copy and the
+// copies that remain mount it.
 func (o *operator) sweepStoreReplicas(ctx context.Context, catalog *NamespaceCatalog, store durableStore, wanted int) error {
 	for index := wanted; ; index++ {
 		held, err := o.retireStoreReplica(ctx, catalog.Metadata.Namespace, store, index)
@@ -79,33 +90,80 @@ func (o *operator) sweepStoreReplicas(ctx context.Context, catalog *NamespaceCat
 	}
 }
 
-// Take down one copy: the pod first, then the claim under it, so the
-// volume is released before it is deleted. The store label guards both
-// deletes, so a pod or a claim that another writer gave a copy's name is
-// left where it is. The answer is whether anything stood under that name,
-// which is what ends the walk.
+// retireStoreReplica takes down one copy, which is the pod alone. The
+// store label guards the delete, so a pod another writer gave a copy's
+// name is left where it is. The answer is whether a pod exists under that
+// name, which is what ends the walk.
 func (o *operator) retireStoreReplica(ctx context.Context, namespace string, store durableStore, index int) (bool, error) {
 	name := store.replicaName(index)
 
 	pod, err := GetPod(ctx, o.client, namespace, name)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
 		return false, err
 	}
-	claim, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return false, err
+	if pod.Metadata.Labels[storeLabelKey] != store.label {
+		return true, nil
 	}
-	if pod != nil && pod.Metadata.Labels[storeLabelKey] == store.label {
-		if err := DeletePod(ctx, o.client, namespace, name); err != nil {
-			return true, err
+	return true, DeletePod(ctx, o.client, namespace, name)
+}
+
+// storeCopies is how many copies of one store the pass stands. A
+// per-node class gives every copy a directory of its own on the node it
+// runs on, so the Catalog's count stands. On any other class the store's
+// one claim binds to one node, so one copy stands and the Catalog reports
+// why. One copy needs no class read.
+func (o *operator) storeCopies(ctx context.Context, store durableStore, wanted int) (int, error) {
+	if wanted <= 1 {
+		return wanted, nil
+	}
+	perNode, err := o.classIsPerNode(ctx, store.class)
+	if err != nil {
+		return 0, err
+	}
+	if perNode {
+		return wanted, nil
+	}
+	return 1, nil
+}
+
+// blockedStore is the reason and message the Catalog carries while it
+// asks for more copies of a store than its class can hold, or an empty
+// reason when both stores can stand what the Catalog asks for. The
+// catalog store is read first, so a Catalog blocked on both stores
+// reports the catalog.
+func (o *operator) blockedStore(ctx context.Context, catalog *NamespaceCatalog) (string, string, error) {
+	stores := []struct {
+		store  durableStore
+		wanted int
+	}{
+		{store: catalogStoreOf(catalog), wanted: catalogReplicaCount(catalog)},
+		{store: progressStoreOf(catalog), wanted: progressReplicaCount(catalog)},
+	}
+	for _, one := range stores {
+		copies, err := o.storeCopies(ctx, one.store, one.wanted)
+		if err != nil {
+			return "", "", err
+		}
+		if copies < one.wanted {
+			return catalogReasonClassNotPerNode, blockedCopiesMessage(one.store, one.wanted), nil
 		}
 	}
-	if claim != nil && claim.Metadata.Labels[storeLabelKey] == store.label {
-		if err := DeletePersistentVolumeClaim(ctx, o.client, namespace, name); err != nil {
-			return true, err
-		}
+	return "", "", nil
+}
+
+// blockedCopiesMessage is the sentence a person acts on: the class that
+// cannot hold more than one copy, the store that asked, and the count it
+// asked for.
+func blockedCopiesMessage(store durableStore, wanted int) string {
+	class := fmt.Sprintf("the class %q", store.class)
+	if store.class == "" {
+		class = "the cluster's default class"
 	}
-	return pod != nil || claim != nil, nil
+	return fmt.Sprintf("%s is not a per-node class, so %s stands one copy and not %d",
+		class, store.base, wanted)
 }
 
 // How many copies of one store are up, out of how many the Catalog asks

@@ -1,20 +1,21 @@
 package main
 
 // The catalog volumes. There is one per Library, which its worker Jobs
-// mount in turn, and one per durable copy of the namespace's catalog. All
-// are ReadWriteOnce, because one agent writes one SQLite database, and
-// all are sized from the namespace Catalog, because every agent holds the
-// whole namespace's catalog.
+// mount in turn, and one for the durable copies of the namespace's
+// catalog, which every copy mounts. All are sized from the namespace
+// Catalog, because every agent holds the whole namespace's catalog. Each
+// is built ReadWriteOnce, and standClaim writes it ReadWriteMany on a
+// per-node class.
 
 import (
 	"context"
-	"errors"
 )
 
 // scannerCatalogClaimName is the durable catalog volume one Library's
 // worker Jobs mount. It is derived from the Library name, so every pass
-// names the same claim and the operator keeps no record of it. Its
-// ReadWriteOnce is what serializes one library's Jobs.
+// names the same claim and the operator keeps no record of it. On a class
+// that is not per-node the claim is ReadWriteOnce, and that is what
+// serializes one library's Jobs.
 //
 // The claim must hold a database whose schema matches this release.
 // Corrosion refuses to change the primary key of a database it already
@@ -29,12 +30,13 @@ func scannerCatalogClaimName(library string) string {
 }
 
 // buildCatalogClaim writes the catalog claim one Library's workers take.
-// It is ReadWriteOnce, because one agent writes one SQLite database. It is
-// sized from the namespace Catalog, because each agent holds the whole
-// namespace's catalog. It is owned by the Library, so it survives a pod roll
-// and is collected with the Library. It binds to the libraries' class,
-// because it is a working copy and not the catalog of record. An empty
-// class is omitted, so the cluster's default StorageClass binds it.
+// It asks for ReadWriteOnce, and standClaim writes ReadWriteMany in its
+// place on a per-node class. It is sized from the namespace Catalog,
+// because each agent holds the whole namespace's catalog. It is owned by
+// the Library, so it survives a pod roll and is collected with the
+// Library. It binds to the libraries' class, because it is a working copy
+// and not the catalog of record. An empty class is omitted, so the
+// cluster's default StorageClass binds it.
 func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
@@ -55,61 +57,38 @@ func buildCatalogClaim(library *Library, catalog *NamespaceCatalog) *PersistentV
 	}
 }
 
-// standCatalogClaim creates the catalog claim when there is none and leaves
-// an existing one alone. A PersistentVolumeClaim's spec is immutable once it
-// binds, so the operator provisions the claim rather than reconciling it. A
-// size a later Catalog grows to reaches a new claim, not this one. A conflict
-// on the create means another writer got there first, which is success.
+// standCatalogClaim provisions the claim one Library's workers mount,
+// through standClaim. A size a later Catalog grows to reaches a new claim
+// and not this one, because a claim's spec is immutable once it binds.
 func (o *operator) standCatalogClaim(ctx context.Context, library *Library, catalog *NamespaceCatalog) error {
-	namespace := library.Metadata.Namespace
-	name := scannerCatalogClaimName(library.Metadata.Name)
-
-	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-
-	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildCatalogClaim(library, catalog))
-	if errors.Is(err, ErrConflict) {
-		return nil
-	}
-	return err
+	return o.standClaim(ctx, buildCatalogClaim(library, catalog))
 }
 
-// The claim the catalog pod mounts: the one the Catalog names,
-// or the one the operator provisions when it names none.
+// catalogClaimFor names the claim every durable copy of the catalog
+// mounts: the one the Catalog names, or the one the operator provisions
+// when it names none. Every copy mounts the same claim. On a per-node
+// class that gives each copy a directory of its own on the node it runs
+// on. On any other class the claim binds to one node, so one copy
+// stands.
 func catalogClaimFor(catalog *NamespaceCatalog) string {
 	if catalog.Spec.Storage.ClaimName != "" {
 		return catalog.Spec.Storage.ClaimName
 	}
-	return catalogStoreOf(catalog).replicaName(0)
-}
-
-// The claim one copy of the catalog mounts. The first copy takes the
-// claim the Catalog names when it names one. Every copy after it takes a
-// claim of its own name.
-func catalogReplicaClaim(catalog *NamespaceCatalog, index int) string {
-	if index == 0 {
-		return catalogClaimFor(catalog)
-	}
-	return catalogStoreOf(catalog).replicaName(index)
+	return catalogStoreOf(catalog).base
 }
 
 // The catalog pod's own claim, owned by the Catalog, so the
 // garbage collector takes it with the Catalog and the standing catalog
 // survives every roll of the pod.
 //
-// One claim per copy, at the copy's own name, on the class and the size
-// every copy shares.
-func buildCatalogPodClaim(catalog *NamespaceCatalog, index int) *PersistentVolumeClaim {
+// There is one claim for the store, at the store's own name, on the
+// class and the size every copy shares.
+func buildCatalogPodClaim(catalog *NamespaceCatalog) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
 		Kind:       "PersistentVolumeClaim",
 		Metadata: ObjectMeta{
-			Name:            catalogStoreOf(catalog).replicaName(index),
+			Name:            catalogStoreOf(catalog).base,
 			Namespace:       catalog.Metadata.Namespace,
 			Labels:          catalogPodLabels(),
 			OwnerReferences: []OwnerReference{catalogObjectOwner(catalog)},

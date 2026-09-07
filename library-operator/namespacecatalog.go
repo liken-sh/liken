@@ -53,7 +53,8 @@ type CatalogProgress struct {
 	Size             string `json:"size,omitempty"`
 	StorageClassName string `json:"storageClassName,omitempty"`
 	// How many durable copies of the progress store the namespace stands.
-	// The copies are peers, and each one holds a claim of its own.
+	// The copies are peers, and every one of them mounts the store's one
+	// claim.
 	Replicas int `json:"replicas,omitempty"`
 }
 
@@ -98,8 +99,8 @@ type CatalogStorage struct {
 	// operator provisions.
 	ClaimName string `json:"claimName,omitempty"`
 	// How many durable copies of the catalog the namespace stands. The
-	// copies are peers that Corrosion syncs from one another, and each one
-	// holds a claim of its own.
+	// copies are peers that Corrosion syncs from one another, and every
+	// one of them mounts the store's one claim.
 	Replicas int `json:"replicas,omitempty"`
 }
 
@@ -229,6 +230,9 @@ const (
 
 	catalogReasonStanding     = "Standing"
 	catalogReasonManyCatalogs = "ManyCatalogs"
+	// The Catalog asks for more than one copy of a store on a class that
+	// is not per-node, so the namespace stands one copy of that store.
+	catalogReasonClassNotPerNode = "ClassNotPerNode"
 	// The catalog pod has not started, and the catalog pod
 	// failed.
 	catalogReasonPodPending = "PodPending"

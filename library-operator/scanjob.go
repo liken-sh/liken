@@ -3,7 +3,8 @@ package main
 // A scan is a Job. The full walk runs from a CronJob on the
 // Library's schedule, and a folder scan runs from a Job the webhook
 // creates for one path. Both run the same pod on the Library's own
-// catalog claim, whose ReadWriteOnce admits one of them at a time.
+// catalog claim. On a class that is not per-node the claim is
+// ReadWriteOnce, which admits one of them at a time.
 
 import (
 	"context"

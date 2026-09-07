@@ -24,8 +24,8 @@ func nodeAt(name, verdict string, since time.Duration) *Node {
 	}
 }
 
-// One durable copy of the catalog, standing on a node, with the claim
-// under it, as a pass reads them.
+// copyOnNode puts one durable copy of the catalog on a node, with the
+// store's claim under it, as a pass reads them.
 func copyOnNode(cluster *fakeCluster, catalog *NamespaceCatalog, index int, node string) *Pod {
 	pod := testCatalogPod(catalog, index)
 	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
@@ -34,18 +34,18 @@ func copyOnNode(cluster *fakeCluster, catalog *NamespaceCatalog, index int, node
 	pod.Spec.NodeName = node
 	pod.Status = PodStatus{Phase: podRunning, PodIP: "10.42.4.4"}
 	cluster.pods[pod.Metadata.Name] = pod
-	claim := buildCatalogPodClaim(catalog, index)
+	claim := buildCatalogPodClaim(catalog)
 	cluster.claims[claim.Metadata.Name] = claim
 	return pod
 }
 
-// A copy whose node has been NotReady past the grace loses its pod and
-// its claim, and the pass stands both again.
+// A copy whose node has been NotReady past the grace loses its pod, and
+// on a class that binds the claim to that node its claim with it. The
+// pass stands both again.
 func TestAStrandedCopyLosesItsPodAndItsClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
-	catalog.Spec.Storage.Replicas = 2
-	stranded := copyOnNode(cluster, catalog, 1, "nuc-2")
+	stranded := copyOnNode(cluster, catalog, 0, "nuc-2")
 	cluster.nodes["nuc-2"] = nodeAt("nuc-2", "False", 11*time.Minute)
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(),
@@ -54,21 +54,42 @@ func TestAStrandedCopyLosesItsPodAndItsClaim(t *testing.T) {
 	if got := cluster.countRequests(http.MethodDelete, "pods"); got != 1 {
 		t.Errorf("pod deletes = %d, want the one stranded copy", got)
 	}
-	if got := cluster.forcedDeletes; len(got) != 1 || !strings.HasSuffix(got[0], "/house-catalog-catalog-1") {
+	if got := cluster.forcedDeletes; len(got) != 1 || !strings.HasSuffix(got[0], "/house-catalog-catalog-0") {
 		t.Errorf("forced deletes = %v, want the stranded copy with no grace period", got)
 	}
 	if got := cluster.countRequests(http.MethodDelete, "persistentvolumeclaims"); got != 1 {
 		t.Errorf("claim deletes = %d, want the stranded copy's claim", got)
 	}
-	stood := cluster.heldPod("house-catalog-catalog-1")
+	stood := cluster.heldPod("house-catalog-catalog-0")
 	if stood == nil {
 		t.Fatal("the pass stood no copy in place of the stranded one")
 	}
 	if stood.Spec.NodeName != "" {
 		t.Errorf("nodeName = %q, want a fresh copy the scheduler places", stood.Spec.NodeName)
 	}
-	if cluster.heldClaim("house-catalog-catalog-1") == nil {
+	if cluster.heldClaim("house-catalog-catalog") == nil {
 		t.Error("the pass provisioned no claim for the copy it stood")
+	}
+}
+
+// A copy on a per-node class loses its pod alone. The claim is the
+// store's, every copy mounts it, and it pins the fresh copy to no node.
+func TestAStrandedCopyOnAPerNodeClassKeepsTheStoresClaim(t *testing.T) {
+	cluster := newFakeCluster()
+	seedStorageClass(cluster, "per-node", perNodeProvisioner)
+	catalog := seedCatalog(cluster, "house-catalog", "house")
+	catalog.Spec.Storage.StorageClassName = "per-node"
+	pod := copyOnNode(cluster, catalog, 0, "nuc-2")
+
+	if err := testOperator(t, cluster).healStoreReplica(t.Context(), pod); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldPod("house-catalog-catalog-0") != nil {
+		t.Error("the stranded pod stands, want it taken down")
+	}
+	if cluster.heldClaim("house-catalog-catalog") == nil {
+		t.Error("the heal took the claim every copy of the store mounts")
 	}
 }
 
@@ -109,10 +130,27 @@ func TestTheHealLeavesEveryCopyItHasNoVerdictOn(t *testing.T) {
 			if got := cluster.countRequests(http.MethodDelete, "pods"); got != 0 {
 				t.Errorf("pod deletes = %d, want none", got)
 			}
-			if cluster.heldClaim("house-catalog-catalog-1") == nil {
+			if cluster.heldClaim("house-catalog-catalog") == nil {
 				t.Error("the heal took the claim of a copy it must leave alone")
 			}
 		})
+	}
+}
+
+// A pod that mounts no claim heals to the pod alone, because the claim
+// the heal reads is the one the pod itself names.
+func TestTheHealTakesAPodThatMountsNoClaim(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := housekeepingCatalog()
+	pod := copyOnNode(cluster, catalog, 0, "nuc-2")
+	pod.Spec.Volumes = nil
+
+	if err := testOperator(t, cluster).healStoreReplica(t.Context(), pod); err != nil {
+		t.Fatal(err)
+	}
+
+	if cluster.heldClaim("house-catalog-catalog") == nil {
+		t.Error("the heal took a claim no pod named")
 	}
 }
 
@@ -148,8 +186,8 @@ func TestTheHealLeavesAClaimItDidNotProvision(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	pod := copyOnNode(cluster, catalog, 0, "nuc-2")
-	cluster.claims["house-catalog-catalog-0"] = &PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "house-catalog-catalog-0", Namespace: "house"},
+	cluster.claims["house-catalog-catalog"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "house-catalog-catalog", Namespace: "house"},
 	}
 
 	if err := testOperator(t, cluster).healStoreReplica(t.Context(), pod); err != nil {
@@ -159,7 +197,7 @@ func TestTheHealLeavesAClaimItDidNotProvision(t *testing.T) {
 	if cluster.heldPod("house-catalog-catalog-0") != nil {
 		t.Error("the stranded pod stands, want it taken down")
 	}
-	if cluster.heldClaim("house-catalog-catalog-0") == nil {
+	if cluster.heldClaim("house-catalog-catalog") == nil {
 		t.Error("the heal took a claim that carries no store label")
 	}
 }
@@ -170,7 +208,7 @@ func TestTheHealReportsAReadTheServerRefuses(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	pod := copyOnNode(cluster, catalog, 1, "nuc-2")
-	cluster.broken["GET /api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog-1"] =
+	cluster.broken["GET /api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog"] =
 		http.StatusInternalServerError
 
 	err := testOperator(t, cluster).healStoreReplica(t.Context(), pod)
@@ -222,7 +260,7 @@ func TestTheHealTakesAPodWhoseClaimIsAlreadyGone(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	pod := copyOnNode(cluster, catalog, 1, "nuc-2")
-	delete(cluster.claims, "house-catalog-catalog-1")
+	delete(cluster.claims, "house-catalog-catalog")
 
 	if err := testOperator(t, cluster).healStoreReplica(t.Context(), pod); err != nil {
 		t.Fatal(err)

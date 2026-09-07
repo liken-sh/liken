@@ -117,7 +117,7 @@ func TestCatalogPodMountsTheNamespacesClaim(t *testing.T) {
 		catalog *NamespaceCatalog
 		want    string
 	}{
-		{name: "the operator's own claim", catalog: housekeepingCatalog(), want: "house-catalog-catalog-0"},
+		{name: "the operator's own claim", catalog: housekeepingCatalog(), want: "house-catalog-catalog"},
 		{name: "a claim the Catalog names", catalog: named, want: "catalog-of-my-own"},
 	}
 	for _, one := range cases {
@@ -138,9 +138,9 @@ func TestCatalogPodClaimIsOwnedByItsCatalog(t *testing.T) {
 	catalog := housekeepingCatalog()
 	catalog.Spec.Storage = CatalogStorage{Size: "8Gi", StorageClassName: "fast"}
 
-	claim := buildCatalogPodClaim(catalog, 0)
+	claim := buildCatalogPodClaim(catalog)
 
-	if claim.Metadata.Name != "house-catalog-catalog-0" || claim.Metadata.Namespace != "house" {
+	if claim.Metadata.Name != "house-catalog-catalog" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own claim", claim.Metadata)
 	}
 	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
@@ -178,13 +178,13 @@ func TestStandCatalogPodClaimProvisionsOnlyWhatItOwns(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			if one.standing {
-				cluster.claims["house-catalog-catalog-0"] = &PersistentVolumeClaim{
-					Metadata: ObjectMeta{Name: "house-catalog-catalog-0", Namespace: "house"},
+				cluster.claims["house-catalog-catalog"] = &PersistentVolumeClaim{
+					Metadata: ObjectMeta{Name: "house-catalog-catalog", Namespace: "house"},
 					Status:   PersistentVolumeClaimStatus{Phase: claimBound},
 				}
 			}
 
-			if err := testOperator(t, cluster).standCatalogPodClaim(t.Context(), one.catalog, 0); err != nil {
+			if err := testOperator(t, cluster).standCatalogPodClaim(t.Context(), one.catalog); err != nil {
 				t.Fatal(err)
 			}
 
@@ -200,14 +200,14 @@ func TestStandCatalogPodClaimProvisionsOnlyWhatItOwns(t *testing.T) {
 func TestStandCatalogPodClaimAnswersTheServer(t *testing.T) {
 	conflicted := newFakeCluster()
 	conflicted.refuseCreate = true
-	if err := testOperator(t, conflicted).standCatalogPodClaim(t.Context(), housekeepingCatalog(), 0); err != nil {
+	if err := testOperator(t, conflicted).standCatalogPodClaim(t.Context(), housekeepingCatalog()); err != nil {
 		t.Fatalf("err = %v, want a conflict to read as success", err)
 	}
 
 	broken := newFakeCluster()
-	broken.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog-0"] =
+	broken.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog"] =
 		http.StatusInternalServerError
-	err := testOperator(t, broken).standCatalogPodClaim(t.Context(), housekeepingCatalog(), 0)
+	err := testOperator(t, broken).standCatalogPodClaim(t.Context(), housekeepingCatalog())
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
 	}
@@ -285,16 +285,19 @@ func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
 	}
 }
 
-// a failure to provision the claim ends the stand, because the pod
-// would have nothing to mount.
-func TestStandCatalogPodReportsAFailedClaim(t *testing.T) {
+// A failure to provision the claim ends the stand before any pod is
+// created, because the pods would have nothing to mount.
+func TestStandCatalogPodsReportsAFailedClaim(t *testing.T) {
 	cluster := newFakeCluster()
-	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog-0"] =
+	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog"] =
 		http.StatusInternalServerError
 
-	_, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog(), 0)
+	_, err := testOperator(t, cluster).standCatalogPods(t.Context(), housekeepingCatalog())
 
 	if err == nil {
 		t.Fatal("err = nil, want the failure the stand could not read past")
+	}
+	if got := cluster.countRequests(http.MethodPost, "pods"); got != 0 {
+		t.Errorf("pods = %d, want none stood over a claim the pass could not read", got)
 	}
 }

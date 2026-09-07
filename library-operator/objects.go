@@ -14,8 +14,9 @@ import (
 )
 
 // A PersistentVolumeClaim is read for two answers: whether it is
-// bound, and which volume it is bound to. The operator never writes
-// one, so the type carries nothing else.
+// bound, and which volume it is bound to. The operator also writes the
+// claims its own pods and Jobs mount, so the type carries the spec
+// fields those claims need and nothing else.
 type PersistentVolumeClaim struct {
 	APIVersion string                      `json:"apiVersion,omitempty"`
 	Kind       string                      `json:"kind,omitempty"`
@@ -24,8 +25,10 @@ type PersistentVolumeClaim struct {
 	Status     PersistentVolumeClaimStatus `json:"status"`
 }
 
-// VolumeName is written by the binder, not by whoever created the
-// claim, so it is empty until the claim binds.
+// VolumeName is the volume the claim is bound to. The binder writes it on
+// an ordinary claim. The operator writes it on a per-node claim, which
+// names the volume the operator wrote first, so the claim waits on no
+// provisioner.
 //
 // PersistentVolumeClaimSpec is the write half of the claim. The operator
 // reads a media claim through VolumeName and Phase, and it writes a catalog
@@ -53,23 +56,51 @@ type PersistentVolumeClaimStatus struct {
 // answered it yet, and Lost means the volume behind it is gone.
 const claimBound = "Bound"
 
-// The core group a PersistentVolumeClaim belongs to, and the access
-// mode the catalog claim takes: ReadWriteOnce, because one agent writes
-// one SQLite database and Corrosion agents gossip rather than share a
-// file.
+// The core group a PersistentVolumeClaim belongs to, and the two access
+// modes a claim takes. ReadWriteOnce is the mode on every class but a
+// per-node one, because one agent writes one SQLite database and
+// Corrosion agents gossip rather than share a file. ReadWriteMany is the
+// mode on a per-node class, because every node that mounts the volume
+// holds a copy of its own, and ReadWriteOnce would refuse the second
+// node.
 const (
 	claimAPIVersion         = "v1"
 	accessModeReadWriteOnce = "ReadWriteOnce"
+	accessModeReadWriteMany = "ReadWriteMany"
 )
 
-// A PersistentVolume is read for one answer: what serves the storage.
-// The operator never writes one.
+// A PersistentVolume is read for what serves the storage behind a
+// Library's claim, and written for a claim on a per-node class, which
+// binds to a volume nothing else provisions.
 type PersistentVolume struct {
-	APIVersion string               `json:"apiVersion,omitempty"`
-	Kind       string               `json:"kind,omitempty"`
-	Metadata   ObjectMeta           `json:"metadata"`
-	Spec       PersistentVolumeSpec `json:"spec"`
+	APIVersion string                 `json:"apiVersion,omitempty"`
+	Kind       string                 `json:"kind,omitempty"`
+	Metadata   ObjectMeta             `json:"metadata"`
+	Spec       PersistentVolumeSpec   `json:"spec"`
+	Status     PersistentVolumeStatus `json:"status,omitzero"`
 }
+
+// PersistentVolumeList is the volumes one list answers, which is how the
+// sweep reads the volumes this operator wrote.
+type PersistentVolumeList struct {
+	Metadata ListMeta           `json:"metadata"`
+	Items    []PersistentVolume `json:"items"`
+}
+
+// PersistentVolumeStatus carries the phase a volume is in. Released is
+// the phase of a volume whose claim is gone, which is the volume the
+// sweep deletes.
+type PersistentVolumeStatus struct {
+	Phase string `json:"phase,omitempty"`
+}
+
+// Bound is the phase of a volume a claim holds, and Released is the
+// phase of a volume whose claim is gone. A Retain volume stays Released
+// until something deletes it.
+const (
+	volumeBound    = "Bound"
+	volumeReleased = "Released"
+)
 
 // PersistentVolumeSpec is the half of a PersistentVolume that says
 // where the storage is. Kubernetes gives each kind of storage its own
@@ -80,13 +111,45 @@ type PersistentVolume struct {
 type PersistentVolumeSpec struct {
 	// Source is the name of the storage key, such as nfs or csi, and
 	// it is the type the status reports.
-	Source string
+	Source string `json:"-"`
 
 	// NFS is the one source this operator reads in full, because a
 	// media reference over NFS is built from the server and the export
 	// path.
-	NFS *NFSVolumeSource
+	NFS *NFSVolumeSource `json:"nfs,omitempty"`
+
+	// The fields below are the volume the operator writes for a claim
+	// on a per-node class: the CSI source that names the driver and
+	// the handle, and the settings that bind the volume to that one
+	// claim.
+	CSI                           *CSIPersistentVolumeSource `json:"csi,omitempty"`
+	StorageClassName              string                     `json:"storageClassName,omitempty"`
+	AccessModes                   []string                   `json:"accessModes,omitempty"`
+	Capacity                      map[string]string          `json:"capacity,omitempty"`
+	PersistentVolumeReclaimPolicy string                     `json:"persistentVolumeReclaimPolicy,omitempty"`
+	ClaimRef                      *ClaimReference            `json:"claimRef,omitempty"`
 }
+
+// CSIPersistentVolumeSource is the CSI source of a volume: the driver
+// that publishes it, and the handle the driver names it by.
+type CSIPersistentVolumeSource struct {
+	Driver       string `json:"driver"`
+	VolumeHandle string `json:"volumeHandle"`
+}
+
+// ClaimReference names the claim a volume is reserved for, so the binder
+// gives the volume to that claim and to no other. The operator writes the
+// namespace and the name. The binder writes the uid when it binds, so a
+// reference that carries a uid names a claim that was bound.
+type ClaimReference struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	UID       string `json:"uid,omitempty"`
+}
+
+// Retain leaves the volume in place when its claim goes, so the operator
+// removes it and the binder never does.
+const reclaimRetain = "Retain"
 
 type NFSVolumeSource struct {
 	Server string `json:"server,omitempty"`
@@ -112,7 +175,18 @@ var persistentVolumeSettings = map[string]bool{
 // UnmarshalJSON reads the spec as its raw keys and names the first one
 // that is not a setting. The keys are sorted first, so a spec that
 // somehow carries two sources decodes the same way every time.
+//
+// The tagged fields are decoded first through a type that carries no
+// method of its own, because a type that decodes itself would call this
+// function again.
 func (s *PersistentVolumeSpec) UnmarshalJSON(data []byte) error {
+	type fields PersistentVolumeSpec
+	var read fields
+	if err := json.Unmarshal(data, &read); err != nil {
+		return err
+	}
+	*s = PersistentVolumeSpec(read)
+
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(data, &keys); err != nil {
 		return err
@@ -122,13 +196,17 @@ func (s *PersistentVolumeSpec) UnmarshalJSON(data []byte) error {
 			continue
 		}
 		s.Source = name
-		if name != "nfs" {
-			return nil
-		}
-		s.NFS = &NFSVolumeSource{}
-		return json.Unmarshal(keys[name], s.NFS)
+		return nil
 	}
 	return nil
+}
+
+// A StorageClass is read for one answer: the provisioner behind the
+// class a claim names, which is what tells a per-node class from every
+// other class.
+type StorageClass struct {
+	Metadata    ObjectMeta `json:"metadata"`
+	Provisioner string     `json:"provisioner,omitempty"`
 }
 
 // The marks the objects this operator writes carry. The name

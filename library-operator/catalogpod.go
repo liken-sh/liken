@@ -1,8 +1,8 @@
 package main
 
 // The catalog pods are what a Catalog becomes at run time: one durable
-// copy per replica the Catalog asks for, owned by the Catalog, each with
-// the namespace's catalog on a claim of its own. The first copy reports
+// copy per replica the Catalog asks for, owned by the Catalog, every one
+// of them on the store's one claim. The first copy reports
 // what it holds over the bus. They are the standing members of the gossip
 // cluster, and every worker Job joins that cluster for the length of its
 // run. They answer on no port: the agent's API is loopback only, and the
@@ -10,7 +10,6 @@ package main
 
 import (
 	"context"
-	"errors"
 )
 
 // The name every durable copy of the namespace's catalog is numbered
@@ -68,7 +67,7 @@ func buildCatalogPod(catalog *NamespaceCatalog, index int, scannerImage, corrosi
 			Containers:                    containers,
 			Volumes: []Volume{
 				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-					ClaimName: catalogReplicaClaim(catalog, index),
+					ClaimName: catalogClaimFor(catalog),
 				}},
 			},
 		},
@@ -114,8 +113,19 @@ func reporterSidecar(catalog *NamespaceCatalog, image, busAddress, topicBase str
 // order, and take down the copies above that count. A failure on one copy
 // ends the stand, and the pass reports it with the copies that already
 // stood.
+//
+// The claim is stood once, before any pod, because every copy mounts it.
+// A Catalog that asks for copies on a class that is not per-node stands
+// one, because a claim on such a class binds to one node.
 func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatalog) ([]*Pod, error) {
-	wanted := catalogReplicaCount(catalog)
+	store := catalogStoreOf(catalog)
+	wanted, err := o.storeCopies(ctx, store, catalogReplicaCount(catalog))
+	if err != nil {
+		return nil, err
+	}
+	if err := o.standCatalogPodClaim(ctx, catalog); err != nil {
+		return nil, err
+	}
 	pods := make([]*Pod, wanted)
 	for index := range wanted {
 		pod, err := o.standCatalogPod(ctx, catalog, index)
@@ -124,7 +134,7 @@ func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatal
 		}
 		pods[index] = pod
 	}
-	return pods, o.sweepStoreReplicas(ctx, catalog, catalogStoreOf(catalog), wanted)
+	return pods, o.sweepStoreReplicas(ctx, catalog, store, wanted)
 }
 
 // The pod that stands for one Catalog after this pass, on the
@@ -132,9 +142,6 @@ func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatal
 // it matches the template, the created pod when there was none, and nil
 // when this pass deleted a stale one.
 func (o *operator) standCatalogPod(ctx context.Context, catalog *NamespaceCatalog, index int) (*Pod, error) {
-	if err := o.standCatalogPodClaim(ctx, catalog, index); err != nil {
-		return nil, err
-	}
 	desired := buildCatalogPod(catalog, index, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
 	return o.standPod(ctx, desired)
 }
@@ -171,29 +178,15 @@ func catalogPodBlocker(pod *Pod) (string, string) {
 	return "", ""
 }
 
-// An absent claim is created and an existing one is left alone,
-// the rule standCatalogClaim follows, because a claim's spec is
-// immutable once it binds. A Catalog that names a claim of its own
-// creates none: the claim is the person's, and the operator mounts it.
-//
-// The claim a Catalog names is the first copy's alone. Every copy after
-// it takes a claim the operator provisions.
-func (o *operator) standCatalogPodClaim(ctx context.Context, catalog *NamespaceCatalog, index int) error {
-	if index == 0 && catalog.Spec.Storage.ClaimName != "" {
+// An absent claim is created and an existing one is left alone, the
+// rule standClaim holds, because a claim's spec is immutable once it
+// binds. A Catalog that names a claim of its own creates none: the claim
+// is the person's, and the operator mounts it. A person's own claim gets
+// no volume either, because the operator writes volumes for its own
+// claims alone and removes only those.
+func (o *operator) standCatalogPodClaim(ctx context.Context, catalog *NamespaceCatalog) error {
+	if catalog.Spec.Storage.ClaimName != "" {
 		return nil
 	}
-	namespace, name := catalog.Metadata.Namespace, catalogStoreOf(catalog).replicaName(index)
-
-	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildCatalogPodClaim(catalog, index))
-	if errors.Is(err, ErrConflict) {
-		return nil
-	}
-	return err
+	return o.standClaim(ctx, buildCatalogPodClaim(catalog))
 }

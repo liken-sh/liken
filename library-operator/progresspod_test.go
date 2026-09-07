@@ -173,9 +173,9 @@ func TestProgressClaimTakesItsOwnSizeAndClass(t *testing.T) {
 	catalog.Spec.Progress.Size = "256Mi"
 	catalog.Spec.Progress.StorageClassName = "synology-iscsi"
 
-	claim := buildProgressClaim(catalog, 0)
+	claim := buildProgressClaim(catalog)
 
-	if claim.Metadata.Name != "house-catalog-progress-0" || claim.Metadata.Namespace != "house" {
+	if claim.Metadata.Name != "house-catalog-progress" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the progress claim in the Catalog's namespace", claim.Metadata)
 	}
 	if claim.Spec.StorageClassName != "synology-iscsi" {
@@ -198,7 +198,7 @@ func TestProgressClaimDefaultsToTheCatalogsSizeAndClass(t *testing.T) {
 	catalog := housekeepingCatalog()
 	catalog.Spec.Storage.StorageClassName = "local-path"
 
-	claim := buildProgressClaim(catalog, 0)
+	claim := buildProgressClaim(catalog)
 
 	if claim.Spec.StorageClassName != "local-path" {
 		t.Errorf("storageClassName = %q, want the catalog's class", claim.Spec.StorageClassName)
@@ -216,11 +216,11 @@ func TestProgressClaimStandsBesideACatalogThatNamesItsOwn(t *testing.T) {
 	catalog := housekeepingCatalog()
 	catalog.Spec.Storage.ClaimName = "a-claim-of-my-own"
 
-	if err := testOperator(t, cluster).standProgressClaim(t.Context(), catalog, 0); err != nil {
+	if err := testOperator(t, cluster).standProgressClaim(t.Context(), catalog); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldClaim("house-catalog-progress-0") == nil {
+	if cluster.heldClaim("house-catalog-progress") == nil {
 		t.Error("the pass provisioned no progress claim")
 	}
 }
@@ -235,25 +235,25 @@ func TestProgressPodMountsItsClaimAlone(t *testing.T) {
 	}
 	volume := pod.Spec.Volumes[0]
 	if volume.Name != progressVolumeName || volume.PersistentVolumeClaim == nil ||
-		volume.PersistentVolumeClaim.ClaimName != "house-catalog-progress-0" {
+		volume.PersistentVolumeClaim.ClaimName != "house-catalog-progress" {
 		t.Errorf("volume = %+v, want the progress claim", volume)
 	}
 }
 
-// The pass stands the pod and its claim together, so the pod the
-// kubelet schedules has a volume to bind.
-func TestStandProgressPodCreatesThePodAndItsClaim(t *testing.T) {
+// The pass stands the pods and the store's one claim together, so every
+// pod the kubelet schedules has a volume to bind.
+func TestStandProgressPodsCreateThePodsAndTheStoresClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 
-	if _, err := testOperator(t, cluster).standProgressPod(t.Context(), catalog, 0); err != nil {
+	if _, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog); err != nil {
 		t.Fatal(err)
 	}
 
 	if cluster.heldPod("house-catalog-progress-0") == nil {
 		t.Error("the pass stood no progress pod")
 	}
-	if cluster.heldClaim("house-catalog-progress-0") == nil {
+	if cluster.heldClaim("house-catalog-progress") == nil {
 		t.Error("the pass provisioned no progress claim")
 	}
 }
@@ -298,7 +298,7 @@ func TestReconcileCatalogsStandsTheProgressClusterToo(t *testing.T) {
 	if cluster.heldPod("house-catalog-progress-0") == nil {
 		t.Fatal("the pass stood no progress pod")
 	}
-	if cluster.heldClaim("house-catalog-progress-0") == nil {
+	if cluster.heldClaim("house-catalog-progress") == nil {
 		t.Fatal("the pass provisioned no claim for the progress pod")
 	}
 	service := cluster.heldService("house", progressServiceName)

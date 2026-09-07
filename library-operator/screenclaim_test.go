@@ -192,6 +192,36 @@ func TestStandScreenClaimReportsAFailedRead(t *testing.T) {
 	}
 }
 
+// A screen's claims on a per-node class bind to a volume of their own,
+// so the pod they belong to is pinned to no node, and the recovery leaves
+// the pod and both claims in place.
+func TestReconcileScreensKeepsAnUnschedulableScreenOnAPerNodeClass(t *testing.T) {
+	shortUnschedulableGrace(t)
+	cluster := newFakeCluster()
+	seedStorageClass(cluster, "per-node", perNodeProvisioner)
+	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+	catalog.Spec.Screens.StorageClassName = "per-node"
+	pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
+	cluster.pods[pod.Metadata.Name] = pod
+	for _, claim := range screenClaims(player, catalog) {
+		claim.Status.Phase = claimBound
+		cluster.claims[claim.Metadata.Name] = claim
+	}
+
+	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
+		[]Player{*player}, nil, []Pod{*pod}, testNow)
+
+	if cluster.heldPod("den-tv-media-browser") == nil {
+		t.Error("the pass took a screen pod whose claims pin it to no node")
+	}
+	for _, name := range []string{"den-tv-media-browser-catalog", "den-tv-media-browser-art"} {
+		if cluster.heldClaim(name) == nil {
+			t.Errorf("the pass took the claim %s, which pins the pod to no node", name)
+		}
+	}
+}
+
 // The grace is a variable, so a test drives it in milliseconds.
 func shortUnschedulableGrace(t *testing.T) {
 	t.Helper()
