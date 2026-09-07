@@ -138,7 +138,13 @@ pub trait Screen {
         None
     }
 
-    /// The new surface is up, on the frame at `at` seconds.
+    /// The new surface is on the screen: its first frame was presented, at
+    /// `at` seconds. A Wayland surface is not shown until its first buffer
+    /// arrives, and the first frame on a fresh wgpu surface is the slow
+    /// one, so a motion started when the window was created would have
+    /// spent most of its length before anyone saw a frame of it. The
+    /// screen draws that first frame as it stood, and starts what the
+    /// surface was for on the frame after.
     fn surfaced(&mut self, _at: f64) {}
 
     /// The window's logical size and its scale, before the first frame and
@@ -229,6 +235,9 @@ pub struct Ready<S: Screen> {
     /// Whether a present is still waiting on a window the compositor has not
     /// given yet.
     pub(crate) surface_pending: bool,
+    /// Whether the window on the glass is fresh and no frame has been
+    /// presented on it yet, so the screen is told after the first one.
+    pub(crate) surfaced_pending: bool,
     /// When the process began, for the time to the first frame.
     pub(crate) launched: std::time::Instant,
     /// The second the screen named for its next change, while the loop sleeps

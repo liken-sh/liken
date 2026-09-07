@@ -183,6 +183,17 @@ impl<S: Screen> Ready<S> {
 
         frame.present();
 
+        // The first frame on a fresh window is on the screen now, so the
+        // screen hears of the surface with the clock at this moment, and
+        // whatever it starts on that word draws from the next frame.
+        if self.surfaced_pending {
+            self.surfaced_pending = false;
+            let now = self.start.map_or(at, |start| start.elapsed().as_secs_f64());
+            self.screen.surfaced(now);
+            self.scheduled = None;
+            self.stale = true;
+        }
+
         // A captured frame draws twice and blocks on a readback, so it says
         // nothing about the cost of a frame and stays out of the numbers.
         self.stats

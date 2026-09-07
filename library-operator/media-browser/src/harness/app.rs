@@ -103,6 +103,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             scale,
             app_id,
             surface_pending: false,
+            surfaced_pending: false,
             launched,
             scheduled: None,
             start: None,
@@ -208,7 +209,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             }
             if ready.surface_pending && ready.represent(event_loop) {
                 ready.surface_pending = false;
-                ready.screen.surfaced(at);
+                ready.surfaced_pending = true;
                 // A Wayland surface is not on screen until its first buffer
                 // arrives, so the new window gets a draw whatever the
                 // schedule says.

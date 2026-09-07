@@ -53,12 +53,15 @@ and the browser ignored it.
   `Present` at the end of the film still runs the return motion, and
   the frame after it is the page whole again.
 - **The return waits for the surface.** A `Present` asks the harness
-  for a fresh window, and the return motion starts on the frame the
-  harness reports that window up, not at the `Present`. The return
-  runs on the clock, and a compositor takes its own time to map a
-  window, so a return started at the `Present` ran out before the
-  first frame anyone saw. That is why the return was never seen on the
-  house `Player`.
+  for a fresh window. The harness draws the first frame on that window
+  as the page stood, and tells the screen the surface is up after that
+  frame is presented, with the clock at that moment. The return starts
+  on the frame after. The return runs on the clock, a compositor takes
+  its own time to map a window, and the first frame on a fresh surface
+  is the slow one, so a return started at the `Present`, or at the
+  window's creation, ran out before the first frame anyone saw. That is
+  why the return was never seen on the house `Player`, and then seen
+  only as a jump.
 - **The memory budget follows the window.** The store's in-memory
   budget is computed from the window's physical size on every resize,
   the same count of posters and backdrops at the size the panel draws
