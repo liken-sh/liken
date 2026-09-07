@@ -84,6 +84,55 @@ func TestWestonConfigNamesTheModeTheRecordStates(t *testing.T) {
 	}
 }
 
+func TestWestonConfigScalesAWideOutputByTwo(t *testing.T) {
+	// HDMI-A-1 carries the lab's 3840x1600 monitor and prefers that
+	// mode, so its section states scale=2. The portable display on
+	// HDMI-A-2 prefers 1920x1080 and states no scale, which is weston's
+	// default of 1. DP-1 is dark, has no modes, and states none either.
+	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), nil)
+
+	if want := "name=HDMI-A-1\nmode=preferred\napp-ids=hdmi-a-1\nscale=2\n"; !strings.Contains(config, want) {
+		t.Errorf("the config does not contain %q:\n%s", want, config)
+	}
+	if got := strings.Count(config, "scale="); got != 1 {
+		t.Errorf("got %d scale lines, want 1:\n%s", got, config)
+	}
+}
+
+func TestWestonConfigScalesByTheModeTheRecordStates(t *testing.T) {
+	// A claim's mode decides the scale, not the monitor's preference: the
+	// wide monitor driven at 1920x1080 gets no scale, and the portable
+	// display asked for a mode 3840 wide, in the claim's own spelling
+	// with a refresh, gets 2.
+	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), map[string]string{
+		"HDMI-A-1": "1920x1080",
+		"HDMI-A-2": "3840x2160@60",
+	})
+
+	for _, want := range []string{
+		"name=HDMI-A-1\nmode=1920x1080\napp-ids=hdmi-a-1\n\n",
+		"name=HDMI-A-2\nmode=3840x2160@60\napp-ids=hdmi-a-2\nscale=2\n",
+	} {
+		if !strings.Contains(config, want) {
+			t.Errorf("the config does not contain %q:\n%s", want, config)
+		}
+	}
+}
+
+func TestModeWidthReadsBothSpellingsAndRefusesTheRest(t *testing.T) {
+	for mode, want := range map[string]int{
+		"3840x2160":    3840,
+		"3840x2160@60": 3840,
+		"1280x720":     1280,
+		"preferred":    0,
+		"widexhigh":    0,
+	} {
+		if got := modeWidth(mode); got != want {
+			t.Errorf("modeWidth(%q) = %d, want %d", mode, got, want)
+		}
+	}
+}
+
 func TestWestonConfigIgnoresARecordEntryForAConnectorTheCardDoesNotHave(t *testing.T) {
 	// The record outlives a monitor and the walk is the truth about
 	// what the card has, so an entry with no connector adds no section.

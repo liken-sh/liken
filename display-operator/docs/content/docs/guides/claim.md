@@ -160,6 +160,14 @@ kernel spells it, and it can carry a refresh: `3840x1600@24` runs
 a 24 fps film without the 3:2 cadence a 60 Hz mode forces on it.
 The refresh is a whole number of hertz.
 
+A mode 3840 pixels wide or wider runs at an output scale of 2, and
+a narrower one at 1. The compositor states the scale to every
+client on the output. A client that lays out in logical pixels
+draws a 4K panel at the 1080p size and rasters at the panel's full
+resolution, and a client that does not is scaled up so that it is
+readable. The rule reads the mode the output runs, whether the
+claim stated it or the monitor preferred it.
+
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
     metadata:

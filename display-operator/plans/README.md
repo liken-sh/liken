@@ -165,6 +165,9 @@ say why it is built the way it is.
 * [14, Prometheus metrics](14-prometheus-metrics.md). Proposed.
   Claimed output availability, control failures, and kernel/compositor
   mode agreement, with alert rules that allow intentional darkness.
+* [15, The output states its scale](15-the-output-states-its-scale.md).
+  An output whose mode is 3840 wide or wider gets `scale=2` in its
+  section, so every client draws a 4K panel at the 1080p size.
 
 ## Open problems
 

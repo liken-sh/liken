@@ -146,8 +146,56 @@ name=%s
 mode=%s
 app-ids=%s
 `, output.Connector, mode, appID(output.Connector))
+		if scale := outputScale(output, mode); scale > 1 {
+			fmt.Fprintf(&config, "scale=%d\n", scale)
+		}
 	}
 	return config.String()
+}
+
+// scaledWidth is the narrowest mode that gets an output scale of 2.
+// A 4K panel at scale 2 lays out as a 1080p one, which is the size
+// every client draws for. The rule has one threshold, so a person can
+// predict it from the mode alone.
+const scaledWidth = 3840
+
+// outputScale is the integer scale an output section states for this
+// mode: 2 at 4K and wider, and 1 below it. The width is read from
+// the mode the section writes, so the scale always matches the mode
+// weston runs: a claim's own spelling, or the monitor's preferred
+// mode when the section says preferred. A dark connector has no
+// modes and gets 1, like every narrower panel.
+//
+// Weston states the scale to every client on the output. A client
+// that lays out in logical pixels, such as the media browser, draws a
+// 4K panel at the 1080p size and rasters at the panel's resolution.
+// A client that does not is scaled up by the compositor so that it is
+// readable.
+func outputScale(output Output, mode string) int {
+	if mode == preferredMode {
+		if len(output.Modes) == 0 {
+			return 1
+		}
+		mode = output.Modes[0]
+	}
+	if modeWidth(mode) >= scaledWidth {
+		return 2
+	}
+	return 1
+}
+
+// modeWidth is the width a mode name states, from 3840x2160 or
+// 3840x2160@60, and 0 for a name in neither form.
+func modeWidth(mode string) int {
+	width, _, found := strings.Cut(mode, "x")
+	if !found {
+		return 0
+	}
+	n, err := strconv.Atoi(width)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // writeWestonConfig writes the compositor's config where weston reads
