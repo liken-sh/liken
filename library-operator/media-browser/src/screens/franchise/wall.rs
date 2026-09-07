@@ -1,9 +1,11 @@
 // The franchise page's wall, measured before anything draws. The wall is
 // one lane of rows in story order, one row per entry, first to last; two
-// entries the story tells at once each take a row of their own. The rows
+// entries the story tells at once each take a row of their own. An era
+// is a heading over the first row it covers, and the heading holds at
+// the top of the lane while the era's rows scroll under it. The rows
 // follow the order and never the times, because a franchise runs from
 // 1260 BC to 2028 with most of it in twenty years, and a time scale is
-// then one dot and an empty rail. The universes are the lines of the
+// then one dot and an empty lane. The universes are the lines of the
 // metro strip beside the lane: the franchise's own first, then every
 // other universe an entry names, in first-seen order, and the strip packs
 // their runs into lanes. A held entry is a card as tall as its art and
@@ -18,7 +20,7 @@ use crate::catalog::franchise::{Entry, Era, Franchise, Held, SERIES, SPAN, Stand
 use crate::catalog::{Calendar, art};
 use crate::look;
 use crate::screens::facts;
-use crate::views::{REACH, area, rail, stack, text, wall};
+use crate::views::{REACH, area, text, wall};
 
 /// The space under a row, inside a card, and between the strip and the
 /// cards.
@@ -78,32 +80,26 @@ pub fn label_at(rows: &[Row], row: usize) -> &str {
     }
 }
 
-/// The caption over the time column, in the lines the column holds:
-/// "Years from the Battle of Yavin". The column is as wide as one time
-/// and its mark, so the caption wraps into a short stack of lines over
-/// the times it names. A calendar with no zero carries none, and so does
-/// a wall with no column.
-pub fn caption(calendar: &Option<Calendar>, time: f32) -> Vec<String> {
+/// The caption the band writes under the page's title: "Years from the
+/// Battle of Yavin". The times in the column count from one event, and
+/// the caption is where the page says which event and in what unit. It
+/// is one line in the band and not a stack over the column, because the
+/// column is as wide as one time and its mark, and a caption wrapped
+/// into that width pushed the first row down a screen's worth. A
+/// calendar with no zero carries none, and so does a wall with no
+/// column, because then there are no times to caption.
+pub fn caption(calendar: &Option<Calendar>, time: f32) -> String {
     let Some(calendar) = calendar else {
-        return Vec::new();
+        return String::new();
     };
     match time > 0.0 {
-        true => text::wrapped(&calendar.caption(), look::CAPTION, time - GAP),
-        false => Vec::new(),
+        true => calendar.caption(),
+        false => String::new(),
     }
 }
 
-/// The space over the first row: the caption's own lines at the head of
-/// the time column, and the gap under them. A wall with no caption keeps
-/// the room the mark of a focused first row reaches into, and no more.
-pub fn head(caption: &[String]) -> f32 {
-    match caption.is_empty() {
-        true => HEAD,
-        false => text::height(caption.len(), look::CAPTION) + GAP,
-    }
-}
-
-/// The space over the first row of a wall with no caption.
+/// The space over the first row: the room the mark of a focused first
+/// row reaches into, and no more.
 pub const HEAD: f32 = REACH;
 
 /// The space under the last row.
@@ -253,48 +249,168 @@ pub fn story(franchise: &Franchise, columns: &[String], today: &str) -> Vec<Row>
         .collect()
 }
 
-/// The eras as the bars of the jump rail. A row is in an era where the row
-/// carries a time and its span meets the era's, so the file writes no row and
-/// the rail is derived. The widest era takes the outer lane, and an era a
-/// wider one holds whole takes the inner one, so a phase nests inside its
-/// saga. An era no row meets draws no bar.
-pub fn bars(eras: &[Era], rows: &[Row]) -> Vec<rail::Bar> {
-    let mut widest: Vec<&Era> = eras.iter().collect();
-    widest.sort_by(|one, other| {
-        other
-            .width()
-            .partial_cmp(&one.width())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+/// One era as a heading over the rows it covers: its name, how long it
+/// runs, the first and the last row it covers, and how deep it nests.
+/// The file writes no row, so the headings are derived.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Heading {
+    pub name: String,
+    /// How long the era runs in the calendar's own unit, "3441 years",
+    /// and nothing where the file names no calendar.
+    pub count: String,
+    pub first: usize,
+    pub last: usize,
+    /// How many wider eras start on the same row. An era of depth zero
+    /// draws as a heading with a rule, and one deeper as a sub-heading
+    /// under it, so a phase reads as part of its saga.
+    pub depth: usize,
+}
 
-    let mut outer: Vec<&Era> = Vec::new();
-    let mut bars = Vec::new();
-    for era in widest {
-        let mut covered = rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.timed && era.meets(row.from, row.to))
-            .map(|(index, _)| index);
-        let Some(first) = covered.next() else {
-            continue;
-        };
-        let last = covered.next_back().unwrap_or(first);
-        // An era that meets any era already in the outer lane takes the
-        // inner one, held whole or not, because two bars in one lane draw
-        // over each other, and the earlier one's label, pinned at the top
-        // of the region, hides the later one's.
-        let lane = usize::from(outer.iter().any(|wider| wider.meets(era.from, era.to)));
-        if lane == 0 {
-            outer.push(era);
+impl Heading {
+    /// The words the heading reads as, "The Second Age · 3441 years".
+    pub fn label(&self) -> String {
+        match self.count.is_empty() {
+            true => self.name.clone(),
+            false => format!("{}{SPAN_MARK}{}", self.name, self.count),
         }
-        bars.push(rail::Bar {
-            label: era.name.clone(),
-            first,
-            last,
-            lane,
-        });
     }
-    bars
+}
+
+/// The run of a heading's words that reads bright: everything before the
+/// count, so "The Infinity Saga › Phase Two" of "The Infinity Saga › Phase
+/// Two · 3 years", and the whole of words with no count.
+pub fn bright(words: &str) -> &str {
+    match words.find(SPAN_MARK) {
+        Some(at) => &words[..at],
+        None => words,
+    }
+}
+
+/// How long an era runs, in the calendar's own unit: "3441 years". The
+/// count is inclusive of both ends, the way a person says "from 1 to
+/// 3441"; an era of one year says "1 year". A file with no calendar
+/// counts nothing.
+pub fn counted(era: &Era, calendar: &Option<Calendar>) -> String {
+    let Some(calendar) = calendar else {
+        return String::new();
+    };
+    let count = (era.to - era.from).abs().round() as i64 + 1;
+    let unit = match count {
+        1 => calendar.unit.trim_end_matches('s').to_string(),
+        _ => calendar.unit.clone(),
+    };
+    format!("{count} {unit}")
+}
+
+/// The mark between a heading's name and its count.
+pub const SPAN_MARK: &str = " · ";
+
+/// The mark between the eras of the held line, outer to inner.
+pub const CRUMB_MARK: &str = " › ";
+
+/// The height one heading takes over its first row.
+pub const HEADING: f32 = 52.0;
+
+/// The half pixel inside which two edges count as one, so the scroll's
+/// rounding never decides whether the held line shows.
+pub const SLACK: f32 = 0.5;
+
+/// The eras as headings, in the order the wall draws them: by the first
+/// row each covers, and the widest first where several start on one
+/// row, so an Age reads over the stretch inside it. A heading marks
+/// where the story enters an era: the first timed row whose span starts
+/// inside the era's, and not the first row the era merely touches,
+/// because a long row that a later era overlaps would otherwise wear
+/// that era's heading too. From there the era covers one unbroken run
+/// of rows, to the last before a timed row its span does not meet. The
+/// wall is in story order and not in time order, and a story jumps
+/// back, so a row far down the wall may meet an era that ended long
+/// before it; a heading that reached that row would hold over everything
+/// between. A row with no time sits inside whatever era surrounds it
+/// and breaks no run. An era no row starts inside draws no heading.
+pub fn headings(eras: &[Era], rows: &[Row], calendar: &Option<Calendar>) -> Vec<Heading> {
+    let mut headings: Vec<(f64, Heading)> = eras
+        .iter()
+        .filter_map(|era| {
+            let meets = |row: &Row| row.timed && era.meets(row.from, row.to);
+            let first = rows
+                .iter()
+                .position(|row| row.timed && era.from <= row.from && row.from <= era.to)?;
+            let last = rows
+                .iter()
+                .enumerate()
+                .skip(first)
+                .take_while(|(_, row)| !row.timed || meets(row))
+                .filter(|(_, row)| row.timed)
+                .map(|(index, _)| index)
+                .last()
+                .unwrap_or(first);
+            Some((
+                era.width(),
+                Heading {
+                    name: era.name.clone(),
+                    count: counted(era, calendar),
+                    first,
+                    last,
+                    depth: 0,
+                },
+            ))
+        })
+        .collect();
+    headings.sort_by(|(one_width, one), (other_width, other)| {
+        one.first.cmp(&other.first).then_with(|| {
+            other_width
+                .partial_cmp(one_width)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    let mut headings: Vec<Heading> = headings.into_iter().map(|(_, heading)| heading).collect();
+    for index in 0..headings.len() {
+        headings[index].depth = headings[..index]
+            .iter()
+            .filter(|other| other.first == headings[index].first)
+            .count();
+    }
+    headings
+}
+
+/// How many headings stand over this row: every era that starts on it.
+pub fn over(headings: &[Heading], row: usize) -> usize {
+    headings
+        .iter()
+        .filter(|heading| heading.first == row)
+        .count()
+}
+
+/// How many headings stand between the top of the lane and this row
+/// when the row is scrolled to the top: its own inline ones, and the
+/// held line where the row is inside an era that started above it, so
+/// the held line never covers the row.
+pub fn reach(headings: &[Heading], row: usize) -> usize {
+    let inside = headings
+        .iter()
+        .any(|heading| heading.first < row && row <= heading.last);
+    over(headings, row) + usize::from(inside)
+}
+
+/// The first row of the era before the one this row is in: the nearest
+/// heading that starts above the row. Left steps here.
+pub fn before(headings: &[Heading], row: usize) -> Option<usize> {
+    headings
+        .iter()
+        .map(|heading| heading.first)
+        .filter(|first| *first < row)
+        .max()
+}
+
+/// The first row of the next era: the nearest heading that starts under
+/// the row. Right steps here.
+pub fn after(headings: &[Heading], row: usize) -> Option<usize> {
+    headings
+        .iter()
+        .map(|heading| heading.first)
+        .filter(|first| *first > row)
+        .min()
 }
 
 // One entry as a cell. An entry that names several universes takes a dot
@@ -424,15 +540,108 @@ fn timed(calendar: &Option<crate::catalog::Calendar>, timed: bool, from: f64, to
 /// after it starts under the one before it and the space under that.
 /// Every measure of the wall that names a row reads these, because a card
 /// and a thin row are not one height.
-pub fn tops(rows: &[Row], art: f32, head: f32) -> Vec<f32> {
+pub fn tops(rows: &[Row], headings: &[Heading], art: f32, head: f32) -> Vec<f32> {
     let mut tops = Vec::with_capacity(rows.len() + 1);
     let mut top = head;
-    for row in rows {
+    for (index, row) in rows.iter().enumerate() {
+        top += over(headings, index) as f32 * HEADING;
         tops.push(top);
         top += row.height(art) + GAP;
     }
     tops.push(top);
     tops
+}
+
+/// Where one row ends, in the wall's own space: the next row's top, less
+/// the headings that stand over the next row and the gap. The tops alone
+/// no longer say it, because a heading takes its room between two rows.
+pub fn foot(headings: &[Heading], tops: &[f32], row: usize) -> f32 {
+    let top = tops.get(row).copied().unwrap_or_default();
+    let next = tops.get(row + 1).copied().unwrap_or(top + GAP);
+    next - over(headings, row + 1) as f32 * HEADING - GAP
+}
+
+/// The top of one heading in the wall's own space: the headings over a
+/// row stack right over it, in list order, the first the highest.
+pub fn heading_top(headings: &[Heading], index: usize, tops: &[f32]) -> f32 {
+    let heading = &headings[index];
+    let row = tops.get(heading.first).copied().unwrap_or_default();
+    let under = headings[..index]
+        .iter()
+        .filter(|other| other.first == heading.first)
+        .count();
+    row - (over(headings, heading.first) - under) as f32 * HEADING
+}
+
+/// The box every heading draws in, in frame space after the scroll: at
+/// its own top, in the flow of the rows. A heading that scrolls up
+/// passes under the held line, which is where its era's name goes on
+/// reading.
+pub fn heading_boxes(
+    lane: Rectangle,
+    headings: &[Heading],
+    tops: &[f32],
+    down: f32,
+) -> Vec<Rectangle> {
+    (0..headings.len())
+        .map(|index| {
+            let from = heading_top(headings, index, tops);
+            area(lane.x, lane.y + from - down, lane.width, HEADING)
+        })
+        .collect()
+}
+
+/// The one line held at the top of the lane while the wall is inside an
+/// era: every era whose heading has scrolled past the top and whose rows
+/// still reach under it, outer to inner, "The Infinity Saga › Phase
+/// Three · 3 years", the innermost with its count. One line, and never
+/// a stack, because two headings of one weight at the top read as two
+/// things at once and not as one inside another. Nothing while the wall
+/// stands at its top or between eras.
+pub fn crumb(headings: &[Heading], tops: &[f32], down: f32) -> Option<String> {
+    let inside: Vec<&Heading> = headings
+        .iter()
+        .enumerate()
+        .filter(|(index, heading)| {
+            let from = heading_top(headings, *index, tops);
+            let end = foot(headings, tops, heading.last) + GAP;
+            from < down - SLACK && end > down + SLACK
+        })
+        .map(|(_, heading)| heading)
+        .collect();
+    let (last, outer) = inside.split_last()?;
+    let mut line = String::new();
+    for heading in outer {
+        line.push_str(&heading.name);
+        line.push_str(CRUMB_MARK);
+    }
+    line.push_str(&last.label());
+    Some(line)
+}
+
+/// The band the held line takes at the top of the cards' column: one
+/// heading tall while a line holds, and nothing while none does. The
+/// band covers the cards alone, so the strip's lines and the time
+/// labels beside them run up to the top of the wall, and the rule under
+/// the line says where the cards are cut.
+pub fn band(cards: Rectangle, held: bool) -> Rectangle {
+    let height = match held {
+        true => HEADING.min(cards.height),
+        false => 0.0,
+    };
+    area(cards.x, cards.y, cards.width, height)
+}
+
+/// The part of the cards' column under the held line, where the rows
+/// draw, so no row draws over it.
+pub fn under(cards: Rectangle, held: bool) -> Rectangle {
+    let height = band(cards, held).height;
+    area(
+        cards.x,
+        cards.y + height,
+        cards.width,
+        (cards.height - height).max(0.0),
+    )
 }
 
 /// The part of the wall the strip and the cards draw in: everything to
@@ -453,14 +662,14 @@ pub fn labelled(rows: &[Row]) -> bool {
     rows.iter().any(|row| !row.time.is_empty())
 }
 
-/// The lane of the wall: where the rail leaves off, the part the strip and
-/// the cards share, the strip, and the cards. The left-hand room is only
-/// what is used: the rail takes lanes only with eras, the time label its
-/// column only where a row carries one, and the strip a pitch for every
-/// lane its runs fill. Where none of them stands at the left, the cards
-/// keep the width they have beside a time column at its floor and stand
-/// centered in the region, so a page of one universe with no calendar
-/// does not sit off to the right.
+/// The lane of the wall: the wall itself, the part the strip and the
+/// cards share, the strip, and the cards. The left-hand room is only
+/// what is used: the time label takes its column only where a row
+/// carries one, and the strip a pitch for every lane its runs fill.
+/// Where none of them stands at the left, the cards keep the width they
+/// have beside a time column at its floor and stand centered in the
+/// region, so a page of one universe with no calendar does not sit off
+/// to the right.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Lane {
     pub wall: Rectangle,
@@ -470,17 +679,17 @@ pub struct Lane {
 }
 
 impl Lane {
-    /// The lane for these eras and runs over the region, beside a time
-    /// column of this width.
-    pub fn of(region: Rectangle, eras: &[rail::Bar], runs: &[metro::Run], time: f32) -> Self {
-        let wall = rail::beside(region, eras);
+    /// The lane for these runs over the region, beside a time column of
+    /// this width.
+    pub fn of(region: Rectangle, runs: &[metro::Run], time: f32) -> Self {
+        let wall = region;
         let columned = columned(wall, time);
         let strip = area(columned.x, columned.y, metro::width(runs), columned.height);
         let gap = match strip.width > 0.0 {
             true => GAP,
             false => 0.0,
         };
-        let bare = eras.is_empty() && time <= 0.0 && strip.width == 0.0;
+        let bare = time <= 0.0 && strip.width == 0.0;
         let cards = match bare {
             true => area(
                 region.x + floor() / 2.0,
@@ -507,14 +716,19 @@ impl Lane {
 /// The box one row draws in, in frame space after the scroll: from the
 /// right of the strip to the right of the wall, as tall as the row. A row
 /// past the tops draws nothing.
-pub fn cell_box(cards: Rectangle, row: usize, tops: &[f32], down: f32) -> Rectangle {
+pub fn cell_box(
+    cards: Rectangle,
+    row: usize,
+    headings: &[Heading],
+    tops: &[f32],
+    down: f32,
+) -> Rectangle {
     let top = tops.get(row).copied().unwrap_or_default();
-    let next = tops.get(row + 1).copied().unwrap_or(top + GAP);
     area(
         cards.x,
         cards.y + top - down,
         cards.width,
-        (next - top - GAP).max(0.0),
+        (foot(headings, tops, row) - top).max(0.0),
     )
 }
 
@@ -532,35 +746,21 @@ pub fn clipped(columned: Rectangle) -> Rectangle {
 
 /// The box one row's time label draws in, in frame space after the
 /// scroll, at the left of the wall. `time` is the width of the column.
-pub fn time_box(wall: Rectangle, time: f32, row: usize, tops: &[f32], offset: f32) -> Rectangle {
+pub fn time_box(
+    wall: Rectangle,
+    time: f32,
+    row: usize,
+    headings: &[Heading],
+    tops: &[f32],
+    offset: f32,
+) -> Rectangle {
     let top = tops.get(row).copied().unwrap_or_default();
-    let next = tops.get(row + 1).copied().unwrap_or(top + GAP);
     area(
         wall.x,
         wall.y + top - offset,
         (time - GAP).max(0.0),
-        next - top - GAP,
+        foot(headings, tops, row) - top,
     )
-}
-
-/// The box the caption draws in: the time column at the head of the wall,
-/// held at the top of the region while the wall scrolls under it, the way
-/// a jump rail holds the label of a bar. The times move and the caption
-/// stays, because it names what every one of them counts.
-pub fn caption_box(
-    wall: Rectangle,
-    time: f32,
-    caption: &[String],
-    tops: &[f32],
-    offset: f32,
-) -> Rectangle {
-    let section = area(
-        wall.x,
-        wall.y - offset,
-        (time - GAP).max(0.0),
-        content(tops),
-    );
-    stack::held(section, wall, text::height(caption.len(), look::CAPTION))
 }
 
 /// The length of the wall these tops lay out, the space over the first
@@ -569,19 +769,36 @@ pub fn content(tops: &[f32]) -> f32 {
     tops.last().copied().unwrap_or_default() + TAIL
 }
 
-/// How far the wall has scrolled with focus on this row. The last row
-/// pulls the space under it into view, so the wall stops at its own
-/// foot and not a row short of it.
-pub fn scroll(row: usize, tops: &[f32], height: f32) -> f32 {
+/// How far the wall has scrolled with focus on this row, from where it
+/// stood before. The wall moves only when it has to: when the focused
+/// row has left the view above, the wall comes down until the row stands
+/// at the top, under the headings over it and the held line; when it has
+/// left below, the wall goes up until the row stands at the foot. A row
+/// already in view moves nothing, so up and down walk the rows on the
+/// screen and the wall stays still under them. The block the scroll
+/// keeps in view is the row and the headings that stand over it when it
+/// is at the top. The last row pulls the space under it into view, so
+/// the wall stops at its own foot and not a row short of it.
+pub fn scroll(before: f32, row: usize, headings: &[Heading], tops: &[f32], height: f32) -> f32 {
     let count = tops.len().saturating_sub(1);
-    let top = tops.get(row).copied().unwrap_or_default();
-    let next = tops.get(row + 1).copied().unwrap_or(top);
-    let block = area(0.0, top, 0.0, next - top);
+    let top = tops.get(row).copied().unwrap_or_default() - reach(headings, row) as f32 * HEADING;
     let tail = match row + 1 >= count {
         true => TAIL,
         false => 0.0,
     };
-    crate::views::stack::offset(block, tail, content(tops), height)
+    let foot = foot(headings, tops, row) + GAP + tail;
+    // A short wall keeps the room to bring its last row out from under
+    // the held line, so a wall of two rows and six eras never leaves a
+    // title covered.
+    let most = (content(tops).max(top + height) - height).max(0.0);
+    let down = before.clamp(0.0, most);
+    if top < down {
+        top.max(0.0)
+    } else if foot > down + height {
+        (foot - height).clamp(0.0, most)
+    } else {
+        down
+    }
 }
 
 #[cfg(test)]

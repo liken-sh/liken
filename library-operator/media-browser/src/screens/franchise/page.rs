@@ -1,7 +1,13 @@
-// The franchise page's one canvas: the rail and the time labels at the
-// left, and the metro strip and one lane of cards beside them. The wall
-// scrolls inside its own region and is clipped to it, so no row draws
-// over the band. A row the region does not reach builds no geometry, so
+// The franchise page's two canvases: the wall, with the time labels at
+// the left, the metro strip and one lane of cards beside them, and the
+// era headings in the flow of the rows; and over it the one line held
+// at the top of the cards while the wall is inside an era, on a ground
+// of its own. The second canvas is a layer of its own, the way the band
+// over the page is, because inside one canvas the renderer draws every
+// fill before any text, and a ground drawn in the wall's canvas would
+// draw under the words of rows that scroll up under the line. The wall
+// scrolls inside its own region and is clipped to it, and the rows are
+// clipped under the held line, so no art draws over it. A row the region does not reach builds no geometry, so
 // a wall of a hundred rows costs only the rows a person sees.
 
 use std::cell::RefCell;
@@ -12,14 +18,16 @@ use iced_widget::canvas;
 use iced_winit::core::image::FilterMethod;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
+use super::Franchise;
 use super::card::{self, GROUND_TONE};
 use super::metro;
-use super::wall::{self, Cell};
-use super::{Focus, Franchise};
+use super::wall::{self, Cell, GAP};
 use crate::art::Art;
 use crate::catalog::franchise::Standing;
 use crate::look;
-use crate::views::{Tone, area, artwork, band, extent, mark, rail, rounded, text, wall as still};
+use crate::views::{
+    REACH, Tone, area, artwork, band, divider, extent, mark, rounded, text, wall as still,
+};
 
 // The margin at both sides of the page.
 const MARGIN: f32 = 80.0;
@@ -83,59 +91,41 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
-        let region = region(bounds);
         let rows = &page.rows;
-        // The lane measures where the rail leaves off, the time column,
-        // the strip, and the cards, and centers the cards where nothing
-        // stands at the left.
-        let wall::Lane {
+        let Layout {
+            region,
             wall,
             columned,
             strip,
             cards,
-        } = wall::Lane::of(region, &page.eras, &page.runs, page.time);
-        let head = wall::head(&page.caption);
-        let art = wall::art_height(region.height - head);
-        let tops = wall::tops(rows, art, head);
-        let down = match page.focus {
-            Focus::Row(row) => wall::scroll(row, &tops, region.height),
-            Focus::Rail(bar) => match page.eras.get(bar) {
-                Some(bar) => wall::scroll(bar.first, &tops, region.height),
-                None => 0.0,
-            },
-        };
+            art,
+            tops,
+            down,
+            headings,
+            held,
+        } = layout(page, bounds);
 
         frame.with_clip(region, |frame| {
-            // The rows start under the head the caption and the first
-            // row's focus mark need, and the tops carry that head, so
-            // the rail reads them as they are.
-            rail::draw(
+            times(
                 frame,
-                region,
-                &page.eras,
+                page,
+                wall,
                 &tops,
                 down,
-                match focus {
-                    Some(Focus::Rail(bar)) => Some(bar),
-                    _ => None,
-                },
+                column(wall, page.time, region),
             );
 
-            // The caption holds the top of the column, and the times
-            // draw under it, so a time that scrolls up leaves the column
-            // under the caption and never draws through it.
-            let caption = wall::caption_box(wall, page.time, &page.caption, &tops, down);
-            times(frame, page, wall, &tops, down, under(caption, region));
-            stacked(frame, &page.caption, caption.position(), look::faint());
-
-            // The strip and the rows are clipped to their own part of
-            // the region, so a row that has scrolled up draws nothing
-            // over the time labels beside it.
+            // The strip is clipped to its own part of the region, so a
+            // row that has scrolled up draws nothing over the time labels
+            // beside it, and the rows are clipped under the held line.
             let cells = wall::clipped(columned);
             frame.with_clip(cells, |frame| {
-                metro::draw(frame, strip, &page.runs, rows, &tops, down);
+                metro::draw(frame, strip, &page.runs, rows, &page.headings, &tops, down);
+            });
+            let cells = wall::clipped(wall::under(cards, held.is_some()));
+            frame.with_clip(cells, |frame| {
                 for (index, row) in rows.iter().enumerate() {
-                    let bounds = wall::cell_box(cards, index, &tops, down);
+                    let bounds = wall::cell_box(cards, index, &page.headings, &tops, down);
                     if outside(bounds, cells) {
                         continue;
                     }
@@ -143,14 +133,152 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                         true => entry(frame, store, &row.cell, bounds, cells, art),
                         false => thin(frame, &row.cell, bounds),
                     }
-                    if focus == Some(Focus::Row(index)) {
+                    if focus == Some(index) {
                         mark(frame, bounds);
                     }
                 }
             });
+
+            // The headings draw in the flow of the rows, and scroll up
+            // under the held line with them.
+            for (heading, bounds) in page.headings.iter().zip(&headings) {
+                if outside(*bounds, region) {
+                    continue;
+                }
+                let words = heading.label();
+                match heading.depth {
+                    0 => divider::two(frame, *bounds, &words, wall::bright(&words)),
+                    _ => subheading(frame, *bounds, &words),
+                }
+            }
         });
 
         vec![frame.into_geometry()]
+    }
+}
+
+/// The layer over the wall: the one line held at the top while the wall
+/// is inside an era, on an opaque ground, so it stands over the rows
+/// under it.
+pub struct Held<'a> {
+    /// The franchise the page is about.
+    pub franchise: &'a Franchise,
+}
+
+impl canvas::Program<Infallible, Theme, Renderer> for Held<'_> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let page = self.franchise;
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let Layout {
+            region,
+            cards,
+            held,
+            ..
+        } = layout(page, bounds);
+        // The space between the band over the page and the wall is
+        // painted here, over the wall, because the renderer clips a line
+        // of text as a whole and a row's words that cross the top of the
+        // wall would show in it.
+        let gap = area(region.x, band::HEIGHT, region.width, TOP);
+        frame.fill_rectangle(gap.position(), extent(gap), look::BACKGROUND);
+        // The line stands in the cards' column, where the headings in
+        // the flow stand, so it reads as one of them held still, and the
+        // strip and the time labels beside it run on up to the top. Its
+        // ground reaches the focus mark's room to the left, so the mark
+        // of a row under it is covered whole. The ground takes a clip of
+        // its own, and never the wall's region, because the renderer
+        // folds a clip with the bounds of an earlier one into that
+        // earlier layer, and the ground would then draw under the rows'
+        // words.
+        if let Some(line) = &held {
+            let band = wall::band(cards, true);
+            let ground = area(band.x - REACH, band.y, band.width + REACH, band.height);
+            frame.with_clip(ground, |frame| {
+                frame.fill_rectangle(ground.position(), extent(ground), look::BACKGROUND);
+                divider::two(frame, band, line, wall::bright(line));
+            });
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+/// The measures both canvases draw from, so the two agree on every
+/// frame.
+struct Layout {
+    region: Rectangle,
+    wall: Rectangle,
+    columned: Rectangle,
+    strip: Rectangle,
+    cards: Rectangle,
+    art: f32,
+    tops: Vec<f32>,
+    down: f32,
+    headings: Vec<Rectangle>,
+    held: Option<String>,
+}
+
+// The layout of the page in this frame: the lane measures the time
+// column, the strip, and the cards, and centers the cards where nothing
+// stands at the left; the tops lay the rows and their headings out; the
+// scroll follows focus; and the headings stand where the scroll puts
+// them.
+fn layout(page: &Franchise, bounds: Rectangle) -> Layout {
+    let region = region(bounds);
+    let wall::Lane {
+        wall,
+        columned,
+        strip,
+        cards,
+    } = wall::Lane::of(region, &page.runs, page.time);
+    let art = wall::art_height(region.height - wall::HEAD);
+    let tops = wall::tops(&page.rows, &page.headings, art, wall::HEAD);
+    // Both canvases read the scroll the last frame left and write the
+    // one they draw with, and the second finds the first's answer
+    // already settled, so the two agree.
+    let down = wall::scroll(
+        page.scrolled.get(),
+        page.focus,
+        &page.headings,
+        &tops,
+        region.height,
+    );
+    page.scrolled.set(down);
+    let headings = wall::heading_boxes(cards, &page.headings, &tops, down);
+    let held = wall::crumb(&page.headings, &tops, down);
+    Layout {
+        region,
+        wall,
+        columned,
+        strip,
+        cards,
+        art,
+        tops,
+        down,
+        headings,
+        held,
+    }
+}
+
+// One sub-heading: the words of an era that starts on the same row as a
+// wider one, at the caption size and with no rule, so it reads as part
+// of the heading over it. The name is muted and the count a step
+// fainter, the way a heading's name is bright and its count muted.
+fn subheading(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, words: &str) {
+    let at = Point::new(
+        bounds.x,
+        bounds.y + bounds.height - divider::LIFT - text::height(1, look::CAPTION),
+    );
+    for (content, color) in [(words, look::faint()), (wall::bright(words), look::muted())] {
+        text::line(frame, content, at, look::CAPTION, color, bounds.width);
     }
 }
 
@@ -160,8 +288,8 @@ fn outside(cell: Rectangle, columned: Rectangle) -> bool {
     cell.y + cell.height < columned.y || cell.y > columned.y + columned.height
 }
 
-// Every row's time label, in the column under the caption. A label the
-// column does not reach builds no geometry, and a label the row above
+// Every row's time label, in the column. A label the column does not
+// reach builds no geometry, and a label the row above
 // carries too draws nothing, so a run of rows in one year prints the
 // year once.
 fn times(
@@ -174,7 +302,7 @@ fn times(
 ) {
     frame.with_clip(column, |frame| {
         for index in 0..page.rows.len() {
-            let label = wall::time_box(wall, page.time, index, tops, down);
+            let label = wall::time_box(wall, page.time, index, &page.headings, tops, down);
             if label.y + label.height < column.y || label.y > column.y + column.height {
                 continue;
             }
@@ -209,16 +337,10 @@ fn stacked(
     }
 }
 
-// The part of the time column the times draw in: everything under the
-// caption's own band.
-fn under(caption: Rectangle, region: Rectangle) -> Rectangle {
-    let top = caption.y + caption.height;
-    area(
-        caption.x,
-        top,
-        caption.width,
-        (region.y + region.height - top).max(0.0),
-    )
+// The part of the region the times draw in: the time column, the
+// whole height of the region.
+fn column(wall: Rectangle, time: f32, region: Rectangle) -> Rectangle {
+    area(wall.x, region.y, (time - GAP).max(0.0), region.height)
 }
 
 // One held entry of the order as a card of three layers: the ground made

@@ -101,7 +101,12 @@ A movie's page shows its art, its facts, its people, and the set or
 franchise it is part of. A series' page shows its seasons as a wall
 of episode stills. A person's page shows their credits and their
 biography. A franchise's page draws its story order as one lane with a
-line per universe beside it, and its eras on the rail.
+line per universe beside it, and a heading over the first row of each
+era, with the era's length beside its name. An era inside a wider one
+reads as a smaller line under it. While the wall scrolls inside an era,
+one line held over the cards names the eras around it, outer to inner,
+and left and right jump an era at a time. The wall moves only when the
+row in focus would leave the screen.
 
 Search is a wall like any other. Every typed character rereads it.
 The index is built in memory from titles, original titles, people's

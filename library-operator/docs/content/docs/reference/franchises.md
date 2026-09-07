@@ -161,8 +161,8 @@ A calendar needs a `unit`, either `years` or `days`. Without `zero`,
 `before`, and `after`, the times are plain calendar years, which is
 what the Marvel films count in. With `zero`, the times count from the
 named event, as Star Wars counts from the Battle of Yavin, and the
-page prints the zero once as the caption of the time column: "Years
-from the Battle of Yavin". `before` and `after` are short marks of at
+page prints the zero once, under the franchise's name at the top of
+the page: "Years from the Battle of Yavin". `before` and `after` are short marks of at
 most six characters, printed after the magnitude of a time, so -233
 with `before: BBY` reads "233 BBY". Leave them out where the franchise
 has no short marks: a days calendar without them reads "Day 1141",
@@ -173,8 +173,8 @@ A `time` is `from` and `to` in the calendar's unit, and they are
 equal for a story that stays in one year. A time on a show covers
 every season under it, and a time on a season overrides it. A
 flashback inside one film does not widen its span; the span is the
-film's main setting. An entry with no time draws in its row and
-joins no era on the rail.
+film's main setting. An entry with no time draws in its row, starts
+no era, and ends none.
 
 ## Members no library holds
 

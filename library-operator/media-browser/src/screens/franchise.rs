@@ -1,8 +1,8 @@
 // One franchise's page: the order of a story across films and series, as a
 // wall of rows from first to last. The lines beside the rows are the
-// universes, the rail at the left is the eras, and the label beside a
-// row is its time on the franchise's own clock, under a caption that
-// names what that clock counts. A press opens the film or the series,
+// universes, a heading over a row starts an era, and the label beside a
+// row is its time on the franchise's own clock. The band's note names
+// what that clock counts. A press opens the film or the series,
 // the way the set strip's press does, and a press on a gap opens
 // nothing. Story order is the one order the page draws, because it is
 // the one order a franchise has.
@@ -13,7 +13,7 @@ mod page;
 pub mod strips;
 mod wall;
 
-use std::cell::RefCell;
+use std::cell::{self, RefCell};
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
@@ -24,23 +24,15 @@ use super::{Screen, Step, movie, series};
 use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
-use crate::focus;
-use crate::views::{band, rail};
+use crate::views::band;
 
 pub use metro::Run;
 pub use wall::{Cell, Row};
 
-/// Where focus is on the page: one row, or one bar of the rail.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Focus {
-    Row(usize),
-    Rail(usize),
-}
-
 /// The franchise page: the universes, the rows in story order, the runs
-/// of the strip, the bars of the rail, and where focus is. Every row,
-/// every run, and every bar is built once here, at the read, and not on
-/// every frame.
+/// of the strip, the headings of the eras, and where focus is. Every
+/// row, every run, and every heading is built once here, at the read,
+/// and not on every frame.
 #[derive(Debug)]
 pub struct Franchise {
     /// The catalog's library column of the `Library` of kind
@@ -61,13 +53,17 @@ pub struct Franchise {
     /// The width of the time column, from the widest label the rows
     /// carry, and none where no row carries one.
     pub time: f32,
-    /// The caption over that column, in the lines the column holds, and
-    /// none where the file's calendar names no zero.
-    pub caption: Vec<String>,
-    /// The eras, as the bars of the rail beside the rows.
-    pub eras: Vec<rail::Bar>,
-    /// Where focus is.
-    pub focus: Focus,
+    /// The one line under the band's title that says what the times
+    /// count from, and none where the file's calendar names no zero.
+    pub caption: String,
+    /// The eras, as the headings over the rows.
+    pub headings: Vec<wall::Heading>,
+    /// The row focus is on.
+    pub focus: usize,
+    /// How far the wall stood scrolled at the last frame. The scroll
+    /// moves only when focus leaves the view, so the last position is
+    /// part of the page, and the frame that draws it writes it here.
+    pub scrolled: cell::Cell<f32>,
 }
 
 impl Franchise {
@@ -80,7 +76,7 @@ impl Franchise {
         let universes = wall::columns(&read);
         let rows = wall::story(&read, &universes, &today);
         let runs = metro::runs(&rows, &universes);
-        let eras = wall::bars(&read.eras, &rows);
+        let headings = wall::headings(&read.eras, &rows, &read.calendar);
         // The column's width and its caption are measured once, at the
         // read, because they answer the same words on every frame.
         let time = wall::time_width(&rows);
@@ -94,8 +90,9 @@ impl Franchise {
             rows,
             time,
             caption,
-            eras,
-            focus: Focus::Row(0),
+            headings,
+            focus: 0,
+            scrolled: cell::Cell::new(0.0),
         })
     }
 
@@ -107,26 +104,40 @@ impl Franchise {
             return;
         };
         let focus = self.focus;
+        let scrolled = self.scrolled.get();
         *self = fresh;
         self.focus = self.hold(focus);
+        self.scrolled.set(scrolled);
     }
 
     /// Fold one press in. Down walks forward in story order and up walks
     /// back, one row at a time whatever universe the next row is in, and
-    /// up from the first row holds it. Left lands on the rail, where up
-    /// and down move a bar and right returns to the first row of that
-    /// bar. Right on a row does nothing, because there is no rail on the
-    /// right yet. A press opens the film or the series, and opens nothing
-    /// on a gap or on a bar.
+    /// up from the first row holds it. Left and right step an era at a
+    /// time, to the first row of the era before or after, so a person
+    /// crosses a long wall in a few presses. A press opens the film or
+    /// the series, and opens nothing on a gap.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
-        match self.focus {
-            Focus::Row(row) => self.on_row(row, key, source),
-            Focus::Rail(bar) => self.on_rail(bar, key),
+        let row = self.focus;
+        if key == "enter" {
+            return self.opened(row, source);
         }
+        // Up from the first row moves nothing, which is how a press
+        // reaches the browser's strip.
+        if key == "up" && row == 0 {
+            return Step::Still;
+        }
+        self.focus = match key {
+            "up" => row.saturating_sub(1),
+            "down" if row + 1 < self.rows.len() => row + 1,
+            "left" => wall::before(&self.headings, row).unwrap_or(row),
+            "right" => wall::after(&self.headings, row).unwrap_or(row),
+            _ => row,
+        };
+        Step::Stay
     }
 
-    /// The view: the wall under the band, and the band as a layer over
-    /// it.
+    /// The view: the wall, the headings that have left their own tops as
+    /// a layer over it, and the band as a layer over both.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
@@ -140,51 +151,15 @@ impl Franchise {
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let band = band::layer(&self.title);
-        iced_widget::Stack::with_children(vec![wall, band])
+        let held = canvas(page::Held { franchise: self })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+        let band = band::layer(&self.title, &self.caption);
+        iced_widget::Stack::with_children(vec![wall, held, band])
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
-    }
-
-    // One press on a cell of the wall.
-    fn on_row(&mut self, row: usize, key: &str, source: &mut dyn Source) -> Step {
-        if key == "enter" {
-            return self.opened(row, source);
-        }
-        // Up from the first row moves nothing, which is how a press
-        // reaches the browser's strip.
-        if key == "up" && row == 0 {
-            return Step::Still;
-        }
-        self.focus = match key {
-            "up" => Focus::Row(row.saturating_sub(1)),
-            "down" if row + 1 < self.rows.len() => Focus::Row(row + 1),
-            "left" => match rail::covering(&self.eras, row) {
-                Some(bar) => Focus::Rail(bar),
-                None => Focus::Row(row),
-            },
-            _ => Focus::Row(row),
-        };
-        Step::Stay
-    }
-
-    // One press on the rail. Up and down move a bar, and right and a
-    // select both jump to the first row the bar covers, which is what
-    // the rail is for.
-    fn on_rail(&mut self, bar: usize, key: &str) -> Step {
-        if key == "up" && bar == 0 {
-            return Step::Still;
-        }
-        self.focus = match key {
-            "up" | "down" => Focus::Rail(focus::list(bar, self.eras.len(), key)),
-            "right" | "enter" => match self.eras.get(bar) {
-                Some(bar) => Focus::Row(bar.first),
-                None => Focus::Rail(bar),
-            },
-            _ => Focus::Rail(bar),
-        };
-        Step::Stay
     }
 
     // The page one cell opens: the film's or the series' own. A member
@@ -207,15 +182,10 @@ impl Franchise {
         }
     }
 
-    // Where focus lands after a re-read: where it was, unless the row,
-    // the cell, or the bar it was on went away.
-    fn hold(&self, focus: Focus) -> Focus {
-        match focus {
-            Focus::Row(..) if self.rows.is_empty() => Focus::Row(0),
-            Focus::Row(row) => Focus::Row(row.min(self.rows.len() - 1)),
-            Focus::Rail(..) if self.eras.is_empty() => Focus::Row(0),
-            Focus::Rail(bar) => Focus::Rail(bar.min(self.eras.len() - 1)),
-        }
+    // Where focus lands after a re-read: where it was, unless the row it
+    // was on went away.
+    fn hold(&self, focus: usize) -> usize {
+        focus.min(self.rows.len().saturating_sub(1))
     }
 }
 

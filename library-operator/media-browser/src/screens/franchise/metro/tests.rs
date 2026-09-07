@@ -134,14 +134,14 @@ fn the_palettes_eight_hues_are_distinct_and_light_enough_on_black() {
 fn a_dot_stands_in_the_middle_of_its_row_and_scrolls_with_the_wall() {
     let art = 100.0;
     let rows = vec![row(&[0], true), row(&[1], false)];
-    let tops = crate::screens::franchise::wall::tops(&rows, art, HEAD);
+    let tops = crate::screens::franchise::wall::tops(&rows, &[], art, HEAD);
     let strip = area(300.0, 200.0, 2.0 * PITCH, 900.0);
     assert_eq!(
-        middle(strip, 0, &tops, 0.0),
+        middle(strip, 0, &[], &tops, 0.0),
         strip.y + HEAD + card_height(art) / 2.0
     );
     assert_eq!(
-        middle(strip, 1, &tops, 50.0),
+        middle(strip, 1, &[], &tops, 50.0),
         strip.y + tops[1] + THIN / 2.0 - 50.0
     );
 }
@@ -194,10 +194,11 @@ fn run(first: usize, last: usize, lane: usize) -> Run {
 #[test]
 fn a_name_stands_over_its_first_dot_in_the_gutter_beside_its_line() {
     let (strip, tops) = strip(8);
-    let box_of = name_box(strip, &run(1, 5, 1), &tops, 0.0, 120.0).expect("the dot is on screen");
+    let box_of =
+        name_box(strip, &run(1, 5, 1), &[], &tops, 0.0, 120.0).expect("the dot is on screen");
     assert_eq!(
         box_of.y + box_of.height,
-        middle(strip, 1, &tops, 0.0) - DOT - NAME_GAP
+        middle(strip, 1, &[], &tops, 0.0) - DOT - NAME_GAP
     );
     assert_eq!(box_of.height, 120.0);
     assert_eq!(box_of.center_x(), name_x(strip, 1));
@@ -207,8 +208,8 @@ fn a_name_stands_over_its_first_dot_in_the_gutter_beside_its_line() {
 fn a_name_covers_no_dot_of_its_own_lane_and_none_of_the_next() {
     let (strip, tops) = strip(8);
     for lane in 0..3 {
-        let box_of =
-            name_box(strip, &run(1, 5, lane), &tops, 0.0, 120.0).expect("the dot is on screen");
+        let box_of = name_box(strip, &run(1, 5, lane), &[], &tops, 0.0, 120.0)
+            .expect("the dot is on screen");
         assert!(box_of.x >= line_x(strip, lane) + DOT, "lane {lane}");
         assert!(
             box_of.x + box_of.width <= line_x(strip, lane + 1) - DOT,
@@ -220,8 +221,9 @@ fn a_name_covers_no_dot_of_its_own_lane_and_none_of_the_next() {
 #[test]
 fn a_name_whose_first_dot_is_above_the_strip_holds_the_top_of_it() {
     let (strip, tops) = strip(8);
-    let box_of = name_box(strip, &run(0, 7, 0), &tops, 900.0, 120.0).expect("the run is on screen");
-    assert!(middle(strip, 0, &tops, 900.0) < strip.y);
+    let box_of =
+        name_box(strip, &run(0, 7, 0), &[], &tops, 900.0, 120.0).expect("the run is on screen");
+    assert!(middle(strip, 0, &[], &tops, 900.0) < strip.y);
     assert_eq!(box_of.y, strip.y);
     assert_eq!(box_of.height, 120.0);
 }
@@ -229,26 +231,33 @@ fn a_name_whose_first_dot_is_above_the_strip_holds_the_top_of_it() {
 #[test]
 fn a_run_whose_first_dot_is_below_the_strip_draws_no_name() {
     let (strip, tops) = strip(8);
-    assert!(middle(strip, 7, &tops, 0.0) > strip.y + strip.height);
-    assert_eq!(name_box(strip, &run(7, 8, 0), &tops, 0.0, 120.0), None);
+    assert!(middle(strip, 7, &[], &tops, 0.0) > strip.y + strip.height);
+    assert_eq!(name_box(strip, &run(7, 8, 0), &[], &tops, 0.0, 120.0), None);
     // The dot arrives at the foot of the strip, and the name arrives
     // with it.
-    let down = middle(strip, 7, &tops, 0.0) - (strip.y + strip.height);
-    assert!(name_box(strip, &run(7, 8, 0), &tops, down, 120.0).is_some());
+    let down = middle(strip, 7, &[], &tops, 0.0) - (strip.y + strip.height);
+    assert!(name_box(strip, &run(7, 8, 0), &[], &tops, down, 120.0).is_some());
 }
 
 #[test]
 fn a_run_that_has_scrolled_over_the_head_of_the_strip_draws_no_name() {
     let (strip, tops) = strip(8);
-    assert!(middle(strip, 2, &tops, 900.0) < strip.y);
-    assert_eq!(name_box(strip, &run(0, 2, 0), &tops, 900.0, 120.0), None);
+    assert!(middle(strip, 2, &[], &tops, 900.0) < strip.y);
+    assert_eq!(
+        name_box(strip, &run(0, 2, 0), &[], &tops, 900.0, 120.0),
+        None
+    );
 }
 
 #[test]
 fn the_last_dot_of_a_run_pushes_its_name_off_with_it() {
     let (strip, tops) = strip(8);
-    let box_of = name_box(strip, &run(0, 2, 0), &tops, 400.0, 120.0).expect("the run is on screen");
-    assert_eq!(box_of.y + box_of.height, middle(strip, 2, &tops, 400.0));
+    let box_of =
+        name_box(strip, &run(0, 2, 0), &[], &tops, 400.0, 120.0).expect("the run is on screen");
+    assert_eq!(
+        box_of.y + box_of.height,
+        middle(strip, 2, &[], &tops, 400.0)
+    );
     assert!(box_of.y < strip.y);
 }
 

@@ -20,7 +20,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Color, Point, Rectangle};
 
-use super::wall::{GAP, Row};
+use super::wall::{self, Heading, Row};
 use crate::look;
 use crate::views::{area, rounded, stack, text};
 
@@ -190,10 +190,9 @@ fn gamma(linear: f32) -> f32 {
 }
 
 /// The middle of one row, in frame space after the scroll.
-pub fn middle(strip: Rectangle, row: usize, tops: &[f32], down: f32) -> f32 {
+pub fn middle(strip: Rectangle, row: usize, headings: &[Heading], tops: &[f32], down: f32) -> f32 {
     let top = tops.get(row).copied().unwrap_or_default();
-    let next = tops.get(row + 1).copied().unwrap_or(top + GAP);
-    strip.y + (top + next - GAP) / 2.0 - down
+    strip.y + (top + wall::foot(headings, tops, row)) / 2.0 - down
 }
 
 /// The runs one row takes a dot on, in the order the row names their
@@ -239,11 +238,12 @@ pub fn bar(strip: Rectangle, lanes: &[usize], y: f32, radius: f32) -> Option<Rec
 pub fn name_box(
     strip: Rectangle,
     run: &Run,
+    headings: &[Heading],
     tops: &[f32],
     down: f32,
     length: f32,
 ) -> Option<Rectangle> {
-    let first = middle(strip, run.first, tops, down);
+    let first = middle(strip, run.first, headings, tops, down);
     if first - DOT > strip.y + strip.height {
         return None;
     }
@@ -252,7 +252,7 @@ pub fn name_box(
         name_x(strip, run.lane) - NAME_ROOM / 2.0,
         top,
         NAME_ROOM,
-        middle(strip, run.last, tops, down) - top,
+        middle(strip, run.last, headings, tops, down) - top,
     );
     let at = stack::held(section, strip, length);
     match at.y + at.height < strip.y {
@@ -270,6 +270,7 @@ pub fn draw(
     strip: Rectangle,
     runs: &[Run],
     rows: &[Row],
+    headings: &[Heading],
     tops: &[f32],
     down: f32,
 ) {
@@ -279,8 +280,8 @@ pub fn draw(
     for run in runs {
         let x = line_x(strip, run.lane);
         let (top, bottom) = (
-            middle(strip, run.first, tops, down),
-            middle(strip, run.last, tops, down),
+            middle(strip, run.first, headings, tops, down),
+            middle(strip, run.last, headings, tops, down),
         );
         frame.fill_rectangle(
             Point::new(x - LINE / 2.0, top),
@@ -292,7 +293,7 @@ pub fn draw(
         );
     }
     for (index, row) in rows.iter().enumerate() {
-        let y = middle(strip, index, tops, down);
+        let y = middle(strip, index, headings, tops, down);
         if y < strip.y - DOT || y > strip.y + strip.height + DOT {
             continue;
         }
@@ -314,7 +315,14 @@ pub fn draw(
     }
     for run in runs {
         let shown = text::cut(&run.name, NAME, strip.height);
-        let Some(at) = name_box(strip, run, tops, down, text::measured(&shown, NAME)) else {
+        let Some(at) = name_box(
+            strip,
+            run,
+            headings,
+            tops,
+            down,
+            text::measured(&shown, NAME),
+        ) else {
             continue;
         };
         text::upward(frame, &shown, at, NAME, color(run.hue));

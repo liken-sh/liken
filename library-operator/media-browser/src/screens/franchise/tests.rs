@@ -1,5 +1,5 @@
 // The franchise page over an invented order: the rows it packs, the
-// rail it derives, and where a press takes focus.
+// headings it derives, and where a press takes focus.
 
 use super::*;
 use crate::catalog::franchise::{Calendar, Entry, Era, Held, MOVIE, Membership, SERIES};
@@ -254,22 +254,25 @@ fn a_franchise_no_library_holds_opens_no_page() {
 fn the_page_opens_on_the_first_row_in_story_order() {
     let page = page();
     assert_eq!(page.title, "The Cycle");
-    assert_eq!(page.focus, Focus::Row(0));
+    assert_eq!(page.focus, 0);
     assert_eq!(page.universes, [COPPICE, FEN, MARSH]);
     assert_eq!(page.rows.len(), 6);
 }
 
 #[test]
-fn the_eras_become_the_bars_of_the_rail_widest_first() {
+fn the_eras_become_headings_over_their_first_rows() {
     let page = page();
-    let bars: Vec<(&str, usize, usize, usize)> = page
-        .eras
+    let headings: Vec<(String, usize, usize)> = page
+        .headings
         .iter()
-        .map(|bar| (bar.label.as_str(), bar.first, bar.last, bar.lane))
+        .map(|heading| (heading.label(), heading.first, heading.last))
         .collect();
     assert_eq!(
-        bars,
-        [("The Long Survey", 0, 5, 0), ("The Coppice Years", 3, 4, 1),]
+        headings,
+        [
+            ("The Long Survey · 81 years".to_string(), 0, 5),
+            ("The Coppice Years · 11 years".to_string(), 3, 4)
+        ]
     );
 }
 
@@ -278,63 +281,48 @@ fn up_and_down_move_a_row_and_up_from_the_first_row_holds_it() {
     let mut page = page();
     let mut source = Orders::default();
     page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Row(1));
+    assert_eq!(page.focus, 1);
     page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Row(2));
+    assert_eq!(page.focus, 2);
     page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Row(1));
+    assert_eq!(page.focus, 1);
     page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Row(0));
+    assert_eq!(page.focus, 0);
     page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Row(0));
+    assert_eq!(page.focus, 0);
 }
 
 #[test]
 fn down_from_the_last_row_holds_focus() {
     let mut page = page();
     let mut source = Orders::default();
-    page.focus = Focus::Row(5);
+    page.focus = 5;
     page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Row(5));
+    assert_eq!(page.focus, 5);
 }
 
 #[test]
-fn right_moves_nothing_on_a_row() {
+fn left_and_right_step_an_era_at_a_time_and_hold_at_the_ends() {
     let mut page = page();
     let mut source = Orders::default();
-    page.focus = Focus::Row(1);
     page.key("right", &mut source);
-    assert_eq!(page.focus, Focus::Row(1));
-}
-
-#[test]
-fn left_from_the_first_column_lands_on_the_rail() {
-    let mut page = page();
-    let mut source = Orders::default();
-    page.key("left", &mut source);
-    assert_eq!(page.focus, Focus::Rail(0));
-}
-
-#[test]
-fn the_rail_moves_an_era_at_a_time_and_returns_to_its_first_row() {
-    let mut page = page();
-    let mut source = Orders::default();
-    page.focus = Focus::Rail(0);
-    page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Rail(1));
-    page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Rail(1));
+    assert_eq!(page.focus, 3);
     page.key("right", &mut source);
-    assert_eq!(page.focus, Focus::Row(3));
-
-    page.focus = Focus::Rail(1);
-    page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Rail(0));
-    page.key("enter", &mut source);
-    assert_eq!(page.focus, Focus::Row(0));
-    page.focus = Focus::Rail(0);
+    assert_eq!(page.focus, 3);
     page.key("left", &mut source);
-    assert_eq!(page.focus, Focus::Rail(0));
+    assert_eq!(page.focus, 0);
+    page.key("left", &mut source);
+    assert_eq!(page.focus, 0);
+
+    page.focus = 5;
+    page.key("left", &mut source);
+    assert_eq!(page.focus, 3);
+    page.focus = 2;
+    page.key("left", &mut source);
+    assert_eq!(page.focus, 0);
+    page.focus = 1;
+    page.key("right", &mut source);
+    assert_eq!(page.focus, 3);
 }
 
 #[test]
@@ -349,7 +337,7 @@ fn a_press_on_an_entry_opens_the_film_in_the_place_of_this_page() {
 fn a_press_on_a_series_entry_opens_the_series() {
     let mut page = page();
     let mut source = Orders::default();
-    page.focus = Focus::Row(4);
+    page.focus = 4;
     let step = page.key("enter", &mut source);
     assert!(matches!(step, Step::Replace(Screen::Series(_))));
 }
@@ -358,9 +346,9 @@ fn a_press_on_a_series_entry_opens_the_series() {
 fn a_press_on_a_gap_opens_nothing() {
     let mut page = page();
     let mut source = Orders::default();
-    page.focus = Focus::Row(3);
+    page.focus = 3;
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
-    page.focus = Focus::Row(9);
+    page.focus = 9;
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
 }
 
@@ -368,17 +356,13 @@ fn a_press_on_a_gap_opens_nothing() {
 fn a_reread_holds_the_rung_focus_was_on() {
     let mut page = page();
     let mut source = Orders::default();
-    page.focus = Focus::Row(2);
+    page.focus = 2;
     page.reread(&mut source);
-    assert_eq!(page.focus, Focus::Row(2));
+    assert_eq!(page.focus, 2);
 
-    page.focus = Focus::Row(99);
+    page.focus = 99;
     page.reread(&mut source);
-    assert_eq!(page.focus, Focus::Row(5));
-
-    page.focus = Focus::Rail(9);
-    page.reread(&mut source);
-    assert_eq!(page.focus, Focus::Rail(1));
+    assert_eq!(page.focus, 5);
 }
 
 #[test]
@@ -389,12 +373,10 @@ fn a_reread_that_finds_nothing_leaves_the_page_as_it_was() {
 }
 
 #[test]
-fn a_rail_or_a_wall_that_went_away_leaves_focus_on_the_first_row() {
+fn a_wall_that_went_away_leaves_focus_on_the_first_row() {
     let mut page = page();
-    page.eras.clear();
-    assert_eq!(page.hold(Focus::Rail(0)), Focus::Row(0));
     page.rows.clear();
-    assert_eq!(page.hold(Focus::Row(3)), Focus::Row(0));
+    assert_eq!(page.hold(3), 0);
 }
 
 #[test]
@@ -402,13 +384,13 @@ fn a_page_with_no_rows_moves_nowhere() {
     let mut page = page();
     let mut source = Orders::default();
     page.rows.clear();
-    page.eras.clear();
-    page.focus = Focus::Row(0);
+    page.headings.clear();
+    page.focus = 0;
     page.key("down", &mut source);
-    assert_eq!(page.focus, Focus::Row(0));
+    assert_eq!(page.focus, 0);
     page.key("left", &mut source);
-    assert_eq!(page.focus, Focus::Row(0));
+    assert_eq!(page.focus, 0);
     page.key("up", &mut source);
-    assert_eq!(page.focus, Focus::Row(0));
+    assert_eq!(page.focus, 0);
     assert!(matches!(page.key("enter", &mut source), Step::Stay));
 }

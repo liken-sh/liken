@@ -289,7 +289,7 @@ impl Wall {
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let band = band::layer(&self.heading);
+        let band = band::layer(&self.heading, "");
         let mut layers = vec![grid, band];
         if let Some(keyboard) = self.grid() {
             layers.push(

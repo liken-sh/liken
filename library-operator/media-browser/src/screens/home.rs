@@ -270,7 +270,7 @@ impl Home {
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let band = band::layer(&self.heading);
+        let band = band::layer(&self.heading, "");
         Stack::with_children(vec![ground, front, band])
             .width(Length::Fill)
             .height(Length::Fill)

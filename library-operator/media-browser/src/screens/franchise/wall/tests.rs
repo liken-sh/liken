@@ -1,5 +1,5 @@
 // The wall's measures over an invented order: the universes it names,
-// the rows it lays out, the bars it derives, and the boxes it places.
+// the rows it lays out, the headings it derives, and the boxes it places.
 
 use super::*;
 use crate::catalog::franchise::{Calendar, Held, MOVIE};
@@ -283,61 +283,136 @@ fn walled() -> Vec<Row> {
 }
 
 #[test]
-fn an_era_covers_the_rows_its_span_meets() {
-    let bars = bars(&[era("The Long Survey", -40.0, 40.0)], &walled());
-    assert_eq!(bars.len(), 1);
-    assert_eq!((bars[0].first, bars[0].last), (0, 2));
-    assert_eq!(bars[0].lane, 0);
+fn an_era_heads_the_first_row_that_starts_inside_it_and_covers_to_the_last() {
+    let headings = headings(
+        &[era("The Long Survey", -40.0, 40.0)],
+        &walled(),
+        &Some(calendar()),
+    );
+    assert_eq!(headings.len(), 1);
+    assert_eq!((headings[0].first, headings[0].last), (0, 2));
+    assert_eq!(headings[0].name, "The Long Survey");
+    assert_eq!(headings[0].count, "81 years");
+    assert_eq!(headings[0].label(), "The Long Survey · 81 years");
 }
 
 #[test]
-fn an_era_a_wider_one_holds_draws_in_the_inner_lane() {
-    let bars = bars(
+fn a_row_an_era_only_touches_does_not_wear_its_heading() {
+    // The walled rows start at -32, -30, and -20. An era from -31 touches
+    // the first row and starts inside none of it, so the second row
+    // heads it; an era every row starts before draws no heading.
+    let headings = headings(
+        &[era("Late start", -31.0, 40.0), era("Earlier", -40.0, -33.0)],
+        &walled(),
+        &Some(calendar()),
+    );
+    assert_eq!(headings.len(), 1);
+    assert_eq!(
+        (headings[0].name.as_str(), headings[0].first),
+        ("Late start", 1)
+    );
+}
+
+#[test]
+fn headings_come_by_first_row_and_the_widest_first_on_one_row_and_nest_by_depth() {
+    let headings = headings(
         &[
-            era("The Coppice Years", -5.0, 5.0),
+            era("The Coppice Years", -33.0, -30.0),
             era("The Long Survey", -40.0, 40.0),
+            era("Late", -25.0, 40.0),
         ],
         &walled(),
+        &Some(calendar()),
     );
-    let lanes: Vec<(&str, usize, usize, usize)> = bars
+    let named: Vec<(&str, usize, usize, usize)> = headings
         .iter()
-        .map(|bar| (bar.label.as_str(), bar.first, bar.last, bar.lane))
+        .map(|heading| {
+            (
+                heading.name.as_str(),
+                heading.first,
+                heading.last,
+                heading.depth,
+            )
+        })
         .collect();
     assert_eq!(
-        lanes,
-        [("The Long Survey", 0, 2, 0), ("The Coppice Years", 2, 2, 1),]
+        named,
+        [
+            ("The Long Survey", 0, 2, 0),
+            ("The Coppice Years", 0, 0, 1),
+            ("Late", 1, 2, 0),
+        ]
     );
+    assert_eq!(over(&headings, 0), 2);
+    assert_eq!(over(&headings, 1), 1);
+    assert_eq!(over(&headings, 2), 0);
+    // A row inside an era that started above it keeps the held line's
+    // room over its own headings.
+    assert_eq!(reach(&headings, 0), 2);
+    assert_eq!(reach(&headings, 1), 2);
+    assert_eq!(reach(&headings, 2), 1);
 }
 
 #[test]
-fn two_eras_that_overlap_and_hold_neither_take_two_lanes() {
-    let bars = bars(
-        &[era("Early", -40.0, -10.0), era("Late", -25.0, 40.0)],
+fn left_and_right_find_the_first_row_of_the_era_before_and_after() {
+    let headings = headings(
+        &[era("Early", -40.0, -25.0), era("Late", -25.0, 40.0)],
         &walled(),
+        &Some(calendar()),
     );
-    assert_eq!(bars.len(), 2);
-    assert_eq!((bars[0].label.as_str(), bars[0].lane), ("Late", 0));
-    assert_eq!((bars[1].label.as_str(), bars[1].lane), ("Early", 1));
+    assert_eq!(before(&headings, 2), Some(1));
+    assert_eq!(before(&headings, 1), Some(0));
+    assert_eq!(before(&headings, 0), None);
+    assert_eq!(after(&headings, 0), Some(1));
+    assert_eq!(after(&headings, 2), None);
 }
 
 #[test]
-fn two_eras_that_never_meet_share_the_outer_lane() {
-    let bars = bars(
-        &[era("Early", -40.0, -25.0), era("Late", -15.0, 40.0)],
-        &walled(),
+fn an_era_covers_one_unbroken_run_and_a_row_with_no_time_breaks_none() {
+    // Story order jumps back: the fifth row is set inside the era again,
+    // after a row outside it, and the third row carries no time.
+    let page = franchise(vec![
+        entry(1, (-40.0, -35.0), &[]),
+        entry(2, (-34.0, -30.0), &[]),
+        Entry {
+            timed: false,
+            ..entry(3, (0.0, 0.0), &[])
+        },
+        entry(4, (10.0, 12.0), &[]),
+        entry(5, (-38.0, -36.0), &[]),
+        Entry {
+            timed: false,
+            ..entry(6, (0.0, 0.0), &[])
+        },
+    ]);
+    let rows = story(&page, &columns(&page), TODAY);
+    let headings = headings(
+        &[era("Early", -40.0, -30.0), era("Late", 5.0, 20.0)],
+        &rows,
+        &Some(calendar()),
     );
-    assert_eq!(bars.len(), 2);
-    assert!(bars.iter().all(|bar| bar.lane == 0));
+    let named: Vec<(&str, usize, usize)> = headings
+        .iter()
+        .map(|heading| (heading.name.as_str(), heading.first, heading.last))
+        .collect();
+    assert_eq!(named, [("Early", 0, 1), ("Late", 3, 3)]);
 }
 
 #[test]
-fn an_era_no_row_meets_draws_no_bar() {
-    assert!(bars(&[era("Before", -500.0, -100.0)], &walled()).is_empty());
-    assert!(bars(&[], &walled()).is_empty());
+fn an_era_no_row_starts_inside_draws_no_heading() {
+    assert!(
+        headings(
+            &[era("Before", -500.0, -100.0)],
+            &walled(),
+            &Some(calendar())
+        )
+        .is_empty()
+    );
+    assert!(headings(&[], &walled(), &Some(calendar())).is_empty());
 }
 
 #[test]
-fn a_wall_of_untimed_rows_draws_no_rail() {
+fn a_wall_of_untimed_rows_draws_no_heading() {
     let page = Franchise {
         calendar: None,
         ..franchise(vec![Entry {
@@ -346,7 +421,7 @@ fn a_wall_of_untimed_rows_draws_no_rail() {
         }])
     };
     let rows = story(&page, &columns(&page), TODAY);
-    assert!(bars(&[era("An Era", -40.0, 40.0)], &rows).is_empty());
+    assert!(headings(&[era("An Era", -40.0, 40.0)], &rows, &Some(calendar())).is_empty());
 }
 
 const REGION: Rectangle = Rectangle {
@@ -473,18 +548,10 @@ fn a_row_prints_its_time_only_where_it_differs_from_the_row_above() {
 }
 
 #[test]
-fn the_caption_wraps_into_the_lines_the_column_holds() {
+fn the_caption_is_the_calendars_one_line() {
     let rows = mixed();
-    let time = time_width(&rows);
-    let caption = caption(&Some(calendar()), time);
-    assert_eq!(caption.join(" "), "Years from the Survey");
-    assert!(caption.len() > 1, "{caption:?}");
-    for line in &caption {
-        assert!(
-            text::measured(line, look::CAPTION) <= time - GAP || !line.contains(' '),
-            "{line}"
-        );
-    }
+    let caption = caption(&Some(calendar()), time_width(&rows));
+    assert_eq!(caption, "Years from the Survey");
 }
 
 #[test]
@@ -499,44 +566,10 @@ fn a_calendar_with_no_zero_and_a_wall_with_no_column_carry_no_caption() {
 }
 
 #[test]
-fn the_head_of_the_wall_holds_the_caption_and_a_wall_with_none_holds_the_mark() {
-    let caption = caption(&Some(calendar()), time_width(&mixed()));
-    assert_eq!(
-        head(&caption),
-        text::height(caption.len(), look::CAPTION) + GAP
-    );
-    assert!(head(&caption) > head(&[]));
-    assert_eq!(head(&[]), HEAD);
+fn the_head_of_the_wall_is_the_room_the_first_rows_mark_reaches_into() {
     assert_eq!(HEAD, crate::views::REACH);
-}
-
-#[test]
-fn the_caption_holds_the_top_of_the_column_while_the_wall_scrolls() {
-    let page = franchise(
-        (1..=40)
-            .map(|number| entry(number, (number as f64, number as f64), &[]))
-            .collect(),
-    );
-    let rows = story(&page, &columns(&page), TODAY);
-    let time = time_width(&rows);
-    let caption = caption(&Some(calendar()), time);
-    let tops = tops(&rows, art_height(ROWS), head(&caption));
-    let box_of = |down| caption_box(REGION, time, &caption, &tops, down);
-    assert_eq!(box_of(0.0).x, REGION.x);
-    assert_eq!(box_of(0.0).y, REGION.y);
-    assert_eq!(box_of(0.0).width, time - GAP);
-    assert_eq!(
-        box_of(0.0).height,
-        text::height(caption.len(), look::CAPTION)
-    );
-
-    let down = scroll(20, &tops, REGION.height);
-    assert!(down > 0.0);
-    assert_eq!(box_of(down).y, REGION.y);
-
-    // The first label stands under the caption, so the two never draw
-    // over each other.
-    assert!(time_box(REGION, time, 0, &tops, 0.0).y >= box_of(0.0).y + box_of(0.0).height);
+    let rows = mixed();
+    assert_eq!(tops(&rows, &[], art_height(ROWS), HEAD)[0], HEAD);
 }
 
 #[test]
@@ -547,7 +580,7 @@ fn a_wall_with_no_eras_no_time_labels_and_one_universe_centers_its_cards() {
     };
     let rows = story(&page, &columns(&page), TODAY);
     assert!(!labelled(&rows));
-    let lane = Lane::of(REGION, &[], &metro::runs(&rows, &columns(&page)), 0.0);
+    let lane = Lane::of(REGION, &metro::runs(&rows, &columns(&page)), 0.0);
     assert_eq!(lane.wall, REGION);
     assert_eq!(lane.strip.width, 0.0);
     assert_eq!(lane.cards.width, REGION.width - floor());
@@ -560,7 +593,7 @@ fn a_time_label_earns_its_column_and_a_strip_a_pitch_for_every_lane() {
     let rows = mixed();
     let time = time_width(&rows);
     assert!(labelled(&rows));
-    let one = Lane::of(REGION, &[], &[], time);
+    let one = Lane::of(REGION, &[], time);
     assert_eq!(one.columned.x, REGION.x + time);
     assert_eq!(one.cards, one.columned);
 
@@ -572,20 +605,170 @@ fn a_time_label_earns_its_column_and_a_strip_a_pitch_for_every_lane() {
     ]);
     let crossed = story(&page, &columns(&page), TODAY);
     let runs = metro::runs(&crossed, &columns(&page));
-    let three = Lane::of(REGION, &[], &runs, time);
+    let three = Lane::of(REGION, &runs, time);
     assert_eq!(three.strip.x, REGION.x + time);
     assert_eq!(three.strip.width, 3.0 * metro::PITCH);
     assert_eq!(three.cards.x, three.strip.x + three.strip.width + GAP);
     assert_eq!(three.cards.x + three.cards.width, REGION.x + REGION.width);
+    assert_eq!(three.wall, REGION);
+}
 
-    let bar = rail::Bar {
+// The walled rows under two eras: one over all three rows, and one over
+// the first row alone, inside it.
+fn headed() -> (Vec<Heading>, Vec<Row>) {
+    let rows = walled();
+    let headings = headings(
+        &[
+            era("The Coppice Years", -33.0, -30.0),
+            era("The Long Survey", -40.0, 40.0),
+        ],
+        &rows,
+        &Some(calendar()),
+    );
+    (headings, rows)
+}
+
+#[test]
+fn a_heading_takes_its_height_over_its_first_row_and_stacks_over_one_row() {
+    let art = art_height(ROWS);
+    let (headings, rows) = headed();
+    let tops = tops(&rows, &headings, art, HEAD);
+    assert_eq!(tops[0], HEAD + 2.0 * HEADING);
+    assert_eq!(tops[1], tops[0] + rows[0].height(art) + GAP);
+    assert_eq!(heading_top(&headings, 0, &tops), HEAD);
+    assert_eq!(heading_top(&headings, 1, &tops), HEAD + HEADING);
+
+    let bare = self::tops(&rows, &[], art, HEAD);
+    assert_eq!(bare[0], HEAD);
+}
+
+#[test]
+fn a_heading_stands_at_its_own_top_and_scrolls_with_the_wall() {
+    let art = art_height(ROWS);
+    let (headings, rows) = headed();
+    let tops = tops(&rows, &headings, art, HEAD);
+    let lane = area(500.0, 100.0, 1200.0, 900.0);
+    let boxes = heading_boxes(lane, &headings, &tops, 0.0);
+    assert_eq!(boxes[0], area(lane.x, lane.y + HEAD, lane.width, HEADING));
+    assert_eq!(
+        boxes[1],
+        area(lane.x, lane.y + HEAD + HEADING, lane.width, HEADING)
+    );
+    let scrolled = heading_boxes(lane, &headings, &tops, 30.0);
+    assert_eq!(scrolled[0].y, boxes[0].y - 30.0);
+}
+
+#[test]
+fn the_held_line_names_the_eras_the_wall_is_inside_outer_to_inner() {
+    let art = art_height(ROWS);
+    let (headings, rows) = headed();
+    let tops = tops(&rows, &headings, art, HEAD);
+
+    // At the top of the wall nothing holds.
+    assert_eq!(crumb(&headings, &tops, 0.0), None);
+
+    // Scrolled into the first row, the wall is inside both eras, and
+    // the line reads them outer to inner with the inner one's count.
+    let down = HEAD + 2.0 * HEADING + 10.0;
+    assert_eq!(
+        crumb(&headings, &tops, down).as_deref(),
+        Some("The Long Survey › The Coppice Years · 4 years")
+    );
+
+    // Scrolled past the first row, the inner era has ended and the outer
+    // one holds alone.
+    let down = tops[1] + 10.0;
+    assert_eq!(
+        crumb(&headings, &tops, down).as_deref(),
+        Some("The Long Survey · 81 years")
+    );
+}
+
+#[test]
+fn the_held_line_takes_a_band_over_the_cards_and_none_while_nothing_holds() {
+    let cards = area(500.0, 100.0, 1200.0, 900.0);
+    assert_eq!(
+        band(cards, true),
+        area(cards.x, cards.y, cards.width, HEADING)
+    );
+    assert_eq!(under(cards, true).y, cards.y + HEADING);
+    assert_eq!(under(cards, true).height, cards.height - HEADING);
+    assert_eq!(band(cards, false).height, 0.0);
+    assert_eq!(under(cards, false), cards);
+}
+
+#[test]
+fn the_wall_moves_only_when_focus_leaves_the_view() {
+    let art = art_height(ROWS);
+    let page = franchise((1..=40).map(|n| entry(n, (0.0, 0.0), &[])).collect());
+    let rows = story(&page, &columns(&page), TODAY);
+    let tops = tops(&rows, &[], art, HEAD);
+    let height = 900.0;
+    // Down from the top: the wall stands until a row would leave the
+    // foot, then brings it to the foot.
+    assert_eq!(scroll(0.0, 0, &[], &tops, height), 0.0);
+    assert_eq!(scroll(0.0, 1, &[], &tops, height), 0.0);
+    let third = scroll(0.0, 3, &[], &tops, height);
+    assert!(third > 0.0);
+    assert_eq!(tops[4] - third, height);
+    // Up to a row still in view: nothing moves.
+    assert_eq!(scroll(third, 2, &[], &tops, height), third);
+    // Up past the top: the row comes to the top. About three rows fit,
+    // so the row two above the foot is already out of view.
+    assert!(tops[1] < third);
+    assert_eq!(scroll(third, 1, &[], &tops, height), tops[1]);
+    assert_eq!(scroll(third, 0, &[], &tops, height), tops[0]);
+    // A jump far down brings that row to the foot, and the last row
+    // pulls the space under it into view.
+    let last = scroll(third, 39, &[], &tops, height);
+    assert_eq!(last, content(&tops) - height);
+}
+
+#[test]
+fn a_heading_counts_how_long_its_era_runs() {
+    let years = Some(calendar());
+    assert_eq!(counted(&era("The Survey", -40.0, 40.0), &years), "81 years");
+    assert_eq!(counted(&era("A Day", 3.0, 3.0), &years), "1 year");
+    let days = Some(Calendar {
+        unit: "days".into(),
+        ..calendar()
+    });
+    assert_eq!(counted(&era("The Siege", 10.0, 12.0), &days), "3 days");
+    assert_eq!(counted(&era("Bare", 0.0, 9.0), &None), "");
+    let bare = Heading {
+        name: "Bare".into(),
+        count: String::new(),
         first: 0,
-        last: 1,
-        ..rail::Bar::default()
+        last: 0,
+        depth: 0,
     };
-    let railed = Lane::of(REGION, &[bar], &[], time);
-    assert_eq!(railed.wall.x, REGION.x + rail::LANE);
-    assert_eq!(railed.cards.x, REGION.x + rail::LANE + time);
+    assert_eq!(bare.label(), "Bare");
+    assert_eq!(
+        bright("The Infinity Saga › Phase Two · 3 years"),
+        "The Infinity Saga › Phase Two"
+    );
+    assert_eq!(bright("Bare"), "Bare");
+}
+
+#[test]
+fn the_scroll_keeps_the_held_line_off_the_focused_row() {
+    let art = art_height(ROWS);
+    let page = franchise((1..=40).map(|n| entry(n, (0.0, 0.0), &[])).collect());
+    let rows = story(&page, &columns(&page), TODAY);
+    let headings = headings(&[era("All", -1.0, 1.0)], &rows, &Some(calendar()));
+    let tops = tops(&rows, &headings, art, HEAD);
+    // Focus on a row deep in the era: the row never stands under the
+    // held heading, wherever the scroll puts it.
+    let down = scroll(0.0, 20, &headings, &tops, 900.0);
+    assert!(tops[20] - down >= HEADING);
+    // Up from there to a row above the view: the row lands one held
+    // line under the top, not under it.
+    let up = scroll(down, 10, &headings, &tops, 900.0);
+    assert!(up < down);
+    assert_eq!(tops[10] - up, HEADING);
+    // Focus on the first row: the wall stands at its top, and the
+    // heading is inline over the row.
+    assert_eq!(scroll(0.0, 0, &headings, &tops, 900.0), 0.0);
 }
 
 #[test]
@@ -601,30 +784,30 @@ fn a_card_is_the_arts_height_and_the_gaps_around_it_and_a_gap_is_thin() {
 #[test]
 fn the_rows_start_under_the_first_marks_room_and_each_after_the_one_before_it() {
     let art = art_height(ROWS);
-    let tops = tops(&mixed(), art, HEAD);
+    let tops = tops(&mixed(), &[], art, HEAD);
     assert_eq!(tops.len(), 4);
     assert_eq!(tops[0], HEAD);
     assert_eq!(tops[1], HEAD + card_height(art) + GAP);
     assert_eq!(tops[2], tops[1] + THIN + GAP);
     assert_eq!(tops[3], tops[2] + card_height(art) + GAP);
-    assert_eq!(self::tops(&[], art, HEAD), [HEAD]);
+    assert_eq!(self::tops(&[], &[], art, HEAD), [HEAD]);
 }
 
 #[test]
 fn a_row_takes_the_cards_width_and_its_own_height_and_scrolls_with_the_wall() {
     let art = art_height(ROWS);
-    let tops = tops(&mixed(), art, HEAD);
+    let tops = tops(&mixed(), &[], art, HEAD);
     let cards = area(500.0, 100.0, 1200.0, 900.0);
-    let card = cell_box(cards, 0, &tops, 0.0);
+    let card = cell_box(cards, 0, &[], &tops, 0.0);
     assert_eq!(card.x, cards.x);
     assert_eq!(card.width, cards.width);
     assert_eq!(card.y, cards.y + HEAD);
     assert_eq!(card.height, card_height(art));
 
-    let thin = cell_box(cards, 1, &tops, 40.0);
+    let thin = cell_box(cards, 1, &[], &tops, 40.0);
     assert_eq!(thin.y, cards.y + tops[1] - 40.0);
     assert_eq!(thin.height, THIN);
-    assert_eq!(cell_box(cards, 9, &tops, 0.0).height, 0.0);
+    assert_eq!(cell_box(cards, 9, &[], &tops, 0.0).height, 0.0);
 }
 
 #[test]
@@ -670,8 +853,8 @@ fn a_title_of_one_long_word_breaks_where_the_line_ends() {
 #[test]
 fn a_focused_row_lies_wholly_inside_the_clip() {
     let columned = columned(REGION, time_width(&mixed()));
-    let tops = tops(&mixed(), art_height(ROWS), HEAD);
-    let row = cell_box(columned, 0, &tops, 0.0);
+    let tops = tops(&mixed(), &[], art_height(ROWS), HEAD);
+    let row = cell_box(columned, 0, &[], &tops, 0.0);
     let marked = crate::views::marked(row);
     let clip = clipped(columned);
     assert!(marked.x >= clip.x, "{marked:?} {clip:?}");
@@ -691,8 +874,8 @@ fn the_clip_starts_at_the_top_of_the_lane_and_the_first_row_below_it() {
 #[test]
 fn the_time_label_stands_beside_its_own_row() {
     let time = time_width(&mixed());
-    let tops = tops(&mixed(), art_height(ROWS), HEAD);
-    let box_of = time_box(REGION, time, 1, &tops, 40.0);
+    let tops = tops(&mixed(), &[], art_height(ROWS), HEAD);
+    let box_of = time_box(REGION, time, 1, &[], &tops, 40.0);
     assert_eq!(box_of.x, REGION.x);
     assert_eq!(box_of.y, REGION.y + tops[1] - 40.0);
     assert_eq!(box_of.width, time - GAP);
@@ -703,16 +886,16 @@ fn the_time_label_stands_beside_its_own_row() {
 fn a_wall_that_fits_stands_at_its_top_and_a_long_one_scrolls() {
     let art = art_height(ROWS);
     let page = franchise((1..=40).map(|n| entry(n, (0.0, 0.0), &[])).collect());
-    let tops = tops(&story(&page, &columns(&page), TODAY), art, HEAD);
-    assert_eq!(scroll(0, &tops, 900.0), 0.0);
-    assert!(scroll(30, &tops, 900.0) > 0.0);
-    assert_eq!(scroll(39, &tops, 900.0), content(&tops) - 900.0);
+    let tops = tops(&story(&page, &columns(&page), TODAY), &[], art, HEAD);
+    assert_eq!(scroll(0.0, 0, &[], &tops, 900.0), 0.0);
+    assert!(scroll(0.0, 30, &[], &tops, 900.0) > 0.0);
+    assert_eq!(scroll(0.0, 39, &[], &tops, 900.0), content(&tops) - 900.0);
     assert_eq!(content(&tops), tops[40] + TAIL);
     assert_eq!(content(&[]), TAIL);
-    assert_eq!(scroll(0, &[], 900.0), 0.0);
+    assert_eq!(scroll(0.0, 0, &[], &[], 900.0), 0.0);
 
-    let two = self::tops(&mixed()[..2], art, HEAD);
-    assert_eq!(scroll(1, &two, 900.0), 0.0);
+    let two = self::tops(&mixed()[..2], &[], art, HEAD);
+    assert_eq!(scroll(0.0, 1, &[], &two, 900.0), 0.0);
 }
 
 #[test]

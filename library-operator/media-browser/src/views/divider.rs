@@ -17,22 +17,36 @@ pub const HEIGHT: f32 = 78.0;
 // The thickness of the rule under the two words.
 const RULE: f32 = 2.0;
 
-// The space between the words and the rule under them.
-const LIFT: f32 = 14.0;
+/// The space between the words and the rule under them, and the space a
+/// sub-heading keeps over the foot of its own box.
+pub const LIFT: f32 = 14.0;
 
 /// Draw one divider in this region: the heading at the left, and the rule
 /// under it.
 pub fn draw(frame: &mut canvas::Frame<Renderer>, region: Rectangle, name: &str) {
+    two(frame, region, name, name);
+}
+
+/// Draw one divider whose heading reads in two runs: `heading` whole in
+/// the muted ink, and `bright`, its first run, over it in the text ink,
+/// so a name reads first and what follows it second. The whole heading
+/// draws muted and the first run draws over it, the way a strip's heading
+/// does, so the shaper places both runs and no estimate of the first
+/// run's width stands between them. A heading that is all one run passes
+/// itself as both.
+pub fn two(frame: &mut canvas::Frame<Renderer>, region: Rectangle, heading: &str, bright: &str) {
     let baseline = region.y + region.height - LIFT - RULE;
-    frame.fill_text(label(
-        name,
-        Point::new(region.x, baseline),
-        look::HEADING,
-        look::text(),
-        Alignment::Left,
-        Vertical::Bottom,
-        region.width,
-    ));
+    for (content, color) in [(heading, look::muted()), (bright, look::text())] {
+        frame.fill_text(label(
+            content,
+            Point::new(region.x, baseline),
+            look::HEADING,
+            color,
+            Alignment::Left,
+            Vertical::Bottom,
+            region.width,
+        ));
+    }
 
     let rule = area(
         region.x,
