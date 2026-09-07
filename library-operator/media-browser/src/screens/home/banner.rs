@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn the_sample_home_page_opens_on_a_banner_of_titles_with_backdrops() {
         let mut catalog = Catalog;
-        let home = Home::open(&mut catalog);
+        let home = Home::open(&mut catalog, &[]);
         let banner = home.banner().expect("the home page holds a banner");
         assert!(!banner.is_empty());
         assert!(banner.titles.len() <= MOST);
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn a_reread_keeps_focus_on_the_page_it_held_or_clamps() {
         let mut catalog = Catalog;
-        let home = Home::open(&mut catalog);
+        let home = Home::open(&mut catalog, &[]);
         let titles = home.banner().expect("a banner").titles.clone();
         let mut banner = Banner {
             titles: titles.clone(),

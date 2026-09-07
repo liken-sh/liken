@@ -1,10 +1,12 @@
 mod draw;
 mod franchises;
+mod identity;
 mod lists;
 mod pages;
 mod people;
 mod plans;
 mod plays;
+mod progress;
 mod read_scope;
 mod recent;
 mod recent_queries;
@@ -185,6 +187,18 @@ fn insert_file(path: &Path, library: &str, file: &str, item: &str, kind: &str, r
 fn insert_main_file(path: &Path, library: &str, file: &str, item: &str) {
     insert_file(path, library, file, item, "video", "primary");
 }
+// One name that resolves to one item of one library. The identity read and
+// the franchise reads both fold these.
+fn insert_alias(path: &Path, library: &str, alias: &str, item: &str) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute(
+            "INSERT INTO aliases (library, alias, item, source) VALUES (?, ?, ?, 'nfo')",
+            (library, alias, item),
+        )
+        .unwrap();
+}
+
 // The series every episode test hangs under, and the two choices those
 // tests resolve.
 const SERIES: &str = "series:tvdb:73739";

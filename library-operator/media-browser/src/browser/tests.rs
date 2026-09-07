@@ -5,21 +5,26 @@
 // catalog they read, the store they draw from, and the bus they fold.
 
 mod art_counts;
+mod audience;
 mod banner;
 mod clock;
 mod home;
 mod keys;
 mod loading;
 mod moments;
+mod pages;
 mod paging;
 mod plays;
 mod prefetch;
 mod rail;
 mod reader;
+mod resume;
 mod search;
 mod strip;
 mod volume;
+mod walls;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,9 +34,10 @@ use crate::art::{ArtCounts, Image};
 use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Answer, Credit, CreditSlot, Credits, Episode, FileFacts, Fold, Franchise, FranchiseEntry,
-    GenreEntry, GenreSort, InSeries, LibraryEntry, Membership, MovieDetails, MovieSet, Order,
-    Person, PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
+    Answer, Credit, CreditSlot, Credits, Entry, Episode, FileFacts, Fold, Franchise,
+    FranchiseEntry, GenreEntry, GenreSort, Held, Identity, InSeries, LibraryEntry, Membership,
+    MovieDetails, MovieSet, Order, Person, PlayItem, Played, Presentation, Progress, Query, Resume,
+    SeriesDetails, Slot, Title,
 };
 use crate::screens::home::Home;
 use crate::screens::movie::Focus;
@@ -63,6 +69,9 @@ struct Fake {
     // to resolve.
     items: Vec<PlayItem>,
     chosen: Option<(String, Selection)>,
+    // The work this source names every choice by, so a test reads the
+    // identity the browser published rather than the one a catalog holds.
+    identity: Identity,
     // Whether the series library holds any episode at all. A library the
     // scanner has not reached looks like that.
     empty: bool,
@@ -70,6 +79,9 @@ struct Fake {
     // set and the art a page draws over.
     trailers: bool,
     sets: bool,
+    // Whether the titles belong to franchise orders, so `franchises_of`
+    // answers the three orders below.
+    orders: bool,
     // Whether the movies credit anybody, so a page carries the
     // stripes a walk to a person's page starts from.
     people: bool,
@@ -90,11 +102,26 @@ struct Fake {
     // How many home pages this catalog read, which every clone of it
     // counts into.
     reads: Arc<AtomicUsize>,
+    // What the audience is in the middle of, which the continue-watching
+    // row reads.
+    continues: Vec<Resume>,
+    // Where the audience reached in one work, by the library and the id
+    // that name it, and in each episode of one series. The two pages read
+    // them.
+    reached: HashMap<(String, String), Progress>,
+    episodes_reached: Vec<Progress>,
+    // The people the last of the three progress reads named.
+    watching: Vec<String>,
 }
 
 // The library the fake serial is in, and the serial's id.
 const SERIALS: &str = "screening/serials";
 const SERIAL: &str = "series:1";
+
+// Two more shows of that library, beside the serial the recency rows hold,
+// so a resume and a franchise order can name a show no other row draws.
+const OTHER_SERIAL: &str = "series:2";
+const LAST_SERIAL: &str = "series:3";
 
 // The one person the fake library credits, and the directory their
 // entry sits in.
@@ -188,6 +215,72 @@ impl Fake {
     }
 }
 
+// One held member of an order, as the strip read answers it.
+fn order_member(position: i64, library: &str, id: &str, kind: &str, title: &str) -> Entry {
+    Entry {
+        position,
+        kind: match kind {
+            "movies" => crate::catalog::franchise::MOVIE.to_string(),
+            _ => crate::catalog::franchise::SERIES.to_string(),
+        },
+        alias: format!("{kind}:tmdb:{position}"),
+        title: title.to_string(),
+        held: Some(Held {
+            library: library.to_string(),
+            id: id.to_string(),
+            kind: kind.to_string(),
+            title: title.to_string(),
+            released: "1980".into(),
+            art: format!("{id}.jpg"),
+            ..Held::default()
+        }),
+        ..Entry::default()
+    }
+}
+
+// The three orders the fake titles belong to. The Cycle ends on the film
+// after the finished one. The Saga runs from that film through the last
+// serial to the film the audience is in the middle of. The Run puts a film
+// after the last serial.
+fn orders() -> Vec<Membership> {
+    let films = "screening/films";
+    let order = |id: &str, title: &str, members: Vec<Entry>| Membership {
+        library: "screening/orders".to_string(),
+        id: id.to_string(),
+        title: title.to_string(),
+        movies: members.len() as i64,
+        series: 0,
+        members,
+    };
+    vec![
+        order(
+            "franchise:name:the-cycle",
+            "The Cycle",
+            vec![
+                order_member(1, films, "movies:2", "movies", "Entry 2"),
+                order_member(2, films, "movies:3", "movies", "Entry 3"),
+            ],
+        ),
+        order(
+            "franchise:name:the-saga",
+            "The Saga",
+            vec![
+                order_member(1, films, "movies:2", "movies", "Entry 2"),
+                order_member(2, SERIALS, LAST_SERIAL, "series", "Last Serial"),
+                order_member(3, films, "movies:1", "movies", "Entry 1"),
+            ],
+        ),
+        order(
+            "franchise:name:the-run",
+            "The Run",
+            vec![
+                order_member(1, SERIALS, LAST_SERIAL, "series", "Last Serial"),
+                order_member(2, films, "movies:4", "movies", "Entry 4"),
+            ],
+        ),
+    ]
+}
+
 impl Source for Fake {
     // Two franchises, so the home page's franchises strip draws one with art
     // and one with none. The one with no art draws as the tile of words every
@@ -218,8 +311,23 @@ impl Source for Fake {
         ]
     }
 
-    fn franchises_of(&mut self, _library: &str, _id: &str) -> Vec<Membership> {
-        Vec::new()
+    // The orders the fake titles belong to, cut to the ones that hold the
+    // item asked for, as the catalog's own read answers them.
+    fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership> {
+        if !self.orders {
+            return Vec::new();
+        }
+        orders()
+            .into_iter()
+            .filter(|order| {
+                order.members.iter().any(|entry| {
+                    entry
+                        .held
+                        .as_ref()
+                        .is_some_and(|held| held.library == library && held.id == id)
+                })
+            })
+            .collect()
     }
 
     // The page of the first franchise, so a select on the strip opens
@@ -359,9 +467,17 @@ impl Source for Fake {
                     .chain(std::iter::once(serial()))
                     .collect(),
             },
-            // This fixture indexes nothing, so a search answers nothing.
-            // The search tests run over the sample source instead.
-            Query::Search { .. } => Answer::default(),
+            // The fixture matches the typed text against the film titles
+            // alone. That is enough to test that a search result is a wall
+            // like any other; the tests of the search itself run over the
+            // sample source.
+            Query::Search { text } => Answer {
+                name: String::new(),
+                slots: (1..=self.movies)
+                    .map(|number| Slot::of("screening/films", "movies", self.member(number)))
+                    .filter(|slot| slot.title.to_lowercase().contains(&text.to_lowercase()))
+                    .collect(),
+            },
         }
     }
 
@@ -498,6 +614,46 @@ impl Source for Fake {
         self.calls.push("play");
         self.chosen = Some((library.to_string(), selection.clone()));
         self.items.clone()
+    }
+
+    fn identity(&mut self, _library: &str, _selection: &Selection) -> Identity {
+        self.identity.clone()
+    }
+
+    fn continue_watching(&mut self, people: &[String]) -> Vec<Resume> {
+        self.calls.push("continue_watching");
+        self.watching = people.to_vec();
+        self.continues.clone()
+    }
+
+    fn progress_of(&mut self, library: &str, id: &str, people: &[String]) -> Option<Progress> {
+        self.calls.push("progress_of");
+        self.watching = people.to_vec();
+        self.reached
+            .get(&(library.to_string(), id.to_string()))
+            .cloned()
+    }
+
+    // The plays of one library, out of the same rows the work read answers
+    // from, so one fixture field feeds a page and a wall alike.
+    fn progress_by_item(&mut self, library: &str, people: &[String]) -> HashMap<String, Played> {
+        self.watching = people.to_vec();
+        self.reached
+            .iter()
+            .filter(|((held, _), _)| held == library)
+            .map(|((_, id), progress)| (id.clone(), progress.played()))
+            .collect()
+    }
+
+    fn episode_progress(
+        &mut self,
+        _library: &str,
+        _series: &str,
+        people: &[String],
+    ) -> Vec<Progress> {
+        self.calls.push("episode_progress");
+        self.watching = people.to_vec();
+        self.episodes_reached.clone()
     }
 
     fn credits(&mut self, _library: &str, _id: &str) -> Credits {

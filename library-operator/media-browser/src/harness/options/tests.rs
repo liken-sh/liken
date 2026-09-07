@@ -274,3 +274,137 @@ fn a_size_is_two_numbers_around_an_x() {
     assert!(parse_size("1920").is_err());
     assert!(parse_size("widexhigh").is_err());
 }
+
+// A Person list on disk, in the shape the browser reads.
+fn people_file(dir: &tempfile::TempDir, json: &str) -> String {
+    let path = dir.path().join("people.json");
+    std::fs::write(&path, json).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn help_names_the_progress_flags() {
+    assert!(HELP.contains("--progress PATH"));
+    assert!(HELP.contains("--progress-updates URL"));
+    assert!(HELP.contains("--people FILE"));
+    assert!(HELP.contains("--audience NAMES"));
+    assert!(HELP.contains("--print-progress"));
+}
+
+#[test]
+fn the_progress_flags_land_in_the_options() {
+    let Ok(Invocation::Run(options)) = Options::parse(args(
+        "--catalog /state/state.db --progress /state/progress.db \
+         --progress-updates http://127.0.0.1:20091 --print-progress",
+    )) else {
+        panic!("the flags parse");
+    };
+
+    assert_eq!(options.progress, Some(PathBuf::from("/state/progress.db")));
+    assert_eq!(
+        options.progress_updates,
+        Some("http://127.0.0.1:20091".to_string())
+    );
+    assert!(options.print_progress);
+}
+
+#[test]
+fn a_progress_flag_without_its_value_is_an_error() {
+    assert_eq!(
+        Options::parse(args("--progress")),
+        Err("--progress needs a value".to_string())
+    );
+    assert_eq!(
+        Options::parse(args("--progress-updates")),
+        Err("--progress-updates needs a value".to_string())
+    );
+}
+
+#[test]
+fn a_progress_stream_without_its_file_is_an_error() {
+    assert_eq!(
+        Options::parse(args("--progress-updates http://127.0.0.1:20091")),
+        Err("--progress-updates needs --progress".to_string())
+    );
+}
+
+#[test]
+fn a_print_without_a_catalog_is_an_error() {
+    assert_eq!(
+        Options::parse(args("--print-progress")),
+        Err("--print-progress needs --catalog".to_string())
+    );
+}
+
+#[test]
+fn the_audience_is_a_list_of_names() {
+    assert_eq!(parse_audience("first, second"), ["first", "second"]);
+    assert_eq!(parse_audience("first,"), ["first"]);
+    assert!(parse_audience("").is_empty());
+}
+
+#[test]
+fn the_audience_lands_in_the_options() {
+    let Ok(Invocation::Run(options)) = Options::parse(args("--audience first,second")) else {
+        panic!("the audience parses");
+    };
+
+    assert_eq!(options.audience, ["first", "second"]);
+}
+
+#[test]
+fn the_people_file_lands_in_the_options() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = people_file(&dir, r#"[{"name":"first","displayName":"First"}]"#);
+    let Ok(Invocation::Run(options)) =
+        Options::parse(args(&format!("--people {path} --audience first")))
+    else {
+        panic!("the people parse");
+    };
+
+    assert_eq!(
+        options.people,
+        [crate::audience::Person {
+            name: "first".into(),
+            display_name: "First".into(),
+        }]
+    );
+    assert_eq!(options.audience, ["first"]);
+}
+
+#[test]
+fn a_people_file_that_is_not_there_is_an_error() {
+    let error = Options::parse(args("--people /absent/people.json")).unwrap_err();
+    assert!(
+        error.starts_with("bad --people /absent/people.json:"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_people_file_that_is_not_a_person_list_is_an_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = people_file(&dir, r#"{"name":"first"}"#);
+    let error = Options::parse(args(&format!("--people {path}"))).unwrap_err();
+    assert!(error.ends_with("the people are not a list"), "{error}");
+}
+
+#[test]
+fn an_audience_name_the_people_file_does_not_hold_is_an_error() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = people_file(&dir, r#"[{"name":"first"}]"#);
+
+    assert_eq!(
+        Options::parse(args(&format!("--people {path} --audience first,second"))),
+        Err("no person named second".to_string())
+    );
+}
+
+#[test]
+fn an_audience_with_no_people_file_takes_any_name() {
+    let Ok(Invocation::Run(options)) = Options::parse(args("--audience first,second")) else {
+        panic!("the audience parses");
+    };
+
+    assert_eq!(options.audience, ["first", "second"]);
+}

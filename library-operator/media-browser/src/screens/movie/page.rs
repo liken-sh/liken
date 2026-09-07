@@ -14,9 +14,10 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 use super::super::franchise::strips::Place;
 use super::{Focus, Movie};
 use crate::art::Art;
+use crate::catalog::progress::clock;
 use crate::look;
 use crate::views::stack::{self, Stack};
-use crate::views::{area, buttons, card, header, people, ratings, strip, text};
+use crate::views::{area, buttons, card, header, people, progress, ratings, strip, text};
 
 // The margin at both sides of the page.
 const MARGIN: f32 = 120.0;
@@ -52,6 +53,18 @@ const FOOT: f32 = 36.0;
 // The extra space over a stripe and over the foot, on top of the gap
 // between two blocks, so each stands clear of the block over it.
 const STRIPE_LEAD: f32 = 16.0;
+
+// The space between the foot of the button row and the bar under it, so
+// the bar reads as a mark under the row and not as its edge.
+const BAR_LEAD: f32 = 18.0;
+
+// The space between the right end of the button row and what stands
+// beside it: the clock of a bar, or the word of a film watched.
+const BESIDE: f32 = 24.0;
+
+// The word at the end of the button row's line on a film the audience
+// already finished.
+const WATCHED: &str = "Watched";
 
 /// The box the movie's logo draws in at these bounds, scroll included,
 /// which is where the loading state starts the logo's move.
@@ -156,15 +169,49 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         // browser's strip does, so one mark draws on the glass.
         let focus = self.held.then_some(movie.focus);
 
+        let words: Vec<&'static str> = movie.buttons().iter().map(|button| button.word()).collect();
+        let at = blocks.buttons.at(offset);
         buttons::draw(
             &mut frame,
-            movie.buttons(),
-            blocks.buttons.at(offset),
+            &words,
+            at,
             match focus {
                 Some(Focus::Buttons(index)) => Some(index),
                 _ => None,
             },
         );
+        // The bar and its clock, or the word of a film watched, beside and
+        // under the row the words just drew.
+        let row = row(&words, at);
+        let beside = bounds.width - MARGIN - row.x - row.width - BESIDE;
+        match &movie.progress {
+            Some(watched) if watched.finished => {
+                text::line(
+                    &mut frame,
+                    WATCHED,
+                    Point::new(row.x + row.width + BESIDE, centered(row)),
+                    look::FACE,
+                    look::faint(),
+                    beside,
+                );
+            }
+            Some(reached) => {
+                let track = track(row);
+                progress::fill(&mut frame, track, reached.played().fraction());
+                text::line(
+                    &mut frame,
+                    &clock(reached.position, reached.duration),
+                    Point::new(
+                        track.x + track.width + BESIDE,
+                        centered(area(track.x, track.y + track.height, 0.0, progress::HEIGHT)),
+                    ),
+                    look::FACE,
+                    look::faint(),
+                    beside,
+                );
+            }
+            None => {}
+        }
 
         if let (Some(set), Some(block)) = (&movie.set, blocks.strip) {
             strip::draw(
@@ -352,7 +399,7 @@ impl Blocks {
         );
         let tagline = place(0.0, lines(&movie.tagline, look::TAGLINE, column, 0));
         let plot = place(0.0, lines(&movie.plot, look::PLOT, column, PLOT_LINES));
-        let buttons = place(0.0, buttons::HEIGHT);
+        let buttons = place(0.0, buttons::HEIGHT + bar_band(movie));
         let strip = movie
             .set
             .as_ref()
@@ -425,6 +472,35 @@ impl Blocks {
             .map(|under| under.top)
             .find(|top| *top > block.top)
             .unwrap_or(self.content)
+    }
+}
+
+// The box the button row fills, from the first button's left edge to the
+// last button's right edge. The focus mark reaches outside that box; what
+// is measured against the row is measured against the buttons.
+fn row(words: &[&'static str], at: Point) -> Rectangle {
+    area(at.x, at.y, buttons::row_width(words), buttons::HEIGHT)
+}
+
+// The box the bar draws along the foot of: the button row, taller by the
+// lead, so the bar spans the row and stands the lead under it.
+fn track(row: Rectangle) -> Rectangle {
+    area(row.x, row.y, row.width, row.height + BAR_LEAD)
+}
+
+// The top of a line of text at [`look::FACE`] that reads as centered on
+// this box.
+fn centered(band: Rectangle) -> f32 {
+    band.y + (band.height - text::height(1, look::FACE)) / 2.0
+}
+
+// What the bar under the button row adds to the row's block: the space
+// over the bar and the line of text beside it, which is the taller of the
+// two. A page that draws no bar adds nothing.
+fn bar_band(movie: &Movie) -> f32 {
+    match &movie.progress {
+        Some(progress) if !progress.finished => BAR_LEAD + text::height(1, look::FACE),
+        _ => 0.0,
     }
 }
 

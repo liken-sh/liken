@@ -6,6 +6,7 @@
 // This module holds the Query, the Slot a read answers with, and the
 // Answer that names what the query is about.
 
+use super::progress::Played;
 use super::{Title, library_name};
 
 /// How a recency query treats episodes. An episode is the only new
@@ -310,6 +311,10 @@ pub struct Slot {
     /// How many seasons a series slot's episodes fall into. Zero on every
     /// other kind, and where the read carried none.
     pub seasons: i64,
+    /// How far a play of the work reached, on the slots of the
+    /// continue-watching row and on episodes with a play behind them.
+    /// Nothing on every other slot.
+    pub progress: Option<Played>,
 }
 
 impl Slot {
@@ -330,6 +335,7 @@ impl Slot {
             episode: None,
             new: 0,
             seasons: 0,
+            progress: None,
         }
     }
 

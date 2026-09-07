@@ -357,3 +357,35 @@ fn no_art_answers_none() {
         None
     );
 }
+
+#[test]
+fn the_sample_catalog_holds_no_progress() {
+    let mut catalog = Catalog;
+    let people = ["first".to_string()];
+
+    assert!(catalog.continue_watching(&people).is_empty());
+    assert_eq!(
+        catalog.progress_of("sample/features", "movie:sample:1", &people),
+        None
+    );
+    assert!(
+        catalog
+            .episode_progress("sample/serials", "series:sample:1", &people)
+            .is_empty()
+    );
+}
+
+#[test]
+fn the_sample_catalog_names_no_work() {
+    let mut catalog = Catalog;
+
+    assert_eq!(
+        catalog.identity(
+            "sample/features",
+            &Selection::Movie {
+                id: "movie:sample:1".into()
+            }
+        ),
+        crate::catalog::Identity::default()
+    );
+}

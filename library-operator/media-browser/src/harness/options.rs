@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::audience;
+
 /// The Wayland app-id the surface must ask for. The display claim
 /// delivers it into the container at run time, and the compositor places the
 /// window on the claimed output by it. An empty value asks for no app-id,
@@ -29,6 +31,10 @@ media-browser [FLAGS]
 
   --catalog PATH           the sidecar's SQLite file; without it, the sample
   --updates URL            the agent's HTTP API base
+  --progress PATH          the progress store's SQLite file
+  --progress-updates URL   the progress agent's HTTP API base
+  --people FILE            the Person list, as JSON
+  --audience NAMES         who is watching, comma separated
   --library-root NAME=PATH where a library's volume is read; repeatable
   --cache-dir PATH         where scaled art is cached; without it, no disk cache
   --cache-budget BYTES     the bytes the disk cache keeps; without it, 512 MiB
@@ -39,6 +45,7 @@ media-browser [FLAGS]
   --stats FILE             the JSON measurements, written at exit
   --quit-after SECONDS     when to exit
   --size WxH               the window size to ask for; the default is 1920x1080
+  --print-progress         print what the audience is watching, then exit
   --help                   print this and exit
 
 The binary takes the same keys from a real keyboard, so it runs on a
@@ -65,6 +72,20 @@ pub struct Options {
     pub catalog: Option<PathBuf>,
     /// The base of the agent's HTTP API, where the update streams are.
     pub updates: Option<String>,
+    /// The progress store's SQLite file, beside the catalog's. Without it
+    /// the browser reads no progress.
+    pub progress: Option<PathBuf>,
+    /// The base of the progress agent's HTTP API. The progress agent is a
+    /// second agent with an API of its own, not the catalog agent's.
+    pub progress_updates: Option<String>,
+    /// Every `Person` the cluster holds. An empty list means no name is
+    /// checked against it.
+    pub people: Vec<audience::Person>,
+    /// The people watching at the start of the run, by `Person` name. An
+    /// empty audience reads the plays that name nobody.
+    pub audience: Vec<String>,
+    /// Print the audience's continue-watching rows and exit, with no window.
+    pub print_progress: bool,
     /// Where each library's volume is read, keyed by the catalog's
     /// library column, `namespace/name`.
     pub library_roots: Vec<(String, PathBuf)>,
@@ -100,6 +121,11 @@ impl Default for Options {
         Self {
             catalog: None,
             updates: None,
+            progress: None,
+            progress_updates: None,
+            people: Vec::new(),
+            audience: Vec::new(),
+            print_progress: false,
             library_roots: Vec::new(),
             cache_dir: None,
             cache_budget: None,
@@ -133,6 +159,11 @@ impl Options {
                 "--help" => return Ok(Invocation::Help),
                 "--catalog" => options.catalog = Some(PathBuf::from(value()?)),
                 "--updates" => options.updates = Some(value()?),
+                "--progress" => options.progress = Some(PathBuf::from(value()?)),
+                "--progress-updates" => options.progress_updates = Some(value()?),
+                "--people" => options.people = read_people(&value()?)?,
+                "--audience" => options.audience = parse_audience(&value()?),
+                "--print-progress" => options.print_progress = true,
                 "--library-root" => options.library_roots.push(parse_root(&value()?)?),
                 "--cache-dir" => options.cache_dir = Some(PathBuf::from(value()?)),
                 "--cache-budget" => {
@@ -170,6 +201,27 @@ impl Options {
             if !options.library_roots.is_empty() {
                 return Err("--library-root needs --catalog".to_string());
             }
+            // The print names each work from the catalog, so it needs one.
+            if options.print_progress {
+                return Err("--print-progress needs --catalog".to_string());
+            }
+        }
+
+        // The progress stream wakes re-reads of one file, so a stream
+        // without that file has nothing to wake.
+        if options.progress.is_none() && options.progress_updates.is_some() {
+            return Err("--progress-updates needs --progress".to_string());
+        }
+
+        // The people list is the closed set of names an audience may hold,
+        // so a name outside it is a mistake in the flag.
+        if !options.people.is_empty()
+            && let Some(unknown) = options
+                .audience
+                .iter()
+                .find(|name| !options.people.iter().any(|person| &person.name == *name))
+        {
+            return Err(format!("no person named {unknown}"));
         }
 
         Ok(Invocation::Run(Box::new(options)))
@@ -205,6 +257,25 @@ fn grace(text: &str) -> Option<Duration> {
         return None;
     }
     Some(Duration::from_secs_f64(seconds))
+}
+
+/// The `Person` list the file holds. A file that does not parse stops the
+/// run, because a run that quietly held no people would take every audience
+/// name as good.
+pub fn read_people(path: &str) -> Result<Vec<audience::Person>, String> {
+    let bytes = std::fs::read(path).map_err(|error| format!("bad --people {path}: {error}"))?;
+
+    audience::people_from_json(&bytes).map_err(|error| format!("bad --people {path}: {error}"))
+}
+
+/// The audience, written as `Person` names separated by commas. An empty
+/// name is dropped, so a trailing comma names nobody extra.
+pub fn parse_audience(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// One library root, written `NAME=PATH`, where the name is the

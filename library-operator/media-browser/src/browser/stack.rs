@@ -18,11 +18,13 @@ impl<S: Source, A: Art> Browser<S, A> {
     // Read the screen on top again. The home page goes through the
     // reader, so the read that uncovers it never holds the frame thread.
     pub(super) fn reread_top(&mut self) {
+        let people = self.audience.current(self.clock).to_vec();
         let Some(top) = self.stack.last_mut() else {
             self.refresh_home();
             return;
         };
         top.reread(&mut self.source);
+        top.read_progress(&mut self.source, &people);
         top.volume(&*self.store.borrow());
     }
 
@@ -37,24 +39,31 @@ impl<S: Source, A: Art> Browser<S, A> {
                 self.stack.pop();
                 self.opened(screen);
             }
-            Step::Play { library, selection } => {
+            Step::Play {
+                library,
+                selection,
+                start,
+            } => {
                 // The press enters the state in the frame it lands in.
                 // Nothing downstream is awaited: the request crosses the
                 // bus, the operator creates the `Play`, and the pod
                 // starts, and none of the three reaches this browser. A
                 // choice with no film behind it enters nothing, because
                 // no film will ever cover the page.
-                if self.request_play(&library, &selection) {
+                if self.request_play(&library, &selection, start) {
                     self.loading = Some(loading::Loading::entered(self.clock));
                 }
             }
         }
     }
 
-    // Push a screen and read the files it draws off the volume,
-    // which the screen itself cannot reach: only the browser holds the
-    // store that resolves a library's root.
+    // Push a screen, read how far the audience reached in what it draws,
+    // and read the files it draws off the volume. A screen reaches neither
+    // for itself: only the browser holds the audience and the store that
+    // resolves a library's root.
     pub(super) fn opened(&mut self, mut screen: screens::Screen) {
+        let people = self.audience.current(self.clock).to_vec();
+        screen.read_progress(&mut self.source, &people);
         screen.volume(&*self.store.borrow());
         self.stack.push(screen);
         self.on_strip = false;

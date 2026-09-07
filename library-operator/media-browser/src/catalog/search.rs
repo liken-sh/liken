@@ -240,6 +240,7 @@ impl Index {
             episode: None,
             new: 0,
             seasons: held.seasons as i64,
+            progress: None,
         }
     }
 

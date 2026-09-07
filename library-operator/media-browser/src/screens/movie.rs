@@ -2,10 +2,12 @@
 // page reads down: the logo or the title, the facts, the tagline, the
 // plot, the buttons, the set strip, a strip for each franchise the movie
 // belongs to, and the stripes of credited people.
-// Focus lands on Play, so a film is two presses from the wall, as it was
-// when the wall played it on select.
+// Focus lands on the first button of the row, so a film is two presses
+// from the wall, as it was when the wall played it on select. That button
+// is Resume where the audience is in the middle of the film.
 
 mod page;
+pub mod row;
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -17,7 +19,7 @@ use super::franchise::strips::{self, Move, Place, Strips};
 use super::{Item, Screen, Step, facts, foot, franchise, person, stripes};
 use crate::art::Art;
 use crate::catalog::draw::Date;
-use crate::catalog::{MovieDetails, MovieSet, Query, Selection, Slot, Source};
+use crate::catalog::{MovieDetails, MovieSet, Progress, Query, Selection, Slot, Source};
 use crate::focus;
 use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::{layers, ratings};
@@ -118,13 +120,19 @@ pub struct Movie {
     /// The franchises the movie belongs to, one strip each, under the set
     /// strip.
     pub franchises: Strips,
+    /// Where the audience reached in the film, or nothing where no play of
+    /// theirs names it. It decides the button row, the bar under it, and
+    /// the word at the end of its line.
+    pub progress: Option<Progress>,
     /// Where focus is.
     pub focus: Focus,
 }
 
 impl Movie {
-    /// Read one movie's page, or nothing where the library holds no
-    /// movie under that id. Focus lands on Play.
+    /// Read one movie's page, or nothing where the library holds no movie
+    /// under that id. Focus lands on the first button of the row. The page
+    /// carries no progress until the browser reads it, because only the
+    /// browser holds the audience.
     pub fn open(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.movie(library, id)?;
         let set = set_of(library, id, &details, source);
@@ -143,29 +151,39 @@ impl Movie {
             foot: foot::Foot::of(&details.studios, &source.files(library, id)),
             set,
             franchises: Strips::of(library, id, source),
+            progress: None,
             focus: Focus::Buttons(0),
         })
     }
 
     /// Read the page again, because the scanner can write the movie or
-    /// its set while the page is open. Focus stays where it was.
+    /// its set while the page is open. Focus stays where it was. The
+    /// progress crosses the read, so the button row the focus is held
+    /// against is the row the page already drew.
     pub fn reread(&mut self, source: &mut dyn Source) {
-        let Some(fresh) = Self::open(&self.library, &self.id, source) else {
+        let Some(mut fresh) = Self::open(&self.library, &self.id, source) else {
             return;
         };
+        fresh.progress = self.progress.clone();
         let focus = self.focus;
         *self = fresh;
         self.focus = self.hold(focus);
     }
 
-    /// The buttons this page draws. Play is always there. Trailer joins
-    /// it where the `files` table holds a trailer for the movie.
-    pub fn buttons(&self) -> &'static [&'static str] {
-        if self.trailer {
-            &["Play", "Trailer"]
-        } else {
-            &["Play"]
-        }
+    /// Read how far these people reached in the film. The browser calls it
+    /// at every open and at every re-read, because only the browser holds
+    /// the audience.
+    pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
+        self.progress = source.progress_of(&self.library, &self.id, people);
+        self.focus = self.hold(self.focus);
+    }
+
+    /// The buttons this page draws. Play is always there, or Resume and
+    /// Start over in its place while the audience is in the middle of the
+    /// film. Trailer joins them where the `files` table holds a trailer
+    /// for the movie.
+    pub fn buttons(&self) -> &'static [row::Button] {
+        row::of(self.progress.as_ref(), self.trailer)
     }
 
     /// Fold one press in. Left and right move across the row that holds
@@ -215,9 +233,9 @@ impl Movie {
 
     fn on_button(&mut self, index: usize, key: &str) -> Step {
         match key {
-            "enter" => Step::Play {
-                library: self.library.clone(),
-                selection: self.chosen(index),
+            "enter" => match self.buttons().get(index) {
+                Some(button) => self.press(*button),
+                None => Step::Stay,
             },
             // The buttons are the topmost focus, so up moves nothing and
             // the press reaches the browser's strip.
@@ -361,16 +379,33 @@ impl Movie {
         Step::Stay
     }
 
-    // The choice a button stands for. Only a movie with a trailer file
-    // has a second button, so index one is always the trailer.
-    fn chosen(&self, index: usize) -> Selection {
-        match index {
-            0 => Selection::Movie {
-                id: self.id.clone(),
-            },
-            _ => Selection::Trailer {
-                id: self.id.clone(),
-            },
+    // The play one button asks for: the trailer, the film from the second
+    // the audience reached, or the film from the beginning.
+    fn press(&self, button: row::Button) -> Step {
+        let (selection, start) = match button {
+            row::Button::Trailer => (
+                Selection::Trailer {
+                    id: self.id.clone(),
+                },
+                None,
+            ),
+            row::Button::Resume => (
+                Selection::Movie {
+                    id: self.id.clone(),
+                },
+                self.progress.as_ref().map(|progress| progress.position),
+            ),
+            row::Button::Play | row::Button::StartOver => (
+                Selection::Movie {
+                    id: self.id.clone(),
+                },
+                None,
+            ),
+        };
+        Step::Play {
+            library: self.library.clone(),
+            selection,
+            start,
         }
     }
 

@@ -7,6 +7,7 @@
 mod broker;
 mod cache;
 mod flags;
+mod progress;
 mod screens;
 
 use std::path::{Path, PathBuf};

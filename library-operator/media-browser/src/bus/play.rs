@@ -5,7 +5,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::catalog::{PlayItem, Presentation};
+use crate::catalog::{Identity, PlayItem, Presentation};
 
 /// The request as bytes. `library` is the catalog's library column,
 /// `namespace/name`, and every path is relative to that library's root.
@@ -15,7 +15,23 @@ use crate::catalog::{PlayItem, Presentation};
 /// after it. The operator folds it into the `Play`'s name. A list that
 /// resolved nothing carries an empty slug, and the operator then names
 /// the `Play` after the unit alone.
-pub fn payload(library: &str, items: &[PlayItem]) -> Vec<u8> {
+///
+/// `people` names who is watching, by `Person` name, and `identity` names
+/// the work the progress store keys on. Each is left out where it holds
+/// nothing, so a play with no audience and no alias is recorded against
+/// the `Player` alone.
+///
+/// `start` is the second the first item starts at, which a resume carries.
+/// It goes out as a decimal string, one of the time forms the player
+/// accepts, and the key is left out of a request that starts at the
+/// beginning.
+pub fn payload(
+    library: &str,
+    items: &[PlayItem],
+    people: &[String],
+    identity: &Identity,
+    start: Option<i64>,
+) -> Vec<u8> {
     let mut request = Map::new();
     request.insert("library".into(), Value::from(library));
     request.insert(
@@ -26,6 +42,37 @@ pub fn payload(library: &str, items: &[PlayItem]) -> Vec<u8> {
         "items".into(),
         Value::Array(items.iter().map(one).collect()),
     );
+    if !people.is_empty() {
+        request.insert(
+            "people".into(),
+            Value::Array(
+                people
+                    .iter()
+                    .map(|name| Value::from(name.as_str()))
+                    .collect(),
+            ),
+        );
+    }
+    if !identity.aliases.is_empty() {
+        request.insert(
+            "aliases".into(),
+            Value::Object(
+                identity
+                    .aliases
+                    .iter()
+                    .map(|(provider, id)| (provider.clone(), Value::from(id.as_str())))
+                    .collect(),
+            ),
+        );
+    }
+    for (name, number) in [("season", identity.season), ("episode", identity.episode)] {
+        if number != 0 {
+            request.insert(name.into(), Value::from(number));
+        }
+    }
+    if let Some(seconds) = start {
+        request.insert("start".into(), Value::from(seconds.to_string()));
+    }
     Value::Object(request).to_string().into_bytes()
 }
 
@@ -89,7 +136,8 @@ mod tests {
     }
 
     fn decoded(library: &str, items: &[PlayItem]) -> Value {
-        serde_json::from_slice(&payload(library, items)).expect("the request is JSON")
+        serde_json::from_slice(&payload(library, items, &[], &Identity::default(), None))
+            .expect("the request is JSON")
     }
 
     #[test]
@@ -158,6 +206,91 @@ mod tests {
             )["items"][0]["presentation"],
             serde_json::json!({})
         );
+    }
+
+    // The request as the browser publishes it for an audience and a work it
+    // named.
+    fn recorded(people: &[&str], identity: &Identity) -> Value {
+        let people: Vec<String> = people.iter().map(|name| (*name).to_string()).collect();
+        serde_json::from_slice(&payload(
+            "default/films",
+            &[movie()],
+            &people,
+            identity,
+            None,
+        ))
+        .expect("the request is JSON")
+    }
+
+    fn named(aliases: &[(&str, &str)], numbers: (i64, i64)) -> Identity {
+        Identity {
+            aliases: aliases
+                .iter()
+                .map(|(provider, id)| ((*provider).to_string(), (*id).to_string()))
+                .collect(),
+            season: numbers.0,
+            episode: numbers.1,
+        }
+    }
+
+    #[test]
+    fn a_request_names_the_people_watching() {
+        assert_eq!(
+            recorded(&["first", "second"], &Identity::default())["people"],
+            serde_json::json!(["first", "second"])
+        );
+    }
+
+    #[test]
+    fn a_request_names_the_work_at_every_provider() {
+        assert_eq!(
+            recorded(
+                &[],
+                &named(&[("tmdb", "603"), ("path", "some-film-1999")], (0, 0))
+            )["aliases"],
+            serde_json::json!({"tmdb": "603", "path": "some-film-1999"})
+        );
+    }
+
+    #[test]
+    fn an_episode_request_names_the_two_aired_numbers() {
+        let request = recorded(&[], &named(&[("tvdb", "73739")], (2, 5)));
+
+        assert_eq!(request["season"], 2);
+        assert_eq!(request["episode"], 5);
+    }
+
+    #[test]
+    fn a_request_with_no_audience_and_no_work_carries_neither() {
+        let request = recorded(&[], &Identity::default());
+
+        assert_eq!(request.get("people"), None);
+        assert_eq!(request.get("aliases"), None);
+        assert_eq!(request.get("season"), None);
+        assert_eq!(request.get("episode"), None);
+    }
+
+    // The request as the browser publishes it for a play that starts where
+    // the audience left the work.
+    fn resumed(start: Option<i64>) -> Value {
+        serde_json::from_slice(&payload(
+            "default/films",
+            &[movie()],
+            &[],
+            &Identity::default(),
+            start,
+        ))
+        .expect("the request is JSON")
+    }
+
+    #[test]
+    fn a_resume_names_the_second_the_film_starts_at() {
+        assert_eq!(resumed(Some(1_337))["start"], "1337");
+    }
+
+    #[test]
+    fn a_play_from_the_beginning_names_no_second() {
+        assert_eq!(resumed(None).get("start"), None);
     }
 
     #[test]

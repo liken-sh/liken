@@ -19,6 +19,9 @@ use crate::catalog::{Query, Source};
 use crate::focus;
 use crate::views::{area, band, card, clip_marked, wall};
 
+// The progress module: the bars the wall's film slots draw, read per
+// library the slots span.
+mod progress;
 // The rail module: which walls draw one, what its bars say, and how it
 // draws beside the slots.
 mod rail;
@@ -53,6 +56,10 @@ pub struct Wall {
     pub bars: Vec<rail::Jump>,
     /// Where focus is.
     pub focus: Focus,
+    // The people the last progress read named, so a re-read of the slots
+    // draws the same bars again without the browser, which is where the
+    // audience is held.
+    people: Vec<String>,
 }
 
 impl Wall {
@@ -64,6 +71,7 @@ impl Wall {
             search: None,
             bars: Vec::new(),
             focus: Focus::Slots,
+            people: Vec::new(),
         };
         wall.headed();
         wall.railed();
@@ -72,10 +80,22 @@ impl Wall {
 
     /// Read the titles again and keep focus in range, because a change
     /// can remove the focused title.
+    /// Read the slots again, and the bars with them. A re-read builds every
+    /// slot afresh, and the browser is not behind every re-read: a resort
+    /// and a letter typed into the search field both land here.
     pub fn reread(&mut self, source: &mut dyn Source) {
         self.slots.reread(source);
+        progress::read(&mut self.slots.items, source, &self.people);
         self.headed();
         self.railed();
+    }
+
+    /// Read how far these people reached in the films this wall draws, and
+    /// hold the names, so every later re-read of the slots draws the bars
+    /// again.
+    pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
+        self.people = people.to_vec();
+        progress::read(&mut self.slots.items, source, &self.people);
     }
 
     // The bars again, because the answer they name has changed. Focus

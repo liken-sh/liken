@@ -4,6 +4,7 @@
 // opens. The page's order is fixed here, and the home page and its read
 // both take it from here.
 
+use super::resume;
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::SHOWN;
 use crate::catalog::{
@@ -34,12 +35,13 @@ pub(super) const GENRE: &str = "genre";
 // one, and both open the franchise's page.
 pub(super) use slots::FRANCHISE;
 
-/// One row of the page as a read: the banner, the slots of one query,
-/// the libraries themselves, the genres themselves, or the franchises
-/// themselves.
+/// One row of the page as a read: the banner, what the audience is in the
+/// middle of, the slots of one query, the libraries themselves, the genres
+/// themselves, or the franchises themselves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Banner,
+    Continue,
     Query(Query),
     Libraries,
     Genres,
@@ -58,15 +60,19 @@ impl Row {
     }
 }
 
-// The rows of the page, top to bottom: the banner, the two recency
-// strips under the `Shows` fold on `today` in seconds, so a show takes
-// one slot however many episodes it holds, the strips the day drew in
-// the drawn order, the libraries, the genres, and the franchises to close
-// the page.
+// The rows of the page, top to bottom: the banner, what the audience is in
+// the middle of, the two recency strips under the `Shows` fold on `today`
+// in seconds, so a show takes one slot however many episodes it holds, the
+// strips the day drew in the drawn order, the libraries, the genres, and
+// the franchises to close the page.
+// The continue-watching row is the first of the strips, because a person
+// who left a film part way through wants it back before anything the
+// catalog gained.
 pub(super) fn rows(today: i64, drawn: Vec<Candidate>) -> Vec<Row> {
     let fold = Fold::Shows { today };
     let mut rows = vec![
         Row::Banner,
+        Row::Continue,
         Row::Query(Query::Released { fold }),
         Row::Query(Query::Added { fold }),
     ];
@@ -163,8 +169,24 @@ impl Strip {
     // A drawn strip under `FLOOR` holds nothing at all, not even its
     // "see all" or "about" slot, so a two-film set the day drew takes
     // no row.
-    pub(super) fn reread(&mut self, source: &mut dyn Source, today: i64, released: &[Item]) {
+    pub(super) fn reread(
+        &mut self,
+        source: &mut dyn Source,
+        today: i64,
+        released: &[Item],
+        people: &[String],
+    ) {
         match &self.row {
+            // The continue-watching row reads the progress store for the
+            // people in the room. It holds nothing where they are in the
+            // middle of nothing, and the page then skips it.
+            Row::Continue => {
+                self.heading = resume::HEADING.to_string();
+                self.items = resume::slots(source, people)
+                    .into_iter()
+                    .map(Item::resumed)
+                    .collect();
+            }
             Row::Query(query) => {
                 let mut answer = source.wall(query);
                 // A person's heading is two-tone: the name bright, and
@@ -247,6 +269,9 @@ impl Strip {
     // a person's own page for a person's strip, and the wall of everything
     // the query answers for every other. A library opens its wall, and a
     // title opens its page by its kind.
+    // A slot of the continue-watching row opens its page like every other
+    // slot, so the person resumes, starts over, or picks another episode
+    // there.
     pub(super) fn select(&self, source: &mut dyn Source) -> Step {
         let Some(item) = self.focused() else {
             return match &self.row {
@@ -307,6 +332,7 @@ fn library_item(entry: LibraryEntry) -> Item {
         tiles,
         episode: None,
         new: 0,
+        progress: None,
     }
 }
 
@@ -332,6 +358,7 @@ fn genre_item(entry: GenreEntry) -> Item {
         tiles: entry.art,
         episode: None,
         new: 0,
+        progress: None,
     }
 }
 
@@ -361,6 +388,7 @@ fn franchise_item(entry: FranchiseEntry) -> Item {
         tiles: Vec::new(),
         episode: None,
         new: 0,
+        progress: None,
     }
 }
 
@@ -522,7 +550,7 @@ mod tests {
             library: "sample/features".into(),
             id: "set:sample:01".into(),
         }));
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         assert!(strip.is_empty());
         assert_eq!(strip.last, None);
         assert_eq!(strip.count(), 0);
@@ -534,7 +562,7 @@ mod tests {
             library: "sample/features".into(),
             path: ".contributors/Player 0001-1".into(),
         }));
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         assert!(strip.is_empty());
         assert_eq!(strip.last, None);
     }
@@ -545,7 +573,7 @@ mod tests {
             library: "sample/features".into(),
             path: ".contributors/A Second Writer".into(),
         }));
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         assert_eq!(strip.items.len(), 6);
         assert!(strip.items.len() >= FLOOR);
         assert!(strip.last.is_some());
@@ -560,7 +588,7 @@ mod tests {
     fn a_recency_strip_under_the_floor_still_holds_its_slots() {
         let today = date_seconds("2026-09-05").expect("a full date reads");
         let mut strip = Strip::new(Row::Query(Query::Released { fold: Fold::Airing }));
-        strip.reread(&mut Catalog, today, &[]);
+        strip.reread(&mut Catalog, today, &[], &[]);
         assert!(!strip.is_empty());
         assert!(strip.items.len() < FLOOR);
     }
@@ -568,7 +596,7 @@ mod tests {
     #[test]
     fn the_libraries_row_of_two_libraries_still_holds_them() {
         let mut strip = Strip::new(Row::Libraries);
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         assert_eq!(strip.items.len(), 2);
         assert!(strip.items.len() < FLOOR);
     }
@@ -576,10 +604,10 @@ mod tests {
     #[test]
     fn the_genres_and_the_franchises_rows_hold_what_they_read() {
         let mut genres = Strip::new(Row::Genres);
-        genres.reread(&mut Catalog, 0, &[]);
+        genres.reread(&mut Catalog, 0, &[], &[]);
         assert_eq!(genres.items.len(), 5);
         let mut franchises = Strip::new(Row::Franchises);
-        franchises.reread(&mut Catalog, 0, &[]);
+        franchises.reread(&mut Catalog, 0, &[], &[]);
         assert!(!franchises.is_empty());
     }
 
@@ -589,7 +617,7 @@ mod tests {
             library: "sample/features".into(),
             path: ".contributors/A Second Writer".into(),
         }));
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         assert_eq!(strip.heading, "A Second Writer · writer");
         let (name, rest) = crate::views::strip::split(&strip.heading);
         assert_eq!((name, rest), ("A Second Writer", " · writer"));
@@ -601,7 +629,7 @@ mod tests {
             library: "sample/features".into(),
             path: path.into(),
         }));
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         strip
     }
 
@@ -628,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_reads_the_banner_the_recency_rows_the_draw_the_libraries_the_genres_then_the_franchises()
+    fn the_page_reads_the_banner_the_resumes_the_recency_rows_the_draw_the_libraries_the_genres_then_the_franchises()
      {
         let western = Query::Genre {
             name: "Western".into(),
@@ -645,6 +673,7 @@ mod tests {
             rows(0, drawn),
             [
                 Row::Banner,
+                Row::Continue,
                 Row::Query(Query::Released { fold }),
                 Row::Query(Query::Added { fold }),
                 Row::Query(western),
@@ -653,7 +682,7 @@ mod tests {
                 Row::Franchises,
             ]
         );
-        assert_eq!(rows(0, Vec::new()).len(), 6);
+        assert_eq!(rows(0, Vec::new()).len(), 7);
     }
 
     #[test]
@@ -661,6 +690,7 @@ mod tests {
         assert!(Row::Query(Query::Released { fold: Fold::Airing }).recency());
         assert!(Row::Query(Query::Added { fold: Fold::Titles }).recency());
         assert!(!Row::Banner.recency());
+        assert!(!Row::Continue.recency());
         assert!(!Row::Libraries.recency());
         assert!(!Row::Genres.recency());
         assert!(!Row::Franchises.recency());
@@ -800,7 +830,7 @@ mod tests {
     #[test]
     fn every_tile_of_the_franchises_row_says_the_scope_of_its_order() {
         let mut strip = Strip::new(Row::Franchises);
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         let scopes: Vec<&str> = strip
             .items
             .iter()
@@ -813,7 +843,7 @@ mod tests {
     fn every_still_of_a_recency_row_reads_its_episode_over_its_show() {
         let today = date_seconds("2026-09-05").expect("a full date reads");
         let mut strip = Strip::new(Row::Query(Query::Released { fold: Fold::Airing }));
-        strip.reread(&mut Catalog, today, &[]);
+        strip.reread(&mut Catalog, today, &[], &[]);
         let stills: Vec<&Item> = strip
             .items
             .iter()
@@ -839,7 +869,7 @@ mod tests {
             order: Order::Released,
             sort: GenreSort::default(),
         }));
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         let serial = strip
             .items
             .iter()
@@ -863,20 +893,20 @@ mod tests {
     #[test]
     fn every_shelf_of_the_sample_draws_a_mosaic_and_no_title_does() {
         let mut strip = Strip::new(Row::Libraries);
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         assert!(strip.items.iter().all(|item| item.tiles.len() == TILES));
         let mut genres = Strip::new(Row::Genres);
-        genres.reread(&mut Catalog, 0, &[]);
+        genres.reread(&mut Catalog, 0, &[], &[]);
         assert!(genres.items.iter().all(|item| item.tiles.len() == TILES));
         let mut franchises = Strip::new(Row::Franchises);
-        franchises.reread(&mut Catalog, 0, &[]);
+        franchises.reread(&mut Catalog, 0, &[], &[]);
         assert!(franchises.items.iter().all(|item| item.tiles.is_empty()));
     }
 
     #[test]
     fn no_poster_of_the_genres_row_stands_on_two_tiles() {
         let mut strip = Strip::new(Row::Genres);
-        strip.reread(&mut Catalog, 0, &[]);
+        strip.reread(&mut Catalog, 0, &[], &[]);
         let mut drawn: Vec<&(String, String)> =
             strip.items.iter().flat_map(|item| &item.tiles).collect();
         let posters = drawn.len();

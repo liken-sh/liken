@@ -1,6 +1,8 @@
 // The movie page over an invented catalog: the words it builds out of a
 // body, and where a press takes focus.
 
+mod resume;
+
 use super::*;
 use crate::catalog::Answer;
 use crate::catalog::franchise::{Entry, Held, MOVIE};
@@ -36,6 +38,10 @@ struct Films {
     // Whether the movie belongs to a franchise, which puts a strip
     // under the set strip.
     franchise: bool,
+    // Where the audience reached in every film of this catalog, and the
+    // people the last read of it named.
+    progress: Option<crate::catalog::Progress>,
+    watching: Vec<String>,
 }
 
 impl Films {
@@ -248,6 +254,16 @@ impl Source for Films {
         Vec::new()
     }
 
+    fn progress_of(
+        &mut self,
+        _library: &str,
+        _id: &str,
+        people: &[String],
+    ) -> Option<crate::catalog::Progress> {
+        self.watching = people.to_vec();
+        self.progress.clone()
+    }
+
     fn changed(&mut self) -> bool {
         false
     }
@@ -288,6 +304,12 @@ fn ordered() -> (Movie, Films) {
     })
 }
 
+// The words of the page's button row, which is what a person reads on
+// the buttons.
+fn words(page: &Movie) -> Vec<&'static str> {
+    page.buttons().iter().map(|button| button.word()).collect()
+}
+
 fn page(films: Films) -> (Movie, Films) {
     let mut source = films;
     let page =
@@ -299,7 +321,7 @@ fn page(films: Films) -> (Movie, Films) {
 fn a_page_opens_with_focus_on_play() {
     let (page, _) = page(Films::default());
     assert_eq!(page.focus, Focus::Buttons(0));
-    assert_eq!(page.buttons(), ["Play"]);
+    assert_eq!(words(&page), ["Play"]);
 }
 
 #[test]
@@ -308,7 +330,7 @@ fn a_movie_with_a_trailer_file_gets_the_second_button() {
         trailer: true,
         ..Films::default()
     });
-    assert_eq!(page.buttons(), ["Play", "Trailer"]);
+    assert_eq!(words(&page), ["Play", "Trailer"]);
 }
 
 #[test]

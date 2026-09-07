@@ -76,6 +76,7 @@ pub fn still_of(episode: Episode, today: &str, band: f32) -> Still {
         name: episode.title,
         plot: episode.plot,
         art: episode.art,
+        progress: None,
     }
 }
 

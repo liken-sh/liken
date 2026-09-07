@@ -128,4 +128,18 @@ for root in "${roots[@]}"; do
   arguments+=(--library-root "$root")
 done
 
+# The local progress agent's file and API, which the browser reads for the
+# progress rows. local/progress writes the file, so a run without it opens
+# the catalog alone.
+if [ -f "$repo/local/state/progress/agent-1/state.db" ]; then
+  arguments+=(--progress "$repo/local/state/progress/agent-1/state.db"
+    --progress-updates "http://127.0.0.1:20091")
+fi
+
+# The people local/seed-progress named, which the browser offers when it
+# asks who is watching.
+if [ -f "$repo/local/state/people.json" ]; then
+  arguments+=(--people "$repo/local/state/people.json")
+fi
+
 exec "$here/media-browser" "${arguments[@]}" "${flags[@]}"

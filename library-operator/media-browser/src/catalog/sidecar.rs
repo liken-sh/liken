@@ -14,9 +14,9 @@ use crate::catalog::franchise;
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::DRAWN;
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, LibraryEntry,
-    Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Query, Selection, SeriesDetails,
-    Slot, Sort, Source, TILES, library_name, recency,
+    Answer, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
+    LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Played, Progress,
+    Query, Resume, Selection, SeriesDetails, Slot, Sort, Source, TILES, library_name, recency,
 };
 use crate::harness::Waker;
 
@@ -24,10 +24,12 @@ mod details;
 mod files;
 mod franchises;
 mod genres;
+mod identity;
 mod item;
 mod people;
 mod play;
 mod pool;
+mod progress;
 mod recent;
 mod search;
 mod series;
@@ -38,6 +40,10 @@ mod updates;
 // and the row would never reach a peer.
 pub struct SidecarSource {
     database: PathBuf,
+    // The progress store's file, attached beside the catalog on the same
+    // connection, so a progress read is one statement across the two.
+    // Nothing here means the three progress reads answer empty.
+    store: Option<PathBuf>,
     connection: Option<Connection>,
     shared: Arc<updates::Shared>,
     shelf: Arc<search::Shelf>,
@@ -77,12 +83,29 @@ impl SidecarSource {
         search::follow(shelf.clone(), shared.clone(), database.clone(), quiet);
         Self {
             database,
+            store: None,
             connection: None,
             shared,
             shelf,
             page_reads: None,
             streams: true,
         }
+    }
+
+    /// The same source with the progress store beside the catalog.
+    /// `updates` is the progress agent's own HTTP API base; a change to its
+    /// two tables marks the same changed flag the catalog's tables do. A
+    /// file that is not there yet leaves the three progress reads empty.
+    pub fn with_progress(mut self, path: PathBuf, updates: &str) -> Self {
+        if !path.exists() {
+            eprintln!("media-browser: no progress store at {}", path.display());
+            return self;
+        }
+        for table in ["plays", "play_people"] {
+            updates::follow(self.shared.clone(), updates.to_string(), table);
+        }
+        self.store = Some(path);
+        self
     }
 
     // The connection opens on demand and drops on any failure, because
@@ -98,7 +121,10 @@ impl SidecarSource {
         if self.connection.is_none() {
             let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
             match Connection::open_with_flags(&self.database, flags) {
-                Ok(connection) => self.connection = Some(connection),
+                Ok(connection) => {
+                    self.attach(&connection);
+                    self.connection = Some(connection);
+                }
                 Err(error) => {
                     eprintln!(
                         "media-browser: cannot open the catalog {}: {error}",
@@ -115,8 +141,36 @@ impl SidecarSource {
         result
     }
 
+    // The progress file joins this connection as the schema `progress`.
+    // SQLite opens an attached file with the flags the main file carries,
+    // and the main file is read-only, so the store is read-only too, and no
+    // write from here can bypass the agent's bookkeeping. A failed attach
+    // leaves the three progress reads answering empty, and the log line is
+    // the only sign of the difference from an empty store.
+    fn attach(&self, connection: &Connection) {
+        let Some(store) = &self.store else {
+            return;
+        };
+        let path = store.to_string_lossy().into_owned();
+        if let Err(error) = connection.execute("ATTACH DATABASE ?1 AS progress", [&path]) {
+            eprintln!(
+                "media-browser: cannot open the progress store {}: {error}",
+                store.display()
+            );
+        }
+    }
+
     fn read<T>(&mut self, run: impl FnOnce(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
         self.read_result(run).unwrap_or_default()
+    }
+
+    // A progress read runs only where a store is attached. A source without
+    // one answers empty and keeps its connection.
+    fn stored<T>(&mut self, run: impl FnOnce(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
+        if self.store.is_none() {
+            return Vec::new();
+        }
+        self.read(run)
     }
 
     fn person_entries(&mut self, library: &str, path: &str) -> Option<PersonEntries> {
@@ -411,6 +465,30 @@ impl Source for SidecarSource {
         }
     }
 
+    fn identity(&mut self, library: &str, selection: &Selection) -> Identity {
+        // An episode records against its series, because an episode has no
+        // provider id of its own. A trailer records against nothing, because
+        // a trailer is not the work.
+        let (item, season, episode) = match selection {
+            Selection::Movie { id } => (id, 0, 0),
+            Selection::Episode {
+                series,
+                season,
+                episode,
+            } => (series, *season, *episode),
+            Selection::Trailer { .. } => return Identity::default(),
+        };
+
+        let mut found = self
+            .read(|connection| identity::of(connection, library, item))
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        found.season = season;
+        found.episode = episode;
+        found
+    }
+
     fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership> {
         self.read(|connection| franchises::strips(connection, library, id))
     }
@@ -446,6 +524,31 @@ impl Source for SidecarSource {
             .next()
     }
 
+    fn continue_watching(&mut self, people: &[String]) -> Vec<Resume> {
+        self.stored(|connection| progress::resumes(connection, people))
+    }
+
+    fn progress_of(&mut self, library: &str, id: &str, people: &[String]) -> Option<Progress> {
+        self.stored(|connection| progress::of(connection, library, id, people))
+            .into_iter()
+            .next()
+    }
+
+    fn progress_by_item(&mut self, library: &str, people: &[String]) -> HashMap<String, Played> {
+        self.stored(|connection| progress::by_item(connection, library, people))
+            .into_iter()
+            .collect()
+    }
+
+    fn episode_progress(
+        &mut self,
+        library: &str,
+        series: &str,
+        people: &[String],
+    ) -> Vec<Progress> {
+        self.stored(|connection| progress::episodes(connection, library, series, people))
+    }
+
     fn changed(&mut self) -> bool {
         self.streams && self.shared.changed.swap(false, Ordering::AcqRel)
     }
@@ -458,9 +561,12 @@ impl Source for SidecarSource {
 
     // The second source over the same file: its own read-only connection,
     // opened on its first read, and no claim on the streams.
+    // It attaches the same progress store, so a read off the reader thread
+    // answers what the first source answers.
     fn reader(&mut self) -> Option<Box<dyn Source + Send>> {
         Some(Box::new(Self {
             database: self.database.clone(),
+            store: self.store.clone(),
             connection: None,
             shared: self.shared.clone(),
             shelf: self.shelf.clone(),

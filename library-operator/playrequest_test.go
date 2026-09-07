@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -685,5 +686,41 @@ func TestAPlayCarriesTheFinalizerOnlyWhereAStoreStands(t *testing.T) {
 				t.Errorf("finalizers = %v, want %v", play.Metadata.Finalizers, testCase.want)
 			}
 		})
+	}
+}
+
+// startRequest is a request for these items that begins the first one at
+// the position given.
+func startRequest(start string, items ...playRequestItem) []byte {
+	request := playRequest{Library: testLibraryKey, Start: start, Items: items}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+func TestAPlayBeginsWhereTheRequestNamed(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, startRequest("1393", film(testFilmPath)))
+
+	operator.pass()
+
+	if start := cluster.heldPlays()[0].Spec.Start; start != "1393" {
+		t.Errorf("start = %q, want the position the request named", start)
+	}
+}
+
+// The absent case reads the JSON the API client sends, because a decoded
+// object cannot tell an absent key from an empty string.
+func TestARequestThatNamesNoStartCarriesNone(t *testing.T) {
+	play := housePlay(t, playRequest{}, false)
+
+	spec, err := json.Marshal(play.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(spec), "start") {
+		t.Errorf("spec = %s, want no start", spec)
 	}
 }

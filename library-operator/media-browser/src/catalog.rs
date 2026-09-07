@@ -2,6 +2,8 @@
 // `Source` yields them, so one set of views draws the sidecar's file, a
 // test fixture, and the sample data the same way.
 
+use std::collections::HashMap;
+
 use crate::harness::Waker;
 
 // The sidecar module implements this seam over plan 06's delivery: a
@@ -35,7 +37,17 @@ pub mod art;
 // from, with its fold and its ranking.
 pub mod search;
 
+// The progress module: where a play reached, and what a screen draws for
+// it.
+pub mod progress;
+
+// The identity module: the ids the providers know a work by, which a play
+// request carries so the progress store keys on the work.
+pub mod identity;
+
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
+pub use identity::Identity;
+pub use progress::{Played, Progress, Resume};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
@@ -464,6 +476,46 @@ pub trait Source {
     /// One person by the library and the directory that name them,
     /// or nothing where that library holds no such entry.
     fn person(&mut self, library: &str, path: &str) -> Option<Person>;
+
+    /// The work this choice plays, as the providers name it. A source with
+    /// no aliases answers the default, and a play of it is then recorded
+    /// against the `Player` alone.
+    fn identity(&mut self, _library: &str, _selection: &Selection) -> Identity {
+        Identity::default()
+    }
+
+    /// Every work these people have a play of, one row per work across
+    /// every library, newest first. The row is the latest play, finished
+    /// or not. A source with no progress store answers nothing.
+    fn continue_watching(&mut self, _people: &[String]) -> Vec<Resume> {
+        Vec::new()
+    }
+
+    /// Where these people last reached in one movie or one series, or
+    /// nothing where no play of theirs names it. A series answers its latest
+    /// episode row.
+    fn progress_of(&mut self, _library: &str, _id: &str, _people: &[String]) -> Option<Progress> {
+        None
+    }
+
+    /// Every movie of one library these people have a play of, keyed by the
+    /// movie's id, with the latest play's position and duration. Finished
+    /// plays are in it; series ids are not. A source with no progress store
+    /// answers an empty map.
+    fn progress_by_item(&mut self, _library: &str, _people: &[String]) -> HashMap<String, Played> {
+        HashMap::new()
+    }
+
+    /// Where these people reached in each episode of one series: the latest
+    /// play per episode, in aired order.
+    fn episode_progress(
+        &mut self,
+        _library: &str,
+        _series: &str,
+        _people: &[String],
+    ) -> Vec<Progress> {
+        Vec::new()
+    }
 
     /// How large this source's search index is, or nothing where the
     /// source holds none. The stats line reports the numbers, so a run

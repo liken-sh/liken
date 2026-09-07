@@ -33,6 +33,7 @@ pub mod header;
 pub mod keyboard;
 pub mod layers;
 pub mod people;
+pub mod progress;
 pub mod rail;
 pub mod ratings;
 pub mod scroll;
@@ -135,6 +136,12 @@ pub trait Card {
     /// one art of its own.
     fn tiles(&self) -> &[(String, String)] {
         &[]
+    }
+
+    /// The share of the work a play of it reached, which draws as the bar
+    /// along the foot of the art. Nothing on a slot no play names.
+    fn watched(&self) -> Option<f32> {
+        None
     }
 }
 

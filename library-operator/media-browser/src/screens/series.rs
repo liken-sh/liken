@@ -8,6 +8,7 @@
 
 mod layout;
 mod page;
+pub mod progress;
 mod seasons;
 
 use std::cell::RefCell;
@@ -21,7 +22,7 @@ use super::movie::franchise_press;
 use super::{Screen, Step, facts, foot, person, stripes};
 use crate::art::Art;
 use crate::catalog::draw::Date;
-use crate::catalog::{Selection, SeriesDetails, Source};
+use crate::catalog::{Progress, Selection, SeriesDetails, Source};
 use crate::focus::{self, Run};
 use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::{Card, layers, rail, ratings};
@@ -58,7 +59,7 @@ pub struct Season {
 
 /// One episode, as a still of the wall and as the facts the header shows
 /// while that still has focus.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Still {
     /// The episode's id inside its library, which its files are read by.
     pub id: String,
@@ -88,6 +89,9 @@ pub struct Still {
     /// its series where the catalog holds no still for the episode.
     /// Empty where the series holds no art either.
     pub art: String,
+    /// How far the audience reached in this episode, or nothing where no
+    /// play of theirs names it.
+    pub progress: Option<Progress>,
 }
 
 impl Card for Still {
@@ -105,6 +109,10 @@ impl Card for Still {
 
     fn under(&self) -> &str {
         &self.under
+    }
+
+    fn watched(&self) -> Option<f32> {
+        progress::share(self.progress.as_ref())
     }
 }
 
@@ -155,6 +163,9 @@ pub struct Series {
     /// The still the wall last held, which a left press on the rail
     /// returns to.
     entered: usize,
+    /// Whether the way into the page named the episode focus is on, so the
+    /// progress read leaves focus where that way put it.
+    placed: bool,
     /// Where focus is.
     pub focus: Focus,
 }
@@ -187,6 +198,7 @@ impl Series {
             .position(|still| still.season == season && still.episode == episode)
         {
             page.focus = Focus::Still(index);
+            page.placed = true;
         }
         page.refoot(source);
         Some(page)
@@ -216,6 +228,7 @@ impl Series {
             stills,
             bars,
             entered: 0,
+            placed: false,
             focus: Focus::Still(0),
         })
     }
@@ -232,11 +245,13 @@ impl Series {
 
     /// Read the page again, because the scanner can write the series or
     /// its episodes while the page is open. Focus stays where it was,
-    /// inside what the read answered.
+    /// inside what the read answered, and not on the episode a first
+    /// read of the progress would land it on.
     pub fn reread(&mut self, source: &mut dyn Source) {
-        let Some(fresh) = Self::open(&self.library, &self.id, source) else {
+        let Some(mut fresh) = Self::open(&self.library, &self.id, source) else {
             return;
         };
+        fresh.placed = true;
         let focus = self.focus;
         *self = fresh;
         self.focus = self.hold(focus);
@@ -313,6 +328,7 @@ impl Series {
                 season: still.season,
                 episode: still.episode,
             },
+            start: progress::start(still),
         }
     }
 

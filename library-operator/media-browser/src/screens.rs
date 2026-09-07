@@ -5,6 +5,7 @@
 // primitives in the views module. A new kind adds a screen here and,
 // where it needs one, a primitive there. It adds no row to a table.
 
+pub mod audience;
 pub mod credits;
 pub mod facts;
 pub mod foot;
@@ -27,7 +28,7 @@ use iced_winit::core::{Element, Theme};
 
 use self::series::seasons_of;
 use crate::art::Art;
-use crate::catalog::{InSeries, Query, Selection, Slot, Source};
+use crate::catalog::{InSeries, Played, Query, Selection, Slot, Source};
 use crate::views::curtain::Curtain;
 use crate::views::field::TextField;
 use crate::views::{
@@ -75,6 +76,9 @@ pub enum Step {
         library: String,
         /// What the person chose.
         selection: Selection,
+        /// The second the play starts at, where the person is in the middle
+        /// of the work, and nothing where the play starts at the beginning.
+        start: Option<i64>,
     },
 }
 
@@ -168,6 +172,25 @@ impl Screen {
         }
     }
 
+    /// Read how far these people reached in what this screen draws. The
+    /// browser calls it at every open and at every re-read, the way it
+    /// reads a screen's volume files, because only the browser holds the
+    /// audience.
+    /// Read how far these people reached in what this screen draws. The
+    /// browser calls it at every open and at every re-read, the way it
+    /// reads a screen's volume files, because only the browser holds the
+    /// audience. The two pages a title plays from read it, and so does
+    /// every wall, whose film slots draw a bar under the art. The home page
+    /// is the one screen that reads its own, through the reader thread.
+    pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
+        match self {
+            Self::Movie(screen) => screen.read_progress(source, people),
+            Self::Series(screen) => series::progress::read(screen, source, people),
+            Self::Wall(screen) => screen.read_progress(source, people),
+            _ => {}
+        }
+    }
+
     /// Read the files this screen draws that live on a library
     /// volume and not in the catalog. Only a person's page holds one, and
     /// every other screen reads nothing.
@@ -243,6 +266,9 @@ pub struct Item {
     /// How many episodes of a folded show are current, and zero on every
     /// other item.
     pub new: usize,
+    /// How far a play of the work reached, on the slots of the
+    /// continue-watching row, and nothing on every other item.
+    pub progress: Option<Played>,
 }
 
 impl Item {
@@ -260,6 +286,20 @@ impl Item {
     /// or the facts line: the year, a series' season count, the runtime,
     /// and the rating.
     pub fn of(query: &Query, slot: Slot) -> Self {
+        Self::spelled(slot, spelling(query))
+    }
+
+    /// One slot of the continue-watching row as an item. No query stands
+    /// behind it, because the row is read from the progress store and not
+    /// from a wall, so its card takes the facts spelling every slot outside
+    /// a person's or a set's strip takes.
+    pub fn resumed(slot: Slot) -> Self {
+        Self::spelled(slot, Spelling::Facts)
+    }
+
+    // One slot as an item, with both caption lines cut to the spelling the
+    // read asked for.
+    fn spelled(slot: Slot, spelling: Spelling) -> Self {
         let year = facts::year(&slot.released);
         let numbers = slot
             .episode
@@ -284,16 +324,16 @@ impl Item {
         // leads a work only where every part left is an `as` run.
         let leads = leading(&slot);
         let tagged = tagged(&slot);
-        let (caption, under, tagline) = match (&slot.episode, query, played(&slot.parts)) {
+        let (caption, under, tagline) = match (&slot.episode, spelling, played(&slot.parts)) {
             (Some(_), _, _) => (
                 slot.title.clone(),
                 facts::joined(&[series, &numbers, &runtime]),
                 false,
             ),
-            (None, Query::Person { .. }, Some(character)) => {
+            (None, Spelling::Parts, Some(character)) => {
                 (character, facts::joined(&[&slot.title, year]), false)
             }
-            (None, Query::Person { .. }, None) => (
+            (None, Spelling::Parts, None) => (
                 leads,
                 match slot.parts.is_empty() {
                     true => facts::joined(&[facts::kind_word(&slot.kind), year]),
@@ -301,8 +341,8 @@ impl Item {
                 },
                 tagged,
             ),
-            (None, Query::Set { .. }, _) => (leads, facts::joined(&[year, &runtime]), tagged),
-            (None, _, _) => (leads, facts, tagged),
+            (None, Spelling::Set, _) => (leads, facts::joined(&[year, &runtime]), tagged),
+            (None, Spelling::Facts, _) => (leads, facts, tagged),
         };
         Self {
             library: slot.library,
@@ -321,6 +361,7 @@ impl Item {
             tiles: Vec::new(),
             episode: slot.episode,
             new: slot.new,
+            progress: slot.progress,
         }
     }
 
@@ -339,6 +380,25 @@ impl Item {
 pub fn fitted_strip(items: &mut [Item]) {
     for item in items.iter_mut() {
         item.fit(strip::caption_width(item.ratio()));
+    }
+}
+
+// Which of the three spellings a card's two lines take. A person's strip
+// credits the parts, a set's strip carries the year and the runtime, and
+// every other slot carries the facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Spelling {
+    Facts,
+    Parts,
+    Set,
+}
+
+// The spelling the slots of one query take.
+fn spelling(query: &Query) -> Spelling {
+    match query {
+        Query::Person { .. } => Spelling::Parts,
+        Query::Set { .. } => Spelling::Set,
+        _ => Spelling::Facts,
     }
 }
 
@@ -437,6 +497,10 @@ impl Card for Item {
     fn new_episodes(&self) -> usize {
         self.new
     }
+
+    fn watched(&self) -> Option<f32> {
+        self.progress.map(|played| played.fraction())
+    }
 }
 
 #[cfg(test)]
@@ -468,6 +532,7 @@ mod tests {
             episode: None,
             new: 0,
             seasons: 0,
+            progress: None,
         }
     }
 

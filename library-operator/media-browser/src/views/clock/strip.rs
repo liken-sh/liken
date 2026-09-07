@@ -1,11 +1,12 @@
 // The strip: the browser's own layer across the top of every screen,
-// right-aligned. It draws a magnifying glass at the clock's left, then
-// the clock. On a search wall the glass expands into the text field,
-// which draws leftward from the clock with the glass inside its left
-// end. The focus mark goes on the glass, or on the field, while the
-// strip holds the browser's focus. It is the browser's layer and not a
-// screen's, so every screen carries it in the same place and an up
-// press that moves nothing on any screen reaches it.
+// right-aligned. It draws the circles of the room, a magnifying glass at
+// the clock's left, then the clock. On a search wall the glass
+// expands into the text field, which draws leftward from the clock with
+// the glass inside its left end. The focus mark goes on whichever of the
+// strip's two targets holds focus: the glass, or the field it expanded
+// into, or the circles. It is the browser's layer and not a screen's, so
+// every screen carries it in the same place and an up press that moves
+// nothing on any screen reaches it.
 
 use std::convert::Infallible;
 
@@ -17,7 +18,7 @@ use super::{left, reading};
 use crate::clock::Time;
 use crate::look;
 use crate::views::field::{self, TextField};
-use crate::views::{area, band, mark};
+use crate::views::{area, band, mark, text};
 
 /// The side of the icon's square box. The icon is the size of the
 /// reading beside it, so the two read as one strip.
@@ -67,13 +68,59 @@ fn glass(frame: &mut canvas::Frame<Renderer>, at: Rectangle, ink: Color) {
     );
 }
 
+/// What the strip's focus stands on: one of two targets, not one per
+/// person.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Target {
+    /// The glass, or the field it expanded into.
+    #[default]
+    Glass,
+    /// The circles of the room, as one target.
+    Circles,
+}
+
 /// The strip as one frame draws it: the reading, the text of the search
 /// wall on top of the stack or nothing where the top screen is not one,
-/// and whether the strip holds the browser's focus.
+/// the room, and which target holds the browser's focus.
 pub struct Strip<'a> {
     pub time: Time,
     pub field: Option<&'a TextField>,
-    pub focused: bool,
+    /// The target the focus mark goes on, or nothing while the strip does
+    /// not hold the browser's focus.
+    pub focus: Option<Target>,
+    /// The first letter of each person in the room, in the order of the
+    /// answer, and none where the browser holds no answer.
+    pub letters: Vec<String>,
+}
+
+/// The side of one circle of the room: the glass's own size, so the
+/// circles and the glass read as one strip.
+pub const CIRCLE: f32 = GLASS;
+
+// The gap between two circles, narrow enough that the row reads as one
+// thing.
+const CIRCLE_GAP: f32 = 6.0;
+
+/// The box this many circles take in a frame this wide: a row that ends a
+/// margin before the glass, and nothing at all where the room is empty.
+pub fn circles_at(width: f32, count: usize) -> Rectangle {
+    let taken = match count {
+        0 => 0.0,
+        _ => count as f32 * CIRCLE + (count - 1) as f32 * CIRCLE_GAP,
+    };
+    let right = glass_at(width).x - band::PAD;
+    area(right - taken, (band::HEIGHT - CIRCLE) / 2.0, taken, CIRCLE)
+}
+
+/// The box one circle of the row draws in.
+pub fn circle_at(width: f32, count: usize, index: usize) -> Rectangle {
+    let row = circles_at(width, count);
+    area(
+        row.x + index as f32 * (CIRCLE + CIRCLE_GAP),
+        row.y,
+        CIRCLE,
+        CIRCLE,
+    )
 }
 
 impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
@@ -103,8 +150,35 @@ impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
                 at
             }
         };
-        if self.focused {
+        if self.focus == Some(Target::Glass) {
             mark(&mut frame, marked);
+        }
+        // The field draws leftward from the clock over the same band, so
+        // the circles stand down while a search wall is on top.
+        if !self.letters.is_empty() && self.field.is_none() {
+            let count = self.letters.len();
+            for (index, letter) in self.letters.iter().enumerate() {
+                let at = circle_at(bounds.width, count, index);
+                frame.fill(
+                    &canvas::Path::circle(Point::new(at.center_x(), at.center_y()), at.width / 2.0),
+                    look::muted(),
+                );
+                text::shown(
+                    &mut frame,
+                    letter,
+                    area(
+                        at.x,
+                        at.center_y() - text::height(1, look::FACE) / 2.0,
+                        at.width,
+                        text::height(1, look::FACE),
+                    ),
+                    look::FACE,
+                    look::text(),
+                );
+            }
+            if self.focus == Some(Target::Circles) {
+                mark(&mut frame, circles_at(bounds.width, count));
+            }
         }
         reading(&mut frame, bounds, self.time);
         vec![frame.into_geometry()]
@@ -126,6 +200,37 @@ mod tests {
         assert_eq!(at.height, GLASS);
         assert!(at.y > 0.0);
         assert!(at.y + at.height < band::HEIGHT);
+    }
+
+    #[test]
+    fn the_circles_of_the_room_end_a_margin_before_the_glass() {
+        let row = circles_at(WIDTH, 3);
+
+        assert_eq!(row.x + row.width + band::PAD, glass_at(WIDTH).x);
+        assert_eq!(row.width, 3.0 * CIRCLE + 2.0 * CIRCLE_GAP);
+        assert_eq!(row.height, CIRCLE);
+        assert_eq!(row.center_y(), glass_at(WIDTH).center_y());
+    }
+
+    #[test]
+    fn a_room_of_nobody_takes_no_room() {
+        let row = circles_at(WIDTH, 0);
+
+        assert_eq!(row.width, 0.0);
+        assert_eq!(row.x + band::PAD, glass_at(WIDTH).x);
+    }
+
+    #[test]
+    fn one_circle_sits_beside_the_next_and_the_last_ends_the_row() {
+        let row = circles_at(WIDTH, 2);
+        let first = circle_at(WIDTH, 2, 0);
+        let last = circle_at(WIDTH, 2, 1);
+
+        assert_eq!(first.x, row.x);
+        assert_eq!(first.width, CIRCLE);
+        assert_eq!(last.x, first.x + CIRCLE + CIRCLE_GAP);
+        assert_eq!(last.x + last.width, row.x + row.width);
+        assert_eq!(last.y, first.y);
     }
 
     #[test]

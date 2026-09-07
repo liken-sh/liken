@@ -46,6 +46,11 @@ type playRequest struct {
 	Aliases map[string]string `json:"aliases,omitempty"`
 	Season  int               `json:"season,omitempty"`
 	Episode int               `json:"episode,omitempty"`
+
+	// Where the first item begins. The browser reads it out of the
+	// progress store, and it reaches the Play unchanged, because the
+	// player parses it and the operator does not.
+	Start string `json:"start,omitempty"`
 }
 
 // playRequestItem is one item of the list. Every path is relative to
@@ -178,7 +183,7 @@ func (r playRequest) play(players []Player, libraries []Library, people []Person
 		APIVersion: playerAPIVersion,
 		Kind:       "Play",
 		Metadata:   metadata,
-		Spec:       PlaySpec{Players: []string{r.Player}, Items: items},
+		Spec:       PlaySpec{Players: []string{r.Player}, Items: items, Start: r.Start},
 	}, nil
 }
 

@@ -16,7 +16,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Color, Rectangle};
 
-use super::{Card, Tone, area, artwork, card, mark, scroll, text};
+use super::{Card, Tone, area, artwork, card, mark, progress, scroll, text};
 use crate::art::Art;
 use crate::look;
 
@@ -207,6 +207,7 @@ pub fn draw<T: Card, A: Art>(
             item.name(),
             Tone::Full,
         );
+        progress::draw(frame, item, slot);
         let focused = Some(index) == grid.focus;
         if focused && grid.marked {
             mark(frame, slot);

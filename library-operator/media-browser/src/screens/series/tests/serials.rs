@@ -32,6 +32,10 @@ pub struct Serials {
     // The episode count of each season, or the three of SEASONS where the
     // test names none.
     pub seasons: Vec<i64>,
+    // How far the audience reached in each episode a play of theirs names,
+    // and the people the last read of it named.
+    pub progress: Vec<crate::catalog::Progress>,
+    pub watching: Vec<String>,
 }
 
 impl Serials {
@@ -235,6 +239,16 @@ impl Source for Serials {
 
     fn changed(&mut self) -> bool {
         false
+    }
+
+    fn episode_progress(
+        &mut self,
+        _library: &str,
+        _series: &str,
+        people: &[String],
+    ) -> Vec<crate::catalog::Progress> {
+        self.watching = people.to_vec();
+        self.progress.clone()
     }
 
     fn wake_by(&mut self, _wake: Waker) {}

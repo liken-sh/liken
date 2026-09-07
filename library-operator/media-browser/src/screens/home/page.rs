@@ -14,6 +14,9 @@ use crate::screens::Item;
 pub struct Page {
     /// The date the day's draw was seeded by.
     pub date: Date,
+    /// The people the continue-watching row was read for. The screen keeps
+    /// them so a re-read of its own asks for the same audience.
+    pub people: Vec<String>,
     /// The rows in the page's order, each one read, with no focus in any
     /// of them.
     pub blocks: Vec<Block>,
@@ -41,7 +44,10 @@ impl Drop for PageRead<'_> {
 /// draw, then each strip in the page's order, then the banner off the
 /// strips. It touches no screen, so it runs wherever the caller puts
 /// it.
-pub fn read(source: &mut dyn Source, today: Date) -> Page {
+///
+/// Read every row of the page. `people` is the audience the
+/// continue-watching row is read for.
+pub fn read(source: &mut dyn Source, today: Date, people: &[String]) -> Page {
     let scope = PageRead::begin(source);
     let source = &mut *scope.source;
     let seconds = today.seconds();
@@ -55,7 +61,7 @@ pub fn read(source: &mut dyn Source, today: Date) -> Page {
     for index in 0..blocks.len() {
         let released = released(&blocks);
         if let Block::Strip(strip) = &mut blocks[index] {
-            strip.reread(source, seconds, &released);
+            strip.reread(source, seconds, &released, people);
         }
     }
     let titles = titles(&blocks, source);
@@ -67,6 +73,7 @@ pub fn read(source: &mut dyn Source, today: Date) -> Page {
     }
     Page {
         date: today,
+        people: people.to_vec(),
         blocks,
     }
 }
@@ -84,11 +91,18 @@ fn released(blocks: &[Block]) -> Vec<Item> {
 // The banner's titles from the drawn strips, then the two recency
 // strips. The banner is read after the strips because it holds one title
 // from each of them.
+// The continue-watching row feeds the banner nothing, because a work the
+// audience already started is not one to introduce.
 fn titles(blocks: &[Block], source: &mut dyn Source) -> Vec<Title> {
     let strips: Vec<&Strip> = blocks.iter().filter_map(Block::strip).collect();
     let (recency, drawn): (Vec<&Strip>, Vec<&Strip>) = strips
         .into_iter()
-        .filter(|strip| !matches!(strip.row, Row::Libraries | Row::Genres | Row::Franchises))
+        .filter(|strip| {
+            !matches!(
+                strip.row,
+                Row::Continue | Row::Libraries | Row::Genres | Row::Franchises
+            )
+        })
         .partition(|strip| strip.row.recency());
     Banner::read(drawn.into_iter().chain(recency), source)
 }

@@ -11,7 +11,9 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle};
 
-use super::{Card, Tone, area, artwork, card, clock, label, mark, mosaic, text, underline, wall};
+use super::{
+    Card, Tone, area, artwork, card, clock, label, mark, mosaic, progress, text, underline, wall,
+};
 use crate::art::Art;
 use crate::look;
 
@@ -239,6 +241,7 @@ pub fn draw<T: Card, A: Art>(
                     false => mosaic(frame, store, member.tiles(), slot, tone(strip, index)),
                 }
                 pilled(frame, member, slot);
+                progress::draw(frame, member, slot);
                 if strip.lines > 0 {
                     card::draw(frame, member, caption_band(slot));
                 }

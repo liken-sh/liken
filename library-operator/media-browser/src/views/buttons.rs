@@ -35,6 +35,18 @@ pub fn button(names: &[&str], index: usize, at: Point) -> Rectangle {
     area(left, at.y, width(names[index]), HEIGHT)
 }
 
+/// How wide the whole row is. The bar under it and the word at the end of
+/// its line are measured against this.
+pub fn row_width(names: &[&str]) -> f32 {
+    match names.is_empty() {
+        true => 0.0,
+        false => {
+            let last = button(names, names.len() - 1, Point::new(0.0, 0.0));
+            last.x + last.width
+        }
+    }
+}
+
 /// Draw the row. `focus` names the button that holds focus, or nothing
 /// while another row of the page holds it. The answer is the row's
 /// height, so the caller stacks the next block under it.
@@ -70,6 +82,13 @@ mod tests {
     #[test]
     fn a_longer_word_takes_a_wider_button() {
         assert!(width("Trailer") > width("Play"));
+    }
+
+    #[test]
+    fn the_row_is_as_wide_as_its_buttons_and_the_gaps_between_them() {
+        let names = ["Play", "Trailer"];
+        assert_eq!(row_width(&names), width("Play") + GAP + width("Trailer"));
+        assert_eq!(row_width(&[]), 0.0);
     }
 
     #[test]

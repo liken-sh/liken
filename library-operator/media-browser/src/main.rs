@@ -6,6 +6,7 @@ use media_screen::{Bus, Wiring};
 use media_browser::art::volumes::{self, Volumes};
 use media_browser::browser::Browser;
 use media_browser::catalog::sidecar::SidecarSource;
+use media_browser::catalog::{Source, progress};
 use media_browser::harness::options::HELP;
 use media_browser::harness::{self, Invocation, Options};
 use media_browser::sample;
@@ -80,7 +81,6 @@ fn main() {
 // library roots name. A run without one browses the invented sample, so the
 // client opens on a workstation with no cluster.
 fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
-    let bus = bus(wiring);
     let play_topic = options.play_topic.clone();
 
     let Some(catalog) = options.catalog.clone() else {
@@ -88,7 +88,8 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
             Browser::new(sample::Catalog, sample::NoArt)
                 .with_page(options.size)
                 .with_timing(options.stats.is_some())
-                .with_bus(bus, play_topic),
+                .with_audience(options.people.clone(), options.audience.clone())
+                .with_bus(bus(wiring), play_topic),
             options,
         );
     };
@@ -96,7 +97,21 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     // A run with no update stream reads the file alone, and a title
     // that lands after it opens waits for the next re-read.
     let updates = options.updates.clone().unwrap_or_default();
-    let source = SidecarSource::new(catalog, &updates);
+    let mut source = SidecarSource::new(catalog, &updates);
+    if let Some(progress_file) = options.progress.clone() {
+        let stream = options.progress_updates.clone().unwrap_or_default();
+        source = source.with_progress(progress_file, &stream);
+    }
+
+    // The print is a drill's read of the store, so it runs before the
+    // broker connection and before any window.
+    if options.print_progress {
+        for resume in source.continue_watching(&options.audience) {
+            println!("{}", progress::line(&resume));
+        }
+        return Ok(());
+    }
+
     let roots = options.library_roots.iter().cloned().collect();
     let store = Volumes::with_cache_dir(
         roots,
@@ -109,7 +124,8 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
         Browser::new(source, store)
             .with_page(options.size)
             .with_timing(options.stats.is_some())
-            .with_bus(bus, play_topic),
+            .with_audience(options.people.clone(), options.audience.clone())
+            .with_bus(bus(wiring), play_topic),
         options,
     )
 }

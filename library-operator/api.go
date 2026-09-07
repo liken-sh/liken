@@ -626,6 +626,10 @@ type PersonSpec struct {
 type PlaySpec struct {
 	Players []string   `json:"players,omitempty"`
 	Items   []PlayItem `json:"items,omitempty"`
+	// Where the first item begins, as a time the player accepts, such as
+	// 0:10:00 or 600. Empty, the run begins at the start of the item. The
+	// operator does not parse or check the value; the player does.
+	Start string `json:"start,omitempty"`
 }
 
 // PlayItem is one item: the media reference the Player accepts, and

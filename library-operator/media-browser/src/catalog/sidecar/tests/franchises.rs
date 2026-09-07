@@ -105,16 +105,6 @@ fn insert_run(path: &Path, franchise: &str, position: i64, season: i64, episode:
         .unwrap();
 }
 
-fn insert_alias(path: &Path, library: &str, alias: &str, item: &str) {
-    let connection = Connection::open(path).unwrap();
-    connection
-        .execute(
-            "INSERT INTO aliases (library, alias, item, source) VALUES (?, ?, ?, 'nfo')",
-            (library, alias, item),
-        )
-        .unwrap();
-}
-
 // The order the reads below are made of: two films the lab holds, a
 // series run of one season, a film no library holds, and one entry with
 // no time.

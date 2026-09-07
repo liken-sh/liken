@@ -9,6 +9,7 @@ pub mod banner;
 mod layout;
 mod page;
 mod recent;
+mod resume;
 mod rows;
 
 use std::cell::RefCell;
@@ -83,17 +84,23 @@ pub struct Home {
     pub heading: String,
     pub blocks: Vec<Block>,
     pub focus: usize,
+    /// The people the page was last read for, so a re-read of the page asks
+    /// the progress store for the same audience.
+    pub people: Vec<String>,
 }
 
 impl Home {
     /// Read every row, with focus on the first row that holds anything.
-    pub fn open(source: &mut dyn Source) -> Self {
+    /// Read the home page. `people` is the audience the continue-watching
+    /// row is read for.
+    pub fn open(source: &mut dyn Source, people: &[String]) -> Self {
         let mut home = Self {
             heading: HEADING.to_string(),
             blocks: Vec::new(),
             focus: 0,
+            people: Vec::new(),
         };
-        home.apply(read(source, Date::today()));
+        home.apply(read(source, Date::today(), people));
         home
     }
 
@@ -103,7 +110,8 @@ impl Home {
     /// keeps its focus. Focus follows the row it was on where that row
     /// stays.
     pub fn reread(&mut self, source: &mut dyn Source) {
-        self.apply(read(source, Date::today()));
+        let people = std::mem::take(&mut self.people);
+        self.apply(read(source, Date::today(), &people));
     }
 
     /// Take a page the reader answered. A row the page holds and the
@@ -111,6 +119,7 @@ impl Home {
     /// where that row stays, and a strip the day no longer draws goes.
     pub fn apply(&mut self, page: Page) {
         let focused = self.blocks.get(self.focus).map(Block::row);
+        self.people = page.people;
         let mut banner: Option<Banner> = None;
         let mut kept: Vec<Strip> = Vec::new();
         for block in std::mem::take(&mut self.blocks) {
@@ -405,7 +414,7 @@ mod tests {
 
     #[test]
     fn a_reread_keeps_the_rows_and_the_row_focus_was_on() {
-        let mut home = Home::open(&mut Catalog);
+        let mut home = Home::open(&mut Catalog, &[]);
         home.key("down", &mut Catalog);
         let focus = home.focus;
         let rows = home.blocks.len();
@@ -416,18 +425,18 @@ mod tests {
 
     #[test]
     fn a_press_moves_over_a_drawn_row_that_holds_nothing() {
-        let mut home = Home::open(&mut Catalog);
+        let mut home = Home::open(&mut Catalog, &[]);
         home.blocks.insert(1, Block::Strip(Strip::new(Row::Genres)));
         home.focus = 0;
         home.key("down", &mut Catalog);
-        assert_eq!(home.focus, 2);
+        assert_eq!(home.focus, 3);
         home.key("up", &mut Catalog);
         assert_eq!(home.focus, 0);
     }
 
     #[test]
     fn a_press_past_the_rows_prefetches_nothing_and_moves_nothing() {
-        let mut home = Home::open(&mut Catalog);
+        let mut home = Home::open(&mut Catalog, &[]);
         home.focus = 99;
         assert!(!home.prefetches());
         assert!(matches!(home.key("enter", &mut Catalog), Step::Stay));

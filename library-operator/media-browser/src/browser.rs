@@ -15,6 +15,7 @@ use iced_winit::core::{Color, Element, Length, Theme};
 use media_screen::{Bus, Moment};
 
 use crate::art::{Art, ArtCounts};
+use crate::audience::{Audience, Person};
 use crate::bus::play;
 use crate::catalog::draw::Date;
 use crate::catalog::search::Size;
@@ -65,6 +66,10 @@ pub struct Browser<S: Source, A: Art> {
     // publishes on the connection the crate already holds, so the topic
     // is held here and not in the crate, which reads none of it.
     play_topic: String,
+    // The people in the room and the second of the last press. Every play
+    // request is recorded against them, and every progress read is for
+    // them.
+    audience: Audience,
     // Whether the shade is down. The browser never decides it: it asks for
     // the shade, the crate decides, and the moment comes back here.
     asleep: bool,
@@ -81,6 +86,9 @@ pub struct Browser<S: Source, A: Art> {
     // The loading state the page under a chosen title is in, or nothing
     // while no title has been chosen.
     loading: Option<loading::Loading>,
+    // The picker over the stack while the browser has no answer to who is
+    // watching, and nothing once it has one.
+    picker: Option<screens::audience::Picker>,
     // The volume row's state, which the level moments the bus delivers fold
     // into.
     level: volume::Level,
@@ -90,6 +98,9 @@ pub struct Browser<S: Source, A: Art> {
     // browser's field and not a screen's, because the strip is the
     // browser's layer, and it clears whenever the stack changes.
     on_strip: bool,
+    // Which of the strip's targets holds focus while the strip holds it:
+    // the glass, or the circles of the room.
+    strip_focus: views::clock::strip::Target,
     // The second on the loop's own clock at which the minute turns, or
     // nothing before the first tick. The clock draws a reading to the
     // minute, so this is the one frame it asks for.
@@ -112,7 +123,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         // The first read is the one a person waits for, so the run says
         // how long it took, the way the reader thread says it of a re-read.
         let started = std::time::Instant::now();
-        let home = screens::Screen::Home(home::Home::open(&mut source));
+        let home = screens::Screen::Home(home::Home::open(&mut source, &[]));
         let ms = started.elapsed().as_secs_f64() * 1_000.0;
         eprintln!("media-browser: the home page opened in {ms:.1} ms");
         let reader = reader::Reader::new(source.reader());
@@ -127,15 +138,18 @@ impl<S: Source, A: Art> Browser<S, A> {
             today: Date::today,
             bus: None,
             play_topic: String::new(),
+            audience: Audience::default(),
             asleep: false,
             surface_due: false,
             page: PAGE,
             clock: 0.0,
             rest: None,
             loading: None,
+            picker: None,
             level: volume::Level::default(),
             time: clock::now(),
             on_strip: false,
+            strip_focus: views::clock::strip::Target::default(),
             minute: None,
         }
     }
@@ -164,9 +178,68 @@ impl<S: Source, A: Art> Browser<S, A> {
         self
     }
 
+    /// The browser over this `Person` list, with the audience the run named
+    /// already answered. An empty list is a cluster with no `Person`, and
+    /// the browser then asks nobody and records nobody.
+    pub fn with_audience(mut self, people: Vec<Person>, preset: Vec<String>) -> Self {
+        self.audience = Audience::new(people);
+        if !preset.is_empty() {
+            self.audience.answer(preset, 0.0);
+        }
+        // The home page opened before the audience was known, so its
+        // continue-watching row is behind, and the loop's first pass reads
+        // the page again.
+        self.home_stale = true;
+        self
+    }
+
+    /// The people in the room, which the picker draws and a play request is
+    /// recorded against.
+    pub fn audience(&self) -> &Audience {
+        &self.audience
+    }
+
     /// Whether the shade is down. The frame is black while it is.
     pub fn asleep(&self) -> bool {
         self.asleep
+    }
+
+    // Raise the picker where the browser has no answer to who is watching.
+    // The answer is whether it went up, which is a frame to draw. A
+    // browser that knows no people never asks. Neither does one under the
+    // shade or under the loading state, because nobody sees a picker drawn
+    // there.
+    fn ask(&mut self) -> bool {
+        let due = self.picker.is_none()
+            && !self.asleep
+            && self.loading.is_none()
+            && self.audience.needs_answer(self.clock);
+        if due {
+            self.picker = Some(screens::audience::Picker::open(
+                self.audience.known().len(),
+                &[],
+            ));
+        }
+        due
+    }
+
+    // Take the picker's answer: set who is watching, drop the gate, and
+    // read again for the new people. The home page goes through its own
+    // reader, and the screen on top reads its progress here, because both
+    // were read for whoever was watching before.
+    fn answered(&mut self, chosen: Vec<usize>) {
+        let names = chosen
+            .into_iter()
+            .filter_map(|index| self.audience.known().get(index))
+            .map(|person| person.name.clone())
+            .collect();
+        self.audience.answer(names, self.clock);
+        self.picker = None;
+        self.home_stale = true;
+        let people = self.audience.current(self.clock).to_vec();
+        if let Some(top) = self.stack.last_mut() {
+            top.read_progress(&mut self.source, &people);
+        }
     }
 
     // Fold one moment in. A press is a key by another route, and the
@@ -218,13 +291,15 @@ impl<S: Source, A: Art> Browser<S, A> {
     // behind: a change the source reported, or a day other than the one
     // it was read on. A read in place lands on this call, and a read on
     // the thread lands on a later pass.
-    fn refresh_home(&mut self) {
+    // The answer is whether a page landed, which is a frame to draw.
+    fn refresh_home(&mut self) -> bool {
         let today = (self.today)();
         if !self.home_stale && self.home_date == today {
-            return;
+            return false;
         }
-        self.reader.ask(&mut self.source, today);
-        self.landed_home();
+        let people = self.audience.current(self.clock).to_vec();
+        self.reader.ask(&mut self.source, today, people);
+        self.landed_home()
     }
 
     // Take the page the reader answered, where one landed. The answer is
@@ -267,7 +342,7 @@ impl<S: Source, A: Art> Browser<S, A> {
     // The answer is whether the catalog resolved a film, and not whether
     // the request went out. A run with no bus browses the same way, and
     // the page it draws while it waits is the same page.
-    fn request_play(&mut self, library: &str, selection: &Selection) -> bool {
+    fn request_play(&mut self, library: &str, selection: &Selection, start: Option<i64>) -> bool {
         let items = self.source.play(library, selection);
         if items.is_empty() {
             eprintln!(
@@ -276,6 +351,9 @@ impl<S: Source, A: Art> Browser<S, A> {
             );
             return false;
         }
+        // The work is read before the bus is borrowed, because the read
+        // wants the source and the publish holds a borrow of the bus.
+        let identity = self.source.identity(library, selection);
         let Some(bus) = &self.bus else {
             return true;
         };
@@ -289,7 +367,17 @@ impl<S: Source, A: Art> Browser<S, A> {
         // A request is an event, so it is not retained: a broker that
         // held the last one would replay it to the operator on every
         // reconnect.
-        bus.publish(&self.play_topic, play::payload(library, &items), false);
+        bus.publish(
+            &self.play_topic,
+            play::payload(
+                library,
+                &items,
+                self.audience.current(self.clock),
+                &identity,
+                start,
+            ),
+            false,
+        );
         true
     }
 
@@ -298,24 +386,69 @@ impl<S: Source, A: Art> Browser<S, A> {
     // screen carries it in the same place. The field is the search
     // wall's own, read off the top screen.
     fn strip(&self) -> Option<views::clock::strip::Strip<'_>> {
+        // Focus falls back to the glass where no circles are drawn, so the
+        // mark never goes around nothing.
+        let focus = match self.circles() {
+            true => self.strip_focus,
+            false => views::clock::strip::Target::Glass,
+        };
         (!self.asleep).then(|| views::clock::strip::Strip {
             time: self.time,
             field: self.top().field(),
-            focused: self.on_strip,
+            focus: self.on_strip.then_some(focus),
+            letters: self.audience.letters(self.clock),
         })
     }
 
-    // One press while the strip holds focus. Select opens the search
-    // wall with the grid, or shows the grid on a search wall. Down gives
-    // focus back to the screen. A word that edits the field types into
-    // it on a search wall and gives focus back with it. Every other
-    // word, the arrows included, moves nothing.
+    // Whether the strip draws the circles of the room: where somebody is
+    // watching and no search field stands over the same band.
+    fn circles(&self) -> bool {
+        !self.audience.current(self.clock).is_empty() && self.top().field().is_none()
+    }
+
+    // Put the browser's focus on the strip, at the glass, which is where a
+    // screen hands focus up to.
+    fn enter_strip(&mut self) {
+        self.on_strip = true;
+        self.strip_focus = views::clock::strip::Target::Glass;
+    }
+
+    // Give focus back to the screen, and leave the strip at the glass for
+    // the next press that reaches it.
+    fn leave_strip(&mut self) {
+        self.on_strip = false;
+        self.strip_focus = views::clock::strip::Target::Glass;
+    }
+
+    // One press while the strip holds focus. Left from the glass reaches
+    // the circles of the room, where there are any, and right returns to
+    // the glass. Select on the circles asks who is watching again, with the
+    // room already chosen. Select on the glass opens the search wall with
+    // the grid, or shows the grid on a search wall. Down gives focus back
+    // to the screen. A word that edits the field types into it on a search
+    // wall and gives focus back with it. Every other word moves nothing.
     fn on_strip(&mut self, name: &str) -> bool {
-        match name {
-            "enter" => {
+        use views::clock::strip::Target;
+        match (name, self.strip_focus) {
+            ("left", Target::Glass) if self.circles() => {
+                self.strip_focus = Target::Circles;
+                true
+            }
+            ("right", Target::Circles) => {
+                self.strip_focus = Target::Glass;
+                true
+            }
+            ("enter", Target::Circles) => {
+                self.picker = Some(screens::audience::Picker::open(
+                    self.audience.known().len(),
+                    &self.audience.chosen(self.clock),
+                ));
+                true
+            }
+            ("enter", _) => {
                 match self.top().searching() {
                     true => {
-                        self.on_strip = false;
+                        self.leave_strip();
                         let top = self.stack.last_mut().unwrap_or(&mut self.home);
                         top.show_grid();
                     }
@@ -323,12 +456,12 @@ impl<S: Source, A: Art> Browser<S, A> {
                 }
                 true
             }
-            "down" => {
-                self.on_strip = false;
+            ("down", _) => {
+                self.leave_strip();
                 true
             }
             _ if views::field::edits(name) && self.top().searching() => {
-                self.on_strip = false;
+                self.leave_strip();
                 self.on_screen(name)
             }
             _ => false,
@@ -343,7 +476,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         let still = matches!(step, Step::Still);
         self.take(step);
         if still && name == "up" {
-            self.on_strip = true;
+            self.enter_strip();
             return true;
         }
         !still
@@ -365,6 +498,9 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     }
 
     fn key(&mut self, name: &str) -> bool {
+        // Every press holds the audience's answer open, whatever the press
+        // then does, because a person at the remote is a person in the room.
+        self.audience.touch(self.clock);
         // A press during the loading state reaches no screen under it.
         // Back exits the state here and now, and cancels nothing: the
         // `Play` this browser asked for is the operator's to run.
@@ -374,11 +510,23 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             }
             return true;
         }
+        // The picker takes every press while it stands, and the press that
+        // raises it does nothing else, so a room that answered hours ago
+        // never plays under the last room's name.
+        if self.ask() {
+            return true;
+        }
+        if let Some(picker) = &mut self.picker {
+            if let Some(chosen) = picker.key(name) {
+                self.answered(chosen);
+            }
+            return true;
+        }
         let mut changed = true;
         match name {
             // Escape on the strip gives focus back to the screen and pops
             // nothing, because the strip is over the stack and not on it.
-            "escape" if self.on_strip => self.on_strip = false,
+            "escape" if self.on_strip => self.leave_strip(),
             // The screen on top is asked first, because a search wall
             // reads backspace as a deleted character, and escape as the
             // grid closed or the text cleared. Every other screen takes
@@ -430,14 +578,22 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         let folded = self.drain_bus();
         let delivered = self.store.get_mut().delivered();
         let landed = self.landed_home();
-        if !self.source.changed() {
-            return folded || delivered || landed;
+        if self.source.changed() {
+            // A change marks the home page behind whether or not a page
+            // covers it, because back pops to the home page with no read of
+            // its own.
+            self.home_stale = true;
+            self.reread_top();
+            return true;
         }
-        // A change marks the home page behind whether or not a page covers
-        // it, because back pops to the home page with no read of its own.
-        self.home_stale = true;
-        self.reread_top();
-        true
+        // A home page behind the audience it was read for is asked for
+        // here, so a run that names an audience and takes no press still
+        // draws the continue-watching row. A read already in flight is left
+        // to land, because the ask would otherwise repeat on every pass of
+        // the loop.
+        let refreshed = !self.reader.reading() && self.refresh_home();
+        let asked = self.ask();
+        folded || delivered || landed || refreshed || asked
     }
 
     // The source, the art store, the home page's reader, and the bus
@@ -471,6 +627,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // clock the harness drives every frame with.
     fn tick(&mut self, at: f64) {
         self.clock = at;
+        self.ask();
         self.time = clock::now();
         self.minute = Some(at + clock::seconds_to_next_minute());
         if self.loading.is_some_and(|state| state.done(at)) {
@@ -505,6 +662,17 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
                 .height(Length::Fill)
                 .into(),
         ];
+        if let Some(picker) = &self.picker {
+            layers.push(
+                canvas(screens::audience::Layer {
+                    people: self.audience.known(),
+                    picker,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            );
+        }
         if let Some(row) = self.level.row(self.clock) {
             layers.push(canvas(row).width(Length::Fill).height(Length::Fill).into());
         }

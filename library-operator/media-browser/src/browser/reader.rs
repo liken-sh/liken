@@ -26,8 +26,9 @@ pub struct Reader {
     landed: Option<Page>,
     // Whether a read is in flight on the thread.
     reading: bool,
-    // The date of the read that is due after the one in flight.
-    due: Option<Date>,
+    // The date and the audience of the read that is due after the one in
+    // flight.
+    due: Option<Ask>,
     // Whether each read prints the milliseconds it took.
     timed: Arc<AtomicBool>,
 }
@@ -51,19 +52,29 @@ impl Reader {
         self.timed.store(timed, Ordering::Relaxed);
     }
 
-    /// Ask for one page of this date. A read already in flight is left
-    /// to land, and one read follows it.
-    pub fn ask(&mut self, source: &mut dyn Source, today: Date) {
+    /// Ask for one page of this date, for these people. A read already in
+    /// flight is left to land, and one read follows it.
+    pub fn ask(&mut self, source: &mut dyn Source, today: Date, people: Vec<String>) {
+        let ask = Ask {
+            date: today,
+            people,
+        };
         let Some(thread) = &self.thread else {
-            self.landed = Some(read(source, today, &self.timed));
+            self.landed = Some(read(source, &ask, &self.timed));
             return;
         };
         if self.reading {
-            self.due = Some(today);
+            self.due = Some(ask);
             return;
         }
         self.reading = true;
-        let _ = thread.asks.send(today);
+        let _ = thread.asks.send(ask);
+    }
+
+    /// Whether a read is in flight, so a caller that asks on every pass of
+    /// the loop does not queue a second read behind the one that runs.
+    pub fn reading(&self) -> bool {
+        self.reading
     }
 
     /// The page that landed, or nothing while none has. A read that was
@@ -75,10 +86,10 @@ impl Reader {
                 self.reading = false;
             }
             if !self.reading
-                && let Some(date) = self.due.take()
+                && let Some(ask) = self.due.take()
             {
                 self.reading = true;
-                let _ = thread.asks.send(date);
+                let _ = thread.asks.send(ask);
             }
         }
         self.landed.take()
@@ -93,10 +104,17 @@ impl Reader {
     }
 }
 
-// The thread over the second source: the dates it reads on, the pages
+// What one read is asked for: the date the day's draw is seeded by, and the
+// people the continue-watching row is read for.
+struct Ask {
+    date: Date,
+    people: Vec<String>,
+}
+
+// The thread over the second source: the asks it reads on, the pages
 // it answers, and the handle it wakes the loop with.
 struct Thread {
-    asks: Sender<Date>,
+    asks: Sender<Ask>,
     pages: Receiver<Page>,
     wake: Arc<Mutex<Option<Waker>>>,
 }
@@ -106,13 +124,13 @@ impl Thread {
     // closes with it and the read loop ends there. A read in flight at
     // that moment finishes and is dropped with the channel.
     fn spawn(mut source: Box<dyn Source + Send>, timed: Arc<AtomicBool>) -> Self {
-        let (asks, dates) = mpsc::channel::<Date>();
+        let (asks, dates) = mpsc::channel::<Ask>();
         let (answers, pages) = mpsc::channel::<Page>();
         let wake = Arc::new(Mutex::new(None));
         let woken: Arc<Mutex<Option<Waker>>> = wake.clone();
         thread::spawn(move || {
-            while let Ok(date) = dates.recv() {
-                let page = read(&mut *source, date, &timed);
+            while let Ok(ask) = dates.recv() {
+                let page = read(&mut *source, &ask, &timed);
                 let _ = answers.send(page);
                 // The page is sent before the wake fires, so the pass the
                 // wake starts takes a page that is already in the channel.
@@ -130,9 +148,9 @@ impl Thread {
 }
 
 // One read, and the milliseconds it took where the run measures them.
-fn read(source: &mut dyn Source, today: Date, timed: &AtomicBool) -> Page {
+fn read(source: &mut dyn Source, ask: &Ask, timed: &AtomicBool) -> Page {
     let started = Instant::now();
-    let page = home::read(source, today);
+    let page = home::read(source, ask.date, &ask.people);
     if timed.load(Ordering::Relaxed) {
         let ms = started.elapsed().as_secs_f64() * 1_000.0;
         eprintln!("media-browser: the home page read in {ms:.1} ms");

@@ -2,7 +2,7 @@
 // page has scrolled to hold the block that has focus.
 
 use super::*;
-use crate::catalog::{CreditSlot, Credits, FileFacts};
+use crate::catalog::{CreditSlot, Credits, FileFacts, Progress};
 use crate::screens::foot;
 use crate::screens::movie::Set;
 use crate::screens::stripes::Stripes;
@@ -67,6 +67,7 @@ fn crowded(focus: Focus) -> Movie {
                 ..FileFacts::default()
             }],
         ),
+        progress: None,
         set: Some(Set {
             heading: "The Set".into(),
             members: vec![Item {
@@ -86,6 +87,7 @@ fn crowded(focus: Focus) -> Movie {
                 art: String::new(),
                 tiles: Vec::new(),
                 new: 0,
+                progress: None,
             }],
             current: 0,
         }),
@@ -95,6 +97,58 @@ fn crowded(focus: Focus) -> Movie {
 
 fn blocks(movie: &Movie) -> Blocks {
     Blocks::of(movie, WIDTH * COLUMN, WIDTH - 2.0 * MARGIN, HEIGHT * TOP)
+}
+
+// The top of the set strip, the block the button row's own block stands
+// over.
+fn strip_top(movie: &Movie) -> f32 {
+    blocks(movie).strip.expect("the page draws a set strip").top
+}
+
+#[test]
+fn the_bar_under_the_button_row_holds_a_band_of_its_own() {
+    let plain = crowded(Focus::Buttons(0));
+    let mut reached = crowded(Focus::Buttons(0));
+    reached.progress = Some(Progress {
+        position: 900,
+        duration: 6_720,
+        ..Progress::default()
+    });
+    let finished = Movie {
+        progress: Some(Progress {
+            finished: true,
+            ..Progress::default()
+        }),
+        ..crowded(Focus::Buttons(0))
+    };
+
+    assert!(strip_top(&reached) > strip_top(&plain));
+    assert_eq!(strip_top(&finished), strip_top(&plain));
+}
+
+// The words of the row a film the audience is in the middle of draws, and
+// where the row starts on the page.
+const WORDS: [&str; 3] = ["Resume", "Start over", "Trailer"];
+const AT: Point = Point::new(MARGIN, 640.0);
+
+#[test]
+fn the_row_spans_the_first_button_to_the_last() {
+    let row = row(&WORDS, AT);
+    let last = buttons::button(&WORDS, WORDS.len() - 1, AT);
+
+    assert_eq!(row.x, buttons::button(&WORDS, 0, AT).x);
+    assert_eq!(row.x + row.width, last.x + last.width);
+    assert_eq!(row.height, buttons::HEIGHT);
+}
+
+#[test]
+fn the_bar_spans_the_button_row_and_stands_a_lead_under_it() {
+    let row = row(&WORDS, AT);
+    let (bar, _) = progress::bar(track(row), 0.5);
+
+    assert_eq!(bar.x, row.x);
+    assert_eq!(bar.width, row.width);
+    assert_eq!(bar.y, row.y + row.height + BAR_LEAD);
 }
 
 #[test]
