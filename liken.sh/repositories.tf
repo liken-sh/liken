@@ -5,8 +5,10 @@
 # separate settings pages, and a new repository started from none of
 # them. Now a new repository is one entry in the map below.
 #
-# The resources adopt the existing repositories through the import
-# blocks at the bottom; nothing here creates or deletes a repository.
+# The resources create a repository that is new to the map, and nothing
+# here deletes one. The repositories that predate this file were
+# adopted into the state once, so an entry and its real repository
+# always match by name.
 # The zone's records for the sites are above in terraform.tf, in the
 # extension_operators set, so the DNS half and the Pages half of every
 # site read from the same directory.
@@ -61,6 +63,11 @@ locals {
       description = "People as a fact of liken clusters: the Person CRD"
       cname       = "people.liken.sh"
       topics      = ["liken", "kubernetes", "crd", "identity"]
+    }
+    per-node-csi-driver = {
+      description = "Volumes with one copy on every node, for replicated stores and caches on liken clusters"
+      cname       = "per-node.liken.sh"
+      topics      = ["liken", "kubernetes", "csi", "csi-driver", "storage"]
     }
     log = {
       description = "The liken devlog"
@@ -135,24 +142,4 @@ resource "github_repository_pages" "sites" {
   build_type     = "workflow"
   cname          = each.value
   https_enforced = true
-}
-
-# Adoption. Each existing repository and site maps onto its entry by
-# name; the first apply records the identity and changes only what the
-# resources state differently.
-import {
-  for_each = local.repositories
-  to       = github_repository.repositories[each.key]
-  id       = each.key
-}
-
-# The five manual sites predate this file, so their Pages
-# configurations import. A site added after adoption (the devlog, the
-# git CSI driver, the library operator, the people operator) is
-# created by the resource instead, and an import for it would fail,
-# because there is nothing to import yet.
-import {
-  for_each = { for name, repo in local.repositories : name => repo.cname if repo.cname != null && name != "log" && name != "git-csi-driver" && name != "library-operator" && name != "people-operator" }
-  to       = github_repository_pages.sites[each.key]
-  id       = each.key
 }

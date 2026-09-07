@@ -207,7 +207,8 @@ resource "linode_domain_record" "www" {
 # driver's name. library-operator publishes no devices, so its
 # manual answers at library.liken.sh, the name of what it operates:
 # the media libraries of a cluster. people-operator's manual answers
-# at people.liken.sh on the same rule. A subdomain can CNAME where the apex
+# at people.liken.sh on the same rule, and per-node-csi-driver's at
+# per-node.liken.sh, the name of its StorageClass. A subdomain can CNAME where the apex
 # cannot, so each name points at the organization's Pages hostname,
 # and GitHub routes the request to the repository that claims the
 # name as its custom domain. The Pages verification record below
@@ -223,20 +224,13 @@ resource "linode_domain_record" "extension_operators" {
     "git",
     "library",
     "people",
+    "per-node",
   ])
 
   domain_id   = linode_domain.liken_sh.id
   name        = each.value
   record_type = "CNAME"
   target      = "liken-sh.github.io"
-}
-
-# The three hardware records lived under the name hardware_operators
-# before media joined the set. This block maps their state onto the
-# wider name, so an apply renames them instead of recreating them.
-moved {
-  from = linode_domain_record.hardware_operators
-  to   = linode_domain_record.extension_operators
 }
 
 # The devlog at log.liken.sh is a Pages site like the manuals, but it
