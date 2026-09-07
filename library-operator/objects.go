@@ -487,6 +487,9 @@ type VolumeMount struct {
 	Name      string `json:"name"`
 	MountPath string `json:"mountPath"`
 	ReadOnly  bool   `json:"readOnly,omitempty"`
+	// SubPath mounts one directory of the volume, so two agents keep
+	// their files on one claim without seeing each other's.
+	SubPath string `json:"subPath,omitempty"`
 }
 
 // A scan pod carries two volumes: the library's claim, mounted
@@ -503,6 +506,23 @@ type Volume struct {
 	Name                  string                             `json:"name"`
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
 	EmptyDir              *EmptyDirVolumeSource              `json:"emptyDir,omitempty"`
+	ConfigMap             *ConfigMapVolumeSource             `json:"configMap,omitempty"`
+}
+
+// A ConfigMap projected as files, one per key. Optional lets the pod
+// start before the map exists, with an empty directory in its place.
+type ConfigMapVolumeSource struct {
+	Name     string `json:"name"`
+	Optional *bool  `json:"optional,omitempty"`
+}
+
+// A ConfigMap. The operator writes one per screen namespace, the
+// people file the browser reads, and reads it back only to compare.
+type ConfigMap struct {
+	APIVersion string            `json:"apiVersion,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	Metadata   ObjectMeta        `json:"metadata"`
+	Data       map[string]string `json:"data,omitempty"`
 }
 
 // An emptyDir the kubelet creates with the pod and removes with it. A

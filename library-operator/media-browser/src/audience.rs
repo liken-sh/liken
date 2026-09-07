@@ -80,6 +80,15 @@ impl Audience {
         &self.known
     }
 
+    /// Replace the `Person` list. The answer stands: a person who was
+    /// chosen stays chosen, and one the new list dropped is filtered out
+    /// of what a play records the next time an answer is taken. The list
+    /// on disk changes when a `Person` is added, which is rare and never
+    /// worth a restart.
+    pub fn learn(&mut self, known: Vec<Person>) {
+        self.known = known;
+    }
+
     /// Set who is watching, as of this second. A name outside the known
     /// list is dropped, because a play recorded against a `Person` the
     /// cluster does not hold names nobody. A browser that knows no people

@@ -302,6 +302,10 @@ func servicesPath(namespace string) string {
 	return corePrefix + namespace + "/services"
 }
 
+func configMapsPath(namespace string) string {
+	return corePrefix + namespace + "/configmaps"
+}
+
 // ListLibraries answers a whole pass with one request, and the list's
 // resourceVersion is where the libraries watch resumes from.
 func ListLibraries(ctx context.Context, c *Client) (*LibraryList, error) {
@@ -621,6 +625,39 @@ func CreateService(ctx context.Context, c *Client, service *Service) (*Service, 
 // UpdateService writes the whole Service back. The resourceVersion in
 // the body makes the write conditional, so a Service that changed
 // underneath answers ErrConflict, and the next pass reads it again.
+func GetConfigMap(ctx context.Context, c *Client, namespace, name string) (*ConfigMap, error) {
+	configMap := &ConfigMap{}
+	if err := c.RequestJSON(ctx, http.MethodGet, configMapsPath(namespace)+"/"+name, nil, configMap); err != nil {
+		return nil, err
+	}
+	return configMap, nil
+}
+
+func CreateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*ConfigMap, error) {
+	body, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, err
+	}
+	created := &ConfigMap{}
+	if err := c.RequestJSON(ctx, http.MethodPost, configMapsPath(configMap.Metadata.Namespace), body, created); err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func UpdateConfigMap(ctx context.Context, c *Client, configMap *ConfigMap) (*ConfigMap, error) {
+	body, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, err
+	}
+	written := &ConfigMap{}
+	path := configMapsPath(configMap.Metadata.Namespace) + "/" + configMap.Metadata.Name
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
+}
+
 func UpdateService(ctx context.Context, c *Client, service *Service) (*Service, error) {
 	body, err := json.Marshal(service)
 	if err != nil {

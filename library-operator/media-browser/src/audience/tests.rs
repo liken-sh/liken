@@ -126,6 +126,25 @@ fn nobody_is_an_answer() {
 }
 
 #[test]
+fn a_new_person_list_keeps_the_answer_that_stands() {
+    let mut audience = audience(&["first", "second"]);
+    audience.answer(vec!["first".to_string()], 0.0);
+
+    audience.learn(
+        ["first", "second", "third"]
+            .iter()
+            .map(|name| Person {
+                name: (*name).to_string(),
+                display_name: (*name).to_string(),
+            })
+            .collect(),
+    );
+
+    assert_eq!(audience.known().len(), 3);
+    assert_eq!(audience.current(1.0), ["first".to_string()]);
+}
+
+#[test]
 fn a_name_the_person_list_does_not_hold_is_dropped() {
     let mut audience = audience(&["first"]);
 

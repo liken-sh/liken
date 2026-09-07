@@ -32,12 +32,22 @@ fallback is one agent and one file for both, which plan 14 set aside.
 
 ### The browser asks who is watching
 
-When the browser wakes from the idle screen after a sleep longer than
-a threshold, it draws the `Person` list and asks who is watching. The
-answer is the audience until the next sleep, and every play request
-carries it as `people`. The browser reads the `Person` list through
-the operator, which publishes it retained on the bus, because a
-screen pod holds no API credential.
+When the browser has no answer to who is watching, it draws the
+`Person` list and asks. The answer stands until three hours pass with
+no press, and every play request carries it as `people`. A press on
+the circles of the room's strip asks again with the room already
+chosen.
+
+The browser reads the `Person` list from a file, because a screen
+pod holds no API credential. The operator writes one `ConfigMap` per
+screen namespace from the `Person` objects, cut to the name and the
+display name the browser draws, owned by the namespace's `Catalog`
+where one stands. The pod projects it, and the browser reads the
+file again each time the picker opens, so a `Person` added later is
+offered within the kubelet's sync period and no pod restarts. The
+bus was weighed for this and set aside: a list that changes a few
+times a year is not worth a retained topic that a broker restart
+takes away until the message returns.
 
 ### The play request carries the work
 
@@ -57,9 +67,13 @@ Corrosion update stream wakes the redraw the way the catalog's does.
 
 ## What is not decided
 
-- The sleep threshold before the browser asks again, and how the
-  picker looks.
-- Default people per screen, and where that default lives.
-- The finished threshold, and how the browser picks the next episode
-  from a `Watch`'s last recorded row.
+- Default people per screen, and where that default lives. A living
+  room asks every time on purpose; a bedroom might not want to.
 - Retention of history rows.
+
+## What was decided in the build
+
+- The answer lapses after three hours with no press.
+- Finished is a position at or past ninety percent of the duration.
+- A finished episode continues at the next episode in the series;
+  a finished movie leaves the continue row.

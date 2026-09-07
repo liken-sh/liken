@@ -82,6 +82,10 @@ pub struct Options {
     /// Every `Person` the cluster holds. An empty list means no name is
     /// checked against it.
     pub people: Vec<audience::Person>,
+    /// Where that list was read from, so the browser reads it again each
+    /// time it asks who is watching. A list in a pod is a projected
+    /// ConfigMap that the kubelet rewrites when a `Person` is added.
+    pub people_file: Option<PathBuf>,
     /// The people watching at the start of the run, by `Person` name. An
     /// empty audience reads the plays that name nobody.
     pub audience: Vec<String>,
@@ -130,6 +134,7 @@ impl Default for Options {
             progress: None,
             progress_updates: None,
             people: Vec::new(),
+            people_file: None,
             audience: Vec::new(),
             print_progress: false,
             library_roots: Vec::new(),
@@ -168,7 +173,11 @@ impl Options {
                 "--updates" => options.updates = Some(value()?),
                 "--progress" => options.progress = Some(PathBuf::from(value()?)),
                 "--progress-updates" => options.progress_updates = Some(value()?),
-                "--people" => options.people = read_people(&value()?)?,
+                "--people" => {
+                    let path = value()?;
+                    options.people = read_people(&path)?;
+                    options.people_file = Some(PathBuf::from(path));
+                }
                 "--audience" => options.audience = parse_audience(&value()?),
                 "--print-progress" => options.print_progress = true,
                 "--library-root" => options.library_roots.push(parse_root(&value()?)?),

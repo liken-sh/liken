@@ -117,7 +117,9 @@ namespace. Its grants are read and status writes on this operator's
 own resources, read on `media-operator`'s `Player` and
 `MediaPreferences`, create and patch on `Play`, patch on
 `people.liken.sh`'s `Person` for one finalizer, and create and delete
-on the claims, pods, `Jobs`, `CronJobs`, and `Services` it owns.
+on the claims, pods, `Jobs`, `CronJobs`, `Services`, and the one
+`ConfigMap` per screen namespace it owns, which carries the `Person`
+list every screen reads.
 
 This site serves the same files as raw YAML, so a clone is never
 needed: [`libraries-crd.yaml`](/deploy/libraries-crd.yaml),

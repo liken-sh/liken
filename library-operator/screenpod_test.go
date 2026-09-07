@@ -129,6 +129,8 @@ func TestScreenPodBrowserReadsTheCatalogAndEveryLibraryRoot(t *testing.T) {
 		t.Errorf("image = %q, want %q", browser.Image, testBrowserImage)
 	}
 	want := "--catalog /var/lib/corrosion/state.db --updates http://127.0.0.1:8080 " +
+		"--progress /var/lib/progress/state.db --progress-updates http://127.0.0.1:8081 " +
+		"--people /etc/library/people/people.json " +
 		"--cache-dir /var/cache/media-browser --cache-budget 2013265920 " +
 		"--library-root house/films=/libraries/films/exports/films " +
 		"--library-root house/shows=/libraries/shows"
@@ -295,16 +297,42 @@ func TestScreenPodWithNoLibrariesMountsNone(t *testing.T) {
 	pod := testScreenPod(denScreen(), nil)
 
 	browser := pod.Spec.Containers[0]
-	if len(browser.VolumeMounts) != 2 || browser.VolumeMounts[0].Name != catalogVolumeName ||
-		browser.VolumeMounts[1].Name != artCacheVolumeName {
-		t.Errorf("volumeMounts = %+v, want the catalog and art cache", browser.VolumeMounts)
+	if len(browser.VolumeMounts) != 4 || browser.VolumeMounts[0].Name != catalogVolumeName ||
+		browser.VolumeMounts[1].Name != catalogVolumeName ||
+		browser.VolumeMounts[2].Name != artCacheVolumeName ||
+		browser.VolumeMounts[3].Name != peopleVolumeName {
+		t.Errorf("volumeMounts = %+v, want the catalog twice, the art cache, and the people", browser.VolumeMounts)
 	}
 	if strings.Contains(strings.Join(browser.Args, " "), "--library-root") {
 		t.Errorf("args = %v, want no library root", browser.Args)
 	}
-	if len(pod.Spec.Volumes) != 2 || pod.Spec.Volumes[0].Name != catalogVolumeName ||
-		pod.Spec.Volumes[1].Name != artCacheVolumeName {
-		t.Errorf("volumes = %+v, want the catalog and art cache", pod.Spec.Volumes)
+	if len(pod.Spec.Volumes) != 3 || pod.Spec.Volumes[0].Name != catalogVolumeName ||
+		pod.Spec.Volumes[1].Name != artCacheVolumeName || pod.Spec.Volumes[2].Name != peopleVolumeName {
+		t.Errorf("volumes = %+v, want the catalog, the art cache, and the people", pod.Spec.Volumes)
+	}
+}
+
+// The progress agent's file lives in one directory of the catalog claim,
+// and the browser mounts that same directory at the path its --progress
+// argument names. The people file is a ConfigMap the pod can start
+// without, mounted read-only.
+func TestScreenPodBrowserMountsTheProgressDirectoryAndThePeopleFile(t *testing.T) {
+	pod := testScreenPod(denScreen(), nil)
+
+	browser := pod.Spec.Containers[0]
+	progress := browser.VolumeMounts[1]
+	if progress.MountPath != progressStatePath || progress.SubPath != screenProgressSubPath || progress.ReadOnly {
+		t.Errorf("progress mount = %+v, want %s on the %s directory of the claim, writable",
+			progress, progressStatePath, screenProgressSubPath)
+	}
+	people := browser.VolumeMounts[3]
+	if people.MountPath != peopleMountPath || !people.ReadOnly {
+		t.Errorf("people mount = %+v, want %s read-only", people, peopleMountPath)
+	}
+	volume := pod.Spec.Volumes[2]
+	if volume.ConfigMap == nil || volume.ConfigMap.Name != peopleConfigMapName ||
+		volume.ConfigMap.Optional == nil || !*volume.ConfigMap.Optional {
+		t.Errorf("people volume = %+v, want the optional %s map", volume, peopleConfigMapName)
 	}
 }
 
@@ -406,8 +434,8 @@ func TestScreenPodBrowserArmsTheWatchdogAndRunsUnprivileged(t *testing.T) {
 func TestScreenPodRunsTheSameCatalogSidecar(t *testing.T) {
 	pod := testScreenPod(denScreen(), houseLibraries())
 
-	if len(pod.Spec.InitContainers) != 1 {
-		t.Fatalf("initContainers = %d, want the catalog sidecar", len(pod.Spec.InitContainers))
+	if len(pod.Spec.InitContainers) != 2 {
+		t.Fatalf("initContainers = %d, want the catalog and progress sidecars", len(pod.Spec.InitContainers))
 	}
 	sidecar := pod.Spec.InitContainers[0]
 	if sidecar.Name != catalogContainer || sidecar.Image != testCorrosionImage {
@@ -421,6 +449,96 @@ func TestScreenPodRunsTheSameCatalogSidecar(t *testing.T) {
 	}
 }
 
+// The second sidecar is the progress store's own agent, with its file on
+// the screen's catalog claim in a directory of its own, so the screen's
+// two agents share one claim and neither sees the other's files. The pod
+// carries the progress member label, so the namespace's progress
+// EndpointSlice names it as a peer.
+func TestScreenPodRunsTheProgressSidecarOnTheCatalogClaim(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	sidecar := pod.Spec.InitContainers[1]
+	if sidecar.Name != progressContainer || sidecar.Image != testCorrosionImage {
+		t.Errorf("sidecar = %q on %q, want the progress agent", sidecar.Name, sidecar.Image)
+	}
+	if sidecar.RestartPolicy != "Always" || sidecar.StartupProbe == nil {
+		t.Errorf("sidecar = %+v, want a native sidecar with a startup probe", sidecar)
+	}
+	if strings.Join(sidecar.Args, " ") != "agent --config "+progressConfigPath {
+		t.Errorf("args = %v, want the progress configuration", sidecar.Args)
+	}
+	mount := sidecar.VolumeMounts
+	if len(mount) != 1 || mount[0].Name != catalogVolumeName || mount[0].MountPath != progressStatePath ||
+		mount[0].SubPath != screenProgressSubPath {
+		t.Errorf("volumeMounts = %+v, want the %s directory of the catalog claim at %s",
+			mount, screenProgressSubPath, progressStatePath)
+	}
+	if pod.Metadata.Labels[progressMemberLabelKey] != progressMemberLabelValue {
+		t.Errorf("labels = %v, want the progress member label", pod.Metadata.Labels)
+	}
+}
+
+// The pass writes the namespace's people file before it stands a pod,
+// cut to the two fields the browser draws, in name order, and owned
+// by the namespace's Catalog. A later pass with the same people
+// rewrites nothing, and one with a new Person rewrites the file.
+func TestReconcileScreensWritesThePeopleFileOfTheNamespace(t *testing.T) {
+	cluster := newFakeCluster()
+	boundHouse(cluster)
+	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	operator := testOperator(t, cluster)
+	people := []Person{
+		{Metadata: ObjectMeta{Name: "thora"}, Spec: PersonSpec{DisplayName: "Thora"}},
+		{Metadata: ObjectMeta{Name: "chris"}},
+		{Metadata: ObjectMeta{Name: "gone", DeletionTimestamp: "2026-09-07T00:00:00Z"}},
+	}
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
+		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+
+	written := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
+	if written == nil {
+		t.Fatal("no people map was written")
+	}
+	want := `[{"name":"chris","displayName":"chris"},{"name":"thora","displayName":"Thora"}]`
+	if got := written.Data[peopleFileName]; got != want {
+		t.Errorf("people = %s, want %s", got, want)
+	}
+	if len(written.Metadata.OwnerReferences) != 1 || written.Metadata.OwnerReferences[0].Kind != "Catalog" {
+		t.Errorf("owners = %+v, want the namespace's Catalog", written.Metadata.OwnerReferences)
+	}
+
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
+		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+	if got := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName).Metadata.ResourceVersion; got != "1" {
+		t.Errorf("resourceVersion = %s after an unchanged pass, want 1", got)
+	}
+
+	people = append(people, Person{Metadata: ObjectMeta{Name: "io"}, Spec: PersonSpec{DisplayName: "Io"}})
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
+		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+	rewritten := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
+	if rewritten.Metadata.ResourceVersion != "2" || !strings.Contains(rewritten.Data[peopleFileName], `"io"`) {
+		t.Errorf("people = %+v, want the file rewritten with io", rewritten)
+	}
+}
+
+// A namespace with no Catalog gets the file too, unowned, so a screen on
+// an emptyDir still knows its people.
+func TestReconcileScreensWritesAnUnownedPeopleFileWithNoCatalog(t *testing.T) {
+	cluster := newFakeCluster()
+	seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+	people := []Person{{Metadata: ObjectMeta{Name: "chris"}}}
+
+	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
+		[]Player{*cluster.players["den-tv"]}, nil, people, nil, testNow)
+
+	written := cluster.heldConfigMap(testLibraryNamespace, peopleConfigMapName)
+	if written == nil || len(written.Metadata.OwnerReferences) != 0 {
+		t.Errorf("people map = %+v, want an unowned map", written)
+	}
+}
+
 // A pass stands one pod per delegated Player, stamped with the template
 // hash a later pass compares against, and it mounts the Libraries of
 // that Player's namespace and no other.
@@ -431,7 +549,7 @@ func TestReconcileScreensStandsAPodForADelegatedPlayer(t *testing.T) {
 	operator := testOperator(t, cluster)
 
 	operator.reconcileScreens(t.Context(), testLibraryNamespace, cluster.catalogs["house-catalog"],
-		[]Player{*cluster.players["den-tv"]}, []Library{*cluster.libraries["movies"]}, nil, testNow)
+		[]Player{*cluster.players["den-tv"]}, []Library{*cluster.libraries["movies"]}, nil, nil, testNow)
 
 	pod := cluster.heldPod("den-tv-media-browser")
 	if pod == nil {
@@ -465,7 +583,7 @@ func TestReconcileScreensStopsThePodOfAPlayerItNoLongerServes(t *testing.T) {
 			}
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
-				[]Player{*player}, nil, []Pod{*cluster.pods["den-tv-media-browser"]}, testNow)
+				[]Player{*player}, nil, nil, []Pod{*cluster.pods["den-tv-media-browser"]}, testNow)
 
 			if cluster.heldPod("den-tv-media-browser") != nil {
 				t.Error("the screen pod still stands for a Player this operator does not serve")
@@ -482,7 +600,7 @@ func TestReconcileScreensSendsNoDeleteWhenNoPodStands(t *testing.T) {
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, "media.liken.sh/idle-screen")
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
-		[]Player{*player}, nil, nil, testNow)
+		[]Player{*player}, nil, nil, nil, testNow)
 
 	if got := cluster.countRequests(http.MethodDelete, "pods"); got != 0 {
 		t.Errorf("the pass sent %d deletes for a Player with no pod", got)
@@ -499,13 +617,13 @@ func TestReconcileScreensReplacesAStalePod(t *testing.T) {
 	cluster.pods["den-tv-media-browser"] = stale
 	operator := testOperator(t, cluster)
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
 
 	if cluster.heldPod("den-tv-media-browser") != nil {
 		t.Fatal("the stale pod still stands")
 	}
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
 
 	replacement := cluster.heldPod("den-tv-media-browser")
 	if replacement == nil {
@@ -522,9 +640,9 @@ func TestReconcileScreensKeepsAMatchingPod(t *testing.T) {
 	cluster := newFakeCluster()
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
 	operator := testOperator(t, cluster)
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
 
-	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, testNow)
+	operator.reconcileScreens(t.Context(), testLibraryNamespace, nil, []Player{*player}, nil, nil, nil, testNow)
 
 	if cluster.countRequests(http.MethodDelete, "pods") != 0 {
 		t.Error("the pass deleted a pod that matched the template")
@@ -553,7 +671,7 @@ func TestReconcileScreensReadsOneNamespace(t *testing.T) {
 	}
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
-		[]Player{*house, *studio}, libraries, nil, testNow)
+		[]Player{*house, *studio}, libraries, nil, nil, testNow)
 
 	if cluster.heldPod("studio-tv-media-browser") != nil {
 		t.Error("the pass stood a pod for a Player in another namespace")
@@ -598,7 +716,7 @@ func TestReconcileScreensCarriesOnPastAFailure(t *testing.T) {
 			cluster.broken[one.path] = http.StatusInternalServerError
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, one.catalog,
-				[]Player{*broken, *standing}, nil, nil, testNow)
+				[]Player{*broken, *standing}, nil, nil, nil, testNow)
 
 			if cluster.heldPod("kitchen-tv-media-browser") == nil {
 				t.Error("the pass stopped at the broken Player")

@@ -110,6 +110,35 @@ fn the_first_frame_asks_who_is_watching() {
     assert!(browser.picker.is_some());
 }
 
+// The list on disk is read again each time the picker opens, so a
+// `Person` added after the run started is offered, and a file that went
+// bad leaves the list the browser holds.
+#[test]
+fn the_picker_reads_the_person_list_again_when_it_opens() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("people.json");
+    let (browser, _bus) = watching(&["first"], &[]);
+    let mut browser = browser.with_people_file(Some(path.clone()));
+
+    std::fs::write(
+        &path,
+        r#"[{"name":"first","displayName":"First"},{"name":"second","displayName":"Second"}]"#,
+    )
+    .unwrap();
+    browser.tick(0.0);
+
+    assert!(browser.picker.is_some());
+    assert_eq!(browser.audience().known().len(), 2);
+
+    std::fs::write(&path, "not json").unwrap();
+    browser.key("escape");
+    browser.key("up");
+    browser.key("left");
+    browser.key("enter");
+
+    assert_eq!(browser.audience().known().len(), 2);
+}
+
 #[test]
 fn a_run_that_names_the_audience_asks_nobody() {
     let (mut browser, _bus) = watching(&["first", "second"], &["first"]);

@@ -71,6 +71,9 @@ pub struct Browser<S: Source, A: Art> {
     // request is recorded against them, and every progress read is for
     // them.
     audience: Audience,
+    // Where the `Person` list is read from again each time the picker
+    // opens, or nothing on a run that named no file.
+    people_file: Option<std::path::PathBuf>,
     // Whether the shade is down. The browser never decides it: it asks for
     // the shade, the crate decides, and the moment comes back here.
     asleep: bool,
@@ -151,6 +154,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             bus: None,
             play_topic: String::new(),
             audience: Audience::default(),
+            people_file: None,
             asleep: false,
             covered: false,
             surface_due: false,
@@ -207,10 +211,37 @@ impl<S: Source, A: Art> Browser<S, A> {
         self
     }
 
+    /// Read the `Person` list again from this file each time the picker
+    /// opens.
+    pub fn with_people_file(mut self, path: Option<std::path::PathBuf>) -> Self {
+        self.people_file = path;
+        self
+    }
+
     /// The people in the room, which the picker draws and a play request is
     /// recorded against.
     pub fn audience(&self) -> &Audience {
         &self.audience
+    }
+
+    // Read the `Person` list from its file again, so a picker opened after
+    // a `Person` was added draws them. A file that cannot be read leaves
+    // the list the browser holds, because a list that was good at the
+    // start is better than none.
+    fn learn_people(&mut self) {
+        let Some(path) = &self.people_file else {
+            return;
+        };
+        let people = std::fs::read(path)
+            .ok()
+            .and_then(|bytes| crate::audience::people_from_json(&bytes).ok());
+        match people {
+            Some(people) => self.audience.learn(people),
+            None => eprintln!(
+                "media-browser: the people file could not be read: {}",
+                path.display()
+            ),
+        }
     }
 
     /// Whether the shade is down. The frame is black while it is.
@@ -229,6 +260,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             && self.loading.is_none()
             && self.audience.needs_answer(self.clock);
         if due {
+            self.learn_people();
             self.picker = Some(screens::audience::Picker::open(
                 self.audience.known().len(),
                 &[],
@@ -456,6 +488,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                 true
             }
             ("enter", Target::Circles) => {
+                self.learn_people();
                 self.picker = Some(screens::audience::Picker::open(
                     self.audience.known().len(),
                     &self.audience.chosen(self.clock),

@@ -43,8 +43,9 @@ type fakeCluster struct {
 	// The catalog objects the operator writes, by namespace and name,
 	// because the operator stands one of each in every namespace that
 	// holds a Library.
-	slices   map[string]*EndpointSlice
-	services map[string]*Service
+	slices     map[string]*EndpointSlice
+	services   map[string]*Service
+	configMaps map[string]*ConfigMap
 	// The Jobs and CronJobs the operator creates, keyed by namespace and
 	// name, because a worker of one namespace and a worker of another
 	// may take the same name.
@@ -103,6 +104,7 @@ func newFakeCluster() *fakeCluster {
 		pods:           map[string]*Pod{},
 		slices:         map[string]*EndpointSlice{},
 		services:       map[string]*Service{},
+		configMaps:     map[string]*ConfigMap{},
 		jobs:           map[string]*Job{},
 		cronJobs:       map[string]*CronJob{},
 		watches:        map[string]*Watch{},
@@ -274,6 +276,8 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveEndpointSlice(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case strings.Contains(r.URL.Path, "/services"):
 		f.serveService(w, r, namespaceOf(r.URL.Path)+"/"+name)
+	case strings.Contains(r.URL.Path, "/configmaps"):
+		f.serveConfigMap(w, r, namespaceOf(r.URL.Path)+"/"+name)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/plays"):
 		f.createPlay(w, r)
 	case r.Method == http.MethodPost:
@@ -747,6 +751,35 @@ func (f *fakeCluster) serveService(w http.ResponseWriter, r *http.Request, key s
 	default:
 		answer(w, f.services[key])
 	}
+}
+
+func (f *fakeCluster) serveConfigMap(w http.ResponseWriter, r *http.Request, key string) {
+	switch r.Method {
+	case http.MethodPost:
+		if f.refuseCreate {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		f.writeConfigMap(w, r, "1")
+	case http.MethodPut:
+		f.writeConfigMap(w, r, "2")
+	default:
+		answer(w, f.configMaps[key])
+	}
+}
+
+func (f *fakeCluster) writeConfigMap(w http.ResponseWriter, r *http.Request, resourceVersion string) {
+	var written ConfigMap
+	_ = json.NewDecoder(r.Body).Decode(&written)
+	written.Metadata.ResourceVersion = resourceVersion
+	f.configMaps[written.Metadata.Namespace+"/"+written.Metadata.Name] = &written
+	_ = json.NewEncoder(w).Encode(written)
+}
+
+func (f *fakeCluster) heldConfigMap(namespace, name string) *ConfigMap {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	return f.configMaps[namespace+"/"+name]
 }
 
 func (f *fakeCluster) writeService(w http.ResponseWriter, r *http.Request, resourceVersion string) {

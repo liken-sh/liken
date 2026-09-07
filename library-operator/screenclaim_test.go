@@ -90,7 +90,7 @@ func TestReconcileScreensStandsBothClaimsBeforeThePod(t *testing.T) {
 	catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
-		[]Player{*player}, nil, nil, testNow)
+		[]Player{*player}, nil, nil, nil, testNow)
 
 	cases := []struct{ claim, volume, size string }{
 		{"den-tv-media-browser-catalog", catalogVolumeName, defaultCatalogSize},
@@ -131,7 +131,7 @@ func TestReconcileScreensLeavesAnExistingScreenClaim(t *testing.T) {
 	}
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
-		[]Player{*player}, nil, nil, testNow)
+		[]Player{*player}, nil, nil, nil, testNow)
 
 	if got := cluster.countRequests(http.MethodPost, "persistentvolumeclaims"); got != 0 {
 		t.Errorf("creates = %d, want none over claims that already stand", got)
@@ -145,7 +145,7 @@ func TestReconcileScreensWithNoCatalogKeepsTheEmptyDir(t *testing.T) {
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, nil,
-		[]Player{*player}, nil, nil, testNow)
+		[]Player{*player}, nil, nil, nil, testNow)
 
 	if got := cluster.countRequests(http.MethodPost, "persistentvolumeclaims"); got != 0 {
 		t.Errorf("creates = %d, want none in a namespace with no Catalog", got)
@@ -210,7 +210,7 @@ func TestReconcileScreensKeepsAnUnschedulableScreenOnAPerNodeClass(t *testing.T)
 	}
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
-		[]Player{*player}, nil, []Pod{*pod}, testNow)
+		[]Player{*player}, nil, nil, []Pod{*pod}, testNow)
 
 	if cluster.heldPod("den-tv-media-browser") == nil {
 		t.Error("the pass took a screen pod whose claims pin it to no node")
@@ -321,7 +321,7 @@ func TestReconcileScreensRecoversAnUnschedulableScreen(t *testing.T) {
 			}
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
-				[]Player{*player}, nil, []Pod{*pod}, testNow)
+				[]Player{*player}, nil, nil, []Pod{*pod}, testNow)
 
 			if gone := cluster.heldPod("den-tv-media-browser") == nil; gone != one.wantOut {
 				t.Errorf("the pod is gone = %v, want %v", gone, one.wantOut)
@@ -384,7 +384,7 @@ func TestReconcileScreensGuardsTheArtClaimDelete(t *testing.T) {
 			cluster.claims["den-tv-media-browser-art"] = claims[1]
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
-				[]Player{*player}, nil, []Pod{*pod}, testNow)
+				[]Player{*player}, nil, nil, []Pod{*pod}, testNow)
 
 			if cluster.heldPod("den-tv-media-browser") != nil {
 				t.Error("the pod stands, want the recovery to have taken it")
@@ -441,7 +441,7 @@ func TestReconcileScreensCarriesOnPastAFailedRecovery(t *testing.T) {
 			cluster.broken[one.broken] = http.StatusInternalServerError
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
-				[]Player{*player, *standing}, nil, []Pod{*pod}, testNow)
+				[]Player{*player, *standing}, nil, nil, []Pod{*pod}, testNow)
 
 			if held := cluster.heldPod("den-tv-media-browser") != nil; held != one.wantPodIn {
 				t.Errorf("the pod stands = %v, want %v", held, one.wantPodIn)

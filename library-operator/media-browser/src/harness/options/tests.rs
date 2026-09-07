@@ -268,6 +268,17 @@ fn a_capture_time_must_be_a_number() {
 }
 
 #[test]
+fn a_people_file_is_read_and_its_path_is_kept() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = people_file(&dir, r#"[{"name":"first","displayName":"First"}]"#);
+    let Ok(Invocation::Run(options)) = Options::parse(args(&format!("--people {path}"))) else {
+        panic!("a run");
+    };
+    assert_eq!(options.people.len(), 1);
+    assert_eq!(options.people_file, Some(PathBuf::from(path)));
+}
+
+#[test]
 fn a_scale_is_one_positive_number_and_the_default_is_the_compositors() {
     let Ok(Invocation::Run(options)) = Options::parse(args("--scale 2")) else {
         panic!("a run");

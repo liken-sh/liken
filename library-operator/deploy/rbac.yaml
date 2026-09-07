@@ -223,6 +223,12 @@ rules:
   - apiGroups: [""]
     resources: [services]
     verbs: [get, create, update]
+  # The people file every screen reads, one ConfigMap per namespace
+  # that holds a Player, written from the Person list and rewritten
+  # when it changes. Owned by the namespace's Catalog where one stands.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create, update]
   # The EndpointSlice behind the catalog Service, on the same terms
   # and for the same reasons. There is one per namespace that holds a
   # Catalog, and the operator writes it because that Service names no

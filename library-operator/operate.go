@@ -495,7 +495,7 @@ func (o *operator) pass() {
 		// namespace's one Catalog, and a namespace with none, or with more
 		// than one, stands its screens on an emptyDir.
 		o.reconcileScreens(ctx, namespace, singleCatalog(byNamespace[namespace]).catalog,
-			players.Items, libraries.Items, screens.Items, now)
+			players.Items, libraries.Items, people.Items, screens.Items, now)
 	}
 	// The play requests are served last, on the collections this pass
 	// already read. A request is one moment: the pass creates its Play

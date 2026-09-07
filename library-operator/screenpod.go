@@ -113,14 +113,20 @@ func screenPodName(player string) string {
 
 // ScreenLabels is what one Player's screen pod carries: the name
 // label a list of this operator's screens selects on, the Player it
-// draws for, and the member label that makes its agent a peer of the
-// namespace's catalog cluster.
+// draws for, and the two member labels that make its agents peers of
+// the namespace's catalog cluster and its progress cluster.
 func screenLabels(player string) map[string]string {
-	return withMemberLabel(map[string]string{
+	return withProgressMemberLabel(withMemberLabel(map[string]string{
 		scannerLabelKey: screenLabelValue,
 		playerLabelKey:  player,
-	})
+	}))
 }
+
+// Where the screen's progress agent keeps its file: one directory of
+// the screen's catalog claim, beside the catalog agent's files at the
+// claim's root, so one claim carries both and the browser starts with
+// progress already on disk.
+const screenProgressSubPath = "progress"
 
 // PlayerOwner ties the pod's life to the Player's. Controller is true
 // because exactly one thing manages this pod, and the UID is what the garbage
@@ -173,6 +179,7 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 	volumes = append(volumes,
 		screenCatalogVolume(player, catalog),
 		screenArtVolume(player, catalog),
+		peopleVolume(),
 	)
 
 	return &Pod{
@@ -195,9 +202,12 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 			// The catalog agent is the same native sidecar every other
 			// pod runs, so the kubelet passes its startupProbe before it
 			// starts the browser, and the browser's first read never races an
-			// API that is not listening.
+			// API that is not listening. The progress agent is the second
+			// sidecar, on the same terms, so the screen is a member of both
+			// of the namespace's clusters and the browser reads both files.
 			InitContainers: []Container{
 				catalogSidecar(corrosionImage),
+				screenProgressSidecar(corrosionImage),
 			},
 			Containers: []Container{
 				browserSidecar(player, shown, catalog, browserImage, topicBase, timeZone),
@@ -213,6 +223,17 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 	}
 }
 
+// The progress agent of a screen pod: the progress store's own sidecar
+// with its file moved onto the screen's catalog claim, under a directory
+// of its own.
+func screenProgressSidecar(image string) Container {
+	agent := progressSidecar(image)
+	agent.VolumeMounts = []VolumeMount{
+		{Name: catalogVolumeName, MountPath: progressStatePath, SubPath: screenProgressSubPath},
+	}
+	return agent
+}
+
 // BrowserSidecar builds the container that draws the wall. It learns
 // the catalog, the update stream, and every library root from its arguments
 // alone, because it holds no API credential to look one up with. Each library
@@ -222,6 +243,11 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 	args := []string{
 		"--catalog", path.Join(catalogStatePath, catalogStateFile),
 		"--updates", defaultCatalogAPI,
+		// The progress rows and their update stream, from the second
+		// agent, and the people file the pass writes for the namespace.
+		"--progress", path.Join(progressStatePath, catalogStateFile),
+		"--progress-updates", defaultProgressAPI,
+		"--people", peopleFilePath(),
 		"--cache-dir", artCacheMountPath,
 	}
 	args = append(args, artCacheArgs(catalog)...)
@@ -234,7 +260,9 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 	// file beside the database, and that file must be writable.
 	mounts := []VolumeMount{
 		{Name: catalogVolumeName, MountPath: catalogStatePath},
+		{Name: catalogVolumeName, MountPath: progressStatePath, SubPath: screenProgressSubPath},
 		{Name: artCacheVolumeName, MountPath: artCacheMountPath},
+		{Name: peopleVolumeName, MountPath: peopleMountPath, ReadOnly: true},
 	}
 	for index := range libraries {
 		library := &libraries[index]
@@ -353,7 +381,17 @@ func remoteTopics(remotes []PlayerIdleRemote) []EnvVar {
 //
 // A failure on one Player is reported and the pass carries on, because
 // one broken screen must not hold up another room's.
-func (o *operator) reconcileScreens(ctx context.Context, namespace string, catalog *NamespaceCatalog, players []Player, libraries []Library, screens []Pod, now time.Time) {
+func (o *operator) reconcileScreens(ctx context.Context, namespace string, catalog *NamespaceCatalog, players []Player, libraries []Library, people []Person, screens []Pod, now time.Time) {
+	// The people file stands before any pod, so a screen created on this
+	// pass mounts a map that exists. A namespace whose Players are all
+	// undelegated gets the map too, at the cost of one small object.
+	var owners []OwnerReference
+	if catalog != nil {
+		owners = []OwnerReference{catalogObjectOwner(catalog)}
+	}
+	if err := o.standPeopleConfigMap(ctx, namespace, owners, people); err != nil {
+		fmt.Fprintf(os.Stderr, "standing the people of %s: %v\n", namespace, err)
+	}
 	inNamespace := []Library{}
 	for index := range libraries {
 		if libraries[index].Metadata.Namespace == namespace {
