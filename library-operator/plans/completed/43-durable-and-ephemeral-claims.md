@@ -85,5 +85,26 @@ catalog, wants a size of its own.
 
 ## The drill
 
-To be run on `liken-1`, which has one class, and on the house, which
-has two.
+Rolled to `liken-1` as 2026.09.06-001-dev-001 on 2026-09-07, then
+released as 2026.09.06-002 and rolled onto the house through flux the
+same night.
+
+- On `liken-1`, which has one class, the `Catalog` was patched with a
+  256Mi progress size and both new classes. The standing progress
+  claim stayed at 1Gi, as the create-once rule says. The claim and
+  its pod were deleted, and the next pass created the claim at 256Mi
+  and the pod came back ready on it. The `Catalog` read Ready
+  throughout, except for the catalog pod's own restart on the image
+  bump.
+- On the house, which has a node-local class and a SAN's block class,
+  the `Catalog` moved `spec.storage` and `spec.progress` to the block
+  class and named the node-local one for `spec.libraries`. Both
+  central claims were empty, so both were deleted with their pods.
+  The catalog claim bound on the block class at 1Gi in under a
+  minute, and the `Catalog` read Ready.
+- The 256Mi progress claim stayed Pending on the block class, because
+  that SAN's driver makes no volume under 1G. That is the class's
+  floor and not the operator's: the house names 1Gi for the progress
+  store, and the claim bound and its pod came back ready. A cluster
+  that wants a smaller progress claim needs a class with no such
+  floor.

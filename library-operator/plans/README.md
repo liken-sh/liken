@@ -43,11 +43,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [37, Prometheus metrics](37-prometheus-metrics.md). Proposed.
   Enrichment progress, work needing attention, worker outcomes, and
   observation health, with optional collection and quiet idle libraries.
-* [43, Durable and ephemeral claims](43-durable-and-ephemeral-claims.md).
-  Built. `spec.progress` sizes and classes the progress claim, and
-  `spec.libraries` classes a `Library`'s two working copies, so a
-  cluster keeps its two central stores on a durable class and every
-  copy on a node-local one. Each field defaults to `spec.storage`.
 * [41, The people on the screen](41-the-people-on-the-screen.md). The
   screen half of plan 14: a second agent on every screen pod, the
   browser asks who is watching and sends the answer with every play
@@ -246,6 +241,12 @@ that took a hearing-impaired flag for Hindi.
   the browser scales, sized by `Catalog.spec.screens.artCache.size`
   and classed with the catalog claim. The cached art survived a pod
   restart, and a deleted claim came back fresh on the next pass.
+* [43, Durable and ephemeral claims](completed/43-durable-and-ephemeral-claims.md).
+  Built in 2026.09.06-002 and drilled on `liken-1` and the house on
+  2026-09-07. `spec.progress` sizes and classes the progress claim,
+  and `spec.libraries` classes a `Library`'s two working copies, so a
+  cluster keeps its two central stores on a durable class and every
+  copy on a node-local one. Each field defaults to `spec.storage`.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds
