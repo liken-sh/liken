@@ -60,6 +60,17 @@ spec:
         app: bluetooth-operator
     spec:
       serviceAccountName: bluetooth-operator
+      # The operator is the machine's hardware layer: every pod that
+      # claims a device it publishes depends on it, and it holds
+      # the adapter and the bluetoothd that holds it. So it schedules ahead of
+      # ordinary pods onto a machine that is already full, preempting
+      # one if it must, and it is evicted last. It also runs whatever
+      # the machine is marked with, because liken taints a node while
+      # it starts, and the devices have to publish before anything
+      # can claim them.
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
       # AF_BLUETOOTH sockets exist only in the host's network
       # namespace. A socket call in a pod's own namespace fails with
       # EAFNOSUPPORT, and no device node or mount changes that,
