@@ -7,7 +7,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
-use super::{Tone, label, paint, text};
+use super::{Tone, curtain, label, paint, text};
 use crate::art::Art;
 use crate::look;
 
@@ -24,6 +24,10 @@ pub struct Title<'a> {
     pub at: Point,
     /// The box a logo draws in.
     pub logo_box: (f32, f32),
+    /// The size the logo is decoded at. A page passes the loading state's
+    /// size, [`crate::views::curtain::logo_decode`], so the head draws the
+    /// decode the state will slide to the centre, scaled down into its box.
+    pub decode: (u32, u32),
     /// The width the title text wraps in.
     pub width: f32,
     /// The size the title draws at where the item has no logo.
@@ -41,16 +45,13 @@ pub struct Title<'a> {
 pub fn title<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, head: &Title<'_>) -> f32 {
     let (logo_width, logo_height) = head.logo_box;
     if !head.logo.is_empty()
-        && let Some(image) = store.fitted(
-            head.library,
-            head.logo,
-            logo_width as u32,
-            logo_height as u32,
-        )
+        && let Some(image) = store.fitted(head.library, head.logo, head.decode.0, head.decode.1)
     {
-        // The logo keeps its own ratio, so it takes the height the fit
-        // landed at and not the height of the box.
-        let (width, height) = image.size();
+        // The logo keeps its own ratio inside the box, so it takes the
+        // height the fit lands at and not the height of the box.
+        let (decoded_width, decoded_height) = image.size();
+        let ratio = decoded_height as f32 / decoded_width as f32;
+        let (width, height) = curtain::fitted(logo_width, logo_height, ratio);
         if !head.lifted {
             paint(
                 frame,
@@ -58,13 +59,13 @@ pub fn title<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, head: &
                 Rectangle {
                     x: head.at.x,
                     y: head.at.y,
-                    width: width as f32,
-                    height: height as f32,
+                    width,
+                    height,
                 },
                 Tone::Full,
             );
         }
-        return height as f32;
+        return height;
     }
 
     frame.fill_text(label(

@@ -175,19 +175,20 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
         let store = &mut *layer.store.borrow_mut();
         pool(&mut frame, bounds, away);
 
-        // The mark swells at the state's own energy, so it is at full
-        // swing while the state holds and it stills over the exit.
+        // The mark stays in its place under the centre and fades in and
+        // out there, at the state's own share, while the logo slides past
+        // it to the centre. It swells at the state's own energy, so it is
+        // at full swing while the state holds and it stills over the exit.
         let box_ = mark::bounds();
         let span = bounds.width * SPAN;
         let height = span * box_.height / box_.width;
         let logo = layer.logo(store, bounds);
-        let foot = logo
-            .as_ref()
-            .map(|(_, at)| at.y + at.height)
-            .unwrap_or_else(|| layer.centre(bounds));
         mark::draw(
             &mut frame,
-            Point::new(bounds.center_x(), foot + bounds.height * GAP + height / 2.0),
+            Point::new(
+                bounds.center_x(),
+                layer.centre(bounds) + bounds.height * GAP + height / 2.0,
+            ),
             span,
             f64::from(away),
             layer.curtain.phase,
@@ -241,12 +242,8 @@ impl<A: Art> Layer<'_, A> {
             return None;
         }
         let page = self.head.head(bounds);
-        let image = store.fitted(
-            self.library,
-            self.logo,
-            (bounds.width * LOGO_WIDTH) as u32,
-            (bounds.height * LOGO_HEIGHT) as u32,
-        )?;
+        let (width, height) = logo_decode(bounds);
+        let image = store.fitted(self.library, self.logo, width, height)?;
         let (width, height) = image.size();
         let ratio = height as f32 / width as f32;
 
@@ -291,8 +288,20 @@ fn pool(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, away: f32) {
     }
 }
 
-// The largest width and height at this ratio that fit inside a box.
-fn fitted(width: f32, height: f32, ratio: f32) -> (f32, f32) {
+/// The size the logo is decoded at for a frame of these bounds: the box
+/// it lands in at the centre. A page's head asks for the same decode and
+/// draws it scaled down into its own box, so the head and the state draw
+/// one image, and the state's logo never waits on a second decode while
+/// the head falls back to text.
+pub fn logo_decode(bounds: Rectangle) -> (u32, u32) {
+    (
+        (bounds.width * LOGO_WIDTH) as u32,
+        (bounds.height * LOGO_HEIGHT) as u32,
+    )
+}
+
+/// The largest width and height at this ratio that fit inside a box.
+pub fn fitted(width: f32, height: f32, ratio: f32) -> (f32, f32) {
     match width * ratio <= height {
         true => (width, width * ratio),
         false => (height / ratio, height),
@@ -336,6 +345,12 @@ mod tests {
     fn the_middle_of_the_move_is_between_the_two() {
         let at = between(from(), to(), 0.5);
         assert_eq!(at, area(440.0, 235.0, 520.0, 130.0));
+    }
+
+    #[test]
+    fn the_decode_is_the_centre_box_of_the_frame() {
+        let bounds = area(0.0, 0.0, 1920.0, 1080.0);
+        assert_eq!(logo_decode(bounds), (652, 280));
     }
 
     #[test]

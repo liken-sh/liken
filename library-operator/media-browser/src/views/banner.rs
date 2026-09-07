@@ -143,6 +143,7 @@ pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: 
                 name: banner.name,
                 at: stack.at(),
                 logo_box: (LOGO_WIDTH, LOGO_HEIGHT),
+                decode: (LOGO_WIDTH as u32, LOGO_HEIGHT as u32),
                 width: column,
                 size: look::HEAD_TITLE,
                 lifted: false,

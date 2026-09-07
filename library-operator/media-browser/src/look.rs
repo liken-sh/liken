@@ -144,12 +144,12 @@ pub const ROW_NAME: f32 = 28.0;
 pub const DETAIL: f32 = 20.0;
 
 /// How long the page takes to leave when a person chooses a title, in
-/// seconds.
-pub const DEPARTURE: f64 = 0.35;
+/// seconds. The mark fades in over the same span.
+pub const DEPARTURE: f64 = 0.4;
 
-/// How long the page takes to return, in seconds: about a third of the
-/// departure, so the way back is quicker than the way out.
-pub const RETURN: f64 = 0.12;
+/// How long the page takes to return, in seconds, and the mark to fade
+/// out: the same span as the way out, so the two read as one motion.
+pub const RETURN: f64 = 0.4;
 
 /// The one family the whole display draws in, and the italic face of that
 /// family, which the second caption line of a two-line card draws in. Both
@@ -189,9 +189,9 @@ mod tests {
     }
 
     #[test]
-    fn the_way_back_is_shorter_than_the_way_out() {
+    fn the_way_back_takes_as_long_as_the_way_out() {
         const { assert!(RETURN > 0.0) };
-        const { assert!(RETURN * 2.0 < DEPARTURE) };
+        const { assert!(RETURN == DEPARTURE) };
     }
 
     #[test]

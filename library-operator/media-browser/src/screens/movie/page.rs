@@ -17,7 +17,7 @@ use crate::art::Art;
 use crate::catalog::progress::clock;
 use crate::look;
 use crate::views::stack::{self, Stack};
-use crate::views::{area, buttons, card, header, people, progress, ratings, strip, text};
+use crate::views::{area, buttons, card, curtain, header, people, progress, ratings, strip, text};
 
 // The margin at both sides of the page.
 const MARGIN: f32 = 120.0;
@@ -125,6 +125,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 name: &movie.title,
                 at: blocks.title.at(offset),
                 logo_box: (LOGO_WIDTH, LOGO_HEIGHT),
+                decode: curtain::logo_decode(bounds),
                 width: column,
                 size: look::TITLE,
                 lifted: self.lifted,

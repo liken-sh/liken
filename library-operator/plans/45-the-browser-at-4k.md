@@ -71,6 +71,16 @@ and the browser ignored it.
   window's creation, ran out before the first frame anyone saw. That is
   why the return was never seen on the house `Player`, and then seen
   only as a jump.
+- **The mark fades in place, and the head draws the curtain's logo.**
+  The loading state's mark fades in under the centre and fades out
+  there, at the state's own share, while the title's logo slides from
+  the head to the centre past it. The departure and the return both
+  take 0.4 seconds, so the two read as one motion. A page's head
+  decodes its logo at the curtain's centre size and draws it scaled
+  down into its own box, so the head and the state draw one decode,
+  and the state never falls back to the title's text while a second
+  decode lands. That fallback was the flicker on the house `Player`:
+  the logo, then the name in type, then the logo again.
 - **The memory budget follows the window.** The store's in-memory
   budget is computed from the window's physical size on every resize,
   the same count of posters and backdrops at the size the panel draws

@@ -20,7 +20,9 @@ use super::{COLUMNS, Focus, Series, seasons};
 use crate::art::Art;
 use crate::look;
 use crate::views::stack::Stack;
-use crate::views::{area, card, divider, header, people, rail, ratings, strip, text, wall};
+use crate::views::{
+    area, card, curtain, divider, header, people, rail, ratings, strip, text, wall,
+};
 
 // The margin at both sides of the header's text.
 const MARGIN: f32 = 120.0;
@@ -61,7 +63,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
-        self.header(&mut frame, store, layout::header(bounds));
+        self.header(&mut frame, store, bounds, layout::header(bounds));
 
         // The rail takes the right edge of the region, and the wall keeps
         // the rest.
@@ -255,7 +257,13 @@ impl<A: Art> Page<'_, A> {
     // episode's line and plot stand in the place the series' plot takes on
     // a series whose episodes have not landed, and while a stripe holds
     // focus.
-    fn header(&self, frame: &mut canvas::Frame<Renderer>, store: &mut A, region: Rectangle) {
+    fn header(
+        &self,
+        frame: &mut canvas::Frame<Renderer>,
+        store: &mut A,
+        bounds: Rectangle,
+        region: Rectangle,
+    ) {
         let series = self.series;
         let column = region.width * COLUMN;
         let mut stack = Stack::new(Point::new(MARGIN, region.y + layout::TOP), layout::GAP);
@@ -271,6 +279,7 @@ impl<A: Art> Page<'_, A> {
                     name: &series.title,
                     at: stack.at(),
                     logo_box: (layout::LOGO_WIDTH, layout::LOGO_HEIGHT),
+                    decode: curtain::logo_decode(bounds),
                     width: column,
                     size: look::HEAD_TITLE,
                     lifted: self.lifted,
