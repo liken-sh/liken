@@ -807,3 +807,126 @@ func requestFor(name string) <-chan clientMessage {
 	close(messages)
 	return messages
 }
+
+// While the owner mark stands, the equipment holds the level. mpv goes
+// to unity, a level off the topic reaches no mpv command and draws no
+// indicator, and a press still publishes the next state from the level
+// the topic delivered.
+func TestWhileTheMarkStandsTheLevelDoesNotReachMpv(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(bus, client)
+
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+
+	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+	mustNoLine(t, lines, 100*time.Millisecond)
+	mustMatch(t, c.heldVolume(), volumeState{Level: 45})
+
+	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionVolume, Amount: 5}))
+	published := waitForPublish(t, brokers[0].pubs)
+	mustMatch(t, published.topic, c.volumeTopic)
+	mustMatch(t, string(published.payload), `{"level":50,"muted":false}`)
+}
+
+// The mark and the level arrive in either order. A level that reached
+// mpv before the mark is undone by the unity write the mark brings, so
+// both orders end with mpv at unity.
+func TestALevelThatArrivesBeforeTheMarkEndsAtUnity(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(nil, client)
+
+	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":true}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","yes"]}`)
+
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+}
+
+// The unity write happens once for the owner that holds the level, so a
+// redelivered mark writes nothing more. A fresh bus session redelivers
+// the mark, and mpv goes to unity again.
+func TestTheUnityWriteHappensOncePerOwner(t *testing.T) {
+	bus, _, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(bus, client)
+
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+	mustNoLine(t, lines, 100*time.Millisecond)
+
+	c.onConnect(bus)
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+}
+
+// An empty payload is the mark cleared. mpv takes the level back at the
+// state the topic last delivered, and every level after it applies as
+// it does with no equipment at all.
+func TestTheClearedMarkGivesTheLevelBackToMpv(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(nil, client)
+
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+
+	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+	mustNoLine(t, lines, 100*time.Millisecond)
+
+	c.handle(c.volumeOwnerTopic, nil)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+
+	c.handle(c.volumeTopic, []byte(`{"level":50,"muted":false}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","50"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+}
+
+// A mark cleared before any level arrived writes nothing, because there
+// is no state to give mpv back.
+func TestAClearedMarkWithNoLevelWritesNothing(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(nil, client)
+
+	c.handle(c.volumeOwnerTopic, nil)
+
+	mustNoLine(t, lines, 100*time.Millisecond)
+}
+
+// ownedCommander is a sidecar for a unit with speakers, wired to both
+// the level and the owner mark.
+func ownedCommander(bus *Bus, mpv net.Conn) *commander {
+	return &commander{
+		commandsTopic:    playCommandsTopic(defaultTopicBase, "house", "movie"),
+		volumeTopic:      playerVolumeTopic(defaultTopicBase, "house", "theater"),
+		volumeOwnerTopic: playerVolumeOwnerTopic(defaultTopicBase, "house", "theater"),
+		bus:              bus,
+		mpv:              mpv,
+	}
+}

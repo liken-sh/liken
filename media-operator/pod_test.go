@@ -268,6 +268,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: trickplayIntervalVariable, Value: defaultTrickplayInterval},
 			{Name: playerNameVariable, Value: "theater"},
 			{Name: playerVolumeTopicVariable, Value: playerVolumeTopic(testTopicBase, "house", "theater")},
+			{Name: playerVolumeOwnerTopicVariable, Value: playerVolumeOwnerTopic(testTopicBase, "house", "theater")},
 		},
 		VolumeMounts: append([]VolumeMount{{Name: "ipc", MountPath: "/ipc"}, {Name: "art", MountPath: "/art"}},
 			testResolution(t).Mounts...),
@@ -467,6 +468,23 @@ func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
 	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeTopicVariable), "")
 	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeTopicVariable),
 		playerVolumeTopic(testTopicBase, "house", "theater"))
+}
+
+// The owner mark travels with the level and nowhere else. Its topic is
+// the volume topic plus the owner suffix, so a sidecar with speakers
+// reads both and a sidecar without speakers reads neither.
+func TestTheCommandSidecarCarriesTheOwnerTopicWithTheVolumeTopic(t *testing.T) {
+	speakerless := &Player{
+		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+		Spec:     PlayerSpec{Display: &PlayerDevice{Class: "display-output"}},
+	}
+	play := testPlay()
+	pod := buildPod(play, buildClaim(play, speakerless), testResolution(t),
+		testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeOwnerTopicVariable), "")
+	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeOwnerTopicVariable),
+		playerVolumeTopic(testTopicBase, "house", "theater")+"/owner")
 }
 
 // A resolved timezone reaches the player container as TZ, so the display clock

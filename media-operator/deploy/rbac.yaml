@@ -113,6 +113,15 @@ rules:
   - apiGroups: [display.liken.sh]
     resources: [displays]
     verbs: [get, patch]
+  # The equipment operator's receivers, cluster-scoped. The operator
+  # lists them to find the input a unit's cable lands on, folds the
+  # match into the Player status, and patches spec.session under its own
+  # field manager while a Play stands. Server-side apply keeps the write
+  # to that one block, so the inputs a person declared stay the
+  # person's.
+  - apiGroups: [equipment.liken.sh]
+    resources: [receivers]
+    verbs: [get, list, watch, patch]
   # The playback pods and the standing pods, on the same terms as the
   # claims: created once, and deleted to replace a stale one, a playback
   # pod at the film's place or a standing pod on a template that

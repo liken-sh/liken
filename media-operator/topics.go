@@ -287,6 +287,13 @@ func playerVolumeTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerVolumeKind
 }
 
+// playerVolumeOwnerTopic carries the owner mark for a unit's level,
+// retained. A non-empty payload means equipment owns the level. An
+// empty payload means no owner holds it.
+func playerVolumeOwnerTopic(base, namespace, name string) string {
+	return playerVolumeTopic(base, namespace, name) + "/owner"
+}
+
 // playerVolumeFilter is the operator's one subscription across
 // every unit's level. The operator reads it to learn which units the
 // broker already holds a level for, so the seed writes only where

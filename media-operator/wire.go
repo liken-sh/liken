@@ -167,4 +167,9 @@ const (
 	// that states sinks, so a container that reads nothing here
 	// subscribes to no level, draws none, and publishes none.
 	playerVolumeTopicVariable = "MEDIA_PLAYER_VOLUME_TOPIC"
+
+	// The topic the owner mark stands on, set on the command sidecar
+	// whenever the volume topic is. A retained mark means equipment holds
+	// the level, so mpv sits at unity and applies none.
+	playerVolumeOwnerTopicVariable = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC"
 )

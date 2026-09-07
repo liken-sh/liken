@@ -155,6 +155,18 @@ type operator struct {
 	// the pass goroutine touches it.
 	panelFaults map[string]string
 
+	// The two lookups a pass shares, dropped at the start of every pass so
+	// each pass reads the cluster again. Only the pass goroutine touches
+	// them.
+	screenCache   *screens
+	receiverCache *receivers
+
+	// receiverSessions holds the session this operator last applied per
+	// unit, so a pass writes a Receiver only when the session changed, and
+	// a unit whose Play is gone still names a Receiver to lift the session
+	// from. Only the pass goroutine touches it.
+	receiverSessions map[string]receiverSession
+
 	// volumes is the desk for each unit's level. Unlike the desks
 	// above, it wakes no pass, because the level folds into no status.
 	// The pass reads it for one question alone: whether the broker
@@ -265,6 +277,7 @@ func operate() {
 		panels:                panels,
 		panelOverrides:        map[string]panelOverride{},
 		panelFaults:           map[string]string{},
+		receiverSessions:      map[string]receiverSession{},
 		volumes:               newVolumeDesk(),
 		positionWrites:        map[string]time.Time{},
 		keysPublished:         map[string]string{},
@@ -362,6 +375,9 @@ func operate() {
 // cluster. A failure on one object is reported and the pass continues,
 // because one broken run must not freeze every other unit's status.
 func (o *operator) pass() {
+	// The pass reads the screens and the Receivers again, so a cable moved
+	// between passes is seen on the next one.
+	o.screenCache, o.receiverCache = nil, nil
 	if o.busReconnected.Swap(false) {
 		o.reestablishRetained()
 	}
@@ -737,7 +753,10 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	drawn := make(map[string]bool, len(players))
 	// One screens for the pass, so the driver's ResourceSlices
 	// are listed at most once however many units the cluster holds.
-	lookup := newScreens(o.client)
+	lookup := o.screenLookup()
+	// The units that hold a standing run, which is what keeps the session
+	// on their equipment.
+	standing := make(map[string]bool, len(players))
 	for index := range players {
 		player := &players[index]
 		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
@@ -760,6 +779,10 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			drawn[key] = true
 			desired.Panel = o.reconcilePanel(player, key, lookup, idle.OffMode)
 		}
+		// The equipment the unit's cable lands on, and the session it holds
+		// while a Play stands.
+		standing[key] = playerHasStandingPlay(player, plays)
+		desired.Receiver = o.reconcileReceiver(player, standing[key])
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
@@ -805,6 +828,9 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// The overrides shrink the same way, and a unit dropped
 	// while its panel was dark takes a lift on the way out.
 	o.retainPanels(drawn)
+	// A unit whose Play ended or whose Player is gone releases the
+	// equipment it held.
+	o.retainSessions(standing)
 	// The volume desk shrinks the same way. The retained level itself
 	// stays on the broker, so a Player recreated under the same name
 	// keeps the level the room was left at.
@@ -1074,7 +1100,7 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	}
 
 	claim := buildClaim(play, player)
-	pod, fresh, err := o.ensurePlayback(play, claim, resolved, prefs, remotes, remoteErr != nil)
+	pod, fresh, err := o.ensurePlayback(play, player, claim, resolved, prefs, remotes, remoteErr != nil)
 	if err != nil {
 		return err
 	}
@@ -1125,7 +1151,7 @@ func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 // The bool reports a genuinely new pod, true only in the no-existing-pod
 // branch. A fresh Play uses it to steal its controllers, and a recreate,
 // which returns false, leaves the focus mark alone.
-func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
+func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	key := runKey(namespace, name)
 	running, err := GetPod(o.client, namespace, podName(name))
@@ -1151,6 +1177,10 @@ func (o *operator) ensurePlayback(play *Play, claim *ResourceClaim, resolved res
 		if !resuming && claimHasSink(claim) {
 			o.writeThroughVolume(play)
 		}
+		// The session goes on the unit's Receiver before the pod exists, so
+		// the equipment is awake and on the right input by the time mpv draws
+		// its first frame.
+		o.applyReceiverSession(player)
 		pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)
 		return pod, !resuming, err
 	}

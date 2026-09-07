@@ -40,6 +40,14 @@ type fakeCluster struct {
 	// form.
 	peripherals map[string]*Peripheral
 
+	// The equipment the equipment operator publishes, one Receiver per
+	// piece of equipment, and every session apply this operator sent, in
+	// order, the refused ones included.
+	receivers       map[string]*Receiver
+	sessions        []receiverApplied
+	sessionsFail    bool
+	receiversAbsent bool
+
 	// applyFails is a Display the API server refuses to write,
 	// the failure a pass answers by leaving the panel where it stands
 	// and trying again.
@@ -58,6 +66,14 @@ type displayApplied struct {
 	manager  string
 }
 
+// One session apply the operator made: the Receiver it named, the block
+// it wrote, and the field manager it wrote under.
+type receiverApplied struct {
+	name    string
+	session *ReceiverSession
+	manager string
+}
+
 func newFakeCluster() *fakeCluster {
 	return &fakeCluster{
 		plays:      map[string]*Play{},
@@ -68,6 +84,8 @@ func newFakeCluster() *fakeCluster {
 		claims:     map[string]*ResourceClaim{},
 		pods:       map[string]*Pod{},
 		displays:   map[string]*Display{},
+
+		receivers: map[string]*Receiver{},
 
 		peripherals: map[string]*Peripheral{},
 		fails:       map[string]bool{},
@@ -143,6 +161,18 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 				list.Items = append(list.Items, *f.peripherals[key])
 			}
 			_ = json.NewEncoder(w).Encode(list)
+		case r.Method == http.MethodGet && r.URL.Path == receiversPath:
+			if f.receiversAbsent {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			list := ReceiverList{Metadata: ListMeta{ResourceVersion: "1"}}
+			for _, key := range sortedNames(f.receivers) {
+				list.Items = append(list.Items, *f.receivers[key])
+			}
+			_ = json.NewEncoder(w).Encode(list)
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/"):
+			f.applySession(w, r, name)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/displays/"):
 			answer(w, f.displays[name])
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/displays/"):
@@ -207,6 +237,30 @@ func (f *fakeCluster) apply(w http.ResponseWriter, r *http.Request, name string)
 	_ = json.NewEncoder(w).Encode(held)
 }
 
+// applySession folds one server-side apply onto a Receiver. The session
+// the body carries replaces the one the Receiver holds, and an apply
+// with no session lifts it.
+func (f *fakeCluster) applySession(w http.ResponseWriter, r *http.Request, name string) {
+	held, standing := f.receivers[name]
+	if !standing {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var applied receiverApply
+	_ = json.NewDecoder(r.Body).Decode(&applied)
+	f.sessions = append(f.sessions, receiverApplied{
+		name:    name,
+		session: applied.Spec.Session,
+		manager: r.URL.Query().Get("fieldManager"),
+	})
+	if f.sessionsFail {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	held.Spec.Session = applied.Spec.Session
+	_ = json.NewEncoder(w).Encode(held)
+}
+
 // An object the cluster does not hold is a 404, which is the answer the
 // operator creates against.
 func answer[T any](w http.ResponseWriter, held *T) {
@@ -245,6 +299,7 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		panels:                newPanelDesk(wake),
 		panelOverrides:        map[string]panelOverride{},
 		panelFaults:           map[string]string{},
+		receiverSessions:      map[string]receiverSession{},
 		volumes:               newVolumeDesk(),
 		positionWrites:        map[string]time.Time{},
 		keysPublished:         map[string]string{},
@@ -1395,7 +1450,7 @@ func TestOnlyANewRunStealsAndAResumeDoesNot(t *testing.T) {
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 			claim := buildClaim(play, housePlayer())
 
-			_, fresh, err := media.ensurePlayback(play, claim,
+			_, fresh, err := media.ensurePlayback(play, housePlayer(), claim,
 				resolution{Items: []string{"https://nas/film.mkv"}}, resolvedPreferences{}, nil, false)
 			if err != nil {
 				t.Fatal(err)

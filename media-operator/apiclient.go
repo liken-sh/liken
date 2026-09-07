@@ -184,6 +184,7 @@ const (
 	claimPrefix     = "/apis/" + claimAPIVersion + "/namespaces/"
 	slicesPath      = "/apis/" + claimAPIVersion + "/resourceslices"
 	displaysPath    = "/apis/" + displayAPIVersion + "/displays"
+	receiversPath   = "/apis/" + receiverAPIVersion + "/receivers"
 	peripheralsPath = "/apis/" + peripheralAPIVersion + "/peripherals"
 	podPrefix       = "/api/v1/namespaces/"
 	podsAllPath     = "/api/v1/pods"
@@ -493,7 +494,36 @@ func ApplyDisplayOverride(c *Client, name string, override *DisplayOverride) err
 	if err != nil {
 		return err
 	}
-	path := displaysPath + "/" + name + "?fieldManager=" + displayFieldManager
+	path := displaysPath + "/" + name + "?fieldManager=" + applyFieldManager
+	return c.requestJSON(http.MethodPatch, path, applyContentType, body, nil)
+}
+
+// ListReceivers reads every Receiver in one request. A Receiver is
+// cluster-scoped, so the path carries no namespace. A cluster that runs
+// no equipment operator answers ErrNotFound.
+func ListReceivers(c *Client) (*ReceiverList, error) {
+	list := &ReceiverList{}
+	if err := c.RequestJSON(http.MethodGet, receiversPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// ApplyReceiverSession writes spec.session and nothing else, under this
+// operator's own field manager. A nil session applies an empty spec,
+// and the API server then removes the block this manager owns. That is
+// how the equipment is released.
+func ApplyReceiverSession(c *Client, name string, session *ReceiverSession) error {
+	body, err := json.Marshal(&receiverApply{
+		APIVersion: receiverAPIVersion,
+		Kind:       "Receiver",
+		Metadata:   ObjectMeta{Name: name},
+		Spec:       ReceiverSpec{Session: session},
+	})
+	if err != nil {
+		return err
+	}
+	path := receiversPath + "/" + name + "?fieldManager=" + applyFieldManager
 	return c.requestJSON(http.MethodPatch, path, applyContentType, body, nil)
 }
 

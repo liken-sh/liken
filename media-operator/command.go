@@ -68,6 +68,10 @@ type commander struct {
 	// applies none, and answers no volume press.
 	volumeTopic string
 
+	// The topic the owner mark stands on, set whenever the volume topic
+	// is.
+	volumeOwnerTopic string
+
 	// The unit's controllers, keyed by the events topic each one
 	// publishes on, and the Player this Play runs on, which is the value
 	// a mark must hold for a press to act. A pod for a Play whose Player
@@ -103,6 +107,13 @@ type commander struct {
 	volumeMutex sync.Mutex
 	volume      volumeState
 	haveVolume  bool
+
+	// volumeOwned is the owner mark: equipment holds the level, so a state
+	// the topic delivers is recorded and never written to mpv.
+	// unityApplied marks that mpv was set to unity for the owner that
+	// holds it now, so the sidecar sets it once and not on every state.
+	volumeOwned  bool
+	unityApplied bool
 
 	// volumeCaughtUp marks that this bus session has already
 	// delivered a level. The first message of a session is the
@@ -189,6 +200,7 @@ func runCommand() {
 		availabilityTopic: playAvailabilityTopic(base, namespace, name),
 		commandsTopic:     playCommandsTopic(base, namespace, name),
 		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
+		volumeOwnerTopic:  os.Getenv(playerVolumeOwnerTopicVariable),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
 		artDir:            artMountPath,
 		playerName:        os.Getenv(playerNameVariable),
@@ -215,6 +227,11 @@ func runCommand() {
 	// topic, so this pod subscribes to no level at all.
 	if cmd.volumeTopic != "" {
 		cmd.bus.Subscribe(cmd.volumeTopic)
+	}
+	// The mark is retained too, and it arrives in either order against the
+	// level, so each handler answers for both orders.
+	if cmd.volumeOwnerTopic != "" {
+		cmd.bus.Subscribe(cmd.volumeOwnerTopic)
 	}
 	// The controllers' own topics, two per Remote the unit names.
 	cmd.subscribeRemotes(cmd.bus)
@@ -243,6 +260,10 @@ func (c *commander) onConnect(bus *Bus) {
 	// is a catch-up again and applies silently again.
 	c.volumeMutex.Lock()
 	c.volumeCaughtUp = false
+	// A fresh session redelivers the mark too, and mpv is the same process
+	// it was, so the unity write is owed again only if the mark still
+	// stands.
+	c.unityApplied = false
 	c.volumeMutex.Unlock()
 	bus.Publish(c.availabilityTopic, []byte(availabilityOnline), true)
 	c.reportMutex.Lock()
@@ -277,6 +298,10 @@ func (c *commander) marshalLastReport() ([]byte, bool) {
 // so a newer program's command degrades to no effect rather than a
 // crash.
 func (c *commander) handle(topic string, payload []byte) {
+	if c.volumeOwnerTopic != "" && topic == c.volumeOwnerTopic {
+		c.applyVolumeOwner(payload)
+		return
+	}
 	if c.volumeTopic != "" && topic == c.volumeTopic {
 		c.applyVolume(payload)
 		return
@@ -328,12 +353,45 @@ func (c *commander) applyVolume(payload []byte) {
 	c.haveVolume = true
 	signal := c.volumeCaughtUp
 	c.volumeCaughtUp = true
+	owned := c.volumeOwned
 	c.volumeMutex.Unlock()
+	// While the mark stands the level is the equipment's. The state is
+	// recorded for the next press, and mpv is left at unity with no
+	// indicator drawn.
+	if owned {
+		return
+	}
 	for _, command := range volumeCommands(state) {
 		c.command(command)
 	}
 	if signal {
 		c.command(volumeChangedCommand())
+	}
+}
+
+// applyVolumeOwner folds one message off the owner topic. A non-empty
+// payload hands the level to equipment, and mpv goes to unity once. An
+// empty payload is the mark cleared, and mpv takes the level back at
+// the state the topic last delivered.
+func (c *commander) applyVolumeOwner(payload []byte) {
+	owned := len(payload) > 0
+	c.volumeMutex.Lock()
+	c.volumeOwned = owned
+	apply, state := false, defaultVolumeState()
+	switch {
+	case owned && !c.unityApplied:
+		c.unityApplied = true
+		apply = true
+	case !owned:
+		c.unityApplied = false
+		apply, state = c.haveVolume, c.volume
+	}
+	c.volumeMutex.Unlock()
+	if !apply {
+		return
+	}
+	for _, command := range volumeCommands(state) {
+		c.command(command)
 	}
 }
 

@@ -235,10 +235,17 @@ func commandSidecar(
 	// Player that states sinks. A unit with nothing to hear names no
 	// topic, and its sidecar answers no volume press.
 	if claimHasSink(claim) {
-		env = append(env, EnvVar{
-			Name:  playerVolumeTopicVariable,
-			Value: playerVolumeTopic(topicBase, play.Metadata.Namespace, playerName(play)),
-		})
+		// The owner mark travels with the level. The sidecar reads the two
+		// together to decide whether it applies a level to mpv at all.
+		env = append(env,
+			EnvVar{
+				Name:  playerVolumeTopicVariable,
+				Value: playerVolumeTopic(topicBase, play.Metadata.Namespace, playerName(play)),
+			},
+			EnvVar{
+				Name:  playerVolumeOwnerTopicVariable,
+				Value: playerVolumeOwnerTopic(topicBase, play.Metadata.Namespace, playerName(play)),
+			})
 	}
 	return Container{
 		Name:    commandContainer,

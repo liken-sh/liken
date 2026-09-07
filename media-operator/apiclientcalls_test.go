@@ -60,6 +60,10 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 		{name: "apply a display override", call: func(c *Client) error {
 			return ApplyDisplayOverride(c, "panel", nil)
 		}},
+		{name: "list receivers", call: func(c *Client) error { _, err := ListReceivers(c); return err }},
+		{name: "apply a receiver session", call: func(c *Client) error {
+			return ApplyReceiverSession(c, "living-room-denon", nil)
+		}},
 	}
 	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -156,4 +160,56 @@ func TestPutRemoteStatusWritesTheStatusSubresource(t *testing.T) {
 	mustSucceed(t, err)
 	mustMatch(t, written.Metadata.ResourceVersion, "8")
 	mustMatch(t, api.requests[0].Path, "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes/wand/status")
+}
+
+// The session apply reaches the Receiver's own path, under this
+// operator's field manager, as an apply patch that carries the session
+// alone. A nil session carries an empty spec, which is the lift.
+func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
+	cases := []struct {
+		name    string
+		session *ReceiverSession
+		want    string
+	}{
+		{
+			name:    "a session the run holds",
+			session: &ReceiverSession{Player: "house/theater", Input: "GAME", VolumeTopic: "liken/media/players/house/theater/volume"},
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+		},
+		{
+			name: "the lift",
+			want: `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{}}`,
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			api := &cannedAPI{answers: map[string]any{
+				"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon": Receiver{},
+			}}
+
+			mustSucceed(t, ApplyReceiverSession(testAPIClient(t, api.handler()), "living-room-denon", each.session))
+
+			mustMatch(t, len(api.requests), 1)
+			mustMatch(t, api.requests[0].Method, http.MethodPatch)
+			mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/living-room-denon")
+			mustMatch(t, string(api.requests[0].Body), each.want)
+		})
+	}
+}
+
+// The Receivers are read from one cluster-scoped collection.
+func TestListReceiversReadsTheClusterCollection(t *testing.T) {
+	api := &cannedAPI{answers: map[string]any{
+		"GET /apis/equipment.liken.sh/v1alpha1/receivers": ReceiverList{
+			Metadata: ListMeta{ResourceVersion: "31"},
+			Items:    []Receiver{*houseReceiver()},
+		},
+	}}
+
+	list, err := ListReceivers(testAPIClient(t, api.handler()))
+	mustSucceed(t, err)
+
+	mustMatch(t, list.Metadata.ResourceVersion, "31")
+	mustMatch(t, len(list.Items), 1)
+	mustMatch(t, list.Items[0].Spec.Inputs[1].Machine, testNode)
 }

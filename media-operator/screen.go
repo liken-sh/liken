@@ -33,9 +33,9 @@ const (
 )
 
 // The field manager this operator applies under. Server-side
-// apply keeps it to spec.override, so the cluster owner's resting
-// fields never conflict with it.
-const displayFieldManager = "media-operator"
+// apply keeps it to the one block this operator states, so the cluster
+// owner's resting fields never conflict with it.
+const applyFieldManager = "media-operator"
 
 // A Display carries only what this operator reads or writes:
 // the override it applies, and the observed values it folds into the
@@ -137,9 +137,12 @@ type ResourceSliceList struct {
 }
 
 type ResourceSliceSpec struct {
-	Driver  string              `json:"driver,omitempty"`
-	Pool    ResourceSlicePool   `json:"pool"`
-	Devices []ResourceSliceItem `json:"devices,omitempty"`
+	Driver string            `json:"driver,omitempty"`
+	Pool   ResourceSlicePool `json:"pool"`
+	// The machine whose devices this slice publishes, which is the machine
+	// a Receiver input names.
+	NodeName string              `json:"nodeName,omitempty"`
+	Devices  []ResourceSliceItem `json:"devices,omitempty"`
 }
 
 type ResourceSlicePool struct {
@@ -157,49 +160,82 @@ type DeviceAttribute struct {
 	String *string `json:"string,omitempty"`
 }
 
+// A resolved screen is the machine the unit draws on and the monitor id
+// that names its Display.
+type screen struct {
+	node    string
+	monitor string
+}
+
 // screens resolves each unit's screen to the monitor id that
 // names its Display. It lists the driver's ResourceSlices at most once
 // a pass, because one list answers every unit.
+//
+// Each unit's answer is held for the pass, because the panel and the
+// equipment both ask the same question of the same claim.
 type screens struct {
-	client *Client
-	slices []ResourceSlice
-	listed bool
+	client   *Client
+	slices   []ResourceSlice
+	listed   bool
+	resolved map[string]screen
 }
 
 func newScreens(client *Client) *screens {
-	return &screens{client: client}
+	return &screens{resolved: map[string]screen{}, client: client}
 }
 
-// monitorFor is the whole lookup: the unit's standing idle
+// screenLookup is the pass's one screens. It is built on first use and
+// dropped when the pass ends.
+func (o *operator) screenLookup() *screens {
+	if o.screenCache == nil {
+		o.screenCache = newScreens(o.client)
+	}
+	return o.screenCache
+}
+
+// screenFor is the whole lookup: the unit's standing idle
 // claim carries the allocation, the allocation names the draw device,
 // and the device's attributes carry the monitor id. A claim the
 // scheduler has not allocated yet names no screen, and the pass then
 // writes no override.
-func (s *screens) monitorFor(player *Player) (string, bool) {
+func (s *screens) screenFor(player *Player) (screen, bool) {
+	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
+	if held, checked := s.resolved[key]; checked {
+		return held, held.monitor != ""
+	}
+	found, resolved := s.lookUp(player)
+	s.resolved[key] = found
+	return found, resolved
+}
+
+func (s *screens) lookUp(player *Player) (screen, bool) {
 	claim, err := GetResourceClaim(s.client,
 		player.Metadata.Namespace, idleClaimName(player.Metadata.Name))
 	if err != nil || claim.Status == nil || claim.Status.Allocation == nil {
-		return "", false
+		return screen{}, false
 	}
 	for _, result := range claim.Status.Allocation.Devices.Results {
 		if result.Request != idleDrawRequest {
 			continue
 		}
-		return s.monitorOf(result)
+		return s.screenOf(result)
 	}
-	return "", false
+	return screen{}, false
 }
 
-// monitorOf reads the monitor id off the allocated device. The
+// screenOf reads the monitor id off the allocated device. The
 // driver, the pool, and the device name are what a ResourceSlice entry
 // is keyed by.
-func (s *screens) monitorOf(result DeviceRequestAllocationResult) (string, bool) {
+//
+// The slice also names the machine that publishes the device, which is
+// the machine a Receiver input names.
+func (s *screens) screenOf(result DeviceRequestAllocationResult) (screen, bool) {
 	if !s.listed {
 		s.listed = true
 		list, err := ListResourceSlices(s.client)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listing resource slices: %v\n", err)
-			return "", false
+			return screen{}, false
 		}
 		s.slices = list.Items
 	}
@@ -213,12 +249,12 @@ func (s *screens) monitorOf(result DeviceRequestAllocationResult) (string, bool)
 			}
 			attribute, held := device.Attributes[monitorIDAttribute]
 			if !held || attribute.String == nil {
-				return "", false
+				return screen{}, false
 			}
-			return *attribute.String, true
+			return screen{node: slice.Spec.NodeName, monitor: *attribute.String}, true
 		}
 	}
-	return "", false
+	return screen{}, false
 }
 
 // panelOverride is what this operator last wrote for one unit: the
@@ -241,8 +277,9 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 	if desire == "" {
 		return ""
 	}
-	monitor, found := lookup.monitorFor(player)
-	if !found {
+	found, resolved := lookup.screenFor(player)
+	monitor := found.monitor
+	if !resolved {
 		// A screen the scheduler has not allocated is the one
 		// silent fault, and only for the on desire: the panel is lit,
 		// which is what the desire asks for.

@@ -14,6 +14,10 @@ import (
 // screen, which is also the name of its Display.
 const testMonitor = "DP-1"
 
+// The machine the display driver publishes that screen from, which is
+// the machine a Receiver input names.
+const testNode = "nuc5"
+
 // The idle claim as the scheduler left it: the draw request
 // allocated against one device in the display driver's pool.
 func allocatedIdleClaim() *ResourceClaim {
@@ -39,8 +43,9 @@ func monitorSlice() ResourceSlice {
 	return ResourceSlice{
 		Metadata: ObjectMeta{Name: "nuc5-display"},
 		Spec: ResourceSliceSpec{
-			Driver: "display.liken.sh",
-			Pool:   ResourceSlicePool{Name: "nuc5"},
+			Driver:   "display.liken.sh",
+			Pool:     ResourceSlicePool{Name: "nuc5"},
+			NodeName: testNode,
 			Devices: []ResourceSliceItem{{
 				Name:       "card0-dp-1-draw",
 				Attributes: map[string]DeviceAttribute{monitorIDAttribute: {String: ptr(testMonitor)}},
@@ -87,7 +92,7 @@ func TestTheOffDesireOverridesTheBacklight(t *testing.T) {
 
 	mustMatch(t, len(cluster.applies), 1)
 	mustMatch(t, cluster.applies[0].name, testMonitor)
-	mustMatch(t, cluster.applies[0].manager, displayFieldManager)
+	mustMatch(t, cluster.applies[0].manager, applyFieldManager)
 	mustMatch(t, *cluster.applies[0].override, DisplayOverride{Backlight: displayPowerOff})
 	mustMatch(t, *cluster.displays[testMonitor].Spec.Override, DisplayOverride{Backlight: displayPowerOff})
 }
@@ -353,10 +358,11 @@ func TestTheScreenIsFoundThroughTheAllocation(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	monitor, found := newScreens(media.client).monitorFor(housePlayer())
+	found, resolved := newScreens(media.client).screenFor(housePlayer())
 
-	mustMatch(t, found, true)
-	mustMatch(t, monitor, testMonitor)
+	mustMatch(t, resolved, true)
+	mustMatch(t, found.monitor, testMonitor)
+	mustMatch(t, found.node, testNode)
 }
 
 // A device that carries no monitor id names no Display, which
@@ -366,7 +372,7 @@ func TestADeviceWithNoMonitorIDNamesNoScreen(t *testing.T) {
 	cluster.slices[0].Spec.Devices[0].Attributes = nil
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	_, found := newScreens(media.client).monitorFor(housePlayer())
+	_, found := newScreens(media.client).screenFor(housePlayer())
 
 	mustMatch(t, found, false)
 }
@@ -407,7 +413,7 @@ func TestTheMonitorLookupWalksPastSlicesThatDoNotHoldTheDevice(t *testing.T) {
 			// client and reads the list the case names.
 			lookup := &screens{slices: each.slices, listed: true}
 
-			_, found := lookup.monitorOf(allocatedDrawDevice())
+			_, found := lookup.screenOf(allocatedDrawDevice())
 
 			mustMatch(t, found, false)
 		})
@@ -421,7 +427,7 @@ func TestTheMonitorLookupAnswersNothingWhenTheSliceListFails(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 
-	_, found := newScreens(client).monitorOf(allocatedDrawDevice())
+	_, found := newScreens(client).screenOf(allocatedDrawDevice())
 
 	mustMatch(t, found, false)
 }

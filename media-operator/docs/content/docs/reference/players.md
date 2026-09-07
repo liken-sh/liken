@@ -143,7 +143,18 @@ What plays on this Player now, written only by the media operator. It is derived
 | <span id="status--activity"></span>`activity` | string | no | Whether the Player performs a run now. Playing is a Play running on it, Starting is a Play whose pod has not begun, and Idle is no Play at all. One of: `Playing`, `Starting`, `Idle`. |
 | <span id="status--play"></span>`play` | string | no | The name of the Play on this Player, in the same namespace. Empty while the Player is Idle. |
 | <span id="status--panel"></span>`panel` | string | no | What the screen's Display last observed: On, BacklightOff, or Off. Empty until a Display carries an observation for the unit's screen. |
+| <span id="status--receiver"></span>`receiver` | [object](#statusreceiver) | no | The equipment this unit's cable lands on, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel. |
 | <span id="status--idle"></span>`idle` | [object](#statusidle) | no | What draws this unit's idle screen, and everything the operator that draws it needs. A delegate wires its client from this block alone, and it sets MEDIA_PLAYER_NAME on that client to the Player's metadata.name, the value every focus mark holds. The block is absent for a Player that drives no screen and where the cluster names no display-draw class. A delegate reads this block and never the spec, because the spec may inherit its controller from the default MediaPreferences, and only the media operator resolves the tiers. |
+
+### status.receiver
+
+The equipment this unit's cable lands on, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusreceiver--name"></span>`name` | string | no | The name of the matched Receiver. |
+| <span id="statusreceiver--input"></span>`input` | string | no | The input of that Receiver this unit's cable lands on. |
+| <span id="statusreceiver--reachable"></span>`reachable` | string | no | The status of the Receiver's Reachable condition, empty until it carries one. |
 
 ### status.idle
 

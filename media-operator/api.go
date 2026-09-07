@@ -83,11 +83,26 @@ type PlayerStatus struct {
 	// until a Display carries an observation.
 	Panel string `json:"panel,omitempty"`
 
+	// Receiver is the equipment this unit's cable lands on and the input
+	// it lands on. It is absent for a unit that plays straight into its
+	// panel.
+	Receiver *PlayerReceiverStatus `json:"receiver,omitempty"`
+
 	// Idle is the resolved idle screen controller and, where a
 	// controller draws, the standing claim a delegate references and the
 	// requests that claim carries. It is nil for a Player that drives no
 	// screen and for a cluster that names no display-draw class.
 	Idle *PlayerIdleStatus `json:"idle,omitempty"`
+}
+
+// PlayerReceiverStatus names the Receiver and the input matched from
+// the unit's machine and monitor id, and folds that Receiver's
+// Reachable condition into one word. The word is empty until the
+// equipment operator reports one.
+type PlayerReceiverStatus struct {
+	Name      string `json:"name,omitempty"`
+	Input     string `json:"input,omitempty"`
+	Reachable string `json:"reachable,omitempty"`
 }
 
 // PlayerIdleStatus is what a delegate wires its client from. Controller
