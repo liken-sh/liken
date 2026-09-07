@@ -67,6 +67,17 @@ spec:
         app: display-operator
     spec:
       serviceAccountName: display-operator
+      # The operator is the machine's hardware layer: every pod that
+      # claims a device it publishes depends on it, and it holds
+      # the GPU and the compositor that holds it. So it schedules ahead of
+      # ordinary pods onto a machine that is already full, preempting
+      # one if it must, and it is evicted last. It also runs whatever
+      # the machine is marked with, because liken taints a node while
+      # it starts, and the devices have to publish before anything
+      # can claim them.
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
       # The kernel delivers uevents to the initial user namespace only.
       # A pod in its own user namespace receives an empty stream, with
       # no error to read, and no monitor plugged in after the pod
