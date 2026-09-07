@@ -82,7 +82,24 @@ holds 8Gi on every machine.
 
 ## The drill
 
-Roll the build to `liken-1`, delete the screen pod, and measure the
-first wall after the restart against the same wall today. Then delete
-the art claim, watch the next pass create it again, and confirm
-the pod comes back with an empty cache and fills it.
+Rolled to `liken-1` as 2026.09.04-003-dev-041 on 2026-09-07, with the
+`Catalog` naming `local-path` for both screen claims and 2Gi for the
+art claim. The browser was driven from a pod that published presses
+on the remote's events topic, so no person stood at the screen.
+
+- The claim `lab-portable-media-browser-art` bound at 2Gi on the
+  screen's node, the pod mounted it at the cache path, and the browser
+  was started with `--cache-budget 2013265920`, which is 2Gi less
+  128 MiB. The `Catalog` status entry named both claims.
+- A fresh claim held 15 files after the home page drew. A walk down
+  the home page, into a wall, and down twenty rows left 123 files and
+  5.8 MB on it.
+- The pod was deleted and came back ready 7 s later, with the same
+  123 files on the claim. The delete itself took 63 s, which is the
+  catalog sidecar's shutdown and not this plan's.
+- The art claim was deleted, then the pod. The next pass created a
+  new claim, it bound, and the pod came back ready 76 s after the pod
+  delete with 13 files on the fresh claim.
+- Typing two letters over the bus took the fresh claim from 13 files
+  to 73, because the search wall drew its hits. That also proved that
+  a letter key reaches the browser from the remote's topic.

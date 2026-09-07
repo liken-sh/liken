@@ -47,10 +47,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   screen half of plan 14: a second agent on every screen pod, the
   browser asks who is watching and sends the answer with every play
   request, and continue watching and history draw from the local copy.
-* [42, A screen keeps its art](42-a-screen-keeps-its-art.md).
-  A second claim beside plan 32's, for the browser's scaled art,
-  sized by the `Catalog` and classed with the catalog claim, so a
-  restart draws from art it already scaled.
 
 ## Future
 
@@ -239,6 +235,12 @@ that took a hearing-impaired flag for Hindi.
   per namespace fed from the bus, that a standing pod holds beside the
   catalog pod. The operator is the only API client and holds a
   finalizer on every `Play` and every `Person` until the store answers.
+* [42, A screen keeps its art](completed/42-a-screen-keeps-its-art.md).
+  Built in 2026.09.04-003-dev-041 and drilled on `liken-1` on
+  2026-09-07. A second claim beside plan 32's, for every piece of art
+  the browser scales, sized by `Catalog.spec.screens.artCache.size`
+  and classed with the catalog claim. The cached art survived a pod
+  restart, and a deleted claim came back fresh on the next pass.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds
