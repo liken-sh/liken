@@ -69,6 +69,11 @@ locals {
       cname       = "per-node.liken.sh"
       topics      = ["liken", "kubernetes", "csi", "csi-driver", "storage"]
     }
+    equipment-operator = {
+      description = "Receivers and other A/V equipment on the network, as resources of liken clusters"
+      cname       = "equipment.liken.sh"
+      topics      = ["liken", "kubernetes", "kubernetes-operator", "denon", "home-theater"]
+    }
     log = {
       description = "The liken devlog"
       cname       = "log.liken.sh"

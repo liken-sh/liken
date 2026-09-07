@@ -208,7 +208,9 @@ resource "linode_domain_record" "www" {
 # manual answers at library.liken.sh, the name of what it operates:
 # the media libraries of a cluster. people-operator's manual answers
 # at people.liken.sh on the same rule, and per-node-csi-driver's at
-# per-node.liken.sh, the name of its StorageClass. A subdomain can CNAME where the apex
+# per-node.liken.sh, the name of its StorageClass. equipment-operator's
+# manual answers at equipment.liken.sh, the name of its API group.
+# A subdomain can CNAME where the apex
 # cannot, so each name points at the organization's Pages hostname,
 # and GitHub routes the request to the repository that claims the
 # name as its custom domain. The Pages verification record below
@@ -225,6 +227,7 @@ resource "linode_domain_record" "extension_operators" {
     "library",
     "people",
     "per-node",
+    "equipment",
   ])
 
   domain_id   = linode_domain.liken_sh.id
