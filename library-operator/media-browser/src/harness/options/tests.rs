@@ -268,6 +268,18 @@ fn a_capture_time_must_be_a_number() {
 }
 
 #[test]
+fn a_scale_is_one_positive_number_and_the_default_is_the_compositors() {
+    let Ok(Invocation::Run(options)) = Options::parse(args("--scale 2")) else {
+        panic!("a run");
+    };
+    assert_eq!(options.scale, Some(2.0));
+    assert_eq!(Options::default().scale, None);
+    assert_eq!(parse_scale(" 1.5 "), Ok(1.5));
+    assert!(parse_scale("0").is_err());
+    assert!(parse_scale("big").is_err());
+}
+
+#[test]
 fn a_size_is_two_numbers_around_an_x() {
     assert_eq!(parse_size("1920x1080"), Ok((1920, 1080)));
     assert_eq!(parse_size(" 640x480 "), Ok((640, 480)));

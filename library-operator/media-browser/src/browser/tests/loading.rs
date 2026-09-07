@@ -2,6 +2,8 @@
 // that holds it, the return that ends it, and the frames the loop asks
 // for while it runs.
 
+use media_screen::status::{Activity, Status};
+
 use super::*;
 
 // The second the press lands on, so the state is entered on a clock that
@@ -97,17 +99,37 @@ fn the_wake_after_the_film_returns_the_page() {
 }
 
 // The `Play` ends while the browser was never covered, so the crate
-// sends the fresh surface and no wake. The page returns on that alone.
+// sends the fresh surface and no wake. The page returns on the surface
+// alone: the present asks for it, and the return waits until the
+// harness reports it up, so the return's frames land on the window a
+// person sees and not on the one the film covered.
 #[test]
-fn a_present_returns_the_page_too() {
+fn a_present_asks_for_the_surface_and_the_return_waits_for_it() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
 
     *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
     browser.pump(PRESS + 5.0);
 
-    assert!(browser.loading.expect("the state is leaving").leaving());
     assert!(browser.surface_due());
+    assert!(!browser.loading.expect("the state holds").leaving());
+
+    browser.surfaced(PRESS + 7.0);
+
+    assert!(browser.loading.expect("the state is leaving").leaving());
+    assert_eq!(browser.loading.expect("the state").away(PRESS + 7.0), 1.0);
+    browser.tick(PRESS + 7.0 + look::RETURN);
+    assert!(browser.loading.is_none());
+}
+
+#[test]
+fn a_surface_with_no_present_behind_it_returns_nothing() {
+    let (mut browser, _bus) = on_a_movie();
+    browser.key("enter");
+
+    browser.surfaced(PRESS + 7.0);
+
+    assert!(!browser.loading.expect("the state holds").leaving());
 }
 
 #[test]
@@ -149,6 +171,7 @@ fn the_loop_draws_the_state_and_goes_quiet_after_it() {
 
     *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
     browser.pump(PRESS + 5.0);
+    browser.surfaced(PRESS + 5.0);
     browser.tick(PRESS + 5.0 + look::RETURN);
     browser.minute = Some(MINUTE);
 
@@ -157,6 +180,58 @@ fn the_loop_draws_the_state_and_goes_quiet_after_it() {
 
 // A state held under a film would draw a black frame sixty times a
 // second, so the browser asks for none while the shade is down.
+// The film covers the surface and the bus says so in the status. The
+// crate sends no sleep during a film, so the status is the one word the
+// browser has that the film is up.
+#[test]
+fn a_playing_status_covers_the_page_and_asks_for_no_frame() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Status(Status {
+        activity: Activity::Playing,
+        ..Status::default()
+    })];
+    browser.pump(PRESS + 1.0);
+
+    assert_eq!(browser.next_frame(PRESS + 1.0), None);
+    assert!(browser.loading.is_some());
+}
+
+#[test]
+fn the_present_after_a_covered_film_draws_the_return() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Status(Status {
+        activity: Activity::Playing,
+        ..Status::default()
+    })];
+    browser.pump(PRESS + 1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    browser.pump(PRESS + 5.0);
+    browser.surfaced(PRESS + 5.0);
+
+    assert_eq!(browser.next_frame(PRESS + 5.0), Some(PRESS + 5.0));
+    assert!(browser.loading.expect("the state is leaving").leaving());
+}
+
+#[test]
+fn an_idle_status_uncovers_the_page() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![
+        Moment::Status(Status {
+            activity: Activity::Starting,
+            ..Status::default()
+        }),
+        Moment::Status(Status::default()),
+    ];
+    browser.pump(PRESS + 1.0);
+
+    assert_eq!(browser.next_frame(PRESS + 1.0), Some(PRESS + 1.0));
+}
+
 #[test]
 fn a_state_under_the_film_asks_for_no_frame() {
     let (mut browser, bus) = on_a_movie();

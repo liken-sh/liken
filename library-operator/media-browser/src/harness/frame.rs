@@ -22,7 +22,21 @@ use super::{QUIT, Ready, Screen};
 /// and not as many as the loop can spin.
 pub const STEP: f64 = 1.0 / 60.0;
 
+/// The viewport's logical size in whole pixels, which is what a screen lays
+/// out in.
+pub(crate) fn logical(viewport: &Viewport) -> (u32, u32) {
+    let size = viewport.logical_size();
+    (size.width.round() as u32, size.height.round() as u32)
+}
+
 impl<S: Screen> Ready<S> {
+    /// The scale the run lays out at: the one --scale stated, or the one
+    /// the compositor states for the window's output.
+    pub(crate) fn scale(&self) -> f32 {
+        self.scale
+            .unwrap_or_else(|| self.window.scale_factor() as f32)
+    }
+
     /// Hand one key to the screen. The answer is true when the key ends the
     /// run. Both the keyboard and the script arrive here, so the key that
     /// ends a run is decided once for the two of them.
@@ -88,10 +102,9 @@ impl<S: Screen> Ready<S> {
         if self.resized {
             let size = self.window.inner_size();
             let (width, height) = (size.width.max(1), size.height.max(1));
-            self.viewport = Viewport::with_physical_size(
-                Size::new(width, height),
-                self.window.scale_factor() as f32,
-            );
+            self.viewport = Viewport::with_physical_size(Size::new(width, height), self.scale());
+            self.screen
+                .scaled(logical(&self.viewport), self.viewport.scale_factor());
             configure(&self.surface, &self.device, self.format, width, height);
             self.stats.resized((width, height));
             self.resized = false;

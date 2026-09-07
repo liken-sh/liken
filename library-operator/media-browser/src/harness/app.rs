@@ -14,6 +14,7 @@ use winit::keyboard::ModifiersState;
 use winit::window::WindowId;
 
 use super::capture::Captures;
+use super::frame::logical;
 use super::stats::Stats;
 use super::timeline::Timeline;
 use super::watchdog::Watchdog;
@@ -65,6 +66,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             stats: stats_path,
             quit_after,
             app_id,
+            scale,
             // The binary reads the catalog flags before the run, so
             // the harness carries them and uses none of them.
             ..
@@ -72,7 +74,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
 
         let viewport = Viewport::with_physical_size(
             Size::new(graphics.size.0, graphics.size.1),
-            graphics.window.scale_factor() as f32,
+            scale.unwrap_or(graphics.window.scale_factor() as f32),
         );
         let stats = Stats::new(
             graphics.backend.clone(),
@@ -80,7 +82,8 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             graphics.size,
         );
 
-        let screen = screen.take().expect("one window per run");
+        let mut screen = screen.take().expect("one window per run");
+        screen.scaled(logical(&viewport), viewport.scale_factor());
         *state = State::Ready(Box::new(Ready {
             screen,
             timeline: Timeline::new(script, quit_after),
@@ -97,6 +100,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             modifiers: ModifiersState::default(),
             events: Vec::new(),
             resized: false,
+            scale,
             app_id,
             surface_pending: false,
             launched,
@@ -151,9 +155,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             _ => {}
         }
 
-        if let Some(event) =
-            conversion::window_event(event, ready.window.scale_factor() as f32, ready.modifiers)
-        {
+        if let Some(event) = conversion::window_event(event, ready.scale(), ready.modifiers) {
             ready.events.push(event);
         }
     }

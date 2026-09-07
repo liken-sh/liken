@@ -36,6 +36,9 @@ pub fn budget(size: (u32, u32)) -> usize {
 /// cache under them, and the loop's wake handle.
 pub struct Volumes {
     store: Store,
+    // How many physical pixels one logical pixel spans. Every ask is in
+    // logical pixels, and the decode under it is at physical size.
+    scale: f32,
     // The wake handle arrives after the store is built, because the
     // harness owns the loop it wakes. Every worker fires through this
     // cell, so a handle set late still reaches decodes queued early.
@@ -71,6 +74,7 @@ impl Volumes {
         });
         Self {
             store: Store::with_cache_dir(roots, budget, waker, cache_dir, cache_budget),
+            scale: 1.0,
             wake,
         }
     }
@@ -90,11 +94,14 @@ impl Volumes {
         if !contained(art) {
             return None;
         }
+        let width = (width as f32 * self.scale).round() as u32;
+        let height = (height as f32 * self.scale).round() as u32;
         let scaled = self.store.scaled(library, art, width, height, fit)?;
         let built = scaled.art.get_or_init(|| {
-            Image::new(
+            Image::at_scale(
                 scaled.width,
                 scaled.height,
+                self.scale,
                 Bytes::from_owner(scaled.rgba.clone()),
             )
         });
@@ -119,6 +126,10 @@ impl Art for Volumes {
 
     fn fitted(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Image> {
         self.decoded(library, art, width, height, Fit::Contain)
+    }
+
+    fn scaled(&mut self, scale: f32) {
+        self.scale = scale;
     }
 
     fn file(&self, library: &str, path: &str) -> Option<PathBuf> {
@@ -218,6 +229,33 @@ mod tests {
                 from_source: 1,
             }
         );
+    }
+
+    #[test]
+    fn a_store_at_scale_two_decodes_twice_the_pixels_and_reports_the_logical_size() {
+        let dir = TempDir::new().unwrap();
+        let mut volumes = volume(&dir);
+        volumes.scaled(2.0);
+        let (sender, receiver) = mpsc::channel();
+        volumes.wake_by(Arc::new(move || {
+            let _ = sender.send(());
+        }));
+
+        assert!(
+            volumes
+                .covered("local/movies", "poster.jpg", 40, 60)
+                .is_none()
+        );
+        receiver.recv_timeout(DEADLINE).unwrap();
+
+        let art = volumes
+            .covered("local/movies", "poster.jpg", 40, 60)
+            .expect("the decode landed");
+        assert_eq!(art.size(), (40, 60));
+        let Handle::Rgba { width, height, .. } = &handles(&art)[0] else {
+            panic!("decoded art is an Rgba handle");
+        };
+        assert_eq!((*width, *height), (80, 120));
     }
 
     #[test]

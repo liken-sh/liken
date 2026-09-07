@@ -12,6 +12,7 @@ use iced_wgpu::Renderer;
 use iced_widget::{Space, Stack, canvas};
 use iced_winit::core::{Color, Element, Length, Theme};
 
+use media_screen::status::Activity;
 use media_screen::{Bus, Moment};
 
 use crate::art::{Art, ArtCounts};
@@ -73,8 +74,19 @@ pub struct Browser<S: Source, A: Art> {
     // Whether the shade is down. The browser never decides it: it asks for
     // the shade, the crate decides, and the moment comes back here.
     asleep: bool,
+    // Whether a film covers the surface. The bus says so in every status
+    // whose activity is not idle, and a covered surface gets no frame
+    // callbacks, so a browser that kept drawing under the film would
+    // render every frame for nobody and take the GPU from the film.
+    covered: bool,
     // Whether a present asked for a fresh Wayland surface.
     surface_due: bool,
+    // Whether the return waits for that surface. The return runs on the
+    // clock, and the compositor takes its own time to map a fresh
+    // window, so a return started at the present would run out before
+    // the first frame anyone sees. It starts on the frame the harness
+    // reports the surface up.
+    returning: bool,
     // The size a page's backdrop is decoded at, which is the size of the
     // window.
     page: (u32, u32),
@@ -140,7 +152,9 @@ impl<S: Source, A: Art> Browser<S, A> {
             play_topic: String::new(),
             audience: Audience::default(),
             asleep: false,
+            covered: false,
             surface_due: false,
+            returning: false,
             page: PAGE,
             clock: 0.0,
             rest: None,
@@ -256,20 +270,23 @@ impl<S: Source, A: Art> Browser<S, A> {
             Moment::Sleep => self.asleep = true,
             Moment::Wake => {
                 self.asleep = false;
+                self.covered = false;
                 self.presented();
                 self.lifted();
             }
             Moment::Present => {
                 self.surface_due = true;
-                self.presented();
+                self.covered = false;
+                self.returning = true;
                 self.lifted();
             }
+            Moment::Status(status) => self.covered = status.activity != Activity::Idle,
             // A level brings up the volume row, which draws over every
             // screen.
             Moment::Level { volume, pressed } => self.level.fold(volume, pressed, self.clock),
-            // The browser draws no identity block and no unit status, so
-            // these two change nothing here.
-            Moment::Focus { .. } | Moment::Status(_) => {}
+            // The browser draws no identity block, so focus changes nothing
+            // here.
+            Moment::Focus { .. } => {}
         }
     }
 
@@ -599,6 +616,24 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // The source, the art store, the home page's reader, and the bus
     // deliver on threads of their own, so all four take the handle that
     // wakes the loop.
+    // The fresh surface is up, so the return the present held starts now
+    // and its first frame is the first one on the new window.
+    fn surfaced(&mut self, at: f64) {
+        if !self.returning {
+            return;
+        }
+        self.returning = false;
+        self.clock = at;
+        self.presented();
+    }
+
+    // The page's backdrop is decoded at the logical size of the window,
+    // and the store scales every ask to the panel.
+    fn scaled(&mut self, logical: (u32, u32), scale: f32) {
+        self.page = logical;
+        self.store.get_mut().scaled(scale);
+    }
+
     fn wake_by(&mut self, wake: Waker) {
         self.source.wake_by(wake.clone());
         if let Some(bus) = &self.bus {
@@ -694,7 +729,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // second the minute turns. Nothing under a film schedules a frame,
     // because those frames would draw a black shade nobody sees.
     fn next_frame(&self, at: f64) -> Option<f64> {
-        let drawing = !self.asleep;
+        let drawing = !self.asleep && !self.covered;
         let loading = (drawing && self.loading.is_some()).then_some(at);
         let level = drawing.then(|| self.level.next_frame(at)).flatten();
         let minute = drawing.then_some(self.minute).flatten();

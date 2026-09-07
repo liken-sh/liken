@@ -57,8 +57,16 @@ for _ in $(seq 100); do
   sleep 0.1
 done
 
+# The headless output takes the size the run asked for, so a --size of
+# 3840x2160 with --scale 2 is a 4K panel on this workstation.
+mode=1920x1080
+previous=""
+for argument in "$@"; do
+  [ "$previous" = "--size" ] && mode="$argument"
+  previous="$argument"
+done
 if [ -n "$display" ]; then
-  WAYLAND_DISPLAY="$display" wlr-randr --output HEADLESS-1 --custom-mode 1920x1080 || true
+  WAYLAND_DISPLAY="$display" wlr-randr --output HEADLESS-1 --custom-mode "$mode" || true
 else
   echo "local/media-browser: the client never reported a display" >&2
 fi

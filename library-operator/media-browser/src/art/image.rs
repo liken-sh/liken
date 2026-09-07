@@ -19,6 +19,10 @@ const SYNC_UPLOAD_BYTES: usize = 2 * 1024 * 1024;
 pub struct Image {
     width: u32,
     height: u32,
+    // How many physical pixels one logical pixel spans in these bands.
+    // The size the image reports is logical, because the views lay out
+    // in logical pixels and the bands are decoded for the panel's.
+    scale: f32,
     bands: Vec<Band>,
 }
 
@@ -34,6 +38,13 @@ impl Image {
     /// is a contiguous run of rows, so each handle is a view of the one
     /// buffer and no pixel is copied.
     pub fn new(width: u32, height: u32, pixels: Bytes) -> Self {
+        Self::at_scale(width, height, 1.0, pixels)
+    }
+
+    /// An image of this many physical pixels, decoded for a panel at this
+    /// scale, so it reports its size in the logical pixels the views lay
+    /// out in.
+    pub fn at_scale(width: u32, height: u32, scale: f32, pixels: Bytes) -> Self {
         let row = width as usize * 4;
         let mut bands = Vec::new();
         let per_band = (SYNC_UPLOAD_BYTES - 1)
@@ -54,14 +65,18 @@ impl Image {
         Self {
             width,
             height,
+            scale,
             bands,
         }
     }
 
-    /// The pixel size the decode landed at. A contain fit answers a size
+    /// The logical size the decode landed at. A contain fit answers a size
     /// smaller than the box it was asked for.
     pub fn size(&self) -> (u32, u32) {
-        (self.width, self.height)
+        (
+            (self.width as f32 / self.scale).round() as u32,
+            (self.height as f32 / self.scale).round() as u32,
+        )
     }
 
     /// Each band with the share of the target rectangle it draws in. A band
@@ -111,6 +126,13 @@ mod tests {
             width: width as f32,
             height: height as f32,
         }
+    }
+
+    #[test]
+    fn an_image_at_scale_two_reports_half_its_pixels_as_its_size() {
+        let art = Image::at_scale(540, 810, 2.0, numbered(540, 810));
+        assert_eq!(art.size(), (270, 405));
+        assert_eq!(drawn(&art, area(&art)).len(), 1);
     }
 
     #[test]

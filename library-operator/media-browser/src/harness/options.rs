@@ -45,6 +45,7 @@ media-browser [FLAGS]
   --stats FILE             the JSON measurements, written at exit
   --quit-after SECONDS     when to exit
   --size WxH               the window size to ask for; the default is 1920x1080
+  --scale FACTOR           the scale to lay out at, in place of the compositor's
   --print-progress         print what the audience is watching, then exit
   --help                   print this and exit
 
@@ -105,6 +106,11 @@ pub struct Options {
     pub quit_after: Option<f64>,
     /// The window size to ask the compositor for.
     pub size: (u32, u32),
+    /// The scale to lay out at, in place of the one the compositor states
+    /// for the output. A pod never sets it: it is the knob a run on a
+    /// workstation turns to see a 4K panel's layout under a compositor that
+    /// states 1.
+    pub scale: Option<f32>,
     /// The Wayland app-id every window this run maps asks for, from
     /// [`APP_ID`]. Nothing on the command line sets it.
     pub app_id: String,
@@ -135,6 +141,7 @@ impl Default for Options {
             stats: None,
             quit_after: None,
             size: (1920, 1080),
+            scale: None,
             app_id: String::new(),
             window_grace: None,
             play_topic: String::new(),
@@ -187,6 +194,7 @@ impl Options {
                     );
                 }
                 "--size" => options.size = parse_size(&value()?)?,
+                "--scale" => options.scale = Some(parse_scale(&value()?)?),
                 other => return Err(format!("unknown flag {other}")),
             }
         }
@@ -336,6 +344,19 @@ pub fn parse_times(raw: &str) -> Result<Vec<f64>, String> {
 }
 
 /// A window size, written `WIDTHxHEIGHT`.
+/// One scale factor. A factor at or under zero would lay out nothing, so
+/// it is refused with the size parse's own kind of message.
+pub fn parse_scale(raw: &str) -> Result<f32, String> {
+    let scale: f32 = raw
+        .trim()
+        .parse()
+        .map_err(|_| format!("bad --scale {raw}"))?;
+    if scale <= 0.0 {
+        return Err(format!("bad --scale {raw}"));
+    }
+    Ok(scale)
+}
+
 pub fn parse_size(raw: &str) -> Result<(u32, u32), String> {
     let (width, height) = raw
         .trim()

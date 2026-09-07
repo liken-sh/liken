@@ -51,6 +51,9 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   Every claim can bind to a `per-node` volume the operator writes up
   front; the copies of a store share one claim, and the heal shrinks
   to a pod delete.
+* [45, The browser at 4K](45-the-browser-at-4k.md). Layout in
+  logical pixels, art decoded at physical pixels, a `--scale` test
+  knob, and a browser that draws no frame while a film covers it.
 
 ## Future
 

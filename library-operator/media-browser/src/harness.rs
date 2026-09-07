@@ -140,6 +140,13 @@ pub trait Screen {
 
     /// The new surface is up, on the frame at `at` seconds.
     fn surfaced(&mut self, _at: f64) {}
+
+    /// The window's logical size and its scale, before the first frame and
+    /// after every resize. The layout is in logical pixels, and the scale
+    /// is how many physical pixels each one spans, so a screen that decodes
+    /// art hands the scale to its store and keeps every other measure as it
+    /// is.
+    fn scaled(&mut self, _logical: (u32, u32), _scale: f32) {}
 }
 
 /// Run a screen to the end of its script and write what it measured.
@@ -213,6 +220,9 @@ pub struct Ready<S: Screen> {
     pub(crate) modifiers: ModifiersState,
     pub(crate) events: Vec<Event>,
     pub(crate) resized: bool,
+    /// The scale from --scale, in place of the window's, or nothing to lay
+    /// out at the scale the compositor states.
+    pub(crate) scale: Option<f32>,
     /// The app-id every window of this run asks for, held because the
     /// re-present maps a second window.
     pub(crate) app_id: String,
@@ -396,6 +406,7 @@ mod tests {
         still.wake_by(Arc::new(|| {}));
         still.update(());
         still.surfaced(2.0);
+        still.scaled((1920, 1080), 1.0);
         assert!(still.key("q"));
         assert!(still.key(QUIT));
         still.tick(2.0);
