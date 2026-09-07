@@ -1,9 +1,9 @@
 package main
 
-// The progress pod is one standing pod per namespace, owned by the
-// Catalog, holding the namespace's durable progress store on a claim of
-// its own and writing to it from the bus. It is the standing member of
-// the progress gossip cluster, and a rebuilt cluster starts from it.
+// The progress pods are the durable copies of one namespace's progress
+// store, owned by the Catalog, each on a claim of its own. The first copy
+// writes to the store from the bus. They are the standing members of the
+// progress gossip cluster, and a rebuilt cluster starts from them.
 //
 // The pod holds no Kubernetes credential. The operator is the only API
 // client, and everything the store records about a Play crosses the bus
@@ -49,35 +49,45 @@ const (
 // The pod one Catalog stands for its progress store, and the claim
 // under it. Both are named from the Catalog, so every pass names the
 // same objects and the operator keeps no record of them.
+//
+// The first copy's name. storereplicas.go numbers every copy after it
+// from here.
 func progressPodName(catalog string) string {
-	return catalog + "-progress"
-}
-
-func progressClaimName(catalog string) string {
 	return catalog + "-progress"
 }
 
 // The label pair the progress pod carries: the name label that tells it
 // from a catalog pod and a screen pod, and the progress member label
 // the namespace's progress EndpointSlice is written over.
+//
+// The store label is the third. It tells a durable copy of the progress
+// store from every other pod that holds a progress agent.
 func progressPodLabels() map[string]string {
-	return withProgressMemberLabel(map[string]string{scannerLabelKey: progressLabelValue})
+	return withProgressMemberLabel(map[string]string{
+		scannerLabelKey: progressLabelValue,
+		storeLabelKey:   progressStoreLabelValue,
+	})
 }
 
 // The pod the Catalog stands for its progress store. It is a function
 // of the Catalog and the operator's own settings alone, so two passes
 // over an unchanged Catalog build the same pod, which is what makes the
 // template hash mean anything.
-func buildProgressPod(catalog *NamespaceCatalog, operatorImage, corrosionImage, busAddress, topicBase, mediaBase string) *Pod {
+//
+// buildProgressPod builds one copy of the progress store. The index names
+// which copy this is.
+func buildProgressPod(catalog *NamespaceCatalog, index int, operatorImage, corrosionImage, busAddress, topicBase, mediaBase string) *Pod {
+	store := progressStoreOf(catalog)
 	grace := int64(scannerGracePeriod)
 	// The progress role holds no Kubernetes credential; it reads the
 	// bus and writes its own agent, and the operator alone reads the API.
 	noToken := false
+	sidecars, containers := progressPodContainers(catalog, index, operatorImage, corrosionImage, busAddress, topicBase, mediaBase)
 	return &Pod{
 		APIVersion: podAPIVersion,
 		Kind:       "Pod",
 		Metadata: ObjectMeta{
-			Name:            progressPodName(catalog.Metadata.Name),
+			Name:            store.replicaName(index),
 			Namespace:       catalog.Metadata.Namespace,
 			Labels:          progressPodLabels(),
 			OwnerReferences: []OwnerReference{catalogObjectOwner(catalog)},
@@ -89,19 +99,28 @@ func buildProgressPod(catalog *NamespaceCatalog, operatorImage, corrosionImage, 
 			RestartPolicy:                 "Always",
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,
-			InitContainers: []Container{
-				progressSidecar(corrosionImage),
-			},
-			Containers: []Container{
-				progressRole(catalog, operatorImage, busAddress, topicBase, mediaBase),
-			},
+			Affinity:                      store.antiAffinity(),
+			InitContainers:                sidecars,
+			Containers:                    containers,
 			Volumes: []Volume{
 				{Name: progressVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-					ClaimName: progressClaimName(catalog.Metadata.Name),
+					ClaimName: store.replicaName(index),
 				}},
 			},
 		},
 	}
+}
+
+// The containers one copy of the progress store runs, as the native
+// sidecars and the containers beside them. The first copy carries the
+// recorder over its agent. Every copy after it is the agent alone, because
+// one namespace records each Play once.
+func progressPodContainers(catalog *NamespaceCatalog, index int, operatorImage, corrosionImage, busAddress, topicBase, mediaBase string) ([]Container, []Container) {
+	agent := progressSidecar(corrosionImage)
+	if index > 0 {
+		return nil, []Container{replicaAgent(agent)}
+	}
+	return []Container{agent}, []Container{progressRole(catalog, operatorImage, busAddress, topicBase, mediaBase)}
 }
 
 // The Corrosion agent of the progress cluster. The image carries the
@@ -187,12 +206,14 @@ func progressRole(catalog *NamespaceCatalog, image, busAddress, topicBase, media
 //
 // A Catalog that names a claim of its own names the catalog's claim,
 // never this one, so the operator always provisions the progress claim.
-func buildProgressClaim(catalog *NamespaceCatalog) *PersistentVolumeClaim {
+//
+// One claim per copy, at the copy's own name.
+func buildProgressClaim(catalog *NamespaceCatalog, index int) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
 		Kind:       "PersistentVolumeClaim",
 		Metadata: ObjectMeta{
-			Name:            progressClaimName(catalog.Metadata.Name),
+			Name:            progressStoreOf(catalog).replicaName(index),
 			Namespace:       catalog.Metadata.Namespace,
 			Labels:          progressPodLabels(),
 			OwnerReferences: []OwnerReference{catalogObjectOwner(catalog)},
@@ -211,8 +232,8 @@ func buildProgressClaim(catalog *NamespaceCatalog) *PersistentVolumeClaim {
 // rule standCatalogClaim follows, because a claim's spec is immutable
 // once it binds. A size a later Catalog grows to reaches a new claim,
 // not this one.
-func (o *operator) standProgressClaim(ctx context.Context, catalog *NamespaceCatalog) error {
-	namespace, name := catalog.Metadata.Namespace, progressClaimName(catalog.Metadata.Name)
+func (o *operator) standProgressClaim(ctx context.Context, catalog *NamespaceCatalog, index int) error {
+	namespace, name := catalog.Metadata.Namespace, progressStoreOf(catalog).replicaName(index)
 
 	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
 	if err == nil {
@@ -221,20 +242,35 @@ func (o *operator) standProgressClaim(ctx context.Context, catalog *NamespaceCat
 	if !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildProgressClaim(catalog))
+	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildProgressClaim(catalog, index))
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}
 	return err
 }
 
+// Stand every durable copy of the progress store this Catalog asks for,
+// in index order, and take down the copies above that count.
+func (o *operator) standProgressPods(ctx context.Context, catalog *NamespaceCatalog) ([]*Pod, error) {
+	wanted := progressReplicaCount(catalog)
+	pods := make([]*Pod, wanted)
+	for index := range wanted {
+		pod, err := o.standProgressPod(ctx, catalog, index)
+		if err != nil {
+			return pods, err
+		}
+		pods[index] = pod
+	}
+	return pods, o.sweepStoreReplicas(ctx, catalog, progressStoreOf(catalog), wanted)
+}
+
 // The pod that stands for one Catalog's progress store after this pass,
 // on the same terms as every other pod this operator stands.
-func (o *operator) standProgressPod(ctx context.Context, catalog *NamespaceCatalog) (*Pod, error) {
-	if err := o.standProgressClaim(ctx, catalog); err != nil {
+func (o *operator) standProgressPod(ctx context.Context, catalog *NamespaceCatalog, index int) (*Pod, error) {
+	if err := o.standProgressClaim(ctx, catalog, index); err != nil {
 		return nil, err
 	}
-	desired := buildProgressPod(catalog, o.scannerImage, o.corrosionImage,
+	desired := buildProgressPod(catalog, index, o.scannerImage, o.corrosionImage,
 		o.busAddress, o.topicBase, o.mediaTopicBase)
 	return o.standPod(ctx, desired)
 }

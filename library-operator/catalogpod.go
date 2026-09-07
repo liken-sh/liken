@@ -1,12 +1,12 @@
 package main
 
-// The catalog pod is what a Catalog becomes at run time: one
-// standing pod per namespace, owned by the Catalog, holding the
-// namespace's durable catalog on a claim and reporting what it holds
-// over the bus. It is the standing member of the gossip cluster, and
-// every worker Job joins that cluster for the length of its run. It
-// answers on no port: the agent's API is loopback only, and the
-// reporter reads it from inside the pod.
+// The catalog pods are what a Catalog becomes at run time: one durable
+// copy per replica the Catalog asks for, owned by the Catalog, each with
+// the namespace's catalog on a claim of its own. The first copy reports
+// what it holds over the bus. They are the standing members of the gossip
+// cluster, and every worker Job joins that cluster for the length of its
+// run. They answer on no port: the agent's API is loopback only, and the
+// reporter reads it from inside its own pod.
 
 import (
 	"context"
@@ -22,24 +22,35 @@ func catalogPodName(catalog string) string {
 // The label pair the catalog pod carries: the name label that
 // tells it from a Job's pod and a screen pod, and the member label the
 // namespace's EndpointSlice is written over.
+//
+// The store label is the third. It tells a durable copy of the catalog
+// from every other pod that holds a catalog agent.
 func catalogPodLabels() map[string]string {
-	return withMemberLabel(map[string]string{scannerLabelKey: catalogLabelValue})
+	return withMemberLabel(map[string]string{
+		scannerLabelKey: catalogLabelValue,
+		storeLabelKey:   catalogStoreLabelValue,
+	})
 }
 
 // The pod the Catalog stands. It is a function of the Catalog
 // and the operator's own settings alone, so two passes over an
 // unchanged Catalog build the same pod, which is what makes the
 // template hash mean anything.
-func buildCatalogPod(catalog *NamespaceCatalog, scannerImage, corrosionImage, busAddress, topicBase string) *Pod {
+//
+// buildCatalogPod builds one copy of the catalog. The index names which
+// copy this is.
+func buildCatalogPod(catalog *NamespaceCatalog, index int, scannerImage, corrosionImage, busAddress, topicBase string) *Pod {
+	store := catalogStoreOf(catalog)
 	grace := int64(scannerGracePeriod)
 	// The reporter holds no Kubernetes credential; it publishes over
 	// the bus, and the operator alone writes a status.
 	noToken := false
+	sidecars, containers := catalogPodContainers(catalog, index, scannerImage, corrosionImage, busAddress, topicBase)
 	return &Pod{
 		APIVersion: podAPIVersion,
 		Kind:       "Pod",
 		Metadata: ObjectMeta{
-			Name:            catalogPodName(catalog.Metadata.Name),
+			Name:            store.replicaName(index),
 			Namespace:       catalog.Metadata.Namespace,
 			Labels:          catalogPodLabels(),
 			OwnerReferences: []OwnerReference{catalogObjectOwner(catalog)},
@@ -51,19 +62,28 @@ func buildCatalogPod(catalog *NamespaceCatalog, scannerImage, corrosionImage, bu
 			RestartPolicy:                 "Always",
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,
-			InitContainers: []Container{
-				catalogSidecar(corrosionImage),
-			},
-			Containers: []Container{
-				reporterSidecar(catalog, scannerImage, busAddress, topicBase),
-			},
+			Affinity:                      store.antiAffinity(),
+			InitContainers:                sidecars,
+			Containers:                    containers,
 			Volumes: []Volume{
 				{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-					ClaimName: catalogClaimFor(catalog),
+					ClaimName: catalogReplicaClaim(catalog, index),
 				}},
 			},
 		},
 	}
+}
+
+// The containers one copy of the catalog runs, as the native sidecars and
+// the containers beside them. The first copy carries the reporter over
+// its agent. Every copy after it is the agent alone, because one namespace
+// publishes one report.
+func catalogPodContainers(catalog *NamespaceCatalog, index int, scannerImage, corrosionImage, busAddress, topicBase string) ([]Container, []Container) {
+	agent := catalogSidecar(corrosionImage)
+	if index > 0 {
+		return nil, []Container{replicaAgent(agent)}
+	}
+	return []Container{agent}, []Container{reporterSidecar(catalog, scannerImage, busAddress, topicBase)}
 }
 
 // The container that reads the loopback catalog API and
@@ -89,15 +109,32 @@ func reporterSidecar(catalog *NamespaceCatalog, image, busAddress, topicBase str
 	}
 }
 
+// Stand every durable copy of the catalog this Catalog asks for, in index
+// order, and take down the copies above that count. A failure on one copy
+// ends the stand, and the pass reports it with the copies that already
+// stood.
+func (o *operator) standCatalogPods(ctx context.Context, catalog *NamespaceCatalog) ([]*Pod, error) {
+	wanted := catalogReplicaCount(catalog)
+	pods := make([]*Pod, wanted)
+	for index := range wanted {
+		pod, err := o.standCatalogPod(ctx, catalog, index)
+		if err != nil {
+			return pods, err
+		}
+		pods[index] = pod
+	}
+	return pods, o.sweepStoreReplicas(ctx, catalog, catalogStoreOf(catalog), wanted)
+}
+
 // The pod that stands for one Catalog after this pass, on the
 // same terms as every other pod this operator stands: the live pod when
 // it matches the template, the created pod when there was none, and nil
 // when this pass deleted a stale one.
-func (o *operator) standCatalogPod(ctx context.Context, catalog *NamespaceCatalog) (*Pod, error) {
-	if err := o.standCatalogPodClaim(ctx, catalog); err != nil {
+func (o *operator) standCatalogPod(ctx context.Context, catalog *NamespaceCatalog, index int) (*Pod, error) {
+	if err := o.standCatalogPodClaim(ctx, catalog, index); err != nil {
 		return nil, err
 	}
-	desired := buildCatalogPod(catalog, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
+	desired := buildCatalogPod(catalog, index, o.scannerImage, o.corrosionImage, o.busAddress, o.topicBase)
 	return o.standPod(ctx, desired)
 }
 
@@ -136,11 +173,14 @@ func catalogPodBlocker(pod *Pod) (string, string) {
 // the rule standCatalogClaim follows, because a claim's spec is
 // immutable once it binds. A Catalog that names a claim of its own
 // creates none: the claim is the person's, and the operator mounts it.
-func (o *operator) standCatalogPodClaim(ctx context.Context, catalog *NamespaceCatalog) error {
-	if catalog.Spec.Storage.ClaimName != "" {
+//
+// The claim a Catalog names is the first copy's alone. Every copy after
+// it takes a claim the operator provisions.
+func (o *operator) standCatalogPodClaim(ctx context.Context, catalog *NamespaceCatalog, index int) error {
+	if index == 0 && catalog.Spec.Storage.ClaimName != "" {
 		return nil
 	}
-	namespace, name := catalog.Metadata.Namespace, catalogPodClaimName(catalog.Metadata.Name)
+	namespace, name := catalog.Metadata.Namespace, catalogStoreOf(catalog).replicaName(index)
 
 	_, err := GetPersistentVolumeClaim(ctx, o.client, namespace, name)
 	if err == nil {
@@ -149,7 +189,7 @@ func (o *operator) standCatalogPodClaim(ctx context.Context, catalog *NamespaceC
 	if !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildCatalogPodClaim(catalog))
+	_, err = CreatePersistentVolumeClaim(ctx, o.client, buildCatalogPodClaim(catalog, index))
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

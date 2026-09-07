@@ -157,6 +157,16 @@ const (
 	templateHashAnnotation   = "library.liken.sh/template-hash"
 )
 
+// The store label names which of the namespace's two durable stores a
+// pod or a claim is a copy of. The member labels above are on every pod
+// that holds an agent, a Job's pod and a screen pod included, so they
+// cannot tell the durable copies from the rest.
+const (
+	storeLabelKey           = "library.liken.sh/store"
+	catalogStoreLabelValue  = "catalog"
+	progressStoreLabelValue = "progress"
+)
+
 // The label pair that names one Library's objects, on the
 // catalog claim the Library owns.
 func libraryLabels(library string) map[string]string {
@@ -236,6 +246,34 @@ type PodSpec struct {
 	// them by. A screen pod names the display claim media-operator stood for
 	// its Player, and no other pod this operator builds holds one.
 	ResourceClaims []PodResourceClaim `json:"resourceClaims,omitempty"`
+	// The scheduling rules the pod carries. The durable copies of a store
+	// are the only pods this operator gives any.
+	Affinity *Affinity `json:"affinity,omitempty"`
+}
+
+// The one kind of affinity this operator states: the rule that keeps two
+// copies of one store off one node.
+type Affinity struct {
+	PodAntiAffinity *PodAntiAffinity `json:"podAntiAffinity,omitempty"`
+}
+
+// A required term is a placement the scheduler refuses to break, so a
+// copy with nowhere to go stays Pending and the status says so.
+type PodAntiAffinity struct {
+	RequiredDuringSchedulingIgnoredDuringExecution []PodAffinityTerm `json:"requiredDuringSchedulingIgnoredDuringExecution,omitempty"`
+}
+
+// One term names the pods it reads and the topology it spreads them
+// over. The selector reads the pod's own namespace.
+type PodAffinityTerm struct {
+	LabelSelector *LabelSelector `json:"labelSelector,omitempty"`
+	TopologyKey   string         `json:"topologyKey"`
+}
+
+// The equality half of a Kubernetes label selector, the only half this
+// operator states.
+type LabelSelector struct {
+	MatchLabels map[string]string `json:"matchLabels,omitempty"`
 }
 
 // One claim the pod holds. Name is the pod-local name a container's

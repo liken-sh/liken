@@ -56,6 +56,115 @@ func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 	}
 }
 
+// A Catalog that asks for more than one copy of a store stands one pod
+// and one claim per copy, the first under the store's own name and
+// every copy after it numbered, and the status says how many it asks
+// for.
+func TestReconcileCatalogsStandsEveryCopyOfBothStores(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := seedCatalog(cluster, "house-catalog", "house")
+	catalog.Spec.Storage.Replicas = 3
+	catalog.Spec.Progress.Replicas = 2
+
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+
+	for _, name := range []string{
+		"house-catalog-catalog", "house-catalog-catalog-1", "house-catalog-catalog-2",
+		"house-catalog-progress", "house-catalog-progress-1",
+	} {
+		if cluster.heldPod(name) == nil {
+			t.Errorf("the pass stood no pod %s", name)
+		}
+		if cluster.heldClaim(name) == nil {
+			t.Errorf("the pass provisioned no claim %s", name)
+		}
+	}
+	if cluster.heldPod("house-catalog-progress-2") != nil {
+		t.Error("the pass stood a copy the Catalog did not ask for")
+	}
+	replicas := cluster.heldCatalog("house-catalog").Status.Replicas
+	if replicas.Catalog.Wanted != 3 || replicas.Progress.Wanted != 2 {
+		t.Errorf("replicas = %+v, want three catalog copies and two progress copies", replicas)
+	}
+}
+
+// A Catalog that asks for fewer copies than it stands loses the pods
+// and the claims above the count it asks for, and keeps the first.
+func TestReconcileCatalogsTakesDownTheCopiesItNoLongerAsksFor(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := seedCatalog(cluster, "house-catalog", "house")
+	standingCatalogCopies(cluster, catalog, 3)
+
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+
+	if cluster.heldPod("house-catalog-catalog") == nil || cluster.heldClaim("house-catalog-catalog") == nil {
+		t.Error("the pass took down the copy the Catalog still asks for")
+	}
+	for _, name := range []string{"house-catalog-catalog-1", "house-catalog-catalog-2"} {
+		if cluster.heldPod(name) != nil || cluster.heldClaim(name) != nil {
+			t.Errorf("%s stands, want it taken down", name)
+		}
+	}
+}
+
+// The status counts the copies of each store that are up beside the
+// count the Catalog asks for, and Ready reports the first copy that is
+// not up in that copy's own words.
+func TestStandingCatalogStatusCountsTheCopiesOfBothStores(t *testing.T) {
+	catalog := testNamespaceCatalog()
+	catalog.Spec.Storage.Replicas = 3
+	catalog.Spec.Progress.Replicas = 2
+	starting := readyCatalogCopy("house-catalog", "house", 2)
+	starting.Status.ContainerStatuses[0].Ready = false
+
+	status := standingCatalogStatus(catalog,
+		[]*Pod{
+			readyCatalogPod("house-catalog", "house"),
+			readyCatalogCopy("house-catalog", "house", 1),
+			starting,
+		},
+		[]*Pod{progressPodAt("house-catalog-progress", "house", "10.42.0.5"), nil},
+		nil, testNow)
+
+	if status.Replicas.Catalog != (StoreReplicas{Ready: 2, Wanted: 3}) {
+		t.Errorf("catalog copies = %+v, want two of three up", status.Replicas.Catalog)
+	}
+	if status.Replicas.Progress != (StoreReplicas{Ready: 1, Wanted: 2}) {
+		t.Errorf("progress copies = %+v, want one of two up", status.Replicas.Progress)
+	}
+	ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
+	if ready.Status != ConditionFalse || ready.Reason != catalogReasonPodPending {
+		t.Errorf("Ready = %+v, want False with PodPending while a copy starts", ready)
+	}
+	if ready.Message == "" {
+		t.Error("the condition carries no message for the copy that is not up")
+	}
+}
+
+// A copy the scheduler cannot place carries the kubelet's own words,
+// because the ordinary hold on a third copy is a cluster with two
+// nodes and a rule that keeps two copies apart.
+func TestStandingCatalogStatusReportsAPendingCopy(t *testing.T) {
+	catalog := testNamespaceCatalog()
+	catalog.Spec.Storage.Replicas = 2
+	pending := readyCatalogCopy("house-catalog", "house", 1)
+	pending.Status = PodStatus{Phase: podPending, Message: "no node fits the pod's anti-affinity"}
+
+	status := standingCatalogStatus(catalog,
+		[]*Pod{readyCatalogPod("house-catalog", "house"), pending}, nil, nil, testNow)
+
+	ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
+	if ready.Status != ConditionFalse || ready.Reason != catalogReasonPodPending {
+		t.Errorf("Ready = %+v, want False with PodPending", ready)
+	}
+	if ready.Message != "no node fits the pod's anti-affinity" {
+		t.Errorf("message = %q, want the kubelet's own words", ready.Message)
+	}
+	if status.Replicas.Catalog != (StoreReplicas{Ready: 1, Wanted: 2}) {
+		t.Errorf("catalog copies = %+v, want one of two up", status.Replicas.Catalog)
+	}
+}
+
 // a Catalog that names a claim of its own mounts that claim, and the
 // operator provisions none.
 func TestReconcileCatalogsMountsTheClaimTheCatalogNames(t *testing.T) {
@@ -159,7 +268,7 @@ func TestStandingCatalogStatusReportsTheNamespacesMembers(t *testing.T) {
 		scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1"),
 	}
 
-	status := standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), pods, testNow)
+	status := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, pods, testNow)
 
 	want := []string{"movies-scanner", "shows-scanner"}
 	if len(status.Members) != 2 || status.Members[0] != want[0] || status.Members[1] != want[1] {
@@ -188,7 +297,7 @@ func TestStandingCatalogStatusReportsTheScreens(t *testing.T) {
 		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
 	onAnEmptyDir.Status.Phase = podPending
 
-	status := standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), []Pod{
+	status := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, []Pod{
 		scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1"),
 		*onAnEmptyDir,
 		*onAClaim,
@@ -242,7 +351,7 @@ func TestWriteCatalogStatusWritesOnlyAChange(t *testing.T) {
 	seedCatalog(cluster, "house-catalog", "house")
 	operator := testOperator(t, cluster)
 	catalog := cluster.heldCatalog("house-catalog")
-	settled := standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), nil, testNow)
+	settled := standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, nil, testNow)
 
 	if err := operator.writeCatalogStatus(t.Context(), catalog, settled); err != nil {
 		t.Fatal(err)
@@ -283,7 +392,7 @@ func TestWriteCatalogStatusReadsAConflictAsSuccessAndReportsAFailure(t *testing.
 			catalog := cluster.heldCatalog("house-catalog")
 
 			err := operator.writeCatalogStatus(t.Context(), catalog,
-				standingCatalogStatus(catalog, readyCatalogPod("house-catalog", "house"), nil, testNow))
+				standingCatalogStatus(catalog, []*Pod{readyCatalogPod("house-catalog", "house")}, nil, nil, testNow))
 
 			if testCase.wantErr && err == nil {
 				t.Fatal("err = nil, want the server's refusal")
@@ -323,7 +432,7 @@ func TestStandingCatalogStatusFollowsTheCatalogPod(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			catalog := &NamespaceCatalog{Metadata: ObjectMeta{Name: "house-catalog", Namespace: "house"}}
 
-			status := standingCatalogStatus(catalog, one.pod, nil, testNow)
+			status := standingCatalogStatus(catalog, []*Pod{one.pod}, nil, nil, testNow)
 
 			ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
 			if ready.Status != one.status || ready.Reason != one.reason {

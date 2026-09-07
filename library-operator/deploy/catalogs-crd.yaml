@@ -1,7 +1,7 @@
-# The Catalog API, declared to Kubernetes. A namespace has
-# exactly one Catalog. It stands the catalog pod that holds the
-# namespace's durable catalog and reports it, it sizes the volume every
-# catalog agent takes, and it owns that pod, its claim, and the
+# The Catalog API, declared to Kubernetes. A namespace has exactly one
+# Catalog. It stands the durable copies that hold the namespace's
+# catalog, of which the first reports it. It sizes the volume every
+# catalog agent takes, and it owns those pods, their claims, and the
 # namespace's catalog Service and EndpointSlice. More than one Catalog
 # in a namespace marks every Catalog Blocked and stands no cluster.
 apiVersion: apiextensions.k8s.io/v1
@@ -27,6 +27,9 @@ spec:
         - name: Size
           type: string
           jsonPath: .status.storageSize
+        - name: Copies
+          type: integer
+          jsonPath: .status.replicas.catalog.wanted
         - name: Ready
           type: string
           jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -51,10 +54,10 @@ spec:
                   type: object
                   default: {}
                   description: >-
-                    The catalog pod's claim, the catalog of record every
-                    other agent copies. Its size is also the size of
-                    every copy, and its class is the default class for
-                    the progress and libraries claims.
+                    The catalog of record every other agent copies,
+                    held on one claim per durable copy. The size is also
+                    the size of every working copy, and the class is the
+                    default class for the progress and libraries claims.
                   properties:
                     size:
                       type: string
@@ -73,6 +76,22 @@ spec:
                       type: string
                       minLength: 1
                       description: "An existing PersistentVolumeClaim in this namespace for the catalog pod to mount, in place of the one the operator provisions; the operator creates none when it is set."
+                    replicas:
+                      type: integer
+                      minimum: 1
+                      default: 1
+                      description: >-
+                        How many durable copies of the catalog the
+                        namespace stands. The copies are peers that
+                        Corrosion syncs from one another, and each one
+                        holds a claim of its own at size. No two copies
+                        share a node, so a copy the scheduler cannot
+                        place stays Pending and the Catalog is not Ready.
+                        A copy on a node that stays NotReady for ten
+                        minutes is deleted with its claim and stood
+                        again elsewhere. A copy taken away by a lower
+                        count loses its claim with its pod; a backup is
+                        a deliberate act outside this operator.
                 progress:
                   type: object
                   default: {}
@@ -85,6 +104,16 @@ spec:
                       type: string
                       minLength: 1
                       description: "The StorageClass the progress claim binds to. Omitted, the claim takes storage.storageClassName, and when that is also omitted the cluster's default binds it."
+                    replicas:
+                      type: integer
+                      minimum: 1
+                      default: 1
+                      description: >-
+                        How many durable copies of the progress store
+                        the namespace stands, on the same terms as
+                        storage.replicas. The first copy records what
+                        crosses the bus; every copy after it holds the
+                        rows.
                 libraries:
                   type: object
                   default: {}
@@ -121,13 +150,37 @@ spec:
                 members:
                   type: array
                   x-kubernetes-list-type: atomic
-                  description: "The pods that are members of the namespace's catalog cluster: the catalog pod, the pods of the Jobs that are running, and the screen pods."
+                  description: "The pods that are members of the namespace's catalog cluster: the durable copies of the catalog, the pods of the Jobs that are running, and the screen pods."
                   items:
                     type: string
                 storageSize:
                   type: string
                   description: >-
                     The storage size the agents were given.
+                replicas:
+                  type: object
+                  description: "The durable copies of the namespace's two stores: for each, the count that is up beside the count the Catalog asks for."
+                  properties:
+                    catalog:
+                      type: object
+                      description: "The copies of the catalog."
+                      properties:
+                        ready:
+                          type: integer
+                          description: "How many copies run with every container ready."
+                        wanted:
+                          type: integer
+                          description: "How many copies the Catalog asks for, from storage.replicas."
+                    progress:
+                      type: object
+                      description: "The copies of the progress store."
+                      properties:
+                        ready:
+                          type: integer
+                          description: "How many copies run with every container ready."
+                        wanted:
+                          type: integer
+                          description: "How many copies the Catalog asks for, from progress.replicas."
                 screens:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -152,7 +205,7 @@ spec:
                         description: "The screen pod's phase, as the kubelet reports it."
                 conditions:
                   type: array
-                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs."
+                  description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

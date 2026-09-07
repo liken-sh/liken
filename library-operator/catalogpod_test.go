@@ -16,15 +16,15 @@ func housekeepingCatalog() *NamespaceCatalog {
 	}
 }
 
-func testCatalogPod(catalog *NamespaceCatalog) *Pod {
-	return buildCatalogPod(catalog, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+func testCatalogPod(catalog *NamespaceCatalog, index int) *Pod {
+	return buildCatalogPod(catalog, index, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 }
 
 // the pod is named for the Catalog, owned by it, and carries the member
 // label, so it is a peer of the namespace's gossip cluster like every
 // other agent.
 func TestCatalogPodBelongsToItsCatalog(t *testing.T) {
-	pod := testCatalogPod(housekeepingCatalog())
+	pod := testCatalogPod(housekeepingCatalog(), 0)
 
 	if pod.Metadata.Name != "house-catalog-catalog" || pod.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own pod", pod.Metadata)
@@ -47,7 +47,7 @@ func TestCatalogPodBelongsToItsCatalog(t *testing.T) {
 // the catalog pod is a standing service: it restarts in place, it holds
 // no Kubernetes credential, and it answers on no port.
 func TestCatalogPodStandsAndAnswersOnNoPort(t *testing.T) {
-	pod := testCatalogPod(housekeepingCatalog())
+	pod := testCatalogPod(housekeepingCatalog(), 0)
 
 	if pod.Spec.RestartPolicy != "Always" {
 		t.Errorf("restartPolicy = %q, want Always", pod.Spec.RestartPolicy)
@@ -74,7 +74,7 @@ func TestCatalogPodStandsAndAnswersOnNoPort(t *testing.T) {
 // it learns the namespace, the broker, and the catalog API from its
 // environment alone.
 func TestCatalogPodRunsTheReporterBesideTheAgent(t *testing.T) {
-	pod := testCatalogPod(housekeepingCatalog())
+	pod := testCatalogPod(housekeepingCatalog(), 0)
 
 	if len(pod.Spec.InitContainers) != 1 || pod.Spec.InitContainers[0].Name != catalogContainer {
 		t.Fatalf("initContainers = %+v, want the catalog agent alone", pod.Spec.InitContainers)
@@ -122,7 +122,7 @@ func TestCatalogPodMountsTheNamespacesClaim(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			pod := testCatalogPod(one.catalog)
+			pod := testCatalogPod(one.catalog, 0)
 
 			source := podVolume(t, pod, catalogVolumeName).PersistentVolumeClaim
 			if source == nil || source.ClaimName != one.want {
@@ -138,7 +138,7 @@ func TestCatalogPodClaimIsOwnedByItsCatalog(t *testing.T) {
 	catalog := housekeepingCatalog()
 	catalog.Spec.Storage = CatalogStorage{Size: "8Gi", StorageClassName: "fast"}
 
-	claim := buildCatalogPodClaim(catalog)
+	claim := buildCatalogPodClaim(catalog, 0)
 
 	if claim.Metadata.Name != "house-catalog-catalog" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own claim", claim.Metadata)
@@ -184,7 +184,7 @@ func TestStandCatalogPodClaimProvisionsOnlyWhatItOwns(t *testing.T) {
 				}
 			}
 
-			if err := testOperator(t, cluster).standCatalogPodClaim(t.Context(), one.catalog); err != nil {
+			if err := testOperator(t, cluster).standCatalogPodClaim(t.Context(), one.catalog, 0); err != nil {
 				t.Fatal(err)
 			}
 
@@ -200,14 +200,14 @@ func TestStandCatalogPodClaimProvisionsOnlyWhatItOwns(t *testing.T) {
 func TestStandCatalogPodClaimAnswersTheServer(t *testing.T) {
 	conflicted := newFakeCluster()
 	conflicted.refuseCreate = true
-	if err := testOperator(t, conflicted).standCatalogPodClaim(t.Context(), housekeepingCatalog()); err != nil {
+	if err := testOperator(t, conflicted).standCatalogPodClaim(t.Context(), housekeepingCatalog(), 0); err != nil {
 		t.Fatalf("err = %v, want a conflict to read as success", err)
 	}
 
 	broken := newFakeCluster()
 	broken.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog"] =
 		http.StatusInternalServerError
-	err := testOperator(t, broken).standCatalogPodClaim(t.Context(), housekeepingCatalog())
+	err := testOperator(t, broken).standCatalogPodClaim(t.Context(), housekeepingCatalog(), 0)
 	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
 		t.Fatalf("err = %v, want the server's own message", err)
 	}
@@ -270,7 +270,7 @@ func TestStandCatalogPodReplacesAStalePod(t *testing.T) {
 			cluster := newFakeCluster()
 			cluster.pods["house-catalog-catalog"] = one.live
 
-			pod, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog())
+			pod, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog(), 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -292,7 +292,7 @@ func TestStandCatalogPodReportsAFailedClaim(t *testing.T) {
 	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-catalog"] =
 		http.StatusInternalServerError
 
-	_, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog())
+	_, err := testOperator(t, cluster).standCatalogPod(t.Context(), housekeepingCatalog(), 0)
 
 	if err == nil {
 		t.Fatal("err = nil, want the failure the stand could not read past")

@@ -112,8 +112,8 @@ type EndpointPort struct {
 // two passes over the same cluster build the same object. The pass
 // hands in every pod in the cluster that carries the member label, and
 // this reads only the ones in its namespace, which is what keeps one
-// namespace's agents out of another's cluster. Every kind is a peer:
-// the standing catalog pod, a Job's pod for the length of its run, and
+// namespace's agents out of another's cluster. Every kind is a peer: each
+// durable copy of the store, a Job's pod for the length of its run, and
 // a screen pod. A pod with no address is not a peer yet, a pod with a
 // deletion timestamp is a peer no longer, and a pod that has finished
 // gossips no more. The endpoints sort by address, so the order the list

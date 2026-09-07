@@ -5,12 +5,13 @@ package main
 // beside its agent.
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
 
-func testProgressPod(catalog *NamespaceCatalog) *Pod {
-	return buildProgressPod(catalog, testScannerImage, testCorrosionImage,
+func testProgressPod(catalog *NamespaceCatalog, index int) *Pod {
+	return buildProgressPod(catalog, index, testScannerImage, testCorrosionImage,
 		testBusAddress, defaultTopicBase, defaultMediaTopicBase)
 }
 
@@ -18,7 +19,7 @@ func testProgressPod(catalog *NamespaceCatalog) *Pod {
 // progress member label alone, so it is a peer of the progress cluster
 // and not of the catalog cluster.
 func TestProgressPodBelongsToItsCatalogAndItsOwnCluster(t *testing.T) {
-	pod := testProgressPod(housekeepingCatalog())
+	pod := testProgressPod(housekeepingCatalog(), 0)
 
 	if pod.Metadata.Name != "house-catalog-progress" || pod.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own progress pod", pod.Metadata)
@@ -45,7 +46,7 @@ func TestProgressPodBelongsToItsCatalogAndItsOwnCluster(t *testing.T) {
 // credential, because the operator is the only API client and every
 // fact reaches this pod over the bus.
 func TestProgressPodStandsWithNoCredential(t *testing.T) {
-	pod := testProgressPod(housekeepingCatalog())
+	pod := testProgressPod(housekeepingCatalog(), 0)
 
 	if pod.Spec.RestartPolicy != "Always" {
 		t.Errorf("restartPolicy = %q, want Always", pod.Spec.RestartPolicy)
@@ -69,7 +70,7 @@ func TestProgressPodStandsWithNoCredential(t *testing.T) {
 // kubelet passes its startupProbe before the progress role starts and
 // the first write never races an API that is not listening.
 func TestProgressPodRunsTheAgentOnTheProgressConfiguration(t *testing.T) {
-	pod := testProgressPod(housekeepingCatalog())
+	pod := testProgressPod(housekeepingCatalog(), 0)
 
 	if len(pod.Spec.InitContainers) != 1 {
 		t.Fatalf("initContainers = %+v, want the progress agent alone", pod.Spec.InitContainers)
@@ -98,7 +99,7 @@ func TestProgressPodRunsTheAgentOnTheProgressConfiguration(t *testing.T) {
 // The agent announces the pod's own address on the progress port, which
 // nothing knows until the kubelet has started the pod.
 func TestProgressPodAgentAnnouncesItsOwnAddress(t *testing.T) {
-	agent := testProgressPod(housekeepingCatalog()).Spec.InitContainers[0]
+	agent := testProgressPod(housekeepingCatalog(), 0).Spec.InitContainers[0]
 
 	held := envOf(agent)
 	if held[gossipAddressVariable] != progressGossipAddress {
@@ -122,7 +123,7 @@ func TestProgressPodAgentAnnouncesItsOwnAddress(t *testing.T) {
 // namespace, the two topic trees, the broker, and its agent's address
 // from its environment alone.
 func TestProgressPodRunsTheProgressRole(t *testing.T) {
-	pod := testProgressPod(housekeepingCatalog())
+	pod := testProgressPod(housekeepingCatalog(), 0)
 
 	if len(pod.Spec.Containers) != 1 {
 		t.Fatalf("containers = %+v, want the progress role alone", pod.Spec.Containers)
@@ -172,7 +173,7 @@ func TestProgressClaimTakesItsOwnSizeAndClass(t *testing.T) {
 	catalog.Spec.Progress.Size = "256Mi"
 	catalog.Spec.Progress.StorageClassName = "synology-iscsi"
 
-	claim := buildProgressClaim(catalog)
+	claim := buildProgressClaim(catalog, 0)
 
 	if claim.Metadata.Name != "house-catalog-progress" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the progress claim in the Catalog's namespace", claim.Metadata)
@@ -197,7 +198,7 @@ func TestProgressClaimDefaultsToTheCatalogsSizeAndClass(t *testing.T) {
 	catalog := housekeepingCatalog()
 	catalog.Spec.Storage.StorageClassName = "local-path"
 
-	claim := buildProgressClaim(catalog)
+	claim := buildProgressClaim(catalog, 0)
 
 	if claim.Spec.StorageClassName != "local-path" {
 		t.Errorf("storageClassName = %q, want the catalog's class", claim.Spec.StorageClassName)
@@ -215,7 +216,7 @@ func TestProgressClaimStandsBesideACatalogThatNamesItsOwn(t *testing.T) {
 	catalog := housekeepingCatalog()
 	catalog.Spec.Storage.ClaimName = "a-claim-of-my-own"
 
-	if err := testOperator(t, cluster).standProgressClaim(t.Context(), catalog); err != nil {
+	if err := testOperator(t, cluster).standProgressClaim(t.Context(), catalog, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -227,7 +228,7 @@ func TestProgressClaimStandsBesideACatalogThatNamesItsOwn(t *testing.T) {
 // The pod mounts the progress claim and nothing else, because the
 // progress store reads no volume and no media.
 func TestProgressPodMountsItsClaimAlone(t *testing.T) {
-	pod := testProgressPod(housekeepingCatalog())
+	pod := testProgressPod(housekeepingCatalog(), 0)
 
 	if len(pod.Spec.Volumes) != 1 {
 		t.Fatalf("volumes = %+v, want the progress claim alone", pod.Spec.Volumes)
@@ -245,7 +246,7 @@ func TestStandProgressPodCreatesThePodAndItsClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 
-	if _, err := testOperator(t, cluster).standProgressPod(t.Context(), catalog); err != nil {
+	if _, err := testOperator(t, cluster).standProgressPod(t.Context(), catalog, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,10 +265,10 @@ func TestListProgressMemberPodsReadsTheProgressLabelAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	operator := testOperator(t, cluster)
-	if _, err := operator.standProgressPod(t.Context(), catalog); err != nil {
+	if _, err := operator.standProgressPod(t.Context(), catalog, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := operator.standCatalogPod(t.Context(), catalog); err != nil {
+	if _, err := operator.standCatalogPod(t.Context(), catalog, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -355,7 +356,7 @@ func TestReconcileCatalogsStandsNoProgressClusterForManyCatalogs(t *testing.T) {
 // it carry different names, and a pod that named both the same is
 // refused at create.
 func TestTheProgressPodNamesEveryContainerOnce(t *testing.T) {
-	pod := testProgressPod(housekeepingCatalog())
+	pod := testProgressPod(housekeepingCatalog(), 0)
 
 	held := map[string]int{}
 	for _, container := range append(append([]Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
@@ -369,5 +370,20 @@ func TestTheProgressPodNamesEveryContainerOnce(t *testing.T) {
 	}
 	if len(held) != 2 {
 		t.Errorf("the pod holds %d named containers, want the agent and the role", len(held))
+	}
+}
+
+// A failure standing one copy ends the stand, and the pass reports it
+// with the copies that already stood.
+func TestStandProgressPodsReportsAFailedCopy(t *testing.T) {
+	cluster := newFakeCluster()
+	catalog := housekeepingCatalog()
+	catalog.Spec.Progress.Replicas = 2
+	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-progress"] = http.StatusInternalServerError
+
+	_, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog)
+
+	if err == nil {
+		t.Fatal("err = nil, want the failure the stand could not read past")
 	}
 }

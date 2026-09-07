@@ -528,6 +528,19 @@ func DeletePod(ctx context.Context, c *Client, namespace, name string) error {
 	return err
 }
 
+// ForceDeletePod deletes one pod with no grace period, so the API server
+// removes it at once and waits for no kubelet. A pod on a node that is
+// gone never finishes a graceful delete: it stays Terminating for as long
+// as the node is away, and the claim it mounts stays with it. The heal
+// uses this and nothing else does.
+func ForceDeletePod(ctx context.Context, c *Client, namespace, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, podsPath(namespace)+"/"+name+"?gracePeriodSeconds=0", nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 // GetService reads the live catalog Service of one namespace. The
 // read answers the fields the operator compares, and it answers the
 // resourceVersion and the addresses the API server assigned, which

@@ -1,14 +1,16 @@
 # The operator's identity in the cluster, and deliberately
 # nothing more. It reads libraries and catalogs, writes their statuses,
 # reads the storage behind each library, provisions the catalog claims,
-# stands the catalog pod of each namespace that holds a Catalog with the
-# catalog Service and EndpointSlice beside it, and creates the CronJob
-# each library becomes and the Jobs a webhook and a departure ask for.
-# It deletes an object to replace a stale one, to end a run, or to
-# recover a screen the scheduler cannot place, which takes that
-# screen's catalog claim with the pod. Every other teardown is the
-# garbage collector's, through the ownerReferences the pods, the
-# claims, the CronJob, and the catalog objects carry. It deletes no
+# stands the durable copies of each namespace's two stores with the
+# Services and EndpointSlices beside them, and creates the CronJob each
+# library becomes and the Jobs a webhook and a departure ask for. It
+# deletes an object to replace a stale one, to end a run, to recover a
+# screen the scheduler cannot place, to take down a copy the Catalog no
+# longer asks for, or to free a copy stranded on a node that stays
+# NotReady. Each of the last three takes a claim with the pod.
+# Every other teardown is the garbage collector's, through the
+# ownerReferences the pods, the claims, the CronJob, and the catalog
+# objects carry. It deletes no
 # object a person created. Every grant is cluster-wide, because a
 # Library can be in any namespace.
 #
@@ -132,20 +134,28 @@ rules:
   - apiGroups: [people.liken.sh]
     resources: [people]
     verbs: [get, list, watch, patch]
-  # The media claim each Library names, read by name to learn whether
-  # it is bound and which volume it is bound to. The catalog claims the
-  # operator provisions: one per Library for its Jobs, one per Catalog for
-  # the catalog pod, and one per screen, each owned by the object it belongs
-  # to, so the garbage collector removes it with that owner. There is no
-  # update, because a claim's spec is immutable once it binds. The delete
-  # covers one claim: the catalog claim of a screen the scheduler has refused
-  # for longer than the grace, and the operator sends it only when the
-  # claim's name is the derived screen claim name, it carries the screen name
-  # label and the player label, and its controller ownerReference names the
-  # Player with the UID this pass read.
+  # The media claim each Library names, read by name to learn whether it
+  # is bound and which volume it is bound to. The claims the operator
+  # provisions: one per Library for its Jobs, one per durable copy of
+  # each of a Catalog's two stores, and one per screen, each owned by the
+  # object it belongs to, so the garbage collector removes it with that
+  # owner. There is no update, because a claim's spec is immutable once
+  # it binds.
+  #
+  # The delete covers three claims, each guarded by the labels and the
+  # name the operator itself wrote: the catalog claim of a screen the
+  # scheduler has refused for longer than the grace, a copy of a store
+  # the Catalog no longer asks for, and a copy stranded on a node that
+  # has stayed NotReady past the grace.
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, create, delete]
+  # The nodes, read for the Ready verdict of the machine each durable
+  # copy of a store runs on. A copy on a node that stays NotReady is
+  # deleted with its claim, so it can stand elsewhere.
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
   # The volume behind that claim, read by name for its source: an NFS
   # server and export, or the name of whatever other key serves it.
   # Playing a title from the library needs that, so the operator reads

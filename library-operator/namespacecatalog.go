@@ -52,6 +52,9 @@ type CatalogSpec struct {
 type CatalogProgress struct {
 	Size             string `json:"size,omitempty"`
 	StorageClassName string `json:"storageClassName,omitempty"`
+	// How many durable copies of the progress store the namespace stands.
+	// The copies are peers, and each one holds a claim of its own.
+	Replicas int `json:"replicas,omitempty"`
 }
 
 // The class each Library's scanner and enrichment claims bind to. A
@@ -89,20 +92,63 @@ type CatalogArtCache struct {
 type CatalogStorage struct {
 	Size             string `json:"size,omitempty"`
 	StorageClassName string `json:"storageClassName,omitempty"`
-	// The claim the catalog pod mounts in place of one the
+	// The claim the first copy of the catalog mounts in place of one the
 	// operator provisions, for a namespace whose catalog volume a person
-	// makes themselves.
+	// makes themselves. Every copy after the first takes a claim the
+	// operator provisions.
 	ClaimName string `json:"claimName,omitempty"`
+	// How many durable copies of the catalog the namespace stands. The
+	// copies are peers that Corrosion syncs from one another, and each one
+	// holds a claim of its own.
+	Replicas int `json:"replicas,omitempty"`
 }
 
-// The cluster the Catalog stands, so a person reads one object to see
-// the namespace's catalog: the member agent pods, the storage the agents were
-// given, the screens and the claims they run on, and the conditions.
+// The copies a Catalog stands when it asks for none. One copy is what a
+// namespace stood before the field existed.
+const defaultStoreReplicas = 1
+
+// How many copies of the catalog the Catalog asks for. The API server
+// defaults the field, so a zero is a Catalog read from anywhere but the
+// API server, and it takes the same default.
+func catalogReplicaCount(catalog *NamespaceCatalog) int {
+	if catalog.Spec.Storage.Replicas > 0 {
+		return catalog.Spec.Storage.Replicas
+	}
+	return defaultStoreReplicas
+}
+
+// How many copies of the progress store the Catalog asks for.
+func progressReplicaCount(catalog *NamespaceCatalog) int {
+	if catalog.Spec.Progress.Replicas > 0 {
+		return catalog.Spec.Progress.Replicas
+	}
+	return defaultStoreReplicas
+}
+
+// The cluster the Catalog stands, so a person reads one object to see the
+// namespace's catalog: the member agent pods, the storage the agents were
+// given, the durable copies of each store, the screens and the claims
+// they run on, and the conditions.
 type CatalogStatus struct {
 	Members     []string        `json:"members,omitempty"`
 	StorageSize string          `json:"storageSize,omitempty"`
+	Replicas    CatalogReplicas `json:"replicas,omitzero"`
 	Screens     []CatalogScreen `json:"screens,omitempty"`
 	Conditions  []Condition     `json:"conditions,omitempty"`
+}
+
+// The durable copies of the namespace's two stores: how many are up, and
+// how many the Catalog asks for.
+type CatalogReplicas struct {
+	Catalog  StoreReplicas `json:"catalog,omitzero"`
+	Progress StoreReplicas `json:"progress,omitzero"`
+}
+
+// One store's copies. Ready counts the copies the kubelet reports up, and
+// Wanted is the count the Catalog asks for.
+type StoreReplicas struct {
+	Ready  int `json:"ready"`
+	Wanted int `json:"wanted"`
 }
 
 // One screen pod of the namespace: the Player it draws for, the claim

@@ -58,6 +58,9 @@ type fakeCluster struct {
 	// Person is cluster-scoped, so its name is its whole identity.
 	watches map[string]*Watch
 	people  map[string]*Person
+	// The nodes the heal of a stranded copy reads, by name, which the
+	// operator reads and never writes.
+	nodes map[string]*Node
 
 	// A PersistentVolume is held as the body the API server serves,
 	// because a volume names its storage with a key on the spec and
@@ -65,6 +68,9 @@ type fakeCluster struct {
 	// operator's own work.
 	volumes  map[string]string
 	requests []string
+	// The pods deleted with no grace period, by path. A heal of a copy
+	// on a dead node is the one delete that must be forced.
+	forcedDeletes []string
 
 	// Broken maps a path to the status the server answers it with,
 	// which is how a test drives the failure a pass reports and
@@ -96,6 +102,7 @@ func newFakeCluster() *fakeCluster {
 		cronJobs:  map[string]*CronJob{},
 		watches:   map[string]*Watch{},
 		people:    map[string]*Person{},
+		nodes:     map[string]*Node{},
 		broken:    map[string]int{},
 		parked:    make(chan struct{}),
 	}
@@ -115,6 +122,9 @@ func (f *fakeCluster) handler() http.Handler {
 
 func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+	if r.Method == http.MethodDelete && r.URL.Query().Get("gracePeriodSeconds") == "0" {
+		f.forcedDeletes = append(f.forcedDeletes, r.URL.Path)
+	}
 	// A test breaks a path, one request against a path, or one method
 	// against a path: the two pod lists differ by their selector alone,
 	// so the whole request line is a key too.
@@ -180,6 +190,12 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(written)
 	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/watches/"):
 		f.patchWatch(w, r, name)
+	case r.URL.Path == nodesPath:
+		list := NodeList{Metadata: ListMeta{ResourceVersion: "1"}}
+		for _, key := range sortedNames(f.nodes) {
+			list.Items = append(list.Items, *f.nodes[key])
+		}
+		_ = json.NewEncoder(w).Encode(list)
 	case r.URL.Path == peoplePath:
 		list := PersonList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.people) {
@@ -874,7 +890,7 @@ func withCatalog() catalogChoice {
 func readyCatalogPod(catalog, namespace string) *Pod {
 	pod := buildCatalogPod(
 		&NamespaceCatalog{Metadata: ObjectMeta{Name: catalog, Namespace: namespace, UID: catalog + "-uid"}},
-		testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+		0, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
 	// The stamp is what a pass compares against, so a pod without one
 	// would read as stale and be replaced on the pass that read it.
 	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
@@ -885,6 +901,23 @@ func readyCatalogPod(catalog, namespace string) *Pod {
 		PodIP:                 "10.42.0.9",
 		InitContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: true}},
 		ContainerStatuses:     []ContainerStatus{{Name: reporterContainer, Ready: true}},
+	}
+	return pod
+}
+
+// ReadyCatalogCopy is one durable copy of the namespace's catalog past
+// the first, as the kubelet reports it: the agent alone, and up.
+func readyCatalogCopy(catalog, namespace string, index int) *Pod {
+	pod := buildCatalogPod(
+		&NamespaceCatalog{Metadata: ObjectMeta{Name: catalog, Namespace: namespace, UID: catalog + "-uid"}},
+		index, testScannerImage, testCorrosionImage, testBusAddress, defaultTopicBase)
+	if err := stampTemplateHash(&pod.Metadata, pod.Spec); err != nil {
+		panic(err)
+	}
+	pod.Status = PodStatus{
+		Phase:             podRunning,
+		PodIP:             "10.42.0.10",
+		ContainerStatuses: []ContainerStatus{{Name: catalogContainer, Ready: true}},
 	}
 	return pod
 }

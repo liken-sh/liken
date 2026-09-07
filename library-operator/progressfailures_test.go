@@ -265,7 +265,7 @@ func TestStandProgressStopsOnTheFailureTheAPIGives(t *testing.T) {
 	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-progress"] =
 		http.StatusInternalServerError
 
-	if _, err := testOperator(t, cluster).standProgressPod(t.Context(), catalog); err == nil {
+	if _, err := testOperator(t, cluster).standProgressPod(t.Context(), catalog, 0); err == nil {
 		t.Error("the pass stood a progress pod over a claim it could not read")
 	}
 }

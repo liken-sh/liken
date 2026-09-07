@@ -226,8 +226,13 @@ func everyContainerReady(pod *Pod) bool {
 // The agent counts here as much as the container beside it, and the
 // kubelet reports it under initContainerStatuses because it is a native
 // sidecar. A pod whose agent has not opened its API is not up.
+//
+// A durable copy of a store past the first runs the agent as its own
+// container and carries no sidecar, so the agent is looked for in both
+// lists.
 func everyContainerReadyBeside(pod *Pod, agent string) bool {
-	if !containerReady(pod.Status.InitContainerStatuses, agent) {
+	if !containerReady(pod.Status.InitContainerStatuses, agent) &&
+		!containerReady(pod.Status.ContainerStatuses, agent) {
 		return false
 	}
 	if len(pod.Status.ContainerStatuses) == 0 {

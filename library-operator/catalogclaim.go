@@ -1,10 +1,10 @@
 package main
 
-// The durable catalog volumes. There is one per Library, which
-// its worker Jobs mount in turn, and one per namespace, which the
-// catalog pod holds. Both are ReadWriteOnce, because one agent writes
-// one SQLite database, and both are sized from the namespace Catalog,
-// because every agent holds the whole namespace's catalog.
+// The catalog volumes. There is one per Library, which its worker Jobs
+// mount in turn, and one per durable copy of the namespace's catalog. All
+// are ReadWriteOnce, because one agent writes one SQLite database, and
+// all are sized from the namespace Catalog, because every agent holds the
+// whole namespace's catalog.
 
 import (
 	"context"
@@ -94,15 +94,28 @@ func catalogClaimFor(catalog *NamespaceCatalog) string {
 	return catalogPodClaimName(catalog.Metadata.Name)
 }
 
+// The claim one copy of the catalog mounts. The first copy takes the
+// claim the Catalog names when it names one. Every copy after it takes a
+// claim of its own name.
+func catalogReplicaClaim(catalog *NamespaceCatalog, index int) string {
+	if index == 0 {
+		return catalogClaimFor(catalog)
+	}
+	return catalogStoreOf(catalog).replicaName(index)
+}
+
 // The catalog pod's own claim, owned by the Catalog, so the
 // garbage collector takes it with the Catalog and the standing catalog
 // survives every roll of the pod.
-func buildCatalogPodClaim(catalog *NamespaceCatalog) *PersistentVolumeClaim {
+//
+// One claim per copy, at the copy's own name, on the class and the size
+// every copy shares.
+func buildCatalogPodClaim(catalog *NamespaceCatalog, index int) *PersistentVolumeClaim {
 	return &PersistentVolumeClaim{
 		APIVersion: claimAPIVersion,
 		Kind:       "PersistentVolumeClaim",
 		Metadata: ObjectMeta{
-			Name:            catalogPodClaimName(catalog.Metadata.Name),
+			Name:            catalogStoreOf(catalog).replicaName(index),
 			Namespace:       catalog.Metadata.Namespace,
 			Labels:          catalogPodLabels(),
 			OwnerReferences: []OwnerReference{catalogObjectOwner(catalog)},
