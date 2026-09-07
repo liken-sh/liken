@@ -148,18 +148,18 @@ func TestTheHealLeavesAClaimItDidNotProvision(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	pod := copyOnNode(cluster, catalog, 0, "nuc-2")
-	cluster.claims["house-catalog-catalog"] = &PersistentVolumeClaim{
-		Metadata: ObjectMeta{Name: "house-catalog-catalog", Namespace: "house"},
+	cluster.claims["house-catalog-catalog-0"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "house-catalog-catalog-0", Namespace: "house"},
 	}
 
 	if err := testOperator(t, cluster).healStoreReplica(t.Context(), pod); err != nil {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-catalog") != nil {
+	if cluster.heldPod("house-catalog-catalog-0") != nil {
 		t.Error("the stranded pod stands, want it taken down")
 	}
-	if cluster.heldClaim("house-catalog-catalog") == nil {
+	if cluster.heldClaim("house-catalog-catalog-0") == nil {
 		t.Error("the heal took a claim that carries no store label")
 	}
 }
@@ -211,7 +211,7 @@ func TestReconcileCatalogsStandsTheStoresWhenTheNodeListFails(t *testing.T) {
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 
-	if cluster.heldPod("house-catalog-catalog") == nil {
+	if cluster.heldPod("house-catalog-catalog-0") == nil {
 		t.Error("the pass stood no catalog pod after the node list failed")
 	}
 }

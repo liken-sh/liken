@@ -262,7 +262,7 @@ func TestTheStoreAnswersABaseItCannotBuildARequestFrom(t *testing.T) {
 func TestStandProgressStopsOnTheFailureTheAPIGives(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
-	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-progress"] =
+	cluster.broken["/api/v1/namespaces/house/persistentvolumeclaims/house-catalog-progress-0"] =
 		http.StatusInternalServerError
 
 	if _, err := testOperator(t, cluster).standProgressPod(t.Context(), catalog, 0); err == nil {

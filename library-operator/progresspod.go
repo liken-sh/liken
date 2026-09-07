@@ -46,13 +46,11 @@ const (
 	defaultProgressAPI  = "http://127.0.0.1:8081"
 )
 
-// The pod one Catalog stands for its progress store, and the claim
-// under it. Both are named from the Catalog, so every pass names the
-// same objects and the operator keeps no record of them.
-//
-// The first copy's name. storereplicas.go numbers every copy after it
-// from here.
-func progressPodName(catalog string) string {
+// The name every durable copy of the namespace's progress store is
+// numbered from, pods and claims alike. It derives from the Catalog, so
+// every pass names the same objects and the operator keeps no record of
+// them. storereplicas.go numbers the copies from here.
+func progressStoreName(catalog string) string {
 	return catalog + "-progress"
 }
 

@@ -79,19 +79,13 @@ func (o *operator) standCatalogClaim(ctx context.Context, library *Library, cata
 	return err
 }
 
-// The durable catalog volume the namespace's catalog pod holds,
-// named from the Catalog, unless the Catalog names a claim of its own.
-func catalogPodClaimName(catalog string) string {
-	return catalog + "-catalog"
-}
-
 // The claim the catalog pod mounts: the one the Catalog names,
 // or the one the operator provisions when it names none.
 func catalogClaimFor(catalog *NamespaceCatalog) string {
 	if catalog.Spec.Storage.ClaimName != "" {
 		return catalog.Spec.Storage.ClaimName
 	}
-	return catalogPodClaimName(catalog.Metadata.Name)
+	return catalogStoreOf(catalog).replicaName(0)
 }
 
 // The claim one copy of the catalog mounts. The first copy takes the

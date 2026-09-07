@@ -12,10 +12,9 @@ import (
 	"testing"
 )
 
-// Replica zero keeps the store's own name, so a cluster that already
-// holds a catalog and a progress store migrates nothing, and every copy
-// after it is numbered.
-func TestTheCopiesOfAStoreAreNumberedAfterTheFirst(t *testing.T) {
+// Every copy of a store carries its own number, copy zero included, so
+// one rule names the pod and the claim of every copy.
+func TestEveryCopyOfAStoreCarriesItsNumber(t *testing.T) {
 	catalog := housekeepingCatalog()
 
 	cases := []struct {
@@ -24,9 +23,9 @@ func TestTheCopiesOfAStoreAreNumberedAfterTheFirst(t *testing.T) {
 		index int
 		want  string
 	}{
-		{name: "the first catalog copy", store: catalogStoreOf(catalog), want: "house-catalog-catalog"},
-		{name: "a second catalog copy", store: catalogStoreOf(catalog), index: 1, want: "house-catalog-catalog-1"},
-		{name: "the first progress copy", store: progressStoreOf(catalog), want: "house-catalog-progress"},
+		{name: "the first catalog copy", store: catalogStoreOf(catalog), want: "house-catalog-catalog-0"},
+		{name: "a third catalog copy", store: catalogStoreOf(catalog), index: 2, want: "house-catalog-catalog-2"},
+		{name: "the first progress copy", store: progressStoreOf(catalog), want: "house-catalog-progress-0"},
 		{name: "a third progress copy", store: progressStoreOf(catalog), index: 2, want: "house-catalog-progress-2"},
 	}
 	for _, one := range cases {
@@ -139,7 +138,7 @@ func TestScalingDownTakesEveryCopyAboveTheCountAsked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-catalog") == nil || cluster.heldClaim("house-catalog-catalog") == nil {
+	if cluster.heldPod("house-catalog-catalog-0") == nil || cluster.heldClaim("house-catalog-catalog-0") == nil {
 		t.Error("the sweep took the first copy, which the Catalog still asks for")
 	}
 	for _, name := range []string{"house-catalog-catalog-1", "house-catalog-catalog-2"} {

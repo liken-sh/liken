@@ -13,9 +13,10 @@ import (
 	"errors"
 )
 
-// The pod one Catalog becomes, named from the Catalog, so every
-// pass names the same pod and the operator keeps no record of it.
-func catalogPodName(catalog string) string {
+// The name every durable copy of the namespace's catalog is numbered
+// from. It derives from the Catalog, so every pass names the same pods
+// and the operator keeps no record of them.
+func catalogStoreName(catalog string) string {
 	return catalog + "-catalog"
 }
 
@@ -138,13 +139,14 @@ func (o *operator) standCatalogPod(ctx context.Context, catalog *NamespaceCatalo
 	return o.standPod(ctx, desired)
 }
 
-// The pod that holds the namespace's catalog, out of the pods
-// the pass listed, or nil when it does not stand yet.
+// The copy that reports the namespace's catalog, out of the pods the pass
+// listed, or nil when it does not stand yet. It is copy zero, because that
+// copy alone carries the reporter.
 func catalogPodOf(catalog *NamespaceCatalog, pods []Pod) *Pod {
 	if catalog == nil {
 		return nil
 	}
-	name := catalogPodName(catalog.Metadata.Name)
+	name := catalogStoreOf(catalog).replicaName(0)
 	for index := range pods {
 		pod := &pods[index]
 		if pod.Metadata.Namespace == catalog.Metadata.Namespace && pod.Metadata.Name == name {

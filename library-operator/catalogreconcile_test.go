@@ -26,10 +26,10 @@ func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{pod}, testNow)
 
-	if cluster.heldPod("house-catalog-catalog") == nil {
+	if cluster.heldPod("house-catalog-catalog-0") == nil {
 		t.Fatal("the pass stood no catalog pod")
 	}
-	if cluster.heldClaim("house-catalog-catalog") == nil {
+	if cluster.heldClaim("house-catalog-catalog-0") == nil {
 		t.Fatal("the pass provisioned no claim for the catalog pod")
 	}
 	service := cluster.heldService("house", catalogServiceName)
@@ -69,8 +69,8 @@ func TestReconcileCatalogsStandsEveryCopyOfBothStores(t *testing.T) {
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 
 	for _, name := range []string{
-		"house-catalog-catalog", "house-catalog-catalog-1", "house-catalog-catalog-2",
-		"house-catalog-progress", "house-catalog-progress-1",
+		"house-catalog-catalog-0", "house-catalog-catalog-1", "house-catalog-catalog-2",
+		"house-catalog-progress-0", "house-catalog-progress-1",
 	} {
 		if cluster.heldPod(name) == nil {
 			t.Errorf("the pass stood no pod %s", name)
@@ -97,7 +97,7 @@ func TestReconcileCatalogsTakesDownTheCopiesItNoLongerAsksFor(t *testing.T) {
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 
-	if cluster.heldPod("house-catalog-catalog") == nil || cluster.heldClaim("house-catalog-catalog") == nil {
+	if cluster.heldPod("house-catalog-catalog-0") == nil || cluster.heldClaim("house-catalog-catalog-0") == nil {
 		t.Error("the pass took down the copy the Catalog still asks for")
 	}
 	for _, name := range []string{"house-catalog-catalog-1", "house-catalog-catalog-2"} {
@@ -123,7 +123,7 @@ func TestStandingCatalogStatusCountsTheCopiesOfBothStores(t *testing.T) {
 			readyCatalogCopy("house-catalog", "house", 1),
 			starting,
 		},
-		[]*Pod{progressPodAt("house-catalog-progress", "house", "10.42.0.5"), nil},
+		[]*Pod{progressPodAt("house-catalog-progress-0", "house", "10.42.0.5"), nil},
 		nil, testNow)
 
 	if status.Replicas.Catalog != (StoreReplicas{Ready: 2, Wanted: 3}) {
@@ -174,10 +174,10 @@ func TestReconcileCatalogsMountsTheClaimTheCatalogNames(t *testing.T) {
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 
-	if cluster.heldClaim("house-catalog-catalog") != nil {
+	if cluster.heldClaim("house-catalog-catalog-0") != nil {
 		t.Error("the pass provisioned a claim over the one the Catalog names")
 	}
-	pod := cluster.heldPod("house-catalog-catalog")
+	pod := cluster.heldPod("house-catalog-catalog-0")
 	if pod == nil {
 		t.Fatal("the pass stood no catalog pod")
 	}
@@ -192,7 +192,7 @@ func TestReconcileCatalogsIsReadyWhenTheCatalogPodIsUp(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	pod := readyCatalogPod("house-catalog", "house")
-	cluster.pods["house-catalog-catalog"] = pod
+	cluster.pods["house-catalog-catalog-0"] = pod
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{*pod}, testNow)
 
@@ -233,7 +233,7 @@ func TestReconcileCatalogsMarksEveryCatalogBlockedWhenThereAreTwo(t *testing.T) 
 func TestReconcileCatalogsCarriesOnFromAFailedWrite(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := seedCatalog(cluster, "house-catalog", "house")
-	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-catalog"] = http.StatusInternalServerError
+	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-catalog-0"] = http.StatusInternalServerError
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 

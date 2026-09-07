@@ -15,30 +15,27 @@ import (
 // because two copies on one node are lost together.
 const hostnameTopologyKey = "kubernetes.io/hostname"
 
-// One of the two durable stores a Catalog stands: the name its first copy
-// takes, and the store label value every copy carries. The two travel
-// together, so no caller can pair one store's name with the other store's
-// label.
+// One of the two durable stores a Catalog stands: the name every copy of
+// it is numbered from, and the store label value every copy carries. The
+// two travel together, so no caller can pair one store's name with the
+// other store's label.
 type durableStore struct {
 	base  string
 	label string
 }
 
 func catalogStoreOf(catalog *NamespaceCatalog) durableStore {
-	return durableStore{base: catalogPodName(catalog.Metadata.Name), label: catalogStoreLabelValue}
+	return durableStore{base: catalogStoreName(catalog.Metadata.Name), label: catalogStoreLabelValue}
 }
 
 func progressStoreOf(catalog *NamespaceCatalog) durableStore {
-	return durableStore{base: progressPodName(catalog.Metadata.Name), label: progressStoreLabelValue}
+	return durableStore{base: progressStoreName(catalog.Metadata.Name), label: progressStoreLabelValue}
 }
 
-// The name one copy's pod and its claim take. The first copy keeps the
-// store's own name, so a namespace that already holds a catalog and a
-// progress store migrates nothing. Every copy after it carries its number.
+// The name one copy's pod and its claim take. Every copy carries its
+// number, copy zero included, so one rule names them all and a person
+// reads a copy's number off the pod in front of them.
 func (s durableStore) replicaName(index int) string {
-	if index == 0 {
-		return s.base
-	}
 	return s.base + "-" + strconv.Itoa(index)
 }
 

@@ -21,7 +21,7 @@ func testProgressPod(catalog *NamespaceCatalog, index int) *Pod {
 func TestProgressPodBelongsToItsCatalogAndItsOwnCluster(t *testing.T) {
 	pod := testProgressPod(housekeepingCatalog(), 0)
 
-	if pod.Metadata.Name != "house-catalog-progress" || pod.Metadata.Namespace != "house" {
+	if pod.Metadata.Name != "house-catalog-progress-0" || pod.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the Catalog's own progress pod", pod.Metadata)
 	}
 	if len(pod.Metadata.OwnerReferences) != 1 {
@@ -175,7 +175,7 @@ func TestProgressClaimTakesItsOwnSizeAndClass(t *testing.T) {
 
 	claim := buildProgressClaim(catalog, 0)
 
-	if claim.Metadata.Name != "house-catalog-progress" || claim.Metadata.Namespace != "house" {
+	if claim.Metadata.Name != "house-catalog-progress-0" || claim.Metadata.Namespace != "house" {
 		t.Errorf("metadata = %+v, want the progress claim in the Catalog's namespace", claim.Metadata)
 	}
 	if claim.Spec.StorageClassName != "synology-iscsi" {
@@ -220,7 +220,7 @@ func TestProgressClaimStandsBesideACatalogThatNamesItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldClaim("house-catalog-progress") == nil {
+	if cluster.heldClaim("house-catalog-progress-0") == nil {
 		t.Error("the pass provisioned no progress claim")
 	}
 }
@@ -235,7 +235,7 @@ func TestProgressPodMountsItsClaimAlone(t *testing.T) {
 	}
 	volume := pod.Spec.Volumes[0]
 	if volume.Name != progressVolumeName || volume.PersistentVolumeClaim == nil ||
-		volume.PersistentVolumeClaim.ClaimName != "house-catalog-progress" {
+		volume.PersistentVolumeClaim.ClaimName != "house-catalog-progress-0" {
 		t.Errorf("volume = %+v, want the progress claim", volume)
 	}
 }
@@ -250,10 +250,10 @@ func TestStandProgressPodCreatesThePodAndItsClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cluster.heldPod("house-catalog-progress") == nil {
+	if cluster.heldPod("house-catalog-progress-0") == nil {
 		t.Error("the pass stood no progress pod")
 	}
-	if cluster.heldClaim("house-catalog-progress") == nil {
+	if cluster.heldClaim("house-catalog-progress-0") == nil {
 		t.Error("the pass provisioned no progress claim")
 	}
 }
@@ -277,7 +277,7 @@ func TestListProgressMemberPodsReadsTheProgressLabelAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house-catalog-progress" {
+	if len(list.Items) != 1 || list.Items[0].Metadata.Name != "house-catalog-progress-0" {
 		t.Errorf("pods = %+v, want the progress pod alone", list.Items)
 	}
 }
@@ -295,10 +295,10 @@ func TestReconcileCatalogsStandsTheProgressClusterToo(t *testing.T) {
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
 
-	if cluster.heldPod("house-catalog-progress") == nil {
+	if cluster.heldPod("house-catalog-progress-0") == nil {
 		t.Fatal("the pass stood no progress pod")
 	}
-	if cluster.heldClaim("house-catalog-progress") == nil {
+	if cluster.heldClaim("house-catalog-progress-0") == nil {
 		t.Fatal("the pass provisioned no claim for the progress pod")
 	}
 	service := cluster.heldService("house", progressServiceName)
@@ -347,7 +347,7 @@ func TestReconcileCatalogsStandsNoProgressClusterForManyCatalogs(t *testing.T) {
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second), nil, testNow)
 
-	if cluster.heldPod("house-catalog-progress") != nil {
+	if cluster.heldPod("house-catalog-progress-0") != nil {
 		t.Error("the pass stood a progress pod for a namespace with two Catalogs")
 	}
 }
@@ -379,7 +379,7 @@ func TestStandProgressPodsReportsAFailedCopy(t *testing.T) {
 	cluster := newFakeCluster()
 	catalog := housekeepingCatalog()
 	catalog.Spec.Progress.Replicas = 2
-	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-progress"] = http.StatusInternalServerError
+	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-progress-0"] = http.StatusInternalServerError
 
 	_, err := testOperator(t, cluster).standProgressPods(t.Context(), catalog)
 
