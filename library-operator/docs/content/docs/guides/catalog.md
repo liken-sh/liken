@@ -29,6 +29,8 @@ members find each other through:
         storageClassName: local-path
       screens:
         storageClassName: local-path
+        artCache:
+          size: 2Gi
 
 Every member holds the whole namespace's catalog, because the cluster
 gossips every row to every peer. So one `size` covers the catalog
@@ -93,7 +95,17 @@ is named `<screen-pod>-catalog`, sized from the `Catalog`, and classed
 by `spec.screens.storageClassName`. A screen pod is pinned to the
 machine that holds its display, so a node-local class fits.
 
-The claim is what makes a restart fast. On an `emptyDir`, a restarted
+A screen holds a second claim beside it, `<screen-pod>-art`, where
+the browser keeps every piece of art it scaled: posters, backdrops,
+episode stills, logos, and headshots. `spec.screens.artCache.size`
+sizes it, 2Gi by default, and it takes the same class. The browser is
+told to keep 128 MiB under that size, which is the room an atomic
+write needs. Both claims are created once and never updated, so a
+size change reaches new screens and not standing ones. To resize a
+standing screen, delete its claim, and the next pass creates it at
+the new size.
+
+The catalog claim is what makes a restart fast. On an `emptyDir`, a restarted
 screen synced the whole catalog again every time. On a claim, the
 sync happens once, when the claim is fresh:
 

@@ -10,7 +10,7 @@ use super::*;
 // after the first one runs on a thread. The clone the reader holds is
 // the catalog as it stood here, and a change to the browser's own source
 // after this never reaches it.
-fn threaded() -> Browser<Fake, NoPosters> {
+fn threaded() -> Browser<Fake, NoArt> {
     let mut browser = Browser::new(
         Fake {
             movies: 3,
@@ -18,7 +18,7 @@ fn threaded() -> Browser<Fake, NoPosters> {
             threaded: true,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     );
     browser.source.reads.store(0, Ordering::SeqCst);
     browser.source.calls.clear();
@@ -27,7 +27,7 @@ fn threaded() -> Browser<Fake, NoPosters> {
 
 // Pump until a page lands, which a read on a thread takes milliseconds
 // to answer.
-fn settled(browser: &mut Browser<Fake, NoPosters>) {
+fn settled(browser: &mut Browser<Fake, NoArt>) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         if browser.pump(2.0) {
@@ -40,7 +40,7 @@ fn settled(browser: &mut Browser<Fake, NoPosters>) {
 
 // Pump until the catalog has answered this many reads, and answer how
 // many it read.
-fn reads(browser: &mut Browser<Fake, NoPosters>, count: usize) -> usize {
+fn reads(browser: &mut Browser<Fake, NoArt>, count: usize) -> usize {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline && browser.source.reads.load(Ordering::SeqCst) < count {
         browser.pump(2.0);
@@ -51,7 +51,7 @@ fn reads(browser: &mut Browser<Fake, NoPosters>, count: usize) -> usize {
 
 // A tenth of a second of pumps, in which a read the reader should not
 // have asked for would land.
-fn quiet(browser: &mut Browser<Fake, NoPosters>) {
+fn quiet(browser: &mut Browser<Fake, NoArt>) {
     for _ in 0..20 {
         browser.pump(2.0);
         thread::sleep(Duration::from_millis(5));
@@ -59,7 +59,7 @@ fn quiet(browser: &mut Browser<Fake, NoPosters>) {
 }
 
 // The headings of the page's strips, in the page's order.
-fn headings(browser: &Browser<Fake, NoPosters>) -> Vec<String> {
+fn headings(browser: &Browser<Fake, NoArt>) -> Vec<String> {
     showing_home(browser)
         .blocks
         .iter()

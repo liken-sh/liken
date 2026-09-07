@@ -11,8 +11,8 @@ use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::Person;
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 use crate::views::stack::Stack;
 use crate::views::{area, card, extent, text, wall};
 
@@ -59,16 +59,16 @@ pub fn region(bounds: Rectangle) -> Rectangle {
 }
 
 /// The page as one canvas.
-pub struct Page<'a, P> {
+pub struct Page<'a, A> {
     /// The person the page is about.
     pub person: &'a Person,
     /// The store the headshot and the posters come from.
-    pub posters: &'a RefCell<P>,
+    pub store: &'a RefCell<A>,
     /// Whether the page holds focus, or the browser's strip over it does.
     pub held: bool,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
     type State = ();
 
     fn draw(
@@ -81,10 +81,10 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let person = self.person;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let posters = &mut *self.posters.borrow_mut();
+        let store = &mut *self.store.borrow_mut();
 
         let headshot = area(MARGIN, TOP, headshot_width(), HEADSHOT);
-        drawn(&mut frame, posters, person, headshot);
+        drawn(&mut frame, store, person, headshot);
 
         let left = headshot.x + headshot.width + BESIDE;
         let column = bounds.width - left - MARGIN;
@@ -109,7 +109,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             region.height + wall::HEAD,
         );
         frame.with_clip(clip, |frame| {
-            person.works.draw(frame, posters, region, self.held, LINES);
+            person.works.draw(frame, store, region, self.held, LINES);
         });
 
         vec![frame.into_geometry()]
@@ -120,14 +120,14 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 // decode lands. The art draws band by band, because the renderer uploads
 // a large image on a later frame and this client draws no later frame
 // until an event.
-fn drawn<P: Posters>(
+fn drawn<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     person: &Person,
     slot: Rectangle,
 ) {
     if !person.headshot.is_empty()
-        && let Some(art) = posters.poster(
+        && let Some(art) = store.covered(
             &person.headshot_library,
             &person.headshot,
             slot.width as u32,

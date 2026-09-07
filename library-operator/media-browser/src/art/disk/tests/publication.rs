@@ -5,8 +5,8 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 use super::super::*;
-use super::{entry, key, resolve, source_poster, write_rgb};
-use crate::posters::Fit;
+use super::{entry, key, resolve, source_art, write_rgb};
+use crate::art::Fit;
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -29,7 +29,7 @@ fn cached_read_during_flush() -> Result {
             size: 4,
             modified_ns: 5,
         },
-        &source_poster([10, 20, 30, 100]),
+        &source_art([10, 20, 30, 100]),
     )
     .unwrap();
     let (flush_started_tx, flush_started_rx) = mpsc::sync_channel(0);

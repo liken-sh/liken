@@ -1,8 +1,8 @@
 package main
 
-// These tests read the claim a screen's catalog agent runs on, the
-// pass that creates it before the pod, and the recovery of a screen the
-// scheduler cannot place where its volume is.
+// The two claims a screen holds, the pass that creates them before the
+// pod, and the recovery of a screen the scheduler cannot place where
+// its volumes are.
 
 import (
 	"net/http"
@@ -20,55 +20,71 @@ func testCatalogWithScreens(size, class string) *NamespaceCatalog {
 	return catalog
 }
 
-// The claim is named for the screen pod, ReadWriteOnce, sized from the
-// Catalog, classed by the screens block, labeled with the screen and the
-// Player, and owned by the Player.
-func TestBuildScreenClaimIsOwnedByThePlayerAndSizedByTheCatalog(t *testing.T) {
-	claim := buildScreenClaim(denScreen(), testCatalogWithScreens("2Gi", "local-path"))
+// A screen holds two claims: the catalog claim sized from spec.storage
+// and the art claim sized from spec.screens.artCache. Both take the
+// screens block's class, the screen and Player labels, and the Player
+// as owner.
+func TestScreenClaimsAreNamedSizedLabeledAndOwned(t *testing.T) {
+	catalog := testCatalogWithScreens("2Gi", "local-path")
+	catalog.Spec.Screens.ArtCache.Size = "4Gi"
+	claims := screenClaims(denScreen(), catalog)
 
-	if claim.Metadata.Name != "den-tv-media-browser-catalog" {
-		t.Errorf("name = %q, want den-tv-media-browser-catalog", claim.Metadata.Name)
+	cases := []struct{ name, size string }{
+		{"den-tv-media-browser-catalog", "2Gi"},
+		{"den-tv-media-browser-art", "4Gi"},
 	}
-	if claim.Metadata.Namespace != testLibraryNamespace {
-		t.Errorf("namespace = %q, want %s", claim.Metadata.Namespace, testLibraryNamespace)
+	if len(claims) != len(cases) {
+		t.Fatalf("claims = %d, want the catalog claim and the art claim", len(claims))
 	}
-	if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
-		t.Errorf("accessModes = %v, want ReadWriteOnce", claim.Spec.AccessModes)
-	}
-	if claim.Spec.Resources.Requests["storage"] != "2Gi" {
-		t.Errorf("storage = %q, want the Catalog's size", claim.Spec.Resources.Requests["storage"])
-	}
-	if claim.Spec.StorageClassName != "local-path" {
-		t.Errorf("storageClassName = %q, want the screens' class", claim.Spec.StorageClassName)
-	}
-	if claim.Metadata.Labels[scannerLabelKey] != screenLabelValue {
-		t.Errorf("labels = %v, want the screen name label", claim.Metadata.Labels)
-	}
-	if claim.Metadata.Labels[playerLabelKey] != "den-tv" {
-		t.Errorf("labels = %v, want the player label", claim.Metadata.Labels)
-	}
-	want := []OwnerReference{playerOwner(denScreen())}
-	if len(claim.Metadata.OwnerReferences) != 1 || claim.Metadata.OwnerReferences[0] != want[0] {
-		t.Errorf("ownerReferences = %+v, want %+v", claim.Metadata.OwnerReferences, want)
+	for index, one := range cases {
+		claim := claims[index]
+		if claim.Metadata.Name != one.name {
+			t.Errorf("name = %q, want %s", claim.Metadata.Name, one.name)
+		}
+		if claim.Metadata.Namespace != testLibraryNamespace {
+			t.Errorf("namespace = %q, want %s", claim.Metadata.Namespace, testLibraryNamespace)
+		}
+		if len(claim.Spec.AccessModes) != 1 || claim.Spec.AccessModes[0] != accessModeReadWriteOnce {
+			t.Errorf("accessModes = %v, want ReadWriteOnce", claim.Spec.AccessModes)
+		}
+		if claim.Spec.Resources.Requests["storage"] != one.size {
+			t.Errorf("storage = %q, want %s", claim.Spec.Resources.Requests["storage"], one.size)
+		}
+		if claim.Spec.StorageClassName != "local-path" {
+			t.Errorf("storageClassName = %q, want the screens' class", claim.Spec.StorageClassName)
+		}
+		if claim.Metadata.Labels[scannerLabelKey] != screenLabelValue {
+			t.Errorf("labels = %v, want the screen name label", claim.Metadata.Labels)
+		}
+		if claim.Metadata.Labels[playerLabelKey] != "den-tv" {
+			t.Errorf("labels = %v, want the player label", claim.Metadata.Labels)
+		}
+		want := playerOwner(denScreen())
+		if len(claim.Metadata.OwnerReferences) != 1 || claim.Metadata.OwnerReferences[0] != want {
+			t.Errorf("ownerReferences = %+v, want %+v", claim.Metadata.OwnerReferences, want)
+		}
 	}
 }
 
 // An absent class is omitted, so the cluster's default StorageClass
-// binds the claim, and an absent size takes the Catalog's default.
-func TestBuildScreenClaimOmitsAnAbsentClassAndDefaultsTheSize(t *testing.T) {
-	claim := buildScreenClaim(denScreen(), testNamespaceCatalog())
+// binds the claim, and an absent size takes the default of its own field.
+func TestScreenClaimsOmitAnAbsentClassAndDefaultTheSizes(t *testing.T) {
+	claims := screenClaims(denScreen(), testNamespaceCatalog())
 
-	if claim.Spec.StorageClassName != "" {
-		t.Errorf("storageClassName = %q, want it omitted for the default class", claim.Spec.StorageClassName)
-	}
-	if claim.Spec.Resources.Requests["storage"] != defaultCatalogSize {
-		t.Errorf("storage = %q, want the default", claim.Spec.Resources.Requests["storage"])
+	want := []string{defaultCatalogSize, defaultArtCacheSize}
+	for index, claim := range claims {
+		if claim.Spec.StorageClassName != "" {
+			t.Errorf("storageClassName = %q, want it omitted for the default class", claim.Spec.StorageClassName)
+		}
+		if claim.Spec.Resources.Requests["storage"] != want[index] {
+			t.Errorf("storage = %q, want %s", claim.Spec.Resources.Requests["storage"], want[index])
+		}
 	}
 }
 
-// The pass creates the claim before the pod, and the pod's catalog
-// volume names it.
-func TestReconcileScreensStandsTheClaimBeforeThePod(t *testing.T) {
+// The pass creates both claims before the pod, and each of the pod's
+// two volumes names the claim it was made for.
+func TestReconcileScreensStandsBothClaimsBeforeThePod(t *testing.T) {
 	cluster := newFakeCluster()
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
 	catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
@@ -76,20 +92,26 @@ func TestReconcileScreensStandsTheClaimBeforeThePod(t *testing.T) {
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 		[]Player{*player}, nil, nil, testNow)
 
-	claim := cluster.heldClaim("den-tv-media-browser-catalog")
-	if claim == nil {
-		t.Fatal("the pass provisioned no claim for the screen")
-	}
-	if claim.Spec.Resources.Requests["storage"] != defaultCatalogSize {
-		t.Errorf("storage = %q, want the Catalog's size", claim.Spec.Resources.Requests["storage"])
+	cases := []struct{ claim, volume, size string }{
+		{"den-tv-media-browser-catalog", catalogVolumeName, defaultCatalogSize},
+		{"den-tv-media-browser-art", artCacheVolumeName, defaultArtCacheSize},
 	}
 	pod := cluster.heldPod("den-tv-media-browser")
 	if pod == nil {
 		t.Fatal("the pass stood no screen pod")
 	}
-	source := podVolume(t, pod, catalogVolumeName).PersistentVolumeClaim
-	if source == nil || source.ClaimName != "den-tv-media-browser-catalog" {
-		t.Errorf("catalog volume = %+v, want the screen's claim", source)
+	for _, one := range cases {
+		claim := cluster.heldClaim(one.claim)
+		if claim == nil {
+			t.Fatalf("the pass provisioned no %s for the screen", one.claim)
+		}
+		if claim.Spec.Resources.Requests["storage"] != one.size {
+			t.Errorf("storage = %q, want %s", claim.Spec.Resources.Requests["storage"], one.size)
+		}
+		source := podVolume(t, pod, one.volume).PersistentVolumeClaim
+		if source == nil || source.ClaimName != one.claim {
+			t.Errorf("%s volume = %+v, want %s", one.volume, source, one.claim)
+		}
 	}
 	claimed := cluster.firstRequest(http.MethodPost, "persistentvolumeclaims")
 	stood := cluster.firstRequest(http.MethodPost, "pods")
@@ -99,23 +121,25 @@ func TestReconcileScreensStandsTheClaimBeforeThePod(t *testing.T) {
 }
 
 // A claim that already stands is left alone, so a screen comes back on
-// the catalog it holds.
+// the catalog and the art it holds.
 func TestReconcileScreensLeavesAnExistingScreenClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
 	catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
-	cluster.claims["den-tv-media-browser-catalog"] = boundScreenClaim(player)
+	for _, claim := range boundScreenClaims(player) {
+		cluster.claims[claim.Metadata.Name] = claim
+	}
 
 	testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 		[]Player{*player}, nil, nil, testNow)
 
 	if got := cluster.countRequests(http.MethodPost, "persistentvolumeclaims"); got != 0 {
-		t.Errorf("creates = %d, want none over a claim that already stands", got)
+		t.Errorf("creates = %d, want none over claims that already stand", got)
 	}
 }
 
 // A namespace with no single Catalog has no size to read, so the pod
-// keeps its emptyDir and the pass provisions nothing.
+// keeps its emptyDirs and the pass provisions nothing.
 func TestReconcileScreensWithNoCatalogKeepsTheEmptyDir(t *testing.T) {
 	cluster := newFakeCluster()
 	player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
@@ -130,8 +154,10 @@ func TestReconcileScreensWithNoCatalogKeepsTheEmptyDir(t *testing.T) {
 	if pod == nil {
 		t.Fatal("the pass stood no screen pod")
 	}
-	if podVolume(t, pod, catalogVolumeName).EmptyDir == nil {
-		t.Errorf("catalog volume = %+v, want an emptyDir", podVolume(t, pod, catalogVolumeName))
+	for _, name := range []string{catalogVolumeName, artCacheVolumeName} {
+		if podVolume(t, pod, name).EmptyDir == nil {
+			t.Errorf("%s volume = %+v, want an emptyDir", name, podVolume(t, pod, name))
+		}
 	}
 }
 
@@ -141,7 +167,7 @@ func TestStandScreenClaimAcceptsAConflict(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.refuseCreate = true
 
-	err := testOperator(t, cluster).standScreenClaim(t.Context(), denScreen(), testNamespaceCatalog())
+	err := testOperator(t, cluster).standScreenClaims(t.Context(), denScreen(), testNamespaceCatalog())
 
 	if err != nil {
 		t.Fatalf("err = %v, want a conflict to read as success", err)
@@ -151,13 +177,18 @@ func TestStandScreenClaimAcceptsAConflict(t *testing.T) {
 // A read that fails for any other reason is reported, because the pass
 // cannot tell whether the claim exists.
 func TestStandScreenClaimReportsAFailedRead(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.broken[claimPath(testLibraryNamespace, "den-tv-media-browser-catalog")] = http.StatusInternalServerError
+	cases := []string{"den-tv-media-browser-catalog", "den-tv-media-browser-art"}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			cluster.broken[claimPath(testLibraryNamespace, name)] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).standScreenClaim(t.Context(), denScreen(), testNamespaceCatalog())
+			err := testOperator(t, cluster).standScreenClaims(t.Context(), denScreen(), testNamespaceCatalog())
 
-	if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
-		t.Fatalf("err = %v, want the server's own message", err)
+			if err == nil || !strings.Contains(err.Error(), "the API server is unwell") {
+				t.Fatalf("err = %v, want the server's own message", err)
+			}
+		})
 	}
 }
 
@@ -188,16 +219,19 @@ func unschedulableScreenPod(player *Player, catalog *NamespaceCatalog, since tim
 	return pod
 }
 
-// The screen's own claim, bound to a volume on the node the pod first
+// The screen's own claims, bound to volumes on the node the pod first
 // landed on.
-func boundScreenClaim(player *Player) *PersistentVolumeClaim {
-	claim := buildScreenClaim(player, testNamespaceCatalog())
-	claim.Status.Phase = claimBound
-	return claim
+func boundScreenClaims(player *Player) []*PersistentVolumeClaim {
+	claims := screenClaims(player, testNamespaceCatalog())
+	for _, claim := range claims {
+		claim.Status.Phase = claimBound
+	}
+	return claims
 }
 
-// Past the grace, on a bound claim of this Player's own, the pass
-// deletes the pod and the claim, and it deletes neither in every other state.
+// Past the grace, on a Bound catalog claim of this Player's own, the
+// pass deletes the pod and both claims. In every other state it deletes
+// none of them.
 func TestReconcileScreensRecoversAnUnschedulableScreen(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -248,11 +282,13 @@ func TestReconcileScreensRecoversAnUnschedulableScreen(t *testing.T) {
 				one.pod(pod)
 			}
 			cluster.pods[pod.Metadata.Name] = pod
-			claim := boundScreenClaim(player)
+			claims := boundScreenClaims(player)
 			if one.claim != nil {
-				one.claim(claim)
+				one.claim(claims[0])
 			}
-			cluster.claims[claim.Metadata.Name] = claim
+			for _, claim := range claims {
+				cluster.claims[claim.Metadata.Name] = claim
+			}
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
 				[]Player{*player}, nil, []Pod{*pod}, testNow)
@@ -260,8 +296,74 @@ func TestReconcileScreensRecoversAnUnschedulableScreen(t *testing.T) {
 			if gone := cluster.heldPod("den-tv-media-browser") == nil; gone != one.wantOut {
 				t.Errorf("the pod is gone = %v, want %v", gone, one.wantOut)
 			}
-			if gone := cluster.heldClaim(claim.Metadata.Name) == nil; gone != one.wantOut {
-				t.Errorf("the claim is gone = %v, want %v", gone, one.wantOut)
+			for _, claim := range claims {
+				if gone := cluster.heldClaim(claim.Metadata.Name) == nil; gone != one.wantOut {
+					t.Errorf("%s is gone = %v, want %v", claim.Metadata.Name, gone, one.wantOut)
+				}
+			}
+		})
+	}
+}
+
+// The art claim's delete carries the same three guards and the Bound
+// check, so a claim that fails one of them stands while the pod and the
+// catalog claim go.
+func TestReconcileScreensGuardsTheArtClaimDelete(t *testing.T) {
+	cases := []struct {
+		name    string
+		art     func(*PersistentVolumeClaim)
+		wantOut bool
+	}{
+		{name: "every guard passes", wantOut: true},
+		{
+			name: "the claim never bound",
+			art:  func(claim *PersistentVolumeClaim) { claim.Status.Phase = "Pending" },
+		},
+		{
+			name: "the claim carries another name",
+			art:  func(claim *PersistentVolumeClaim) { claim.Metadata.Name = "movies-catalog" },
+		},
+		{
+			name: "the claim carries no screen label",
+			art:  func(claim *PersistentVolumeClaim) { delete(claim.Metadata.Labels, scannerLabelKey) },
+		},
+		{
+			name: "the claim names another Player",
+			art:  func(claim *PersistentVolumeClaim) { claim.Metadata.Labels[playerLabelKey] = "kitchen-tv" },
+		},
+		{
+			name: "the owner holds another UID",
+			art: func(claim *PersistentVolumeClaim) {
+				claim.Metadata.OwnerReferences[0].UID = "an-older-den-tv"
+			},
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			shortUnschedulableGrace(t)
+			cluster := newFakeCluster()
+			player := seedPlayer(cluster, "den-tv", testLibraryNamespace, screenController)
+			catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
+			pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
+			cluster.pods[pod.Metadata.Name] = pod
+			claims := boundScreenClaims(player)
+			if one.art != nil {
+				one.art(claims[1])
+			}
+			cluster.claims["den-tv-media-browser-catalog"] = claims[0]
+			cluster.claims["den-tv-media-browser-art"] = claims[1]
+
+			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,
+				[]Player{*player}, nil, []Pod{*pod}, testNow)
+
+			if cluster.heldPod("den-tv-media-browser") != nil {
+				t.Error("the pod stands, want the recovery to have taken it")
+			}
+			if cluster.heldClaim("den-tv-media-browser-catalog") != nil {
+				t.Error("the catalog claim stands, want the recovery to have taken it")
+			}
+			if gone := cluster.heldClaim("den-tv-media-browser-art") == nil; gone != one.wantOut {
+				t.Errorf("the art claim is gone = %v, want %v", gone, one.wantOut)
 			}
 		})
 	}
@@ -289,6 +391,10 @@ func TestReconcileScreensCarriesOnPastAFailedRecovery(t *testing.T) {
 			name:   "the claim cannot be deleted",
 			broken: http.MethodDelete + " " + claimPath(testLibraryNamespace, "den-tv-media-browser-catalog"),
 		},
+		{
+			name:   "the art claim cannot be deleted",
+			broken: http.MethodDelete + " " + claimPath(testLibraryNamespace, "den-tv-media-browser-art"),
+		},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -299,7 +405,9 @@ func TestReconcileScreensCarriesOnPastAFailedRecovery(t *testing.T) {
 			catalog := seedCatalog(cluster, "house-catalog", testLibraryNamespace)
 			pod := unschedulableScreenPod(player, catalog, testNow.Add(-time.Minute))
 			cluster.pods[pod.Metadata.Name] = pod
-			cluster.claims["den-tv-media-browser-catalog"] = boundScreenClaim(player)
+			for _, claim := range boundScreenClaims(player) {
+				cluster.claims[claim.Metadata.Name] = claim
+			}
 			cluster.broken[one.broken] = http.StatusInternalServerError
 
 			testOperator(t, cluster).reconcileScreens(t.Context(), testLibraryNamespace, catalog,

@@ -38,8 +38,8 @@ use stats::Stats;
 use timeline::Timeline;
 use watchdog::Watchdog;
 
+use crate::art::ArtCounts;
 use crate::catalog::search::Size;
-use crate::posters::PosterCounts;
 
 /// The word that ends a run, from the keyboard or from a script. It is a
 /// word no screen binds and `key_of` never produces, so no remote can
@@ -128,8 +128,8 @@ pub trait Screen {
     }
 
     /// Disk-cache hits and source decode attempts for this run.
-    fn poster_counts(&self) -> PosterCounts {
-        PosterCounts::default()
+    fn art_counts(&self) -> ArtCounts {
+        ArtCounts::default()
     }
 
     /// How large the screen's search index is, or nothing where the
@@ -171,7 +171,7 @@ pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), S
     // The screen's own sources wake the loop through this proxy, so a
     // delivery folds the moment it lands. The event it sends carries
     // nothing: the wake is the message, and `about_to_wait` pumps on it.
-    // The browser hands it to its catalog source and its poster store.
+    // The browser hands it to its catalog source and its art store.
     let proxy = event_loop.create_proxy();
     screen.wake_by(Arc::new(move || {
         let _ = proxy.send_event(());
@@ -391,7 +391,7 @@ mod tests {
         assert!(!still.pump(1.0));
         assert_eq!(still.next_frame(3.5), Some(3.5));
         assert!(!still.surface_due());
-        assert_eq!(still.poster_counts(), PosterCounts::default());
+        assert_eq!(still.art_counts(), ArtCounts::default());
         assert_eq!(still.index_size(), None);
         still.wake_by(Arc::new(|| {}));
         still.update(());

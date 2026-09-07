@@ -48,14 +48,14 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::{Alignment, LineHeight, Shaping};
 use iced_winit::core::{Color, Font, Pixels, Point, Rectangle, Size};
 
+use crate::art::{Art, Image};
 use crate::look;
-use crate::posters::{Art, Posters};
 
 /// What a primitive reads off one of a screen's items. A screen
 /// implements it for the rows it holds, so a wall, a list, and a strip
 /// draw the screen's own type and copy nothing.
 pub trait Card {
-    /// The art path the poster store resolves, empty where the item has
+    /// The art path the store resolves, empty where the item has
     /// none.
     fn art(&self) -> &str {
         ""
@@ -166,11 +166,11 @@ impl Tone {
 // Both programs draw art through this one function, so one place
 // enforces the rule: the store is asked only for a slot that is drawn,
 // at the slot's exact pixel size, and never for a row with no art
-// path. Until a poster arrives, the slot shows the ground color and
+// path. Until the art arrives, the slot shows the ground color and
 // the row's name.
-pub(crate) fn artwork<P: Posters>(
+pub(crate) fn artwork<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     library: &str,
     art: &str,
     slot: Rectangle,
@@ -178,14 +178,14 @@ pub(crate) fn artwork<P: Posters>(
     tone: Tone,
 ) {
     if !art.is_empty()
-        && let Some(poster) = posters.poster(library, art, slot.width as u32, slot.height as u32)
+        && let Some(image) = store.covered(library, art, slot.width as u32, slot.height as u32)
     {
         // The ground under a dimmed slot is the black one, so a sibling
         // darkens by the same amount whatever art lies behind the slot.
         if tone == Tone::Dimmed {
             frame.fill_rectangle(slot.position(), slot.size(), look::BACKGROUND);
         }
-        paint(frame, &poster, slot, tone);
+        paint(frame, &image, slot, tone);
         return;
     }
 
@@ -240,23 +240,23 @@ pub fn cell(tiles: &[(String, String)], index: usize) -> (&str, &str) {
 // poster goes through, so the store decodes a quarter-size poster the way
 // it decodes a whole one, and a cell whose art has not landed draws the
 // ground an empty slot draws.
-pub(crate) fn mosaic<P: Posters>(
+pub(crate) fn mosaic<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     tiles: &[(String, String)],
     slot: Rectangle,
     tone: Tone,
 ) {
     for (index, cell_of) in quarters(slot).into_iter().enumerate() {
         let (library, art) = cell(tiles, index);
-        artwork(frame, posters, library, art, cell_of, "", tone);
+        artwork(frame, store, library, art, cell_of, "", tone);
     }
 }
 
-// Art draws band by band, each band into its share of the rectangle,
+// Image draws band by band, each band into its share of the rectangle,
 // because the renderer uploads an image of two megabytes or more on a
 // later frame, and this client draws no later frame until an event.
-fn paint(frame: &mut canvas::Frame<Renderer>, art: &Art, into: Rectangle, tone: Tone) {
+fn paint(frame: &mut canvas::Frame<Renderer>, art: &Image, into: Rectangle, tone: Tone) {
     for (band, handle) in art.bands(into) {
         frame.draw_image(band, canvas::Image::new(handle).opacity(tone.opacity()));
     }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # local/browse opens the media browser on the catalog the local
 # three-agent cluster holds, so a change to the views, the source, or the
-# poster store is seen against real scanned rows and real art.
+# art store is seen against real scanned rows and real art.
 #
 # Usage:
 #   local/browse [NAME=DIR ...] [FLAGS ...]
@@ -67,8 +67,8 @@ if ! curl --silent --fail --max-time 2 \
 fi
 
 # The NAME of a root is the catalog's library column, namespace/name,
-# and the poster store holds one root per library key, so a NAME the
-# catalog does not hold answers no poster for every item and the wall
+# and the art store holds one root per library key, so a NAME the
+# catalog does not hold answers no art for every item and the wall
 # draws placeholders and reports nothing.
 #
 # The union is the browser's own libraries query, so this reads the
@@ -100,7 +100,7 @@ if [ "$record" = true ]; then
 fi
 
 # The reverse gap fails silently too: a library the catalog holds with
-# no root draws every poster slot as a placeholder. That is a warning
+# no root draws every art slot as a placeholder. That is a warning
 # rather than an error, because browsing the other libraries is still
 # useful.
 for key in "${keys[@]}"; do

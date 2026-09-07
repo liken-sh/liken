@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use iced_widget::core::Bytes;
 
-use super::store::ArtStore;
-use super::{Art, Fit, PosterCounts, Posters};
+use super::store::Store;
+use super::{Art, ArtCounts, Fit, Image};
 use crate::harness::Waker;
 use crate::views::wall;
 
@@ -32,10 +32,10 @@ pub fn budget(size: (u32, u32)) -> usize {
         + CACHED_BACKDROPS * width as usize * height as usize * 4
 }
 
-/// The poster store as the views see it: the library roots, the decode
+/// The art store as the views see it: the library roots, the decode
 /// cache under them, and the loop's wake handle.
 pub struct Volumes {
-    store: ArtStore,
+    store: Store,
     // The wake handle arrives after the store is built, because the
     // harness owns the loop it wakes. Every worker fires through this
     // cell, so a handle set late still reaches decodes queued early.
@@ -44,16 +44,19 @@ pub struct Volumes {
 
 impl Volumes {
     /// A store over these library roots, keyed by the catalog's
-    /// `library` column, holding decoded posters under `budget` bytes.
+    /// `library` column, holding decoded art under `budget` bytes.
     pub fn new(roots: HashMap<String, PathBuf>, budget: usize) -> Self {
-        Self::with_cache_dir(roots, budget, None)
+        Self::with_cache_dir(roots, budget, None, None)
     }
 
-    /// A store with a disk cache where `cache_dir` names one.
+    /// A store with a disk cache where `cache_dir` names one, kept under
+    /// `cache_budget` bytes, or under the cache's own default when the
+    /// budget is `None`.
     pub fn with_cache_dir(
         roots: HashMap<String, PathBuf>,
         budget: usize,
         cache_dir: Option<PathBuf>,
+        cache_budget: Option<usize>,
     ) -> Self {
         let wake = Arc::new(Mutex::new(None::<Waker>));
         let held = wake.clone();
@@ -67,7 +70,7 @@ impl Volumes {
             }
         });
         Self {
-            store: ArtStore::with_cache_dir(roots, budget, waker, cache_dir),
+            store: Store::with_cache_dir(roots, budget, waker, cache_dir, cache_budget),
             wake,
         }
     }
@@ -83,16 +86,16 @@ impl Volumes {
         width: u32,
         height: u32,
         fit: Fit,
-    ) -> Option<Art> {
+    ) -> Option<Image> {
         if !contained(art) {
             return None;
         }
-        let poster = self.store.poster(library, art, width, height, fit)?;
-        let built = poster.art.get_or_init(|| {
-            Art::new(
-                poster.width,
-                poster.height,
-                Bytes::from_owner(poster.rgba.clone()),
+        let scaled = self.store.scaled(library, art, width, height, fit)?;
+        let built = scaled.art.get_or_init(|| {
+            Image::new(
+                scaled.width,
+                scaled.height,
+                Bytes::from_owner(scaled.rgba.clone()),
             )
         });
         Some(built.clone())
@@ -109,12 +112,12 @@ fn contained(art: &str) -> bool {
         .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
 }
 
-impl Posters for Volumes {
-    fn poster(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Art> {
+impl Art for Volumes {
+    fn covered(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Image> {
         self.decoded(library, art, width, height, Fit::Cover)
     }
 
-    fn fitted(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Art> {
+    fn fitted(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Image> {
         self.decoded(library, art, width, height, Fit::Contain)
     }
 
@@ -129,7 +132,7 @@ impl Posters for Volumes {
         self.store.delivered()
     }
 
-    fn counts(&self) -> PosterCounts {
+    fn counts(&self) -> ArtCounts {
         self.store.counts()
     }
 
@@ -152,7 +155,7 @@ mod tests {
 
     const DEADLINE: Duration = Duration::from_secs(10);
 
-    fn handles(art: &Art) -> Vec<Handle> {
+    fn handles(art: &Image) -> Vec<Handle> {
         let (width, height) = art.size();
         art.bands(Rectangle {
             x: 0.0,
@@ -164,7 +167,7 @@ mod tests {
         .collect()
     }
 
-    fn ids(art: &Art) -> Vec<iced_widget::core::image::Id> {
+    fn ids(art: &Image) -> Vec<iced_widget::core::image::Id> {
         handles(art).iter().map(Handle::id).collect()
     }
 
@@ -176,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn a_decoded_poster_becomes_a_handle_of_the_drawn_size() {
+    fn decoded_art_becomes_a_handle_of_the_drawn_size() {
         let dir = TempDir::new().unwrap();
         let mut volumes = volume(&dir);
         let (sender, receiver) = mpsc::channel();
@@ -186,13 +189,13 @@ mod tests {
 
         assert!(
             volumes
-                .poster("local/movies", "poster.jpg", 40, 60)
+                .covered("local/movies", "poster.jpg", 40, 60)
                 .is_none()
         );
         receiver.recv_timeout(DEADLINE).unwrap();
 
         let art = volumes
-            .poster("local/movies", "poster.jpg", 40, 60)
+            .covered("local/movies", "poster.jpg", 40, 60)
             .expect("the decode landed");
         assert_eq!(art.size(), (40, 60));
         let drawn = handles(&art);
@@ -204,13 +207,13 @@ mod tests {
             ..
         } = &drawn[0]
         else {
-            panic!("a decoded poster is an Rgba handle");
+            panic!("decoded art is an Rgba handle");
         };
         assert_eq!((*width, *height), (40, 60));
         assert_eq!(pixels.len(), 40 * 60 * 4);
         assert_eq!(
             volumes.counts(),
-            PosterCounts {
+            ArtCounts {
                 from_cache: 0,
                 from_source: 1,
             }
@@ -228,16 +231,16 @@ mod tests {
 
         assert!(
             volumes
-                .poster("local/movies", "poster.jpg", 40, 60)
+                .covered("local/movies", "poster.jpg", 40, 60)
                 .is_none()
         );
         receiver.recv_timeout(DEADLINE).unwrap();
 
         let first = volumes
-            .poster("local/movies", "poster.jpg", 40, 60)
+            .covered("local/movies", "poster.jpg", 40, 60)
             .unwrap();
         let again = volumes
-            .poster("local/movies", "poster.jpg", 40, 60)
+            .covered("local/movies", "poster.jpg", 40, 60)
             .unwrap();
         assert_eq!(ids(&first), ids(&again));
     }
@@ -258,9 +261,13 @@ mod tests {
         let fitted = volumes.fitted("local/movies", "logo.png", 60, 60).unwrap();
         assert_eq!(fitted.size(), (60, 20));
 
-        assert!(volumes.poster("local/movies", "logo.png", 60, 60).is_none());
+        assert!(
+            volumes
+                .covered("local/movies", "logo.png", 60, 60)
+                .is_none()
+        );
         receiver.recv_timeout(DEADLINE).unwrap();
-        let covered = volumes.poster("local/movies", "logo.png", 60, 60).unwrap();
+        let covered = volumes.covered("local/movies", "logo.png", 60, 60).unwrap();
         assert_eq!(covered.size(), (60, 60));
     }
 
@@ -276,7 +283,7 @@ mod tests {
         assert!(!volumes.delivered());
         assert!(
             volumes
-                .poster("local/movies", "poster.jpg", 24, 36)
+                .covered("local/movies", "poster.jpg", 24, 36)
                 .is_none()
         );
         receiver.recv_timeout(DEADLINE).unwrap();
@@ -295,7 +302,7 @@ mod tests {
         assert!(contained("art/./poster.jpg"));
         assert!(
             volumes
-                .poster("local/movies", "../poster.jpg", 40, 60)
+                .covered("local/movies", "../poster.jpg", 40, 60)
                 .is_none()
         );
         assert!(
@@ -311,14 +318,18 @@ mod tests {
         let mut volumes = volume(&dir);
         assert!(
             volumes
-                .poster("local/movies", "poster.jpg", 8, 12)
+                .covered("local/movies", "poster.jpg", 8, 12)
                 .is_none()
         );
         let (sender, receiver) = mpsc::channel();
         volumes.wake_by(Arc::new(move || {
             let _ = sender.send(());
         }));
-        assert!(volumes.poster("local/movies", "other.jpg", 8, 12).is_none());
+        assert!(
+            volumes
+                .covered("local/movies", "other.jpg", 8, 12)
+                .is_none()
+        );
         receiver.recv_timeout(DEADLINE).unwrap();
     }
 

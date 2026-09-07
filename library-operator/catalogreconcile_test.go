@@ -174,9 +174,9 @@ func TestStandingCatalogStatusReportsTheNamespacesMembers(t *testing.T) {
 	}
 }
 
-// The status lists one entry per screen pod of the namespace, with
-// the Player, the claim its agent runs on, the node, and the pod's phase. A
-// screen on an emptyDir names no claim.
+// The status lists one entry per screen pod of the namespace: the
+// Player, the two claims it runs on, the node, and the pod's phase. A
+// screen on emptyDirs names neither claim.
 func TestStandingCatalogStatusReportsTheScreens(t *testing.T) {
 	catalog := testNamespaceCatalog()
 	onAClaim := buildScreenPod(denScreen(), nil, catalog,
@@ -196,7 +196,13 @@ func TestStandingCatalogStatusReportsTheScreens(t *testing.T) {
 	}, testNow)
 
 	want := []CatalogScreen{
-		{Player: "den-tv", Claim: "den-tv-media-browser-catalog", Node: "nuc-2", Phase: podRunning},
+		{
+			Player:   "den-tv",
+			Claim:    "den-tv-media-browser-catalog",
+			ArtClaim: "den-tv-media-browser-art",
+			Node:     "nuc-2",
+			Phase:    podRunning,
+		},
 		{Player: "kitchen-tv", Phase: podPending},
 	}
 	if len(status.Screens) != len(want) {

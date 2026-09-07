@@ -12,8 +12,8 @@ use iced_widget::{Stack, canvas};
 use iced_winit::core::{Element, Length, Point, Rectangle, Theme, mouse};
 
 use super::{Tone, area, curtain, extent, paint};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 
 // The share of the width at which the scrim gives the art back, and the
 // share of that run it holds the full shade for. The shade holds across
@@ -67,13 +67,13 @@ impl Ground {
 
 /// One page as its three layers: the backdrop, the scrim over it, and
 /// everything the screen draws over both.
-pub struct Page<'a, P, F> {
+pub struct Page<'a, A, F> {
     /// The library the art paths resolve against.
     pub library: &'a str,
     /// The path of the backdrop file, empty where the item has none.
     pub art: &'a str,
     /// The store the backdrop comes from.
-    pub posters: &'a RefCell<P>,
+    pub store: &'a RefCell<A>,
     /// The ground under the page's own art, where it has any.
     pub ground: Ground,
     /// The page itself: its fills, its art, and its text, in that draw
@@ -81,12 +81,12 @@ pub struct Page<'a, P, F> {
     pub front: F,
     /// The loading state's layers over the page, where a press has put the
     /// page into that state.
-    pub over: Option<curtain::Layer<'a, P>>,
+    pub over: Option<curtain::Layer<'a, A>>,
 }
 
-impl<'a, P, F> Page<'a, P, F>
+impl<'a, A, F> Page<'a, A, F>
 where
-    P: Posters + 'a,
+    A: Art + 'a,
     F: canvas::Program<Infallible, Theme, Renderer> + 'a,
 {
     /// The page as one element, its layers in depth order.
@@ -95,7 +95,7 @@ where
             whole(Backdrop {
                 library: self.library,
                 art: self.art,
-                posters: self.posters,
+                store: self.store,
             }),
             whole(Scrim {
                 ground: self.ground,
@@ -128,13 +128,13 @@ where
 // is asked at the size of the frame, which is the size the prefetch asked
 // for while the wall held focus, so the page finds the decode in the
 // cache.
-struct Backdrop<'a, P> {
+struct Backdrop<'a, A> {
     library: &'a str,
     art: &'a str,
-    posters: &'a RefCell<P>,
+    store: &'a RefCell<A>,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Backdrop<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Backdrop<'_, A> {
     type State = ();
 
     fn draw(
@@ -146,7 +146,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Backdrop<'_, P
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let art = self.posters.borrow_mut().poster(
+        let art = self.store.borrow_mut().covered(
             self.library,
             self.art,
             bounds.width as u32,

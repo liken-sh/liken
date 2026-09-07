@@ -17,6 +17,7 @@ fn the_default_size_is_1920x1080_and_the_cache_is_off() {
     let options = Options::default();
     assert_eq!(options.size, (1920, 1080));
     assert_eq!(options.cache_dir, None);
+    assert_eq!(options.cache_budget, None);
 }
 
 #[test]
@@ -29,8 +30,9 @@ fn help_stops_the_parse() {
 }
 
 #[test]
-fn help_names_the_poster_cache_directory() {
+fn help_names_the_art_cache_directory() {
     assert!(HELP.contains("--cache-dir PATH"));
+    assert!(HELP.contains("--cache-budget BYTES"));
 }
 
 #[test]
@@ -55,6 +57,31 @@ fn a_cache_directory_without_its_value_is_an_error() {
         Options::parse(args("--cache-dir")),
         Err("--cache-dir needs a value".to_string())
     );
+}
+
+#[test]
+fn a_cache_budget_without_its_value_is_an_error() {
+    assert_eq!(
+        Options::parse(args("--cache-budget")),
+        Err("--cache-budget needs a value".to_string())
+    );
+}
+
+#[test]
+fn a_cache_budget_that_is_not_a_count_of_bytes_is_an_error() {
+    assert_eq!(
+        Options::parse(args("--cache-budget 2Gi")),
+        Err("bad --cache-budget 2Gi".to_string())
+    );
+}
+
+#[test]
+fn the_cache_budget_lands_in_the_options() {
+    let Ok(Invocation::Run(options)) = Options::parse(args("--cache-budget 2013265920")) else {
+        panic!("the budget parses");
+    };
+
+    assert_eq!(options.cache_budget, Some(2_013_265_920));
 }
 
 #[test]

@@ -9,19 +9,19 @@ use crate::catalog::{GenreSort, Sort};
 // More movies than a strip shows, so a strip of them has more to see.
 const MORE_THAN_SHOWN: usize = crate::catalog::recency::SHOWN + 6;
 
-fn with_recent(movies: usize) -> Browser<Fake, NoPosters> {
+fn with_recent(movies: usize) -> Browser<Fake, NoArt> {
     Browser::new(
         Fake {
             movies,
             recent: true,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     )
 }
 
 // The row that holds focus, and the slot inside that strip.
-fn at(browser: &Browser<Fake, NoPosters>) -> (usize, usize) {
+fn at(browser: &Browser<Fake, NoArt>) -> (usize, usize) {
     let home = showing_home(browser);
     let strip = home.blocks[home.focus]
         .strip()
@@ -30,7 +30,7 @@ fn at(browser: &Browser<Fake, NoPosters>) -> (usize, usize) {
 }
 
 // The strips of the page in order, the banner left out.
-fn strips(browser: &Browser<Fake, NoPosters>) -> Vec<&crate::screens::home::Strip> {
+fn strips(browser: &Browser<Fake, NoArt>) -> Vec<&crate::screens::home::Strip> {
     showing_home(browser)
         .blocks
         .iter()
@@ -40,7 +40,7 @@ fn strips(browser: &Browser<Fake, NoPosters>) -> Vec<&crate::screens::home::Stri
 
 // A browser with recent titles and focus on the first strip. The page
 // opens on the banner, and these tests are about the strips.
-fn on_strips(movies: usize) -> Browser<Fake, NoPosters> {
+fn on_strips(movies: usize) -> Browser<Fake, NoArt> {
     let mut browser = with_recent(movies);
     browser.key("down");
     browser
@@ -336,7 +336,7 @@ fn a_rest_on_a_title_asks_for_its_backdrop_and_on_a_library_for_nothing() {
     browser.minute = Some(MINUTE);
     assert_eq!(browser.next_frame(0.0), Some(REST));
     browser.tick(REST);
-    assert!(browser.posters.get_mut().asked.contains(&(
+    assert!(browser.store.get_mut().asked.contains(&(
         SERIALS.into(),
         format!("{SERIAL}.backdrop.jpg"),
         1920,
@@ -355,7 +355,7 @@ fn a_rest_on_an_episode_asks_for_its_series_backdrop() {
     browser.tick(0.0);
     browser.key("left");
     browser.tick(REST);
-    assert!(browser.posters.get_mut().asked.contains(&(
+    assert!(browser.store.get_mut().asked.contains(&(
         SERIALS.into(),
         format!("{SERIAL}.backdrop.jpg"),
         1920,
@@ -397,7 +397,7 @@ fn the_view_builds_with_strips_and_with_the_strip_in_focus() {
 // A browser whose pool holds every kind and whose library holds more
 // movies than a strip shows, so a genre's and a person's strip end in
 // "see all" and the set's strip, of three, does not.
-fn with_draw() -> Browser<Fake, NoPosters> {
+fn with_draw() -> Browser<Fake, NoArt> {
     Browser::new(
         Fake {
             movies: MORE_THAN_SHOWN,
@@ -407,11 +407,11 @@ fn with_draw() -> Browser<Fake, NoPosters> {
             pool: true,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     )
 }
 
-fn headings(browser: &Browser<Fake, NoPosters>) -> Vec<&str> {
+fn headings(browser: &Browser<Fake, NoArt>) -> Vec<&str> {
     strips(browser)
         .into_iter()
         .map(|strip| strip.heading.as_str())
@@ -480,7 +480,7 @@ fn a_drawn_strip_captions_every_title_with_its_own_title_and_its_facts_under_it(
 // The browser after a "see all" on the drawn strip under this heading.
 // The presses go down to the strip and right to its "see all" slot,
 // which right stops on.
-fn see_all_on(heading: &str) -> Browser<Fake, NoPosters> {
+fn see_all_on(heading: &str) -> Browser<Fake, NoArt> {
     let mut browser = with_draw();
     let index = headings(&browser)
         .iter()

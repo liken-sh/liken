@@ -30,7 +30,8 @@ media-browser [FLAGS]
   --catalog PATH           the sidecar's SQLite file; without it, the sample
   --updates URL            the agent's HTTP API base
   --library-root NAME=PATH where a library's volume is read; repeatable
-  --cache-dir PATH         where scaled posters are cached; without it, no disk cache
+  --cache-dir PATH         where scaled art is cached; without it, no disk cache
+  --cache-budget BYTES     the bytes the disk cache keeps; without it, 512 MiB
   --script \"0.0:p,3.0:o\"   key events at seconds from the first frame
   --capture DIR            where captured PNGs go
   --capture-at \"0.5,3.2\"   one PNG of the rendered frame at each second listed;
@@ -67,8 +68,11 @@ pub struct Options {
     /// Where each library's volume is read, keyed by the catalog's
     /// library column, `namespace/name`.
     pub library_roots: Vec<(String, PathBuf)>,
-    /// Where scaled posters are cached. `None` leaves the disk cache off.
+    /// Where scaled art is cached. `None` leaves the disk cache off.
     pub cache_dir: Option<PathBuf>,
+    /// The bytes the disk cache keeps under. The operator sets it from
+    /// the art claim's size, and `None` keeps the cache's own default.
+    pub cache_budget: Option<usize>,
     /// Key events at seconds from the first frame, in the order they fire.
     pub script: Vec<(f64, String)>,
     /// Where captured PNGs go, and at what seconds.
@@ -98,6 +102,7 @@ impl Default for Options {
             updates: None,
             library_roots: Vec::new(),
             cache_dir: None,
+            cache_budget: None,
             script: Vec::new(),
             capture_dir: None,
             capture_at: Vec::new(),
@@ -130,6 +135,14 @@ impl Options {
                 "--updates" => options.updates = Some(value()?),
                 "--library-root" => options.library_roots.push(parse_root(&value()?)?),
                 "--cache-dir" => options.cache_dir = Some(PathBuf::from(value()?)),
+                "--cache-budget" => {
+                    let raw = value()?;
+                    options.cache_budget = Some(
+                        raw.trim()
+                            .parse()
+                            .map_err(|_| format!("bad --cache-budget {raw}"))?,
+                    );
+                }
                 "--script" => options.script = parse_script(&value()?)?,
                 "--capture" => options.capture_dir = Some(PathBuf::from(value()?)),
                 "--capture-at" => options.capture_at = parse_times(&value()?)?,

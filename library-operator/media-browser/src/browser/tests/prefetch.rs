@@ -1,4 +1,4 @@
-// The rest on a wall: what the browser asks the poster store for once
+// The rest on a wall: what the browser asks the art store for once
 // focus stands still, and when it asks for nothing.
 
 use super::*;
@@ -18,7 +18,7 @@ fn a_rest_on_a_wall_asks_for_the_backdrop_at_page_size() {
     browser.minute = Some(MINUTE);
 
     assert_eq!(browser.next_frame(REST), Some(MINUTE));
-    assert!(browser.posters.get_mut().asked.contains(&(
+    assert!(browser.store.get_mut().asked.contains(&(
         "screening/films".into(),
         "movies:1.backdrop.jpg".into(),
         1920,
@@ -34,7 +34,7 @@ fn a_press_before_the_rest_moves_the_ask_to_the_item_it_lands_on() {
 
     browser.tick(REST);
     let early: Vec<&(String, String, u32, u32)> = browser
-        .posters
+        .store
         .get_mut()
         .asked
         .iter()
@@ -43,7 +43,7 @@ fn a_press_before_the_rest_moves_the_ask_to_the_item_it_lands_on() {
     assert!(early.is_empty());
 
     browser.tick(0.1 + REST);
-    let asked = &browser.posters.get_mut().asked;
+    let asked = &browser.store.get_mut().asked;
     assert!(asked.contains(&(
         "screening/films".into(),
         "movies:2.backdrop.jpg".into(),
@@ -79,7 +79,7 @@ fn a_series_wall_rests_on_the_backdrop_of_the_page_it_opens() {
 
     browser.tick(REST);
 
-    assert!(browser.posters.get_mut().asked.contains(&(
+    assert!(browser.store.get_mut().asked.contains(&(
         "screening/serials".into(),
         "series:1.backdrop.jpg".into(),
         1920,
@@ -91,7 +91,7 @@ fn a_series_wall_rests_on_the_backdrop_of_the_page_it_opens() {
 fn a_window_of_another_size_asks_for_a_backdrop_of_that_size() {
     let mut browser = resting(3).with_page((1280, 720));
     browser.tick(REST);
-    assert!(browser.posters.get_mut().asked.contains(&(
+    assert!(browser.store.get_mut().asked.contains(&(
         "screening/films".into(),
         "movies:1.backdrop.jpg".into(),
         1280,
@@ -108,5 +108,5 @@ fn a_movie_with_no_backdrop_asks_for_nothing() {
 
     browser.tick(REST);
 
-    assert!(browser.posters.get_mut().asked.is_empty());
+    assert!(browser.store.get_mut().asked.is_empty());
 }

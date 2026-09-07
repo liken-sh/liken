@@ -47,6 +47,10 @@ movie, and play it on the same `Player`. Plan 10 documents that.
   screen half of plan 14: a second agent on every screen pod, the
   browser asks who is watching and sends the answer with every play
   request, and continue watching and history draw from the local copy.
+* [42, A screen keeps its art](42-a-screen-keeps-its-art.md).
+  A second claim beside plan 32's, for the browser's scaled art,
+  sized by the `Catalog` and classed with the catalog claim, so a
+  restart draws from art it already scaled.
 
 ## Future
 

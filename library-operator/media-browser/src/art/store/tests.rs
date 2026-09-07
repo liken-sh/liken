@@ -9,20 +9,28 @@ use super::*;
 
 const DEADLINE: Duration = Duration::from_secs(10);
 
-fn store(source: &TempDir, cache: Option<PathBuf>) -> (ArtStore, mpsc::Receiver<()>) {
+fn store(source: &TempDir, cache: Option<PathBuf>) -> (Store, mpsc::Receiver<()>) {
+    store_with_budget(source, cache, None)
+}
+
+fn store_with_budget(
+    source: &TempDir,
+    cache: Option<PathBuf>,
+    budget: Option<usize>,
+) -> (Store, mpsc::Receiver<()>) {
     let roots = HashMap::from([("movies".to_owned(), source.path().to_path_buf())]);
     let (sender, receiver) = mpsc::channel();
     let waker: Waker = Arc::new(move || {
         let _ = sender.send(());
     });
     (
-        ArtStore::initialize(roots, 1 << 20, waker, 1, cache),
+        Store::initialize(roots, 1 << 20, waker, 1, cache, budget),
         receiver,
     )
 }
 
-fn request(store: &mut ArtStore, receiver: &mpsc::Receiver<()>, art: &str) {
-    assert!(store.poster("movies", art, 16, 24, Fit::Cover).is_none());
+fn request(store: &mut Store, receiver: &mpsc::Receiver<()>, art: &str) {
+    assert!(store.scaled("movies", art, 16, 24, Fit::Cover).is_none());
     receiver.recv_timeout(DEADLINE).unwrap();
 }
 
@@ -40,14 +48,14 @@ fn a_source_decode_counts_once_and_a_memory_hit_does_not_count() {
     request(&mut store, &receiver, "poster.jpg");
     assert_eq!(
         store.counts(),
-        PosterCounts {
+        ArtCounts {
             from_cache: 0,
             from_source: 1,
         }
     );
     assert!(
         store
-            .poster("movies", "poster.jpg", 16, 24, Fit::Cover)
+            .scaled("movies", "poster.jpg", 16, 24, Fit::Cover)
             .is_some()
     );
     assert_eq!(store.counts().from_source, 1);
@@ -60,21 +68,42 @@ fn a_failed_source_read_counts_as_source_io() {
     request(&mut store, &receiver, "missing.jpg");
     assert_eq!(
         store.counts(),
-        PosterCounts {
+        ArtCounts {
             from_cache: 0,
             from_source: 1,
         }
     );
     assert!(
         store
-            .poster("movies", "missing.jpg", 16, 24, Fit::Cover)
+            .scaled("movies", "missing.jpg", 16, 24, Fit::Cover)
             .is_none()
     );
     assert_eq!(store.counts().from_source, 1);
 }
 
 #[test]
-fn a_restart_uses_the_last_known_poster_only_when_the_source_is_missing() {
+fn a_budget_the_run_states_bounds_what_the_disk_cache_keeps() {
+    let source = TempDir::new().unwrap();
+    let cache = TempDir::new().unwrap();
+    write_source(&source);
+    let (mut first, receiver) =
+        store_with_budget(&source, Some(cache.path().to_path_buf()), Some(1));
+    request(&mut first, &receiver, "poster.jpg");
+    drop(first);
+
+    let (mut second, receiver) = store(&source, Some(cache.path().to_path_buf()));
+    request(&mut second, &receiver, "poster.jpg");
+    assert_eq!(
+        second.counts(),
+        ArtCounts {
+            from_cache: 0,
+            from_source: 1,
+        }
+    );
+}
+
+#[test]
+fn a_restart_uses_the_last_known_art_only_when_the_source_is_missing() {
     let source = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
     write_source(&source);
@@ -88,14 +117,14 @@ fn a_restart_uses_the_last_known_poster_only_when_the_source_is_missing() {
     request(&mut second, &receiver, "poster.jpg");
     assert_eq!(
         second.counts(),
-        PosterCounts {
+        ArtCounts {
             from_cache: 1,
             from_source: 0,
         }
     );
     assert!(
         second
-            .poster("movies", "poster.jpg", 16, 24, Fit::Cover)
+            .scaled("movies", "poster.jpg", 16, 24, Fit::Cover)
             .is_some()
     );
 }

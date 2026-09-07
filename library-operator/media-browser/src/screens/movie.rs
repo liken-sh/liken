@@ -15,10 +15,10 @@ use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
 use super::{Item, Screen, Step, facts, foot, franchise, person, stripes};
+use crate::art::Art;
 use crate::catalog::draw::Date;
 use crate::catalog::{MovieDetails, MovieSet, Query, Selection, Slot, Source};
 use crate::focus;
-use crate::posters::Posters;
 use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::{layers, ratings};
 
@@ -183,20 +183,20 @@ impl Movie {
 
     /// The view: the backdrop, the scrim over it, the page over both, and
     /// the loading state's curtain over the page while that state runs.
-    pub fn view<'a, P: Posters>(
+    pub fn view<'a, A: Art>(
         &'a self,
-        posters: &'a RefCell<P>,
+        store: &'a RefCell<A>,
         curtain: Option<Curtain>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
             art: &self.backdrop,
-            posters,
+            store,
             ground: layers::Ground::None,
             front: page::Page {
                 movie: self,
-                posters,
+                store,
                 lifted: curtain.is_some(),
                 held,
             },
@@ -205,7 +205,7 @@ impl Movie {
                 art: &self.backdrop,
                 logo: &self.logo,
                 name: &self.title,
-                posters,
+                store,
                 head: self,
                 curtain,
             }),

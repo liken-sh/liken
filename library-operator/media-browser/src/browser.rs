@@ -1,5 +1,5 @@
-// The media browser: a stack of screens over a catalog source and a
-// poster store. The keyboard and the bus fold through one key handler.
+// The media browser: a stack of screens over a catalog source and an
+// art store. The keyboard and the bus fold through one key handler.
 // The home page is always the bottom of the stack, so the screen is never
 // empty, and back from the home page asks for the shade. The
 // `media-screen` crate holds the shade, the focus gate, and the two
@@ -14,6 +14,7 @@ use iced_winit::core::{Color, Element, Length, Theme};
 
 use media_screen::{Bus, Moment};
 
+use crate::art::{Art, ArtCounts};
 use crate::bus::play;
 use crate::catalog::draw::Date;
 use crate::catalog::search::Size;
@@ -21,7 +22,6 @@ use crate::catalog::{Selection, Source};
 use crate::clock;
 use crate::harness::{Screen, Waker};
 use crate::look;
-use crate::posters::{PosterCounts, Posters};
 use crate::screens::{self, Step, home, loading, volume};
 use crate::views;
 
@@ -33,14 +33,14 @@ mod stack;
 
 use keys::key_of;
 
-/// The browsing screen, generic over where its rows and its posters
+/// The browsing screen, generic over where its rows and its art
 /// come from, so one browser draws the sidecar's file, a test fixture, and
 /// the sample the same way.
-pub struct Browser<S: Source, P: Posters> {
+pub struct Browser<S: Source, A: Art> {
     source: S,
     // The store is in a RefCell because a canvas program draws through
     // a shared reference while the store mutates its cache.
-    posters: RefCell<P>,
+    store: RefCell<A>,
     // The home page is a field of its own, so the type guarantees a
     // screen to draw; the stack holds only descents.
     home: screens::Screen,
@@ -105,9 +105,9 @@ const REST: f64 = 0.3;
 // The size a run that asked for no window size decodes a backdrop at.
 const PAGE: (u32, u32) = (1920, 1080);
 
-impl<S: Source, P: Posters> Browser<S, P> {
+impl<S: Source, A: Art> Browser<S, A> {
     /// Open the browser on its first screen, the home page.
-    pub fn new(mut source: S, posters: P) -> Self {
+    pub fn new(mut source: S, store: A) -> Self {
         let home_date = Date::today();
         // The first read is the one a person waits for, so the run says
         // how long it took, the way the reader thread says it of a re-read.
@@ -118,7 +118,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
         let reader = reader::Reader::new(source.reader());
         Self {
             source,
-            posters: RefCell::new(posters),
+            store: RefCell::new(store),
             home,
             stack: Vec::new(),
             reader,
@@ -350,7 +350,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
     }
 }
 
-impl<S: Source, P: Posters> Screen for Browser<S, P> {
+impl<S: Source, A: Art> Screen for Browser<S, A> {
     // Nothing on the screen emits a message; a remote's presses
     // arrive as keys, and the type says so.
     type Message = Infallible;
@@ -417,7 +417,7 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         changed
     }
 
-    // A poster that landed changes the frame and not the rows, so a
+    // Art that landed changes the frame and not the rows, so a
     // delivery redraws what is already read and only a changed source
     // re-reads the screen. A home page the reader answered lands here too,
     // and it is a frame to draw.
@@ -428,7 +428,7 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         // the film, which is already spent.
         self.clock = at;
         let folded = self.drain_bus();
-        let delivered = self.posters.get_mut().delivered();
+        let delivered = self.store.get_mut().delivered();
         let landed = self.landed_home();
         if !self.source.changed() {
             return folded || delivered || landed;
@@ -440,7 +440,7 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         true
     }
 
-    // The source, the poster store, the home page's reader, and the bus
+    // The source, the art store, the home page's reader, and the bus
     // deliver on threads of their own, so all four take the handle that
     // wakes the loop.
     fn wake_by(&mut self, wake: Waker) {
@@ -449,15 +449,15 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
             bus.wake_on_delivery(wake.clone());
         }
         self.reader.wake_by(wake.clone());
-        self.posters.get_mut().wake_by(wake);
+        self.store.get_mut().wake_by(wake);
     }
 
     fn surface_due(&mut self) -> bool {
         std::mem::take(&mut self.surface_due)
     }
 
-    fn poster_counts(&self) -> PosterCounts {
-        self.posters.borrow().counts()
+    fn art_counts(&self) -> ArtCounts {
+        self.store.borrow().counts()
     }
 
     // The size of the source's search index, for the stats line. A
@@ -490,7 +490,7 @@ impl<S: Source, P: Posters> Screen for Browser<S, P> {
         };
 
         let screen = self.top().view(
-            &self.posters,
+            &self.store,
             self.loading.map(|state| state.curtain(self.clock)),
             !self.on_strip,
         );

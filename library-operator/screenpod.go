@@ -4,11 +4,11 @@ package main
 // Player, in the Player's namespace and owned by it, so deleting the Player
 // tears it down. It holds the media browser and a Corrosion agent of its own.
 //
-// The agent's state is a claim of the screen's own, sized by the
-// namespace Catalog, so a screen that restarts syncs a delta rather than
-// pulling the whole catalog. A screen in a namespace with no single Catalog
-// has no size to read, so its agent keeps an emptyDir and rebuilds from its
-// peers on every start.
+// The agent's state and the browser's scaled art are claims of the
+// screen's own, sized by the namespace Catalog, so a screen that restarts
+// syncs a delta and draws the wall from the art it already holds. A
+// screen in a namespace with no single Catalog has no sizes to read, so
+// both are emptyDirs and it rebuilds them on every start.
 //
 // The browser reads the catalog from the agent's file and the update
 // stream from its loopback API, and it draws poster art from every Library's
@@ -44,15 +44,6 @@ const playerLabelKey = "library.liken.sh/player"
 // directory per Library under this root. The browser reads a title's poster
 // from the mount its library root names.
 const librariesMountPath = "/libraries"
-
-// The browser keeps scaled posters on the node's local disk. The extra
-// 128 MiB above the disk cache's 512 MiB cap gives atomic writes room for
-// temporary files before their rename.
-const (
-	posterCacheVolumeName = "poster-cache"
-	posterCacheMountPath  = "/var/cache/media-browser"
-	posterCacheSizeLimit  = "640Mi"
-)
 
 // The pod-local name of the display claim. The pod holds
 // media-operator's ResourceClaim under this name, and the browser container's
@@ -167,15 +158,13 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 			},
 		})
 	}
-	// The agent's state is the screen's own claim, which the pass
-	// creates before this pod. A namespace with no single Catalog states no
-	// size, so the agent takes an emptyDir and pays a full sync per start.
+	// The rows and the art are claims of the screen's own, which the
+	// pass creates before this pod. A namespace with no single Catalog
+	// states no size, so both are emptyDirs, and on every start the agent
+	// pays a full sync and the browser scales every piece of art again.
 	volumes = append(volumes,
 		screenCatalogVolume(player, catalog),
-		Volume{
-			Name:     posterCacheVolumeName,
-			EmptyDir: &EmptyDirVolumeSource{SizeLimit: posterCacheSizeLimit},
-		},
+		screenArtVolume(player, catalog),
 	)
 
 	return &Pod{
@@ -203,7 +192,7 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 				catalogSidecar(corrosionImage),
 			},
 			Containers: []Container{
-				browserSidecar(player, shown, browserImage, topicBase, timeZone),
+				browserSidecar(player, shown, catalog, browserImage, topicBase, timeZone),
 			},
 			Volumes: volumes,
 			// The display claim media-operator stood for this Player.
@@ -216,28 +205,18 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 	}
 }
 
-// The volume the catalog agent's state is on: the screen's own claim
-// where the namespace holds one Catalog, and an emptyDir where it does not.
-func screenCatalogVolume(player *Player, catalog *NamespaceCatalog) Volume {
-	if catalog == nil {
-		return Volume{Name: catalogVolumeName, EmptyDir: &EmptyDirVolumeSource{}}
-	}
-	return Volume{Name: catalogVolumeName, PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{
-		ClaimName: screenClaimName(player.Metadata.Name),
-	}}
-}
-
 // BrowserSidecar builds the container that draws the wall. It learns
 // the catalog, the update stream, and every library root from its arguments
 // alone, because it holds no API credential to look one up with. Each library
 // claim is mounted read-only, so the browser cannot write to a media volume
 // whatever it does.
-func browserSidecar(player *Player, libraries []Library, image, topicBase, timeZone string) Container {
+func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatalog, image, topicBase, timeZone string) Container {
 	args := []string{
 		"--catalog", path.Join(catalogStatePath, catalogStateFile),
 		"--updates", defaultCatalogAPI,
-		"--cache-dir", posterCacheMountPath,
+		"--cache-dir", artCacheMountPath,
 	}
+	args = append(args, artCacheArgs(catalog)...)
 	// The browser reads the agent's database file straight off the
 	// shared volume, so the catalog volume is mounted here as well as in
 	// the agent. Without this mount the path --catalog names does not
@@ -247,7 +226,7 @@ func browserSidecar(player *Player, libraries []Library, image, topicBase, timeZ
 	// file beside the database, and that file must be writable.
 	mounts := []VolumeMount{
 		{Name: catalogVolumeName, MountPath: catalogStatePath},
-		{Name: posterCacheVolumeName, MountPath: posterCacheMountPath},
+		{Name: artCacheVolumeName, MountPath: artCacheMountPath},
 	}
 	for index := range libraries {
 		library := &libraries[index]
@@ -354,14 +333,14 @@ func remoteTopics(remotes []PlayerIdleRemote) []EnvVar {
 }
 
 // ReconcileScreens brings one namespace's screen pods into line. A
-// Player that names this operator as its idle controller gets a claim and a
+// Player that names this operator as its idle controller gets its claims and a
 // pod, and a Player that names another, or none, loses the pod that stands
 // for it.
 //
 // The operator sends two other deletes here. media-operator deletes
 // the pod itself when the claim under it must be replaced, and the next pass
 // creates it again. A screen the scheduler has refused for longer than the
-// grace loses its pod and its catalog claim, which is the recovery in
+// grace loses its pod and both of its claims, which is the recovery in
 // screenclaim.go.
 //
 // A failure on one Player is reported and the pass carries on, because
@@ -412,8 +391,8 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, catal
 		// The claim stands before the pod, because a pod that named a
 		// claim nothing had created would sit Pending until the next pass.
 		if catalog != nil {
-			if err := o.standScreenClaim(ctx, player, catalog); err != nil {
-				fmt.Fprintf(os.Stderr, "standing the catalog claim of the screen of %s/%s: %v\n",
+			if err := o.standScreenClaims(ctx, player, catalog); err != nil {
+				fmt.Fprintf(os.Stderr, "standing the claims of the screen of %s/%s: %v\n",
 					namespace, name, err)
 				continue
 			}

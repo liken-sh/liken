@@ -66,7 +66,16 @@ The settings every screen pod in the namespace takes.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specscreens--storageclassname"></span>`storageClassName` | string | no | The StorageClass each screen's catalog volume binds to. Omitted, the cluster's default binds it, and a node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display. The size is spec.storage.size, because a screen holds the same rows the durable catalog holds. |
+| <span id="specscreens--storageclassname"></span>`storageClassName` | string | no | The StorageClass both of a screen's claims bind to. Omitted, the cluster's default binds them. A node-local class such as local-path is the right one, because a screen pod is already pinned to the machine that holds its display. |
+| <span id="specscreens--artcache"></span>`artCache` | [object](#specscreensartcache) | no | The volume each screen's browser keeps its scaled art on: posters, backdrops, episode stills, logos, and headshots. A screen that restarts draws the wall from art it already scaled. |
+
+#### spec.screens.artCache
+
+The volume each screen's browser keeps its scaled art on: posters, backdrops, episode stills, logos, and headshots. A screen that restarts draws the wall from art it already scaled.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specscreensartcache--size"></span>`size` | string | no | The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change reaches new screens and not standing ones, because a bound claim's spec is immutable; delete a standing screen's claim and the next pass creates it at the new size. Default: `2Gi`. |
 
 ## status
 
@@ -76,18 +85,19 @@ The cluster the Catalog stands, written only by the library operator.
 | --- | --- | --- | --- |
 | <span id="status--members"></span>`members` | []string | no | The pods that are members of the namespace's catalog cluster: the catalog pod, the pods of the Jobs that are running, and the screen pods. |
 | <span id="status--storagesize"></span>`storageSize` | string | no | The storage size the agents were given. |
-| <span id="status--screens"></span>`screens` | [\[\]object](#statusscreens) | no | One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on an emptyDir and names no claim. |
+| <span id="status--screens"></span>`screens` | [\[\]object](#statusscreens) | no | One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the claim its art cache is on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on emptyDirs and names neither claim. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form; Ready is True when the catalog pod runs with every container ready, and False with the reason PodPending, PodFailed, or ManyCatalogs. |
 
 ### status.screens[]
 
-One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on an emptyDir and names no claim.
+One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the claim its art cache is on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on emptyDirs and names neither claim.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusscreens--player"></span>`player` | string | no | The Player the screen draws for. |
 | <span id="statusscreens--claim"></span>`claim` | string | no | The claim the screen's catalog agent runs on, or empty for a screen on an emptyDir. |
-| <span id="statusscreens--node"></span>`node` | string | no | The node the screen pod runs on, which is the node its claim is bound to. |
+| <span id="statusscreens--artclaim"></span>`artClaim` | string | no | The claim the screen's art cache is on, or empty for a screen on an emptyDir. |
+| <span id="statusscreens--node"></span>`node` | string | no | The node the screen pod runs on, which is the node both of its claims are bound to. |
 | <span id="statusscreens--phase"></span>`phase` | string | no | The screen pod's phase, as the kubelet reports it. |
 
 ### status.conditions[]

@@ -14,9 +14,9 @@ use iced_winit::core::{Element, Length, Rectangle, Theme, mouse};
 
 use super::Step;
 use super::slots::Slots;
+use crate::art::Art;
 use crate::catalog::{Query, Source};
 use crate::focus;
-use crate::posters::Posters;
 use crate::views::{area, band, card, clip_marked, wall};
 
 // The rail module: which walls draw one, what its bars say, and how it
@@ -256,14 +256,14 @@ impl Wall {
     /// A search wall showing its grid draws a third layer over the band,
     /// because a layer draws every fill before every text and the band
     /// paints its own ground.
-    pub fn view<'a, P: Posters>(
+    pub fn view<'a, A: Art>(
         &'a self,
-        posters: &'a RefCell<P>,
+        store: &'a RefCell<A>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let grid = canvas(Program {
             wall: self,
-            posters,
+            store,
             held,
         })
         .width(Length::Fill)
@@ -287,14 +287,14 @@ impl Wall {
 }
 
 // The wall's drawing under the band: the head and the grid, on one frame.
-struct Program<'a, P> {
+struct Program<'a, A> {
     wall: &'a Wall,
-    posters: &'a RefCell<P>,
+    store: &'a RefCell<A>,
     // Whether the wall holds focus, or the browser's strip over it does.
     held: bool,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
     type State = ();
 
     fn draw(
@@ -312,7 +312,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
         let region = rail::beside(whole, &self.wall.bars);
         self.wall.slots.draw_at(
             &mut frame,
-            &mut *self.posters.borrow_mut(),
+            &mut *self.store.borrow_mut(),
             region,
             self.wall.standing(),
             self.wall.marks(self.held),

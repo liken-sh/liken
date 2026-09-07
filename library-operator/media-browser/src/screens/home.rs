@@ -24,10 +24,10 @@ pub use self::page::{Page, read};
 use self::rows::{GENRE, LIBRARY, rows};
 pub use self::rows::{Last, Row, Strip};
 use super::{Step, slots};
+use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
 use crate::focus;
-use crate::posters::Posters;
 use crate::views::{self, area, band, strip};
 
 // The band's heading on the home page is the word "Home" and not the
@@ -244,21 +244,18 @@ impl Home {
     /// so the banner's scrim needs the backdrop on a layer of its own, and
     /// the band needs a layer of its own so a row that scrolled up under
     /// it never shows through.
-    pub fn view<'a, P: Posters>(
+    pub fn view<'a, A: Art>(
         &'a self,
-        posters: &'a RefCell<P>,
+        store: &'a RefCell<A>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
-        let ground = canvas(Ground {
-            home: self,
-            posters,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into();
+        let ground = canvas(Ground { home: self, store })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
         let front = canvas(Program {
             home: self,
-            posters,
+            store,
             held,
         })
         .width(Length::Fill)
@@ -284,12 +281,12 @@ impl Home {
 
 // The under layer: the banner's backdrop alone, clipped under the
 // band.
-struct Ground<'a, P> {
+struct Ground<'a, A> {
     home: &'a Home,
-    posters: &'a RefCell<P>,
+    store: &'a RefCell<A>,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, A> {
     type State = ();
 
     fn draw(
@@ -304,7 +301,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, P> 
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let (layout, offset, clip) = home.placed(bounds);
         frame.with_clip(clip, |frame| {
-            let posters = &mut *self.posters.borrow_mut();
+            let store = &mut *self.store.borrow_mut();
             for (index, block) in home.blocks.iter().enumerate() {
                 let Block::Banner(banner) = block else {
                     continue;
@@ -316,13 +313,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, P> 
                 else {
                     continue;
                 };
-                views::banner::backdrop(
-                    frame,
-                    posters,
-                    &title.item.library,
-                    &title.backdrop,
-                    region,
-                );
+                views::banner::backdrop(frame, store, &title.item.library, &title.backdrop, region);
             }
         });
         vec![frame.into_geometry()]
@@ -330,14 +321,14 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, P> 
 }
 
 // The middle layer: the rows, on one frame.
-struct Program<'a, P> {
+struct Program<'a, A> {
     home: &'a Home,
-    posters: &'a RefCell<P>,
+    store: &'a RefCell<A>,
     // Whether the page holds focus, or the browser's strip over it does.
     held: bool,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
     type State = ();
 
     fn draw(
@@ -352,7 +343,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let (layout, offset, clip) = home.placed(bounds);
         frame.with_clip(clip, |frame| {
-            let posters = &mut *self.posters.borrow_mut();
+            let store = &mut *self.store.borrow_mut();
             for (index, block) in home.blocks.iter().enumerate() {
                 let Some(region) = layout.region(home, index, offset, bounds.width, bounds.height)
                 else {
@@ -369,7 +360,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                         };
                         views::banner::draw(
                             frame,
-                            posters,
+                            store,
                             &views::banner::Banner {
                                 library: &title.item.library,
                                 logo: &title.logo,
@@ -387,7 +378,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Program<'_, P>
                     }
                     Block::Strip(strip) => strip::draw(
                         frame,
-                        posters,
+                        store,
                         &strip::Strip {
                             headed: false,
                             members: &strip.items,

@@ -1,5 +1,5 @@
 // The queue serves the newest request first. A fast scroll then fills
-// the posters under the focus before the ones it scrolled past.
+// the art under the focus before the art it scrolled past.
 //
 // Page-size decodes hold one lane of their own: at most one is in flight,
 // and a slot-size request passes a page-size one that waits. A page-size

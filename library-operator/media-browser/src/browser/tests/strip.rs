@@ -7,7 +7,7 @@ use super::*;
 
 // A browser on a movie's page: the films wall, then the first film,
 // which opens with focus on its buttons.
-fn on_a_movie() -> Browser<Fake, NoPosters> {
+fn on_a_movie() -> Browser<Fake, NoArt> {
     let mut browser = browser(3);
     browser.source.people = true;
     browser.key("enter");
@@ -69,14 +69,14 @@ fn up_from_the_first_row_of_a_persons_works_reaches_the_strip() {
 
 // A browser on a franchise's page, which the home page's franchises
 // strip opens.
-fn on_a_franchise() -> Browser<Fake, NoPosters> {
+fn on_a_franchise() -> Browser<Fake, NoArt> {
     let mut browser = Browser::new(
         Fake {
             movies: 3,
             recent: true,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     );
     for _ in 0..5 {
         browser.key("down");

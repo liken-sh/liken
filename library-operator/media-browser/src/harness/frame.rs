@@ -316,7 +316,7 @@ impl<S: Screen> Ready<S> {
             return;
         }
         self.finished = true;
-        self.stats.poster_counts(self.screen.poster_counts());
+        self.stats.art_counts(self.screen.art_counts());
         self.stats.index_size(self.screen.index_size());
         if let Some(path) = &self.stats_path {
             self.stats.write(path);

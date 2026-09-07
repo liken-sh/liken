@@ -6,11 +6,11 @@
 // and never pushes one itself.
 
 use super::Browser;
+use crate::art::Art;
 use crate::catalog::Source;
-use crate::posters::Posters;
 use crate::screens::{self, Step, loading};
 
-impl<S: Source, P: Posters> Browser<S, P> {
+impl<S: Source, A: Art> Browser<S, A> {
     pub(super) fn top(&self) -> &screens::Screen {
         self.stack.last().unwrap_or(&self.home)
     }
@@ -23,7 +23,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
             return;
         };
         top.reread(&mut self.source);
-        top.volume(&*self.posters.borrow());
+        top.volume(&*self.store.borrow());
     }
 
     // Do what the screen that took the press asked for. Only the browser
@@ -55,7 +55,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
     // which the screen itself cannot reach: only the browser holds the
     // store that resolves a library's root.
     pub(super) fn opened(&mut self, mut screen: screens::Screen) {
-        screen.volume(&*self.posters.borrow());
+        screen.volume(&*self.store.borrow());
         self.stack.push(screen);
         self.on_strip = false;
     }
@@ -69,7 +69,7 @@ impl<S: Source, P: Posters> Browser<S, P> {
             return;
         };
         let (width, height) = self.page;
-        let _ = self.posters.get_mut().poster(&library, &art, width, height);
+        let _ = self.store.get_mut().covered(&library, &art, width, height);
     }
 
     // Back pops one descent and re-reads the screen it uncovers,

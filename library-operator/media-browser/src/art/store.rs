@@ -12,23 +12,23 @@ use super::decode::decode_art;
 use super::disk::{DiskCache, Result as DiskResult};
 use super::key::Key;
 use super::queue::RequestQueue;
-use super::{Art, Fit};
+use super::{Fit, Image};
 use crate::harness::Waker;
 
 // The pixel buffer is shared. A hit on every frame clones a pointer,
 // not the pixels.
 #[derive(Clone)]
-pub struct Poster {
+pub struct Scaled {
     pub width: u32,
     pub height: u32,
     pub rgba: Arc<[u8]>,
     // The handles over these pixels, built on the first ask and held with
     // the cache entry. The renderer keys its uploads by handle id, so a
     // frame that draws the same handles draws uploads it already holds.
-    pub art: Arc<OnceLock<Art>>,
+    pub art: Arc<OnceLock<Image>>,
 }
 
-impl Poster {
+impl Scaled {
     pub(crate) fn new(width: u32, height: u32, rgba: Arc<[u8]>) -> Self {
         Self {
             width,
@@ -43,7 +43,7 @@ impl Poster {
 /// source. A memory hit changes neither count. A failed source read still
 /// counts because it performed the source I/O.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PosterCounts {
+pub struct ArtCounts {
     pub from_cache: u64,
     pub from_source: u64,
 }
@@ -60,21 +60,21 @@ struct Shared {
     // alike, and the mark stands until a reader takes it, so a decode
     // that landed between two frames is never missed.
     delivered: bool,
-    counts: PosterCounts,
+    counts: ArtCounts,
     stop: bool,
 }
 
-pub struct ArtStore {
+pub struct Store {
     roots: Arc<HashMap<String, PathBuf>>,
     shared: Arc<(Mutex<Shared>, Condvar)>,
     workers: Vec<JoinHandle<()>>,
 }
 
-impl ArtStore {
+impl Store {
     // The pool caps at four workers, so decode work leaves cores for
     // the compositor and the rest of the machine.
     pub fn new(roots: HashMap<String, PathBuf>, budget: usize, waker: Waker) -> Self {
-        Self::initialize(roots, budget, waker, worker_count(), None)
+        Self::initialize(roots, budget, waker, worker_count(), None, None)
     }
 
     pub fn with_cache_dir(
@@ -82,8 +82,16 @@ impl ArtStore {
         budget: usize,
         waker: Waker,
         cache_dir: Option<PathBuf>,
+        cache_budget: Option<usize>,
     ) -> Self {
-        Self::initialize(roots, budget, waker, worker_count(), cache_dir)
+        Self::initialize(
+            roots,
+            budget,
+            waker,
+            worker_count(),
+            cache_dir,
+            cache_budget,
+        )
     }
 
     /// The root of one library's volume, or nothing where the store
@@ -98,7 +106,7 @@ impl ArtStore {
         waker: Waker,
         workers: usize,
     ) -> Self {
-        Self::initialize(roots, budget, waker, workers, None)
+        Self::initialize(roots, budget, waker, workers, None, None)
     }
 
     fn initialize(
@@ -107,15 +115,24 @@ impl ArtStore {
         waker: Waker,
         workers: usize,
         cache_dir: Option<PathBuf>,
+        cache_budget: Option<usize>,
     ) -> Self {
         let roots = Arc::new(roots);
-        let disk = cache_dir.map(DiskCache::new).map(Arc::new);
+        // A run under the operator states the bytes the disk cache keeps
+        // under, because the operator sized a claim for it. Every other
+        // run leaves it unstated and the cache holds its own default.
+        let disk = cache_dir
+            .map(|dir| match cache_budget {
+                Some(budget) => DiskCache::with_budget(dir, budget),
+                None => DiskCache::new(dir),
+            })
+            .map(Arc::new);
         let shared = Arc::new((
             Mutex::new(Shared {
                 cache: Cache::new(budget),
                 queue: RequestQueue::default(),
                 delivered: false,
-                counts: PosterCounts::default(),
+                counts: ArtCounts::default(),
                 stop: false,
             }),
             Condvar::new(),
@@ -131,15 +148,15 @@ impl ArtStore {
     }
 
     // An item with no art, and a library the store holds no root for,
-    // can never produce a poster, so neither reaches the queue.
-    pub fn poster(
+    // can never produce art, so neither reaches the queue.
+    pub fn scaled(
         &mut self,
         library: &str,
         art: &str,
         width: u32,
         height: u32,
         fit: Fit,
-    ) -> Option<Poster> {
+    ) -> Option<Scaled> {
         if art.is_empty() || width == 0 || height == 0 {
             return None;
         }
@@ -157,7 +174,7 @@ impl ArtStore {
         let (lock, signal) = &*self.shared;
         let mut shared = lock.lock().expect("the store mutex is never poisoned");
         match shared.cache.get(&key) {
-            Some(Decoded::Ready(poster)) => return Some(poster.clone()),
+            Some(Decoded::Ready(scaled)) => return Some(scaled.clone()),
             Some(Decoded::Failed) => return None,
             None => {}
         }
@@ -175,7 +192,7 @@ impl ArtStore {
         std::mem::take(&mut shared.delivered)
     }
 
-    pub fn counts(&self) -> PosterCounts {
+    pub fn counts(&self) -> ArtCounts {
         let (lock, _) = &*self.shared;
         lock.lock()
             .expect("the store mutex is never poisoned")
@@ -185,7 +202,7 @@ impl ArtStore {
 
 // Dropping the store stops and joins the workers, so no decode outlives
 // the screen that asked for it.
-impl Drop for ArtStore {
+impl Drop for Store {
     fn drop(&mut self) {
         let (lock, signal) = &*self.shared;
         lock.lock().expect("the store mutex is never poisoned").stop = true;
@@ -236,8 +253,8 @@ fn spawn_worker(
                 None => DiskResult::Source(decode_art(&path, key.width, key.height, key.fit)),
             };
             let (value, from_cache) = match result {
-                DiskResult::Cache(poster) => (Decoded::Ready(poster), true),
-                DiskResult::Source(Some(poster)) => (Decoded::Ready(poster), false),
+                DiskResult::Cache(scaled) => (Decoded::Ready(scaled), true),
+                DiskResult::Source(Some(scaled)) => (Decoded::Ready(scaled), false),
                 DiskResult::Source(None) => (Decoded::Failed, false),
             };
             {

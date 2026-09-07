@@ -1,21 +1,21 @@
 use super::*;
 
 #[test]
-fn the_browser_reports_its_poster_stores_counts() {
+fn the_browser_reports_its_art_stores_counts() {
     let browser = Browser::new(
         Fake::default(),
-        NoPosters {
-            counts: PosterCounts {
+        NoArt {
+            counts: ArtCounts {
                 from_cache: 7,
                 from_source: 11,
             },
-            ..NoPosters::default()
+            ..NoArt::default()
         },
     );
 
     assert_eq!(
-        browser.poster_counts(),
-        PosterCounts {
+        browser.art_counts(),
+        ArtCounts {
             from_cache: 7,
             from_source: 11,
         }

@@ -2,6 +2,7 @@
 // before the sidecar source lands. Every name here is synthesized; nothing
 // resembles a real library.
 
+use crate::art::{Art, Image};
 use crate::catalog::franchise;
 use crate::catalog::recency::{self, Candidate};
 use crate::catalog::{
@@ -10,7 +11,6 @@ use crate::catalog::{
     SeriesDetails, Slot, Sort, Source, TILES, Title, library_name, pool,
 };
 use crate::harness::Waker;
-use crate::posters::{Art, Posters};
 
 // The invented people of the sample catalog.
 pub mod people;
@@ -526,13 +526,13 @@ fn trailing(id: &str) -> i64 {
         .unwrap_or(0)
 }
 
-/// A poster store with nothing in it, so every slot draws the
+/// An art store with nothing in it, so every slot draws the
 /// placeholder until the real store lands.
 #[derive(Debug, Default)]
 pub struct NoArt;
 
-impl Posters for NoArt {
-    fn poster(&mut self, _library: &str, _art: &str, _width: u32, _height: u32) -> Option<Art> {
+impl Art for NoArt {
+    fn covered(&mut self, _library: &str, _art: &str, _width: u32, _height: u32) -> Option<Image> {
         None
     }
 }

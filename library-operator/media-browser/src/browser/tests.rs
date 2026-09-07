@@ -4,6 +4,7 @@
 // This file holds what every group of tests under it builds from: the
 // catalog they read, the store they draw from, and the bus they fold.
 
+mod art_counts;
 mod banner;
 mod clock;
 mod home;
@@ -12,7 +13,6 @@ mod loading;
 mod moments;
 mod paging;
 mod plays;
-mod poster_counts;
 mod prefetch;
 mod rail;
 mod reader;
@@ -25,6 +25,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
+use crate::art::{ArtCounts, Image};
 use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
@@ -32,7 +33,6 @@ use crate::catalog::{
     GenreEntry, GenreSort, InSeries, LibraryEntry, Membership, MovieDetails, MovieSet, Order,
     Person, PlayItem, Presentation, Query, SeriesDetails, Slot, Title,
 };
-use crate::posters::{Art, PosterCounts};
 use crate::screens::home::Home;
 use crate::screens::movie::Focus;
 use crate::screens::series::Focus as SeriesFocus;
@@ -191,7 +191,7 @@ impl Fake {
 impl Source for Fake {
     // Two franchises, so the home page's franchises strip draws one with art
     // and one with none. The one with no art draws as the tile of words every
-    // slot with no poster draws.
+    // slot with no art draws.
     fn franchises(&mut self) -> Vec<FranchiseEntry> {
         self.calls.push("franchises");
         vec![
@@ -551,16 +551,16 @@ impl Source for Fake {
 }
 
 #[derive(Default)]
-struct NoPosters {
+struct NoArt {
     delivers: bool,
-    counts: PosterCounts,
+    counts: ArtCounts,
     // Every ask the views and the prefetch made: the library, the art,
     // and the size they asked at.
     asked: Vec<(String, String, u32, u32)>,
 }
 
-impl Posters for NoPosters {
-    fn poster(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Art> {
+impl Art for NoArt {
+    fn covered(&mut self, library: &str, art: &str, width: u32, height: u32) -> Option<Image> {
         self.asked
             .push((library.to_string(), art.to_string(), width, height));
         None
@@ -570,23 +570,23 @@ impl Posters for NoPosters {
         std::mem::take(&mut self.delivers)
     }
 
-    fn counts(&self) -> PosterCounts {
+    fn counts(&self) -> ArtCounts {
         self.counts
     }
 }
 
-fn browser(movies: usize) -> Browser<Fake, NoPosters> {
+fn browser(movies: usize) -> Browser<Fake, NoArt> {
     Browser::new(
         Fake {
             movies,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     )
 }
 
 // The home page the browser is showing.
-fn showing_home(browser: &Browser<Fake, NoPosters>) -> &Home {
+fn showing_home(browser: &Browser<Fake, NoArt>) -> &Home {
     match browser.top() {
         screens::Screen::Home(home) => home,
         _ => panic!("the browser is not showing the home page"),
@@ -595,7 +595,7 @@ fn showing_home(browser: &Browser<Fake, NoPosters>) -> &Home {
 
 // The franchise page the browser is showing, so a test reads the screen a
 // press on the franchises strip opened.
-fn showing_franchise(browser: &Browser<Fake, NoPosters>) -> &crate::screens::franchise::Franchise {
+fn showing_franchise(browser: &Browser<Fake, NoArt>) -> &crate::screens::franchise::Franchise {
     match browser.top() {
         screens::Screen::Franchise(page) => page,
         _ => panic!("the browser is not showing a franchise page"),
@@ -603,7 +603,7 @@ fn showing_franchise(browser: &Browser<Fake, NoPosters>) -> &crate::screens::fra
 }
 
 // The wall the browser is showing, so a test reads the screen it is on.
-fn showing_wall(browser: &Browser<Fake, NoPosters>) -> &Wall {
+fn showing_wall(browser: &Browser<Fake, NoArt>) -> &Wall {
     match browser.top() {
         screens::Screen::Wall(wall) => wall,
         _ => panic!("the browser is not showing a wall"),
@@ -612,14 +612,14 @@ fn showing_wall(browser: &Browser<Fake, NoPosters>) -> &Wall {
 
 // One strip of the home page by its row index, which a test reads a
 // strip's focus through.
-fn strip_at(browser: &Browser<Fake, NoPosters>, index: usize) -> &crate::screens::home::Strip {
+fn strip_at(browser: &Browser<Fake, NoArt>, index: usize) -> &crate::screens::home::Strip {
     showing_home(browser).blocks[index]
         .strip()
         .expect("the row is a strip")
 }
 
 // The movie page the browser is showing.
-fn showing_page(browser: &Browser<Fake, NoPosters>) -> &screens::movie::Movie {
+fn showing_page(browser: &Browser<Fake, NoArt>) -> &screens::movie::Movie {
     match browser.top() {
         screens::Screen::Movie(page) => page,
         _ => panic!("the browser is not showing a page"),
@@ -627,7 +627,7 @@ fn showing_page(browser: &Browser<Fake, NoPosters>) -> &screens::movie::Movie {
 }
 
 // The person's page the browser is showing.
-fn showing_person(browser: &Browser<Fake, NoPosters>) -> &screens::person::Person {
+fn showing_person(browser: &Browser<Fake, NoArt>) -> &screens::person::Person {
     match browser.top() {
         screens::Screen::Person(page) => page,
         _ => panic!("the browser is not showing a person's page"),
@@ -635,7 +635,7 @@ fn showing_person(browser: &Browser<Fake, NoPosters>) -> &screens::person::Perso
 }
 
 // The series page the browser is showing.
-fn showing_series(browser: &Browser<Fake, NoPosters>) -> &screens::series::Series {
+fn showing_series(browser: &Browser<Fake, NoArt>) -> &screens::series::Series {
     match browser.top() {
         screens::Screen::Series(page) => page,
         _ => panic!("the browser is not showing a series page"),
@@ -643,7 +643,7 @@ fn showing_series(browser: &Browser<Fake, NoPosters>) -> &screens::series::Serie
 }
 // A browser on a wall with sets, after the frame the first press asked
 // for, so a test starts at the beginning of a rest.
-fn resting(movies: usize) -> Browser<Fake, NoPosters> {
+fn resting(movies: usize) -> Browser<Fake, NoArt> {
     let mut browser = browser(movies);
     browser.source.sets = true;
     browser.tick(0.0);
@@ -684,7 +684,7 @@ impl Bus for FakeBus {
     }
 }
 
-fn on_bus(movies: usize, moments: Vec<Moment>) -> (Browser<Fake, NoPosters>, FakeBus) {
+fn on_bus(movies: usize, moments: Vec<Moment>) -> (Browser<Fake, NoArt>, FakeBus) {
     let bus = FakeBus::default();
     *bus.inbound.lock().expect("no test panics with the lock") = moments;
     (
@@ -717,7 +717,7 @@ fn one_item() -> PlayItem {
 }
 
 // The browser on a bus, with the play list its source answers.
-fn playing(items: Vec<PlayItem>) -> (Browser<Fake, NoPosters>, FakeBus) {
+fn playing(items: Vec<PlayItem>) -> (Browser<Fake, NoArt>, FakeBus) {
     let (mut browser, bus) = on_bus(3, Vec::new());
     browser.source.items = items;
     (browser, bus)

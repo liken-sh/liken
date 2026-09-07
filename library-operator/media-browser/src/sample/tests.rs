@@ -353,7 +353,7 @@ fn a_set_the_sample_never_invented_is_empty() {
 #[test]
 fn no_art_answers_none() {
     assert_eq!(
-        NoArt.poster("sample/features", "posters/x.jpg", 10, 15),
+        NoArt.covered("sample/features", "posters/x.jpg", 10, 15),
         None
     );
 }

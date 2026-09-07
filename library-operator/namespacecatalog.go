@@ -40,14 +40,22 @@ type CatalogSpec struct {
 	Screens CatalogScreens `json:"screens,omitzero"`
 }
 
-// The screens' half of the Catalog. StorageClassName classes each
-// screen's catalog volume, and it is a field of its own because the
-// namespace's one durable copy and a screen's replica may want different
-// classes. An empty value makes the operator omit the class, so the cluster's
-// default StorageClass binds the claim. The size is spec.storage's, because a
-// screen holds the same rows the durable catalog holds.
+// The screens' half of the Catalog. StorageClassName classes both of a
+// screen's claims, and it is a field of its own because the namespace's
+// one durable copy and a screen's replica may want different classes.
+// An empty value makes the operator omit the class, so the cluster's
+// default StorageClass binds the claims. The catalog claim takes
+// spec.storage.size and the art claim takes artCache.size, because the
+// rows and the art have different sizes and different lives.
 type CatalogScreens struct {
-	StorageClassName string `json:"storageClassName,omitempty"`
+	StorageClassName string          `json:"storageClassName,omitempty"`
+	ArtCache         CatalogArtCache `json:"artCache,omitzero"`
+}
+
+// The volume a screen's browser keeps its scaled art on, which it
+// draws the wall from after a restart.
+type CatalogArtCache struct {
+	Size string `json:"size,omitempty"`
 }
 
 // Size is the one namespace-wide catalog volume size, because each agent
@@ -74,13 +82,15 @@ type CatalogStatus struct {
 }
 
 // One screen pod of the namespace: the Player it draws for, the claim
-// its catalog agent runs on, the node it runs on, and its phase. A screen in
-// a namespace this operator provisions no claim for names none.
+// its catalog agent runs on, the claim its art cache is on, the node it
+// runs on, and its phase. A screen in a namespace this operator
+// provisions no claims for names neither.
 type CatalogScreen struct {
-	Player string `json:"player,omitempty"`
-	Claim  string `json:"claim,omitempty"`
-	Node   string `json:"node,omitempty"`
-	Phase  string `json:"phase,omitempty"`
+	Player   string `json:"player,omitempty"`
+	Claim    string `json:"claim,omitempty"`
+	ArtClaim string `json:"artClaim,omitempty"`
+	Node     string `json:"node,omitempty"`
+	Phase    string `json:"phase,omitempty"`
 }
 
 // The default catalog volume size. A catalog of movies and series is
@@ -95,6 +105,19 @@ func catalogStorageSize(catalog *NamespaceCatalog) string {
 		return catalog.Spec.Storage.Size
 	}
 	return defaultCatalogSize
+}
+
+// The default art cache size. Scaled art is larger than the rows it
+// belongs to, so the default is above the catalog's.
+const defaultArtCacheSize = "2Gi"
+
+// artCacheSize is the size a screen's art claim takes: the Catalog's
+// own value, or the default when it names none.
+func artCacheSize(catalog *NamespaceCatalog) string {
+	if catalog.Spec.Screens.ArtCache.Size != "" {
+		return catalog.Spec.Screens.ArtCache.Size
+	}
+	return defaultArtCacheSize
 }
 
 // The condition this operator publishes on a Catalog, and the reasons

@@ -6,13 +6,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::*;
+use crate::art::Image;
 use crate::catalog::Person as Entry;
 use crate::catalog::{
     Answer, Credits, Episode, FileFacts, Franchise, GenreEntry, LibraryEntry, Membership,
     MovieDetails, MovieSet, PlayItem, Selection, SeriesDetails, Slot,
 };
 use crate::harness::Waker;
-use crate::posters::Art;
 use crate::screens::{Screen, Step};
 use crate::views::Card;
 
@@ -339,8 +339,8 @@ struct Volume {
     roots: HashMap<String, PathBuf>,
 }
 
-impl Posters for Volume {
-    fn poster(&mut self, _library: &str, _art: &str, _width: u32, _height: u32) -> Option<Art> {
+impl Art for Volume {
+    fn covered(&mut self, _library: &str, _art: &str, _width: u32, _height: u32) -> Option<Image> {
         None
     }
 

@@ -21,8 +21,8 @@ use iced_winit::core::{Color, Point, Rectangle, Theme, Vector, mouse};
 use liken_iced::mark;
 
 use super::{Tone, area, extent, label, paint};
+use crate::art::{Art, Image};
 use crate::look;
-use crate::posters::{Art, Posters};
 
 // The box the centred logo draws in, as a share of the frame. The logo
 // keeps its own ratio inside it, so a wide logo takes the width and a
@@ -78,7 +78,7 @@ pub trait Head {
 }
 
 /// The art layer of the loading state over one page.
-pub struct Layer<'a, P> {
+pub struct Layer<'a, A> {
     /// The library the art paths resolve against.
     pub library: &'a str,
     /// The path of the backdrop file, empty where the item has none.
@@ -89,28 +89,28 @@ pub struct Layer<'a, P> {
     /// has no logo.
     pub name: &'a str,
     /// The store the backdrop and the logo come from.
-    pub posters: &'a RefCell<P>,
+    pub store: &'a RefCell<A>,
     /// The page under this layer, which says where its logo sits now.
     pub head: &'a dyn Head,
     /// What this frame draws.
     pub curtain: Curtain,
 }
 
-impl<P> Clone for Layer<'_, P> {
+impl<A> Clone for Layer<'_, A> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<P> Copy for Layer<'_, P> {}
+impl<A> Copy for Layer<'_, A> {}
 
 // The layer over the art: the pool of shade, the mark, the logo on its way
 // to the centre, and the name where the item has no logo. The pool and the
 // mark are meshes and the logo is an image, so the logo draws over both,
 // and the mark sits under the logo where the two never overlap.
-pub struct Front<'a, P>(pub Layer<'a, P>);
+pub struct Front<'a, A>(pub Layer<'a, A>);
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Layer<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Layer<'_, A> {
     type State = ();
 
     fn draw(
@@ -126,14 +126,14 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Layer<'_, P> {
         if away <= 0.0 {
             return vec![frame.into_geometry()];
         }
-        let posters = &mut *self.posters.borrow_mut();
+        let store = &mut *self.store.borrow_mut();
 
         // The art again, at the state's own opacity. It covers the page
         // and it clears the shade in the one move, because the shade is a
         // layer under this one.
         let backdrop = (!self.art.is_empty())
             .then(|| {
-                posters.poster(
+                store.covered(
                     self.library,
                     self.art,
                     bounds.width as u32,
@@ -157,7 +157,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Layer<'_, P> {
     }
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Front<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
     type State = ();
 
     fn draw(
@@ -172,7 +172,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Front<'_, P> {
         let layer = self.0;
         let away = layer.away();
 
-        let posters = &mut *layer.posters.borrow_mut();
+        let store = &mut *layer.store.borrow_mut();
         pool(&mut frame, bounds, away);
 
         // The mark swells at the state's own energy, so it is at full
@@ -180,7 +180,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Front<'_, P> {
         let box_ = mark::bounds();
         let span = bounds.width * SPAN;
         let height = span * box_.height / box_.width;
-        let logo = layer.logo(posters, bounds);
+        let logo = layer.logo(store, bounds);
         let foot = logo
             .as_ref()
             .map(|(_, at)| at.y + at.height)
@@ -217,7 +217,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Front<'_, P> {
     }
 }
 
-impl<P: Posters> Layer<'_, P> {
+impl<A: Art> Layer<'_, A> {
     // How far the page has gone, from 0 whole to 1 fully away.
     fn away(&self) -> f32 {
         self.curtain.away.clamp(0.0, 1.0)
@@ -236,12 +236,12 @@ impl<P: Posters> Layer<'_, P> {
     // of the width as a large one. The store fits a decode inside the box
     // it is asked for and never scales one up, and this state is one
     // image over a still frame, so the scale costs nothing to draw.
-    fn logo(&self, posters: &mut P, bounds: Rectangle) -> Option<(Art, Rectangle)> {
+    fn logo(&self, store: &mut A, bounds: Rectangle) -> Option<(Image, Rectangle)> {
         if self.logo.is_empty() {
             return None;
         }
         let page = self.head.head(bounds);
-        let image = posters.fitted(
+        let image = store.fitted(
             self.library,
             self.logo,
             (bounds.width * LOGO_WIDTH) as u32,

@@ -19,10 +19,10 @@ use iced_winit::core::{Element, Rectangle, Theme};
 use super::franchise::strips::{self, Move, Place, Strips};
 use super::movie::franchise_press;
 use super::{Screen, Step, facts, foot, person, stripes};
+use crate::art::Art;
 use crate::catalog::draw::Date;
 use crate::catalog::{Selection, SeriesDetails, Source};
 use crate::focus::{self, Run};
-use crate::posters::Posters;
 use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::{Card, layers, rail, ratings};
 
@@ -411,20 +411,20 @@ impl Series {
     /// The view: the backdrop behind the header, the scrim over it, the
     /// header and the wall over both, and the loading state's curtain
     /// over the page while that state runs.
-    pub fn view<'a, P: Posters>(
+    pub fn view<'a, A: Art>(
         &'a self,
-        posters: &'a RefCell<P>,
+        store: &'a RefCell<A>,
         curtain: Option<Curtain>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
             art: &self.backdrop,
-            posters,
+            store,
             ground: layers::Ground::Below(layout::head()),
             front: page::Page {
                 series: self,
-                posters,
+                store,
                 lifted: curtain.is_some(),
                 held,
             },
@@ -433,7 +433,7 @@ impl Series {
                 art: &self.backdrop,
                 logo: &self.logo,
                 name: &self.title,
-                posters,
+                store,
                 head: self,
                 curtain,
             }),

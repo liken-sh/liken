@@ -17,8 +17,8 @@ use iced_widget::canvas;
 use iced_winit::core::{Color, Rectangle};
 
 use super::{Card, Tone, area, artwork, card, mark, scroll, text};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 
 /// The wall's column count, fixed so focus movement is a function of
 /// the index alone and never of the window size.
@@ -175,11 +175,11 @@ pub struct Grid<'a, T> {
 pub const HEAD: f32 = 20.0;
 
 /// Draw one wall. The store is asked for the slots this frame draws and
-/// for one row past them, so a scroll's next posters decode before they
-/// appear.
-pub fn draw<T: Card, P: Posters>(
+/// for one row past them, so a scroll's next art decodes before it
+/// appears.
+pub fn draw<T: Card, A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     grid: &Grid<'_, T>,
 ) {
     let cells = lined(grid.region.width, grid.ratio, grid.columns, grid.lines);
@@ -200,7 +200,7 @@ pub fn draw<T: Card, P: Posters>(
         );
         artwork(
             frame,
-            posters,
+            store,
             library_of(item, grid.library),
             item.art(),
             slot,
@@ -229,12 +229,12 @@ pub fn draw<T: Card, P: Posters>(
     }
 
     // One row past the viewport is asked for and not drawn, so a
-    // scroll's next posters decode before they appear.
+    // scroll's next art decodes before it appears.
     for index in range.end..(range.end + grid.columns).min(grid.items.len()) {
         let item = &grid.items[index];
         let ahead = slot(&cells, index, grid.offset, grid.columns);
         if !item.art().is_empty() {
-            let _ = posters.poster(
+            let _ = store.covered(
                 library_of(item, grid.library),
                 item.art(),
                 ahead.width as u32,

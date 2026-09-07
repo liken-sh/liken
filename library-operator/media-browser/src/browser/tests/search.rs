@@ -7,12 +7,12 @@ use crate::sample::Catalog;
 
 // The browser over the invented catalog, which answers a search from an
 // index of its own, so a press here reads real hits.
-fn sampled() -> Browser<Catalog, NoPosters> {
-    Browser::new(Catalog, NoPosters::default())
+fn sampled() -> Browser<Catalog, NoArt> {
+    Browser::new(Catalog, NoArt::default())
 }
 
 // The search wall the browser is showing.
-fn searching(browser: &Browser<Catalog, NoPosters>) -> &Wall {
+fn searching(browser: &Browser<Catalog, NoArt>) -> &Wall {
     match browser.top() {
         screens::Screen::Wall(wall) => wall,
         _ => panic!("the browser is not showing a wall"),
@@ -20,7 +20,7 @@ fn searching(browser: &Browser<Catalog, NoPosters>) -> &Wall {
 }
 
 // What the person has typed into the wall's field.
-fn typed(browser: &Browser<Catalog, NoPosters>) -> &str {
+fn typed(browser: &Browser<Catalog, NoArt>) -> &str {
     searching(browser)
         .search
         .as_ref()
@@ -30,7 +30,7 @@ fn typed(browser: &Browser<Catalog, NoPosters>) -> &str {
 }
 
 // Whether the grid is shown on the wall the browser is showing.
-fn grid(browser: &Browser<Catalog, NoPosters>) -> bool {
+fn grid(browser: &Browser<Catalog, NoArt>) -> bool {
     searching(browser)
         .search
         .as_ref()
@@ -41,7 +41,7 @@ fn grid(browser: &Browser<Catalog, NoPosters>) -> bool {
 
 // The browser with focus on the strip, which an up press past the top
 // row of the home page reaches.
-fn on_the_strip(browser: &mut Browser<Catalog, NoPosters>) {
+fn on_the_strip(browser: &mut Browser<Catalog, NoArt>) {
     for _ in 0..=blocks(browser) {
         browser.key("up");
     }
@@ -49,7 +49,7 @@ fn on_the_strip(browser: &mut Browser<Catalog, NoPosters>) {
 }
 
 // How many rows the home page holds.
-fn blocks(browser: &Browser<Catalog, NoPosters>) -> usize {
+fn blocks(browser: &Browser<Catalog, NoArt>) -> usize {
     match browser.top() {
         screens::Screen::Home(home) => home.blocks.len(),
         _ => panic!("the browser is not showing the home page"),
@@ -280,7 +280,7 @@ fn a_select_on_the_strip_over_a_wall_pushes_an_empty_search_wall_with_the_grid()
 
 // Put the browser on a search wall with hits, the grid shown, and a
 // slot other than the first focused, so a test sees focus move.
-fn typing_over_hits(browser: &mut Browser<Catalog, NoPosters>) {
+fn typing_over_hits(browser: &mut Browser<Catalog, NoArt>) {
     browser.key("s");
     browser.key("right");
     browser.key("up");

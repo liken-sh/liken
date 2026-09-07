@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use super::super::Fit;
 use super::super::key::Key;
-use super::super::store::Poster;
+use super::super::store::Scaled;
 
 const MAGIC: &[u8; 8] = b"LPSTRV1\0";
 const FIXED_HEADER: usize = 89;
@@ -49,7 +49,7 @@ enum Encoding {
 }
 
 pub(super) enum ReadOutcome {
-    Hit(Poster),
+    Hit(Scaled),
     MetadataMiss,
     Invalid,
 }
@@ -131,21 +131,21 @@ pub(super) fn parse(bytes: &[u8], key: &Key, source: Option<SourceStamp>) -> Rea
     if fixed[57..89] != checksum {
         return ReadOutcome::Invalid;
     }
-    let Some(poster) = decode(payload, encoding, width, height, key) else {
+    let Some(scaled) = decode(payload, encoding, width, height, key) else {
         return ReadOutcome::Invalid;
     };
-    ReadOutcome::Hit(poster)
+    ReadOutcome::Hit(scaled)
 }
 
-pub(super) fn encode(key: &Key, stamp: SourceStamp, poster: &Poster) -> Option<Vec<u8>> {
-    if !valid_dimensions(key, poster.width, poster.height) {
+pub(super) fn encode(key: &Key, stamp: SourceStamp, scaled: &Scaled) -> Option<Vec<u8>> {
+    if !valid_dimensions(key, scaled.width, scaled.height) {
         return None;
     }
-    let expected_rgba = rgba_len(poster.width, poster.height)?;
-    if poster.rgba.len() != expected_rgba {
+    let expected_rgba = rgba_len(scaled.width, scaled.height)?;
+    if scaled.rgba.len() != expected_rgba {
         return None;
     }
-    let (encoding, payload) = encode_pixels(poster)?;
+    let (encoding, payload) = encode_pixels(scaled)?;
     if u64::try_from(payload.len()).ok()? > max_payload(key)? {
         return None;
     }
@@ -160,8 +160,8 @@ pub(super) fn encode(key: &Key, stamp: SourceStamp, poster: &Poster) -> Option<V
     bytes.extend_from_slice(&u64::try_from(payload.len()).ok()?.to_be_bytes());
     bytes.extend_from_slice(&stamp.size.to_be_bytes());
     bytes.extend_from_slice(&stamp.modified_ns.to_be_bytes());
-    bytes.extend_from_slice(&poster.width.to_be_bytes());
-    bytes.extend_from_slice(&poster.height.to_be_bytes());
+    bytes.extend_from_slice(&scaled.width.to_be_bytes());
+    bytes.extend_from_slice(&scaled.height.to_be_bytes());
     bytes.push(encoding as u8);
     bytes.extend_from_slice(&u32::try_from(key_bytes.len()).ok()?.to_be_bytes());
     let checksum = entry_checksum(&bytes, &key_bytes, &payload);
@@ -179,26 +179,26 @@ fn entry_checksum(prefix: &[u8], key: &[u8], payload: &[u8]) -> [u8; 32] {
     digest.finalize().into()
 }
 
-fn encode_pixels(poster: &Poster) -> Option<(Encoding, Vec<u8>)> {
+fn encode_pixels(scaled: &Scaled) -> Option<(Encoding, Vec<u8>)> {
     let mut payload = Vec::new();
-    if poster.rgba.chunks_exact(4).any(|pixel| pixel[3] < u8::MAX) {
+    if scaled.rgba.chunks_exact(4).any(|pixel| pixel[3] < u8::MAX) {
         PngEncoder::new(&mut payload)
             .write_image(
-                &poster.rgba,
-                poster.width,
-                poster.height,
+                &scaled.rgba,
+                scaled.width,
+                scaled.height,
                 ExtendedColorType::Rgba8,
             )
             .ok()?;
         return Some((Encoding::Png, payload));
     }
-    let rgb: Vec<u8> = poster
+    let rgb: Vec<u8> = scaled
         .rgba
         .chunks_exact(4)
         .flat_map(|pixel| pixel[..3].iter().copied())
         .collect();
     JpegEncoder::new_with_quality(&mut payload, 90)
-        .write_image(&rgb, poster.width, poster.height, ExtendedColorType::Rgb8)
+        .write_image(&rgb, scaled.width, scaled.height, ExtendedColorType::Rgb8)
         .ok()?;
     Some((Encoding::Jpeg, payload))
 }
@@ -209,7 +209,7 @@ fn decode(
     width: u32,
     height: u32,
     key: &Key,
-) -> Option<Poster> {
+) -> Option<Scaled> {
     let mut reader = ImageReader::new(Cursor::new(payload));
     reader.set_format(match encoding {
         Encoding::Jpeg => ImageFormat::Jpeg,
@@ -228,7 +228,7 @@ fn decode(
     if rgba.len() != rgba_len(width, height)? {
         return None;
     }
-    Some(Poster::new(width, height, Arc::from(rgba)))
+    Some(Scaled::new(width, height, Arc::from(rgba)))
 }
 
 fn valid_dimensions(key: &Key, width: u32, height: u32) -> bool {

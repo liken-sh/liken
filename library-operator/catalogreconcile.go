@@ -99,9 +99,9 @@ func catalogObjectOwner(catalog *NamespaceCatalog) OwnerReference {
 	}
 }
 
-// StandingCatalogStatus reports the cluster the Catalog stands: every
+// standingCatalogStatus reports the cluster the Catalog stands: every
 // member agent pod of the namespace, the storage size the agents were given,
-// and one entry per screen pod with the claim its agent runs on.
+// and one entry per screen pod with the two claims it runs on.
 //
 // Ready follows the catalog pod alone, because that
 // pod is what holds the durable catalog and reports it; a Job's pod
@@ -141,10 +141,11 @@ func catalogScreens(namespace string, pods []Pod) []CatalogScreen {
 			continue
 		}
 		screens = append(screens, CatalogScreen{
-			Player: pod.Metadata.Labels[playerLabelKey],
-			Claim:  screenClaimOf(pod),
-			Node:   pod.Spec.NodeName,
-			Phase:  pod.Status.Phase,
+			Player:   pod.Metadata.Labels[playerLabelKey],
+			Claim:    screenClaimOf(pod, catalogVolumeName),
+			ArtClaim: screenClaimOf(pod, artCacheVolumeName),
+			Node:     pod.Spec.NodeName,
+			Phase:    pod.Status.Phase,
 		})
 	}
 	sort.Slice(screens, func(one, other int) bool {
@@ -153,12 +154,12 @@ func catalogScreens(namespace string, pods []Pod) []CatalogScreen {
 	return screens
 }
 
-// The claim a screen pod's catalog agent runs on, read off the pod
-// itself, because the pod is what states which volume the agent has. A pod
-// on an emptyDir names none.
-func screenClaimOf(pod *Pod) string {
+// The claim behind one of a screen pod's volumes, read off the pod
+// itself, because the pod is what states which volume it has. A volume
+// that is an emptyDir names no claim.
+func screenClaimOf(pod *Pod, volumeName string) string {
 	for _, volume := range pod.Spec.Volumes {
-		if volume.Name == catalogVolumeName && volume.PersistentVolumeClaim != nil {
+		if volume.Name == volumeName && volume.PersistentVolumeClaim != nil {
 			return volume.PersistentVolumeClaim.ClaimName
 		}
 	}

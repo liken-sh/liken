@@ -32,8 +32,11 @@ the browser hold those numbers down:
   arenas on a one-gigabyte box.
 
 The browser keeps 96 decoded posters and three decoded backdrops in
-memory, sized from the window. Scaled posters go to a disk cache of
-512 MiB, on an `emptyDir` capped at `640Mi`.
+memory, sized from the window. Every piece of art it scales goes to a
+disk cache on the screen's art claim, sized by
+`spec.screens.artCache.size` with 2Gi as the default. A screen in a
+namespace with no single `Catalog` keeps that cache on an `emptyDir`
+capped at `640Mi`, with a 512 MiB budget inside it.
 
 ## Give the screens a claim
 
@@ -92,5 +95,6 @@ flushes its database on the way out.
   every title for that fact, and the enricher fills it before the
   next.
 
-The agent's `512Mi` limit and the poster cache's `640Mi` cap are
-constants of the operator's build, not fields.
+The agent's `512Mi` limit and the `emptyDir` cache's `640Mi` cap are
+constants of the operator's build, not fields. The art claim's size
+is a field, `spec.screens.artCache.size`.

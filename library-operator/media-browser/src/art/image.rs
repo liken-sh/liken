@@ -16,7 +16,7 @@ const SYNC_UPLOAD_BYTES: usize = 2 * 1024 * 1024;
 /// One decoded image, ready to draw: its pixel size, and the bands the
 /// canvas draws it as. A small image is one band.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Art {
+pub struct Image {
     width: u32,
     height: u32,
     bands: Vec<Band>,
@@ -29,7 +29,7 @@ struct Band {
     handle: Handle,
 }
 
-impl Art {
+impl Image {
     /// Cut a row-major RGBA buffer into bands under the upload cap. A band
     /// is a contiguous run of rows, so each handle is a view of the one
     /// buffer and no pixel is copied.
@@ -99,11 +99,11 @@ mod tests {
         Bytes::from_owner(pixels)
     }
 
-    fn drawn(art: &Art, into: Rectangle) -> Vec<(Rectangle, Handle)> {
+    fn drawn(art: &Image, into: Rectangle) -> Vec<(Rectangle, Handle)> {
         art.bands(into).collect()
     }
 
-    fn area(art: &Art) -> Rectangle {
+    fn area(art: &Image) -> Rectangle {
         let (width, height) = art.size();
         Rectangle {
             x: 40.0,
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn a_small_image_draws_as_one_band_over_the_whole_rectangle() {
-        let art = Art::new(300, 450, numbered(300, 450));
+        let art = Image::new(300, 450, numbered(300, 450));
         let bands = drawn(&art, area(&art));
         assert_eq!(bands.len(), 1);
         assert_eq!(bands[0].0, area(&art));
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn a_frame_sized_image_draws_as_bands_under_the_upload_cap() {
-        let art = Art::new(1920, 1080, numbered(1920, 1080));
+        let art = Image::new(1920, 1080, numbered(1920, 1080));
         let bands = drawn(&art, area(&art));
         assert!(bands.len() > 1);
         for (_, handle) in &bands {
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn the_bands_tile_the_target_rectangle_with_no_seam() {
-        let art = Art::new(1920, 1080, numbered(1920, 1080));
+        let art = Image::new(1920, 1080, numbered(1920, 1080));
         let into = Rectangle {
             x: 0.0,
             y: 0.0,
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn every_band_holds_the_rows_it_draws() {
-        let art = Art::new(1920, 1080, numbered(1920, 1080));
+        let art = Image::new(1920, 1080, numbered(1920, 1080));
         let mut top = 0u32;
         for (_, handle) in drawn(&art, area(&art)) {
             let Handle::Rgba {
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn an_empty_size_draws_nothing() {
-        let art = Art::new(0, 0, Bytes::from_owner(Vec::new()));
+        let art = Image::new(0, 0, Bytes::from_owner(Vec::new()));
         assert_eq!(art.size(), (0, 0));
         assert_eq!(drawn(&art, area(&art)).len(), 0);
     }

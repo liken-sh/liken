@@ -10,8 +10,8 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
 use super::{Card, Tone, area, artwork, label, mark, scroll, text, wall};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 
 /// The height of a headshot. It is smaller than a strip's poster, so
 /// the three stripes of a page take less than the episode wall above
@@ -90,9 +90,9 @@ pub struct Stripe<'a, T> {
 
 /// Draw the stripe. Only the headshots inside the region become
 /// geometry, so a cast of any length costs one row of slots.
-pub fn draw<T: Card, P: Posters>(
+pub fn draw<T: Card, A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     stripe: &Stripe<'_, T>,
 ) {
     frame.fill_text(label(
@@ -114,7 +114,7 @@ pub fn draw<T: Card, P: Posters>(
         let slot = slot(stripe.region, count, stripe.focus, index);
         artwork(
             frame,
-            posters,
+            store,
             stripe.library,
             person.art(),
             slot,

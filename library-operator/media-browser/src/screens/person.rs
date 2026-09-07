@@ -14,8 +14,8 @@ use iced_winit::core::{Element, Length, Theme};
 
 use super::slots::Slots;
 use super::{Step, facts};
+use crate::art::Art;
 use crate::catalog::{self, Query, Source};
-use crate::posters::Posters;
 use crate::views::wall;
 
 // The file every contributor entry holds their headshot in, and
@@ -101,12 +101,12 @@ impl Person {
     /// Read the biography off the library's volume. It is a file
     /// beside the entry and not a column of the catalog, so it arrives
     /// through the store that resolves every other path of that volume.
-    pub fn read_biography<P: Posters>(&mut self, posters: &P) {
+    pub fn read_biography<A: Art>(&mut self, store: &A) {
         self.biography = String::new();
         if self.biography_path.is_empty() {
             return;
         }
-        let Some(file) = posters.file(&self.biography_library, &self.biography_path) else {
+        let Some(file) = store.file(&self.biography_library, &self.biography_path) else {
             return;
         };
         let Ok(text) = std::fs::read_to_string(file) else {
@@ -132,14 +132,14 @@ impl Person {
     }
 
     /// The view: the head and the wall of works, on one canvas.
-    pub fn view<'a, P: Posters>(
+    pub fn view<'a, A: Art>(
         &'a self,
-        posters: &'a RefCell<P>,
+        store: &'a RefCell<A>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         iced_widget::canvas(page::Page {
             person: self,
-            posters,
+            store,
             held,
         })
         .width(Length::Fill)

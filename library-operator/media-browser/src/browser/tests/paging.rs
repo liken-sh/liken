@@ -255,11 +255,11 @@ fn pump_rereads_what_is_shown() {
 }
 
 #[test]
-fn a_delivered_poster_draws_a_frame_and_reads_no_rows() {
+fn delivered_art_draws_a_frame_and_reads_no_rows() {
     let mut browser = browser(3);
     browser.key("enter");
     let reads = browser.source.calls.len();
-    browser.posters.get_mut().delivers = true;
+    browser.store.get_mut().delivers = true;
     assert!(browser.pump(1.0));
     assert_eq!(browser.source.calls.len(), reads);
     assert!(!browser.pump(2.0));

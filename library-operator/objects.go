@@ -382,7 +382,7 @@ type VolumeMount struct {
 // read-only, and its catalog agent's own claim beside them. That agent holds
 // a copy of the namespace's catalog, and the claim is what makes a restart a
 // delta sync. A screen in a namespace with no single Catalog carries an
-// unbounded emptyDir there. Its poster cache uses a separate bounded emptyDir.
+// unbounded emptyDir there. Its art cache uses a separate bounded emptyDir.
 type Volume struct {
 	Name                  string                             `json:"name"`
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`

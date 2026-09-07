@@ -1,4 +1,4 @@
-// The poster counts cross the browser and harness into the statistics file.
+// The art counts cross the browser and harness into the statistics file.
 
 use super::*;
 
@@ -41,23 +41,23 @@ fn cached_catalog_run(
 
 #[test]
 fn catalog_runs_report_source_decodes_then_disk_cache_hits() {
-    let fixture_dir = workspace("poster-counts-fixture");
+    let fixture_dir = workspace("art-counts-fixture");
     let (database, volume) = fixture(&fixture_dir);
     let cache = fixture_dir.join("cache");
 
-    let first_dir = workspace("poster-counts-first");
+    let first_dir = workspace("art-counts-first");
     let (_first, first_counts) = cached_catalog_run(&first_dir, &database, &volume, &cache);
     assert!(
-        first_counts["posters_from_source"].as_u64().unwrap_or(0) > 0,
+        first_counts["art_from_source"].as_u64().unwrap_or(0) > 0,
         "{first_counts}"
     );
-    assert_eq!(first_counts["posters_from_cache"], serde_json::json!(0));
+    assert_eq!(first_counts["art_from_cache"], serde_json::json!(0));
 
-    let second_dir = workspace("poster-counts-second");
+    let second_dir = workspace("art-counts-second");
     let (_second, second_counts) = cached_catalog_run(&second_dir, &database, &volume, &cache);
     assert!(
-        second_counts["posters_from_cache"].as_u64().unwrap_or(0) > 0,
+        second_counts["art_from_cache"].as_u64().unwrap_or(0) > 0,
         "{second_counts}"
     );
-    assert_eq!(second_counts["posters_from_source"], serde_json::json!(0));
+    assert_eq!(second_counts["art_from_source"], serde_json::json!(0));
 }

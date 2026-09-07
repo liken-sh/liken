@@ -13,8 +13,8 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::super::franchise::strips::Place;
 use super::{Focus, Movie};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 use crate::views::stack::{self, Stack};
 use crate::views::{area, buttons, card, header, people, ratings, strip, text};
 
@@ -67,11 +67,11 @@ pub fn head(movie: &Movie, bounds: Rectangle) -> Rectangle {
 }
 
 /// The page's front layer as one canvas.
-pub struct Page<'a, P> {
+pub struct Page<'a, A> {
     /// The movie the page is about.
     pub movie: &'a Movie,
     /// The store the logo and the strip's posters come from.
-    pub posters: &'a RefCell<P>,
+    pub store: &'a RefCell<A>,
     /// Whether the loading state has lifted the logo off the page, so the
     /// head leaves its box empty.
     pub lifted: bool,
@@ -79,7 +79,7 @@ pub struct Page<'a, P> {
     pub held: bool,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
     type State = ();
 
     fn draw(
@@ -92,7 +92,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let movie = self.movie;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let posters = &mut *self.posters.borrow_mut();
+        let store = &mut *self.store.borrow_mut();
 
         let column = bounds.width * COLUMN;
         let blocks = Blocks::of(
@@ -105,7 +105,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
 
         header::title(
             &mut frame,
-            posters,
+            store,
             &header::Title {
                 library: &movie.library,
                 logo: &movie.logo,
@@ -169,7 +169,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         if let (Some(set), Some(block)) = (&movie.set, blocks.strip) {
             strip::draw(
                 &mut frame,
-                posters,
+                store,
                 &strip::Strip {
                     members: &set.members,
                     current: Some(set.current),
@@ -201,7 +201,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         {
             strip::draw(
                 &mut frame,
-                posters,
+                store,
                 &strip::Strip {
                     members: &band.members,
                     current: band.current,
@@ -238,7 +238,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         {
             people::draw(
                 &mut frame,
-                posters,
+                store,
                 &people::Stripe {
                     people: &band.faces,
                     focus: match focus {

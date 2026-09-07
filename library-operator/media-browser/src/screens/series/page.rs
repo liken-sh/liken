@@ -17,8 +17,8 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 use super::super::franchise::strips::Place;
 use super::layout::{self, Layout};
 use super::{COLUMNS, Focus, Series, seasons};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 use crate::views::stack::Stack;
 use crate::views::{area, card, divider, header, people, rail, ratings, strip, text, wall};
 
@@ -31,11 +31,11 @@ const MARGIN: f32 = 120.0;
 const COLUMN: f32 = 0.42;
 
 /// The page's front layer as one canvas.
-pub struct Page<'a, P> {
+pub struct Page<'a, A> {
     /// The series the page is about.
     pub series: &'a Series,
     /// The store the logo and the stills come from.
-    pub posters: &'a RefCell<P>,
+    pub store: &'a RefCell<A>,
     /// Whether the loading state has lifted the logo off the page, so the
     /// head leaves its box empty.
     pub lifted: bool,
@@ -43,7 +43,7 @@ pub struct Page<'a, P> {
     pub held: bool,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
     type State = ();
 
     fn draw(
@@ -59,9 +59,9 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         // browser's strip does, so one mark draws on the glass.
         let focus = self.held.then_some(series.focus);
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let posters = &mut *self.posters.borrow_mut();
+        let store = &mut *self.store.borrow_mut();
 
-        self.header(&mut frame, posters, layout::header(bounds));
+        self.header(&mut frame, store, layout::header(bounds));
 
         // The rail takes the right edge of the region, and the wall keeps
         // the rest.
@@ -95,7 +95,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                 let run = season.run;
                 wall::draw(
                     frame,
-                    posters,
+                    store,
                     &wall::Grid {
                         items: &series.stills[run.first..run.first + run.count],
                         focus: match focus {
@@ -140,7 +140,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             {
                 strip::draw(
                     frame,
-                    posters,
+                    store,
                     &strip::Strip {
                         members: &band.members,
                         current: band.current,
@@ -179,7 +179,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
             {
                 people::draw(
                     frame,
-                    posters,
+                    store,
                     &people::Stripe {
                         people: &band.faces,
                         focus: match focus {
@@ -248,14 +248,14 @@ pub fn head(bounds: Rectangle) -> Rectangle {
     )
 }
 
-impl<P: Posters> Page<'_, P> {
+impl<A: Art> Page<'_, A> {
     // The header's blocks, from the logo down to the plot. Every block is
     // cut to its own lines, so a long title, a long line, or a long plot
     // never pushes the header past its fixed height. The focused
     // episode's line and plot stand in the place the series' plot takes on
     // a series whose episodes have not landed, and while a stripe holds
     // focus.
-    fn header(&self, frame: &mut canvas::Frame<Renderer>, posters: &mut P, region: Rectangle) {
+    fn header(&self, frame: &mut canvas::Frame<Renderer>, store: &mut A, region: Rectangle) {
         let series = self.series;
         let column = region.width * COLUMN;
         let mut stack = Stack::new(Point::new(MARGIN, region.y + layout::TOP), layout::GAP);
@@ -264,7 +264,7 @@ impl<P: Posters> Page<'_, P> {
         frame.with_clip(title, |frame| {
             header::title(
                 frame,
-                posters,
+                store,
                 &header::Title {
                     library: &series.library,
                     logo: &series.logo,

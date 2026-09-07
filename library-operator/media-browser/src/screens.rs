@@ -26,8 +26,8 @@ use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Theme};
 
 use self::series::seasons_of;
+use crate::art::Art;
 use crate::catalog::{InSeries, Query, Selection, Slot, Source};
-use crate::posters::Posters;
 use crate::views::curtain::Curtain;
 use crate::views::field::TextField;
 use crate::views::{
@@ -171,9 +171,9 @@ impl Screen {
     /// Read the files this screen draws that live on a library
     /// volume and not in the catalog. Only a person's page holds one, and
     /// every other screen reads nothing.
-    pub fn volume<P: Posters>(&mut self, posters: &P) {
+    pub fn volume<A: Art>(&mut self, store: &A) {
         if let Self::Person(screen) = self {
-            screen.read_biography(posters);
+            screen.read_biography(store);
         }
     }
 
@@ -183,19 +183,19 @@ impl Screen {
     /// `held` is whether the screen holds focus. The browser's strip
     /// takes focus off the screen under it, and a screen that drew its
     /// own mark then would put two marks on the glass.
-    pub fn view<'a, P: Posters>(
+    pub fn view<'a, A: Art>(
         &'a self,
-        posters: &'a RefCell<P>,
+        store: &'a RefCell<A>,
         curtain: Option<Curtain>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
-            Self::Home(screen) => screen.view(posters, held),
-            Self::Wall(screen) => screen.view(posters, held),
-            Self::Movie(screen) => screen.view(posters, curtain, held),
-            Self::Series(screen) => screen.view(posters, curtain, held),
-            Self::Person(screen) => screen.view(posters, held),
-            Self::Franchise(screen) => screen.view(posters, held),
+            Self::Home(screen) => screen.view(store, held),
+            Self::Wall(screen) => screen.view(store, held),
+            Self::Movie(screen) => screen.view(store, curtain, held),
+            Self::Series(screen) => screen.view(store, curtain, held),
+            Self::Person(screen) => screen.view(store, held),
+            Self::Franchise(screen) => screen.view(store, held),
         }
     }
 }

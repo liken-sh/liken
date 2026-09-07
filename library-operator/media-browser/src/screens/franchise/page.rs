@@ -16,9 +16,9 @@ use super::card::{self, GROUND_TONE};
 use super::metro;
 use super::wall::{self, Cell};
 use super::{Focus, Franchise};
+use crate::art::Art;
 use crate::catalog::franchise::Standing;
 use crate::look;
-use crate::posters::Posters;
 use crate::views::{Tone, area, artwork, band, extent, mark, rail, rounded, text, wall as still};
 
 // The margin at both sides of the page.
@@ -54,16 +54,16 @@ pub fn region(bounds: Rectangle) -> Rectangle {
 }
 
 /// The page's one canvas.
-pub struct Page<'a, P> {
+pub struct Page<'a, A> {
     /// The franchise the page is about.
     pub franchise: &'a Franchise,
     /// The store the entries' art comes from.
-    pub posters: &'a RefCell<P>,
+    pub store: &'a RefCell<A>,
     /// Whether the page holds focus, or the browser's strip over it does.
     pub held: bool,
 }
 
-impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
+impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
     type State = ();
 
     fn draw(
@@ -81,7 +81,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
         // wall under it.
         let focus = self.held.then_some(page.focus);
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let posters = &mut *self.posters.borrow_mut();
+        let store = &mut *self.store.borrow_mut();
 
         let region = region(bounds);
         let rows = &page.rows;
@@ -140,7 +140,7 @@ impl<P: Posters> canvas::Program<Infallible, Theme, Renderer> for Page<'_, P> {
                         continue;
                     }
                     match row.cell.held() {
-                        true => entry(frame, posters, &row.cell, bounds, cells, art),
+                        true => entry(frame, store, &row.cell, bounds, cells, art),
                         false => thin(frame, &row.cell, bounds),
                     }
                     if focus == Some(Focus::Row(index)) {
@@ -226,29 +226,21 @@ fn under(caption: Rectangle, region: Rectangle) -> Rectangle {
 // art. The ground draws first, then the art, then the words; the images
 // of one layer draw in the order the canvas drew them, so the sharp art
 // lands over the ground.
-fn entry<P: Posters>(
+fn entry<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     cell: &Cell,
     bounds: Rectangle,
     clip: Rectangle,
     art: f32,
 ) {
-    ground(frame, posters, cell, bounds, clip);
+    ground(frame, store, cell, bounds, clip);
     let box_of = card::art_box(bounds, art);
     let art = match cell.wide {
         true => box_of,
         false => card::poster_box(box_of),
     };
-    artwork(
-        frame,
-        posters,
-        &cell.library,
-        &cell.art,
-        art,
-        "",
-        Tone::Full,
-    );
+    artwork(frame, store, &cell.library, &cell.art, art, "", Tone::Full);
     words(frame, cell, card::words_box(bounds, art));
 }
 
@@ -347,9 +339,9 @@ pub fn thin_words(title: &str, bounds: Rectangle) -> (Point, Point) {
 // rows' own clip, because an image carries one clip, and a card that has
 // scrolled past the top of the lane must not draw over what is above it.
 // A card with no art keeps the plain slot ground.
-fn ground<P: Posters>(
+fn ground<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     cell: &Cell,
     bounds: Rectangle,
     clip: Rectangle,
@@ -361,7 +353,7 @@ fn ground<P: Posters>(
     let (width, height) = card::ground(ratio);
     let tiny = match cell.art.is_empty() {
         true => None,
-        false => posters.poster(&cell.library, &cell.art, width, height),
+        false => store.covered(&cell.library, &cell.art, width, height),
     };
     let Some(tiny) = tiny else {
         frame.fill_rectangle(bounds.position(), extent(bounds), look::slot());

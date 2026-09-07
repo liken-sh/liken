@@ -1,14 +1,14 @@
-// The cache's bound is a byte budget over decoded buffers. When a new
-// poster lands over the budget, the least recently drawn one leaves
+// The cache's bound is a byte budget over decoded buffers. When new
+// art lands over the budget, the least recently drawn buffer leaves
 // first.
 
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use super::store::Poster;
+use super::store::Scaled;
 
 pub(crate) enum Decoded {
-    Ready(Poster),
+    Ready(Scaled),
     Failed,
 }
 
@@ -110,18 +110,18 @@ impl<K: Clone + Eq + Hash> Cache<K> {
 
 fn bytes(value: &Decoded) -> usize {
     match value {
-        Decoded::Ready(poster) => poster.rgba.len(),
+        Decoded::Ready(scaled) => scaled.rgba.len(),
         Decoded::Failed => 0,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::store::Poster;
+    use super::super::store::Scaled;
     use super::{Cache, Decoded, FAILED};
 
-    fn poster(bytes: usize) -> Decoded {
-        Decoded::Ready(Poster::new(1, 1, vec![0u8; bytes].into()))
+    fn scaled(bytes: usize) -> Decoded {
+        Decoded::Ready(Scaled::new(1, 1, vec![0u8; bytes].into()))
     }
 
     fn is_ready(entry: Option<&Decoded>) -> bool {
@@ -131,11 +131,11 @@ mod tests {
     #[test]
     fn eviction_takes_the_least_recently_used() {
         let mut cache = Cache::new(512);
-        cache.insert("a", poster(256));
-        cache.insert("b", poster(256));
+        cache.insert("a", scaled(256));
+        cache.insert("b", scaled(256));
         assert!(is_ready(cache.get(&"b")));
         assert!(is_ready(cache.get(&"a")));
-        cache.insert("c", poster(256));
+        cache.insert("c", scaled(256));
         assert!(is_ready(cache.get(&"a")));
         assert!(is_ready(cache.get(&"c")));
         assert!(cache.get(&"b").is_none());
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn failed_entries_consume_no_budget() {
         let mut cache = Cache::new(256);
-        cache.insert("a", poster(256));
+        cache.insert("a", scaled(256));
         cache.insert("bad", Decoded::Failed);
         assert!(is_ready(cache.get(&"a")));
         assert!(matches!(cache.get(&"bad"), Some(Decoded::Failed)));
@@ -167,9 +167,9 @@ mod tests {
     #[test]
     fn replacing_a_key_releases_its_old_bytes() {
         let mut cache = Cache::new(512);
-        cache.insert("a", poster(512));
-        cache.insert("a", poster(256));
-        cache.insert("b", poster(256));
+        cache.insert("a", scaled(512));
+        cache.insert("a", scaled(256));
+        cache.insert("b", scaled(256));
         assert!(is_ready(cache.get(&"a")));
         assert!(is_ready(cache.get(&"b")));
     }
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn an_entry_larger_than_the_budget_still_lands() {
         let mut cache = Cache::new(256);
-        cache.insert("a", poster(512));
+        cache.insert("a", scaled(512));
         assert!(is_ready(cache.get(&"a")));
     }
 }

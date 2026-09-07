@@ -10,7 +10,7 @@ const PRESS: f64 = 3.0;
 
 // The browser on a movie page with focus on Play, at the second before
 // the press.
-fn on_a_movie() -> (Browser<Fake, NoPosters>, FakeBus) {
+fn on_a_movie() -> (Browser<Fake, NoArt>, FakeBus) {
     let (mut browser, bus) = playing(vec![one_item()]);
     browser.key("enter");
     browser.key("enter");
@@ -19,7 +19,7 @@ fn on_a_movie() -> (Browser<Fake, NoPosters>, FakeBus) {
 }
 
 // The browser on a series page with focus on the first still.
-fn on_a_series() -> Browser<Fake, NoPosters> {
+fn on_a_series() -> Browser<Fake, NoArt> {
     let (mut browser, _bus) = playing(vec![one_item()]);
     browser.key("right");
     browser.key("enter");

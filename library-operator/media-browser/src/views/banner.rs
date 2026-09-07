@@ -11,8 +11,8 @@ use iced_winit::core::{Point, Rectangle};
 
 use super::stack::Stack;
 use super::{Tone, area, extent, header, layers, mark, paint, ratings, text};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 
 // The share of the page's height the frame takes.
 const SHARE: f32 = 0.40;
@@ -82,14 +82,14 @@ pub fn indicator(region: Rectangle, index: usize) -> Rectangle {
 /// The under layer: the backdrop over the frame, and the slot color
 /// until it lands. The backdrop is decoded at the frame's size, so a
 /// title costs one decode and never a page's.
-pub fn backdrop<P: Posters>(
+pub fn backdrop<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     library: &str,
     art: &str,
     region: Rectangle,
 ) {
-    match posters.poster(library, art, region.width as u32, region.height as u32) {
+    match store.covered(library, art, region.width as u32, region.height as u32) {
         Some(image) => paint(frame, &image, region, Tone::Full),
         None => frame.fill_rectangle(region.position(), extent(region), look::slot()),
     }
@@ -126,7 +126,7 @@ pub struct Banner<'a> {
 
 /// The over layer: the scrim, the head, the facts, the tagline, the
 /// indicators, and the mark while focused.
-pub fn draw<P: Posters>(frame: &mut canvas::Frame<Renderer>, posters: &mut P, banner: &Banner<'_>) {
+pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: &Banner<'_>) {
     let region = banner.region;
     layers::scrim(frame, region);
 
@@ -136,7 +136,7 @@ pub fn draw<P: Posters>(frame: &mut canvas::Frame<Renderer>, posters: &mut P, ba
     let taken = frame.with_clip(head, |frame| {
         header::title(
             frame,
-            posters,
+            store,
             &header::Title {
                 library: banner.library,
                 logo: banner.logo,

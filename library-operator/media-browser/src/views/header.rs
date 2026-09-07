@@ -8,8 +8,8 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
 use super::{Tone, label, paint, text};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 
 /// What a page draws at its head: the item's logo where the volume holds
 /// one, and the item's title in large text where it does not.
@@ -38,14 +38,10 @@ pub struct Title<'a> {
 
 /// Draw the head. The answer is the height it took, so the caller stacks
 /// the facts under it.
-pub fn title<P: Posters>(
-    frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
-    head: &Title<'_>,
-) -> f32 {
+pub fn title<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, head: &Title<'_>) -> f32 {
     let (logo_width, logo_height) = head.logo_box;
     if !head.logo.is_empty()
-        && let Some(image) = posters.fitted(
+        && let Some(image) = store.fitted(
             head.library,
             head.logo,
             logo_width as u32,

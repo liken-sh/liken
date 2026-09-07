@@ -12,8 +12,8 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle};
 
 use super::{Card, Tone, area, artwork, card, clock, label, mark, mosaic, text, underline, wall};
+use crate::art::Art;
 use crate::look;
-use crate::posters::Posters;
 
 /// The height of a poster in the strip.
 /// Every slot of a strip is this tall, whatever its ratio.
@@ -202,9 +202,9 @@ pub fn slot(strip_region: Rectangle, slots: &[(f32, f32)], offset: f32, index: u
 
 /// Draw the strip. Only the posters inside the region become geometry,
 /// so a set of any length costs one row of slots.
-pub fn draw<T: Card, P: Posters>(
+pub fn draw<T: Card, A: Art>(
     frame: &mut canvas::Frame<Renderer>,
-    posters: &mut P,
+    store: &mut A,
     strip: &Strip<'_, T>,
 ) {
     headed(frame, strip.region, strip.heading);
@@ -229,14 +229,14 @@ pub fn draw<T: Card, P: Posters>(
                 match member.tiles().is_empty() {
                     true => artwork(
                         frame,
-                        posters,
+                        store,
                         library_of(member, strip.library),
                         member.art(),
                         slot,
                         member.name(),
                         tone(strip, index),
                     ),
-                    false => mosaic(frame, posters, member.tiles(), slot, tone(strip, index)),
+                    false => mosaic(frame, store, member.tiles(), slot, tone(strip, index)),
                 }
                 pilled(frame, member, slot);
                 if strip.lines > 0 {
@@ -251,7 +251,7 @@ pub fn draw<T: Card, P: Posters>(
                 };
                 artwork(
                     frame,
-                    posters,
+                    store,
                     last.library,
                     last.art,
                     slot,

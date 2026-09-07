@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use super::key::Key;
-use super::store::Poster;
+use super::store::Scaled;
 
 mod format;
 mod trim;
@@ -17,15 +17,15 @@ mod trim;
 use format::{FileRead, ReadOutcome, SourceStamp};
 use trim::Index;
 
-/// The default disk cache holds 512 MiB of scaled posters.
+/// The default disk cache holds 512 MiB of scaled art.
 pub const DEFAULT_BUDGET: usize = 512 * 1024 * 1024;
 
 static WARNED: AtomicBool = AtomicBool::new(false);
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(super) enum Result {
-    Cache(Poster),
-    Source(Option<Poster>),
+    Cache(Scaled),
+    Source(Option<Scaled>),
 }
 
 struct State {
@@ -43,7 +43,7 @@ impl DiskCache {
         Self::with_budget(root, DEFAULT_BUDGET)
     }
 
-    fn with_budget(root: PathBuf, budget: usize) -> Self {
+    pub(super) fn with_budget(root: PathBuf, budget: usize) -> Self {
         match open(root, budget) {
             Ok(state) => Self { state: Some(state) },
             Err(error) => {
@@ -55,7 +55,7 @@ impl DiskCache {
 
     pub(super) fn resolve<F>(&self, key: &Key, source: &Path, mut decode: F) -> Result
     where
-        F: FnMut() -> Option<Poster>,
+        F: FnMut() -> Option<Scaled>,
     {
         let Some(state) = &self.state else {
             return Result::Source(decode());
@@ -63,20 +63,20 @@ impl DiskCache {
         let first = source_stamp(source);
         match first {
             Ok(Some(stamp)) => {
-                if let Some(poster) = state.load(key, Some(stamp)) {
-                    return Result::Cache(poster);
+                if let Some(scaled) = state.load(key, Some(stamp)) {
+                    return Result::Cache(scaled);
                 }
-                let (poster, stable) = decode_stable(stamp, &mut decode, || source_stamp(source));
-                if let (Some(stamp), Some(poster)) = (stable, poster.as_ref()) {
-                    state.store(key, stamp, poster);
+                let (scaled, stable) = decode_stable(stamp, &mut decode, || source_stamp(source));
+                if let (Some(stamp), Some(scaled)) = (stable, scaled.as_ref()) {
+                    state.store(key, stamp, scaled);
                 }
-                Result::Source(poster)
+                Result::Source(scaled)
             }
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 // A deleted source can use the last result. Every other metadata
                 // error refuses stale data because it cannot prove the identity.
-                if let Some(poster) = state.load(key, None) {
-                    return Result::Cache(poster);
+                if let Some(scaled) = state.load(key, None) {
+                    return Result::Cache(scaled);
                 }
                 Result::Source(decode())
             }
@@ -86,7 +86,7 @@ impl DiskCache {
 }
 
 impl State {
-    fn load(&self, key: &Key, source: Option<SourceStamp>) -> Option<Poster> {
+    fn load(&self, key: &Key, source: Option<SourceStamp>) -> Option<Scaled> {
         let path = trim::path(&self.version, key)?;
         let file = {
             let mut index = self
@@ -110,7 +110,7 @@ impl State {
             }
         };
         match format::parse(&file, key, source) {
-            ReadOutcome::Hit(poster) => Some(poster),
+            ReadOutcome::Hit(scaled) => Some(scaled),
             ReadOutcome::MetadataMiss => None,
             ReadOutcome::Invalid => {
                 let mut index = self
@@ -123,11 +123,11 @@ impl State {
         }
     }
 
-    fn store(&self, key: &Key, stamp: SourceStamp, poster: &Poster) {
+    fn store(&self, key: &Key, stamp: SourceStamp, scaled: &Scaled) {
         if !self.writes.load(Ordering::Acquire) {
             return;
         }
-        let Some(bytes) = format::encode(key, stamp, poster) else {
+        let Some(bytes) = format::encode(key, stamp, scaled) else {
             return;
         };
         if let Err(error) = self.publish(key, &bytes) {
@@ -146,11 +146,11 @@ impl State {
     {
         let Some(path) = trim::path(&self.version, key) else {
             self.writes.store(false, Ordering::Release);
-            return Err(std::io::Error::other("the poster cache key is too long"));
+            return Err(std::io::Error::other("the art cache key is too long"));
         };
         let Some(parent) = path.parent() else {
             self.writes.store(false, Ordering::Release);
-            return Err(std::io::Error::other("the poster cache path has no parent"));
+            return Err(std::io::Error::other("the art cache path has no parent"));
         };
         let prepared = (|| {
             fs::create_dir_all(parent)?;
@@ -185,9 +185,7 @@ impl State {
             temp.published = true;
             let metadata = path.symlink_metadata()?;
             if !metadata.file_type().is_file() {
-                return Err(std::io::Error::other(
-                    "the poster cache entry is not a file",
-                ));
+                return Err(std::io::Error::other("the art cache entry is not a file"));
             }
             index.published(path.clone(), metadata)
         })();
@@ -204,7 +202,7 @@ fn open(root: PathBuf, budget: usize) -> std::io::Result<State> {
     let file_type = version.symlink_metadata()?.file_type();
     if !file_type.is_dir() || file_type.is_symlink() {
         return Err(std::io::Error::other(
-            "the poster cache version is not a directory",
+            "the art cache version is not a directory",
         ));
     }
     let index = Index::scan(&version, budget)?;
@@ -219,7 +217,7 @@ fn validate_shard(path: &Path) -> std::io::Result<()> {
     let file_type = path.symlink_metadata()?.file_type();
     if !file_type.is_dir() || file_type.is_symlink() {
         return Err(std::io::Error::other(
-            "the poster cache shard is not a directory",
+            "the art cache shard is not a directory",
         ));
     }
     Ok(())
@@ -233,9 +231,9 @@ fn decode_stable<F, S>(
     before: SourceStamp,
     decode: &mut F,
     mut stamp: S,
-) -> (Option<Poster>, Option<SourceStamp>)
+) -> (Option<Scaled>, Option<SourceStamp>)
 where
-    F: FnMut() -> Option<Poster>,
+    F: FnMut() -> Option<Scaled>,
     S: FnMut() -> std::io::Result<Option<SourceStamp>>,
 {
     let first = decode();
@@ -261,7 +259,7 @@ fn remove_invalid(path: &Path, index: &mut Index) {
 
 fn warn_once(error: &std::io::Error) {
     if !WARNED.swap(true, Ordering::Relaxed) {
-        eprintln!("media-browser: the poster disk cache failed: {error}");
+        eprintln!("media-browser: the art disk cache failed: {error}");
     }
 }
 

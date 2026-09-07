@@ -7,26 +7,26 @@ use crate::views::ratings::{Mark, Score};
 
 // A browser whose recency strips hold an episode, a serial, and a
 // movie, each with a backdrop.
-fn with_banner() -> Browser<Fake, NoPosters> {
+fn with_banner() -> Browser<Fake, NoArt> {
     Browser::new(
         Fake {
             movies: 3,
             recent: true,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     )
 }
 
 // The banner the home page holds.
-fn banner(browser: &Browser<Fake, NoPosters>) -> &Banner {
+fn banner(browser: &Browser<Fake, NoArt>) -> &Banner {
     showing_home(browser)
         .banner()
         .expect("the home page holds a banner")
 }
 
 // The names of the banner's titles in order.
-fn names(browser: &Browser<Fake, NoPosters>) -> Vec<&str> {
+fn names(browser: &Browser<Fake, NoArt>) -> Vec<&str> {
     banner(browser)
         .titles
         .iter()
@@ -96,7 +96,7 @@ fn the_drawn_strips_feed_the_banner_before_the_recency_strips() {
             pool: true,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     );
     let names = names(&browser);
     assert_eq!(names.len(), 5);
@@ -115,7 +115,7 @@ fn a_title_with_no_backdrop_never_enters_the_banner_and_focus_skips_it() {
             bare: true,
             ..Fake::default()
         },
-        NoPosters::default(),
+        NoArt::default(),
     );
     assert!(banner(&browser).is_empty());
     assert_eq!(showing_home(&browser).focus, 1);
@@ -188,7 +188,7 @@ fn a_rest_on_the_banner_asks_for_the_titles_page_backdrop() {
 
     browser.tick(REST);
 
-    assert!(browser.posters.get_mut().asked.contains(&(
+    assert!(browser.store.get_mut().asked.contains(&(
         "screening/films".into(),
         "movies:1.backdrop.jpg".into(),
         1920,

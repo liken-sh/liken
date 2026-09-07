@@ -7,8 +7,8 @@ use image::{Rgb, RgbImage, Rgba, RgbaImage};
 use tempfile::TempDir;
 
 use super::*;
-use crate::posters::Fit;
-use crate::posters::decode::decode_art;
+use crate::art::Fit;
+use crate::art::decode::decode_art;
 
 mod publication;
 
@@ -44,8 +44,8 @@ fn entry(cache: &Path, key: &Key) -> PathBuf {
     trim::path(&cache.join("v1"), key).unwrap()
 }
 
-fn source_poster(color: [u8; 4]) -> Poster {
-    Poster::new(1, 1, Arc::from(color))
+fn source_art(color: [u8; 4]) -> Scaled {
+    Scaled::new(1, 1, Arc::from(color))
 }
 
 #[test]
@@ -85,10 +85,10 @@ fn a_source_with_a_changed_size_replaces_the_cached_generation() {
     assert_ne!(source.metadata().unwrap().len(), original.len());
     assert!(matches!(resolve(&cache, &key, &source), Result::Source(_)));
     fs::remove_file(&source).unwrap();
-    let Result::Cache(poster) = resolve(&cache, &key, &source) else {
+    let Result::Cache(scaled) = resolve(&cache, &key, &source) else {
         panic!("the replacement was cached");
     };
-    assert_eq!(poster.rgba[3], 100);
+    assert_eq!(scaled.rgba[3], 100);
 }
 
 #[test]
@@ -209,10 +209,9 @@ fn a_write_trims_the_oldest_entry_to_the_cap() {
         .set_times(FileTimes::new().set_modified(old))
         .unwrap();
     let first_size = usize::try_from(first_entry.metadata().unwrap().len()).unwrap();
-    let second_poster =
-        decode_art(&second_source, second.width, second.height, second.fit).unwrap();
+    let second_art = decode_art(&second_source, second.width, second.height, second.fit).unwrap();
     let second_stamp = source_stamp(&second_source).unwrap().unwrap();
-    let second_size = format::encode(&second, second_stamp, &second_poster)
+    let second_size = format::encode(&second, second_stamp, &second_art)
         .unwrap()
         .len();
     drop(initial);
@@ -308,7 +307,7 @@ fn a_truly_unwritable_cache_path_falls_back_to_the_source() {
     let dir = TempDir::new().unwrap();
     let source = dir.path().join("poster.jpg");
     write_rgb(&source, 48, 72, [30, 80, 140]);
-    let cache = PathBuf::from(format!("/proc/{}/poster-cache", std::process::id()));
+    let cache = PathBuf::from(format!("/proc/{}/art-cache", std::process::id()));
     assert!(matches!(
         resolve(
             &DiskCache::new(cache),
@@ -398,12 +397,12 @@ fn a_source_change_during_decode_retries_once_and_persists_the_stable_pair() {
     let mut decodes = 0;
     let mut decode = || {
         decodes += 1;
-        Some(source_poster([decodes, 0, 0, 255]))
+        Some(source_art([decodes, 0, 0, 255]))
     };
     let mut stamps = [changed, changed].into_iter();
-    let (poster, stable) = decode_stable(before, &mut decode, || Ok(stamps.next()));
+    let (scaled, stable) = decode_stable(before, &mut decode, || Ok(stamps.next()));
     assert_eq!(decodes, 2);
-    assert_eq!(poster.unwrap().rgba[0], 2);
+    assert_eq!(scaled.unwrap().rgba[0], 2);
     assert_eq!(stable, Some(changed));
 }
 
@@ -421,10 +420,10 @@ fn a_source_that_changes_twice_is_returned_but_not_persisted() {
         size: 12,
         modified_ns: 22,
     };
-    let mut decode = || Some(source_poster([1, 2, 3, 255]));
+    let mut decode = || Some(source_art([1, 2, 3, 255]));
     let mut stamps = [changed, changed_again].into_iter();
-    let (poster, stable) = decode_stable(before, &mut decode, || Ok(stamps.next()));
-    assert!(poster.is_some());
+    let (scaled, stable) = decode_stable(before, &mut decode, || Ok(stamps.next()));
+    assert!(scaled.is_some());
     assert_eq!(stable, None);
 }
 

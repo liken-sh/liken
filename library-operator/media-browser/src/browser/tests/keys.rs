@@ -5,7 +5,7 @@ use super::*;
 
 // A browser three pages deep: the movies wall, one film's page, and the
 // page of a person that film credits.
-fn three_deep() -> Browser<Fake, NoPosters> {
+fn three_deep() -> Browser<Fake, NoArt> {
     let mut browser = browser(3);
     browser.source.people = true;
     browser.key("enter");

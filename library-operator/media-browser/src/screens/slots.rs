@@ -15,10 +15,10 @@ use iced_winit::core::Rectangle;
 
 use super::wall::Wall;
 use super::{Item, Screen, Step, credits, franchise, movie, person, series};
+use crate::art::Art;
 use crate::catalog::search::PEOPLE;
 use crate::catalog::{Counts, Query, Source};
 use crate::focus;
-use crate::posters::Posters;
 use crate::views::wall;
 
 /// The slots one query answered: the query, the name the answer
@@ -120,25 +120,25 @@ impl Slots {
     /// Draw the grid of these slots in the region, scrolled so the focused
     /// row stays in view, with the mark on the focused slot only while
     /// `marked`, and `lines` caption lines under each slot.
-    pub fn draw<P: Posters>(
+    pub fn draw<A: Art>(
         &self,
         frame: &mut canvas::Frame<Renderer>,
-        posters: &mut P,
+        store: &mut A,
         region: Rectangle,
         marked: bool,
         lines: usize,
     ) {
-        self.draw_at(frame, posters, region, self.focus, marked, lines);
+        self.draw_at(frame, store, region, self.focus, marked, lines);
     }
 
     /// The same drawing, with the grid standing at the slot the caller
     /// names instead of the focus. A wall whose rail holds focus stands
     /// at the slot a select on the focused bar lands on, so the wall
     /// follows the bar.
-    pub fn draw_at<P: Posters>(
+    pub fn draw_at<A: Art>(
         &self,
         frame: &mut canvas::Frame<Renderer>,
-        posters: &mut P,
+        store: &mut A,
         region: Rectangle,
         standing: usize,
         marked: bool,
@@ -147,7 +147,7 @@ impl Slots {
         let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, lines);
         wall::draw(
             frame,
-            posters,
+            store,
             &wall::Grid {
                 items: &self.items,
                 focus: Some(standing),

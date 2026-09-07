@@ -21,10 +21,10 @@ use iced_widget::canvas;
 use iced_winit::core::{Element, Length, Theme};
 
 use super::{Screen, Step, movie, series};
+use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
 use crate::focus;
-use crate::posters::Posters;
 use crate::views::{band, rail};
 
 pub use metro::Run;
@@ -127,14 +127,14 @@ impl Franchise {
 
     /// The view: the wall under the band, and the band as a layer over
     /// it.
-    pub fn view<'a, P: Posters>(
+    pub fn view<'a, A: Art>(
         &'a self,
-        posters: &'a RefCell<P>,
+        store: &'a RefCell<A>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let wall = canvas(page::Page {
             franchise: self,
-            posters,
+            store,
             held,
         })
         .width(Length::Fill)

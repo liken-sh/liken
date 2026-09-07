@@ -3,11 +3,11 @@
 use media_screen::reader::{self, Reader};
 use media_screen::{Bus, Wiring};
 
+use media_browser::art::volumes::{self, Volumes};
 use media_browser::browser::Browser;
 use media_browser::catalog::sidecar::SidecarSource;
 use media_browser::harness::options::HELP;
 use media_browser::harness::{self, Invocation, Options};
-use media_browser::posters::volumes::{self, Volumes};
 use media_browser::sample;
 
 // The identifier this client connects under, before the hostname the
@@ -98,14 +98,15 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     let updates = options.updates.clone().unwrap_or_default();
     let source = SidecarSource::new(catalog, &updates);
     let roots = options.library_roots.iter().cloned().collect();
-    let posters = Volumes::with_cache_dir(
+    let store = Volumes::with_cache_dir(
         roots,
         volumes::budget(options.size),
         options.cache_dir.clone(),
+        options.cache_budget,
     );
 
     harness::run(
-        Browser::new(source, posters)
+        Browser::new(source, store)
             .with_page(options.size)
             .with_timing(options.stats.is_some())
             .with_bus(bus, play_topic),
