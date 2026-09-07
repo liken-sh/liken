@@ -46,12 +46,21 @@ and the browser ignored it.
   a run on a machine whose compositor states 1. The pod never passes
   it. It is a test knob, and `local/browse --size 3840x2160 --scale 2`
   is the 4K panel on a laptop.
-- **A film covers the browser.** On a `Status` moment whose activity
-  is not `Idle`, the browser marks itself covered and its schedule
-  answers no frame, as the asleep state does. `Present` and `Wake`
-  clear the mark. The loading state stays where it is, so the
-  `Present` at the end of the film still runs the return motion, and
-  the frame after it is the page whole again.
+- **A film covers the browser, and the harness draws nothing.** The
+  screen answers one question, whether something opaque covers its
+  surface. The browser answers yes on a `Status` whose activity is
+  `Playing`, and no again on the `Status` that returns to `Idle`, on
+  the `Wake`, and on the `Present`. While the answer is yes the
+  harness builds no frame at all: it leaves the screen's own schedule
+  unasked, holds the glass stale, and still folds every delivery,
+  takes the script's keys, and keeps the deadline. So nothing that
+  lands under the film draws, whether the loading pulse, an art
+  decode, a home page read, or the position the running `Play` writes
+  to the progress store every second. The first frame after the cover
+  lifts draws everything that changed. One gate in the loop, not one
+  guard per source, because every source found later would otherwise
+  need its own. The loading state stays where it is, so the `Present`
+  at the end of the film still runs the return motion.
 - **The return waits for the surface.** A `Present` asks the harness
   for a fresh window. The harness draws the first frame on that window
   as the page stood, and tells the screen the surface is up after that
@@ -68,8 +77,7 @@ and the browser ignored it.
   them. The pod passes no window size, so a budget fixed at the
   default 1080p held too little at 4K to draw one series page: every
   delivery evicted art the page still drew, and the decodes never
-  ended. A delivery under a film draws no frame for the same reason.
-  The art claim keeps its size.
+  ended. The art claim keeps its size.
 
 ## What was considered
 

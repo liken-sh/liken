@@ -78,9 +78,9 @@ pub struct Browser<S: Source, A: Art> {
     // the shade, the crate decides, and the moment comes back here.
     asleep: bool,
     // Whether a film covers the surface. The bus says so in every status
-    // whose activity is not idle, and a covered surface gets no frame
-    // callbacks, so a browser that kept drawing under the film would
-    // render every frame for nobody and take the GPU from the film.
+    // whose activity is playing, and the harness builds no frame while it
+    // stands. It lifts on the status that returns to idle, on the wake,
+    // and on the present.
     covered: bool,
     // Whether a present asked for a fresh Wayland surface.
     surface_due: bool,
@@ -312,7 +312,9 @@ impl<S: Source, A: Art> Browser<S, A> {
                 self.returning = true;
                 self.lifted();
             }
-            Moment::Status(status) => self.covered = status.activity != Activity::Idle,
+            // Starting leaves the page and its pulse on the screen; the
+            // film covers it once it plays.
+            Moment::Status(status) => self.covered = status.activity == Activity::Playing,
             // A level brings up the volume row, which draws over every
             // screen.
             Moment::Level { volume, pressed } => self.level.fold(volume, pressed, self.clock),
@@ -626,10 +628,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // the film, which is already spent.
         self.clock = at;
         let folded = self.drain_bus();
-        // A decode that lands under a film draws no frame: nobody sees it,
-        // and the frame would ask for more art, so a page whose art
-        // outgrows the cache would decode without end under the film.
-        let delivered = self.store.get_mut().delivered() && !self.covered;
+        let delivered = self.store.get_mut().delivered();
         let landed = self.landed_home();
         if self.source.changed() {
             // A change marks the home page behind whether or not a page
@@ -769,8 +768,12 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // through the hold between them; and the clock, which asks for the
     // second the minute turns. Nothing under a film schedules a frame,
     // because those frames would draw a black shade nobody sees.
+    fn covered(&self) -> bool {
+        self.covered
+    }
+
     fn next_frame(&self, at: f64) -> Option<f64> {
-        let drawing = !self.asleep && !self.covered;
+        let drawing = !self.asleep;
         let loading = (drawing && self.loading.is_some()).then_some(at);
         let level = drawing.then(|| self.level.next_frame(at)).flatten();
         let minute = drawing.then_some(self.minute).flatten();

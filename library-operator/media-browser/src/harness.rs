@@ -147,6 +147,18 @@ pub trait Screen {
     /// surface was for on the frame after.
     fn surfaced(&mut self, _at: f64) {}
 
+    /// Whether something opaque covers the surface, so that no frame reaches
+    /// anyone. A covered Wayland surface gets no frame callbacks, and this
+    /// loop presents without waiting for them, so a covered screen that
+    /// kept drawing would render every frame for nobody and take the GPU
+    /// from whatever covers it. While this answers true the harness builds
+    /// no frame at all: it still folds every delivery, takes the script's
+    /// keys, and holds the glass stale, so the first frame after the cover
+    /// lifts draws everything that changed under it.
+    fn covered(&self) -> bool {
+        false
+    }
+
     /// The window's logical size and its scale, before the first frame and
     /// after every resize. The layout is in logical pixels, and the scale
     /// is how many physical pixels each one spans, so a screen that decodes
@@ -416,6 +428,7 @@ mod tests {
         still.update(());
         still.surfaced(2.0);
         still.scaled((1920, 1080), 1.0);
+        assert!(!still.covered());
         assert!(still.key("q"));
         assert!(still.key(QUIT));
         still.tick(2.0);

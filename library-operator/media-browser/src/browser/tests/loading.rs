@@ -182,69 +182,82 @@ fn the_loop_draws_the_state_and_goes_quiet_after_it() {
 // second, so the browser asks for none while the shade is down.
 // The film covers the surface and the bus says so in the status. The
 // crate sends no sleep during a film, so the status is the one word the
-// browser has that the film is up.
+// browser has that the film is up. The harness builds no frame while
+// the browser answers covered, whatever the page, the store, or the
+// source deliver under it, so the browser guards none of those itself.
+fn status(activity: Activity) -> Moment {
+    Moment::Status(Status {
+        activity,
+        ..Status::default()
+    })
+}
+
 #[test]
-fn a_playing_status_covers_the_page_and_asks_for_no_frame() {
+fn a_playing_status_covers_the_browser_and_holds_the_state() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
+    assert!(!browser.covered());
 
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Status(Status {
-        activity: Activity::Playing,
-        ..Status::default()
-    })];
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
     browser.pump(PRESS + 1.0);
 
-    assert_eq!(browser.next_frame(PRESS + 1.0), None);
+    assert!(browser.covered());
     assert!(browser.loading.is_some());
+    assert!(!browser.loading.expect("the state holds").leaving());
 }
 
+// A Play that is starting has not covered anything yet, so the page and
+// its pulse stay on the screen until the film plays.
 #[test]
-fn a_delivery_under_the_film_draws_no_frame() {
+fn a_starting_status_covers_nothing() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Status(Status {
-        activity: Activity::Playing,
-        ..Status::default()
-    })];
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Starting)];
     browser.pump(PRESS + 1.0);
 
-    browser.store.get_mut().delivers = true;
-
-    assert!(!browser.pump(PRESS + 2.0));
+    assert!(!browser.covered());
+    assert_eq!(browser.next_frame(PRESS + 1.0), Some(PRESS + 1.0));
 }
 
 #[test]
-fn the_present_after_a_covered_film_draws_the_return() {
+fn an_idle_status_uncovers_the_browser() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Status(Status {
-        activity: Activity::Playing,
-        ..Status::default()
-    })];
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![status(Activity::Playing), status(Activity::Idle)];
+    browser.pump(PRESS + 1.0);
+
+    assert!(!browser.covered());
+}
+
+#[test]
+fn the_present_uncovers_the_browser_and_the_surface_draws_the_return() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
     browser.pump(PRESS + 1.0);
 
     *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
     browser.pump(PRESS + 5.0);
     browser.surfaced(PRESS + 5.0);
 
+    assert!(!browser.covered());
     assert_eq!(browser.next_frame(PRESS + 5.0), Some(PRESS + 5.0));
     assert!(browser.loading.expect("the state is leaving").leaving());
 }
 
 #[test]
-fn an_idle_status_uncovers_the_page() {
+fn the_wake_uncovers_the_browser() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![
-        Moment::Status(Status {
-            activity: Activity::Starting,
-            ..Status::default()
-        }),
-        Moment::Status(Status::default()),
-    ];
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
     browser.pump(PRESS + 1.0);
 
-    assert_eq!(browser.next_frame(PRESS + 1.0), Some(PRESS + 1.0));
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+    browser.pump(PRESS + 5.0);
+
+    assert!(!browser.covered());
 }
 
 #[test]

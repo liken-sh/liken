@@ -71,11 +71,6 @@ impl<S: Screen> Ready<S> {
 
     /// Build, draw, capture, and present one frame.
     pub(crate) fn frame(&mut self, event_loop: &ActiveEventLoop) {
-        // This frame is the one the schedule asked for, so the schedule is
-        // spent and the next pass asks the screen again. It draws every fold
-        // so far, so the glass is current again.
-        self.scheduled = None;
-        self.stale = false;
         let loop_start = std::time::Instant::now();
         let at = match self.start {
             Some(start) => start.elapsed().as_secs_f64(),
@@ -86,8 +81,6 @@ impl<S: Screen> Ready<S> {
                 0.0
             }
         };
-
-        self.drawn = at;
 
         self.screen.tick(at);
 
@@ -109,6 +102,24 @@ impl<S: Screen> Ready<S> {
             self.stats.resized((width, height));
             self.resized = false;
         }
+
+        // Nothing under a cover is drawn. The keys, the resize, and the
+        // deadline above and below still ran, so a scripted run under a
+        // cover ends on time, and the glass stays stale, so the uncover
+        // draws one frame with everything that changed.
+        if self.screen.covered() {
+            if self.timeline.past_deadline(at) {
+                self.stop(event_loop);
+            }
+            return;
+        }
+
+        // This frame is the one the schedule asked for, so the schedule is
+        // spent and the next pass asks the screen again. It draws every fold
+        // so far, so the glass is current again.
+        self.scheduled = None;
+        self.stale = false;
+        self.drawn = at;
 
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
@@ -221,7 +232,12 @@ impl<S: Screen> Ready<S> {
         };
 
         let at = start.elapsed().as_secs_f64();
+        // A covered screen's own schedule is not asked for, and the stale
+        // glass does not wake the loop: a frame under the cover reaches
+        // nobody. The script, the deadline, and the captures still do.
+        let covered = self.screen.covered();
         let screen_next = match self.scheduled {
+            _ if covered => None,
             Some(scheduled) => Some(scheduled),
             None => self.screen.next_frame(at),
         };
@@ -235,7 +251,7 @@ impl<S: Screen> Ready<S> {
         // at least [`STEP`] after the last frame, which is the frame-rate
         // cap: a burst of folds coalesces to sixty frames a second and no
         // press waits past the next one.
-        let stale_now = self.stale.then_some(at);
+        let stale_now = (self.stale && !covered).then_some(at);
         let next = [
             stale_now,
             screen_next,
