@@ -51,6 +51,17 @@ spec:
         app: audio-operator
     spec:
       serviceAccountName: audio-operator
+      # The operator is the machine's hardware layer: every pod that
+      # claims a device it publishes depends on it, and it holds
+      # the sound card and the PipeWire that holds it. So it schedules ahead of
+      # ordinary pods onto a machine that is already full, preempting
+      # one if it must, and it is evicted last. It also runs whatever
+      # the machine is marked with, because liken taints a node while
+      # it starts, and the devices have to publish before anything
+      # can claim them.
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
       # Four containers, one image, and the kubelet orders them. The
       # declaration runs to completion, PipeWire and WirePlumber start
       # in that order and stay up, and the operator starts last and
