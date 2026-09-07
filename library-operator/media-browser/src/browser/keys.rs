@@ -7,8 +7,10 @@
 /// key, because remotes differ in the name they send for OK and for back.
 /// Select is enter and back is escape, so a press from a remote takes the
 /// path the keyboard and the script take. Home pops to the home page,
-/// search opens the search wall, and a letter or a digit is the
-/// character itself, which is the word a typed key gives on a local run.
+/// search opens the search wall, power asks for the shade, and a letter
+/// or a digit is the character itself, which is the word a typed key
+/// gives on a local run. The three power names are the ones the kernel
+/// gives a remote's power button, and a remote sends one of them.
 pub fn key_of(name: &str) -> Option<&'static str> {
     match name {
         "KEY_UP" => Some("up"),
@@ -19,6 +21,7 @@ pub fn key_of(name: &str) -> Option<&'static str> {
         "KEY_BACK" | "KEY_ESC" | "KEY_EXIT" => Some("escape"),
         "KEY_HOMEPAGE" => Some("home"),
         "KEY_SEARCH" => Some("search"),
+        "KEY_POWER" | "KEY_SLEEP" | "KEY_POWER2" => Some("power"),
         "KEY_BACKSPACE" => Some("backspace"),
         "KEY_SPACE" => Some(" "),
         _ => typed(name),
@@ -57,7 +60,7 @@ mod tests {
 
     // Every name that carries a word of its own, so a binding that
     // changes shows up in one place.
-    const BOUND: [(&str, &str); 15] = [
+    const BOUND: [(&str, &str); 18] = [
         ("KEY_UP", "up"),
         ("KEY_DOWN", "down"),
         ("KEY_LEFT", "left"),
@@ -71,6 +74,9 @@ mod tests {
         ("KEY_EXIT", "escape"),
         ("KEY_HOMEPAGE", "home"),
         ("KEY_SEARCH", "search"),
+        ("KEY_POWER", "power"),
+        ("KEY_SLEEP", "power"),
+        ("KEY_POWER2", "power"),
         ("KEY_BACKSPACE", "backspace"),
         ("KEY_SPACE", " "),
     ];

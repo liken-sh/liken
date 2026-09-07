@@ -113,24 +113,53 @@ fn a_focus_changes_nothing() {
     assert!(!browser.surface_due());
 }
 
+// Back at the home page is home: focus returns to the banner and no
+// shade is asked for, so a person backing out of a deep page never
+// darkens the screen one press past where they meant to stop.
 #[test]
-fn back_at_the_home_page_asks_for_the_shade() {
+fn back_at_the_home_page_returns_to_the_banner_and_asks_no_one() {
     let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.key("down");
+    browser.key("down");
 
     browser.key("escape");
 
-    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 1);
+    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 0);
     assert!(!browser.asleep());
     assert!(matches!(browser.top(), screens::Screen::Home(_)));
+    assert_eq!(showing_home(&browser).focus, 0);
 }
 
 #[test]
-fn backspace_at_the_home_page_asks_too() {
+fn backspace_at_the_home_page_is_back_too() {
     let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.key("down");
 
     browser.key("backspace");
 
+    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 0);
+    assert_eq!(showing_home(&browser).focus, 0);
+}
+
+// The power key is the shade. The crate decides and the moment comes
+// back, so the press itself moves nothing on the screen.
+#[test]
+fn the_power_key_asks_for_the_shade() {
+    let (mut browser, bus) = on_bus(3, Vec::new());
+    browser.key("enter");
+
+    assert!(!browser.key("power"));
+
     assert_eq!(bus.sleeps.load(Ordering::SeqCst), 1);
+    assert!(!browser.asleep());
+    assert!(!browser.stack.is_empty());
+}
+
+#[test]
+fn the_power_key_with_no_bus_asks_no_one() {
+    let mut browser = browser(3);
+
+    assert!(!browser.key("power"));
 }
 
 #[test]

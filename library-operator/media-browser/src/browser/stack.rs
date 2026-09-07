@@ -87,16 +87,24 @@ impl<S: Source, A: Art> Browser<S, A> {
     // this one. The home page is the one screen that is read only where
     // it is behind, so back to it draws the page a person left at once.
     //
-    // At the home page there is nowhere to climb, so a browser on a bus
-    // asks for the shade. Only the browser knows whether back has
-    // anywhere to go, which is why the crate never sleeps on back
-    // itself.
+    // At the home page there is nowhere to climb, so back is home: focus
+    // returns to the banner. The shade is the power key's, because a
+    // person backing out of a deep page would otherwise darken the
+    // screen one press past where they meant to stop.
     pub(super) fn back(&mut self) {
         self.on_strip = false;
         if self.stack.pop().is_some() {
             self.reread_top();
             return;
         }
+        self.home();
+    }
+
+    // Ask the crate for the shade. Only the crate decides, because it
+    // alone knows whether the unit plays something, and the moment comes
+    // back to the browser the way a quiet window's does. A browser with no
+    // bus has no shade to ask for.
+    pub(super) fn rest(&mut self) {
         if let Some(bus) = &self.bus {
             bus.sleep();
         }

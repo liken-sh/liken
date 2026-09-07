@@ -591,6 +591,15 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
                 }
             }
             "home" => self.home(),
+            // The power key asks for the shade. The crate decides, and the
+            // sleep moment comes back here; the press itself changes
+            // nothing on the screen. A press that arrives asleep never
+            // reaches here, because the crate wakes on it instead, so one
+            // button is the shade down and the shade up.
+            "power" => {
+                changed = false;
+                self.rest();
+            }
             // The search key opens the empty wall with the grid shown, and
             // does nothing on a search wall.
             "search" => match self.top().searching() {
