@@ -1,0 +1,54 @@
+# The operator itself: one unprivileged Deployment for the cluster,
+# in the shape of the media operator and not the hardware operators'
+# DaemonSets.
+#
+# A receiver answers over the network, so the pod holds no hardware
+# and runs on any node.
+#
+# There is no volume for state. The operator re-derives everything
+# from the API server on every pass.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: equipment-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: equipment-operator
+  # Recreate, so two copies never reconcile at once. Two operators
+  # would agree on every derived status, but each write they raced
+  # would surface as a conflict for one of them to report.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: equipment-operator
+    spec:
+      serviceAccountName: equipment-operator
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/equipment-operator:latest
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # The broker the operator reads a session's volume from.
+            # The operator cannot derive the Service name, so the
+            # manifest states it.
+            - name: EQUIPMENT_BUS_ADDRESS
+              value: bus.liken-system.svc:1883
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi

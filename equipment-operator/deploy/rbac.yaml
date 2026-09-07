@@ -1,0 +1,40 @@
+# The operator's identity in the cluster, and deliberately nothing
+# more. It reads every Receiver and writes each one's status, and it
+# holds no other grant.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: equipment-operator
+---
+# A ClusterRole and not a Role, because a Receiver is cluster-scoped.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: equipment-operator
+rules:
+  # The receivers. The watch is the wake signal; every pass re-reads
+  # with a list. No create and no delete: a person declares a
+  # Receiver, and this operator only reads one.
+  - apiGroups: [equipment.liken.sh]
+    resources: [receivers]
+    verbs: [get, list, watch]
+  # Only the status half. The API server's subresource split is what
+  # keeps this operator from ever rewriting a spec a person declared.
+  # patch is the verb server-side apply uses.
+  - apiGroups: [equipment.liken.sh]
+    resources: [receivers/status]
+    verbs: [get, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: equipment-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: equipment-operator
+subjects:
+  - kind: ServiceAccount
+    name: equipment-operator
+    namespace: liken-system

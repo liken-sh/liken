@@ -1,0 +1,190 @@
+# A Receiver is one audio/video receiver the cluster drives over
+# the network.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: receivers.equipment.liken.sh
+spec:
+  group: equipment.liken.sh
+  names:
+    kind: Receiver
+    listKind: ReceiverList
+    plural: receivers
+    singular: receiver
+    categories: [equipment]
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec; only the operator writes
+      # status.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Power
+          type: string
+          jsonPath: .status.power
+        - name: Input
+          type: string
+          jsonPath: .status.input
+        - name: Volume
+          type: string
+          jsonPath: .status.volume
+        - name: Reachable
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Reachable")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "One piece of A/V equipment on the far end of a machine's cable: the protocol that reaches it, the inputs liken machines feed, and the session a Player holds on it."
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              description: "How to reach the receiver and how it is wired. The cluster owner writes every field but session, which the media operator applies."
+              # One protocol block names the receiver, and this rule
+              # holds a Receiver to one of them. A second protocol is
+              # one more entry in this list.
+              x-kubernetes-validations:
+                - rule: "[has(self.denon)].exists_one(block, block)"
+                  message: "a Receiver names exactly one protocol block"
+              properties:
+                denon:
+                  type: object
+                  required: [address]
+                  description: "The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain commands such as MV50, and events in the same form."
+                  properties:
+                    address:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
+                inputs:
+                  type: array
+                  maxItems: 32
+                  x-kubernetes-list-type: atomic
+                  description: "The receiver's inputs that liken machines feed. Nothing can discover this wiring, so the cluster owner declares it. A receiver forwards one EDID on every input, so the monitor id alone cannot tell two machines apart, and every entry names the machine."
+                  # A name is how a session asks for an input, so two
+                  # entries under one name name two different inputs
+                  # and the request is ambiguous. maxItems bounds the
+                  # cost of the pairwise check.
+                  x-kubernetes-validations:
+                    - rule: "self.all(input, self.exists_one(other, other.name == input.name))"
+                      message: "input names are unique"
+                  items:
+                    type: object
+                    required: [name, machine, monitor]
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                        maxLength: 63
+                        description: "The input's name on the receiver, as its protocol spells it: MPLAY, GAME, TV, CBL/SAT."
+                      machine:
+                        type: string
+                        minLength: 1
+                        maxLength: 253
+                        description: "The liken machine whose HDMI output lands on this input, by node name."
+                      monitor:
+                        type: string
+                        minLength: 1
+                        maxLength: 253
+                        description: "The monitor id the display and audio operators publish for this cable, such as don-0070-denon-avr. It is the check that the wire is really there."
+                session:
+                  type: object
+                  required: [player, input, volumeTopic]
+                  description: "The Player that holds the receiver now. The media operator applies this block under its own field manager while a Play stands, and lifts it after. A session powers the receiver on, selects the input once, and takes the level from the volume topic. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster."
+                  properties:
+                    player:
+                      type: string
+                      minLength: 3
+                      maxLength: 507
+                      pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                      description: "The Player, as namespace/name."
+                    input:
+                      type: string
+                      minLength: 1
+                      maxLength: 63
+                      description: "The input the Player plays through, by its name in spec.inputs."
+                    volumeTopic:
+                      type: string
+                      minLength: 1
+                      maxLength: 1024
+                      description: "The Player's volume topic on the media bus. The operator follows it, owns the level while the session stands, and writes the receiver's own knob back to it."
+            status:
+              type: object
+              description: "What the receiver last said, in its own units. Only the operator writes it."
+              properties:
+                power:
+                  type: string
+                  description: "The power state the receiver last reported: on or standby."
+                input:
+                  type: string
+                  description: "The input the receiver last reported as selected, whether liken selected it or a person did."
+                volume:
+                  type: string
+                  description: "The master volume the receiver last reported, in its own scale. A Denon counts 0 to 98 in half steps."
+                volumeMax:
+                  type: string
+                  description: "The volume limit set in the receiver's own menu, in the same scale. A session's level of 100 maps onto it."
+                mute:
+                  type: boolean
+                  description: "Whether the receiver last reported itself muted."
+                soundMode:
+                  type: string
+                  description: "The sound mode the receiver last reported, such as MULTI CH IN or STEREO."
+                service:
+                  type: string
+                  description: "The Service that stands in for the receiver on the cluster network, once the operator makes one. Empty until then."
+                conditions:
+                  type: array
+                  description: "Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone."
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                        pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                        description: >-
+                          The check this entry reports, in CamelCase. It
+                          is the key of this list.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: >-
+                          The verdict. True is the good verdict, and
+                          Unknown means the operator cannot tell yet.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The metadata.generation this condition judged.
+                      reason:
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                        description: >-
+                          One CamelCase word for why the condition holds
+                          this verdict, meant for a program to match on.
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The same answer in a sentence a person reads.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the verdict last changed. It moves only
+                          when the status flips.

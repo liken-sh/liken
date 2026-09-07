@@ -1,0 +1,20 @@
+# The example Receiver: one Denon over the network, two inputs from
+# two machines, and a session that holds it.
+apiVersion: equipment.liken.sh/v1alpha1
+kind: Receiver
+metadata:
+  name: theater
+spec:
+  denon:
+    address: receiver.example
+  inputs:
+    - name: MPLAY
+      machine: node-1
+      monitor: hdmi-a-1
+    - name: GAME
+      machine: node-2
+      monitor: hdmi-a-1
+  session:
+    player: house/theater
+    input: MPLAY
+    volumeTopic: liken/media/house/theater/volume
