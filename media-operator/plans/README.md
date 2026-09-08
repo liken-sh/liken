@@ -28,6 +28,10 @@ These plans are designed. Each keeps its number and moves to
 * [26, Prometheus metrics](26-prometheus-metrics.md). Proposed.
   Playback outcomes, startup delay, and report freshness per `Player`,
   with explicit rules for retained reports, pause, and normal endings.
+* [27, One tile in flight](27-one-tile-in-flight.md). Proposed. The
+  scrubber keeps one trickplay request in flight and the bridge serves
+  the newest, so a held scan stops on the release instead of playing
+  back a queue of tiles.
 
 ## Completed
 
