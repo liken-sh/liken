@@ -56,9 +56,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 These plans are named so the design accounts for them. Each is a stub
 for a later agent to shape.
 
-* [47, Progress to Jellyfin over the bus](47-progress-to-jellyfin-over-the-bus.md).
-  A bus consumer mirrors each person's position into Jellyfin, and
-  reads Jellyfin's back.
 * [48, Larger type on banners and headings](48-larger-type-on-banners-and-headings.md).
   One step up on the brand's type scale for banners, headings, and
   franchise cards, with wall captions unchanged. Waits for a UI round.
@@ -92,6 +89,12 @@ Plan 32 stands apart from the enrichment work.
 
 ## Completed
 
+* [47, Progress to Jellyfin over the bus](completed/47-progress-to-jellyfin-over-the-bus.md).
+  Built, and drilled on the house on 2026-09-08 in release
+  2026.09.07-006: a film paused on a phone showed at the same
+  position in the store, and a Play on the television moved
+  Jellyfin's resume point for the same person. The Webhook plugin
+  stores its template base64-encoded, which the guide now states.
 * [01, The repository and its
   builds](completed/01-the-repository-and-its-builds.md). Built, and
   rolled to `liken-1` on 2026-08-29 in release 2026.08.29-001. The
