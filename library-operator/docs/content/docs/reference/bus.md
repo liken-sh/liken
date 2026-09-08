@@ -30,7 +30,9 @@ The rules that shape the tree are `media-operator`'s, and
 them: state is retained and events are not, the topic names the object
 and the payload does not, and a writer that leaves retained state
 behind names an `availability` topic as its MQTT Last Will. This tree
-follows the same three rules.
+follows the same three rules, with one exception:
+[who is watching](#who-is-watching) names no Last Will, because that
+answer is meant to outlive the process that wrote it.
 
 ## The topics
 
@@ -39,6 +41,7 @@ follows the same three rules.
 | `libraries/{namespace}/{name}/status` | the catalog pod's reporter | the operator | yes | [the library report](#the-library-report) |
 | `catalogs/{namespace}/availability` | the catalog pod's reporter | the operator | yes | `online` or `offline` |
 | `players/{namespace}/{player}/play` | the media browser, or any client | the operator | no | [the play request](#the-play-request) |
+| `players/{namespace}/{player}/audience` | the media browser | the media browser, and any client that wants to know who is in the room | yes | [who is watching](#who-is-watching) |
 | `plays/{namespace}/{play}/audience` | the operator | the progress role, the jellyfin role | yes | [the audience](#the-audience) |
 | `plays/{namespace}/{play}/final` | the operator | the progress role, the jellyfin role | yes | [the final status](#the-final-status) |
 | `plays/{namespace}/{play}/recorded` | the progress role | the operator | yes | [the recorded mark](#the-recorded-mark) |
@@ -60,7 +63,8 @@ it names is gone, which is how MQTT drops a retained message, so a
 client that connects later reads nothing for a `Library`, a `Play`, or
 a `Person` that no longer exists. The operator clears the library,
 play, and people topics. The progress role clears its own `forgotten`
-answer when it reads an empty `forget`.
+answer when it reads an empty `forget`. The media browser clears its
+own audience topic when the answer on it lapses.
 
 ## The library report
 
@@ -206,6 +210,44 @@ the root `/`, that is
 `claim://movies//A Quiet Harbor (2014)/A Quiet Harbor (2014).mkv`.
 The two people become owner references, the two aliases become
 annotations, and `600` becomes `spec.start`.
+
+## Who is watching
+
+`players/{namespace}/{player}/audience`
+
+The room on one screen, as the browser asked a person for it. The
+browser is both the writer and the reader: it publishes the answer
+retained, and it reads the broker's catch-up back when it starts. A
+screen pod that restarts inside the idle window draws the room it had
+and asks nobody. The operator names the topic on the browser container
+as `LIBRARY_AUDIENCE_TOPIC`, and reads none of it.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `people` | list of objects | Who is watching, in the order the answer named them. Each entry carries `name`, the `Person` every record keys on, and `displayName`, the name the screen draws. An empty list is the answer "nobody", which is an answer and not the absence of one. |
+| `at` | integer | The Unix time of the last press, in whole seconds. |
+
+    {"people": [{"name": "chris", "displayName": "Chris"}], "at": 1757350000}
+
+The browser writes the message when a person answers the picker, and
+at most once a minute while a person presses keys. The stamp is what
+ages, and a second either way changes nothing a reader can act on. The
+browser republishes what it holds whenever its bus session starts,
+under the stamp the message already carries, because a reconnect is
+not a press. When the answer lapses, three hours after the last press,
+the browser publishes the empty payload, which drops the retained
+message.
+
+The browser acts on a retained delivery alone, which is the broker's
+catch-up on the subscription. A live delivery is the echo of its own
+write and changes nothing. It takes the answer where `at` is inside
+the idle window, and it asks again where the stamp is older. A name
+the cluster's `Person` list does not hold is dropped.
+
+This topic names no availability topic as its Last Will, and that is
+deliberate. The answer describes the room, not the browser, so it must
+outlive the browser's process. A pod the kubelet restarts reads the
+room back.
 
 ## The audience
 

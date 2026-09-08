@@ -107,6 +107,12 @@ const (
 // operator names the topic and reads it.
 const libraryPlayTopicVariable = "LIBRARY_PLAY_TOPIC"
 
+// The topic the browser keeps who is watching on. The browser writes
+// it retained and reads it back at startup, so a screen pod that
+// restarts inside the idle window draws the room it had. It is this
+// operator's own variable for the same reason the play topic is.
+const libraryAudienceTopicVariable = "LIBRARY_AUDIENCE_TOPIC"
+
 // ScreenPodName is the pod one Player becomes. The name is derived
 // rather than generated, so every pass names the same pod and the operator
 // needs no record of what it created.
@@ -340,6 +346,12 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 			// same connection. A browser with no broker publishes no
 			// request, so the topic alone would name nothing.
 			EnvVar{Name: libraryPlayTopicVariable, Value: playRequestTopic(
+				topicBase, player.Metadata.Namespace, player.Metadata.Name)},
+			// The audience topic travels with it, on the same
+			// connection. The browser keeps the room there, so the
+			// picker comes up after a restart only where the answer
+			// is older than the idle window.
+			EnvVar{Name: libraryAudienceTopicVariable, Value: audienceTopic(
 				topicBase, player.Metadata.Namespace, player.Metadata.Name)},
 		)
 	}

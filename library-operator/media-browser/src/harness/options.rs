@@ -25,6 +25,11 @@ pub const WINDOW_GRACE: &str = "WINDOW_GRACE_SECONDS";
 /// the topic base nor the `Player`'s name.
 pub const PLAY_TOPIC: &str = "LIBRARY_PLAY_TOPIC";
 
+/// The topic the browser keeps who is watching on. It is this operator's
+/// own variable for the same reason the play topic is, and the browser is
+/// the only program that writes it.
+pub const AUDIENCE_TOPIC: &str = "LIBRARY_AUDIENCE_TOPIC";
+
 /// The help the binary prints for `--help`.
 pub const HELP: &str = "\
 media-browser [FLAGS]
@@ -124,6 +129,9 @@ pub struct Options {
     /// The play topic, from [`PLAY_TOPIC`]. A run that misses it browses
     /// and starts nothing.
     pub play_topic: String,
+    /// The audience topic, from [`AUDIENCE_TOPIC`]. A run that misses it
+    /// keeps who is watching to itself, and asks again after a restart.
+    pub audience_topic: String,
 }
 
 impl Default for Options {
@@ -150,6 +158,7 @@ impl Default for Options {
             app_id: String::new(),
             window_grace: None,
             play_topic: String::new(),
+            audience_topic: String::new(),
         }
     }
 }
@@ -248,10 +257,9 @@ impl Options {
 impl Options {
     /// Read what the container was told. A pod cannot discover the
     /// app-id its display claim delivered, the grace the operator set,
-    /// or the topic this operator reads play requests on, so all three
-    /// arrive in the environment and none is a flag. The bus wiring
-    /// arrives the same way and `media-screen` reads it, so none of it
-    /// is here.
+    /// or the two topics this operator names, so all four arrive in the
+    /// environment and none is a flag. The bus wiring arrives the same
+    /// way and `media-screen` reads it, so none of it is here.
     pub fn from_environment(&mut self) {
         self.read_environment(|name| std::env::var(name).ok());
     }
@@ -263,6 +271,7 @@ impl Options {
         self.app_id = value(APP_ID).unwrap_or_default();
         self.window_grace = grace(&value(WINDOW_GRACE).unwrap_or_default());
         self.play_topic = value(PLAY_TOPIC).unwrap_or_default();
+        self.audience_topic = value(AUDIENCE_TOPIC).unwrap_or_default();
     }
 }
 

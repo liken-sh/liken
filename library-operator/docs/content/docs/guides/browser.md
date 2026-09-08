@@ -112,6 +112,12 @@ the franchise. A card that is next in a series or a set opens that
 title's page. A card that is next in a franchise alone opens the
 franchise page on that member.
 
+The answer to who is watching stands until three hours pass with no
+press. The browser keeps it on the bus, retained, so a screen pod that
+restarts inside those hours draws the same room and asks nobody.
+[The library bus](/docs/reference/bus/#who-is-watching) gives the
+message.
+
 A movie's page shows its art, its facts, its people, and the set or
 franchise it is part of. A series' page shows its seasons as a wall
 of episode stills. A person's page shows their credits and their

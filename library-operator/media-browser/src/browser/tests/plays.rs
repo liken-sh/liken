@@ -166,7 +166,11 @@ fn a_title_with_no_file_to_play_publishes_nothing() {
 #[test]
 fn a_select_with_no_play_topic_publishes_nothing() {
     let bus = FakeBus::default();
-    let mut browser = browser(3).with_bus(Some(Box::new(bus.clone())), String::new());
+    let mut browser = browser(3).with_bus(
+        Some(Box::new(bus.clone())),
+        String::new(),
+        AUDIENCE_TOPIC.into(),
+    );
     browser.source.items = vec![one_item()];
     browser.key("enter");
     browser.key("enter");

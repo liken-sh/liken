@@ -52,18 +52,19 @@ fn main() {
     pin_allocator_thresholds();
 
     // The bus wiring is read once here, beside the flags. The crate
-    // reads the broker, the Player's name, and every topic. The
-    // browser's own read takes the app-id, the window grace, and the
-    // play topic.
+    // reads the broker, the Player's name, and every topic of the media
+    // tree. The browser's own read takes the app-id, the window grace,
+    // and this operator's two topics.
     let wiring = Wiring::from_environment();
 
     match Options::parse(std::env::args().skip(1)) {
         Ok(Invocation::Help) => print!("{HELP}"),
         Ok(Invocation::Run(mut options)) => {
-            // The app-id, the window grace, and the play topic are not
-            // flags. The display claim delivers the first into the
-            // container and the operator sets the rest, so the binary
-            // reads them here, after the flags and before the window.
+            // The app-id, the window grace, and this operator's two
+            // topics are not flags. The display claim delivers the first
+            // into the container and the operator sets the rest, so the
+            // binary reads them here, after the flags and before the
+            // window.
             options.from_environment();
             if let Err(error) = run(*options, &wiring) {
                 eprintln!("media-browser: {error}");
@@ -82,6 +83,7 @@ fn main() {
 // client opens on a workstation with no cluster.
 fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     let play_topic = options.play_topic.clone();
+    let audience_topic = options.audience_topic.clone();
 
     let Some(catalog) = options.catalog.clone() else {
         return harness::run(
@@ -90,7 +92,7 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
                 .with_timing(options.stats.is_some())
                 .with_audience(options.people.clone(), options.audience.clone())
                 .with_people_file(options.people_file.clone())
-                .with_bus(bus(wiring), play_topic),
+                .with_bus(bus(wiring, &audience_topic), play_topic, audience_topic),
             options,
         );
     };
@@ -127,7 +129,7 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
             .with_timing(options.stats.is_some())
             .with_audience(options.people.clone(), options.audience.clone())
             .with_people_file(options.people_file.clone())
-            .with_bus(bus(wiring), play_topic),
+            .with_bus(bus(wiring, &audience_topic), play_topic, audience_topic),
         options,
     )
 }
@@ -135,8 +137,16 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
 // The connection the wiring describes. A wiring that names no broker,
 // or no topic to read, opens none, and the browser then takes the
 // keyboard alone, which is how it runs on a workstation.
-fn bus(wiring: &Wiring) -> Option<Box<dyn Bus>> {
+//
+// The audience topic is the browser's own, so the crate subscribes to it
+// on this client's behalf and hands each delivery back. A run the
+// operator named no topic for subscribes to none.
+fn bus(wiring: &Wiring, audience_topic: &str) -> Option<Box<dyn Bus>> {
     let client_id = reader::client_id(CLIENT_PREFIX, &reader::hostname());
+    let topics: Vec<String> = match audience_topic.is_empty() {
+        true => Vec::new(),
+        false => vec![audience_topic.to_string()],
+    };
 
-    Some(Box::new(Reader::open(wiring, &client_id)?))
+    Some(Box::new(Reader::open(wiring, &client_id, &topics)?))
 }

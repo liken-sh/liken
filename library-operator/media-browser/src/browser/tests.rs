@@ -50,6 +50,9 @@ use crate::views::wall;
 // browser published on the topic a cluster would give it.
 const PLAY_TOPIC: &str = "liken/library/players/house/den-tv/play";
 
+// The topic the browser keeps who is watching on, named the same way.
+const AUDIENCE_TOPIC: &str = "liken/library/players/house/den-tv/audience";
+
 // The second the clock's own frame falls on. The minute turns on the
 // wall clock, and no test may depend on it, so a case that measures a
 // schedule states the second itself, past every other second it names.
@@ -860,17 +863,34 @@ fn on_bus(movies: usize, moments: Vec<Moment>) -> (Browser<Fake, NoArt>, FakeBus
     let bus = FakeBus::default();
     *bus.inbound.lock().expect("no test panics with the lock") = moments;
     (
-        browser(movies).with_bus(Some(Box::new(bus.clone())), PLAY_TOPIC.into()),
+        browser(movies).with_bus(
+            Some(Box::new(bus.clone())),
+            PLAY_TOPIC.into(),
+            AUDIENCE_TOPIC.into(),
+        ),
         bus.clone(),
     )
 }
 
-// Whether the browser published anything at all.
-fn published_nothing(bus: &FakeBus) -> bool {
+// The play requests the browser published, in order. The room travels
+// on a topic of its own, so a case that reads a request reads these
+// alone. A request is an event and is never retained.
+fn requests(bus: &FakeBus) -> Vec<Vec<u8>> {
     bus.published
         .lock()
         .expect("no test panics with the lock")
-        .is_empty()
+        .iter()
+        .filter(|(topic, _, _)| topic == PLAY_TOPIC)
+        .map(|(_, payload, retained)| {
+            assert!(!retained, "a request is an event");
+            payload.clone()
+        })
+        .collect()
+}
+
+// Whether the browser asked for no play at all.
+fn published_nothing(bus: &FakeBus) -> bool {
+    requests(bus).is_empty()
 }
 // One resolved item, so a test reads what the browser published rather
 // than what a catalog would have answered.
@@ -895,13 +915,9 @@ fn playing(items: Vec<PlayItem>) -> (Browser<Fake, NoArt>, FakeBus) {
     (browser, bus)
 }
 
-// The one request the browser published, decoded. The topic is the
-// operator's own and a request is a moment, so it is not retained.
+// The one request the browser published, decoded.
 fn published(bus: &FakeBus) -> serde_json::Value {
-    let plays = bus.published.lock().expect("no test panics with the lock");
-    assert_eq!(plays.len(), 1);
-    let (topic, payload, retained) = &plays[0];
-    assert_eq!(topic, PLAY_TOPIC);
-    assert!(!retained);
-    serde_json::from_slice(payload).expect("the request is JSON")
+    let requests = requests(bus);
+    assert_eq!(requests.len(), 1);
+    serde_json::from_slice(&requests[0]).expect("the request is JSON")
 }

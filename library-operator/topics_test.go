@@ -54,6 +54,11 @@ func TestTopicsCarryTheLibraryLayout(t *testing.T) {
 			got:  playRequestFilter(base),
 			want: "liken/library/players/+/+/play",
 		},
+		{
+			name: "audience",
+			got:  audienceTopic(base, "house", "den-tv"),
+			want: "liken/library/players/house/den-tv/audience",
+		},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -151,6 +156,7 @@ func TestParsePlayRequestTopicNamesThePlayer(t *testing.T) {
 		{name: "the media operator's own tree", topic: "liken/media/players/house/den-tv/commands"},
 		{name: "a libraries topic", topic: libraryStatusTopic(base, "house", "movies")},
 		{name: "a players topic with a kind this operator does not read", topic: base + "/players/house/den-tv/screen"},
+		{name: "the browser's own audience topic", topic: audienceTopic(base, "house", "den-tv")},
 		{name: "a players topic missing its name", topic: base + "/players/house/play"},
 		{name: "a players topic with a level too many", topic: base + "/players/house/den-tv/play/extra"},
 		{name: "an empty namespace", topic: base + "/players//den-tv/play"},

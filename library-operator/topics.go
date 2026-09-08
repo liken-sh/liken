@@ -113,6 +113,19 @@ func playRequestFilter(base string) string {
 	return base + "/players/+/+/" + playRequestKind
 }
 
+// audienceKind is the last level of a screen's audience topic. It
+// names the people in one Player's room, which is not the audience of
+// a Play: that one is under plays and the operator writes it.
+const audienceKind = "audience"
+
+// audienceTopic carries who is watching on one Player's screen. The
+// browser writes it retained and reads it back when it starts, so a
+// pod that restarts inside the idle window draws the room it had and
+// asks nobody. The operator names the topic and reads none of it.
+func audienceTopic(base, namespace, player string) string {
+	return base + "/players/" + namespace + "/" + player + "/" + audienceKind
+}
+
 // parsePlayRequestTopic maps an inbound play topic back to the Player
 // it names. The operator creates a Play only for a Player it serves,
 // so the topic is what says which Player asked.

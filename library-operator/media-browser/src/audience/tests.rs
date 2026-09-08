@@ -201,3 +201,87 @@ fn any_name_stands_where_the_browser_knows_no_people() {
     assert_eq!(audience.current(0.0), ["third".to_string()]);
     assert!(!audience.needs_answer(0.0));
 }
+
+// The answer on the bus: who is watching with the names a screen draws,
+// the stamp the message carries, and the lapse that ends both.
+
+#[test]
+fn the_answer_on_the_bus_carries_each_display_name() {
+    let mut audience = named(&[("first", "Coral"), ("second", "Kestrel")]);
+    audience.answer(vec!["second".into(), "first".into()], 0.0);
+
+    assert_eq!(
+        audience.watching(0.0),
+        Some(vec![
+            Person {
+                name: "second".into(),
+                display_name: "Kestrel".into(),
+            },
+            Person {
+                name: "first".into(),
+                display_name: "Coral".into(),
+            },
+        ])
+    );
+}
+
+#[test]
+fn an_answer_of_nobody_is_an_empty_room_and_not_the_absence_of_one() {
+    let mut audience = audience(&["first"]);
+    audience.answer(Vec::new(), 0.0);
+
+    assert_eq!(audience.watching(0.0), Some(Vec::new()));
+}
+
+#[test]
+fn an_audience_with_no_answer_holds_nothing_for_the_bus() {
+    let mut audience = audience(&["first"]);
+    assert_eq!(audience.watching(0.0), None);
+
+    audience.answer(vec!["first".into()], 0.0);
+
+    assert_eq!(audience.watching(IDLE_SECONDS + 1.0), None);
+}
+
+#[test]
+fn the_first_press_of_a_minute_moves_the_stamp_and_the_rest_do_not() {
+    let mut audience = audience(&["first"]);
+    assert!(audience.stamp_due(1_000));
+
+    audience.stamped(1_000);
+
+    assert_eq!(audience.stamp(), 1_000);
+    assert!(!audience.stamp_due(1_000 + STAMP_SECONDS - 1));
+    assert!(audience.stamp_due(1_000 + STAMP_SECONDS));
+}
+
+#[test]
+fn the_lapse_drops_the_answer_and_the_stamp_with_it() {
+    let mut audience = audience(&["first"]);
+    audience.answer(vec!["first".into()], 0.0);
+    audience.stamped(1_000);
+
+    assert!(audience.lapse(IDLE_SECONDS + 1.0));
+
+    assert!(audience.needs_answer(IDLE_SECONDS + 1.0));
+    assert_eq!(audience.stamp(), 0);
+}
+
+#[test]
+fn the_lapse_reports_an_answer_gone_once_and_no_more() {
+    let mut audience = audience(&["first"]);
+    audience.answer(vec!["first".into()], 0.0);
+
+    assert!(!audience.lapse(IDLE_SECONDS));
+    assert!(audience.lapse(IDLE_SECONDS + 1.0));
+    assert!(!audience.lapse(IDLE_SECONDS + 2.0));
+}
+
+#[test]
+fn a_press_reports_the_lapsed_answer_it_cleared() {
+    let mut audience = audience(&["first"]);
+    audience.answer(vec!["first".into()], 0.0);
+
+    assert!(!audience.touch(IDLE_SECONDS));
+    assert!(audience.touch(2.0 * IDLE_SECONDS + 1.0));
+}

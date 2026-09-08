@@ -16,8 +16,8 @@ use media_screen::status::Activity;
 use media_screen::{Bus, Moment};
 
 use crate::art::{Art, ArtCounts};
-use crate::audience::{Audience, Person};
-use crate::bus::{next, play};
+use crate::audience::{self, Audience, Person};
+use crate::bus::{self, next, play};
 use crate::catalog::draw::Date;
 use crate::catalog::search::Size;
 use crate::catalog::{Selection, Source};
@@ -68,6 +68,15 @@ pub struct Browser<S: Source, A: Art> {
     // publishes on the connection the crate already holds, so the topic
     // is held here and not in the crate, which reads none of it.
     play_topic: String,
+    // The topic the browser keeps who is watching on, retained. It is
+    // this browser's own message, written for the browser that starts
+    // after this one, so the browser is both the writer and the reader.
+    audience_topic: String,
+    // The wall clock, in whole seconds since the Unix epoch. It is a
+    // field so a test states the second every stamp carries. The run
+    // clock cannot carry the stamp: it starts at zero on every run, and
+    // the message must outlive the process.
+    now: fn() -> i64,
     // The people in the room and the second of the last press. Every play
     // request is recorded against them, and every progress read is for
     // them.
@@ -154,6 +163,8 @@ impl<S: Source, A: Art> Browser<S, A> {
             today: Date::today,
             bus: None,
             play_topic: String::new(),
+            audience_topic: String::new(),
+            now: clock::seconds,
             audience: Audience::default(),
             people_file: None,
             asleep: false,
@@ -188,12 +199,19 @@ impl<S: Source, A: Art> Browser<S, A> {
         self
     }
 
-    /// The browser on a bus, and the topic it publishes a play request
-    /// on. A `Player` whose status names no bus wires none, and the
-    /// browser then takes the keyboard alone.
-    pub fn with_bus(mut self, bus: Option<Box<dyn Bus>>, play_topic: String) -> Self {
+    /// The browser on a bus, the topic it publishes a play request on,
+    /// and the topic it keeps who is watching on. A `Player` whose status
+    /// names no bus wires none, and the browser then takes the keyboard
+    /// alone.
+    pub fn with_bus(
+        mut self,
+        bus: Option<Box<dyn Bus>>,
+        play_topic: String,
+        audience_topic: String,
+    ) -> Self {
         self.bus = bus;
         self.play_topic = play_topic;
+        self.audience_topic = audience_topic;
         self
     }
 
@@ -270,6 +288,11 @@ impl<S: Source, A: Art> Browser<S, A> {
     // shade or under the loading state, because nobody sees a picker drawn
     // there.
     fn ask(&mut self) -> bool {
+        // The idle window ends an answer whether or not anybody pressed, so
+        // the message on the bus goes here as well as on a press.
+        if self.audience.lapse(self.clock) {
+            self.clear_audience();
+        }
         let due = self.picker.is_none()
             && !self.asleep
             && self.loading.is_none()
@@ -280,10 +303,8 @@ impl<S: Source, A: Art> Browser<S, A> {
         due
     }
 
-    // Take the picker's answer: set who is watching, drop the gate, and
-    // read again for the new people. The home page goes through its own
-    // reader, and the screen on top reads its progress here, because both
-    // were read for whoever was watching before.
+    // Take the picker's answer: set who is watching, drop the gate, put
+    // the room on the bus, and read again for the new people.
     fn answered(&mut self, chosen: Vec<usize>) {
         let names = chosen
             .into_iter()
@@ -292,10 +313,127 @@ impl<S: Source, A: Art> Browser<S, A> {
             .collect();
         self.audience.answer(names, self.clock);
         self.picker = None;
+        self.publish_audience((self.now)());
+        self.read_again();
+    }
+
+    // Read again for the people who are watching now. The home page goes
+    // through its own reader, and the screen on top reads its progress
+    // here, because both were read for whoever was watching before.
+    fn read_again(&mut self) {
         self.home_stale = true;
         let people = self.audience.current(self.clock).to_vec();
         if let Some(top) = self.stack.last_mut() {
             top.read_progress(&mut self.source, &people);
+        }
+    }
+
+    // Put the answer on the bus, retained, under this wall second. The
+    // browser that starts after this one reads it back, so a pod that
+    // restarts inside the idle window draws the room it had and asks
+    // nobody. A
+    // run with no bus, and one the operator named no topic for, keeps the
+    // answer to itself and behaves the same in every other way.
+    //
+    // An audience with no answer publishes nothing: the message that
+    // clears the topic is the lapse's, and it says something else.
+    fn publish_audience(&mut self, at: i64) {
+        let Some(people) = self.audience.watching(self.clock) else {
+            return;
+        };
+        let Some(bus) = &self.bus else {
+            return;
+        };
+        if self.audience_topic.is_empty() {
+            return;
+        }
+        bus.publish(
+            &self.audience_topic,
+            bus::audience::payload(&people, at),
+            true,
+        );
+        self.audience.stamped(at);
+    }
+
+    // The answer lapsed, so the message goes with it. An empty payload is
+    // how MQTT drops a retained message, and without the clear a browser
+    // that starts next would read a room that went home hours ago.
+    fn clear_audience(&self) {
+        let Some(bus) = &self.bus else {
+            return;
+        };
+        if self.audience_topic.is_empty() {
+            return;
+        }
+        bus.publish(&self.audience_topic, Vec::new(), true);
+    }
+
+    // The bus session started, so this client republishes the retained
+    // state it owns, which is the rule every program on this broker
+    // follows. A reconnect is not a press, so the answer keeps the stamp
+    // it carries and ages the way it would have. An answer that never
+    // reached the bus, which is the one a run named on the command line,
+    // goes out under the second of the connection.
+    fn republish_audience(&mut self) {
+        let at = match self.audience.stamp() {
+            0 => (self.now)(),
+            stamp => stamp,
+        };
+        self.publish_audience(at);
+    }
+
+    // Take the room off the bus: the message this browser wrote before it
+    // restarted, which the broker kept and delivered on the subscription.
+    // The browser takes it only where it holds no answer of its own, so a
+    // run that named an audience, and one that has already asked, both
+    // keep the newer answer.
+    //
+    // A stamp further back than the idle window is a room that went home,
+    // and the browser then asks as it would have with no message at all.
+    fn restore(&mut self, payload: &[u8]) {
+        if self.audience.watching(self.clock).is_some() {
+            return;
+        }
+        let Some(held) = bus::audience::held(payload) else {
+            return;
+        };
+        let age = ((self.now)() - held.at) as f64;
+        if age > audience::IDLE_SECONDS {
+            return;
+        }
+        // The run clock starts at zero, so the stamp comes back onto it as
+        // the distance from now, which is a second before zero on a run
+        // that has just opened. The lapse measures that distance the same
+        // way either side of zero.
+        let names = held.people.into_iter().map(|person| person.name).collect();
+        self.audience.answer(names, self.clock - age);
+        self.audience.stamped(held.at);
+        // A picker the ask raised stands over the screen with nobody part
+        // way through an answer, so the room that came back closes it. One
+        // somebody is answering stands: their answer is the newer one.
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(screens::audience::Picker::untouched)
+        {
+            self.picker = None;
+        }
+        self.read_again();
+    }
+
+    // One press against the audience. It holds a standing answer open, and
+    // it moves the stamp on the bus at most once a minute, so a walk
+    // across a wall publishes one message and not one per key. A press
+    // that finds a lapsed answer clears the message instead: the room went
+    // home, and the browser asks who is here now.
+    fn pressed(&mut self) {
+        if self.audience.touch(self.clock) {
+            self.clear_audience();
+            return;
+        }
+        let now = (self.now)();
+        if self.audience.stamp_due(now) {
+            self.publish_audience(now);
         }
     }
 
@@ -338,6 +476,21 @@ impl<S: Source, A: Art> Browser<S, A> {
             // A person took the offer the display drew. The bytes are the
             // request this browser wrote onto that Play.
             Moment::PlayNext(request) => self.play_next(&request),
+            // The room, as the broker kept it for this screen. A retained
+            // delivery is the catch-up on the subscription, which is the
+            // message the browser before this one left. A live delivery is
+            // the echo of this browser's own publish, and it says nothing
+            // this browser does not already hold.
+            Moment::Message {
+                topic,
+                payload,
+                retained,
+            } => {
+                if retained && topic == self.audience_topic {
+                    self.restore(&payload);
+                }
+            }
+            Moment::Connected => self.republish_audience(),
         }
     }
 
@@ -611,7 +764,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     fn key(&mut self, name: &str) -> bool {
         // Every press holds the audience's answer open, whatever the press
         // then does, because a person at the remote is a person in the room.
-        self.audience.touch(self.clock);
+        self.pressed();
         // A press during the loading state reaches no screen under it.
         // Back exits the state here and now, and cancels nothing: the
         // `Play` this browser asked for is the operator's to run.

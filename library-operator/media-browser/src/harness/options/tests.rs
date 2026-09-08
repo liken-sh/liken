@@ -193,17 +193,29 @@ fn an_empty_environment_names_no_screen_and_arms_nothing() {
 }
 
 #[test]
-fn an_empty_environment_names_no_play_topic() {
-    assert_eq!(environment(&[]).play_topic, "");
+fn an_empty_environment_names_neither_topic() {
+    let options = environment(&[]);
+    assert_eq!(options.play_topic, "");
+    assert_eq!(options.audience_topic, "");
 }
 
 #[test]
-fn this_operator_names_the_play_topic() {
-    let options = environment(&[(PLAY_TOPIC, "liken/library/players/house/den-tv/play")]);
+fn this_operator_names_both_of_its_topics() {
+    let options = environment(&[
+        (PLAY_TOPIC, "liken/library/players/house/den-tv/play"),
+        (
+            AUDIENCE_TOPIC,
+            "liken/library/players/house/den-tv/audience",
+        ),
+    ]);
 
     assert_eq!(
         options.play_topic,
         "liken/library/players/house/den-tv/play"
+    );
+    assert_eq!(
+        options.audience_topic,
+        "liken/library/players/house/den-tv/audience"
     );
 }
 

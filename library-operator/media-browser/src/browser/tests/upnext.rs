@@ -317,7 +317,11 @@ fn taking(payload: Vec<u8>) -> (Browser<Fake, NoArt>, FakeBus) {
     );
     let (people, preset) = watcher();
     let mut browser = browser
-        .with_bus(Some(Box::new(bus.clone())), PLAY_TOPIC.into())
+        .with_bus(
+            Some(Box::new(bus.clone())),
+            PLAY_TOPIC.into(),
+            AUDIENCE_TOPIC.into(),
+        )
         .with_audience(people, preset);
     browser.pump(0.0);
     (browser, bus)

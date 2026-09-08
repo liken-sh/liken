@@ -185,6 +185,14 @@ impl Picker {
         }
     }
 
+    /// Whether nobody has moved inside the picker yet: focus on the first
+    /// tile and nobody chosen, which is how a picker the ask raised
+    /// stands. An answer that arrives from elsewhere may close such a
+    /// picker, because nobody is part way through an answer of their own.
+    pub fn untouched(&self) -> bool {
+        !self.on_link && self.tile == 0 && !self.chosen.iter().any(|chosen| *chosen)
+    }
+
     /// Whether the person at this index is chosen.
     pub fn holds(&self, index: usize) -> bool {
         self.chosen.get(index).copied().unwrap_or_default()

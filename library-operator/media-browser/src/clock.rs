@@ -33,6 +33,17 @@ pub fn now() -> Time {
     }
 }
 
+/// The wall clock now, in whole seconds since the Unix epoch. The answer
+/// the browser keeps on the bus is stamped with it, because that stamp
+/// must mean the same thing to the browser that reads it back after a
+/// restart, and a run clock starts at zero on every run. A clock set
+/// before the epoch reads zero, which is a stamp no answer stands under.
+pub fn seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs() as i64)
+}
+
 /// The seconds from now until the minute turns, so a caller schedules
 /// one redraw on the turn and none between.
 pub fn seconds_to_next_minute() -> f64 {
@@ -87,6 +98,13 @@ mod tests {
         let time = now();
         assert!(time.hour < 24);
         assert!(time.minute < 60);
+    }
+
+    // The stamp counts from the epoch on the wall clock, so every reading
+    // is past the second this case names, which fell in 2023.
+    #[test]
+    fn the_stamp_is_a_second_of_this_century() {
+        assert!(seconds() > 1_700_000_000);
     }
 
     #[test]

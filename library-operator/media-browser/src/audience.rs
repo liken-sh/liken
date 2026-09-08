@@ -20,7 +20,13 @@ pub struct Person {
 /// `[{"name":"chris","displayName":"Chris"}]`.
 pub fn people_from_json(bytes: &[u8]) -> Result<Vec<Person>, String> {
     let document: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-    let list = document
+    people_from_value(&document)
+}
+
+/// The same list inside a message that carries more than the people, which
+/// is how the answer to who is watching travels on the bus.
+pub fn people_from_value(value: &Value) -> Result<Vec<Person>, String> {
+    let list = value
         .as_array()
         .ok_or_else(|| "the people are not a list".to_string())?;
     list.iter().map(person).collect()
@@ -52,6 +58,13 @@ fn person(entry: &Value) -> Result<Person, String> {
 /// changes between sittings, not during one.
 pub const IDLE_SECONDS: f64 = 3.0 * 60.0 * 60.0;
 
+/// The seconds between two stamps on the bus. A press moves the stamp at
+/// most this often, because the stamp says how long ago somebody pressed
+/// a key, and a second either way changes nothing a reader can act on.
+/// Without the window, a walk across a wall would publish one message per
+/// keystroke.
+pub const STAMP_SECONDS: i64 = 60;
+
 /// The people in the room as the browser knows them: the `Person` list it
 /// may name, the answer it holds, and the second of the last press.
 #[derive(Debug, Clone, Default)]
@@ -62,6 +75,10 @@ pub struct Audience {
     answered: Option<Vec<String>>,
     // The clock second of the last press, which the lapse measures from.
     active: f64,
+    // The wall second the message on the bus carries, or zero where the
+    // bus holds none. It is a wall second and not a run second, because a
+    // browser that starts again reads it against its own wall clock.
+    stamp: i64,
 }
 
 impl Audience {
@@ -72,6 +89,7 @@ impl Audience {
             known,
             answered: None,
             active: 0.0,
+            stamp: 0,
         }
     }
 
@@ -106,12 +124,64 @@ impl Audience {
     }
 
     /// Record a press. It holds the answer open, and it clears an answer
-    /// that already lapsed, so the next answer starts from nothing.
-    pub fn touch(&mut self, at: f64) {
-        if self.lapsed(at) {
-            self.answered = None;
-        }
+    /// that already lapsed, so the next answer starts from nothing. The
+    /// answer is whether the press found a lapsed answer, which is a
+    /// message to clear from the bus.
+    pub fn touch(&mut self, at: f64) -> bool {
+        let lapsed = self.lapse(at);
         self.active = at;
+        lapsed
+    }
+
+    /// Drop an answer the idle window ended, whether or not anybody
+    /// pressed. The answer is whether one went, so the caller clears the
+    /// message on the bus once and no more. The stamp goes with the
+    /// answer, because the bus then holds nothing.
+    pub fn lapse(&mut self, at: f64) -> bool {
+        if self.answered.is_none() || !self.lapsed(at) {
+            return false;
+        }
+        self.answered = None;
+        self.stamp = 0;
+        true
+    }
+
+    /// The current answer as `Person` records, in answer order, each with
+    /// the display name this browser draws, or nothing where no answer
+    /// stands. An answer of nobody is an empty room and not the absence of
+    /// one, so the bus carries the two differently.
+    pub fn watching(&self, at: f64) -> Option<Vec<Person>> {
+        if self.lapsed(at) {
+            return None;
+        }
+        Some(
+            self.answered
+                .as_ref()?
+                .iter()
+                .map(|name| Person {
+                    name: name.clone(),
+                    display_name: self.display_name(name).to_string(),
+                })
+                .collect(),
+        )
+    }
+
+    /// The wall second the message on the bus carries, or zero where the
+    /// bus holds none.
+    pub fn stamp(&self) -> i64 {
+        self.stamp
+    }
+
+    /// Record the stamp the message on the bus now carries.
+    pub fn stamped(&mut self, at: i64) {
+        self.stamp = at;
+    }
+
+    /// Whether a press at this wall second must move the stamp on the bus,
+    /// which is every press outside [`STAMP_SECONDS`] of the stamp that
+    /// stands.
+    pub fn stamp_due(&self, now: i64) -> bool {
+        now - self.stamp >= STAMP_SECONDS
     }
 
     /// Who a play recorded this second names: the answer, or nobody where
