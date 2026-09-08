@@ -121,6 +121,49 @@ fn the_row_asks_the_loop_for_its_frames() {
     assert_eq!(browser.next_frame(PRESS + 4.7), None);
 }
 
+// The mark the owner topic carries, which names the equipment that
+// holds the room's level.
+const OWNER: &[u8] = b"house/theater";
+
+// One owner moment as the crate delivers it: the raw payload off the
+// owner topic, empty for a mark that cleared.
+fn mark(payload: &[u8]) -> Moment {
+    Moment::Owner(payload.to_vec())
+}
+
+#[test]
+fn a_mark_on_the_bus_draws_no_row_and_schedules_no_frame() {
+    let (mut browser, _bus) = on_bus(3, vec![moment(level(), true), mark(OWNER)]);
+
+    assert!(browser.pump(PRESS));
+
+    assert_eq!(browser.level.row(PRESS + 1.0), None);
+    assert_eq!(browser.next_frame(PRESS + 0.1), None);
+}
+
+#[test]
+fn a_press_under_a_standing_mark_brings_up_no_row() {
+    let (mut browser, bus) = on_bus(3, vec![mark(OWNER)]);
+    browser.pump(PRESS);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![moment(level(), true)];
+    browser.pump(PRESS + 1.0);
+
+    assert_eq!(browser.level.row(PRESS + 2.0), None);
+}
+
+#[test]
+fn the_row_returns_when_the_mark_clears() {
+    let (mut browser, bus) = on_bus(3, vec![moment(level(), true), mark(OWNER)]);
+    browser.pump(PRESS);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![mark(b"")];
+    browser.pump(PRESS + 1.0);
+
+    assert!(browser.level.row(PRESS + 1.0).is_some());
+    assert_eq!(browser.next_frame(PRESS + 1.0), Some(PRESS + 4.0));
+}
+
 #[test]
 fn a_covered_browser_schedules_no_frame_for_the_row() {
     let (mut browser, _bus) = on_bus(3, vec![moment(level(), true), Moment::Sleep]);

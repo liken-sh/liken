@@ -215,6 +215,7 @@ fn a_starting_status_covers_nothing() {
 
     *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Starting)];
     browser.pump(PRESS + 1.0);
+    browser.minute = Some(MINUTE);
 
     assert!(!browser.covered());
     assert_eq!(browser.next_frame(PRESS + 1.0), Some(PRESS + 1.0));
@@ -241,6 +242,7 @@ fn the_present_uncovers_the_browser_and_the_surface_draws_the_return() {
     *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
     browser.pump(PRESS + 5.0);
     browser.surfaced(PRESS + 5.0);
+    browser.minute = Some(MINUTE);
 
     assert!(!browser.covered());
     assert_eq!(browser.next_frame(PRESS + 5.0), Some(PRESS + 5.0));

@@ -1659,7 +1659,7 @@ dependencies = [
 [[package]]
 name = "media-screen"
 version = "0.1.0"
-source = "git+https://github.com/liken-sh/media-operator?rev=7d15cc10667addb11897d41835cd77da1a53bb03#7d15cc10667addb11897d41835cd77da1a53bb03"
+source = "git+https://github.com/liken-sh/media-operator?rev=884eebfca709c5193718a1c15f92a54bc1522164#884eebfca709c5193718a1c15f92a54bc1522164"
 dependencies = [
  "rumqttc",
  "serde",

@@ -753,11 +753,12 @@ func denScreenOnTheBus() *Player {
 	player.Status.Idle.FadeAfterSeconds = 600
 	player.Status.Idle.OffAfterSeconds = 1800
 	player.Status.Idle.Bus = &PlayerIdleBus{
-		Address:       "bus.liken-system.svc:1883",
-		StatusTopic:   "liken/media/players/house/den-tv/status",
-		VolumeTopic:   "liken/media/players/house/den-tv/volume",
-		CommandsTopic: "liken/media/players/house/den-tv/commands",
-		PanelTopic:    "liken/media/players/house/den-tv/panel",
+		Address:          "bus.liken-system.svc:1883",
+		StatusTopic:      "liken/media/players/house/den-tv/status",
+		VolumeTopic:      "liken/media/players/house/den-tv/volume",
+		VolumeOwnerTopic: "liken/media/players/house/den-tv/volume/owner",
+		CommandsTopic:    "liken/media/players/house/den-tv/commands",
+		PanelTopic:       "liken/media/players/house/den-tv/panel",
 		Remotes: []PlayerIdleRemote{
 			{
 				Events: "liken/media/remotes/house/sofa/events",
@@ -785,13 +786,14 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 	environment := browserEnvironment(denScreenOnTheBus())
 
 	want := map[string]string{
-		windowGraceVariable:        windowGraceSeconds,
-		mediaBusAddressVariable:    "bus.liken-system.svc:1883",
-		mediaPlayerNameVariable:    "den-tv",
-		mediaStatusTopicVariable:   "liken/media/players/house/den-tv/status",
-		mediaVolumeTopicVariable:   "liken/media/players/house/den-tv/volume",
-		mediaCommandsTopicVariable: "liken/media/players/house/den-tv/commands",
-		mediaPanelTopicVariable:    "liken/media/players/house/den-tv/panel",
+		windowGraceVariable:           windowGraceSeconds,
+		mediaBusAddressVariable:       "bus.liken-system.svc:1883",
+		mediaPlayerNameVariable:       "den-tv",
+		mediaStatusTopicVariable:      "liken/media/players/house/den-tv/status",
+		mediaVolumeTopicVariable:      "liken/media/players/house/den-tv/volume",
+		mediaVolumeOwnerTopicVariable: "liken/media/players/house/den-tv/volume/owner",
+		mediaCommandsTopicVariable:    "liken/media/players/house/den-tv/commands",
+		mediaPanelTopicVariable:       "liken/media/players/house/den-tv/panel",
 		mediaRemoteEventsTopicsVariable: "liken/media/remotes/house/sofa/events\n" +
 			"liken/media/remotes/house/armchair/events",
 		mediaRemoteFocusTopicsVariable: "liken/media/remotes/house/sofa/focus\n" +
@@ -837,6 +839,19 @@ func TestScreenPodWithNoSinksNamesNoVolumeTopic(t *testing.T) {
 
 	if _, set := environment[mediaVolumeTopicVariable]; set {
 		t.Errorf("env = %v, want no volume topic", environment)
+	}
+}
+
+// An older media-operator states no owner topic, and the browser then
+// draws the level with no gate over it.
+func TestScreenPodWithNoOwnerTopicNamesNoOwnerVariable(t *testing.T) {
+	player := denScreenOnTheBus()
+	player.Status.Idle.Bus.VolumeOwnerTopic = ""
+
+	environment := browserEnvironment(player)
+
+	if _, set := environment[mediaVolumeOwnerTopicVariable]; set {
+		t.Errorf("env = %v, want no owner topic", environment)
 	}
 }
 

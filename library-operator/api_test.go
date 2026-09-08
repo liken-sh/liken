@@ -260,6 +260,7 @@ func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 		`"bus":{"address":"bus.liken-system.svc:1883",` +
 		`"statusTopic":"liken/media/players/house/den-tv/status",` +
 		`"volumeTopic":"liken/media/players/house/den-tv/volume",` +
+		`"volumeOwnerTopic":"liken/media/players/house/den-tv/volume/owner",` +
 		`"commandsTopic":"liken/media/players/house/den-tv/commands",` +
 		`"panelTopic":"liken/media/players/house/den-tv/panel",` +
 		`"remotes":[{"events":"liken/media/remotes/house/sofa/events",` +
@@ -277,11 +278,12 @@ func TestPlayerIdleStatusReadsTheBusMediaOperatorPublishes(t *testing.T) {
 			status.Idle.FadeAfterSeconds, status.Idle.OffAfterSeconds)
 	}
 	want := PlayerIdleBus{
-		Address:       "bus.liken-system.svc:1883",
-		StatusTopic:   "liken/media/players/house/den-tv/status",
-		VolumeTopic:   "liken/media/players/house/den-tv/volume",
-		CommandsTopic: "liken/media/players/house/den-tv/commands",
-		PanelTopic:    "liken/media/players/house/den-tv/panel",
+		Address:          "bus.liken-system.svc:1883",
+		StatusTopic:      "liken/media/players/house/den-tv/status",
+		VolumeTopic:      "liken/media/players/house/den-tv/volume",
+		VolumeOwnerTopic: "liken/media/players/house/den-tv/volume/owner",
+		CommandsTopic:    "liken/media/players/house/den-tv/commands",
+		PanelTopic:       "liken/media/players/house/den-tv/panel",
 		Remotes: []PlayerIdleRemote{{
 			Events: "liken/media/remotes/house/sofa/events",
 			Focus:  "liken/media/remotes/house/sofa/focus",

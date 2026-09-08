@@ -491,12 +491,16 @@ type PlayerIdleStatus struct {
 // media-operator publishes no block, and the browser then takes the
 // keyboard alone.
 type PlayerIdleBus struct {
-	Address       string             `json:"address"`
-	StatusTopic   string             `json:"statusTopic"`
-	VolumeTopic   string             `json:"volumeTopic,omitempty"`
-	CommandsTopic string             `json:"commandsTopic"`
-	PanelTopic    string             `json:"panelTopic"`
-	Remotes       []PlayerIdleRemote `json:"remotes,omitempty"`
+	Address     string `json:"address"`
+	StatusTopic string `json:"statusTopic"`
+	VolumeTopic string `json:"volumeTopic,omitempty"`
+	// VolumeOwnerTopic is VolumeTopic with "/owner" after it. A retained
+	// non-empty payload on it names equipment that owns the room's level.
+	// An older media-operator publishes no such field.
+	VolumeOwnerTopic string             `json:"volumeOwnerTopic,omitempty"`
+	CommandsTopic    string             `json:"commandsTopic"`
+	PanelTopic       string             `json:"panelTopic"`
+	Remotes          []PlayerIdleRemote `json:"remotes,omitempty"`
 }
 
 // PlayerIdleRemote is one of the unit's controllers as a client reads
