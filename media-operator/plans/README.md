@@ -28,10 +28,6 @@ These plans are designed. Each keeps its number and moves to
 * [26, Prometheus metrics](26-prometheus-metrics.md). Proposed.
   Playback outcomes, startup delay, and report freshness per `Player`,
   with explicit rules for retained reports, pause, and normal endings.
-* [27, One tile in flight](27-one-tile-in-flight.md). Proposed. The
-  scrubber keeps one trickplay request in flight and the bridge serves
-  the newest, so a held scan stops on the release instead of playing
-  back a queue of tiles.
 
 ## Completed
 
@@ -250,6 +246,11 @@ These plans are designed. Each keeps its number and moves to
   client, and `status.idle` carries the whole contract a delegate's
   client is wired from. The drill watched the two old pods go and the
   browser return the instant a film ended.
+* [27, One tile in flight](completed/27-one-tile-in-flight.md). Built,
+  and drilled on `liken-1` and in the house on 2026-09-08 in release
+  2026.09.08-001. The scrubber keeps one trickplay request in flight
+  and the bridge serves the newest, so a held scan stops on the
+  release instead of playing back a queue of tiles.
 
 ## Open problems
 

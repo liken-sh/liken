@@ -1,22 +1,24 @@
 # 27, One tile in flight
 
-Proposed. A scrub sends the bridge a queue of tile requests it cannot
-keep up with, and the display keeps drawing tiles after the hand lifts.
+Built, and drilled on `liken-1` and in the house on 2026-09-08 in
+release 2026.09.08-001. A scrub sent the bridge a queue of tile
+requests it could not keep up with, and the display kept drawing tiles
+after the hand lifted.
 
 ## The problem
 
 A held left or right on the scrubber feels heavy, and the tile keeps
 moving after the release, as if it had inertia. The cause is a queue.
 
-[`trickplay.lua`](../display/trickplay.lua) asks the bridge for a tile
+[`trickplay.lua`](../../display/trickplay.lua) asks the bridge for a tile
 each time the cursor crosses a whole second. A keyboard-class remote
 autorepeats at the kernel's rate, about thirty events a second, and
-[`scrubber.lua`](../display/scrubber.lua) ramps the scan to three
+[`scrubber.lua`](../../display/scrubber.lua) ramps the scan to three
 hundred seconds of film per second of hold. So a hold sends about
 thirty requests a second, and at full speed nearly every one names a
 new tile.
 
-[`command.go`](../command.go) serves those requests one at a time, in
+[`command.go`](../../command.go) serves those requests one at a time, in
 order, off a channel of sixteen. Each one crops and scales a cell,
 writes a file, and replies. A request that names a sheet the bridge
 does not hold decodes the whole sheet first. The requests arrive faster
