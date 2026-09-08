@@ -99,8 +99,8 @@ stop is present only while a `Play` carries a `next` block.
 **Waiting.** A select on the chip grows it into the card, so a person
 sees what the offer starts before a press starts it. A select on the
 card broadcasts `liken-next`, the way a back at the bare video
-broadcasts `liken-exit`. A card the rise raised takes one press. The card dims and its
-last line reads "Starting". From then on the display routes every
+broadcasts `liken-exit`. A card the rise raised takes one press. The
+card dims and its last line reads "Starting". From then on the display routes every
 press to nothing except back, which exits the run the way it always
 does. The film plays on under the card until the operator ends the
 `Play` or the film ends on its own.
