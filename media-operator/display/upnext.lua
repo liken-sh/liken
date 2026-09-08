@@ -4,6 +4,7 @@
 -- and focus routes a select on it.
 local theme = require("theme")
 local utils = require("mp.utils")
+local advances = require("advances")
 
 local upnext = {}
 
@@ -94,38 +95,64 @@ local function card_x()
 end
 
 -- libass reports no text width to a script, so the panel behind the chip and
--- the clip of a long line add up an estimate. A glyph counts as one of three
--- widths, as a fraction of the type size: a capital, a space, and everything
--- else. The numbers were measured off the brand face at the chip's own size,
--- and they fit a mixed-case line to a few pixels.
-local UPPER_W = 0.46
-local SPACE_W = 0.16
-local OTHER_W = 0.385
-
--- The estimated width of one glyph, by the class its lead byte names. A
--- multibyte glyph counts as the other class.
-local function glyph_w(b, size)
-  if b == 32 then
-    return size * SPACE_W
+-- the clip of a long line add up the face's own advances, which
+-- display/advances.lua carries.
+--
+-- decode reads the UTF-8 sequence that starts at byte i, and returns its
+-- codepoint with the index of the byte after it. mpv's Lua is at the 5.1
+-- level with no utf8 library, and the advance table keys on codepoints. A
+-- malformed byte returns no codepoint and takes the default width.
+local function decode(s, i)
+  local b = string.byte(s, i)
+  local cp, rest
+  if b == nil then
+    return nil, i + 1
+  elseif b < 0x80 then
+    return b, i + 1
+  elseif b >= 0xF0 then
+    cp, rest = b - 0xF0, 3
+  elseif b >= 0xE0 then
+    cp, rest = b - 0xE0, 2
+  elseif b >= 0xC0 then
+    cp, rest = b - 0xC0, 1
+  else
+    return nil, i + 1
   end
-  if b >= 65 and b <= 90 then
-    return size * UPPER_W
+  for k = 1, rest do
+    local c = string.byte(s, i + k)
+    if not c or c < 0x80 or c >= 0xC0 then
+      return nil, i + k
+    end
+    cp = cp * 64 + (c - 0x80)
   end
-  return size * OTHER_W
+  return cp, i + rest + 1
 end
 
--- The estimated width of one line, in canvas pixels. A continuation byte is
--- part of the glyph its lead byte started, so only a lead byte adds width.
+-- The width of one glyph in canvas pixels. An ASS font size is the line
+-- height, so the em it draws at is a fraction of that size.
+local function glyph_w(cp, size)
+  local a = nil
+  if cp then
+    a = advances.advance[cp]
+  end
+  return size * advances.em_per_size * (a or advances.default)
+end
+
+-- The width of one line, in canvas pixels.
 local function text_w(s, size)
   local w = 0
-  for i = 1, #s do
-    local b = string.byte(s, i)
-    if b < 0x80 or b >= 0xC0 then
-      w = w + glyph_w(b, size)
-    end
+  local i = 1
+  while i <= #s do
+    local cp, rest = decode(s, i)
+    w = w + glyph_w(cp, size)
+    i = rest
   end
   return w
 end
+
+-- The ellipsis a clipped line ends on, U+2026, and its UTF-8 bytes.
+local ELLIPSIS = 0x2026
+local ELLIPSIS_BYTES = "\226\128\166"
 
 -- clip drops the glyphs a line has no room for and marks the cut with an
 -- ellipsis, so a long title stays inside the card.
@@ -133,21 +160,21 @@ local function clip(s, size, max_w)
   if text_w(s, size) <= max_w then
     return s
   end
-  local room = max_w - size * OTHER_W
+  local room = max_w - glyph_w(ELLIPSIS, size)
   local w = 0
-  local out = {}
-  for i = 1, #s do
-    local b = string.byte(s, i)
-    if b < 0x80 or b >= 0xC0 then
-      local glyph = glyph_w(b, size)
-      if w + glyph > room then
-        break
-      end
-      w = w + glyph
+  local i = 1
+  local cut = 1
+  while i <= #s do
+    local cp, rest = decode(s, i)
+    local g = glyph_w(cp, size)
+    if w + g > room then
+      break
     end
-    out[#out + 1] = string.sub(s, i, i)
+    w = w + g
+    cut = rest
+    i = rest
   end
-  return table.concat(out) .. "\226\128\166"
+  return string.sub(s, 1, cut - 1) .. ELLIPSIS_BYTES
 end
 
 -- The fade the card runs while the OSD is down, at the same rates the OSD

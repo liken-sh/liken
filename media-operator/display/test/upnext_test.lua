@@ -24,8 +24,8 @@ end
 -- Every display module a test loads. Each test clears them, so no test reads
 -- another test's module state.
 local DISPLAY = {
-  "theme", "upnext", "focus", "scrubber", "strip", "images", "presentation",
-  "audio", "subtitles", "video", "offset", "chooser",
+  "theme", "upnext", "advances", "focus", "scrubber", "strip", "images",
+  "presentation", "audio", "subtitles", "video", "offset", "chooser",
 }
 
 local function load(properties)
@@ -173,6 +173,56 @@ test("the focused chip takes the panel", function()
   lacks(rest, "\\bord2\\3c&H9AC4B4&")
   has(focused, "\\bord2\\3c&H9AC4B4&")
   has(focused, "\\1c&HE8E8E8&")
+end)
+
+-- The x the focused chip's panel draws at: the right margin plus the panel's
+-- padding, less the panel's own width.
+local function panel_x(upnext, title)
+  upnext.receive('{"title":"' .. title .. '"}')
+  local ass = upnext.draw(true)
+  return tonumber(ass:match("\\bord2[^}]-\\pos%(([%d%.%-]+),") or ass:match("\\pos%(([%d%.%-]+),"))
+end
+
+-- The width of one glyph at the chip's type size, from the advance table. The
+-- panel grows by exactly this much when the label gains the glyph.
+local function glyph_step(upnext, glyph)
+  return panel_x(upnext, "") - panel_x(upnext, glyph)
+end
+
+-- The width the advance table gives the longest label of the lab drill, "UP
+-- NEXT The Hobbit: The Desolation of Smaug", at the chip's type size of 28.
+-- The panel is that width plus its padding on both sides, and it ends at the
+-- right margin plus one padding, at 1802.
+local HOBBIT_W = 413.2589
+local HOBBIT_LABEL = "The Hobbit: The Desolation of Smaug"
+
+test("the chip's panel measures the label by the face's own advances", function()
+  local upnext = load()
+
+  local x = panel_x(upnext, HOBBIT_LABEL)
+
+  assert(
+    math.abs(x - (1758 - HOBBIT_W)) < 0.01,
+    string.format("the panel drew at %s, want %.2f", tostring(x), 1758 - HOBBIT_W)
+  )
+end)
+
+test("a multibyte glyph takes the table's width for its codepoint", function()
+  local upnext = load()
+
+  local dot = glyph_step(upnext, "\194\183")
+  local ellipsis = glyph_step(upnext, "\226\128\166")
+
+  assert(math.abs(dot - 28 * 0.7541 * 0.2490) < 0.01, string.format("U+00B7 measured %.4f", dot))
+  assert(math.abs(ellipsis - 28 * 0.7541 * 0.9480) < 0.01, string.format("U+2026 measured %.4f", ellipsis))
+end)
+
+test("a codepoint the table has no width for takes the default", function()
+  local upnext = load()
+
+  local euro = glyph_step(upnext, "\226\130\172")
+
+  assert(math.abs(euro - 28 * 0.7541 * 0.4749) < 0.01, string.format("U+20AC measured %.4f", euro))
 end)
 
 test("the card rises at ninety percent with the three lines", function()
