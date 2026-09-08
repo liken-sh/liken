@@ -100,6 +100,15 @@ local function load_focus(offer)
   return require("focus"), upnext, fake
 end
 
+-- The presses that take a risen offer: the rise, a summon, up to the stop,
+-- and one select on the card.
+local function take(focus, upnext)
+  upnext.on_percent(91)
+  focus.summon()
+  focus.nav("up")
+  focus.nav("select")
+end
+
 local tests = {}
 
 local function test(name, fn)
@@ -203,6 +212,7 @@ test("the unfocused card fills dark and the focused card takes the border", func
   upnext.on_percent(91)
 
   lacks(upnext.draw(false), "\\bord2\\3c&H9AC4B4&")
+  has(upnext.draw(false), "\\1c&H000000&\\1a&H54&")
   has(upnext.draw(true), "\\bord2\\3c&H9AC4B4&")
 end)
 
@@ -220,6 +230,7 @@ test("the card shows itself with the OSD down and leaves a sliver", function()
   local sliver = upnext.draw_outside(false)
 
   has(risen, "E05 \194\183 The Long Tide")
+  has(risen, "\\1c&H000000&\\1a&H54&")
   lacks(sliver, "E05 \194\183 The Long Tide")
   has(sliver, "\\pos(1898.00,380.00)")
   has(sliver, string.format("m 0 0 l 22.00 0 l 22.00 %d.00 l 0 %d.00", CARD_H, CARD_H))
@@ -299,23 +310,83 @@ test("back on the offer dismisses the OSD", function()
   assert(#messages(fake, "liken-exit") == 0, "back ended the run from the offer")
 end)
 
-test("select on the offer sends liken-next and waits", function()
+test("select on the risen card sends liken-next and waits", function()
   local focus, upnext, fake = load_focus(OFFER)
 
-  focus.summon()
-  focus.nav("up")
-  focus.nav("select")
+  take(focus, upnext)
 
   assert(#messages(fake, "liken-next") == 1, "select sent no liken-next")
   assert(upnext.waiting(), "select did not enter waiting")
 end)
 
-test("the waiting card dims and reads Starting", function()
+test("select on the chip expands it and sends nothing", function()
+  local focus, upnext, fake = load_focus(OFFER)
+
+  focus.summon()
+  focus.nav("up")
+  local before = upnext.draw(true)
+  focus.nav("select")
+  local after = upnext.draw(true)
+
+  has(before, "UP NEXT  E05 \194\183 The Long Tide")
+  has(after, "NEXT IN HARBOR LIGHTS \194\183 S02")
+  has(after, "Harbor Lights \194\183 S02 \194\183 45 min")
+  assert(#messages(fake, "liken-next") == 0, "a select on the chip took the offer")
+  assert(upnext.waiting() == false, "a select on the chip entered waiting")
+  assert(focus.focused_stop() == "next", "the expansion moved the focus")
+end)
+
+test("a second select on the expanded card takes the offer", function()
+  local focus, upnext, fake = load_focus(OFFER)
+
+  focus.summon()
+  focus.nav("up")
+  focus.nav("select")
+  focus.nav("select")
+
+  assert(#messages(fake, "liken-next") == 1, "the second select sent no liken-next")
+  assert(upnext.waiting(), "the second select did not enter waiting")
+end)
+
+test("down after an expansion returns to the chip", function()
   local focus, upnext = load_focus(OFFER)
 
   focus.summon()
   focus.nav("up")
   focus.nav("select")
+  focus.nav("down")
+  focus.nav("up")
+
+  has(upnext.draw(true), "UP NEXT  E05 \194\183 The Long Tide")
+end)
+
+test("a hidden OSD returns to the chip", function()
+  local focus, upnext = load_focus(OFFER)
+
+  focus.summon()
+  focus.nav("up")
+  focus.nav("select")
+  focus.dismiss()
+  focus.summon()
+  focus.nav("up")
+
+  has(upnext.draw(true), "UP NEXT  E05 \194\183 The Long Tide")
+end)
+
+test("an expansion never draws over the bare video", function()
+  local focus, upnext = load_focus(OFFER)
+
+  focus.summon()
+  focus.nav("up")
+  focus.nav("select")
+
+  assert(upnext.draw_outside(false) == nil, "the expanded card drew with the OSD down")
+end)
+
+test("the waiting card dims and reads Starting", function()
+  local focus, upnext = load_focus(OFFER)
+
+  take(focus, upnext)
   local ass = upnext.draw_outside(true)
 
   assert(upnext.draw(true) == nil, "the waiting card drew inside the OSD as well")
@@ -326,11 +397,9 @@ test("the waiting card dims and reads Starting", function()
 end)
 
 test("waiting swallows every press but back", function()
-  local focus, _, fake = load_focus(OFFER)
+  local focus, upnext, fake = load_focus(OFFER)
 
-  focus.summon()
-  focus.nav("up")
-  focus.nav("select")
+  take(focus, upnext)
   local before = #fake.commands
   for _, action in ipairs({ "up", "down", "left", "right", "select" }) do
     focus.nav(action)
@@ -344,11 +413,9 @@ test("waiting swallows every press but back", function()
 end)
 
 test("waiting sends liken-exit from a hidden OSD as well", function()
-  local focus, _, fake = load_focus(OFFER)
+  local focus, upnext, fake = load_focus(OFFER)
 
-  focus.summon()
-  focus.nav("up")
-  focus.nav("select")
+  take(focus, upnext)
   focus.dismiss()
   focus.nav("back")
 

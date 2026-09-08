@@ -16,6 +16,9 @@ local ART_H = 248
 local PAD_X = 22
 local PAD_Y = 16
 local CARD_R = 14
+-- The unfocused card's fill, dark enough to read the three lines over a
+-- bright frame. The focused card takes the chooser panel.
+local CARD_ALPHA = "&H54&"
 -- The drop from each line of the card to the next, at the type size each
 -- line draws in.
 local REASON_PITCH = 40
@@ -64,6 +67,10 @@ local offer = nil
 -- Whether the playhead has crossed the rise, whether a select has asked for
 -- the next work, and the card's own fade while the OSD is down.
 local risen = false
+-- Whether a select on the chip has grown it into the card. The rise does the
+-- same on its own. This state lasts only until the focus leaves the stop or
+-- the OSD hides.
+local expanded = false
 local waiting = false
 local fade = 0
 local fade_target = 0
@@ -87,42 +94,60 @@ local function card_x()
 end
 
 -- libass reports no text width to a script, so the panel behind the chip and
--- the clip of a long line count a glyph at this fraction of the type size,
--- which is near the average advance of the brand face. A wide uppercase line
--- can still run past the padding.
-local CHAR_W = 0.40
+-- the clip of a long line add up an estimate. A glyph counts as one of three
+-- widths, as a fraction of the type size: a capital, a space, and everything
+-- else. The numbers were measured off the brand face at the chip's own size,
+-- and they fit a mixed-case line to a few pixels.
+local UPPER_W = 0.46
+local SPACE_W = 0.16
+local OTHER_W = 0.385
 
-local function glyphs(s)
-  local n = 0
+-- The estimated width of one glyph, by the class its lead byte names. A
+-- multibyte glyph counts as the other class.
+local function glyph_w(b, size)
+  if b == 32 then
+    return size * SPACE_W
+  end
+  if b >= 65 and b <= 90 then
+    return size * UPPER_W
+  end
+  return size * OTHER_W
+end
+
+-- The estimated width of one line, in canvas pixels. A continuation byte is
+-- part of the glyph its lead byte started, so only a lead byte adds width.
+local function text_w(s, size)
+  local w = 0
   for i = 1, #s do
     local b = string.byte(s, i)
     if b < 0x80 or b >= 0xC0 then
-      n = n + 1
+      w = w + glyph_w(b, size)
     end
   end
-  return n
+  return w
 end
 
-local function cut(s, n)
-  local count = 0
-  for i = 1, #s do
-    local b = string.byte(s, i)
-    if b < 0x80 or b >= 0xC0 then
-      count = count + 1
-      if count > n then
-        return string.sub(s, 1, i - 1)
-      end
-    end
-  end
-  return s
-end
-
+-- clip drops the glyphs a line has no room for and marks the cut with an
+-- ellipsis, so a long title stays inside the card.
 local function clip(s, size, max_w)
-  local room = math.floor(max_w / (size * CHAR_W))
-  if room < 2 or glyphs(s) <= room then
+  if text_w(s, size) <= max_w then
     return s
   end
-  return cut(s, room - 1) .. "\226\128\166"
+  local room = max_w - size * OTHER_W
+  local w = 0
+  local out = {}
+  for i = 1, #s do
+    local b = string.byte(s, i)
+    if b < 0x80 or b >= 0xC0 then
+      local glyph = glyph_w(b, size)
+      if w + glyph > room then
+        break
+      end
+      w = w + glyph
+    end
+    out[#out + 1] = string.sub(s, i, i)
+  end
+  return table.concat(out) .. "\226\128\166"
 end
 
 -- The fade the card runs while the OSD is down, at the same rates the OSD
@@ -172,6 +197,7 @@ end
 -- A new offer, or the loss of one, drops every state the last one had.
 local function reset()
   risen = false
+  expanded = false
   waiting = false
   fade = 0
   fade_target = 0
@@ -247,6 +273,27 @@ function upnext.waiting()
   return waiting
 end
 
+-- The card is what a select acts on, so the display grows the chip into it
+-- first and takes the offer on the press after that.
+function upnext.showing_card()
+  return risen or expanded
+end
+
+function upnext.expand()
+  expanded = true
+  redraw_cb()
+end
+
+-- The offer falls back to the chip when the focus leaves the stop or the OSD
+-- hides, so a summon shows the small form again until the rise.
+function upnext.collapse()
+  if not expanded then
+    return
+  end
+  expanded = false
+  redraw_cb()
+end
+
 -- take records that focus broadcast the ask. The card then waits for the
 -- operator to end this Play and start the next one. Nothing here ends the
 -- wait: the film ends, or a back press ends the run.
@@ -264,7 +311,7 @@ local function chip(focused)
   local parts = {}
   local color = theme.color.muted
   if focused then
-    local w = glyphs(label) * theme.type.tiny * CHAR_W + 2 * CHIP_PAD_X
+    local w = text_w(label, theme.type.tiny) + 2 * CHIP_PAD_X
     parts[#parts + 1] = theme.panel(
       right() + CHIP_PAD_X - w, CHIP_Y - CHIP_PAD_Y, w, CHIP_H + 2 * CHIP_PAD_Y
     )
@@ -284,7 +331,7 @@ local function card(focused, detail, detail_color)
     parts[#parts + 1] = theme.panel(x, CARD_TOP, CARD_W, CARD_H)
   else
     parts[#parts + 1] = theme.rounded_rect(
-      x, CARD_TOP, CARD_W, CARD_H, CARD_R, theme.color.shadow, theme.alpha.dim
+      x, CARD_TOP, CARD_W, CARD_H, CARD_R, theme.color.shadow, CARD_ALPHA
     )
   end
   parts[#parts + 1] = theme.rect(x, CARD_TOP, CARD_W, ART_H, theme.color.shadow, theme.alpha.panel)
@@ -326,7 +373,7 @@ function upnext.draw(focused)
   if not offer or waiting then
     return nil
   end
-  if risen then
+  if risen or expanded then
     return card(focused, offer.detail, theme.color.muted)
   end
   return chip(focused)
@@ -364,10 +411,13 @@ local function card_on_screen(visible)
   if waiting then
     return true
   end
+  if visible and (risen or expanded) then
+    return true
+  end
   if not risen then
     return false
   end
-  return visible or fade > 0
+  return fade > 0
 end
 
 -- request asks the bridge for the art at the pixel size the art box takes on

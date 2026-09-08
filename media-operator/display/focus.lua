@@ -166,6 +166,10 @@ local function move(dir)
   if focused == "fine" and next_stop ~= "fine" and scrubber.scanning() then
     scrubber.cancel()
   end
+  -- An expanded card is part of the stop, so leaving the stop collapses it.
+  if focused == "next" and next_stop ~= "next" then
+    upnext.collapse()
+  end
   focused = next_stop
 end
 
@@ -237,6 +241,9 @@ end
 
 function focus.dismiss()
   summoned = false
+  -- A hidden OSD collapses the expansion, so the next summon shows the chip
+  -- again until the playhead reaches the rise.
+  upnext.collapse()
   if capturing then
     capturing.close()
     capturing = nil
@@ -281,9 +288,15 @@ function focus.select()
   end
   if focus.visible() then
     if focused == "next" then
-      -- The ask goes out, and the card waits for the next Play.
-      mp.command_native({ "script-message", NEXT })
-      upnext.take()
+      -- The first select on the chip grows it into the card, and a select on
+      -- the card sends the ask. So the offer shows what it starts before a
+      -- press starts it. A card the rise raised takes one press.
+      if upnext.showing_card() then
+        mp.command_native({ "script-message", NEXT })
+        upnext.take()
+      else
+        upnext.expand()
+      end
       redraw_cb()
       return
     end
