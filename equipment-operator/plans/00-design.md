@@ -178,8 +178,11 @@ The media operator resolves a `Player`'s display to a node and a
 monitor id, as it does today, and looks for a `Receiver` input that
 matches both. It applies the session for as long as the match holds,
 sets `active` when a `Play` starts, before it creates the pod, and
-hands the pod and the idle client the owner mark's topic. The command sidecar subscribes to the mark and gates
-mpv on it. When the unit goes away, the session is lifted.
+hands the pod and the idle client the owner mark's topic. The command
+sidecar subscribes to the mark and gates mpv on it. The media
+operator reads the mark too, and a pod it creates for an owned unit
+carries no level of its own. When the unit goes away, the session is
+lifted.
 
 A `Player` with no matching `Receiver` works as it does today. A
 Bluetooth speaker carries no monitor id, so it never matches.
@@ -195,8 +198,10 @@ Bluetooth speaker carries no monitor id, so it never matches.
 - A room with picture on the receiver and sound on a Bluetooth
   speaker. The level owner then comes from the sinks and power and
   input from the display, two lookups instead of one.
-- The idle client draws the level today. It should honor the owner
-  mark the way the sidecar does.
+- The idle client draws the level today. The media screen crate
+  delivers the mark to the client as a moment, and the stock idle
+  client folds it and changes nothing. It should honor the mark the
+  way the sidecar does.
 - HEOS as a second protocol block, on port 1255, for music.
 - `Television` and `Projector` kinds. PJLink would be the first
   protocol that is a standard and not a brand.

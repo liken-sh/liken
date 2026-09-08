@@ -72,8 +72,9 @@ type ReceiverInput struct {
 }
 
 // What a session names: the Player, the input it plays through, the
-// topic it takes the level from, and the two flags the media operator
-// flips on it. Active says a Play stands. Awake says the room's screen
+// topic it takes the level from and marks itself the owner of, and the
+// two flags the media operator flips on it. Active says a Play stands.
+// Awake says the room's screen
 // is awake. The media operator holds a session whenever the Player has
 // a screen, the idle screen included, so a session with both flags off
 // owns the level and sends the equipment nothing.

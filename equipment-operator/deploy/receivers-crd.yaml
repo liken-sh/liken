@@ -121,7 +121,7 @@ spec:
                 session:
                   type: object
                   required: [player, input, volumeTopic]
-                  description: "The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time. Power and input go out once, each time active or awake turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster."
+                  description: "The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time, and marks itself the owner on the topic plus /owner. Power and input go out once, each time active or awake turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster."
                   properties:
                     player:
                       type: string
@@ -138,7 +138,7 @@ spec:
                       type: string
                       minLength: 1
                       maxLength: 1024
-                      description: "The Player's volume topic on the media bus. The operator follows it, owns the level while the session stands, and writes the receiver's own knob back to it."
+                      description: "The Player's volume topic on the media bus, in full. The operator subscribes to it, publishes a retained owner mark on the topic plus /owner while the session stands, and writes the receiver's true level back to it."
                     active:
                       type: boolean
                       description: "Whether a Play stands on the Player. When it turns on, the receiver is powered on and its input selected, once. While it is off, the session owns the level and sends the receiver nothing, so an idle screen never wakes the room. Absent means off."

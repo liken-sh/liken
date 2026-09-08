@@ -82,11 +82,15 @@ that matches both, and applies `spec.session` for as long as the
 `Player` has that screen, at the idle screen included. The session
 takes the level from the `Player`'s volume topic the whole time, so
 the remote's volume keys turn the receiver whether a film plays or
-not. When a `Play` starts, the session powers the receiver on and
-selects the input, once. An idle screen never wakes the receiver.
+not. The topic and its payload are the `media-operator`'s, given on
+its [players page](https://media.liken.sh/docs/reference/players/).
+What this operator reads and writes there is on
+[the receiver on the bus](/docs/reference/bus/). When a `Play`
+starts, the session powers the receiver on and selects the input,
+once. An idle screen never wakes the receiver.
 
 A person at the receiver's own remote outranks the cluster. If they
 select another input, the status records it and nothing switches
 back until the next `Play` starts. If they turn the knob, the new
-level is written back to the bus, so the next press steps from
-there.
+level is written back to the volume topic, so the next press steps
+from there.

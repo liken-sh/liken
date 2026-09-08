@@ -22,8 +22,13 @@ spec:
   session:
     player: house/theater
     input: MPLAY
-    volumeTopic: liken/media/house/theater/volume
+    volumeTopic: liken/media/players/house/theater/volume
 ```
+
+The volume topic is the `Player`'s, on the media bus the
+`media-operator` runs. While the session stands, the operator holds
+a retained owner mark on the topic plus `/owner`, and the pods leave
+the level to the receiver.
 
 The manual is at [equipment.liken.sh](https://equipment.liken.sh/).
 `plans/README.md` indexes the plans. `make test` runs every check CI
