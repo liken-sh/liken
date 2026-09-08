@@ -59,6 +59,7 @@ operator is what resolves the two tiers.
           address: bus.liken-system.svc:1883
           statusTopic: liken/media/players/den/den/status
           volumeTopic: liken/media/players/den/den/volume
+          volumeOwnerTopic: liken/media/players/den/den/volume/owner
           commandsTopic: liken/media/players/den/den/commands
           panelTopic: liken/media/players/den/den/panel
           remotes:
@@ -76,7 +77,8 @@ operator is what resolves the two tiers.
   the screen never fades on its own, and zero on the second means the
   panel never goes dark on its own.
 * `bus` is the broker and every topic the client reads or writes. The
-  section on presses below covers each one.
+  section on presses below covers each one, and
+  [the media bus](/docs/reference/bus/) gives the rules they follow.
 
 ## Build the pod
 
@@ -141,6 +143,14 @@ Set these variables on your container. Each value comes from
 * `MEDIA_PLAYER_VOLUME_TOPIC`, from `bus.volumeTopic`. It is empty for
   a unit with no sinks. Set nothing then, and the client draws no level
   and steps none.
+* `MEDIA_PLAYER_VOLUME_OWNER_TOPIC`, from `bus.volumeOwnerTopic`. It
+  is present whenever `bus.volumeTopic` is. The topic carries the
+  retained [owner mark](/docs/reference/players/#volumeowner): a
+  non-empty payload means equipment applies the unit's level, and an
+  empty payload means no owner holds it. While the mark stands, draw
+  no level of your own and apply none to any audio the client plays.
+  A press still publishes the next state on the volume topic, and the
+  equipment moves one step in its direction.
 * `MEDIA_PLAYER_COMMANDS_TOPIC`, from `bus.commandsTopic`. The operator
   publishes `{"action": "re-present"}` there when a `Play` ends, and
   the client maps a fresh surface. Nothing else arrives, and the client

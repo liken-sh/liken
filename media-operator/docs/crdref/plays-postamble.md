@@ -1,8 +1,8 @@
 ## On the bus
 
 The `plays` tree carries one run's commands, its report, and its
-availability. See [the media bus](/docs/reference/bus/) for the
-rules every topic follows.
+availability. [The media bus](/docs/reference/bus/) gives the rules
+every topic follows and lists every writer and reader of each.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
@@ -76,9 +76,23 @@ The operator folds each report into the `Play`'s Kubernetes status,
 so a program that only needs the current position can read either
 one.
 
+Two writers clear the topic. The pod clears it with an empty
+retained payload when its run ends cleanly, so a finished `Play`
+leaves no report that reads as still playing. A pod that dies
+uncleanly leaves its last report behind, so the operator clears the
+topic as well: two minutes after the `Play` itself is gone, deleted
+by a person or retired at the end of its `ttlSecondsAfterFinished`
+window, the operator publishes an empty retained payload on `status`
+and on `availability`. The two minutes let a subscriber that reads
+just after the delete still see the run's final state. A `Play`
+recreated under the same name inside that window is not cleared.
+
 ### `availability`
 
-`online` or `offline`, retained. The pod names this topic as its
-MQTT Last Will with `offline` as the payload, and publishes `online`
-once it connects, so a retained status a killed pod left behind does
-not read as a live run.
+`online` or `offline`, retained, the
+[availability](/docs/reference/bus/#availability) signal for the
+report above. The pod names this topic as its MQTT Last Will with
+`offline` as the payload, publishes `online` once it connects, and
+publishes `offline` itself when its run ends cleanly. The operator
+clears the topic with an empty retained payload two minutes after
+the `Play` is gone, on the same terms as `status`.

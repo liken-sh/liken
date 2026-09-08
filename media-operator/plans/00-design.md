@@ -202,10 +202,19 @@ remote out of the playback pod.
 
 Each `Remote` reconciles into one standing pod, pinned by its device
 claim to the machine that owns its radio, running whether or not
-anything plays. It reads the controller's input nodes and publishes
-the raw button and axis events to a small message bus, likely MQTT.
-The bus is the data plane and the operator is not on it: when the
-operator restarts, buttons keep working.
+anything plays. It reads the controller's input nodes, folds the base
+table with the `Remote`'s `Keymap`, and publishes each key event on
+an MQTT bus. A press travels from that pod to the playback pod or the
+idle client directly, gated on a retained focus mark, so buttons keep
+working while the operator restarts. The operator is on the bus as
+well, as a subscriber and as the writer of the retained state it
+owns. It subscribes to nine filters: each `Play`'s report and
+availability, each controller's focus mark, cycle request,
+availability, and declared codes, and each unit's panel desire,
+level, and owner mark. It publishes the focus marks, the key tables,
+the `Player` statuses, and the seeded levels, retained, and it clears
+each one when its object is gone. `docs/content/docs/reference/bus.md`
+lists every topic with its writer and readers.
 
 Each playback pod runs one receiver container beside `mpv`. It
 subscribes to the remotes bound to its player, applies the binding's

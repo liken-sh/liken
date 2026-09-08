@@ -34,7 +34,8 @@ good table.
 
 Each `Remote` owns one branch of the [bus](/docs/reference/bus/)
 topic tree, `remotes/<namespace>/<name>/`, under the cluster's topic
-base.
+base. The bus page gives the rules every topic follows and lists
+every writer and reader of each.
 
 | topic          | writer       | retained | carries                       |
 |----------------|--------------|----------|-------------------------------|
@@ -55,8 +56,9 @@ the control, after it folded the base table with the `Keymap`:
 `value` is the kernel's: 0 is the release, 1 the press, and 2 the
 autorepeat. A keyboard's own autorepeat passes through, and the pod
 synthesises value 2 for a gamepad button or a hat with a `repeat`
-block. A control the folded table maps to nothing is not published. A
-press is an event and not a state, so the topic is not retained and a
+block. A control the folded table maps to nothing is not published. The
+topic is not retained
+([why](/docs/reference/bus/#retained-state-and-events)), so a
 subscriber that joins later reads no stale press.
 
 ### keys
@@ -85,18 +87,21 @@ bitmaps at every node open:
     {"keys": [304, 305], "axes": [16, 17]}
 
 The set is complete with no button pressed, because the bitmaps
-state every code a node can report. The topic is retained, because
-a declared set is a state and not an event, and the pod clears it
-with an empty payload when the nodes vanish. The operator subtracts
-the folded table from the set and reports the gap as
+state every code a node can report. The topic is retained
+([why](/docs/reference/bus/#retained-state-and-events)), and the pod
+clears it with an empty payload when the nodes vanish. The operator
+subtracts the folded table from the set and reports the gap as
 `status.unbound` on the `Remote`.
 
 ### availability
 
-The `Remote`'s pod names this topic as its MQTT Last Will, with
-`offline` as the payload, and publishes `online` once it connects.
-When the pod dies, the broker writes `offline`, so the retained
-codes a dead pod left behind do not read as a live declaration.
+`online` or `offline`, retained, the
+[availability](/docs/reference/bus/#availability) signal for the
+codes above. The `Remote`'s pod names this topic as its MQTT Last
+Will with `offline` as the payload, and publishes `online` once it
+connects. When the pod dies, the broker writes `offline`, so the
+retained codes a dead pod left behind do not read as a live
+declaration.
 
 ### focus and focus/cycle
 
@@ -116,11 +121,15 @@ in a person's hand drives the film they just started. A mark that
 names a deleted `Player`, or a `Player` that no longer lists the
 controller, moves to the first bound `Player` by name. A `Play`
 that finishes moves no mark: the unit stays focused and shows its
-idle screen.
+idle screen. A controller that no `Player` lists any more has nothing
+to drive, so the operator clears its mark with an empty retained
+payload.
 
-A press of `KEY_CYCLEWINDOWS` publishes on `focus/cycle`. Only the
-holder of focus publishes it, the playback pod's command sidecar
-during a film and the idle screen client between films. The operator
+A press of `KEY_CYCLEWINDOWS` publishes on `focus/cycle`, with an
+empty payload: the topic names the controller, and the request
+carries nothing else. Only the holder of focus publishes it, the
+playback pod's command sidecar during a film and the idle screen
+client between films. The operator
 reads the request and advances the mark to the next bound `Player`
 by name, wrapping the last back to the first. A controller bound to
 one unit wraps to the same `Player`, and the operator republishes the
