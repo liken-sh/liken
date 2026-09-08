@@ -30,6 +30,12 @@ const DEFAULT_PORT: u16 = 1883;
 /// clock.
 const KEEPALIVE: Duration = Duration::from_secs(30);
 
+/// The largest packet this client sends or accepts. rumqttc caps both at
+/// ten kilobytes unless told otherwise, and a play request for a whole
+/// season of episodes with the work that follows it is larger than that.
+/// The broker sets no limit of its own.
+const MAX_PACKET_SIZE: usize = 256 * 1024;
+
 /// The wait after a failed session, so a broker that is down is no tight
 /// reconnect loop.
 const RECONNECT_WAIT: Duration = Duration::from_secs(1);
@@ -111,6 +117,7 @@ impl Reader {
 
         let mut options = MqttOptions::new(client_id, host, port);
         options.set_keep_alive(KEEPALIVE);
+        options.set_max_packet_size(MAX_PACKET_SIZE, MAX_PACKET_SIZE);
         let (client, connection) = Broker::new(options, QUEUE_DEPTH);
 
         let (sender, moments) = mpsc::channel();
