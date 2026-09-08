@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -69,9 +70,12 @@ type session struct {
 	latest     volumeState
 	haveLatest bool
 
-	awaiting     volumeState
-	haveAwaiting bool
-	adopted      bool
+	// awaiting holds every position the session put on the topic before
+	// it adopted. The adopt publishes one, and a report before the adopt
+	// publishes another, and the broker returns each in its own time, so
+	// the first of them to come back is the adopt line.
+	awaiting []volumeState
+	adopted  bool
 }
 
 // startSession opens the session's own broker connection and claims the
@@ -175,8 +179,9 @@ func (s *session) receive(topic string, payload []byte) {
 	// session left and a press meant for this one. Everything before that
 	// line was written for mpv's scale and moves nothing.
 	if !s.adopted {
-		if s.haveAwaiting && s.awaiting == state {
+		if slices.Contains(s.awaiting, state) {
 			s.latest, s.haveLatest, s.adopted = state, true, true
+			s.awaiting = nil
 		}
 		s.mutex.Unlock()
 		return
@@ -244,7 +249,11 @@ func (s *session) nextPosition(reading denonState, up bool) (int, bool) {
 
 // report puts where the receiver actually stands back on the topic, so
 // the sidecar's next press counts from a value that matches the
-// equipment.
+// equipment. A position reported before the adopt, such as the volume
+// the receiver states when its connection opens, is the same message
+// the adopt publishes, so the session takes its return as the adopt
+// line as well. The broker returns the two in its own order, and the
+// session must not wait for the second when the first has come back.
 func (s *session) report(reading denonState) {
 	level, ok := levelForHalves(reading.Volume, ceilingHalves(s.scale()))
 	if !ok {
@@ -264,6 +273,9 @@ func (s *session) report(reading denonState) {
 	}
 	s.bus.Publish(s.spec.VolumeTopic, payload, true)
 	s.latest, s.haveLatest = position, true
+	if !s.adopted {
+		s.awaiting = append(s.awaiting, position)
+	}
 }
 
 // observe is the session's half of every line the receiver sends. It
@@ -361,7 +373,7 @@ func (s *session) publishPosition() bool {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.bus.Publish(s.spec.VolumeTopic, payload, true)
-	s.awaiting, s.haveAwaiting = held, true
+	s.awaiting = append(s.awaiting, held)
 	return true
 }
 

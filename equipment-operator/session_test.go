@@ -579,6 +579,24 @@ func refuseVolumeSets(t *testing.T, equipment *fakeDenon, within time.Duration) 
 	}
 }
 
+// A position the receiver reports before the adopt, such as a knob
+// turn while the input is still being selected, is the same message
+// the adopt publishes. Its return adopts the session, so the echo of
+// the first position on the topic is enough whichever path wrote it.
+func TestAPositionReportedBeforeTheAdoptIsTheAdoptLine(t *testing.T) {
+	h := newSessionHarness(t)
+	held := h.begin(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	h.equipment.turnKnob(60)
+
+	first := broker.waitForTopic(t, testVolumeTopic)
+	broker.push(testVolumeTopic, first.payload)
+
+	waitUntilAdopted(t, held)
+	h.equipment.waitForCommands(t, "SIGAME")
+}
+
 // A level published after the adopt is a press, and it moves the
 // receiver.
 func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
