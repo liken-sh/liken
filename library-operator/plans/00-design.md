@@ -186,11 +186,14 @@ The media browser is one native Wayland client, built with
 [Iced](https://iced.rs) in Rust. At rest it draws the idle screen that
 `media-operator` defines: the mark, the clock, the unit's name and
 parts, and their animations. On a press it draws the home page. It runs
-in `media-operator`'s idle pod, selected by a `Player` field that names
-an image, and it reads the same bus topics the idle screen reads: the
-`Player`'s status, commands, focus, and volume. `media-operator`'s
-idle-command sidecar keeps the clock, the panel power, and the fade
-policy, and has no notion of libraries.
+in a pod this operator stands for a `Player` whose `spec.idle.controller`
+names this operator, and it reads the same bus topics the idle screen
+reads, which `media-operator` names in the `Player`'s `status.idle.bus`:
+the `Player`'s status, volume, volume owner mark, commands, and panel
+topics, and each remote's events and focus topics. `media-operator`
+settles the fade and off windows, and the browser runs the timers and
+states the panel desire on the panel topic. `media-operator` has no
+notion of libraries.
 
 The media browser reads the catalog from its own sidecar's file and
 subscribes to that sidecar's update stream. Which libraries a screen
@@ -198,11 +201,16 @@ shows, and what its first view contains, are facts of this layer. They
 belong to a resource of this operator and never to the `Player`.
 
 When a person picks a title, the media browser publishes a request on
-the bus: its `Player` and the item. The operator, which has the RBAC,
-creates the `Play` in the `Player`'s namespace with the media reference,
-the thumbnail sidecars, and the start position. The screen holds no API
-credential. When the `Play` ends, the media browser is where the person
-left it.
+the bus, on a topic that names its `Player`: the library, the paths of
+the items to play, their presentation, the people watching, the
+`Watch`, the work's aliases, and the start position. The operator,
+which has the RBAC, creates the `Play` in the `Player`'s namespace with
+each path as a claim reference, the art and trickplay references, the
+people and the `Watch` as owner references, the aliases as annotations,
+and the start position. The screen holds no API credential. When the
+`Play` ends, the media browser is where the person left it.
+`docs/content/docs/reference/bus.md` is the contract of every topic on
+this operator's tree.
 
 ## Watch state and people
 

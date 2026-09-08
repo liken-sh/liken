@@ -67,10 +67,12 @@ is still there, showing its idle screen.
 Over the bus, every key a remote sends reaches the browser under the
 kernel's name, except volume, mute, and the cycle key. Those three are
 handled before they reach the browser, and the browser draws the level
-as a fading row. So a remote with a keyboard types into search, and
-its home and search buttons work once a `Keymap` names them. The same
-keys reach the browser from a keyboard attached to the screen's
-machine.
+as a fading row. While the `Player`'s owner-mark topic holds a
+non-empty payload, equipment owns the room's level and carries its own
+indicator, so the browser draws no row. So a remote with a keyboard
+types into search, and its home and search buttons work once a
+`Keymap` names them. The same keys reach the browser from a keyboard
+attached to the screen's machine.
 
 ## 4. The keys
 
@@ -123,11 +125,15 @@ hits puts focus on the strip, and enter there opens the grid again.
 ## 6. Playback
 
 Enter on a title resolves what to play from the browser's own copy of
-the catalog and publishes the list on the bus. The operator turns it
-into a `Play` for the `Player`, with each item's path as a claim
-reference, and `media-operator` runs it. The `Play` is named after the
-title, so `kubectl get plays` reads like a listing. When the `Play`
-ends, the browser is presented again on the page it left.
+the catalog and publishes the list on the bus, as a play request on
+`liken/library/players/{namespace}/{player}/play`. The operator names
+the topic on the browser container as `LIBRARY_PLAY_TOPIC`, and
+[The library bus](/docs/reference/bus/#the-play-request) gives every field
+of the request. The operator turns it into a `Play` for the `Player`,
+with each item's path as a claim reference, and `media-operator` runs
+it. The `Play` is named after the title, so `kubectl get plays` reads
+like a listing. When the `Play` ends, the browser is presented again
+on the page it left.
 
 ## Every screen shows every library
 

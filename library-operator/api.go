@@ -29,13 +29,8 @@ const playerAPIVersion = "media.liken.sh/v1alpha1"
 // nothing else.
 const personAPIVersion = "people.liken.sh/v1alpha1"
 
-// The kinds this operator names in an owner reference, and reads back
-// off a Play. A Play's owners say who watched it and which Watch it
-// belongs to, which is what an audience is.
-const (
-	watchKind  = "Watch"
-	personKind = "Person"
-)
+// PROSE: the one kind this operator names in an owner reference and reads back off a Play; a Play's owners are the people who watched it, which is what an audience is.
+const personKind = "Person"
 
 // The finalizer this operator holds on every Library. It keeps a
 // deleted Library open until the departure in depart.go has swept
@@ -484,23 +479,46 @@ type PlayerIdleStatus struct {
 }
 
 // PlayerIdleBus is the broker and every topic a delegate's client reads
-// or writes: the retained status, the level, the commands topic that
-// carries the re-present, the panel topic the client states the panel
-// desire on, and the unit's controllers. VolumeTopic is empty for a
-// unit with no sinks, which is the speaker gate. An older
-// media-operator publishes no block, and the browser then takes the
-// keyboard alone.
+// or writes, as media-operator publishes them on the Player's status.
+// This operator copies each one onto the browser container as the
+// MEDIA_ variable of the same name, and the media-screen crate the
+// browser links reads them there. An older media-operator publishes no
+// block, and the browser then takes the keyboard alone.
 type PlayerIdleBus struct {
-	Address     string `json:"address"`
+	// The broker's address, which the browser connects to for every
+	// topic below and for the play request it publishes on this
+	// operator's own tree.
+	Address string `json:"address"`
+	// The Player's retained status. The browser reads the activity off
+	// it: while the unit plays, the film covers the browser, and while
+	// it plays nothing the browser draws its screens.
 	StatusTopic string `json:"statusTopic"`
+	// The Player's retained level. The browser reads the level and the
+	// muted flag off it and draws them as a fading row on a live
+	// message, and a volume key steps from the last level it delivered
+	// and publishes the next one back on this topic. Empty for a unit
+	// with no sinks, which is the speaker gate: no level is drawn and
+	// no volume key publishes.
 	VolumeTopic string `json:"volumeTopic,omitempty"`
 	// VolumeOwnerTopic is VolumeTopic with "/owner" after it. A retained
-	// non-empty payload on it names equipment that owns the room's level.
-	// An older media-operator publishes no such field.
-	VolumeOwnerTopic string             `json:"volumeOwnerTopic,omitempty"`
-	CommandsTopic    string             `json:"commandsTopic"`
-	PanelTopic       string             `json:"panelTopic"`
-	Remotes          []PlayerIdleRemote `json:"remotes,omitempty"`
+	// non-empty payload on it names equipment that owns the room's
+	// level, and while that mark stands the browser draws no level,
+	// because the equipment carries its own indicator. An empty payload
+	// clears the mark, and the row then shows what the last level said.
+	// An older media-operator publishes no such field, and the browser
+	// then draws the level with no gate over it.
+	VolumeOwnerTopic string `json:"volumeOwnerTopic,omitempty"`
+	// The Player's commands topic. The browser acts on one command, the
+	// operator's re-present, which puts the browser back on the page it
+	// left once a Play ends, and only while the unit plays nothing.
+	CommandsTopic string `json:"commandsTopic"`
+	// The retained topic the browser states its panel desire on: off
+	// once its off window passes with no press, and on again at the
+	// next press.
+	PanelTopic string `json:"panelTopic"`
+	// The unit's controllers, in spec.remotes order. The browser
+	// subscribes to each one's events and focus topics.
+	Remotes []PlayerIdleRemote `json:"remotes,omitempty"`
 }
 
 // PlayerIdleRemote is one of the unit's controllers as a client reads
@@ -557,56 +575,10 @@ func (p *Play) ended() bool {
 		p.Metadata.deleting()
 }
 
-// A Watch is a set of people on one item, and the record of where that
-// set reached. The operator writes the owner references and the status;
-// a person or the browser writes the spec.
-type Watch struct {
-	APIVersion string      `json:"apiVersion,omitempty"`
-	Kind       string      `json:"kind,omitempty"`
-	Metadata   ObjectMeta  `json:"metadata"`
-	Spec       WatchSpec   `json:"spec"`
-	Status     WatchStatus `json:"status"`
-}
-
-type WatchList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Watch  `json:"items"`
-}
-
-// WatchSpec is the set of people and the item they watch. Progress
-// belongs to the set, so two Watches on one item with different people
-// are two records.
-type WatchSpec struct {
-	People []string  `json:"people,omitempty"`
-	Item   WatchItem `json:"item"`
-}
-
-// WatchItem names the item as the catalog names it: the Library in the
-// Watch's own namespace, and the slug of a movie or a series inside it.
-type WatchItem struct {
-	Library string `json:"library"`
-	Slug    string `json:"slug"`
-}
-
-// WatchStatus is the projection of the progress store the operator
-// writes. Every field describes the last Play recorded against this
-// Watch, so the whole block is one observation and the operator writes
-// it whole.
-type WatchStatus struct {
-	Play         string `json:"play,omitempty"`
-	Item         int    `json:"item,omitempty"`
-	Position     string `json:"position,omitempty"`
-	Duration     string `json:"duration,omitempty"`
-	Season       int    `json:"season,omitempty"`
-	Episode      int    `json:"episode,omitempty"`
-	Ended        bool   `json:"ended,omitempty"`
-	LastRecorded string `json:"lastRecorded,omitempty"`
-}
-
 // A Person is a subject of the cluster, cluster-scoped and owned by
-// people-operator. A Play names the people who watched it and a Watch
-// the people who share it, both through owner references, so this
-// operator reads a Person for its name and its uid alone.
+// people-operator. A Play names the people who watched it through
+// owner references, so this operator reads a Person for its name and
+// its uid alone.
 type Person struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`

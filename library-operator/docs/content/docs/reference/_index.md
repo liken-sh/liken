@@ -15,6 +15,10 @@ and the claims its agents run on.
 account with one provider, and the facts it may serve.
 [Watches](/docs/reference/watches/) is a set of people on one item,
 and where that set reached.
-[Franchises](/docs/reference/franchises/) is the one page that does
-not generate: the file a person or an agent writes to put films and
-series in story order, and the schema that checks it.
+Two pages do not generate.
+[Franchises](/docs/reference/franchises/) is the file a person or an
+agent writes to put films and series in story order, and the schema
+that checks it. [The library bus](/docs/reference/bus/) is every topic
+this operator's pods publish and read on `media-operator`'s bus, with
+the shape of each payload, the play request a media browser of any
+make publishes included.
