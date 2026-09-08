@@ -52,6 +52,14 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	case request.URL.Path == "/Users":
 		f.userReads++
 		_ = json.NewEncoder(w).Encode(f.users)
+	case request.URL.Path == "/Items" && request.URL.Query().Get("ids") != "":
+		f.seriesReads++
+		item, held := f.byID[request.URL.Query().Get("ids")]
+		if !held {
+			_ = json.NewEncoder(w).Encode(jellyfinItemList{})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(jellyfinItemList{Items: []jellyfinItem{item}})
 	case request.URL.Path == "/Items":
 		f.listings++
 		_ = json.NewEncoder(w).Encode(jellyfinItemList{Items: f.items})
@@ -64,14 +72,6 @@ func (f *fakeJellyfin) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			data: data,
 		})
 		w.WriteHeader(http.StatusNoContent)
-	case strings.HasPrefix(request.URL.Path, "/Items/"):
-		f.seriesReads++
-		item, held := f.byID[strings.TrimPrefix(request.URL.Path, "/Items/")]
-		if !held {
-			http.Error(w, "no such item", http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(item)
 	default:
 		http.Error(w, "no such path", http.StatusNotFound)
 	}
@@ -193,7 +193,7 @@ func TestTheClientReadsOneItemByID(t *testing.T) {
 	if item.ProviderIds["Tmdb"] != "2316" {
 		t.Errorf("item = %+v, want the series' provider ids", item)
 	}
-	if want := "/Items/item-office?fields=ProviderIds"; fake.queries[0] != want {
+	if want := "/Items?fields=ProviderIds&ids=item-office"; fake.queries[0] != want {
 		t.Errorf("query = %q, want %q", fake.queries[0], want)
 	}
 }
@@ -309,5 +309,17 @@ func TestTicksBecomeSeconds(t *testing.T) {
 				t.Errorf("seconds of %d = %d, want %d", test.ticks, got, test.seconds)
 			}
 		})
+	}
+}
+
+// A listing that names an id the server does not hold answers an empty list,
+// and the read is an error rather than an item with no ids.
+func TestAnAbsentItemIsAnError(t *testing.T) {
+	api := standJellyfinServer(t, jellyfinFixture())
+
+	_, err := api.item(t.Context(), "item-nowhere")
+
+	if err == nil {
+		t.Fatal("reading an absent item gave no error")
 	}
 }

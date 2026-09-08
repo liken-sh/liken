@@ -43,6 +43,13 @@ func (f *fakeBackfillJellyfin) ServeHTTP(w http.ResponseWriter, request *http.Re
 			return
 		}
 		_ = json.NewEncoder(w).Encode(f.users)
+	case request.URL.Path == "/Items" && request.URL.Query().Get("ids") != "":
+		item, held := f.series[request.URL.Query().Get("ids")]
+		if !held {
+			_ = json.NewEncoder(w).Encode(jellyfinItemList{})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(jellyfinItemList{Items: []jellyfinItem{item}})
 	case request.URL.Path == "/Items":
 		user := request.URL.Query().Get("userId")
 		played := request.URL.Query().Get("isPlayed") == "true"
@@ -56,12 +63,7 @@ func (f *fakeBackfillJellyfin) ServeHTTP(w http.ResponseWriter, request *http.Re
 		}
 		_ = json.NewEncoder(w).Encode(jellyfinItemList{Items: held})
 	default:
-		item, held := f.series[strings.TrimPrefix(request.URL.Path, "/Items/")]
-		if !held {
-			http.Error(w, "no such item", http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(item)
+		http.Error(w, "no such path", http.StatusNotFound)
 	}
 }
 

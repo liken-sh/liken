@@ -43,7 +43,7 @@ const (
 	jellyfinDeviceName  = "library-operator"
 	jellyfinAPIVersion  = "1"
 	jellyfinItemsPath   = "/Items?recursive=true&includeItemTypes=Movie,Episode,Series&fields=ProviderIds,Path"
-	jellyfinSeriesQuery = "?fields=ProviderIds"
+	jellyfinSeriesQuery = "/Items?fields=ProviderIds&ids="
 	// the listing one user takes. It names the user, so every item
 	// carries that person's own user data, and the caller adds the filter
 	// that narrows the answer.
@@ -154,11 +154,18 @@ func (a *jellyfinAPI) userItems(ctx context.Context, user, query string) ([]jell
 }
 
 // One item by id, which the role reads for a series an episode names and the
-// listing did not carry.
+// listing did not carry. It is the listing narrowed to one id rather than
+// GET /Items/{id}, because that path answers 400 to a request that names no
+// user, and a server API key names none.
 func (a *jellyfinAPI) item(ctx context.Context, id string) (jellyfinItem, error) {
-	item := jellyfinItem{}
-	err := a.get(ctx, "/Items/"+url.PathEscape(id)+jellyfinSeriesQuery, &item)
-	return item, err
+	list := jellyfinItemList{}
+	if err := a.get(ctx, jellyfinSeriesQuery+url.QueryEscape(id), &list); err != nil {
+		return jellyfinItem{}, err
+	}
+	if len(list.Items) == 0 {
+		return jellyfinItem{}, fmt.Errorf("jellyfin has no item %s", id)
+	}
+	return list.Items[0], nil
 }
 
 // Writes one person's position in one item. The administrator key names the
