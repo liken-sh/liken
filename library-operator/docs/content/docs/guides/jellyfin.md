@@ -61,7 +61,9 @@ Set the rest of the destination like this.
 * Request header: `Content-Type` with the value `application/json`.
 
 The template renders the body the role reads. Paste it as one line,
-exactly as it is here.
+exactly as it is here. The plugin's page stores it base64-encoded, so
+anything that writes the plugin's configuration through Jellyfin's API
+must encode the template field the same way.
 
 ```
 {"event":"{{NotificationType}}","user":"{{{NotificationUsername}}}","userId":"{{UserId}}","itemId":"{{ItemId}}","itemType":"{{ItemType}}","seriesId":"{{SeriesId}}","season":"{{SeasonNumber}}","episode":"{{EpisodeNumber}}","positionTicks":"{{PlaybackPositionTicks}}","runTimeTicks":"{{RunTimeTicks}}","paused":"{{IsPaused}}","playedToCompletion":"{{PlayedToCompletion}}","tmdb":"{{Provider_tmdb}}","imdb":"{{Provider_imdb}}","tvdb":"{{Provider_tvdb}}"}
