@@ -8,6 +8,7 @@ package main
 // server fills in the rest.
 
 import (
+	"encoding/json"
 	"slices"
 	"time"
 )
@@ -608,6 +609,21 @@ type PlaySpec struct {
 	// 0:10:00 or 600. Empty, the run begins at the start of the item. The
 	// operator does not parse or check the value; the player does.
 	Start string `json:"start,omitempty"`
+	// Next is the work that follows this one. The display offers it on the
+	// scrubber.
+	Next *PlayNext `json:"next,omitempty"`
+}
+
+// PlayNext is the offer card: its three lines, the art beside them, and the
+// block the browser gets back when a person takes the offer.
+type PlayNext struct {
+	Reason string `json:"reason,omitempty"`
+	Title  string `json:"title,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	Art    string `json:"art,omitempty"`
+	// Request is the browser's own words. This operator carries it and never
+	// reads it.
+	Request json.RawMessage `json:"request,omitempty"`
 }
 
 // PlayItem is one item: the media reference the Player accepts, and

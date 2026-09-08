@@ -68,7 +68,9 @@ fn crowded(focus: Focus) -> Movie {
             }],
         ),
         progress: None,
+        via: None,
         set: Some(Set {
+            id: "set:films".into(),
             heading: "The Set".into(),
             members: vec![Item {
                 art_library: String::new(),

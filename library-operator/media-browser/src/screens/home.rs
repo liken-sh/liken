@@ -9,7 +9,7 @@ pub mod banner;
 mod layout;
 mod page;
 mod recent;
-mod resume;
+pub(crate) mod resume;
 mod rows;
 
 use std::cell::RefCell;

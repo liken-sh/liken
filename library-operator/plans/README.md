@@ -50,6 +50,9 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
   The compose key raises the person picker, the WWW key goes home,
   and page up and down are named for a later choice. Fast follow.
+* [53, Up next](53-up-next.md). Proposed. The browser decides what
+  follows the work it starts, from where the person started, writes
+  it on the `Play`, and starts it when the player asks.
 
 ## Future
 

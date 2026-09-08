@@ -5,7 +5,7 @@
 // work belongs to), walks each one, and folds the offers into cards. A
 // press on a card opens the page its first reason points at.
 
-mod containers;
+pub(crate) mod containers;
 mod reason;
 
 use std::collections::{HashMap, HashSet};
@@ -75,7 +75,7 @@ pub fn cards(source: &mut dyn Source, people: &[String]) -> Vec<Card> {
 }
 
 // The "next in" reason of one container, spelled with its title.
-fn next_in(container: &Container, member: i64, title: String) -> Reason {
+pub(crate) fn next_in(container: &Container, member: i64, title: String) -> Reason {
     match container {
         Container::Film(_) | Container::Series { .. } => Reason::Series(title),
         Container::Set { .. } => Reason::Set(title),
@@ -214,27 +214,37 @@ fn of_work(source: &mut dyn Source, work: &Resume) -> Vec<Container> {
 // kind takes, the reasons as the second line, and the member the first
 // reason opens where that reason is a franchise.
 pub fn item(card: Card) -> Item {
-    let season = card
-        .slot
+    let under = under(&card.slot, &card.reasons);
+    let franchise = card.reasons.first().and_then(in_franchise);
+    Item::resumed(card.slot, under, franchise)
+}
+
+// The second line of a card: every reason, and the season of an episode
+// leaf after them.
+pub(crate) fn under(slot: &Slot, reasons: &[Reason]) -> String {
+    let season = slot
         .episode
         .as_ref()
         .map(|place| format!("S{:02}", place.season))
         .unwrap_or_default();
-    let under = facts::joined(&[&reason::line(&card.reasons), &season]);
-    let franchise = match card.reasons.first() {
-        Some(Reason::Franchise {
+    facts::joined(&[&reason::line(reasons), &season])
+}
+
+// The franchise member a reason names, and nothing for every other reason.
+pub(crate) fn in_franchise(reason: &Reason) -> Option<InFranchise> {
+    match reason {
+        Reason::Franchise {
             library,
             id,
             position,
             ..
-        }) => Some(InFranchise {
+        } => Some(InFranchise {
             library: library.clone(),
             id: id.clone(),
             position: *position,
         }),
         _ => None,
-    };
-    Item::resumed(card.slot, under, franchise)
+    }
 }
 
 #[cfg(test)]

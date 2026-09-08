@@ -19,7 +19,7 @@ use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
 use super::movie::franchise_press;
-use super::{Screen, Step, facts, foot, person, stripes};
+use super::{InFranchise, Screen, Step, facts, foot, person, stripes, upnext};
 use crate::art::Art;
 use crate::catalog::draw::Date;
 use crate::catalog::{Progress, Selection, SeriesDetails, Source};
@@ -166,6 +166,10 @@ pub struct Series {
     /// Whether the way into the page named the episode focus is on, so the
     /// progress read leaves focus where that way put it.
     placed: bool,
+    // The franchise page this page was opened from, which is the container
+    // a play from here follows. It is nothing where the page was reached
+    // any other way.
+    pub via: Option<InFranchise>,
     /// Where focus is.
     pub focus: Focus,
 }
@@ -229,6 +233,7 @@ impl Series {
             bars,
             entered: 0,
             placed: false,
+            via: None,
             focus: Focus::Still(0),
         })
     }
@@ -252,6 +257,7 @@ impl Series {
             return;
         };
         fresh.placed = true;
+        fresh.via = self.via.clone();
         let focus = self.focus;
         *self = fresh;
         self.focus = self.hold(focus);
@@ -321,14 +327,24 @@ impl Series {
         let Some(still) = self.stills.get(index) else {
             return Step::Stay;
         };
+        let numbers = (still.season, still.episode);
+        let start = progress::start(still);
         Step::Play {
             library: self.library.clone(),
             selection: Selection::Episode {
                 series: self.id.clone(),
-                season: still.season,
-                episode: still.episode,
+                season: numbers.0,
+                episode: numbers.1,
             },
-            start: progress::start(still),
+            start,
+            next: upnext::after_episode(
+                source,
+                &self.library,
+                &self.id,
+                &self.title,
+                numbers,
+                self.via.as_ref(),
+            ),
         }
     }
 

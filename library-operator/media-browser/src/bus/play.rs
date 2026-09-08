@@ -5,7 +5,9 @@
 
 use serde_json::{Map, Value};
 
+use super::next;
 use crate::catalog::{Identity, PlayItem, Presentation};
+use crate::screens::upnext::Next;
 
 /// The request as bytes. `library` is the catalog's library column,
 /// `namespace/name`, and every path is relative to that library's root.
@@ -25,12 +27,16 @@ use crate::catalog::{Identity, PlayItem, Presentation};
 /// It goes out as a decimal string, one of the time forms the player
 /// accepts, and the key is left out of a request that starts at the
 /// beginning.
+///
+/// `next` is the work that follows this one. The key is left out of a
+/// request whose container ends here.
 pub fn payload(
     library: &str,
     items: &[PlayItem],
     people: &[String],
     identity: &Identity,
     start: Option<i64>,
+    next: Option<&Next>,
 ) -> Vec<u8> {
     let mut request = Map::new();
     request.insert("library".into(), Value::from(library));
@@ -72,6 +78,9 @@ pub fn payload(
     }
     if let Some(seconds) = start {
         request.insert("start".into(), Value::from(seconds.to_string()));
+    }
+    if let Some(next) = next {
+        request.insert("next".into(), next::value(next));
     }
     Value::Object(request).to_string().into_bytes()
 }
@@ -136,8 +145,15 @@ mod tests {
     }
 
     fn decoded(library: &str, items: &[PlayItem]) -> Value {
-        serde_json::from_slice(&payload(library, items, &[], &Identity::default(), None))
-            .expect("the request is JSON")
+        serde_json::from_slice(&payload(
+            library,
+            items,
+            &[],
+            &Identity::default(),
+            None,
+            None,
+        ))
+        .expect("the request is JSON")
     }
 
     #[test]
@@ -218,6 +234,7 @@ mod tests {
             &people,
             identity,
             None,
+            None,
         ))
         .expect("the request is JSON")
     }
@@ -279,6 +296,7 @@ mod tests {
             &[],
             &Identity::default(),
             start,
+            None,
         ))
         .expect("the request is JSON")
     }

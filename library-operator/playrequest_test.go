@@ -721,3 +721,196 @@ func TestARequestThatNamesNoStartCarriesNone(t *testing.T) {
 		t.Errorf("spec = %s, want no start", spec)
 	}
 }
+
+// The request block is the browser's own bytes. This operator carries it
+// and never reads it.
+func nextRequest(next *playRequestNext) []byte {
+	request := playRequest{
+		Library: testLibraryKey,
+		Items:   []playRequestItem{film(testFilmPath)},
+		Next:    next,
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
+
+func testNext() *playRequestNext {
+	return &playRequestNext{
+		Reason:  "Next in The Serial · S01",
+		Title:   "E03 · Segment 3",
+		Detail:  "The Serial · S01 · E03 · 46 min",
+		Art:     testPosterPath,
+		Request: json.RawMessage(`{"library":"house/movies","selection":{"movie":{"id":"movies:2"}}}`),
+	}
+}
+
+func TestAPlayCarriesTheWorkThatFollowsIt(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, nextRequest(testNext()))
+
+	operator.pass()
+
+	next := cluster.heldPlays()[0].Spec.Next
+	if next == nil {
+		t.Fatal("the play carries no next")
+	}
+	want := testNext()
+	if next.Reason != want.Reason || next.Title != want.Title || next.Detail != want.Detail {
+		t.Errorf("next = %+v, want the three lines the browser spelled", next)
+	}
+	if next.Art != "claim://movies//movies/"+testPosterPath {
+		t.Errorf("art = %q, want the poster stamped onto the library's claim", next.Art)
+	}
+	if string(next.Request) != string(want.Request) {
+		t.Errorf("request = %s, want the browser's own block", next.Request)
+	}
+}
+
+// A next block with no art carries none, the way an item with no art does.
+func TestANextWithNoArtCarriesNone(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	next := testNext()
+	next.Art = ""
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	if art := cluster.heldPlays()[0].Spec.Next.Art; art != "" {
+		t.Errorf("art = %q, want none", art)
+	}
+}
+
+// The next work's art follows an item's rule, so a request cannot reach a
+// poster outside the library through it.
+func TestANextArtOutsideTheLibraryRefusesTheWholeRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	next := testNext()
+	next.Art = "../../etc/shadow"
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	if plays := cluster.heldPlays(); len(plays) != 0 {
+		t.Errorf("plays = %+v, want none", plays)
+	}
+}
+
+// A second library in the same namespace, on a claim and a root of its own,
+// so a next work can be where the items are not.
+func boundShows(cluster *fakeCluster) *Library {
+	library := &Library{
+		Metadata: ObjectMeta{
+			Name: "shows", Namespace: testLibraryNamespace, UID: "shows-uid",
+		},
+		Spec: LibrarySpec{
+			Storage: LibraryStorage{Claim: "shows", Root: "/shows"},
+			Kind:    libraryKindSeries,
+			Series:  &LibrarySettings{},
+		},
+	}
+	cluster.libraries["shows"] = library
+	cluster.claims["shows"] = &PersistentVolumeClaim{
+		Metadata: ObjectMeta{Name: "shows", Namespace: testLibraryNamespace},
+		Spec:     PersistentVolumeClaimSpec{VolumeName: "pv-movies"},
+		Status:   PersistentVolumeClaimStatus{Phase: claimBound},
+	}
+	return library
+}
+
+// A franchise runs from a film to an episode in another library, so the art
+// of the next work is on that library's own claim and root.
+func TestANextInAnotherLibraryStampsTheArtToThatLibrary(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	boundShows(cluster)
+	next := testNext()
+	next.Library = testLibraryNamespace + "/shows"
+	next.Art = "Show/Season 01/S01E03-thumb.jpg"
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	art := cluster.heldPlays()[0].Spec.Next.Art
+	if art != "claim://shows//shows/Show/Season 01/S01E03-thumb.jpg" {
+		t.Errorf("art = %q, want the still on the shows library's own claim", art)
+	}
+}
+
+// The Play carries the three lines, the art, and the request, and never the
+// library, which the operator reads and drops.
+func TestTheLibraryOfTheNextWorkStaysOffThePlay(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	boundShows(cluster)
+	next := testNext()
+	next.Library = testLibraryNamespace + "/shows"
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	spec, err := json.Marshal(cluster.heldPlays()[0].Spec.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(spec, &keys); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"art", "detail", "reason", "request", "title"}
+	if got := slices.Sorted(maps.Keys(keys)); !slices.Equal(got, want) {
+		t.Errorf("next = %v, want %v", got, want)
+	}
+}
+
+// A library key the namespace does not hold refuses the whole request, the
+// way a path outside a library does.
+func TestANextNamingALibraryTheNamespaceDoesNotHoldCreatesNoPlay(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(cluster *fakeCluster)
+		key     string
+	}{
+		{name: "a library the namespace does not hold", key: testLibraryNamespace + "/photos"},
+		{name: "a library of another namespace", key: "studio/series"},
+		{name: "a library key with no namespace in it", key: "shows"},
+		{
+			name:    "a library that names no claim",
+			arrange: func(c *fakeCluster) { c.libraries["shows"].Spec.Storage.Claim = "" },
+			key:     testLibraryNamespace + "/shows",
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			operator, cluster := playingHouse(t)
+			boundStudio(cluster)
+			boundShows(cluster)
+			if each.arrange != nil {
+				each.arrange(cluster)
+			}
+			next := testNext()
+			next.Library = each.key
+			publishPlay(operator, nextRequest(next))
+
+			operator.pass()
+
+			if plays := cluster.heldPlays(); len(plays) != 0 {
+				t.Errorf("plays = %+v, want none", plays)
+			}
+		})
+	}
+}
+
+// The absent case reads the JSON the API client sends, because a decoded
+// object cannot tell an absent key from an empty block.
+func TestARequestThatNamesNoNextCarriesNone(t *testing.T) {
+	play := housePlay(t, playRequest{}, false)
+
+	spec, err := json.Marshal(play.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(spec), "next") {
+		t.Errorf("spec = %s, want no next", spec)
+	}
+}

@@ -44,6 +44,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                 library,
                 selection,
                 start,
+                next,
             } => {
                 // The press enters the state in the frame it lands in.
                 // Nothing downstream is awaited: the request crosses the
@@ -51,7 +52,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                 // starts, and none of the three reaches this browser. A
                 // choice with no film behind it enters nothing, because
                 // no film will ever cover the page.
-                if self.request_play(&library, &selection, start) {
+                if self.request_play(&library, &selection, start, next.as_ref()) {
                     self.loading = Some(loading::Loading::entered(self.clock));
                 }
             }

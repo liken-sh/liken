@@ -21,6 +21,7 @@ mod reader;
 mod resume;
 mod search;
 mod strip;
+mod upnext;
 mod volume;
 mod walls;
 
@@ -333,46 +334,19 @@ impl Source for Fake {
             .collect()
     }
 
-    // The page of the first franchise, so a select on the strip opens
-    // one. The order holds the two films of the fake set.
-    // The Run's page is its order, so a card of the continue-watching row
-    // opens it on a member.
+    // The page of an order is that order, so a page and the row's own walk
+    // of it read one list of members. The Saga has no page, so a strip can
+    // name a franchise the catalog no longer holds.
     fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
-        if id == "franchise:name:the-run" {
-            let order = orders().pop().expect("the run is the last order");
-            return Some(Franchise {
-                library: library.to_string(),
-                id: id.to_string(),
-                title: order.title,
-                entries: order.members,
-                ..Franchise::default()
-            });
-        }
-        if id != "franchise:name:the-cycle" {
+        if id == "franchise:name:the-saga" {
             return None;
         }
+        let order = orders().into_iter().find(|order| order.id == id)?;
         Some(Franchise {
             library: library.to_string(),
             id: id.to_string(),
-            title: "The Cycle".into(),
-            entries: (1..=2)
-                .map(|number| crate::catalog::Entry {
-                    position: number,
-                    kind: crate::catalog::franchise::MOVIE.into(),
-                    alias: format!("movie:tmdb:{number}"),
-                    title: format!("Entry {number}"),
-                    release_year: 1980,
-                    held: Some(crate::catalog::Held {
-                        library: "screening/films".into(),
-                        id: format!("movies:{number}"),
-                        kind: "movies".into(),
-                        title: format!("Entry {number}"),
-                        released: "1980".into(),
-                        ..crate::catalog::Held::default()
-                    }),
-                    ..crate::catalog::Entry::default()
-                })
-                .collect(),
+            title: order.title,
+            entries: order.members,
             ..Franchise::default()
         })
     }

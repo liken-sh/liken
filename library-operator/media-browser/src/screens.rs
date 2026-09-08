@@ -17,6 +17,7 @@ pub mod person;
 pub mod series;
 pub mod slots;
 pub mod stripes;
+pub mod upnext;
 pub mod volume;
 pub mod wall;
 
@@ -83,6 +84,9 @@ pub enum Step {
         /// The second the play starts at, where the person is in the middle
         /// of the work, and nothing where the play starts at the beginning.
         start: Option<i64>,
+        // The work that follows this one. The page that answered the press
+        // names it, and it is nothing where the container ends here.
+        next: Option<upnext::Next>,
     },
 }
 
@@ -333,7 +337,7 @@ impl Item {
 
     // One slot as an item, with both caption lines cut to the spelling the
     // read asked for.
-    fn spelled(slot: Slot, spelling: Spelling) -> Self {
+    pub(crate) fn spelled(slot: Slot, spelling: Spelling) -> Self {
         let year = facts::year(&slot.released);
         let numbers = slot
             .episode
@@ -422,7 +426,7 @@ pub fn fitted_strip(items: &mut [Item]) {
 // credits the parts, a set's strip carries the year and the runtime, and
 // every other slot carries the facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Spelling {
+pub(crate) enum Spelling {
     Facts,
     Parts,
     Set,

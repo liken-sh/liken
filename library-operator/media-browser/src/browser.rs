@@ -17,13 +17,14 @@ use media_screen::{Bus, Moment};
 
 use crate::art::{Art, ArtCounts};
 use crate::audience::{Audience, Person};
-use crate::bus::play;
+use crate::bus::{next, play};
 use crate::catalog::draw::Date;
 use crate::catalog::search::Size;
 use crate::catalog::{Selection, Source};
 use crate::clock;
 use crate::harness::{Screen, Waker};
 use crate::look;
+use crate::screens::upnext::{self, Next};
 use crate::screens::{self, Step, home, loading, volume};
 use crate::views;
 
@@ -334,7 +335,29 @@ impl<S: Source, A: Art> Browser<S, A> {
             // The browser draws no identity block, so focus changes nothing
             // here.
             Moment::Focus { .. } => {}
+            // A person took the offer the display drew. The bytes are the
+            // request this browser wrote onto that Play.
+            Moment::PlayNext(request) => self.play_next(&request),
         }
+    }
+
+    // Start what follows the film that is playing. The block is this
+    // browser's own words, so it reads the resume position and the next
+    // offer the way the page that wrote the first request read them, and
+    // the run chains. A block this browser did not write starts nothing.
+    fn play_next(&mut self, payload: &[u8]) {
+        let Some(request) = next::request(payload) else {
+            eprintln!("media-browser: the play-next ask carried no request of this browser's");
+            return;
+        };
+        let people = self.audience.current(self.clock).to_vec();
+        let (start, next) = upnext::again(&mut self.source, &request, &people);
+        self.take(Step::Play {
+            library: request.library,
+            selection: request.selection,
+            start,
+            next,
+        });
     }
 
     // Fold everything the bus delivered since the last wake. The answer is
@@ -407,7 +430,13 @@ impl<S: Source, A: Art> Browser<S, A> {
     // The answer is whether the catalog resolved a film, and not whether
     // the request went out. A run with no bus browses the same way, and
     // the page it draws while it waits is the same page.
-    fn request_play(&mut self, library: &str, selection: &Selection, start: Option<i64>) -> bool {
+    fn request_play(
+        &mut self,
+        library: &str,
+        selection: &Selection,
+        start: Option<i64>,
+        next: Option<&Next>,
+    ) -> bool {
         let items = self.source.play(library, selection);
         if items.is_empty() {
             eprintln!(
@@ -440,6 +469,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                 self.audience.current(self.clock),
                 &identity,
                 start,
+                next,
             ),
             false,
         );

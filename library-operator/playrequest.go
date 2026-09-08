@@ -49,6 +49,23 @@ type playRequest struct {
 	// progress store, and it reaches the Play unchanged, because the
 	// player parses it and the operator does not.
 	Start string `json:"start,omitempty"`
+
+	// The work that follows this one. Only the browser can name it, because
+	// the answer depends on the page the person started from.
+	Next *playRequestNext `json:"next,omitempty"`
+}
+
+// playRequestNext is the offer as the browser publishes it. The Play
+// carries every field but the library. The operator reads the library to
+// stamp the art and then drops it, because a franchise crosses libraries,
+// and the art of the next work is on that work's own claim.
+type playRequestNext struct {
+	Library string          `json:"library,omitempty"`
+	Reason  string          `json:"reason,omitempty"`
+	Title   string          `json:"title,omitempty"`
+	Detail  string          `json:"detail,omitempty"`
+	Art     string          `json:"art,omitempty"`
+	Request json.RawMessage `json:"request,omitempty"`
 }
 
 // playRequestItem is one item of the list. Every path is relative to
@@ -163,6 +180,10 @@ func (r playRequest) play(players []Player, libraries []Library, people []Person
 	if len(items) == 0 {
 		return nil, fmt.Errorf("the request named nothing to play")
 	}
+	next, err := r.next(libraries, library)
+	if err != nil {
+		return nil, err
+	}
 
 	metadata := ObjectMeta{
 		GenerateName:    playGenerateName(r.Player, r.Slug),
@@ -181,8 +202,55 @@ func (r playRequest) play(players []Player, libraries []Library, people []Person
 		APIVersion: playerAPIVersion,
 		Kind:       "Play",
 		Metadata:   metadata,
-		Spec:       PlaySpec{Players: []string{r.Player}, Items: items, Start: r.Start},
+		Spec: PlaySpec{
+			Players: []string{r.Player},
+			Items:   items,
+			Start:   r.Start,
+			Next:    next,
+		},
 	}, nil
+}
+
+// next is the block as the Play carries it, with its art joined to the
+// claim of the library that holds the next work. The rule is the one an
+// item's art follows, so an art outside that library refuses the request.
+func (r playRequest) next(libraries []Library, own *Library) (*PlayNext, error) {
+	if r.Next == nil {
+		return nil, nil
+	}
+	library, err := r.nextLibrary(libraries, own)
+	if err != nil {
+		return nil, err
+	}
+	next := PlayNext{
+		Reason:  r.Next.Reason,
+		Title:   r.Next.Title,
+		Detail:  r.Next.Detail,
+		Request: r.Next.Request,
+	}
+	if r.Next.Art == "" {
+		return &next, nil
+	}
+	if next.Art, err = reference(library, r.Next.Art); err != nil {
+		return nil, err
+	}
+	return &next, nil
+}
+
+// nextLibrary is the library of the next work: the one the block names, or
+// the library of the items when the block names none.
+func (r playRequest) nextLibrary(libraries []Library, own *Library) (*Library, error) {
+	if r.Next.Library == "" {
+		return own, nil
+	}
+	library := r.libraryNamed(libraries, r.Next.Library)
+	if library == nil {
+		return nil, fmt.Errorf("namespace %s holds no library %s", r.Namespace, r.Next.Library)
+	}
+	if library.Spec.screenClaim() == "" {
+		return nil, fmt.Errorf("library %s names no claim", r.Next.Library)
+	}
+	return library, nil
 }
 
 // owners is the audience of the Play, as owner references: one Person
@@ -303,7 +371,13 @@ func (r playRequest) player(players []Player) *Player {
 // own namespace. The namespace is the boundary: a screen plays the
 // libraries beside it and no others.
 func (r playRequest) library(libraries []Library) *Library {
-	namespace, name, found := strings.Cut(r.Library, "/")
+	return r.libraryNamed(libraries, r.Library)
+}
+
+// libraryNamed is the Library one catalog key names, in the Player's own
+// namespace only. Every key in a request is read against that boundary.
+func (r playRequest) libraryNamed(libraries []Library, key string) *Library {
+	namespace, name, found := strings.Cut(key, "/")
 	if !found || namespace != r.Namespace {
 		return nil
 	}

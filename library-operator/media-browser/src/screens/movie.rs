@@ -16,7 +16,7 @@ use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
-use super::{Item, Screen, Step, facts, foot, franchise, person, stripes};
+use super::{InFranchise, Item, Screen, Step, facts, foot, franchise, person, stripes, upnext};
 use crate::art::Art;
 use crate::catalog::draw::Date;
 use crate::catalog::progress::thread;
@@ -50,6 +50,9 @@ fn films(count: usize) -> String {
 /// The set the movie belongs to, as the strip draws it.
 #[derive(Debug)]
 pub struct Set {
+    // The set's own id in the library. The read of what follows a film
+    // walks the set's order by it.
+    pub id: String,
     /// The strip's heading: the set's own title and the count of its
     /// films.
     pub heading: String,
@@ -64,7 +67,11 @@ impl Set {
     // same slots a wall of the set would. `id` names the member this page is
     // about.
     fn of(set: MovieSet, query: &Query, id: &str) -> Option<Self> {
-        let Query::Set { library, .. } = query else {
+        let Query::Set {
+            library,
+            id: set_id,
+        } = query
+        else {
             return None;
         };
         let mut members: Vec<Item> = set
@@ -77,6 +84,7 @@ impl Set {
         super::fitted_strip(&mut members);
         let current = members.iter().position(|member| member.id == id)?;
         Some(Self {
+            id: set_id.clone(),
             heading: facts::joined(&[&set.title, &films(members.len())]),
             members,
             current,
@@ -121,6 +129,10 @@ pub struct Movie {
     /// The franchises the movie belongs to, one strip each, under the set
     /// strip.
     pub franchises: Strips,
+    // The franchise page this page was opened from, which is the container
+    // a play from here follows. It is nothing where the page was reached
+    // any other way.
+    pub via: Option<InFranchise>,
     /// Where the audience reached in the film, or nothing where no play of
     /// theirs names it. It decides the button row, the bar under it, and
     /// the word at the end of its line.
@@ -152,6 +164,7 @@ impl Movie {
             foot: foot::Foot::of(&details.studios, &source.files(library, id)),
             set,
             franchises: Strips::of(library, id, source),
+            via: None,
             progress: None,
             focus: Focus::Buttons(0),
         })
@@ -166,6 +179,7 @@ impl Movie {
             return;
         };
         fresh.progress = self.progress.clone();
+        fresh.via = self.via.clone();
         let focus = self.focus;
         *self = fresh;
         self.focus = self.hold(focus);
@@ -206,7 +220,7 @@ impl Movie {
     /// strip's heading is a rung over its members.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self.focus {
-            Focus::Buttons(index) => self.on_button(index, key),
+            Focus::Buttons(index) => self.on_button(index, key, source),
             Focus::Strip(index) => self.on_strip(index, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
@@ -245,10 +259,10 @@ impl Movie {
         .view()
     }
 
-    fn on_button(&mut self, index: usize, key: &str) -> Step {
+    fn on_button(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
         match key {
             "enter" => match self.buttons().get(index) {
-                Some(button) => self.press(*button),
+                Some(button) => self.press(*button, source),
                 None => Step::Stay,
             },
             // The buttons are the topmost focus, so up moves nothing and
@@ -395,7 +409,7 @@ impl Movie {
 
     // The play one button asks for: the trailer, the film from the second
     // the audience reached, or the film from the beginning.
-    fn press(&self, button: row::Button) -> Step {
+    fn press(&self, button: row::Button, source: &mut dyn Source) -> Step {
         let (selection, start) = match button {
             row::Button::Trailer => (
                 Selection::Trailer {
@@ -416,10 +430,22 @@ impl Movie {
                 None,
             ),
         };
+        // A trailer is in no order, so it offers nothing after it.
+        let next = match button {
+            row::Button::Trailer => None,
+            _ => upnext::after_film(
+                source,
+                &self.library,
+                &self.id,
+                self.set.as_ref().map(|set| set.id.as_str()),
+                self.via.as_ref(),
+            ),
+        };
         Step::Play {
             library: self.library.clone(),
             selection,
             start,
+            next,
         }
     }
 

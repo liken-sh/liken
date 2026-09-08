@@ -20,7 +20,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Element, Length, Theme};
 
-use super::{Screen, Step, movie, series};
+use super::{InFranchise, Screen, Step, movie, series};
 use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
@@ -58,6 +58,9 @@ pub struct Franchise {
     pub caption: String,
     /// The eras, as the headings over the rows.
     pub headings: Vec<wall::Heading>,
+    // The story position of every row, in the wall's own order. It names
+    // the member a page opened from here continues from.
+    positions: Vec<i64>,
     /// The row focus is on.
     pub focus: usize,
     /// How far the wall stood scrolled at the last frame. The scroll
@@ -71,7 +74,7 @@ impl Franchise {
     /// franchise under that id. Focus lands on the first row, so a press opens
     /// the first entry of the story.
     pub fn open(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
-        Self::read(library, id, source).map(|(page, _)| page)
+        Self::read(library, id, source)
     }
 
     // The page with focus on the row of the entry at this position in story
@@ -84,8 +87,8 @@ impl Franchise {
         position: i64,
         source: &mut dyn Source,
     ) -> Option<Self> {
-        let (mut page, positions) = Self::read(library, id, source)?;
-        if let Some(row) = positions.iter().position(|at| *at == position) {
+        let mut page = Self::read(library, id, source)?;
+        if let Some(row) = page.positions.iter().position(|at| *at == position) {
             page.focus = row;
         }
         Some(page)
@@ -93,7 +96,7 @@ impl Franchise {
 
     // The page with focus on the first row, and the story position of every
     // row, so an entry by position finds its row.
-    fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<(Self, Vec<i64>)> {
+    fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let read = source.franchise(library, id)?;
         let positions = read.entries.iter().map(|entry| entry.position).collect();
         let today = Date::today().iso();
@@ -115,10 +118,11 @@ impl Franchise {
             time,
             caption,
             headings,
+            positions,
             focus: 0,
             scrolled: cell::Cell::new(0.0),
         };
-        Some((page, positions))
+        Some(page)
     }
 
     /// Read the page again, because a scan can write the order while
@@ -194,13 +198,23 @@ impl Franchise {
         let Some((library, kind, id)) = self.rows.get(row).and_then(|row| row.cell.opens()) else {
             return Step::Stay;
         };
-        let opened =
-            match kind {
-                "movies" => movie::Movie::open(library, id, source)
-                    .map(|page| Screen::Movie(Box::new(page))),
-                _ => series::Series::open(library, id, source)
-                    .map(|page| Screen::Series(Box::new(page))),
-            };
+        // The page carries the member it was opened on, so a play from it
+        // follows this story and not the film's own set.
+        let via = InFranchise {
+            library: self.library.clone(),
+            id: self.id.clone(),
+            position: self.positions.get(row).copied().unwrap_or_default(),
+        };
+        let opened = match kind {
+            "movies" => movie::Movie::open(library, id, source).map(|mut page| {
+                page.via = Some(via);
+                Screen::Movie(Box::new(page))
+            }),
+            _ => series::Series::open(library, id, source).map(|mut page| {
+                page.via = Some(via);
+                Screen::Series(Box::new(page))
+            }),
+        };
         match opened {
             Some(screen) => Step::Replace(screen),
             None => Step::Stay,
