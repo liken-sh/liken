@@ -93,6 +93,35 @@ type PlayerStatus struct {
 	// requests that claim carries. It is nil for a Player that drives no
 	// screen and for a cluster that names no display-draw class.
 	Idle *PlayerIdleStatus `json:"idle,omitempty"`
+
+	// Screen is the last screen the idle claim resolved to: the machine
+	// that publishes the draw device and the monitor id, which is the
+	// name of its Display. It is kept when the claim deallocates, so a
+	// unit whose panel is away still knows which Display to read.
+	Screen *PlayerScreenStatus `json:"screen,omitempty"`
+
+	// Conditions carries the Screen condition, which reads the
+	// remembered Display's Connected condition for the unit. It is
+	// empty until the claim has resolved once.
+	Conditions []PlayerCondition `json:"conditions,omitempty"`
+}
+
+// PlayerScreenStatus is the screen memory: the node the draw device
+// is published from and the monitor id that names its Display.
+type PlayerScreenStatus struct {
+	Node    string `json:"node,omitempty"`
+	Monitor string `json:"monitor,omitempty"`
+}
+
+// PlayerCondition is one condition in the standard Kubernetes shape.
+// The transition time moves only when the status does, so a reader
+// can tell how long the unit has waited.
+type PlayerCondition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	Reason             string `json:"reason,omitempty"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
 }
 
 // PlayerReceiverStatus names the Receiver and the input matched from

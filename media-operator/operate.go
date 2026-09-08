@@ -765,6 +765,13 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 		live[key] = true
 		desired := derivePlayerStatus(player, plays, o.reports)
+		// The screen memory and the Screen condition are the one
+		// place outside this operator that says why an idle pod
+		// waits. The derivation builds a fresh status, so the memory
+		// is carried forward here from the status the pass read.
+		if player.Spec.Display != nil {
+			desired.Screen, desired.Conditions = o.reconcileScreen(player, key, lookup)
+		}
 		idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
 		// The panel state is what the screen's Display last
 		// observed, so the status reports the hardware and not what

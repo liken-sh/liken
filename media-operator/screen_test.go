@@ -59,8 +59,64 @@ func monitorSlice() ResourceSlice {
 func litDisplay() *Display {
 	return &Display{
 		Metadata: ObjectMeta{Name: testMonitor},
-		Status:   DisplayStatus{Observed: DisplayObserved{Brightness: ptr(70), Power: "on"}},
+		Status: DisplayStatus{
+			Observed:   DisplayObserved{Brightness: ptr(70), Power: "on"},
+			Conditions: []DisplayCondition{connectedCondition(conditionTrue, "Present", "panel on DP-1")},
+		},
 	}
+}
+
+// The panel as the display-operator reports it while the monitor
+// shows another input: the connector carries no panel, and the idle
+// claim has deallocated.
+func awayDisplay() *Display {
+	display := litDisplay()
+	display.Status.Conditions = []DisplayCondition{connectedCondition("False", displayReasonNoPanel, "no panel on DP-1")}
+	return display
+}
+
+func connectedCondition(status, reason, message string) DisplayCondition {
+	return DisplayCondition{Type: displayConnectedCondition, Status: status, Reason: reason, Message: message}
+}
+
+// The screen the theater unit remembers from an earlier pass, as the
+// operator wrote it onto the Player's status.
+func rememberedScreen() *PlayerScreenStatus {
+	return &PlayerScreenStatus{Node: testNode, Monitor: testMonitor}
+}
+
+// The Screen condition the theater unit held from an earlier pass,
+// stamped at a time no pass under test writes.
+func heldScreenCondition(status, reason string) PlayerCondition {
+	return PlayerCondition{
+		Type:               screenConditionType,
+		Status:             status,
+		Reason:             reason,
+		LastTransitionTime: "2020-01-01T00:00:00Z",
+	}
+}
+
+// screenCondition answers the one Screen condition the written
+// Player carries, and fails the test when it carries none or more.
+func screenCondition(t *testing.T, player *Player) PlayerCondition {
+	t.Helper()
+	if len(player.Status.Conditions) != 1 {
+		t.Fatalf("the Player carries %+v, want one Screen condition", player.Status.Conditions)
+	}
+	condition := player.Status.Conditions[0]
+	mustMatch(t, condition.Type, screenConditionType)
+	return condition
+}
+
+// displayReads counts the passes' reads of the screen's Display.
+func displayReads(cluster *fakeCluster) int {
+	reads := 0
+	for _, request := range cluster.requests {
+		if request == "GET "+displaysPath+"/"+testMonitor {
+			reads++
+		}
+	}
+	return reads
 }
 
 // screenCluster is a cluster whose theater unit has an
@@ -180,21 +236,182 @@ func TestThePlayerStatusFoldsTheDisplayObservation(t *testing.T) {
 	mustMatch(t, cluster.players["theater"].Status.Panel, panelBacklightOff)
 }
 
-// A unit whose sidecar stated no desire reads no Display at
-// all, so a cluster that never darkens a panel costs no request a
-// pass.
-func TestAUnitWithNoDesireReadsNoDisplay(t *testing.T) {
+// A unit with no screen memory reads no Display at all: its claim
+// has never resolved, so there is no Display to read a condition
+// from, and it carries no Screen condition. A unit with a screen
+// reads its Display once a pass whether or not a desire stands,
+// because the condition is what says why the idle pod waits.
+func TestAUnitWithNoScreenMemoryReadsNoDisplay(t *testing.T) {
 	cluster := screenCluster()
+	cluster.claims[idleClaimName("theater")].Status = nil
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.reconcilePlayers([]Player{*housePlayer()}, nil, "", nil)
 
 	mustMatch(t, cluster.players["theater"].Status.Panel, "")
-	for _, request := range cluster.requests {
-		if request == "GET "+displaysPath+"/"+testMonitor {
-			t.Errorf("the pass read the Display: %v", cluster.requests)
-		}
+	mustMatch(t, len(cluster.players["theater"].Status.Conditions), 0)
+	if cluster.players["theater"].Status.Screen != nil {
+		t.Errorf("the Player remembers %+v, want no screen", cluster.players["theater"].Status.Screen)
 	}
+	mustMatch(t, displayReads(cluster), 0)
+}
+
+// The pass writes the screen the idle claim resolved to onto the
+// Player, so a person reads which machine and which Display the unit
+// draws on.
+func TestThePassRemembersTheScreenFromAnAllocatedClaim(t *testing.T) {
+	cluster := screenCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.reconcilePlayers([]Player{*housePlayer()}, nil, "", nil)
+
+	mustMatch(t, *cluster.players["theater"].Status.Screen, *rememberedScreen())
+}
+
+// A claim that deallocated names no screen, so the pass keeps the
+// screen the Player remembers and reads that Display for the
+// condition. The monitor showing another input is the PanelAway
+// reason, with the Display's own message.
+func TestThePassKeepsTheRememberedScreenWhenTheClaimIsUnallocated(t *testing.T) {
+	cluster := screenCluster()
+	cluster.claims[idleClaimName("theater")].Status = nil
+	cluster.displays[testMonitor] = awayDisplay()
+	player := housePlayer()
+	player.Status.Screen = rememberedScreen()
+	cluster.players["theater"] = player
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.reconcilePlayers([]Player{*player}, nil, "", nil)
+
+	mustMatch(t, *cluster.players["theater"].Status.Screen, *rememberedScreen())
+	condition := screenCondition(t, cluster.players["theater"])
+	mustMatch(t, condition.Status, "False")
+	mustMatch(t, condition.Reason, screenReasonPanelAway)
+	mustMatch(t, condition.Message, "no panel on DP-1")
+}
+
+// The Screen condition is the Display's Connected condition read
+// for the unit: present, away, or unknown when there is no Display
+// or no report to read.
+func TestTheScreenConditionFollowsTheDisplay(t *testing.T) {
+	unreported := litDisplay()
+	unreported.Status.Conditions = nil
+	sleeping := litDisplay()
+	sleeping.Status.Conditions = []DisplayCondition{connectedCondition("False", "Sleeping", "panel asleep")}
+
+	cases := []struct {
+		name    string
+		display *Display
+		want    PlayerCondition
+	}{
+		{
+			name:    "a lit panel is present",
+			display: litDisplay(),
+			want:    PlayerCondition{Status: conditionTrue, Reason: screenReasonPresent, Message: "panel on DP-1"},
+		},
+		{
+			name:    "a connector with no panel is away",
+			display: awayDisplay(),
+			want:    PlayerCondition{Status: "False", Reason: screenReasonPanelAway, Message: "no panel on DP-1"},
+		},
+		{
+			name:    "any other reason passes through",
+			display: sleeping,
+			want:    PlayerCondition{Status: "False", Reason: "Sleeping", Message: "panel asleep"},
+		},
+		{
+			name: "a missing Display is unknown",
+			want: PlayerCondition{Status: "Unknown", Reason: screenReasonNoDisplay, Message: "no Display named DP-1"},
+		},
+		{
+			name:    "a Display with no Connected condition is unreported",
+			display: unreported,
+			want:    PlayerCondition{Status: "Unknown", Reason: screenReasonNotReported},
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := screenCluster()
+			delete(cluster.displays, testMonitor)
+			if each.display != nil {
+				cluster.displays[testMonitor] = each.display
+			}
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+
+			media.reconcilePlayers([]Player{*housePlayer()}, nil, "", nil)
+
+			condition := screenCondition(t, cluster.players["theater"])
+			mustMatch(t, condition.Status, each.want.Status)
+			mustMatch(t, condition.Reason, each.want.Reason)
+			mustMatch(t, condition.Message, each.want.Message)
+			if condition.LastTransitionTime == "" {
+				t.Error("the condition carries no transition time")
+			}
+		})
+	}
+}
+
+// The transition time is the moment the status last changed, so a
+// pass that reads the same status keeps the time the Player already
+// holds, and a pass that reads a different one stamps a new time.
+func TestTheTransitionTimeMovesOnlyWhenTheStatusFlips(t *testing.T) {
+	cases := []struct {
+		name    string
+		display *Display
+		moves   bool
+	}{
+		{name: "the same status keeps the time", display: litDisplay(), moves: false},
+		{name: "a flipped status stamps a new time", display: awayDisplay(), moves: true},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := screenCluster()
+			cluster.displays[testMonitor] = each.display
+			player := housePlayer()
+			player.Status.Screen = rememberedScreen()
+			player.Status.Conditions = []PlayerCondition{heldScreenCondition(conditionTrue, screenReasonPresent)}
+			cluster.players["theater"] = player
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+
+			media.reconcilePlayers([]Player{*player}, nil, "", nil)
+
+			condition := screenCondition(t, cluster.players["theater"])
+			mustMatch(t, condition.LastTransitionTime != "2020-01-01T00:00:00Z", each.moves)
+		})
+	}
+}
+
+// A Display the pass cannot read is not a change on the panel, so
+// the unit keeps the condition it already holds rather than churning
+// on a transient error, and the fault reports once.
+func TestAnUnreadableDisplayKeepsTheHeldCondition(t *testing.T) {
+	cluster := screenCluster()
+	cluster.fails[displaysPath+"/"+testMonitor] = true
+	player := housePlayer()
+	player.Status.Screen = rememberedScreen()
+	player.Status.Conditions = []PlayerCondition{heldScreenCondition("False", screenReasonPanelAway)}
+	cluster.players["theater"] = player
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.reconcilePlayers([]Player{*player}, nil, "", nil)
+	media.reconcilePlayers([]Player{*cluster.players["theater"]}, nil, "", nil)
+
+	mustMatch(t, screenCondition(t, cluster.players["theater"]), heldScreenCondition("False", screenReasonPanelAway))
+	if media.panelFaults[playerKey("house", "theater")] == "" {
+		t.Error("an unreadable Display reported no fault")
+	}
+}
+
+// The condition and the panel both read the same Display, so a unit
+// costs one read a pass however many questions the pass asks of it.
+func TestAUnitReadsItsDisplayOnceAPass(t *testing.T) {
+	cluster := screenCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+
+	mustMatch(t, displayReads(cluster), 1)
+	mustMatch(t, cluster.players["theater"].Status.Panel, panelOn)
 }
 
 // An apply the API server refuses leaves the panel dark, so

@@ -358,7 +358,7 @@ func TestAPassWritesThePlayerStatusFromItsRunningPlay(t *testing.T) {
 
 	got := cluster.players["theater"].Status
 	want := PlayerStatus{Activity: playerPlaying, Play: "movie"}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("player status = %+v, want %+v", got, want)
 	}
 }
@@ -374,7 +374,7 @@ func TestAPassMarksAPlayerWithNoPlayIdle(t *testing.T) {
 
 	got := cluster.players["theater"].Status
 	want := PlayerStatus{Activity: playerIdle}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("player status = %+v, want %+v", got, want)
 	}
 }

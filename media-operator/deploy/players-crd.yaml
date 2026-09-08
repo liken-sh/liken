@@ -55,6 +55,9 @@ spec:
         - name: Idle
           type: string
           jsonPath: .status.idle.controller
+        - name: Screen
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Screen")].reason
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -400,6 +403,74 @@ spec:
                       description: >-
                         The status of the Receiver's Reachable
                         condition, empty until it carries one.
+                screen:
+                  type: object
+                  description: >-
+                    The last screen the idle claim resolved to. The
+                    operator keeps it while the panel is away, so it
+                    can still read the screen's Display and say why
+                    the idle pod waits. Absent until the claim has
+                    resolved once.
+                  properties:
+                    node:
+                      type: string
+                      description: >-
+                        The machine that publishes the screen's draw
+                        device.
+                    monitor:
+                      type: string
+                      description: >-
+                        The monitor id of the screen, which is the name
+                        of its Display.
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  description: >-
+                    The unit's conditions. There is one, Screen, and it
+                    is absent until the idle claim has resolved once.
+                    True with reason Present means the screen's Display
+                    reports a panel on its connector. False with reason
+                    PanelAway means the Display reports no panel there:
+                    the monitor shows another input, the idle claim has
+                    deallocated, and the idle pod parks Pending until
+                    the panel returns. That park is by design, and an
+                    alert on Pending pods can read this reason to stay
+                    quiet for it. False with any other reason carries
+                    the Display's own reason through. Unknown with
+                    reason NoDisplay means no Display carries the
+                    remembered monitor id, and Unknown with reason
+                    NotReported means the Display carries no Connected
+                    condition. The message is the Display's own, and
+                    lastTransitionTime moves only when the status does.
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        description: The condition's name, Screen.
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: The condition's status.
+                      reason:
+                        type: string
+                        description: >-
+                          One word for the status: Present, PanelAway,
+                          NoDisplay, NotReported, or the Display's own
+                          reason.
+                      message:
+                        type: string
+                        description: >-
+                          The Display's message for the condition, which
+                          names the connector.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the status last changed, so a reader can
+                          tell how long the unit has waited.
                 idle:
                   type: object
                   description: >-

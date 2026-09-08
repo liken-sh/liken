@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 )
 
 // The group the display-operator serves. A Display is
@@ -73,8 +74,39 @@ type displayApply struct {
 }
 
 type DisplayStatus struct {
-	Observed DisplayObserved `json:"observed,omitempty"`
+	Observed   DisplayObserved    `json:"observed,omitempty"`
+	Conditions []DisplayCondition `json:"conditions,omitempty"`
 }
+
+// The one Display condition this operator reads. The display-operator
+// sets it False with the NoPanel reason when the connector carries no
+// panel, which is a monitor that shows another input.
+const (
+	displayConnectedCondition = "Connected"
+	displayReasonNoPanel      = "NoPanel"
+)
+
+type DisplayCondition struct {
+	Type    string `json:"type,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// The Screen condition a Player carries, and its reasons. Present and
+// PanelAway are this operator's words for the Display's True and
+// NoPanel; every other Display reason passes through. NoDisplay and
+// NotReported are the two ways the Display answers nothing.
+const (
+	screenConditionType     = "Screen"
+	screenReasonPresent     = "Present"
+	screenReasonPanelAway   = "PanelAway"
+	screenReasonNoDisplay   = "NoDisplay"
+	screenReasonNotReported = "NotReported"
+
+	conditionFalse   = "False"
+	conditionUnknown = "Unknown"
+)
 
 // What the display-operator last read from the panel. It is
 // last-known and never live, because a DDC read is itself a wake
@@ -172,16 +204,41 @@ type screen struct {
 // a pass, because one list answers every unit.
 //
 // Each unit's answer is held for the pass, because the panel and the
-// equipment both ask the same question of the same claim.
+// equipment both ask the same question of the same claim. Each
+// Display read is held the same way, because the Screen condition
+// and the panel both read the same one, and a unit costs one GET a
+// pass.
 type screens struct {
 	client   *Client
 	slices   []ResourceSlice
 	listed   bool
 	resolved map[string]screen
+	displays map[string]displayRead
+}
+
+// One Display read, kept with its error so every caller in the pass
+// sees the same answer.
+type displayRead struct {
+	display *Display
+	err     error
 }
 
 func newScreens(client *Client) *screens {
-	return &screens{resolved: map[string]screen{}, client: client}
+	return &screens{
+		client:   client,
+		resolved: map[string]screen{},
+		displays: map[string]displayRead{},
+	}
+}
+
+// displayFor reads one Display at most once a pass.
+func (s *screens) displayFor(monitor string) (*Display, error) {
+	if read, held := s.displays[monitor]; held {
+		return read.display, read.err
+	}
+	display, err := GetDisplay(s.client, monitor)
+	s.displays[monitor] = displayRead{display: display, err: err}
+	return display, err
 }
 
 // screenLookup is the pass's one screens. It is built on first use and
@@ -289,7 +346,7 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 		}
 		return ""
 	}
-	display, err := GetDisplay(o.client, monitor)
+	display, err := lookup.displayFor(monitor)
 	if err != nil {
 		o.panelFault(key, fmt.Sprintf("reading display %s: %v", monitor, err))
 		return ""
@@ -303,6 +360,88 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 	}
 	delete(o.panelFaults, key)
 	return panelFromDisplay(display.Status.Observed)
+}
+
+// reconcileScreen answers one unit's screen memory and its Screen
+// condition. The memory is the screen the claim resolves to this
+// pass, or the one the Player already remembers when the claim has
+// deallocated: a monitor that shows another input drops the draw
+// device, and the claim was the only path from the unit to its
+// Display. The condition reads that Display, so a person can tell a
+// unit that waits for its panel from a unit at fault.
+func (o *operator) reconcileScreen(player *Player, key string, lookup *screens) (*PlayerScreenStatus, []PlayerCondition) {
+	remembered := player.Status.Screen
+	if found, resolved := lookup.screenFor(player); resolved {
+		remembered = &PlayerScreenStatus{Node: found.node, Monitor: found.monitor}
+	}
+	if remembered == nil {
+		return nil, nil
+	}
+	condition, reported := o.screenCondition(player, key, lookup, remembered.Monitor)
+	if !reported {
+		return remembered, nil
+	}
+	return remembered, []PlayerCondition{condition}
+}
+
+// screenCondition folds the Display's Connected condition into the
+// unit's Screen condition. A Display that is gone or carries no
+// report answers Unknown. A read that fails any other way is not a
+// change on the panel, so the unit keeps the condition it holds and
+// the fault reports once.
+func (o *operator) screenCondition(player *Player, key string, lookup *screens, monitor string) (PlayerCondition, bool) {
+	held, holds := heldCondition(player.Status.Conditions, screenConditionType)
+	display, err := lookup.displayFor(monitor)
+	var condition PlayerCondition
+	switch {
+	case errors.Is(err, ErrNotFound):
+		condition = PlayerCondition{
+			Status:  conditionUnknown,
+			Reason:  screenReasonNoDisplay,
+			Message: "no Display named " + monitor,
+		}
+	case err != nil:
+		o.panelFault(key, fmt.Sprintf("reading display %s: %v", monitor, err))
+		return held, holds
+	default:
+		condition = screenFromDisplay(display)
+	}
+	condition.Type = screenConditionType
+	condition.LastTransitionTime = held.LastTransitionTime
+	if !holds || held.Status != condition.Status {
+		condition.LastTransitionTime = time.Now().UTC().Format(time.RFC3339)
+	}
+	return condition, true
+}
+
+// screenFromDisplay reads the Display's Connected condition. True is
+// Present, and NoPanel is PanelAway; the Display's message comes
+// along either way, because it names the connector.
+func screenFromDisplay(display *Display) PlayerCondition {
+	for _, connected := range display.Status.Conditions {
+		if connected.Type != displayConnectedCondition {
+			continue
+		}
+		if connected.Status == conditionTrue {
+			return PlayerCondition{Status: conditionTrue, Reason: screenReasonPresent, Message: connected.Message}
+		}
+		reason := connected.Reason
+		if reason == displayReasonNoPanel {
+			reason = screenReasonPanelAway
+		}
+		return PlayerCondition{Status: conditionFalse, Reason: reason, Message: connected.Message}
+	}
+	return PlayerCondition{Status: conditionUnknown, Reason: screenReasonNotReported}
+}
+
+// heldCondition finds the condition of one type on a Player.
+func heldCondition(conditions []PlayerCondition, kind string) (PlayerCondition, bool) {
+	for _, condition := range conditions {
+		if condition.Type == kind {
+			return condition, true
+		}
+	}
+	return PlayerCondition{}, false
 }
 
 // retainPanels shrinks the record to the units the cluster
