@@ -1032,6 +1032,38 @@ fn a_re_present_states_nothing_while_a_play_runs() {
     );
 }
 
+/// One ask on the commands topic, as the playback pod's command sidecar
+/// publishes it when a person takes the up-next offer on the scrubber.
+const ASK: &[u8] = br#"{"action":"play-next","request":{"library":"living-room/shows"}}"#;
+
+#[test]
+fn a_play_next_states_the_request_whether_or_not_a_play_runs() {
+    let now = Instant::now();
+    let mut idle = idling(&wiring(), now);
+    let mut playing = focused(&wiring());
+    playing.deliver(STATUS, &status("Playing"), true, now);
+
+    for screen in [&mut idle, &mut playing] {
+        assert_eq!(
+            moments(screen.deliver(COMMANDS, ASK, false, now)),
+            [Moment::PlayNext(
+                br#"{"library":"living-room/shows"}"#.to_vec()
+            )]
+        );
+    }
+}
+
+#[test]
+fn a_play_next_with_no_request_states_no_bytes() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now);
+
+    assert_eq!(
+        moments(screen.deliver(COMMANDS, br#"{"action":"play-next"}"#, false, now)),
+        [Moment::PlayNext(Vec::new())]
+    );
+}
+
 #[test]
 fn every_other_action_and_a_payload_that_does_not_decode_state_nothing() {
     let now = Instant::now();

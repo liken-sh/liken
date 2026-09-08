@@ -66,6 +66,7 @@ func buildPod(
 	mounts = append(mounts, artMount(), ipcMount())
 
 	blocks := presentationBlocks(play.Spec.Items, resolved.Logos, resolved.Trickplays, resolved.Arts)
+	next := nextBlock(play.Spec.Next, resolved.Next)
 
 	container := Container{
 		Name:  playerContainer,
@@ -78,6 +79,12 @@ func buildPod(
 		// declares an item's shape, and the shim expands a music album into
 		// one timeline before mpv sees any argument.
 		Env: []EnvVar{{Name: presentationsVariable, Value: blocks}},
+	}
+	// The block goes to both containers, the way the presentation blocks
+	// do, so nothing in the pod reads a second source for what follows this
+	// run.
+	if next != "" {
+		container.Env = append(container.Env, EnvVar{Name: nextVariable, Value: next})
 	}
 	// The start is added only when the spec declares one, so an
 	// ordinary run's pod carries nothing extra. The shim reads it and
@@ -122,7 +129,7 @@ func buildPod(
 	// reads its events-topic list back off the pod to tell whether a
 	// Player reshaped this pod.
 	initContainers := []Container{
-		commandSidecar(play, claim, blocks, resolved.Mounts, sidecarImage, busAddress, topicBase, remotes),
+		commandSidecar(play, claim, blocks, next, resolved.Mounts, sidecarImage, busAddress, topicBase, remotes),
 	}
 
 	return &Pod{
@@ -198,7 +205,7 @@ func mpvVolumeOptions(volume *PlayVolume) []string {
 // volume, because it is the one container besides mpv that reaches the
 // socket.
 func commandSidecar(
-	play *Play, claim *ResourceClaim, blocks string, mediaMounts []VolumeMount,
+	play *Play, claim *ResourceClaim, blocks, next string, mediaMounts []VolumeMount,
 	sidecarImage, busAddress, topicBase string, remotes []boundRemote,
 ) Container {
 	interval := play.Spec.TrickplayInterval
@@ -212,6 +219,9 @@ func commandSidecar(
 		{Name: topicBaseVariable, Value: topicBase},
 		{Name: presentationsVariable, Value: blocks},
 		{Name: trickplayIntervalVariable, Value: interval},
+	}
+	if next != "" {
+		env = append(env, EnvVar{Name: nextVariable, Value: next})
 	}
 	// The Player this Play runs on, which is the value a focus mark must
 	// hold for a controller's press to reach this film, and the two
@@ -299,6 +309,23 @@ func presentationBlocks(items []PlayItem, logos, trickplays, arts []string) stri
 		return "[]"
 	}
 	return string(array)
+}
+
+// nextBlock encodes the Play's next block for the pod as JSON, with the
+// art at the path the resolver rewrote it to, the way a presentation
+// block carries its item's resolved art. A Play with no next block, or a
+// block that does not marshal, gives an empty string.
+func nextBlock(next *PlayNext, art string) string {
+	if next == nil {
+		return ""
+	}
+	block := *next
+	block.Art = art
+	encoded, err := json.Marshal(block)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func ipcMount() VolumeMount {

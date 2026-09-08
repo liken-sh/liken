@@ -574,9 +574,12 @@ spec:
                           description: |-
                             The topic the operator publishes re-present
                             on when a Play ends. The client maps a fresh
-                            surface when it arrives. The operator is the
-                            only writer, and a client publishes nothing
-                            here.
+                            surface when it arrives. The playback pod
+                            publishes play-next on the same topic when a
+                            person takes the up-next offer on the
+                            scrubber, and the client that wrote the Play
+                            reads that ask and starts the next work. A
+                            client publishes nothing here.
                         panelTopic:
                           type: string
                           description: |-

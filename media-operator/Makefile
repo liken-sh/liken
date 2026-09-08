@@ -59,6 +59,7 @@ test-go:
 .PHONY: test-lua
 test-lua:
 	lua5.4 display/test/trickplay_test.lua
+	lua5.4 display/test/upnext_test.lua
 
 # The Rust half is a cargo workspace with two members, the media-screen
 # library and the idle screen that draws with it. idle/Makefile holds

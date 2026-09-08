@@ -220,6 +220,53 @@ spec:
                     items always begin at their own start. This is
                     also how a run resumes: a new Play with the
                     position a finished or deleted one reported.
+                next:
+                  type: object
+                  description: >-
+                    The work that follows this run. The display offers
+                    it on the scrubber as a chip, and as a card in the
+                    last ten percent of the run. A select on the offer
+                    publishes the request below on the Player's commands
+                    topic, where the program that wrote the Play reads
+                    it back and creates the next Play. A Play with no
+                    next block offers nothing.
+                  properties:
+                    reason:
+                      type: string
+                      description: >-
+                        The first line of the card, which says why this
+                        work follows: "Next in The Saga", for one. The
+                        display draws it as given, in uppercase.
+                    title:
+                      type: string
+                      description: >-
+                        The second line of the card, the name of the
+                        work that follows. The chip draws this line
+                        alone.
+                    detail:
+                      type: string
+                      description: >-
+                        The third line of the card, under the title:
+                        the series and the season, or the year and the
+                        runtime. The display draws it as given.
+                    art:
+                      type: string
+                      description: >-
+                        The art of the work that follows, as a claim://,
+                        nfs://, or https:// URI, resolved the way an
+                        item's art is. The display fits it inside the
+                        card's box and keeps its ratio, so a poster is
+                        letterboxed.
+                    request:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      description: >-
+                        An object the operator never reads. When a
+                        person takes the offer, it is published byte for
+                        byte on the Player's commands topic, so the
+                        program that wrote the Play gets its own words
+                        back and needs no other record of what it
+                        offered.
                 trickplayInterval:
                   type: string
                   description: >-

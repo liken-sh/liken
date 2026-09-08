@@ -45,12 +45,14 @@ type artRequest struct {
 // argument names the request, so the bridge drops another script's broadcast.
 // The rest depends on the kind: a logo and a cover carry a box, and a
 // trickplay carries a time and a box.
+//
+// The next work's art carries a box, the way the logo and the cover do.
 func parseArtRequest(args []string) (artRequest, bool) {
 	if len(args) < 4 || args[0] != artRequestMessage {
 		return artRequest{}, false
 	}
 	switch args[1] {
-	case artKindLogo, artKindAlbum:
+	case artKindLogo, artKindAlbum, artKindNext:
 		w, h, ok := parseBox(args[2], args[3])
 		if !ok {
 			return artRequest{}, false
@@ -90,6 +92,9 @@ func parseBox(widthArg, heightArg string) (w, h int, ok bool) {
 // serveArt answers one art request. It dispatches by kind, the logo to
 // serveLogo, the trickplay tile to serveTrickplay, and the playing album's
 // cover to serveAlbum.
+//
+// The next work's art goes to serveNext, which reads the Play's next block
+// and not the playing item's.
 func (c *commander) serveArt(args []string) {
 	request, ok := parseArtRequest(args)
 	if !ok {
@@ -102,6 +107,8 @@ func (c *commander) serveArt(args []string) {
 		c.serveTrickplay(request)
 	case artKindAlbum:
 		c.serveAlbum(request)
+	case artKindNext:
+		c.serveNext(request)
 	}
 }
 

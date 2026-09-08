@@ -28,6 +28,10 @@ These plans are designed. Each keeps its number and moves to
 * [26, Prometheus metrics](26-prometheus-metrics.md). Proposed.
   Playback outcomes, startup delay, and report freshness per `Player`,
   with explicit rules for retained reports, pause, and normal endings.
+* [28, Up next](28-up-next.md). Proposed. A `Play` carries the
+  work that follows it, the display offers it on the scrubber, a
+  select publishes the ask on the bus, and the newest `Play` on a
+  `Player` is the one that runs.
 
 ## Completed
 

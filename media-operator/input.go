@@ -48,6 +48,13 @@ const (
 // reaches no player program.
 const actionRePresent = "re-present"
 
+// actionPlayNext is the ask the playback pod's command sidecar publishes
+// on a Player's commands topic when a person takes the up-next offer on
+// the scrubber. The program that wrote the Play reads it there and
+// creates the next Play. No player program answers it, so commandFor has
+// no case for it.
+const actionPlayNext = "play-next"
+
 // A compiledBinding is one row of a Remote's key table: an evdev
 // type, code, and value on the left, the kernel key name the pod
 // publishes on the right. The names are the API and the numbers are
@@ -200,14 +207,15 @@ const displaySummonMessage = "summon"
 // pixel size. The bridge answers with artReplyMessage, addressed to the
 // display, carrying the ready blob.
 //
-// The three art kinds: the film's logo, the scrub tile, and the playing
-// album's cover.
+// The four art kinds: the film's logo, the scrub tile, the playing
+// album's cover, and the art of the work that follows this run.
 const (
 	artRequestMessage = "liken-art-request"
 	artReplyMessage   = "liken-art"
 	artKindLogo       = "logo"
 	artKindTrickplay  = "trickplay"
 	artKindAlbum      = "album"
+	artKindNext       = "next"
 )
 
 // exitMessage is the script-message the display broadcasts when a person
@@ -216,6 +224,19 @@ const (
 // quit mpv itself, because the ending must reach the bus before mpv starts
 // to tear down the film's surface.
 const exitMessage = "liken-exit"
+
+// nextRequestMessage is the script-message the display broadcasts when a
+// person takes the up-next offer on the scrubber. The sidecar reads it
+// the way it reads the exit press, and publishes the block's request on
+// the Player's commands topic. The program that wrote the Play starts
+// what follows.
+const nextRequestMessage = "liken-next"
+
+// nextMessage is the script-message that carries the next block to the
+// display. The sidecar sends it at the same two moments it sends a
+// presentation: the run's first item, and every replay the display asks
+// for.
+const nextMessage = "next"
 
 // presentationRequestMessage is the script-message the display broadcasts
 // once, when it loads. The sidecar sends each item's block the moment the
@@ -230,6 +251,12 @@ const presentationRequestMessage = "liken-presentation-request"
 // so another script's broadcast is not an ending.
 func isExitMessage(args []string) bool {
 	return len(args) > 0 && args[0] == exitMessage
+}
+
+// isNextRequest reads a client-message as the display's select on the
+// offer. It takes no arguments, so the name is the whole of it.
+func isNextRequest(args []string) bool {
+	return len(args) > 0 && args[0] == nextRequestMessage
 }
 
 // isPresentationRequest reads a client-message as the display asking for the
@@ -260,6 +287,13 @@ const emptyPresentation = "{}"
 // decode.
 func presentationCommand(block json.RawMessage) []any {
 	return []any{"script-message-to", displayClientName, presentationMessage, string(block)}
+}
+
+// nextCommand sends the display the Play's next block as one string
+// argument, the way a presentation block is sent, so the display reads
+// it as text.
+func nextCommand(block json.RawMessage) []any {
+	return []any{"script-message-to", displayClientName, nextMessage, string(block)}
 }
 
 // commandFor is where the action vocabulary becomes the words mpv

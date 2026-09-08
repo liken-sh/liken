@@ -29,6 +29,9 @@ const (
 // the object it would build now. deletionTimestamp is set by the API
 // server on an object that is on its way out, and a standing pair with
 // one set is left alone until the delete completes.
+//
+// creationTimestamp is the API server's own stamp. The operator reads it
+// to tell the newest Play on a Player from an older one.
 type ObjectMeta struct {
 	Name              string            `json:"name,omitempty"`
 	Namespace         string            `json:"namespace,omitempty"`
@@ -36,6 +39,7 @@ type ObjectMeta struct {
 	ResourceVersion   string            `json:"resourceVersion,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 	Annotations       map[string]string `json:"annotations,omitempty"`
+	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
 	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
 }
@@ -381,12 +385,32 @@ type PlaySpec struct {
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
 
+	// Next is the work that follows this run. The display offers it on the
+	// scrubber, and the program that wrote the Play starts it when a person
+	// takes the offer.
+	Next *PlayNext `json:"next,omitempty"`
+
 	// The level this run starts at. The operator writes it through to
 	// the unit's volume topic before it creates the pod, so the
 	// override becomes the Player's state and everything after it is
 	// the ordinary path. Absent, the run starts at whatever the topic
 	// already holds.
 	Volume *PlayVolume `json:"volume,omitempty"`
+}
+
+// PlayNext is the offer: three lines of text the display draws as given,
+// an art reference the operator resolves the way it resolves an item's
+// art, and a request the operator never reads and carries back on the bus
+// when a person takes the offer.
+type PlayNext struct {
+	Reason string `json:"reason,omitempty"`
+	Title  string `json:"title,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	Art    string `json:"art,omitempty"`
+
+	// Request is raw JSON because the writer of the Play defines its shape,
+	// and this operator carries it back unread.
+	Request json.RawMessage `json:"request,omitempty"`
 }
 
 // PlayVolume is a Play's starting level, its muted flag, or both.

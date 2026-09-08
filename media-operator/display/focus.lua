@@ -6,6 +6,7 @@ local scrubber = require("scrubber")
 local strip = require("strip")
 local images = require("images")
 local presentation = require("presentation")
+local upnext = require("upnext")
 
 local focus = {}
 
@@ -22,7 +23,9 @@ local FADE_TICK = theme.fade_tick
 -- The focus stops, top to bottom. The scrubber owns two of them, fine and
 -- chapter, on one bar. up and down walk the stops present for the current
 -- file and skip the rest, so the list is flat and dynamic.
-local STOPS = { "fine", "chapter", "images", "strip" }
+-- The up-next offer is the stop above the scrubber, so up from the fine axis
+-- lands on it and down returns.
+local STOPS = { "next", "fine", "chapter", "images", "strip" }
 
 -- Hide the OSD after this many idle seconds of play. A pause does not start
 -- the countdown. The number lives in theme, because the volume indicator
@@ -36,6 +39,11 @@ local IDLE_HIDE = theme.idle_hide
 -- idle screen over the film that is shutting down, with no black gap between
 -- the two.
 local EXIT = "liken-exit"
+
+-- The script-message a select on the up-next offer broadcasts. The command
+-- sidecar reads it and publishes the Play's own request block on the Player's
+-- commands topic, and the browser starts the next work.
+local NEXT = "liken-next"
 
 local summoned = false
 local paused = false
@@ -57,7 +65,9 @@ function focus.set_redraw(fn)
 end
 
 local function stop_available(stop)
-  if stop == "fine" then
+  if stop == "next" then
+    return upnext.available()
+  elseif stop == "fine" then
     return presentation.type() ~= "image" and scrubber.fine_available()
   elseif stop == "chapter" then
     return presentation.type() ~= "image" and scrubber.chapter_available()
@@ -129,9 +139,16 @@ local function start_fade(target)
   end
 end
 
+-- A summon lands on the first stop below the offer, so the main button stays
+-- play-pause, and a select on the offer takes an up press first.
 local function reset_focus()
-  local p = present()
-  focused = p[1]
+  focused = nil
+  for _, s in ipairs(present()) do
+    if s ~= "next" then
+      focused = s
+      break
+    end
+  end
 end
 
 local function move(dir)
@@ -156,7 +173,10 @@ end
 -- chapter stops seek and step on the scrubber. The strip moves its control
 -- focus, and select returns a chooser to capture.
 local function route(action)
-  if focused == "fine" then
+  if focused == "next" then
+    -- The offer is one thing to take, so it answers select and nothing else.
+    return nil
+  elseif focused == "fine" then
     if action == "left" then
       scrubber.seek(-1)
     elseif action == "right" then
@@ -260,6 +280,13 @@ function focus.select()
     return
   end
   if focus.visible() then
+    if focused == "next" then
+      -- The ask goes out, and the card waits for the next Play.
+      mp.command_native({ "script-message", NEXT })
+      upnext.take()
+      redraw_cb()
+      return
+    end
     if focused == "strip" then
       capturing = route("select")
       redraw_cb()
@@ -274,12 +301,22 @@ function focus.select()
   toggle_pause()
 end
 
--- back has four meanings, one per state, tried in order. An open chooser closes.
+-- back has one meaning per state, tried in order. An open chooser closes.
 -- Else a fine scan cancels its preview. Else the visible OSD dismisses. Else, at
 -- the bare video, back asks the command sidecar to end the run, and the sidecar
 -- quits mpv with code 0, so the pod ends as the Completed a finished film gives,
 -- not an Error.
 function focus.nav(action)
+  -- The offer is taken and the next Play is starting, so the display routes
+  -- every press to nothing. back still ends the run, on the same message the
+  -- bare video sends, because a person must be able to leave.
+  if upnext.waiting() then
+    if action == "back" then
+      mp.command_native({ "script-message", EXIT })
+    end
+    return
+  end
+
   if action == "back" then
     if capturing then
       capturing.close()

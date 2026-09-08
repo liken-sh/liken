@@ -22,7 +22,7 @@ func mediaItems(uris ...string) []PlayItem {
 }
 
 func TestResolvePassesAnHTTPSURIThrough(t *testing.T) {
-	resolved, err := resolvePlay(mediaItems("https://films.example/movies/film.mkv"))
+	resolved, err := resolvePlay(mediaItems("https://films.example/movies/film.mkv"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestResolvePassesAnHTTPSURIThrough(t *testing.T) {
 // An nfs URI names a file, and the pod mounts the directory that
 // holds it, read-only in both places.
 func TestResolveMountsTheDirectoryThatHoldsTheFile(t *testing.T) {
-	resolved, err := resolvePlay(mediaItems("nfs://nas.example/export/dir/film.mkv"))
+	resolved, err := resolvePlay(mediaItems("nfs://nas.example/export/dir/film.mkv"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestResolveCommonAncestorOfTwoFilesInOneDirectory(t *testing.T) {
 	resolved, err := resolvePlay(mediaItems(
 		"nfs://nas.example/export/dir/first.mkv",
 		"nfs://nas.example/export/dir/second.mkv",
-	))
+	), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestResolveMountsTheParentOfSiblingDirectories(t *testing.T) {
 	resolved, err := resolvePlay(mediaItems(
 		"nfs://nas.example/export/films/film.mkv",
 		"nfs://nas.example/export/shows/episode.mkv",
-	))
+	), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestResolveMountsOneCommonAncestorPerServer(t *testing.T) {
 		"nfs://films.example/export/films/film.mkv",
 		"nfs://shows.example/export/shows/episode.mkv",
 		"nfs://films.example/export/films/other.mkv",
-	))
+	), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestResolveKeepsAMixedListInSpecOrder(t *testing.T) {
 		"https://films.example/trailer.mkv",
 		"nfs://nas.example/export/films/film.mkv",
 		"https://films.example/credits.mkv",
-	))
+	), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestResolveKeepsAMixedListInSpecOrder(t *testing.T) {
 
 // A lone https media item mounts nothing and rewrites nothing.
 func TestResolveALoneHTTPSItemMountsNothing(t *testing.T) {
-	resolved, err := resolvePlay(mediaItems("https://films.example/film.mkv"))
+	resolved, err := resolvePlay(mediaItems("https://films.example/film.mkv"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestResolveALogoBesideTheMediaSharesTheMount(t *testing.T) {
 		Presentation: &Presentation{
 			Logo: "nfs://nas.example/export/film/logo.png",
 		},
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestResolveTheCoverArtTheWayTheLogoResolves(t *testing.T) {
 			resolved, err := resolvePlay([]PlayItem{{
 				URI:          "nfs://nas.example/music/album/track.flac",
 				Presentation: &Presentation{Type: "music", Art: each.art},
-			}})
+			}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -263,7 +263,7 @@ func TestResolveRefusesADirectoryThatIsNoAlbum(t *testing.T) {
 			_, err := resolvePlay([]PlayItem{{
 				URI:          "nfs://nas.example/music/None Shall Pass/",
 				Presentation: each.presentation,
-			}})
+			}}, nil)
 			if err == nil {
 				t.Fatal("a directory that is no album resolved")
 			}
@@ -293,7 +293,7 @@ func TestResolveAnAlbumDirectory(t *testing.T) {
 			resolved, err := resolvePlay([]PlayItem{{
 				URI:          each.uri,
 				Presentation: &Presentation{Type: "music", Hint: "album"},
-			}})
+			}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -311,7 +311,7 @@ func TestResolveAnAlbumDirectory(t *testing.T) {
 // A claim:// item mounts the claim itself, read-only, and the URI's path
 // is the path under that mount.
 func TestResolveMountsAClaimAtItsRoot(t *testing.T) {
-	resolved, err := resolvePlay(mediaItems("claim://films/movies/film.mkv"))
+	resolved, err := resolvePlay(mediaItems("claim://films/movies/film.mkv"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestResolveOneClaimCostsOneMount(t *testing.T) {
 			Logo:      "claim://library/art/film/logo.png",
 			Trickplay: "claim://library/movies/film/film.trickplay",
 		},
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func TestResolveMountsOneVolumePerClaim(t *testing.T) {
 		"claim://films/movies/film.mkv",
 		"claim://shows/episodes/episode.mkv",
 		"claim://films/movies/other.mkv",
-	))
+	), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestResolveNumbersServersAndClaimsTogether(t *testing.T) {
 		"claim://library/movies/second.mkv",
 		"nfs://nas.example/export/films/third.mkv",
 		"claim://archive/clips/fourth.mkv",
-	))
+	), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestResolveAnAlbumDirectoryOnAClaim(t *testing.T) {
 			resolved, err := resolvePlay([]PlayItem{{
 				URI:          each.uri,
 				Presentation: &Presentation{Type: "music", Hint: "album"},
-			}})
+			}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -468,7 +468,7 @@ func TestResolveAnAlbumDirectoryOnAClaim(t *testing.T) {
 // A directory on a claim that no block marks as an album is refused, for
 // the reason every other directory item is.
 func TestResolveRefusesAClaimDirectoryThatIsNoAlbum(t *testing.T) {
-	_, err := resolvePlay(mediaItems("claim://music/albums/Third Album/"))
+	_, err := resolvePlay(mediaItems("claim://music/albums/Third Album/"), nil)
 	if err == nil {
 		t.Fatal("a directory that is no album resolved")
 	}
@@ -500,7 +500,7 @@ func TestResolveRefusesAClaimURIItCannotMount(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			resolved, err := resolvePlay(mediaItems(each.uri))
+			resolved, err := resolvePlay(mediaItems(each.uri), nil)
 			if err == nil {
 				t.Fatalf("%q resolved to %+v", each.uri, resolved)
 			}
@@ -522,7 +522,7 @@ func TestResolveAnHTTPSLogoStaysAURL(t *testing.T) {
 		Presentation: &Presentation{
 			Logo: "https://art.example/logo.png",
 		},
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestResolveLeavesAnAbsentLogoEmpty(t *testing.T) {
 	resolved, err := resolvePlay([]PlayItem{
 		{URI: "nfs://nas.example/export/film/film.mkv"},
 		{URI: "nfs://nas.example/export/film/other.mkv", Presentation: &Presentation{Title: "Other"}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +555,7 @@ func TestResolveLeavesAnAbsentLogoEmpty(t *testing.T) {
 // resolve, because the reader is writing a Play and needs the
 // vocabulary.
 func TestResolveNamesTheSchemesItResolves(t *testing.T) {
-	_, err := resolvePlay(mediaItems("rtsp://camera.example/stream"))
+	_, err := resolvePlay(mediaItems("rtsp://camera.example/stream"), nil)
 	if err == nil {
 		t.Fatal("an unknown scheme resolved")
 	}
@@ -576,7 +576,7 @@ func TestResolveRefusesAURIItCannotMount(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			resolved, err := resolvePlay(mediaItems(c.uri))
+			resolved, err := resolvePlay(mediaItems(c.uri), nil)
 			if err == nil {
 				t.Fatalf("%q resolved to %+v", c.uri, resolved)
 			}
@@ -595,7 +595,7 @@ func TestResolveRefusesALogoItCannotMount(t *testing.T) {
 	_, err := resolvePlay([]PlayItem{{
 		URI:          "nfs://nas.example/export/film/film.mkv",
 		Presentation: &Presentation{Logo: "rtsp://camera.example/logo"},
-	}})
+	}}, nil)
 	if err == nil {
 		t.Fatal("a logo with an unresolvable scheme resolved")
 	}
@@ -923,4 +923,69 @@ func TestResolveIdleControllerTierWins(t *testing.T) {
 			mustMatch(t, resolveIdle(one.player, one.defaults, testIdleImage).Controller, one.want)
 		})
 	}
+}
+
+// The next block's art resolves the way an item's art does: an nfs or a
+// claim reference shares the media's mount, and an https reference passes
+// through.
+func TestResolveTheNextBlocksArt(t *testing.T) {
+	cases := []struct {
+		name  string
+		media string
+		art   string
+		want  string
+	}{
+		{
+			name:  "a claim beside the media",
+			media: "claim://library/shows/harbor/s02e04.mkv",
+			art:   "claim://library/shows/harbor/s02e05-thumb.jpg",
+			want:  "/media/1/shows/harbor/s02e05-thumb.jpg",
+		},
+		{
+			name:  "an nfs reference beside the media",
+			media: "nfs://nas.example/export/shows/s02e04.mkv",
+			art:   "nfs://nas.example/export/shows/s02e05-thumb.jpg",
+			want:  "/media/1/s02e05-thumb.jpg",
+		},
+		{
+			name:  "an https reference",
+			media: "claim://library/shows/harbor/s02e04.mkv",
+			art:   "https://art.example/s02e05.jpg",
+			want:  "https://art.example/s02e05.jpg",
+		},
+		{
+			name:  "a block with no art",
+			media: "claim://library/shows/harbor/s02e04.mkv",
+			want:  "",
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			resolved, err := resolvePlay(mediaItems(one.media), &PlayNext{Art: one.art})
+			mustSucceed(t, err)
+			mustMatch(t, resolved.Next, one.want)
+			mustMatch(t, len(resolved.Mounts), 1)
+		})
+	}
+}
+
+// The next block's art on a claim of its own gets a mount of its own,
+// numbered after the media's, so the pod reads both.
+func TestResolveTheNextBlocksArtOnItsOwnClaim(t *testing.T) {
+	resolved, err := resolvePlay(
+		mediaItems("claim://films/movies/film.mkv"),
+		&PlayNext{Art: "claim://art/shows/next.jpg"})
+	mustSucceed(t, err)
+
+	mustMatch(t, resolved.Next, "/media/2/shows/next.jpg")
+	mustMatch(t, len(resolved.Volumes), 2)
+	mustMatch(t, resolved.Volumes[1].PersistentVolumeClaim.ClaimName, "art")
+}
+
+// A next block with an art URI of a scheme the resolver does not know
+// fails the Play, the way an item's own art does, so a bad reference is
+// refused before any pod exists.
+func TestResolveRefusesANextArtItCannotRead(t *testing.T) {
+	_, err := resolvePlay(mediaItems("claim://films/movies/film.mkv"), &PlayNext{Art: "rtsp://camera.example/still"})
+	mustFail(t, err)
 }

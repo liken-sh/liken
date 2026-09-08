@@ -63,6 +63,16 @@ type commander struct {
 	availabilityTopic string
 	commandsTopic     string
 
+	// The Player's commands topic, where the sidecar publishes the ask a
+	// select on the up-next offer makes. It is empty for a pod that read no
+	// Player, and that pod publishes no ask.
+	playerCommandsTopic string
+
+	// The Play's next block as the operator wrote it into the pod, empty for
+	// a Play that carries none. The display draws the offer from it, and the
+	// ask carries its request back.
+	next json.RawMessage
+
 	// The unit's volume topic, empty for a Player with no sinks.
 	// Empty is the speaker gate: the sidecar subscribes to no level,
 	// applies none, and answers no volume press.
@@ -186,11 +196,18 @@ func runCommand() {
 	}
 
 	// The kernel runs no default action for a signal sent to PID 1, and
-	// the command sidecar is its container's PID 1. The signal context
-	// ends the report side on the kubelet's SIGTERM, which is the same
-	// end mpv's closed socket gives.
-	runCtx, stopRun := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	// the command sidecar is its container's PID 1.
+	//
+	// The pod's termination signal runs the exit path, so the ending
+	// reaches the bus and mpv quits before the grace period runs out. mpv
+	// gets the same signal from the kubelet in its own container, because
+	// the player image's shim execs mpv, and mpv installs a SIGTERM handler
+	// of its own.
+	runCtx, stopRun := context.WithCancel(context.Background())
 	defer stopRun()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(signals)
 
 	cmd := &commander{
 		statusTopic:       playStatusTopic(base, namespace, name),
@@ -199,12 +216,20 @@ func runCommand() {
 		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
 		volumeOwnerTopic:  os.Getenv(playerVolumeOwnerTopicVariable),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
+		next:              parseNext(os.Getenv(nextVariable)),
 		artDir:            artMountPath,
 		playerName:        os.Getenv(playerNameVariable),
 		remotes: playRemoteMap(
 			os.Getenv(remoteEventsTopicsVariable),
 			os.Getenv(remoteFocusTopicsVariable)),
 		marks: map[string]string{},
+	}
+	// The ask goes on the Player's own topic. The sidecar builds it from
+	// the base, the namespace, and the unit it plays on, the way it builds
+	// its own status topic. A pod that read no unit builds none and
+	// publishes no ask.
+	if cmd.playerName != "" {
+		cmd.playerCommandsTopic = playerCommandsTopic(base, namespace, cmd.playerName)
 	}
 
 	// The bus runs on its own context, not the signal context, so the
@@ -233,6 +258,10 @@ func runCommand() {
 	// The controllers' own topics, two per Remote the unit names.
 	cmd.subscribeRemotes(cmd.bus)
 	go cmd.bus.Run(busCtx)
+
+	// The handler runs beside the report side, because the exit path
+	// publishes on the bus connection the report side keeps open.
+	go cmd.exitOnSignal(runCtx, signals, stopRun)
 
 	cmd.report(runCtx)
 
@@ -430,6 +459,10 @@ func (c *commander) serveMessage(args []string) {
 		c.exit()
 		return
 	}
+	if isNextRequest(args) {
+		c.publishNext()
+		return
+	}
 	if isPresentationRequest(args) {
 		c.resendPresentation()
 		return
@@ -451,6 +484,9 @@ func (c *commander) resendPresentation() {
 		return
 	}
 	c.command(presentationCommand(c.blockForItem(item)))
+	// The offer replays with the presentation, because the display asks
+	// for both with one request when its script loads.
+	c.sendNext()
 }
 
 // attach sets the mpv connection and observes the properties under one
@@ -505,19 +541,28 @@ func parsePresentations(value string) []json.RawMessage {
 // It clears the previous item's art first, so the shared volume holds only
 // what the current item can show.
 func (c *commander) present(item int) {
-	c.swapArt(item)
+	first := c.swapArt(item)
 	c.command(presentationCommand(c.blockForItem(item)))
+	// One offer serves the whole run, so it is sent once, after the first
+	// item's presentation.
+	if first {
+		c.sendNext()
+	}
 }
 
 // swapArt drops the previous item's decoded art when the playlist reaches a
 // new item, so one item's logo never lingers on the next and the shared volume
 // holds only the current item's blobs.
-func (c *commander) swapArt(item int) {
+//
+// The return value says whether the run reached its first item, which is
+// the moment the offer is sent.
+func (c *commander) swapArt(item int) bool {
 	c.artMutex.Lock()
 	defer c.artMutex.Unlock()
 	if item == c.artItem {
-		return
+		return false
 	}
+	first := c.artItem == 0
 	for _, blob := range c.artCache {
 		os.Remove(blob.path)
 	}
@@ -533,6 +578,7 @@ func (c *commander) swapArt(item int) {
 	c.trickSheet = nil
 	c.trickSheetKey = ""
 	c.artItem = item
+	return first
 }
 
 // blockForItem returns one item's block, or the empty object when the
@@ -614,6 +660,19 @@ func (c *commander) endRun() {
 func (c *commander) exit() {
 	c.endRun()
 	c.command(exitCommand())
+}
+
+// exitOnSignal runs the exit path on the pod's termination signal: the
+// ending reaches the bus, mpv quits, and the run's context ends, so the
+// sidecar clears the retained topics the way every other ending does. A
+// run that ends first ends this handler with nothing to do.
+func (c *commander) exitOnSignal(ctx context.Context, signals <-chan os.Signal, stop context.CancelFunc) {
+	select {
+	case <-ctx.Done():
+	case <-signals:
+		c.exit()
+		stop()
+	}
 }
 
 // playbackState is the run at one moment, as the command sidecar holds

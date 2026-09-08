@@ -14,6 +14,19 @@ The spec is immutable, like a `Job`'s template. A `Play` whose
 player or media changed mid-run would describe a different run;
 delete the `Play` and create another.
 
+One `Player` runs one `Play`. When two unfinished `Play`s name the
+same `Player`, the newest one by creation time, and then by name, is
+the one that runs, and the operator deletes every older one. So a
+`Play` created while a film plays ends that film. The deleted `Play`
+reports its last position before its pod ends, and a `Play` that
+resumes it names that position in `spec.start`.
+
+`spec.next` names the work that follows this run. The display offers
+it on the scrubber, and when a person takes the offer the program that
+wrote the `Play` creates the next one. The `Play` carries the offer
+because the display reads no catalog, and the program that wrote it
+decides what follows.
+
     apiVersion: media.liken.sh/v1alpha1
     kind: Play
     metadata:

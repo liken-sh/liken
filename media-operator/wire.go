@@ -105,6 +105,11 @@ const (
 	// live while the film plays.
 	presentationsVariable = "MEDIA_PRESENTATIONS"
 
+	// The Play's next block, on both containers, as JSON with the art at
+	// the in-pod path the resolver rewrote it to. A Play with no next block
+	// sets it on neither, and a pod that reads none offers nothing.
+	nextVariable = "MEDIA_NEXT"
+
 	// Carries a Play's trickplayInterval to the bridge. The tile width, the
 	// grid, and the tile height are on the sheets, so the bridge reads them.
 	// The interval is not on the sheets, so the Play declares it and the pod
@@ -143,8 +148,9 @@ const (
 	// The player-commands topic, on the idle client pod. The operator
 	// builds it from the Player's identity and passes it whole, the way
 	// it hands the playback pod its focus topics, so the client
-	// subscribes to one exact topic and parses nothing. It carries the
-	// operator's re-present alone.
+	// subscribes to one exact topic and parses nothing.
+	// It carries the operator's re-present and the playback pod's ask for
+	// the work that follows the run.
 	playerCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
 
 	// The player-status topic the playback pod's command sidecar reads the

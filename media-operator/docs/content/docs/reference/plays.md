@@ -22,6 +22,19 @@ The spec is immutable, like a `Job`'s template. A `Play` whose
 player or media changed mid-run would describe a different run;
 delete the `Play` and create another.
 
+One `Player` runs one `Play`. When two unfinished `Play`s name the
+same `Player`, the newest one by creation time, and then by name, is
+the one that runs, and the operator deletes every older one. So a
+`Play` created while a film plays ends that film. The deleted `Play`
+reports its last position before its pod ends, and a `Play` that
+resumes it names that position in `spec.start`.
+
+`spec.next` names the work that follows this run. The display offers
+it on the scrubber, and when a person takes the offer the program that
+wrote the `Play` creates the next one. The `Play` carries the offer
+because the display reads no catalog, and the program that wrote it
+decides what follows.
+
     apiVersion: media.liken.sh/v1alpha1
     kind: Play
     metadata:
@@ -49,6 +62,7 @@ What to play and where. The spec is immutable: a different film or a different p
 | <span id="spec--players"></span>`players` | []string | yes | The Players this Play runs on, by name, in this namespace. One entry today. |
 | <span id="spec--items"></span>`items` | [\[\]object](#specitems) | yes | The media to play in order. Each entry is a URI and an optional presentation that declares how the display should render it. |
 | <span id="spec--start"></span>`start` | string | no | Where in the first item the run begins, as a time the player accepts, such as 0:10:00 or 600. Omitted, the run begins at the start. Later items always begin at their own start. This is also how a run resumes: a new Play with the position a finished or deleted one reported. |
+| <span id="spec--next"></span>`next` | [object](#specnext) | no | The work that follows this run. The display offers it on the scrubber as a chip, and as a card in the last ten percent of the run. A select on the offer publishes the request below on the Player's commands topic, where the program that wrote the Play reads it back and creates the next Play. A Play with no next block offers nothing. |
 | <span id="spec--trickplayinterval"></span>`trickplayInterval` | string | no | The seconds one trickplay tile covers, as a Go duration like 10s. Jellyfin writes no manifest beside the sheets, so the Play declares it. Omitted, it defaults to 10s, the Jellyfin default. |
 | <span id="spec--ttlsecondsafterfinished"></span>`ttlSecondsAfterFinished` | integer | no | How long this Play stays after it finishes, in seconds, the meaning a Job gives the name. While it stays, kubectl get plays still answers what just played and where it stopped; deleting the Play deletes that record. Omitted, it is 300 seconds. Zero deletes the Play as soon as it finishes. The playback pod does not wait for this window: it is deleted as soon as the run finishes. |
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order, the most specific tier; omit it to inherit the Player. |
@@ -85,6 +99,18 @@ How the item should look, for the fields the display cannot read from the file. 
 | <span id="specitemspresentation--art"></span>`art` | string | no | The cover art URI, claim://, nfs:// or https://, resolved the way the media URI is. It is the first place the cover is looked for; a picture embedded in the file and a cover.jpg beside it follow, and the pod reads both of those itself. |
 | <span id="specitemspresentation--logo"></span>`logo` | string | no | The logo art URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows it in the header in place of the title. |
 | <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The X.trickplay directory URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows a tile from it on the scrub cursor. |
+
+### spec.next
+
+The work that follows this run. The display offers it on the scrubber as a chip, and as a card in the last ten percent of the run. A select on the offer publishes the request below on the Player's commands topic, where the program that wrote the Play reads it back and creates the next Play. A Play with no next block offers nothing.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specnext--reason"></span>`reason` | string | no | The first line of the card, which says why this work follows: "Next in The Saga", for one. The display draws it as given, in uppercase. |
+| <span id="specnext--title"></span>`title` | string | no | The second line of the card, the name of the work that follows. The chip draws this line alone. |
+| <span id="specnext--detail"></span>`detail` | string | no | The third line of the card, under the title: the series and the season, or the year and the runtime. The display draws it as given. |
+| <span id="specnext--art"></span>`art` | string | no | The art of the work that follows, as a claim://, nfs://, or https:// URI, resolved the way an item's art is. The display fits it inside the card's box and keeps its ratio, so a poster is letterboxed. |
+| <span id="specnext--request"></span>`request` | object | no | An object the operator never reads. When a person takes the offer, it is published byte for byte on the Player's commands topic, so the program that wrote the Play gets its own words back and needs no other record of what it offered. |
 
 ### spec.volume
 

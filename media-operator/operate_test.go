@@ -2224,3 +2224,142 @@ func mustPublishNoRePresent(t *testing.T, broker *fakeBroker) {
 		}
 	}
 }
+
+// A Play on the named Player, created at the stated moment. The name and
+// the creation time are what the pass orders on when two Plays name one
+// unit.
+func playOnPlayer(name, player, created string) *Play {
+	play := housePlay("https://nas/film.mkv")
+	play.Metadata.Name = name
+	play.Metadata.CreationTimestamp = created
+	play.Spec.Players = []string{player}
+	play.Status.Phase = phaseRunning
+	return play
+}
+
+// Two unfinished Plays on one Player are one run too many. The newest one
+// runs, and the pass deletes the other.
+func TestAPassDeletesEveryOlderPlayOnOnePlayer(t *testing.T) {
+	cases := []struct {
+		name   string
+		older  *Play
+		newer  *Play
+		wanted string
+	}{
+		{
+			name:   "the newer creation time wins",
+			older:  playOnPlayer("early", "theater", "2026-09-08T10:00:00Z"),
+			newer:  playOnPlayer("late", "theater", "2026-09-08T11:00:00Z"),
+			wanted: "late",
+		},
+		{
+			name:   "the later name breaks a tie",
+			older:  playOnPlayer("alpha", "theater", "2026-09-08T10:00:00Z"),
+			newer:  playOnPlayer("omega", "theater", "2026-09-08T10:00:00Z"),
+			wanted: "omega",
+		},
+		{
+			name:   "a Play with no stamp is the older one",
+			older:  playOnPlayer("unstamped", "theater", ""),
+			newer:  playOnPlayer("stamped", "theater", "2026-09-08T10:00:00Z"),
+			wanted: "stamped",
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			cluster := newFakeCluster()
+			cluster.plays[one.older.Metadata.Name] = one.older
+			cluster.plays[one.newer.Metadata.Name] = one.newer
+			cluster.players["theater"] = housePlayer()
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+
+			media.pass()
+
+			if _, standing := cluster.plays[one.wanted]; !standing {
+				t.Errorf("the pass deleted %q, and it is the newest", one.wanted)
+			}
+			if len(cluster.plays) != 1 {
+				t.Errorf("plays = %v, want only %q", sortedNames(cluster.plays), one.wanted)
+			}
+		})
+	}
+}
+
+// The only Play on a Player is the newest one, so nothing deletes it.
+func TestAPassKeepsTheOnlyPlayOnAPlayer(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
+	cluster.players["theater"] = housePlayer()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	if _, standing := cluster.plays["movie"]; !standing {
+		t.Error("the pass deleted the only Play on the unit")
+	}
+}
+
+// Each unit is ordered on its own. Two Plays on two Players are two runs,
+// and neither ends the other.
+func TestAPassLeavesPlaysOnOtherPlayersAlone(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["theater-film"] = playOnPlayer("theater-film", "theater", "2026-09-08T10:00:00Z")
+	cluster.plays["kitchen-film"] = playOnPlayer("kitchen-film", "kitchen", "2026-09-08T11:00:00Z")
+	cluster.players["theater"] = housePlayer()
+	kitchen := housePlayer()
+	kitchen.Metadata.Name = "kitchen"
+	cluster.players["kitchen"] = kitchen
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	mustMatchAll(t, sortedNames(cluster.plays), []string{"kitchen-film", "theater-film"})
+}
+
+// A deleting Play still owns a pod while a finalizer keeps it, and
+// garbage collection does not delete that pod until the finalizer
+// clears. The operator deletes the pod itself, so the claim frees and the
+// next run's pod starts.
+func TestAPassDeletesThePodOfADeletingPlay(t *testing.T) {
+	cluster := newFakeCluster()
+	play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
+	play.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
+	cluster.plays["movie"] = play
+	cluster.players["theater"] = housePlayer()
+	cluster.pods["movie-playback"] = housePlaybackPod()
+	cluster.claims["movie-devices"] = buildClaim(play, housePlayer())
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+	if _, standing := cluster.pods["movie-playback"]; standing {
+		t.Fatal("the deleting Play's pod stands")
+	}
+
+	// A second pass proves the reconcile does not build the pod again for a
+	// Play that is on its way out.
+	media.pass()
+	if _, standing := cluster.pods["movie-playback"]; standing {
+		t.Error("the pass recreated the deleting Play's pod")
+	}
+}
+
+// A deleting Play is not the run on its unit, so the Play that follows it
+// is kept and gets its own pod.
+func TestADeletingPlayDoesNotSupersedeTheNextOne(t *testing.T) {
+	cluster := newFakeCluster()
+	leaving := playOnPlayer("leaving", "theater", "2026-09-08T11:00:00Z")
+	leaving.Metadata.DeletionTimestamp = "2026-09-08T11:30:00Z"
+	cluster.plays["leaving"] = leaving
+	cluster.plays["arriving"] = playOnPlayer("arriving", "theater", "2026-09-08T10:00:00Z")
+	cluster.players["theater"] = housePlayer()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	media.pass()
+
+	if _, standing := cluster.plays["arriving"]; !standing {
+		t.Fatal("the pass deleted the Play that stands")
+	}
+	if _, held := cluster.pods["arriving-playback"]; !held {
+		t.Error("the standing Play reached no pod")
+	}
+}

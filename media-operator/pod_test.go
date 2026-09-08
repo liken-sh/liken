@@ -60,7 +60,7 @@ func testResolution(t *testing.T) resolution {
 	resolved, err := resolvePlay(mediaItems(
 		"https://films.example/trailer.mkv",
 		"nfs://nas.example/export/films/film.mkv",
-	))
+	), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,4 +508,35 @@ func TestBuildPodWithNoTimeZoneCarriesNoTZ(t *testing.T) {
 	if got := envValue(pod.Spec.Containers[0], timeZoneVariable); got != "" {
 		t.Errorf("%s = %q, want none", timeZoneVariable, got)
 	}
+}
+
+// A Play with a next block passes the whole block to both containers in
+// one variable, with the art at the in-pod path the resolver rewrote it
+// to.
+func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
+	play := testPlay()
+	play.Spec.Next = &PlayNext{
+		Reason:  "Next in Harbor Lights",
+		Title:   "E05",
+		Detail:  "45 min",
+		Art:     "claim://library/shows/next.jpg",
+		Request: json.RawMessage(`{"library":"living-room/shows"}`),
+	}
+	resolved, err := resolvePlay(play.Spec.Items, play.Spec.Next)
+	mustSucceed(t, err)
+	pod := buildPod(play, buildClaim(play, testPlayer()), resolved,
+		testPlayerImage, testSidecarImage, testBusAddress, testTopicBase, nil, resolvedPreferences{})
+
+	want := `{"reason":"Next in Harbor Lights","title":"E05","detail":"45 min","art":"/media/1/shows/next.jpg","request":{"library":"living-room/shows"}}`
+	mustMatch(t, envValue(pod.Spec.Containers[0], nextVariable), want)
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), nextVariable), want)
+}
+
+// A Play with no next block sets the variable on neither container, so
+// the pod offers nothing.
+func TestBuildPodSetsNoNextBlockWhereThePlayCarriesNone(t *testing.T) {
+	pod := testPod(t)
+
+	mustMatch(t, envValue(pod.Spec.Containers[0], nextVariable), "")
+	mustMatch(t, envValue(initContainer(t, pod, commandContainer), nextVariable), "")
 }

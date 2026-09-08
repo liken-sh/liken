@@ -218,12 +218,16 @@ func playCommandsTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/commands"
 }
 
-// playerCommandsTopic carries one message, the re-present the operator
+// playerCommandsTopic carries the re-present the operator
 // sends when a Play ends. It is not retained, because a re-present is
-// an event and not a state. The operator is the only writer: a client
+// an event and not a state. A client
 // publishes nothing here, and no press is forwarded on it. It stays off
 // the plays tree because it drives the standing idle screen, not a
 // Play, and a controller sends nothing on it directly.
+//
+// The playback pod's command sidecar is the second writer. It publishes
+// the ask a person makes on the up-next offer, and the program that wrote
+// the Play reads it there and creates the next Play.
 func playerCommandsTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/commands"
 }

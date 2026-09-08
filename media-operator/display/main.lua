@@ -11,6 +11,7 @@ local trickplay = require("trickplay")
 local album = require("album")
 local clock = require("clock")
 local volume = require("volume")
+local upnext = require("upnext")
 
 -- The remote reaches this client by its directory basename. The log names it
 -- once, so a wrong name shows in the player log.
@@ -32,6 +33,9 @@ local function redraw()
   -- draws over the ASS layer, so a logo left in place would sit on top of the
   -- dim rather than under it.
   header.sync(focus.visible() and not focus.capturing())
+  -- The offer's art follows the same rule, so a chooser's dim removes it,
+  -- and so does the card itself when it is not on screen.
+  upnext.sync(focus.visible() and not focus.capturing())
   -- The cover holds the frame for a music item whether the OSD is up or down.
   album.sync()
   -- The thumbnail shows only while a fine scan is in flight, for an item that
@@ -101,6 +105,12 @@ local function redraw()
         parts[#parts + 1] = b
       end
     end
+    -- The offer draws after the bottom cluster, so the chip and the card read
+    -- over the scrim and beside the scrubber.
+    local nx = upnext.draw(stop == "next")
+    if nx then
+      parts[#parts + 1] = nx
+    end
     local capturing = focus.capturing()
     if capturing then
       -- A chooser is open. Dim the whole frame under it, so the list reads
@@ -108,6 +118,13 @@ local function redraw()
       parts[#parts + 1] = theme.rect(0, 0, theme.canvas.w, theme.canvas.h, theme.color.shadow, theme.alpha.dim)
       parts[#parts + 1] = capturing.draw_chooser()
     end
+  end
+  -- The card shows itself when the playhead crosses the rise, and it stays for
+  -- the whole wait, both with the OSD down. So it draws outside the OSD block
+  -- on a fade of its own.
+  local nx_out = upnext.draw_outside(focus.visible())
+  if nx_out then
+    parts[#parts + 1] = nx_out
   end
   -- The volume row draws outside the OSD block, because it comes and goes
   -- on a clock of its own and a level change must show the level and nothing
@@ -144,6 +161,7 @@ header.set_redraw(request_redraw)
 trickplay.set_redraw(request_redraw)
 album.set_redraw(request_redraw)
 volume.set_redraw(request_redraw)
+upnext.set_redraw(request_redraw)
 
 -- mpv pushes each property once when the script observes it, then on every
 -- change, so the display runs no timer of its own for these values.
@@ -153,7 +171,8 @@ end)
 mp.observe_property("time-pos", "number", function()
   request_redraw()
 end)
-mp.observe_property("percent-pos", "number", function()
+mp.observe_property("percent-pos", "number", function(_, value)
+  upnext.on_percent(value)
   request_redraw()
 end)
 mp.observe_property("chapter", "number", function()
@@ -180,7 +199,8 @@ end)
 mp.observe_property("sid", "string", function()
   request_redraw()
 end)
-mp.observe_property("playlist-pos", "number", function()
+mp.observe_property("playlist-pos", "number", function(_, value)
+  upnext.on_playlist_pos(value)
   request_redraw()
 end)
 mp.observe_property("playlist-count", "number", function()
@@ -193,6 +213,7 @@ mp.observe_property("osd-dimensions", "native", function()
   -- below measures against the screen that is there now.
   theme.update_canvas()
   header.on_resize()
+  upnext.on_resize()
   trickplay.on_resize()
   album.on_resize()
   request_redraw()
@@ -233,7 +254,17 @@ mp.register_script_message("liken-art", function(kind, path, w, h, stride)
     trickplay.on_art(kind, path, w, h, stride)
   elseif kind == "album" then
     album.on_art(kind, path, w, h, stride)
+  elseif kind == "next" then
+    upnext.on_art(kind, path, w, h, stride)
   end
+end)
+
+-- The command sidecar sends the Play's up-next block to the display as this
+-- script-message, once at start and again on every presentation replay. No
+-- message means the Play names no next work, and the display draws nothing
+-- for it.
+mp.register_script_message("next", function(text)
+  upnext.receive(text)
 end)
 
 -- The six navigation words the command sidecar sends. It reads the

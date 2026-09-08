@@ -391,9 +391,36 @@ func (o *operator) pass() {
 		defaults = nil
 	}
 	live := make(map[string]bool, len(list.Items))
+	// One unit runs one Play, and the newest Play is the one that runs. So
+	// the pass reads the whole list before it reconciles any Play, and it
+	// names the Plays a newer one replaces.
+	superseded := supersededPlays(list.Items)
 	for index := range list.Items {
 		play := &list.Items[index]
-		live[runKey(play.Metadata.Namespace, play.Metadata.Name)] = true
+		namespace, name := play.Metadata.Namespace, play.Metadata.Name
+		live[runKey(namespace, name)] = true
+		// A deleting Play keeps its pod until its finalizers clear, because
+		// garbage collection waits for them, and the pod keeps the unit's
+		// claim while it waits. The operator deletes the pod itself, so the
+		// claim frees at once and the next run starts. A deleting Play is
+		// reconciled no further, so nothing recreates the pod of a run that
+		// is over.
+		if play.Metadata.DeletionTimestamp != "" {
+			if err := DeletePod(o.client, namespace, podName(name)); err != nil {
+				fmt.Fprintf(os.Stderr, "deleting the pod of play %s/%s: %v\n", namespace, name, err)
+			}
+			continue
+		}
+		// An older Play on a unit that a newer Play also names ends here.
+		// The delete is the whole ending: the sidecar quits mpv on the pod's
+		// termination signal, and the library's store records the last
+		// position before the finalizer clears.
+		if superseded[runKey(namespace, name)] {
+			if err := DeletePlay(o.client, namespace, name); err != nil {
+				fmt.Fprintf(os.Stderr, "deleting superseded play %s/%s: %v\n", namespace, name, err)
+			}
+			continue
+		}
 		// A Finished Play is over, so the pass retires it in place of
 		// reconciling it. A Failed Play is not over here, because the
 		// reconcile below resumes it, so only a Finished Play is retired.
@@ -599,13 +626,6 @@ func (o *operator) reestablishRetained() {
 // backstopInterval, ten seconds, after its window ends.
 func (o *operator) retire(play *Play) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	// A Play a person already deleted is on its way out, and the garbage
-	// collector takes the pod and the claim with it through their
-	// ownerReferences. Leave it alone, the way reconcileStanding leaves a
-	// standing object with a deletionTimestamp alone.
-	if play.Metadata.DeletionTimestamp != "" {
-		return nil
-	}
 	now := time.Now()
 	finished, stamped := finishedTime(play, now)
 	if !stamped {
@@ -630,6 +650,69 @@ func (o *operator) retire(play *Play) error {
 	status := play.Status
 	status.FinishedAt = finished.UTC().Format(time.RFC3339)
 	return writePlayStatus(o.client, play, status)
+}
+
+// supersededPlays names every unfinished Play that a newer Play on the
+// same unit replaces. The newest Play runs, so a play request from any
+// program on the bus ends the film that runs now. Without this rule, a
+// second Play's pod pends on the unit's claim, and nothing ends the
+// first.
+//
+// A Play that is finished, failed, or deleting names no run, and a Play
+// that names no Player names no unit, so none of them replaces anything
+// or is replaced.
+func supersededPlays(plays []Play) map[string]bool {
+	newest := map[string]*Play{}
+	superseded := map[string]bool{}
+	for index := range plays {
+		play := &plays[index]
+		if !unfinishedPlay(play) {
+			continue
+		}
+		unit := runKey(play.Metadata.Namespace, playerName(play))
+		held, seen := newest[unit]
+		if !seen {
+			newest[unit] = play
+			continue
+		}
+		older := held
+		if newerPlay(play, held) {
+			newest[unit] = play
+		} else {
+			older = play
+		}
+		superseded[runKey(older.Metadata.Namespace, older.Metadata.Name)] = true
+	}
+	return superseded
+}
+
+// unfinishedPlay says whether this Play still names a run on a unit.
+func unfinishedPlay(play *Play) bool {
+	return play.Metadata.DeletionTimestamp == "" &&
+		!finishedPhase(play.Status.Phase) &&
+		play.Status.Phase != phaseFailed &&
+		playerName(play) != ""
+}
+
+// newerPlay orders two Plays on one unit. The later creation time wins,
+// and the later name breaks a tie, so every pass picks the same run. A
+// Play with no creation time is the older one.
+func newerPlay(play, than *Play) bool {
+	created, other := playCreated(play), playCreated(than)
+	if !created.Equal(other) {
+		return created.After(other)
+	}
+	return play.Metadata.Name > than.Metadata.Name
+}
+
+// playCreated reads the API server's creation time. A value that does
+// not parse counts as no time, and the name alone orders that Play.
+func playCreated(play *Play) time.Time {
+	created, err := time.Parse(time.RFC3339, play.Metadata.CreationTimestamp)
+	if err != nil {
+		return time.Time{}
+	}
+	return created
 }
 
 // playTTL is how long this Play stands after it finishes: the seconds its
@@ -1085,7 +1168,7 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	}
 	prefs := resolvePreferences(&play.Spec, &player.Spec, defaultSpec)
 
-	resolved, resolveErr := resolvePlay(play.Spec.Items)
+	resolved, resolveErr := resolvePlay(play.Spec.Items, play.Spec.Next)
 	if resolveErr != nil {
 		return writePlayStatus(o.client, play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
 	}

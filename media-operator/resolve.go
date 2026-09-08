@@ -43,7 +43,10 @@ type resolution struct {
 	// Arts is the resolved cover reference for each item, in spec order. It
 	// resolves the way the logo does, and an item with no art has an empty
 	// string.
-	Arts    []string
+	Arts []string
+	// Next is the resolved art of the Play's next block. It is empty for a
+	// Play that carries no next block, and for a block that names no art.
+	Next    string
 	Volumes []Volume
 	Mounts  []VolumeMount
 }
@@ -101,7 +104,7 @@ func (r resolvedRef) mount() (mountKey, []string, bool) {
 // begins. So the resolver mounts the common ancestor of every nfs URI on one
 // server, and passes each file's path under that mount. Mounting a wider
 // subtree than one file is safe, because the mount is read-only.
-func resolvePlay(items []PlayItem) (resolution, error) {
+func resolvePlay(items []PlayItem, next *PlayNext) (resolution, error) {
 	mediaRefs := make([]resolvedRef, len(items))
 	logoRefs := make([]resolvedRef, len(items))
 	trickRefs := make([]resolvedRef, len(items))
@@ -177,6 +180,18 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 		}
 	}
 
+	// The next block's art joins the same pass as the items, so art on the
+	// same claim as the media shares the media's mount.
+	var nextRef resolvedRef
+	if next != nil && next.Art != "" {
+		art, err := parseRef(next.Art)
+		if err != nil {
+			return resolution{}, err
+		}
+		nextRef = art
+		register(art)
+	}
+
 	ancestor := map[mountKey][]string{}
 	ordinal := map[mountKey]int{}
 	var resolved resolution
@@ -220,6 +235,7 @@ func resolvePlay(items []PlayItem) (resolution, error) {
 		resolved.Trickplays[index] = rewrite(trickRefs[index])
 		resolved.Arts[index] = rewrite(artRefs[index])
 	}
+	resolved.Next = rewrite(nextRef)
 	return resolved, nil
 }
 

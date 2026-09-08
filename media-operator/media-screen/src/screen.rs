@@ -34,8 +34,13 @@ use crate::wiring::{Remote, Wiring};
 /// needs no second topic list.
 const CYCLE_SUFFIX: &str = "/cycle";
 
-/// The one command this crate answers on the `Player`'s commands topic.
+/// The two commands this crate answers on the `Player`'s commands topic.
 const RE_PRESENT: &str = "re-present";
+
+/// The ask the playback pod's command sidecar publishes when a person takes
+/// the up-next offer on the scrubber. The client that wrote the `Play` reads
+/// it and starts what follows.
+const PLAY_NEXT: &str = "play-next";
 
 /// One thing the client draws.
 ///
@@ -65,6 +70,12 @@ pub enum Moment {
     /// The unit's listening level. `pressed` is false for the broker's
     /// catch-up and true for a press.
     Level { volume: Volume, pressed: bool },
+    /// A person took the up-next offer on the scrubber. The bytes are the
+    /// `request` of the `Play`'s next block, which this crate never reads:
+    /// the client that wrote the `Play` reads its own words back and starts
+    /// what follows. The moment fires whether or not the unit is idle,
+    /// because the unit is never idle when this arrives.
+    PlayNext(Vec<u8>),
     /// The owner mark as it stands, as the raw payload. A non-empty mark
     /// means equipment owns the level. An empty one means the mark is
     /// cleared. The client decides what to draw for it.
@@ -87,6 +98,15 @@ pub struct Publish {
 pub enum Effect {
     Moment(Moment),
     Publish(Publish),
+}
+
+/// The request as bytes, for a client that parses it with its own types. A
+/// message that carries none gives an empty request.
+fn request_bytes(request: Option<serde_json::Value>) -> Vec<u8> {
+    let Some(value) = request else {
+        return Vec::new();
+    };
+    serde_json::to_vec(&value).unwrap_or_default()
 }
 
 /// One controller's mark and whether this bus session already delivered one.
@@ -153,11 +173,15 @@ pub struct Screen {
     deadline: Option<(Instant, Window)>,
 }
 
-/// The one field of the commands topic this crate reads.
+/// The two fields of the commands topic this crate reads. The request is
+/// whatever object the writer of the `Play` put there, so it is kept as a
+/// value and passed on unread.
 #[derive(Deserialize)]
 struct Command {
     #[serde(default)]
     action: String,
+    #[serde(default)]
+    request: Option<serde_json::Value>,
 }
 
 impl Screen {
@@ -443,14 +467,22 @@ impl Screen {
         effects
     }
 
-    /// Fold one message off the commands topic. One command acts, the
-    /// operator's re-present, and it acts only while the unit plays nothing,
-    /// so a stray one during a film never maps the clock over it. Every other
+    /// Fold one message off the commands topic. The operator's re-present
+    /// acts only while the unit plays nothing, so a stray one during a film
+    /// never maps the clock over it. Every other
     /// action does nothing.
+    ///
+    /// The ask a person makes on the up-next offer acts whether or not the
+    /// unit is idle, because the unit is never idle when it arrives.
     fn on_command(&mut self, payload: &[u8]) -> Vec<Effect> {
         let Some(command) = crate::object::<Command>(payload) else {
             return Vec::new();
         };
+        if command.action == PLAY_NEXT {
+            return vec![Effect::Moment(Moment::PlayNext(request_bytes(
+                command.request,
+            )))];
+        }
         if command.action != RE_PRESENT || !self.idle {
             return Vec::new();
         }

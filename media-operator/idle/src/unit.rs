@@ -162,6 +162,9 @@ impl Unit {
             // The stock idle screen draws the level it holds and nothing
             // about who owns it.
             Moment::Owner(_) => {}
+            // The up-next offer is for the client that wrote the `Play`. The
+            // stock idle screen writes none, so it acts on none.
+            Moment::PlayNext(_) => {}
         }
     }
 
@@ -613,6 +616,16 @@ mod tests {
 
         assert_eq!(unit.volume, volume);
         assert_eq!(unit.pressed, None);
+    }
+
+    #[test]
+    fn an_ask_for_the_next_work_changes_nothing_this_screen_draws() {
+        let mut unit = seeded();
+        let before = unit.clone();
+
+        unit.fold(Moment::PlayNext(br#"{"library":"shows"}"#.to_vec()), 2.0);
+
+        assert_eq!(unit, before);
     }
 
     #[test]
