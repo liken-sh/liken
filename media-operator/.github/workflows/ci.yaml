@@ -12,9 +12,9 @@
 # wrong the day someone adds a file it does not name, and the push
 # that adds it would then land untested.
 #
-# The three test jobs are independent, so they run at once, and the
+# The four test jobs are independent, so they run at once, and the
 # gate takes as long as its slowest job. The publish job waits for all
-# three, so a red gate never reaches the site.
+# four, so a red gate never reaches the site.
 name: ci
 
 on:
@@ -65,6 +65,22 @@ jobs:
           path: coverage.out
           if-no-files-found: error
           retention-days: 7
+
+  # The display is Lua that runs inside mpv. Its test replaces the mp
+  # global with a fake table, so it needs no mpv and nothing beyond the
+  # lua5.4 package Ubuntu carries. The step runs the same make target a
+  # workstation runs; the Makefile says why that interpreter.
+  lua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install the lua interpreter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+
+      - run: make test-lua
 
   docs:
     runs-on: ubuntu-latest
@@ -263,7 +279,7 @@ jobs:
   # under this site's name.
   publish:
     if: github.event_name != 'pull_request'
-    needs: [go, docs, rust]
+    needs: [go, lua, docs, rust]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

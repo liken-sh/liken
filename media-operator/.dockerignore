@@ -15,6 +15,11 @@ docs/themes/brand/.git
 # The Go coverage profile the gate writes on every run.
 coverage.out
 
+# The display's tests run under a plain lua interpreter on a workstation
+# and in CI. mpv loads the directory that holds main.lua and reads
+# nothing below it, so the player image carries no test file.
+display/test/
+
 # cargo writes a target tree in the brand submodule's crate too, when a
 # workstation builds that crate in place, and it grows to gigabytes the
 # idle image never reads.

@@ -487,18 +487,37 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 // press, its request for the current block, and each art request. It runs
 // beside the reporter, so a slow decode or a network fetch never holds up the
 // position reports.
+//
+// A trickplay request is served only after the loop drains what is already
+// queued. The newest tile request in the queue is the one it serves, and the
+// other messages it passed on the way are served first, in their order.
+// trickplayqueue.go says why.
 func (c *commander) serveMessages(messages <-chan clientMessage) {
 	for message := range messages {
-		if isExitMessage(message.Args) {
-			c.exit()
-			continue
+		args := message.Args
+		if isTrickplayRequest(args) {
+			var passed [][]string
+			args, passed = drainTrickplay(args, messages)
+			for _, each := range passed {
+				c.serveMessage(each)
+			}
 		}
-		if isPresentationRequest(message.Args) {
-			c.resendPresentation()
-			continue
-		}
-		c.serveArt(message.Args)
+		c.serveMessage(args)
 	}
+}
+
+// serveMessage answers one broadcast. The exit press and the presentation
+// request each have one answer, and every other message is an art request.
+func (c *commander) serveMessage(args []string) {
+	if isExitMessage(args) {
+		c.exit()
+		return
+	}
+	if isPresentationRequest(args) {
+		c.resendPresentation()
+		return
+	}
+	c.serveArt(args)
 }
 
 // resendPresentation answers the display's request with the block for the

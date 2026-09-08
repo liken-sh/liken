@@ -11,7 +11,7 @@
 # place.
 
 .PHONY: test
-test: test-go test-rust test-docs
+test: test-go test-lua test-rust test-docs
 
 # keycodes.go is generated from the kernel header named here, and it is
 # committed, so a build needs the header only when the table is
@@ -50,6 +50,15 @@ test-go:
 	go test -race ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go test -coverprofile=coverage.out ./...
 	GOTOOLCHAIN=$(COVERAGE_TOOLCHAIN) go tool go-test-coverage --config=.testcoverage.yml
+
+# The display's Lua modules run inside mpv, which is the only host that
+# defines the mp global. The test replaces that global with a fake table
+# in display/test/mp.lua, so it runs under a plain interpreter. lua5.4 is
+# the interpreter Ubuntu carries; mpv embeds a 5.1-level one, so the test
+# and the display use only what both accept.
+.PHONY: test-lua
+test-lua:
+	lua5.4 display/test/trickplay_test.lua
 
 # The Rust half is a cargo workspace with two members, the media-screen
 # library and the idle screen that draws with it. idle/Makefile holds

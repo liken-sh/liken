@@ -22,6 +22,12 @@ local OVERLAY_ID = 2
 -- The two script-message names the display and the bridge agree on.
 local ART_REQUEST = "liken-art-request"
 
+-- How long, in seconds, a request holds the gate closed when the bridge
+-- answers nothing. An item with no trickplay set, or a sheet the bridge cannot
+-- read, draws no reply. Without this limit one such request would stop every
+-- later request for the rest of the item.
+local REPLY_TIMEOUT = 1
+
 local redraw_cb = function() end
 function trickplay.set_redraw(fn)
   redraw_cb = fn
@@ -31,9 +37,17 @@ end
 -- display holds the last tile until a new one arrives, so it does not blink
 -- during a scrub.
 local blob = nil
--- The request last sent, the target second and the pixel box. An unchanged
--- second and box are not asked for again.
+-- The gate. inflight is the key of the request the bridge is answering, and
+-- want is the newest request the display asks for: its key, the target time,
+-- and the pixel box. One request is in flight at a time, so a held scrub sends
+-- one request per round trip, and the last reply is for the newest position.
+-- Without the gate a hold sends about thirty requests a second, the bridge
+-- serves them in order, and the tile keeps moving after the hand lifts. An
+-- unchanged second and box are not asked for again.
+local inflight = nil
 local want = nil
+-- The timer that reopens the gate when the request in flight draws no reply.
+local reply_timer = nil
 -- The overlay on screen now, so a redraw places it again only when the bitmap
 -- or its position changes.
 local placed = nil
@@ -46,17 +60,51 @@ local function osd_metrics()
   return theme.osd_scale()
 end
 
+-- Forget the request in flight and stop its timer, so the next want goes out
+-- at once.
+local function clear_inflight()
+  if reply_timer then
+    reply_timer:kill()
+    reply_timer = nil
+  end
+  inflight = nil
+end
+
+-- Send one request and mark it in flight. The timer clears the mark, and the
+-- want with it, when no reply arrives within REPLY_TIMEOUT. It clears the want
+-- as well, so the next sync asks again even at the same second; the tile the
+-- bridge never answered is otherwise never asked for until the cursor moves.
+local function send(wanted)
+  inflight = wanted.key
+  if reply_timer then
+    reply_timer:kill()
+  end
+  reply_timer = mp.add_timeout(REPLY_TIMEOUT, function()
+    reply_timer = nil
+    inflight = nil
+    want = nil
+  end)
+  mp.command_native({
+    "script-message", ART_REQUEST, "trickplay",
+    tostring(wanted.ms), tostring(wanted.w), tostring(wanted.h),
+  })
+end
+
 -- Ask the bridge for the tile at the target time and pixel box. Quantize the
 -- request to a whole second, so a scrub within one second sends nothing and the
--- IPC does not flood. A new second, or a new box, asks again.
+-- IPC does not flood. A new second, or a new box, asks again. While a request
+-- is in flight, a new want is recorded and not sent; on_art sends it when the
+-- reply arrives.
 local function request(time_seconds, w, h)
   local key = math.floor(time_seconds + 0.5) .. ":" .. w .. "x" .. h
-  if key == want then
+  if want and key == want.key then
     return
   end
-  want = key
-  local ms = math.floor(time_seconds * 1000 + 0.5)
-  mp.command_native({ "script-message", ART_REQUEST, "trickplay", tostring(ms), tostring(w), tostring(h) })
+  want = { key = key, ms = math.floor(time_seconds * 1000 + 0.5), w = w, h = h }
+  if inflight then
+    return
+  end
+  send(want)
 end
 
 -- Place the tile centered on the playhead x, above the bar, in real pixels.
@@ -90,27 +138,39 @@ local function clear()
 end
 
 -- On a new item, drop the tile and the pending request. A stale reply for the
--- old item then does not land on the new one.
+-- old item then does not land on the new one. The in-flight mark goes as well,
+-- so the new item's first request goes out even when the old item's last
+-- request drew no reply.
 function trickplay.on_item()
   blob = nil
   want = nil
+  clear_inflight()
   clear()
   redraw_cb()
 end
 
 -- On a resize, forget the last box, so the next sync asks at the new scale. The
--- current tile stays on screen until the new one arrives.
+-- current tile stays on screen until the new one arrives. The request in
+-- flight carries the old box, so its mark goes as well.
 function trickplay.on_resize()
   want = nil
+  clear_inflight()
 end
 
 -- Receive one decoded tile from the bridge. Accept only a trickplay reply, so a
--- logo reply routed here by mistake draws nothing.
+-- logo reply routed here by mistake draws nothing. The reply carries no key,
+-- so the request it answers is the one marked in flight. When the want names
+-- a different tile, it goes out here: this is the one request per round trip.
 function trickplay.on_art(kind, path, w, h, stride)
   if kind ~= "trickplay" then
     return
   end
+  local answered = inflight
+  clear_inflight()
   blob = { path = path, w = tonumber(w), h = tonumber(h), stride = tonumber(stride) }
+  if want and want.key ~= answered then
+    send(want)
+  end
   redraw_cb()
 end
 
