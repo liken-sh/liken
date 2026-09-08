@@ -158,6 +158,12 @@ pub struct Strip<'a, T> {
     /// The member that holds focus, or nothing while another row of the
     /// page holds it.
     pub focus: Option<usize>,
+    /// The member the row keeps in view while another row holds focus,
+    /// or nothing. A page with many rows remembers where a person was
+    /// on each one, and focus returns to that slot; without this the row
+    /// would scroll back to its start the moment focus left it, and the
+    /// poster a person was looking at would slide off the screen.
+    pub kept: Option<usize>,
     /// The set's own title, drawn over the posters.
     pub heading: &'a str,
     /// The library the art paths resolve against.
@@ -211,6 +217,13 @@ pub fn offset(slots: &[(f32, f32)], focus: Option<usize>, viewport: f32) -> f32 
     (x + width / 2.0 - viewport / 2.0).clamp(0.0, content - viewport)
 }
 
+/// The slot the scroll centers: the one that holds focus, else the one
+/// the row keeps in view, else the one the page is about. A row with
+/// none of the three rests at its start.
+pub fn anchor<T>(strip: &Strip<'_, T>) -> Option<usize> {
+    strip.focus.or(strip.kept).or(strip.current)
+}
+
 /// The slot of one index in frame space, after the scroll.
 pub fn slot(strip_region: Rectangle, slots: &[(f32, f32)], offset: f32, index: usize) -> Rectangle {
     let (x, width) = slots[index];
@@ -244,7 +257,7 @@ pub fn draw<T: Card, A: Art>(
     }
 
     let slots = placed(strip.members, strip.last.is_some());
-    let offset = offset(&slots, strip.focus.or(strip.current), strip.region.width);
+    let offset = offset(&slots, anchor(strip), strip.region.width);
     let right = strip.region.x + strip.region.width;
 
     for index in 0..slots.len() {
@@ -429,6 +442,7 @@ mod tests {
             members,
             current,
             focus,
+            kept: None,
             heading: "The Set",
             library: "screening/films",
             last: None,
@@ -558,6 +572,20 @@ mod tests {
         let (last, width) = slots[30];
         let end = offset(&slots, Some(30), viewport);
         assert_eq!(end, last + width - viewport);
+    }
+
+    #[test]
+    fn a_row_scrolls_to_the_slot_it_keeps_when_focus_is_elsewhere() {
+        let members: Vec<Member> = (0..30).map(|_| Member(wall::POSTER)).collect();
+        let mut row = strip(&members, Some(2), Some(15));
+        assert_eq!(anchor(&row), Some(15));
+        row.focus = None;
+        assert_eq!(anchor(&row), Some(2));
+        row.kept = Some(20);
+        assert_eq!(anchor(&row), Some(20));
+        row.kept = None;
+        row.current = None;
+        assert_eq!(anchor(&row), None);
     }
 
     #[test]

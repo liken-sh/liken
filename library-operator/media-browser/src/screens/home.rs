@@ -438,6 +438,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
                             members: &strip.items,
                             current: None,
                             focus: (focused && !strip.rung).then_some(strip.focus),
+                            kept: Some(strip.focus),
                             heading: &strip.heading,
                             library: "",
                             last: strip.last.as_ref().map(Last::view),

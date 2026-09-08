@@ -148,6 +148,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                         circled: false,
                         members: &band.members,
                         current: band.current,
+                        kept: None,
                         focus: match focus {
                             Some(Focus::Franchise(strip, Place::Member(member)))
                                 if strip == index =>
