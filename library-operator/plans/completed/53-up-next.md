@@ -1,9 +1,10 @@
 # 53, Up next
 
-Proposed. The browser decides what work follows the one it starts,
-writes that on the `Play`, and starts it when the player asks. The
+Built, and drilled on `liken-1` on 2026-09-08 in release 2026.09.08-007.
+The browser decides what work follows the one it starts, writes that on
+the `Play`, and starts it when the player asks. The
 player's half is
-[media-operator plan 28](https://github.com/liken-sh/media-operator/blob/main/plans/28-up-next.md).
+[media-operator plan 28](https://github.com/liken-sh/media-operator/blob/main/plans/completed/28-up-next.md).
 
 ## The problem
 
@@ -110,6 +111,21 @@ successor. The row's reasons already say when one exists, and the
 offer follows the same rule.
 
 ## The proof
+
+Drilled on `liken-1` on 2026-09-08. A play request with a `next` block
+for the second episode of a series reached the `Play`, and a select on
+the offer over the bus brought the browser's play request for that
+episode in the same second, with its own `next` for the third. The
+old `Play` was gone and the new one running eight seconds after the
+press, and the store held both: the old one ended at its last
+position, and the new one under its own season and episode. The film
+chain was drilled from the remote across a franchise. The first series
+drill found that a whole-season play request crossed the bus client's
+ten-kilobyte packet cap, which is why an episode of a long season
+sometimes did not start before this plan; the crate's cap is raised,
+and one episode per `Play` keeps the request small.
+
+The plan as written:
 
 Locally, in the browser's test fixture: a play from a series page
 carries the next episode; a play from a movie page reached through a

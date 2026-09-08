@@ -50,9 +50,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
   The compose key raises the person picker, the WWW key goes home,
   and page up and down are named for a later choice. Fast follow.
-* [53, Up next](53-up-next.md). Proposed. The browser decides what
-  follows the work it starts, from where the person started, writes
-  it on the `Play`, and starts it when the player asks.
 
 ## Future
 
@@ -174,6 +171,11 @@ Plan 32 stands apart from the enrichment work.
   the catalog `Service` and `EndpointSlice`, sizes a `Library`-owned catalog
   claim per scanner pod, and holds a `Library` `Pending` until exactly one
   `Catalog` exists.
+* [53, Up next](completed/53-up-next.md). Built and drilled 2026-09-08
+  in release 2026.09.08-007. The browser names what follows the work it
+  starts, from where the person started, on the `Play`; the player
+  offers it on the scrubber and asks over the bus; the browser starts
+  it. One episode per `Play`, with the season list gone.
 
 Plans 16 to 19 follow the scanner plans and were built before plan 05.
 Each one finishes something plan 04 left short. All four were released in
