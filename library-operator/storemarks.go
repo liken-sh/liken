@@ -5,9 +5,8 @@ package main
 // operator reads no store, so everything the two say to each other
 // crosses the bus, retained. The bus handler folds each mark the store
 // publishes onto this desk, and the pass reads it: a recorded mark
-// releases a Play's finalizer, a Watch's projection becomes its
-// status, and a namespace's forgotten answer counts toward releasing
-// a Person. The pass publishes back what only the API server can say,
+// releases a Play's finalizer, and a namespace's forgotten answer
+// counts toward releasing a Person. The pass publishes back what only the API server can say,
 // and only when it changed, so a pass that changed nothing costs
 // nothing on the bus.
 
@@ -21,14 +20,13 @@ import (
 )
 
 // storeMarks holds the newest mark of each kind and the wake the loop
-// reads. One mutex covers the three maps, because the bus handler runs
+// reads. One mutex covers the two maps, because the bus handler runs
 // on the bus reader's goroutine and the pass runs on the loop's.
 type storeMarks struct {
 	mutex sync.Mutex
-	// What the store last wrote for one Play, and one Watch's
-	// projection, both keyed by namespace and name.
+	// What the store last wrote for one Play, keyed by namespace and
+	// name.
 	recorded map[string]playRecorded
-	progress map[string]watchProgress
 	// The namespaces that answered that one person's rows are gone.
 	forgotten map[string]map[string]bool
 	wake      chan<- struct{}
@@ -37,7 +35,6 @@ type storeMarks struct {
 func newStoreMarks(wake chan<- struct{}) *storeMarks {
 	return &storeMarks{
 		recorded:  map[string]playRecorded{},
-		progress:  map[string]watchProgress{},
 		forgotten: map[string]map[string]bool{},
 		wake:      wake,
 	}
@@ -92,30 +89,6 @@ func (m *storeMarks) dropRecorded(namespace, name string) {
 	m.mutex.Lock()
 	delete(m.recorded, libraryKey(namespace, name))
 	m.mutex.Unlock()
-}
-
-// markProgress folds one Watch's projection, on the same terms as a
-// Play's mark.
-func (m *storeMarks) markProgress(namespace, name string, progress *watchProgress) {
-	key := libraryKey(namespace, name)
-	m.mutex.Lock()
-	if progress == nil {
-		delete(m.progress, key)
-	} else {
-		m.progress[key] = *progress
-	}
-	m.mutex.Unlock()
-	poke(m.wake)
-}
-
-// progressFor answers one Watch's projection, and false where the store
-// has published none. A Watch with no projection keeps the status it
-// carries.
-func (m *storeMarks) progressFor(namespace, name string) (watchProgress, bool) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	progress, held := m.progress[libraryKey(namespace, name)]
-	return progress, held
 }
 
 // markForgotten folds one namespace's answer about one person. False

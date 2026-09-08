@@ -145,57 +145,6 @@ func TestAMessageOnAnotherTopicWritesNothing(t *testing.T) {
 	}
 }
 
-// A store that cannot answer the Watch of a Play publishes no
-// projection, so the retained one stays where it is rather than reading
-// as a Watch at the beginning.
-func TestAFailedWatchReadPublishesNoProjection(t *testing.T) {
-	role, logged := refusingProgress(t)
-
-	role.publishWatch(t.Context(), "play-1")
-
-	if !strings.Contains(logged.String(), "could not read the watch of play-1") {
-		t.Errorf("log = %q, want the read it could not make", logged.String())
-	}
-}
-
-// A Play the store holds a row for with no Watch publishes nothing, and
-// so does a Watch with no row.
-func TestAPlayInNoWatchPublishesNoProjection(t *testing.T) {
-	role, _ := recordingProgress(t)
-	if err := role.store.recordPosition(t.Context(), "play-1", 0, 10, 60, testRecordedAt); err != nil {
-		t.Fatal(err)
-	}
-
-	// The bus is not connected, so a publish would be dropped anyway.
-	// What this reads is that the role makes no read past the Watch.
-	role.publishWatch(t.Context(), "play-1")
-}
-
-// A store that answers the Watch and then refuses the read of its
-// latest Play publishes no projection, so a half-answered read never
-// moves a Watch backward.
-func TestAFailedLatestReadPublishesNoProjection(t *testing.T) {
-	db := newSQLiteProgress(t)
-	// The agent answers the first read and refuses the second, which is
-	// the read of the Watch's latest Play.
-	server := httptest.NewServer(&sqliteAgent{db: db, queriesLeft: 2})
-	t.Cleanup(server.Close)
-	var logged strings.Builder
-	role := newProgressOn("house", defaultTopicBase, defaultMediaTopicBase,
-		newProgressStore(server.URL, server.Client()), &logged)
-	role.bus = newBus("nowhere", "progress-house", nil, nil, role.onMessage)
-	if err := role.store.recordAudience(t.Context(), "play-1",
-		playAudience{Watch: "the-office-with-the-girls"}, testRecordedAt); err != nil {
-		t.Fatal(err)
-	}
-
-	role.publishWatch(t.Context(), "play-1")
-
-	if !strings.Contains(logged.String(), "could not read the latest play") {
-		t.Errorf("log = %q, want the read it could not make", logged.String())
-	}
-}
-
 // A read the agent answers with an error event is a failure the store
 // hands back, so a query that names a column the schema does not have
 // never reads as an empty answer.
@@ -206,7 +155,7 @@ func TestTheStoreAnswersAnErrorEvent(t *testing.T) {
 	t.Cleanup(server.Close)
 	store := newProgressStore(server.URL, server.Client())
 
-	_, err := store.watchOf(t.Context(), "play-1")
+	err := store.recordOutside(t.Context(), "play-1", outsidePlay{})
 
 	if err == nil || !strings.Contains(err.Error(), "no such column") {
 		t.Errorf("err = %v, want the agent's own message", err)
@@ -251,7 +200,7 @@ func TestTheStoreAnswersAnAddressItCannotReach(t *testing.T) {
 	if err := store.forgetPerson(t.Context(), "thora"); err == nil {
 		t.Error("the store hid a write it could not send")
 	}
-	if _, _, err := store.latestForWatch(t.Context(), "a-watch"); err == nil {
+	if err := store.recordOutside(t.Context(), "play-1", outsidePlay{}); err == nil {
 		t.Error("the store hid a read it could not send")
 	}
 }

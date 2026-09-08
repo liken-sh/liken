@@ -89,6 +89,10 @@ Plan 32 stands apart from the enrichment work.
 
 ## Completed
 
+* [51, Drop the Watch](completed/51-drop-the-watch.md). Completed
+  2026-09-08. The `Watch` kind, its projection, and the `watch` field
+  on the play request are gone; the people on a `Play` are the whole
+  record of who shares its progress.
 * [50, The Jellyfin backfill](completed/50-jellyfin-backfill.md). Drilled
   2026-09-08: one Job, every user's resumable and played items in the
   store with Jellyfin's dates. Found and fixed the series read that
@@ -251,6 +255,7 @@ that took a hearing-impaired flag for Hindi.
   per namespace fed from the bus, that a standing pod holds beside the
   catalog pod. The operator is the only API client and holds a
   finalizer on every `Play` and every `Person` until the store answers.
+  Plan 51 removed the `Watch`.
 * [42, A screen keeps its art](completed/42-a-screen-keeps-its-art.md).
   Built in 2026.09.04-003-dev-041 and drilled on `liken-1` on
   2026-09-07. A second claim beside plan 32's, for every piece of art

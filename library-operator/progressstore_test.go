@@ -73,12 +73,12 @@ func TestALaterPositionKeepsTheStart(t *testing.T) {
 	}
 }
 
-// The audience names the Player, the Library, the Watch, and the
-// episode, and it writes one row per person and one per alias.
+// The audience names the Player, the Library, and the episode, and it
+// writes one row per person and one per alias.
 func TestTheAudienceWritesItsPeopleAndAliases(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
 	audience := playAudience{
-		Player: "living-room", Library: "series", Watch: "the-office-with-the-girls",
+		Player: "living-room", Library: "series",
 		People:  []string{"chris", "thora"},
 		Aliases: map[string]string{"tmdb": "2316", "imdb": "tt0386676"},
 		Season:  3, Episode: 5,
@@ -89,8 +89,8 @@ func TestTheAudienceWritesItsPeopleAndAliases(t *testing.T) {
 	}
 
 	row := heldPlay(t, db, "play-1")
-	if row.Player != "living-room" || row.Library != "series" || row.Watch != "the-office-with-the-girls" {
-		t.Errorf("row = %+v, want the Player, the Library, and the Watch", row)
+	if row.Player != "living-room" || row.Library != "series" {
+		t.Errorf("row = %+v, want the Player and the Library", row)
 	}
 	if row.Season != 3 || row.Episode != 5 {
 		t.Errorf("row = %+v, want the season and the episode", row)
@@ -190,8 +190,8 @@ func TestAnOutsidePlayWritesTheWholeRow(t *testing.T) {
 	}
 
 	row := heldPlay(t, db, "jellyfin-7-19")
-	if row.Player != "jellyfin" || row.Library != "" || row.Watch != "" {
-		t.Errorf("row = %+v, want the outside player and no Library and no Watch", row)
+	if row.Player != "jellyfin" || row.Library != "" {
+		t.Errorf("row = %+v, want the outside player and no Library", row)
 	}
 	if row.Season != 2 || row.Episode != 4 || row.Position != 4210 || row.Duration != 8160 {
 		t.Errorf("row = %+v, want the episode, the position, and the duration", row)
@@ -316,82 +316,6 @@ func TestForgettingAPersonLeavesThePlaysAndTheOthers(t *testing.T) {
 	}
 }
 
-// The Watch reads the latest Play recorded against it, which is what
-// the operator writes into Watch.status.
-func TestTheWatchReadsItsLatestPlay(t *testing.T) {
-	store, _ := newSQLiteProgressStore(t)
-	watch := playAudience{Watch: "the-office-with-the-girls"}
-	for _, seeded := range []struct {
-		play string
-		at   time.Time
-		item int
-	}{
-		{"play-1", testRecordedAt, 1},
-		{"play-2", testRecordedAt.Add(time.Hour), 2},
-	} {
-		if err := store.recordAudience(t.Context(), seeded.play, watch, seeded.at); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.recordPosition(t.Context(), seeded.play, seeded.item, 30, 1800, seeded.at); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	row, held, err := store.latestForWatch(t.Context(), "the-office-with-the-girls")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !held || row.Play != "play-2" || row.Item != 2 {
-		t.Errorf("row = %+v held %v, want the latest Play of the Watch", row, held)
-	}
-}
-
-// A Watch nothing was recorded against reads no row, so the role
-// publishes nothing for it.
-func TestAWatchWithNoPlayReadsNoRow(t *testing.T) {
-	store, _ := newSQLiteProgressStore(t)
-
-	_, held, err := store.latestForWatch(t.Context(), "nobody")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if held {
-		t.Error("a Watch with no Play read a row")
-	}
-}
-
-// The Watch one Play belongs to, which is how a write finds the Watch
-// it has to republish.
-func TestTheStoreReadsTheWatchOfAPlay(t *testing.T) {
-	store, _ := newSQLiteProgressStore(t)
-	if err := store.recordAudience(t.Context(), "play-1",
-		playAudience{Watch: "the-office-with-the-girls"}, testRecordedAt); err != nil {
-		t.Fatal(err)
-	}
-
-	cases := []struct {
-		name string
-		play string
-		want string
-	}{
-		{name: "a Play in a Watch", play: "play-1", want: "the-office-with-the-girls"},
-		{name: "a Play the store never saw", play: "play-9", want: ""},
-	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			watch, err := store.watchOf(t.Context(), testCase.play)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if watch != testCase.want {
-				t.Errorf("watchOf(%q) = %q, want %q", testCase.play, watch, testCase.want)
-			}
-		})
-	}
-}
-
 // A store whose agent refuses the write answers the failure, so the
 // role logs it and drops the message.
 func TestTheStoreAnswersTheFailureItsAgentGives(t *testing.T) {
@@ -413,9 +337,9 @@ func TestTheStoreAnswersTheFailureItsAgentGives(t *testing.T) {
 func heldPlay(t *testing.T, db *sql.DB, play string) playRow {
 	t.Helper()
 	row := playRow{}
-	err := db.QueryRow(`SELECT play, player, library, watch, started, ended, item, position,`+
+	err := db.QueryRow(`SELECT play, player, library, started, ended, item, position,`+
 		` duration, phase, season, episode, recorded FROM plays WHERE play = ?`, play).Scan(
-		&row.Play, &row.Player, &row.Library, &row.Watch, &row.Started, &row.Ended,
+		&row.Play, &row.Player, &row.Library, &row.Started, &row.Ended,
 		&row.Item, &row.Position, &row.Duration, &row.Phase, &row.Season, &row.Episode, &row.Recorded)
 	if err == sql.ErrNoRows {
 		return playRow{}

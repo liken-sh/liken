@@ -204,7 +204,6 @@ func (p *progress) recordStatus(ctx context.Context, play string, payload []byte
 		return
 	}
 	p.publishRecorded(play, status.Item, position, false)
-	p.publishWatch(ctx, play)
 }
 
 // recordAudience writes what the operator knows about a Play. An empty
@@ -224,13 +223,11 @@ func (p *progress) recordAudience(ctx context.Context, play string, payload []by
 		p.logf("could not record the audience of %s: %v", play, err)
 		return
 	}
-	p.publishWatch(ctx, play)
 }
 
 // recordOutside writes one play that ran outside this cluster, whole, from
 // the one message that carries it.
-// It publishes nothing back, because no Play resource holds this row and no
-// Watch owns it.
+// It publishes nothing back, because no Play resource holds this row.
 func (p *progress) recordOutside(ctx context.Context, play string, payload []byte) {
 	if len(payload) == 0 {
 		return
@@ -266,7 +263,6 @@ func (p *progress) recordFinal(ctx context.Context, play string, payload []byte)
 		return
 	}
 	p.publishRecorded(play, final.Item, position, true)
-	p.publishWatch(ctx, play)
 }
 
 // forget takes one person out of this namespace's store and answers

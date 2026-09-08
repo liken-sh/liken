@@ -422,7 +422,7 @@ func operatorsBroker(t *testing.T, operator *operator) *fakeBroker {
 
 // Every subscription the operator remembers, which a fresh connection
 // re-sends in sorted order: the reports it folds, the requests it
-// serves, and the three marks the progress store publishes.
+// serves, and the two marks the progress store publishes.
 func TestTheOperatorSubscribesToEveryTopicItActsOn(t *testing.T) {
 	operator, _ := playingHouse(t)
 	broker := operatorsBroker(t, operator)
@@ -432,7 +432,6 @@ func TestTheOperatorSubscribesToEveryTopicItActsOn(t *testing.T) {
 		personForgottenFilter(defaultTopicBase),
 		playRequestFilter(defaultTopicBase),
 		playRecordedFilter(defaultTopicBase),
-		watchProgressFilter(defaultTopicBase),
 	}
 
 	filters := []string{}
@@ -551,13 +550,12 @@ func TestAPlayWithNoUsableSlugNamesThePlayerAlone(t *testing.T) {
 
 // The audience the browser named, and the identity it read out of the
 // catalog beside it, as one request carries them.
-func audienceRequest(watch string, people ...string) []byte {
+func audienceRequest(people ...string) []byte {
 	request := playRequest{
 		Library: testLibraryKey,
 		Slug:    "the-office-s03e05",
 		Items:   []playRequestItem{film(testFilmPath)},
 		People:  people,
-		Watch:   watch,
 		Aliases: map[string]string{"tmdb": "2316", "imdb": "tt0386676"},
 		Season:  3,
 		Episode: 5,
@@ -576,23 +574,22 @@ func TestAPlayCarriesItsAudienceAsOwnerReferences(t *testing.T) {
 	operator, cluster := playingHouse(t)
 	seedPerson(cluster, "chris")
 	seedPerson(cluster, "thora")
-	seedWatch(cluster, "the-girls", "chris", "thora")
-	publishPlay(operator, audienceRequest("the-girls", "chris", "thora"))
+	publishPlay(operator, audienceRequest("chris", "thora"))
 
 	operator.pass()
 
 	owners := cluster.heldPlays()[0].Metadata.OwnerReferences
-	if len(owners) != 3 {
-		t.Fatalf("owners = %+v, want the watch and the two people", owners)
+	if len(owners) != 2 {
+		t.Fatalf("owners = %+v, want the two people", owners)
 	}
-	if owners[0].Kind != watchKind || owners[0].Name != "the-girls" || owners[0].UID != "the-girls-uid" {
-		t.Errorf("owner = %+v, want the Watch with its uid", owners[0])
+	if owners[0].Kind != personKind || owners[0].Name != "chris" || owners[0].UID != "chris-uid" {
+		t.Errorf("owner = %+v, want the Person with its uid", owners[0])
 	}
-	if owners[0].APIVersion != libraryAPIVersion || owners[0].Controller {
-		t.Errorf("owner = %+v, want this operator's group and no controller flag", owners[0])
+	if owners[0].APIVersion != personAPIVersion || owners[0].Controller {
+		t.Errorf("owner = %+v, want people-operator's group and no controller flag", owners[0])
 	}
-	if owners[1].Name != "chris" || owners[2].Name != "thora" {
-		t.Errorf("owners = %+v, want one Person per name the request carried", owners[1:])
+	if owners[1].Name != "thora" {
+		t.Errorf("owners = %+v, want one Person per name the request carried", owners)
 	}
 }
 
@@ -600,7 +597,7 @@ func TestAPlayCarriesItsAudienceAsOwnerReferences(t *testing.T) {
 // characters and an alias list has no such rule.
 func TestAPlayCarriesTheWorksIdentityAsAnnotations(t *testing.T) {
 	operator, cluster := playingHouse(t)
-	publishPlay(operator, audienceRequest(""))
+	publishPlay(operator, audienceRequest())
 
 	operator.pass()
 
@@ -636,7 +633,7 @@ func TestAMovieCarriesNoSeasonAndNoEpisode(t *testing.T) {
 func TestANameNobodyHoldsIsDroppedAndThePlayStillPlays(t *testing.T) {
 	operator, cluster := playingHouse(t)
 	seedPerson(cluster, "chris")
-	publishPlay(operator, audienceRequest("no-such-watch", "chris", "nobody"))
+	publishPlay(operator, audienceRequest("chris", "nobody"))
 
 	operator.pass()
 
@@ -660,7 +657,7 @@ func housePlay(t *testing.T, request playRequest, catalog bool) *Play {
 	request.Namespace, request.Player = testLibraryNamespace, testPlayer
 	request.Library, request.Items = testLibraryKey, []playRequestItem{film(testFilmPath)}
 
-	play, err := request.play([]Player{*player}, []Library{*library}, nil, nil, catalog)
+	play, err := request.play([]Player{*player}, []Library{*library}, nil, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}

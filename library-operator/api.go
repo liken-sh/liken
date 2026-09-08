@@ -29,13 +29,10 @@ const playerAPIVersion = "media.liken.sh/v1alpha1"
 // nothing else.
 const personAPIVersion = "people.liken.sh/v1alpha1"
 
-// The kinds this operator names in an owner reference, and reads back
-// off a Play. A Play's owners say who watched it and which Watch it
-// belongs to, which is what an audience is.
-const (
-	watchKind  = "Watch"
-	personKind = "Person"
-)
+// The one kind this operator names in an owner reference and reads
+// back off a Play. A Play's owners are the people who watched it,
+// which is what an audience is.
+const personKind = "Person"
 
 // The finalizer this operator holds on every Library. It keeps a
 // deleted Library open until the departure in depart.go has swept
@@ -580,56 +577,10 @@ func (p *Play) ended() bool {
 		p.Metadata.deleting()
 }
 
-// A Watch is a set of people on one item, and the record of where that
-// set reached. The operator writes the owner references and the status;
-// a person or the browser writes the spec.
-type Watch struct {
-	APIVersion string      `json:"apiVersion,omitempty"`
-	Kind       string      `json:"kind,omitempty"`
-	Metadata   ObjectMeta  `json:"metadata"`
-	Spec       WatchSpec   `json:"spec"`
-	Status     WatchStatus `json:"status"`
-}
-
-type WatchList struct {
-	Metadata ListMeta `json:"metadata"`
-	Items    []Watch  `json:"items"`
-}
-
-// WatchSpec is the set of people and the item they watch. Progress
-// belongs to the set, so two Watches on one item with different people
-// are two records.
-type WatchSpec struct {
-	People []string  `json:"people,omitempty"`
-	Item   WatchItem `json:"item"`
-}
-
-// WatchItem names the item as the catalog names it: the Library in the
-// Watch's own namespace, and the slug of a movie or a series inside it.
-type WatchItem struct {
-	Library string `json:"library"`
-	Slug    string `json:"slug"`
-}
-
-// WatchStatus is the projection of the progress store the operator
-// writes. Every field describes the last Play recorded against this
-// Watch, so the whole block is one observation and the operator writes
-// it whole.
-type WatchStatus struct {
-	Play         string `json:"play,omitempty"`
-	Item         int    `json:"item,omitempty"`
-	Position     string `json:"position,omitempty"`
-	Duration     string `json:"duration,omitempty"`
-	Season       int    `json:"season,omitempty"`
-	Episode      int    `json:"episode,omitempty"`
-	Ended        bool   `json:"ended,omitempty"`
-	LastRecorded string `json:"lastRecorded,omitempty"`
-}
-
 // A Person is a subject of the cluster, cluster-scoped and owned by
-// people-operator. A Play names the people who watched it and a Watch
-// the people who share it, both through owner references, so this
-// operator reads a Person for its name and its uid alone.
+// people-operator. A Play names the people who watched it through
+// owner references, so this operator reads a Person for its name and
+// its uid alone.
 type Person struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`

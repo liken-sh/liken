@@ -13,8 +13,6 @@ is a volume of media of one kind, and what its scanner reports.
 and the claims its agents run on.
 [Metadata providers](/docs/reference/metadataproviders/) is one
 account with one provider, and the facts it may serve.
-[Watches](/docs/reference/watches/) is a set of people on one item,
-and where that set reached.
 Two pages do not generate.
 [Franchises](/docs/reference/franchises/) is the file a person or an
 agent writes to put films and series in story order, and the schema

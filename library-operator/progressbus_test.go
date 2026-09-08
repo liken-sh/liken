@@ -64,7 +64,7 @@ func TestParsePlayTopicNamesThePlayAndTheKind(t *testing.T) {
 			ok:        true,
 		},
 		{name: "a topic under another base", topic: "other/plays/house/play-1/outside"},
-		{name: "a watches topic", topic: watchProgressTopic(base, "house", "the-office")},
+		{name: "a topic of another branch", topic: base + "/people/chris/forget"},
 		{name: "a plays topic missing its kind", topic: base + "/plays/house/play-1"},
 		{name: "a plays topic with a level too many", topic: base + "/plays/house/play-1/outside/extra"},
 		{name: "an empty namespace", topic: base + "/plays//play-1/outside"},
@@ -108,43 +108,6 @@ func TestAnOutsidePlayReadsItsFields(t *testing.T) {
 	}
 	if outside.Ended {
 		t.Errorf("ended = %v, want a play still running", outside.Ended)
-	}
-}
-
-// The operator folds one projection by the Watch its topic names, and reads
-// nothing off a topic of another shape.
-func TestParseWatchTopicNamesTheWatch(t *testing.T) {
-	base := defaultTopicBase
-	cases := []struct {
-		name      string
-		topic     string
-		namespace string
-		watch     string
-		ok        bool
-	}{
-		{
-			name:      "a watch progress topic",
-			topic:     watchProgressTopic(base, "house", "the-office-with-the-girls"),
-			namespace: "house",
-			watch:     "the-office-with-the-girls",
-			ok:        true,
-		},
-		{name: "a topic under another base", topic: "other/watches/house/the-office/progress"},
-		{name: "a plays topic", topic: playOutsideTopic(base, "house", "play-1")},
-		{name: "a watches topic with a kind this operator does not read", topic: base + "/watches/house/the-office/status"},
-		{name: "a watches topic missing its kind", topic: base + "/watches/house/the-office"},
-		{name: "an empty namespace", topic: base + "/watches//the-office/progress"},
-	}
-	for _, each := range cases {
-		t.Run(each.name, func(t *testing.T) {
-			namespace, watch, ok := parseWatchTopic(base, each.topic)
-			if ok != each.ok {
-				t.Fatalf("ok = %v, want %v", ok, each.ok)
-			}
-			if namespace != each.namespace || watch != each.watch {
-				t.Errorf("parsed (%q, %q), want (%q, %q)", namespace, watch, each.namespace, each.watch)
-			}
-		})
 	}
 }
 

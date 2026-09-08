@@ -55,10 +55,9 @@ type fakeCluster struct {
 	// are a list and not a map, because every Play takes a name the API
 	// server mints.
 	plays []Play
-	// The Watches and the people the progress half reads, by name. A
-	// Person is cluster-scoped, so its name is its whole identity.
-	watches map[string]*Watch
-	people  map[string]*Person
+	// The people the progress half reads, by name. A Person is
+	// cluster-scoped, so its name is its whole identity.
+	people map[string]*Person
 	// The nodes the heal of a stranded copy reads, by name, which the
 	// operator reads and never writes.
 	nodes map[string]*Node
@@ -107,7 +106,6 @@ func newFakeCluster() *fakeCluster {
 		configMaps:     map[string]*ConfigMap{},
 		jobs:           map[string]*Job{},
 		cronJobs:       map[string]*CronJob{},
-		watches:        map[string]*Watch{},
 		people:         map[string]*Person{},
 		nodes:          map[string]*Node{},
 		broken:         map[string]int{},
@@ -184,19 +182,6 @@ func (f *fakeCluster) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(list)
 	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
 		f.patchPlay(w, r, name)
-	case r.URL.Path == watchesPath:
-		list := WatchList{Metadata: ListMeta{ResourceVersion: "1"}}
-		for _, key := range sortedNames(f.watches) {
-			list.Items = append(list.Items, *f.watches[key])
-		}
-		_ = json.NewEncoder(w).Encode(list)
-	case strings.Contains(r.URL.Path, "/watches/") && strings.HasSuffix(r.URL.Path, "/status"):
-		var written Watch
-		_ = json.NewDecoder(r.Body).Decode(&written)
-		f.watches[written.Metadata.Name] = &written
-		_ = json.NewEncoder(w).Encode(written)
-	case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/watches/"):
-		f.patchWatch(w, r, name)
 	case r.URL.Path == nodesPath:
 		list := NodeList{Metadata: ListMeta{ResourceVersion: "1"}}
 		for _, key := range sortedNames(f.nodes) {
@@ -636,20 +621,6 @@ func (f *fakeCluster) patchPlay(w http.ResponseWriter, r *http.Request, name str
 	w.WriteHeader(http.StatusNotFound)
 }
 
-// PatchWatch writes one Watch's metadata, which is the owner references
-// the operator ties to its people.
-func (f *fakeCluster) patchWatch(w http.ResponseWriter, r *http.Request, name string) {
-	held := f.watches[name]
-	if held == nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	if !applyMetadataPatch(w, r, &held.Metadata) {
-		return
-	}
-	_ = json.NewEncoder(w).Encode(held)
-}
-
 // PatchPerson writes one Person's finalizer list, and removes a
 // deleting Person whose last finalizer is gone.
 func (f *fakeCluster) patchPerson(w http.ResponseWriter, r *http.Request, name string) {
@@ -665,12 +636,6 @@ func (f *fakeCluster) patchPerson(w http.ResponseWriter, r *http.Request, name s
 		delete(f.people, name)
 	}
 	_ = json.NewEncoder(w).Encode(held)
-}
-
-func (f *fakeCluster) heldWatch(name string) *Watch {
-	f.mutex.Lock()
-	defer f.mutex.Unlock()
-	return f.watches[name]
 }
 
 func (f *fakeCluster) heldPerson(name string) *Person {

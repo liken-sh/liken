@@ -7,15 +7,14 @@ package main
 // file names, and the two never share a type beyond the payloads here.
 //
 // The flow of one Play. The operator publishes the audience: who
-// watched, which Watch it belongs to, and the work's aliases. The
-// playback pod's sidecar publishes the position on media-operator's
-// own status topic. The progress role joins the two into rows and
-// publishes what it recorded. When the Play ends, the operator
-// publishes its final status off the API, the progress role records
-// it and marks the row ended, and the operator reads that mark to
-// release the Play's finalizer. Every one of these messages is
-// retained, so a restart on either side reads the current state back
-// from the broker.
+// watched, and the work's aliases. The playback pod's sidecar
+// publishes the position on media-operator's own status topic. The
+// progress role joins the two into rows and publishes what it
+// recorded. When the Play ends, the operator publishes its final
+// status off the API, the progress role records it and marks the row
+// ended, and the operator reads that mark to release the Play's
+// finalizer. Every one of these messages is retained, so a restart on
+// either side reads the current state back from the broker.
 //
 // The outside play is the one message in this file that is not retained. The
 // jellyfin role publishes it for a play that ran outside the cluster, and the
@@ -46,14 +45,13 @@ const (
 	playOutsideKind     = "outside"
 	playFinalKind       = "final"
 	playRecordedKind    = "recorded"
-	watchProgressKind   = "progress"
 	personForgetKind    = "forget"
 	personForgottenKind = "forgotten"
 )
 
 // playAudience is what the operator knows about a Play that the
 // progress role cannot read for itself: the Player it ran on, the
-// people who watched, the Watch it belongs to, and the work's aliases.
+// people who watched, and the work's aliases.
 // The operator publishes it retained under the Play's audience topic
 // as soon as the Play exists, and republishes it on every pass the
 // Play is seen, so a progress role that starts late reads it back.
@@ -64,8 +62,6 @@ type playAudience struct {
 	// The Library the items came from, as its name, or empty for a
 	// Play this operator did not create.
 	Library string `json:"library,omitempty"`
-	// The Watch that owns the Play, by name, or empty.
-	Watch string `json:"watch,omitempty"`
 	// The people who watched, as Person names, from the Play's owner
 	// references. Empty for a Play nobody claimed.
 	People []string `json:"people,omitempty"`
@@ -125,22 +121,6 @@ type playRecorded struct {
 	Ended    bool   `json:"ended"`
 	// The time of the write, RFC 3339 in UTC.
 	At string `json:"at"`
-}
-
-// watchProgress is the projection of a Watch out of the store: the
-// latest Play recorded against it and where that Play reached. The
-// operator writes it into the Watch's status. What comes next is a
-// question for the catalog, so it is not here.
-type watchProgress struct {
-	Play     string `json:"play"`
-	Item     int    `json:"item"`
-	Position string `json:"position"`
-	Duration string `json:"duration"`
-	Season   int    `json:"season,omitempty"`
-	Episode  int    `json:"episode,omitempty"`
-	Ended    bool   `json:"ended"`
-	// The time of the last write, RFC 3339 in UTC.
-	LastRecorded string `json:"lastRecorded"`
 }
 
 // The alias annotations on a Play, one per provider, and the two
@@ -210,16 +190,6 @@ func playOutsideFilter(base, namespace string) string {
 	return base + "/plays/" + namespace + "/+/" + playOutsideKind
 }
 
-// Carries one Watch's projection out of the store. Retained; the
-// progress role publishes it, and the operator writes it to status.
-func watchProgressTopic(base, namespace, name string) string {
-	return base + "/watches/" + namespace + "/" + name + "/" + watchProgressKind
-}
-
-func watchProgressFilter(base string) string {
-	return base + "/watches/+/+/" + watchProgressKind
-}
-
 // Carries the operator's request to forget one person, to every
 // namespace's progress role at once. Retained, with an empty payload
 // as the clear. A person is cluster-scoped, so the topic has no
@@ -279,20 +249,6 @@ func parsePlayTopic(base, topic string) (namespace, name, kind string, ok bool) 
 		return "", "", "", false
 	}
 	return parts[0], parts[1], parts[2], true
-}
-
-// parseWatchTopic reads the namespace and the Watch name out of a
-// watch progress topic.
-func parseWatchTopic(base, topic string) (namespace, name string, ok bool) {
-	rest, found := strings.CutPrefix(topic, base+"/watches/")
-	if !found {
-		return "", "", false
-	}
-	parts := strings.Split(rest, "/")
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] != watchProgressKind {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 // parsePersonTopic reads the person and, for a forgotten message, the

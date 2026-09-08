@@ -3,9 +3,8 @@ package main
 // Deleting a Person deletes their progress. The operator asks every
 // namespace's store to drop that person's rows, and holds
 // library.liken.sh/progress on the Person until every store answers.
-// A plays row with no people left stays as the Player's own row, and a
-// shared Watch keeps the people who remain. The garbage collector
-// removes the Plays and the Watches that named nobody else.
+// A plays row with no people left stays as the Player's own row. The
+// garbage collector removes the Plays that named nobody else.
 
 import (
 	"context"
@@ -104,8 +103,8 @@ func personNamed(people []Person, name string) *Person {
 }
 
 // personOwner is one Person as an owner reference. There is no
-// controller flag: a Play or a Watch has several owners and none of
-// them manages it, and the garbage collector deletes a dependent only
+// controller flag: a Play has several owners and none of them manages
+// it, and the garbage collector deletes a dependent only
 // when every owner is gone.
 func personOwner(person *Person) OwnerReference {
 	return OwnerReference{

@@ -76,15 +76,14 @@ func TestAPlayOutsideAStoresNamespaceIsLeftAlone(t *testing.T) {
 }
 
 // The store cannot read a Play's metadata, so the operator publishes
-// what the metadata says: the Player, the Watch, the people, the
-// aliases, and the numbers of an episode.
+// what the metadata says: the Player, the people, the aliases, and the
+// numbers of an episode.
 func TestAPassPublishesWhoWatchedEachPlay(t *testing.T) {
 	cluster := newFakeCluster()
 	boundHouse(cluster)
 	seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
 	play := testPlay("den-tv-the-office")
 	play.Metadata.OwnerReferences = []OwnerReference{
-		{APIVersion: libraryAPIVersion, Kind: watchKind, Name: "the-girls", UID: "the-girls-uid"},
 		{APIVersion: personAPIVersion, Kind: personKind, Name: "thora", UID: "thora-uid"},
 		{APIVersion: personAPIVersion, Kind: personKind, Name: "chris", UID: "chris-uid"},
 	}
@@ -108,8 +107,8 @@ func TestAPassPublishesWhoWatchedEachPlay(t *testing.T) {
 			message.topic, message.retained, want)
 	}
 	audience := decodedAudience(t, message)
-	if audience.Player != testPlayer || audience.Library != "series" || audience.Watch != "the-girls" {
-		t.Errorf("audience = %+v, want the player, the library, and the watch", audience)
+	if audience.Player != testPlayer || audience.Library != "series" {
+		t.Errorf("audience = %+v, want the player and the library", audience)
 	}
 	if len(audience.People) != 2 || audience.People[0] != "chris" || audience.People[1] != "thora" {
 		t.Errorf("people = %v, want chris and thora in name order", audience.People)
@@ -303,7 +302,7 @@ func TestAPlayWithNobodyOnItCarriesThePlayerAlone(t *testing.T) {
 
 	audience := playAudienceOf(&play)
 
-	if audience.Player != testPlayer || audience.Watch != "" || len(audience.People) != 0 {
+	if audience.Player != testPlayer || len(audience.People) != 0 {
 		t.Errorf("audience = %+v, want the player alone", audience)
 	}
 	if audience.Season != 0 || audience.Episode != 0 || len(audience.Aliases) != 0 {
@@ -416,7 +415,6 @@ func TestPassCarriesOnWithNoProgressCollectionsToRead(t *testing.T) {
 	}{
 		{name: "the plays cannot be listed", path: playsAllPath},
 		{name: "the people cannot be listed", path: peoplePath},
-		{name: "the watches cannot be listed", path: watchesPath},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {

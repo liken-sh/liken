@@ -465,26 +465,6 @@ func TestThePlayWatchListsAndWakes(t *testing.T) {
 	}
 }
 
-// A Watch change wakes the loop, so a Watch a person just wrote is tied
-// to its people without a backstop tick's delay.
-func TestTheWatchWatchListsAndWakes(t *testing.T) {
-	useWatchRetryPause(t)
-	api := newWatchAPI()
-	api.answersWatches(watchTurn{})
-	api.answersLists(listTurn{version: "150"})
-
-	wake := startWatch(t, api, watchWatches, "42")
-
-	nextWatchRequest(t, api)
-	if got := nextListRequest(t, api); got != watchesPath {
-		t.Errorf("listed %q, want %q", got, watchesPath)
-	}
-	waitForWatchWake(t, wake)
-	if got := nextWatchRequest(t, api).Get("resourceVersion"); got != "150" {
-		t.Errorf("the second watch resumed from %q, want the list's 150", got)
-	}
-}
-
 // A Person change wakes the loop, so a person on the way out is asked
 // for without a backstop tick's delay.
 func TestThePeopleWatchListsAndWakes(t *testing.T) {

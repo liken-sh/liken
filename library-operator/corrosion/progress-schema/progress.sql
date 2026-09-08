@@ -21,8 +21,10 @@
 -- subtracts them without parsing.
 --
 -- player is the Player the Play ran on, so a Play that names no person
--- still has a row a screen can show. watch is the Watch that owns the
--- Play, or empty. season and episode are 0 for a work that has neither.
+-- still has a row a screen can show. season and episode are 0 for a
+-- work that has neither.
+-- watch is empty on every row. No writer fills it and no reader takes
+-- it, and it stays because Corrosion cannot drop a column.
 CREATE TABLE plays (
     play TEXT NOT NULL DEFAULT '',
     player TEXT NOT NULL DEFAULT '',
@@ -40,7 +42,7 @@ CREATE TABLE plays (
     PRIMARY KEY (play)
 );
 
--- One row per person in one Play. The audience of a Watch is a query
+-- One row per person in one Play. The audience of a Play is a query
 -- over this table and never a column, because a household watches in
 -- subsets and a set of people is what a record belongs to.
 CREATE TABLE play_people (
@@ -63,8 +65,7 @@ CREATE TABLE play_aliases (
 -- the person leads this index while the primary key leads with the Play.
 CREATE INDEX play_people_person ON play_people (person);
 
--- One Watch's Plays, which is what the operator projects into
--- Watch.status.
+-- No read takes this index. It stays because Corrosion cannot drop one.
 CREATE INDEX plays_watch ON plays (watch);
 
 -- One Player's Plays in the order they were recorded, which is a

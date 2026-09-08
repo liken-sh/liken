@@ -125,7 +125,6 @@ This site serves the same files as raw YAML, so a clone is never
 needed: [`libraries-crd.yaml`](/deploy/libraries-crd.yaml),
 [`catalogs-crd.yaml`](/deploy/catalogs-crd.yaml),
 [`metadataproviders-crd.yaml`](/deploy/metadataproviders-crd.yaml),
-[`watches-crd.yaml`](/deploy/watches-crd.yaml),
 [`rbac.yaml`](/deploy/rbac.yaml), and
 [`operator.yaml`](/deploy/operator.yaml).
 

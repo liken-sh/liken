@@ -68,8 +68,9 @@ func TestTheProgressSchemaHoldsTheThreeTables(t *testing.T) {
 	}
 }
 
-// The indexes the store's reads take: one person's plays, one Watch's
-// plays, and one Player's plays in the order they were recorded.
+// The store's reads take two indexes: one person's plays, and one
+// Player's plays in the order they were recorded. plays_watch serves
+// no read, and it stays because the schema cannot drop an index.
 func TestTheProgressSchemaHoldsTheIndexesTheReadsTake(t *testing.T) {
 	db := newSQLiteProgress(t)
 

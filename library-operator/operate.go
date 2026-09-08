@@ -95,8 +95,8 @@ type operator struct {
 	plays *playRequests
 
 	// The marks the progress store publishes, folded by the bus handler
-	// and read by the pass: what each Play recorded, each Watch's
-	// projection, and which namespaces have forgotten a person.
+	// and read by the pass: what each Play recorded, and which
+	// namespaces have forgotten a person.
 	marks *storeMarks
 
 	// What this operator last published on each retained progress
@@ -170,11 +170,10 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 	library.bus.Subscribe(libraryStatusFilter(topicBase))
 	library.bus.Subscribe(catalogAvailabilityFilter(topicBase))
 	library.bus.Subscribe(playRequestFilter(topicBase))
-	// The three marks the progress store publishes. The operator holds
+	// The two marks the progress store publishes. The operator holds
 	// the credential, so every write the store's rows call for is made
 	// on the pass that reads these.
 	library.bus.Subscribe(playRecordedFilter(topicBase))
-	library.bus.Subscribe(watchProgressFilter(topicBase))
 	library.bus.Subscribe(personForgottenFilter(topicBase))
 	return library
 }
@@ -287,7 +286,7 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
 		providers = &MetadataProviderList{}
 	}
-	// The three collections of the progress half, read on the Players'
+	// The two collections of the progress half, read on the Players'
 	// terms: the list proves what the operator may read and gives each
 	// watch its resume point, and a collection a cluster does not serve
 	// costs a line and an empty version.
@@ -295,11 +294,6 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
 		plays = &PlayList{}
-	}
-	watches, err := ListWatches(startup, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing watches: %v\n", err)
-		watches = &WatchList{}
 	}
 	people, err := ListPeople(startup, o.client)
 	if err != nil {
@@ -316,7 +310,6 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	go watchMediaPreferences(o.client, preferences.Metadata.ResourceVersion, o.wake)
 	go watchMetadataProviders(o.client, providers.Metadata.ResourceVersion, o.wake)
 	go watchPlays(o.client, plays.Metadata.ResourceVersion, o.wake)
-	go watchWatches(o.client, watches.Metadata.ResourceVersion, o.wake)
 	go watchPeople(o.client, people.Metadata.ResourceVersion, o.wake)
 
 	// The webhook endpoint runs for the life of the operator. A
@@ -414,8 +407,8 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing metadata providers: %v\n", err)
 		providers = &MetadataProviderList{}
 	}
-	// The Plays, the people, and the Watches of the whole cluster, for
-	// the progress half of the pass. Each is read on the Players' terms:
+	// The Plays and the people of the whole cluster, for the progress
+	// half of the pass. Each is read on the Players' terms:
 	// a cluster that runs no media-operator serves no Plays, and one
 	// that runs no people-operator serves no people, and its libraries
 	// are still scanned and still reported.
@@ -428,11 +421,6 @@ func (o *operator) pass() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing people: %v\n", err)
 		people = &PersonList{}
-	}
-	watches, err := ListWatches(ctx, o.client)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing watches: %v\n", err)
-		watches = &WatchList{}
 	}
 	byNamespace := catalogsByNamespace(catalogs.Items)
 	// The namespaces a progress store stands in, which are the ones
@@ -506,11 +494,11 @@ func (o *operator) pass() {
 	// The play requests are served last, on the collections this pass
 	// already read. A request is one moment: the pass creates its Play
 	// now or drops it, and the person presses again.
-	o.createPlays(ctx, players.Items, libraries.Items, people.Items, watches.Items, stores)
+	o.createPlays(ctx, players.Items, libraries.Items, people.Items, stores)
 	// The progress half runs on the Plays this pass read, so a Play the
 	// call above created is held and published on the next pass, after
 	// the API server has minted its name.
-	o.reconcileProgress(ctx, plays.Items, people.Items, watches.Items, stores, now)
+	o.reconcileProgress(ctx, plays.Items, people.Items, stores, now)
 
 	o.reconcileCatalogs(ctx, byNamespace, members.Items, jobs.Items, now)
 
@@ -543,12 +531,6 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 				o.marks.markRecorded(namespace, name, recorded)
 			})
 		}
-		return
-	}
-	if namespace, name, ok := parseWatchTopic(o.topicBase, topic); ok {
-		foldMark(topic, payload, func(progress *watchProgress) {
-			o.marks.markProgress(namespace, name, progress)
-		})
 		return
 	}
 	if person, kind, namespace, ok := parsePersonTopic(o.topicBase, topic); ok {

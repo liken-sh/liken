@@ -33,11 +33,9 @@ type playRequest struct {
 	Slug  string            `json:"slug"`
 	Items []playRequestItem `json:"items"`
 
-	// Who is watching, as Person names, and the Watch this play belongs
-	// to. Both become owner references on the Play, so the Play's schema
-	// stays media-operator's own.
+	// Who is watching, as Person names. They become owner references on
+	// the Play, so the Play's schema stays media-operator's own.
 	People []string `json:"people,omitempty"`
-	Watch  string   `json:"watch,omitempty"`
 
 	// The work's ids by provider, and the numbers of an episode, which
 	// the browser reads out of the catalog beside it. They become the
@@ -122,9 +120,9 @@ func (o *operator) readPlayRequest(namespace, player, topic string, payload []by
 // fails a check is reported and dropped, because the screen has no way
 // to answer and the pod log is where a person looks.
 func (o *operator) createPlays(ctx context.Context, players []Player, libraries []Library,
-	people []Person, watches []Watch, catalogs map[string]bool) {
+	people []Person, catalogs map[string]bool) {
 	for _, request := range o.plays.take() {
-		play, err := request.play(players, libraries, people, watches, catalogs[request.Namespace])
+		play, err := request.play(players, libraries, people, catalogs[request.Namespace])
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "playing on %s/%s: %v\n",
 				request.Namespace, request.Player, err)
@@ -141,7 +139,7 @@ func (o *operator) createPlays(ctx context.Context, players []Player, libraries 
 // Every refusal here is a request that named something the screen may
 // not reach.
 func (r playRequest) play(players []Player, libraries []Library, people []Person,
-	watches []Watch, catalog bool) (*Play, error) {
+	catalog bool) (*Play, error) {
 	player := r.player(players)
 	if player == nil {
 		return nil, fmt.Errorf("no player of this operator's answers to that name")
@@ -170,7 +168,7 @@ func (r playRequest) play(players []Player, libraries []Library, people []Person
 		GenerateName:    playGenerateName(r.Player, r.Slug),
 		Namespace:       r.Namespace,
 		Annotations:     r.annotations(library),
-		OwnerReferences: r.owners(people, watches),
+		OwnerReferences: r.owners(people),
 	}
 	// The finalizer goes on only where the namespace holds a Catalog,
 	// because the store that releases it stands beside that Catalog. A
@@ -187,21 +185,12 @@ func (r playRequest) play(players []Player, libraries []Library, people []Person
 	}, nil
 }
 
-// owners is the audience of the Play, as owner references: the Watch it
-// belongs to, and one Person per name the request carries. A name the
-// cluster does not hold is reported and dropped, and the Play still
-// plays, because a person at the screen is waiting for the film and not
-// for the record of it.
-func (r playRequest) owners(people []Person, watches []Watch) []OwnerReference {
+// owners is the audience of the Play, as owner references: one Person
+// per name the request carries. A name the cluster does not hold is
+// reported and dropped, and the Play still plays, because a person at
+// the screen is waiting for the film and not for the record of it.
+func (r playRequest) owners(people []Person) []OwnerReference {
 	owners := []OwnerReference{}
-	if r.Watch != "" {
-		if watch := watchNamed(watches, r.Namespace, r.Watch); watch != nil {
-			owners = append(owners, watchOwner(watch))
-		} else {
-			fmt.Fprintf(os.Stderr, "playing on %s/%s: the namespace holds no watch %s\n",
-				r.Namespace, r.Player, r.Watch)
-		}
-	}
 	for _, name := range r.People {
 		person := personNamed(people, name)
 		if person == nil {

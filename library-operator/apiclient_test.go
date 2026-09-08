@@ -534,15 +534,6 @@ func TestEveryVerbReportsAServerFailure(t *testing.T) {
 			_, err := PatchPlayMetadata(t.Context(), c, "house", "den-tv-b2k9x", "1", ObjectMeta{})
 			return err
 		}},
-		{name: "ListWatches", call: func(c *Client) error { _, err := ListWatches(t.Context(), c); return err }},
-		{name: "PatchWatchOwnerReferences", call: func(c *Client) error {
-			_, err := PatchWatchOwnerReferences(t.Context(), c, "house", "the-girls", "1", nil)
-			return err
-		}},
-		{name: "UpdateWatchStatus", call: func(c *Client) error {
-			_, err := UpdateWatchStatus(t.Context(), c, &Watch{})
-			return err
-		}},
 		{name: "ListPeople", call: func(c *Client) error { _, err := ListPeople(t.Context(), c); return err }},
 		{name: "PatchPersonFinalizers", call: func(c *Client) error {
 			_, err := PatchPersonFinalizers(t.Context(), c, "chris", "1", nil)

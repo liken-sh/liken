@@ -203,11 +203,10 @@ belong to a resource of this operator and never to the `Player`.
 When a person picks a title, the media browser publishes a request on
 the bus, on a topic that names its `Player`: the library, the paths of
 the items to play, their presentation, the people watching, the
-`Watch`, the work's aliases, and the start position. The operator,
-which has the RBAC, creates the `Play` in the `Player`'s namespace with
-each path as a claim reference, the art and trickplay references, the
-people and the `Watch` as owner references, the aliases as annotations,
-and the start position. The screen holds no API credential. When the
+work's aliases, and the start position. The operator, which has the
+RBAC, creates the `Play` in the `Player`'s namespace with each path as
+a claim reference, the art and trickplay references, the people as
+owner references, the aliases as annotations, and the start position. The screen holds no API credential. When the
 `Play` ends, the media browser is where the person left it.
 `docs/content/docs/reference/bus.md` is the contract of every topic on
 this operator's tree.
@@ -216,14 +215,15 @@ this operator's tree.
 
 Progress belongs to a set of people, not to one person. A `Person`
 is a fact of the whole cluster, a cluster-scoped CRD in a repository
-of its own, `people-operator`, with no controller. A `Watch` in this
-operator is a set of people on one item, and its progress is one
-record. A `Play` names its people and its `Watch` through owner
-references, and the work's aliases through annotations. A second
+of its own, `people-operator`, with no controller. A `Play` names its
+people through owner references, and the work's aliases through
+annotations. The set of people on a `Play` is the whole record of who
+shares its progress: there is no resource for a group, because the
+people at the screen name the group every time they play. A second
 `Corrosion` cluster per namespace, the progress store, records every
 `Play` from the bus, keyed on aliases and `Person` names and never on
 catalog ids, and every screen holds a copy. Plan 14 states the
-contracts.
+contracts, and plan 51 removed the `Watch` it also defined.
 
 ## Dependencies point one way
 

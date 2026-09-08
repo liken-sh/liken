@@ -43,7 +43,6 @@ follows the same three rules.
 | `plays/{namespace}/{play}/final` | the operator | the progress role, the jellyfin role | yes | [the final status](#the-final-status) |
 | `plays/{namespace}/{play}/recorded` | the progress role | the operator | yes | [the recorded mark](#the-recorded-mark) |
 | `plays/{namespace}/{name}/outside` | the jellyfin role | the progress role | no | [an outside play](#an-outside-play) |
-| `watches/{namespace}/{watch}/progress` | the progress role | the operator | yes | [the watch projection](#the-watch-projection) |
 | `people/{person}/forget` | the operator | every namespace's progress role | yes | [the forget request](#the-forget-request) |
 | `people/{person}/forgotten/{namespace}` | the progress role | the operator | yes | [the forgotten answer](#the-forgotten-answer) |
 | `progress/{namespace}/availability` | the progress role | nothing in this project | yes | `online` or `offline` |
@@ -165,7 +164,6 @@ operator's log and dropped, because the screen has no way to answer.
 | `items[].path` | string | yes | The path of the item's main file, relative to the library root, exactly as the catalog stores it. An empty path, an absolute path, or one that climbs above the root is refused. |
 | `items[].presentation` | object | no | How the item should look, in the `Play`'s own `spec.items[].presentation` field names: `type`, `hint`, `title`, `series`, `season`, `episode`, `episodeTitle`, `year`, `date`, `art`, and `trickplay`. `art` and `trickplay` are paths relative to the library root, and the operator joins them to the claim the way it joins `path`. |
 | `people` | list of strings | no | Who is watching, as `Person` names. Each becomes an owner reference on the `Play`. A name the cluster does not hold is reported and dropped, and the `Play` still plays. |
-| `watch` | string | no | The `Watch` this play belongs to, by name in the `Player`'s namespace. It becomes an owner reference on the `Play`. A name the namespace does not hold is reported and dropped. |
 | `aliases` | map of strings | no | The work's ids by provider, such as `{"tmdb": "1000001", "imdb": "tt0000001"}`. They become the `Play`'s `library.liken.sh/alias.{provider}` annotations, and they are the identity the progress store keys on. |
 | `season` | integer | no | The season number of an episode. It becomes the `library.liken.sh/season` annotation. |
 | `episode` | integer | no | The episode number of an episode. It becomes the `library.liken.sh/episode` annotation. |
@@ -192,7 +190,6 @@ only for a resume.
         }
       ],
       "people": ["ada", "grace"],
-      "watch": "ada-and-grace-a-quiet-harbor",
       "aliases": {"tmdb": "1000001", "imdb": "tt0000001"},
       "start": "600"
     }
@@ -202,8 +199,8 @@ whose URI is `claim://`, the `Library`'s claim, `/`, and the library
 root joined to the path. For a `Library` on the claim `movies` with
 the root `/`, that is
 `claim://movies//A Quiet Harbor (2014)/A Quiet Harbor (2014).mkv`.
-The two people and the `Watch` become owner references, the two
-aliases become annotations, and `600` becomes `spec.start`.
+The two people become owner references, the two aliases become
+annotations, and `600` becomes `spec.start`.
 
 ## The audience
 
@@ -220,7 +217,6 @@ audience.
 |---|---|---|
 | `player` | string | The `Player` the `Play` runs on. |
 | `library` | string | The `Library` the items came from, by name, or absent for a `Play` this operator did not create. |
-| `watch` | string | The `Watch` that owns the `Play`, or absent. |
 | `people` | list of strings | The `Person` names on the `Play`'s owner references, or absent for a `Play` nobody claimed. |
 | `aliases` | map of strings | The work's ids by provider, from the `Play`'s alias annotations. |
 | `season`, `episode` | integers | The numbers of an episode, absent for a work that has none. |
@@ -228,7 +224,6 @@ audience.
     {
       "player": "den-tv",
       "library": "movies",
-      "watch": "ada-and-grace-a-quiet-harbor",
       "people": ["ada", "grace"],
       "aliases": {"tmdb": "1000001", "imdb": "tt0000001"}
     }
@@ -292,28 +287,6 @@ rewatch moves it again.
       "duration": 6730,
       "ended": false,
       "at": 1756508474
-    }
-
-## The watch projection
-
-`watches/{namespace}/{watch}/progress`
-
-The projection of a `Watch` out of the store: the latest `Play`
-recorded against it and where that `Play` reached. The progress role
-publishes it retained after every row it writes for a `Play` in that
-`Watch`, and the operator writes it into the `Watch`'s status, so the
-fields are the ones [the `Watch` status](/docs/reference/watches/#status)
-carries: `play`, `item`, `position`, `duration`, `season`, `episode`,
-`ended`, and `lastRecorded`. The positions are `H:MM:SS`, and
-`lastRecorded` is RFC 3339 in UTC.
-
-    {
-      "play": "den-tv-a-quiet-harbor-2014-x7k2q",
-      "item": 1,
-      "position": "0:24:10",
-      "duration": "1:52:10",
-      "ended": false,
-      "lastRecorded": "2026-08-29T21:34:02Z"
     }
 
 ## The forget request

@@ -116,19 +116,19 @@ func TestAStatusReportOfAnotherNamespaceWritesNothing(t *testing.T) {
 	}
 }
 
-// An audience message writes the Player, the Watch, the people, and the
-// aliases, which is everything the role cannot read for itself.
+// An audience message writes the Player, the people, and the aliases,
+// which is everything the role cannot read for itself.
 func TestAnAudienceMessageWritesWhatTheOperatorKnows(t *testing.T) {
 	role, db := recordingProgress(t)
 	payload, _ := json.Marshal(playAudience{
-		Player: "living-room", Watch: "the-office-with-the-girls",
+		Player: "living-room",
 		People: []string{"chris"}, Aliases: map[string]string{"tmdb": "2316"}, Season: 3, Episode: 5,
 	})
 
 	role.onMessage(playAudienceTopic(defaultTopicBase, "house", "play-1"), payload)
 
 	row := heldPlay(t, db, "play-1")
-	if row.Player != "living-room" || row.Watch != "the-office-with-the-girls" || row.Season != 3 {
+	if row.Player != "living-room" || row.Season != 3 {
 		t.Errorf("row = %+v, want what the audience named", row)
 	}
 	if people := heldPeople(t, db, "play-1"); people["chris"] != 1 {
@@ -310,59 +310,6 @@ func TestTheRolePublishesTheEndedMark(t *testing.T) {
 	}
 	if !recorded.Ended || recorded.Item != 1 {
 		t.Errorf("recorded = %+v, want the ended mark", recorded)
-	}
-}
-
-// A write to a Play in a Watch publishes that Watch's projection, which
-// is what the operator writes into Watch.status.
-func TestAWriteInAWatchPublishesTheWatchProgress(t *testing.T) {
-	role, broker, _ := servingProgress(t)
-	waitForTopic(t, broker, role.availabilityTopic)
-	audience, _ := json.Marshal(playAudience{Watch: "the-office-with-the-girls", Season: 3, Episode: 5})
-	role.onMessage(playAudienceTopic(defaultTopicBase, "house", "play-1"), audience)
-
-	role.onMessage(mediaPlayStatusTopic("house", "play-1"),
-		[]byte(`{"item":0,"position":"0:12:30","duration":"0:42:00"}`))
-
-	// The audience publishes the Watch too, at the position the store
-	// held then, so the test reads on until the position lands.
-	held := waitForWatchProgress(t, broker,
-		watchProgressTopic(defaultTopicBase, "house", "the-office-with-the-girls"),
-		func(progress watchProgress) bool { return progress.Position == "0:12:30" })
-
-	if held.Play != "play-1" || held.Duration != "0:42:00" {
-		t.Errorf("watch progress = %+v, want the latest Play of the Watch", held)
-	}
-	if held.Season != 3 || held.Episode != 5 {
-		t.Errorf("watch progress = %+v, want the season and the episode", held)
-	}
-	if held.Ended || held.LastRecorded == "" {
-		t.Errorf("watch progress = %+v, want a running Play with a recorded time", held)
-	}
-}
-
-// Reads the broker's publishes until one on this topic carries a
-// projection the test accepts, and fails when none does.
-func waitForWatchProgress(t *testing.T, broker *fakeBroker, topic string, accept func(watchProgress) bool) watchProgress {
-	t.Helper()
-	deadline := time.After(scanTestTimeout)
-	for {
-		select {
-		case <-deadline:
-			t.Fatalf("no projection on %q carried what the test waited for", topic)
-			return watchProgress{}
-		case published := <-broker.pubs:
-			if published.topic != topic {
-				continue
-			}
-			var held watchProgress
-			if err := json.Unmarshal(published.payload, &held); err != nil {
-				t.Fatal(err)
-			}
-			if accept(held) {
-				return held
-			}
-		}
 	}
 }
 

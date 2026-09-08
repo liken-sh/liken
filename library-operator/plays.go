@@ -23,13 +23,11 @@ import (
 
 // reconcileProgress is the progress half of one pass. The Plays go
 // first, because a Person is released against what the stores answered
-// about the Plays, and a Watch's status is the projection of the rows
-// they wrote.
+// about the Plays.
 func (o *operator) reconcileProgress(ctx context.Context, plays []Play, people []Person,
-	watches []Watch, stores map[string]bool, now time.Time) {
+	stores map[string]bool, now time.Time) {
 	o.reconcilePlays(ctx, plays, stores)
 	o.reconcilePeople(ctx, people, stores, now)
-	o.reconcileWatches(ctx, watches, people)
 }
 
 // storeNamespaces is the set of namespaces a progress store stands in.
@@ -104,8 +102,8 @@ func (o *operator) reconcilePlay(ctx context.Context, play *Play) {
 }
 
 // playAudienceOf reads the audience off a Play: the Player it runs on,
-// the Watch and the people its owner references name, and the aliases
-// and numbers its annotations carry. A Play a person wrote by hand with
+// the people its owner references name, and the aliases and numbers
+// its annotations carry. A Play a person wrote by hand with
 // the same references and annotations reads the same way.
 func playAudienceOf(play *Play) playAudience {
 	audience := playAudience{Library: play.Metadata.Annotations[libraryAnnotation]}
@@ -113,10 +111,7 @@ func playAudienceOf(play *Play) playAudience {
 		audience.Player = play.Spec.Players[0]
 	}
 	for _, owner := range play.Metadata.OwnerReferences {
-		switch owner.Kind {
-		case watchKind:
-			audience.Watch = owner.Name
-		case personKind:
+		if owner.Kind == personKind {
 			audience.People = append(audience.People, owner.Name)
 		}
 	}

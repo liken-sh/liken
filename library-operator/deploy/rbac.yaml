@@ -71,19 +71,6 @@ rules:
   - apiGroups: [library.liken.sh]
     resources: [catalogs/status]
     verbs: [update]
-  # The Watches, across every namespace and on the same terms as the
-  # libraries. A person declares a Watch, or the browser creates one,
-  # and the patch is for the owner references alone: one Person per
-  # name the Watch holds, so the garbage collector takes the Watch when
-  # the last of them goes.
-  - apiGroups: [library.liken.sh]
-    resources: [watches]
-    verbs: [get, list, watch, patch]
-  # Only the status half, which is the projection of the progress store
-  # the operator folds off the bus.
-  - apiGroups: [library.liken.sh]
-    resources: [watches/status]
-    verbs: [update]
   # The operator reads the MetadataProviders of every namespace and
   # writes only their status: the verdict of the one reachability
   # check it runs per pass. A person declares a provider, and the
@@ -130,7 +117,7 @@ rules:
     resources: [plays]
     verbs: [get, list, watch, create, patch]
   # The people, cluster-scoped and owned by people-operator, read for
-  # the names a Play and a Watch point at. The patch is for the
+  # the names a Play points at. The patch is for the
   # finalizer alone, which keeps a delete from outrunning the sweep of
   # that person's rows out of every namespace's progress store.
   - apiGroups: [people.liken.sh]

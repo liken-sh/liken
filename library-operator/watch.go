@@ -223,31 +223,6 @@ func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}) {
 	}
 }
 
-// This watcher wakes the loop on every Watch change, so a Watch a
-// person or the browser just wrote is tied to its people without a
-// backstop tick's delay. The recovery is watchLibraries's.
-func watchWatches(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
-		path := watchesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
-		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			resourceVersion = readWatchStream(resp, resourceVersion, wake)
-		}
-		if resp != nil {
-			drain(resp.Body)
-		}
-
-		time.Sleep(watchRetryPause.get())
-		list, err := ListWatches(watchContext(), c)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "listing watches to resume the watch: %v\n", err)
-			continue
-		}
-		resourceVersion = list.Metadata.ResourceVersion
-		poke(wake)
-	}
-}
-
 // This watcher wakes the loop on every Person change, so a person a
 // house just declared is held, and one on the way out is asked for,
 // without a backstop tick's delay. The recovery is watchPlayers's: a

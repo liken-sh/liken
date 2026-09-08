@@ -41,6 +41,13 @@ func newProgressStore(base string, httpClient *http.Client) *progressStore {
 	return &progressStore{base: base, http: httpClient}
 }
 
+// defaultProgressClient is the HTTP client the role reaches its own
+// agent with. It states no timeout, because every request bounds itself
+// with a context.
+func defaultProgressClient() *http.Client {
+	return &http.Client{}
+}
+
 // playRow is one row of the plays table, as the store writes it and
 // reads it back. The times are Unix seconds and the position and the
 // duration are seconds, which is the shape the schema holds.
@@ -48,7 +55,6 @@ type playRow struct {
 	Play     string
 	Player   string
 	Library  string
-	Watch    string
 	Started  int64
 	Ended    int64
 	Item     int
@@ -76,20 +82,19 @@ func (s *progressStore) recordPosition(ctx context.Context, play string, item, p
 }
 
 // recordAudience writes what the operator knows about a Play: the
-// Player it ran on, the Library the items came from, the Watch it
-// belongs to, the episode, the people who watched, and the work's
-// aliases.
+// Player it ran on, the Library the items came from, the episode, the
+// people who watched, and the work's aliases.
 //
-// It leaves the recorded time alone, because the operator republishes
-// the audience on every pass, and a bump there would make an idle Play
-// read as the latest write of its Watch.
+// The write leaves the recorded time alone. The operator republishes
+// the audience on every pass, and a bump here would make an idle Play
+// read as recorded later than it was.
 func (s *progressStore) recordAudience(ctx context.Context, play string, audience playAudience, at time.Time) error {
 	statements := []statement{
 		startPlay(play, at),
 		{
-			sql: `UPDATE plays SET player = ?, library = ?, watch = ?, season = ?, episode = ?` +
+			sql: `UPDATE plays SET player = ?, library = ?, season = ?, episode = ?` +
 				` WHERE play = ?`,
-			params: []any{audience.Player, audience.Library, audience.Watch,
+			params: []any{audience.Player, audience.Library,
 				audience.Season, audience.Episode, play},
 		},
 		{sql: `DELETE FROM play_people WHERE play = ?`, params: []any{play}},
@@ -114,8 +119,7 @@ func (s *progressStore) recordAudience(ctx context.Context, play string, audienc
 // its position, and the time of the event as the recorded time.
 // The read of the recorded time comes first, because the newer at wins and a
 // Corrosion transaction cannot branch.
-// The row names no Library and no Watch, because nothing in this cluster
-// played it.
+// The row names no Library, because nothing in this cluster played it.
 func (s *progressStore) recordOutside(ctx context.Context, play string, outside outsidePlay) error {
 	cells, err := s.row(ctx, `SELECT recorded FROM plays WHERE play = ? LIMIT 1`, []any{play})
 	if err != nil {
@@ -135,9 +139,9 @@ func (s *progressStore) recordOutside(ctx context.Context, play string, outside 
 	statements := []statement{
 		startPlay(play, at),
 		{
-			sql: `UPDATE plays SET player = ?, library = ?, watch = ?, season = ?, episode = ?,` +
+			sql: `UPDATE plays SET player = ?, library = ?, season = ?, episode = ?,` +
 				` position = ?, duration = ?, phase = ?, recorded = ?, ended = ? WHERE play = ?`,
-			params: []any{outside.Player, "", "", outside.Season, outside.Episode,
+			params: []any{outside.Player, "", outside.Season, outside.Episode,
 				outside.Position, outside.Duration, phase, outside.At, ended, play},
 		},
 		{sql: `DELETE FROM play_people WHERE play = ?`, params: []any{play}},
@@ -190,41 +194,6 @@ func (s *progressStore) forgetPerson(ctx context.Context, person string) error {
 	return s.apply(ctx, []statement{
 		{sql: `DELETE FROM play_people WHERE person = ?`, params: []any{person}},
 	})
-}
-
-// watchOf is the Watch one Play belongs to, or empty for a Play in no
-// Watch and for a Play the store has no row for.
-func (s *progressStore) watchOf(ctx context.Context, play string) (string, error) {
-	cells, err := s.row(ctx, `SELECT watch FROM plays WHERE play = ? LIMIT 1`, []any{play})
-	if err != nil || len(cells) == 0 {
-		return "", err
-	}
-	text, _ := cells[0].(string)
-	return text, nil
-}
-
-// latestForWatch is the last Play recorded against one Watch, which is
-// the projection the operator writes into that Watch's status. It
-// answers held false for a Watch nothing was recorded against.
-func (s *progressStore) latestForWatch(ctx context.Context, watch string) (playRow, bool, error) {
-	cells, err := s.row(ctx,
-		`SELECT play, item, position, duration, season, episode, ended, recorded`+
-			` FROM plays WHERE watch = ? ORDER BY recorded DESC LIMIT 1`, []any{watch})
-	if err != nil || len(cells) < 8 {
-		return playRow{}, false, err
-	}
-	play, _ := cells[0].(string)
-	return playRow{
-		Play:     play,
-		Watch:    watch,
-		Item:     cellInt(cells[1]),
-		Position: cellInt(cells[2]),
-		Duration: cellInt(cells[3]),
-		Season:   cellInt(cells[4]),
-		Episode:  cellInt(cells[5]),
-		Ended:    int64(cellInt(cells[6])),
-		Recorded: int64(cellInt(cells[7])),
-	}, true, nil
 }
 
 // cellInt reads one cell of a streamed row as an integer. A SqliteValue
