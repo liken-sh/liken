@@ -50,6 +50,9 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
   The compose key raises the person picker, the WWW key goes home,
   and page up and down are named for a later choice. Fast follow.
+* [50, The Jellyfin backfill](50-jellyfin-backfill.md). One Job carries
+  the progress Jellyfin already holds into the store, once, and the
+  `Catalog`'s status says whether it finished.
 
 ## Future
 
