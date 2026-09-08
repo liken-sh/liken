@@ -490,6 +490,14 @@ spec:
                             level and its muted flag. Empty means the
                             unit has no sinks: the client subscribes to
                             no level, draws none, and publishes none.
+                        volumeOwnerTopic:
+                          type: string
+                          description: |-
+                            The retained topic that carries the owner mark for the
+                            unit's level, present whenever volumeTopic is. A
+                            non-empty payload means equipment owns the level, and
+                            the client then draws no level of its own and applies
+                            none. An empty payload means no owner holds it.
                         commandsTopic:
                           type: string
                           description: |-

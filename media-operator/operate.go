@@ -754,9 +754,10 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// One screens for the pass, so the driver's ResourceSlices
 	// are listed at most once however many units the cluster holds.
 	lookup := o.screenLookup()
-	// The units that hold a standing run, which is what keeps the session
-	// on their equipment.
-	standing := make(map[string]bool, len(players))
+	// The units whose screen matches a Receiver input, which is what keeps
+	// the session on their equipment. The session stands idle or playing,
+	// so this set is the match and not the standing run.
+	matched := make(map[string]bool, len(players))
 	for index := range players {
 		player := &players[index]
 		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
@@ -780,9 +781,10 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			desired.Panel = o.reconcilePanel(player, key, lookup, idle.OffMode)
 		}
 		// The equipment the unit's cable lands on, and the session it holds
-		// while a Play stands.
-		standing[key] = playerHasStandingPlay(player, plays)
-		desired.Receiver = o.reconcileReceiver(player, standing[key])
+		// there. The session stands for as long as the unit matches an input,
+		// and its active flag follows the standing run.
+		desired.Receiver = o.reconcileReceiver(player, playerHasStandingPlay(player, plays))
+		matched[key] = desired.Receiver != nil
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
@@ -828,9 +830,9 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// The overrides shrink the same way, and a unit dropped
 	// while its panel was dark takes a lift on the way out.
 	o.retainPanels(drawn)
-	// A unit whose Play ended or whose Player is gone releases the
-	// equipment it held.
-	o.retainSessions(standing)
+	// A unit that is gone, or whose screen no longer matches an input,
+	// releases the equipment it held.
+	o.retainSessions(matched)
 	// The volume desk shrinks the same way. The retained level itself
 	// stays on the broker, so a Player recreated under the same name
 	// keeps the level the room was left at.

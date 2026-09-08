@@ -86,20 +86,26 @@ func deriveIdleStatus(
 		return &PlayerIdleStatus{Controller: controller}
 	}
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
+	bus := &PlayerIdleBus{
+		Address:       busAddress,
+		StatusTopic:   playerStatusTopic(topicBase, namespace, name),
+		VolumeTopic:   idleVolumeTopic(player, topicBase),
+		CommandsTopic: playerCommandsTopic(topicBase, namespace, name),
+		PanelTopic:    playerPanelTopic(topicBase, namespace, name),
+		Remotes:       idleBusRemotes(remotes),
+	}
+	// The owner mark travels with the level, the way it does to the
+	// command sidecar. A unit with no sinks names neither topic.
+	if bus.VolumeTopic != "" {
+		bus.VolumeOwnerTopic = playerVolumeOwnerTopic(topicBase, namespace, name)
+	}
 	return &PlayerIdleStatus{
 		Controller:       controller,
 		Claim:            claim.Metadata.Name,
 		Requests:         claimRequests(claim),
 		FadeAfterSeconds: idle.FadeAfterSeconds,
 		OffAfterSeconds:  idle.OffAfterSeconds,
-		Bus: &PlayerIdleBus{
-			Address:       busAddress,
-			StatusTopic:   playerStatusTopic(topicBase, namespace, name),
-			VolumeTopic:   idleVolumeTopic(player, topicBase),
-			CommandsTopic: playerCommandsTopic(topicBase, namespace, name),
-			PanelTopic:    playerPanelTopic(topicBase, namespace, name),
-			Remotes:       idleBusRemotes(remotes),
-		},
+		Bus:              bus,
 	}
 }
 

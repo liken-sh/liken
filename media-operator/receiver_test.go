@@ -1,10 +1,12 @@
 package main
 
 // These tests cover the media layer's half of the Receiver resource:
-// the match from a unit's screen to an input, the session a standing
-// Play holds on the equipment, and the lift.
+// the match from a unit's screen to an input, the session a matched
+// unit holds on the equipment, the active flag a standing Play moves,
+// and the lift.
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -211,9 +213,12 @@ func TestAStandingRunIsAPlayThatHasNotFinished(t *testing.T) {
 }
 
 // The Player status names the equipment its cable lands on and folds
-// the Receiver's Reachable condition. An idle unit holds no session,
-// because power and input are what a run asks for.
-func TestAnIdleUnitReportsItsReceiverAndHoldsNoSession(t *testing.T) {
+// the Receiver's Reachable condition.
+//
+// An idle unit holds a session too, with the active flag false, so the
+// equipment owns the level while nothing plays and a volume press at
+// the idle screen moves the room.
+func TestAnIdleUnitReportsItsReceiverAndHoldsAnIdleSession(t *testing.T) {
 	cluster := receiverCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
@@ -226,7 +231,12 @@ func TestAnIdleUnitReportsItsReceiverAndHoldsNoSession(t *testing.T) {
 	mustMatch(t, status.Name, "living-room-denon")
 	mustMatch(t, status.Input, "GAME")
 	mustMatch(t, status.Reachable, "True")
-	mustMatch(t, len(cluster.sessions), 0)
+	mustMatch(t, len(cluster.sessions), 1)
+	mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
+		Player:      "house/theater",
+		Input:       "GAME",
+		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+	})
 }
 
 // A unit whose screen no Receiver names reports no receiver block. That
@@ -273,29 +283,41 @@ func TestAStandingPlayHoldsOneSessionOnTheReceiver(t *testing.T) {
 	mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
 		Player:      "house/theater",
 		Input:       "GAME",
+		Active:      true,
 		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
 	})
 	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
 }
 
-// The session goes when the run does. The lift is an apply with no
-// session, which is how the API server removes the block this manager
-// owns.
-func TestTheSessionIsLiftedWhenTheRunEnds(t *testing.T) {
+// A Play that starts flips the active flag, and the end of that Play
+// flips it back. Neither edge is a lift: the session stands, so the
+// room keeps its input and its level owner across the film.
+func TestAPlayMovesTheActiveFlagAndNeitherEdgeLifts(t *testing.T) {
 	cluster := receiverCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
+	runPlayers(media, []Player{*housePlayer()}, nil)
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
 	runPlayers(media, []Player{*housePlayer()}, nil)
 
-	mustMatch(t, len(cluster.sessions), 2)
-	if cluster.sessions[1].session != nil {
-		t.Errorf("the lift carried %+v", cluster.sessions[1].session)
+	mustMatch(t, appliedActive(cluster), "false, true, false")
+	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
+	if cluster.receivers["living-room-denon"].Spec.Session == nil {
+		t.Error("the receiver holds no session")
 	}
-	mustMatch(t, len(media.receiverSessions), 0)
-	if cluster.receivers["living-room-denon"].Spec.Session != nil {
-		t.Error("the receiver still holds a session")
+}
+
+// appliedActive reads the active flag of every session apply the passes
+// made, in order, and reads a lift as the word.
+func appliedActive(cluster *fakeCluster) string {
+	flags := make([]string, len(cluster.sessions))
+	for index, applied := range cluster.sessions {
+		flags[index] = "lift"
+		if applied.session != nil {
+			flags[index] = strconv.FormatBool(applied.session.Active)
+		}
 	}
+	return strings.Join(flags, ", ")
 }
 
 // A Player that is gone takes its session with it, the same as a
@@ -304,7 +326,7 @@ func TestAUnitThatIsGoneLiftsItsSession(t *testing.T) {
 	cluster := receiverCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	runPlayers(media, []Player{*housePlayer()}, standingPlays())
+	runPlayers(media, []Player{*housePlayer()}, nil)
 	runPlayers(media, nil, nil)
 
 	mustMatch(t, len(media.receiverSessions), 0)
@@ -322,12 +344,12 @@ func TestAFailedLiftRetriesOnTheNextPass(t *testing.T) {
 
 	runPlayers(media, []Player{*housePlayer()}, standingPlays())
 	cluster.sessionsFail = true
-	runPlayers(media, []Player{*housePlayer()}, nil)
+	runPlayers(media, nil, nil)
 
 	mustMatch(t, media.receiverSessions[key].receiver, "living-room-denon")
 
 	cluster.sessionsFail = false
-	runPlayers(media, []Player{*housePlayer()}, nil)
+	runPlayers(media, nil, nil)
 
 	mustMatch(t, len(media.receiverSessions), 0)
 	if cluster.receivers["living-room-denon"].Spec.Session != nil {

@@ -173,8 +173,8 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 	}{
 		{
 			name:    "a session the run holds",
-			session: &ReceiverSession{Player: "house/theater", Input: "GAME", VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, VolumeTopic: "liken/media/players/house/theater/volume"},
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","active":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
 		},
 		{
 			name: "the lift",

@@ -540,6 +540,39 @@ func TestReconcilePlayersWritesTheIdleBlock(t *testing.T) {
 	mustMatch(t, written.Bus.PanelTopic, playerPanelTopic(testTopicBase, "house", "theater"))
 }
 
+// The owner mark travels with the level, the way it travels to the
+// command sidecar. A unit with no sinks names neither topic, so its
+// client reads no owner and draws no level at all.
+func TestTheIdleBusCarriesTheOwnerTopicWithTheLevelTopic(t *testing.T) {
+	cases := []struct {
+		name       string
+		sinks      []PlayerDevice
+		wantVolume string
+		wantOwner  string
+	}{
+		{name: "a unit with nothing to hear"},
+		{
+			name:       "a unit with speakers",
+			sinks:      []PlayerDevice{{Class: "audio-sink"}},
+			wantVolume: playerVolumeTopic(testTopicBase, "house", "theater"),
+			wantOwner:  playerVolumeOwnerTopic(testTopicBase, "house", "theater"),
+		},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			player := standingIdlePlayer()
+			player.Spec.Sinks = each.sinks
+
+			got := deriveIdleStatus(player, idleControllerOwn, testBusAddress, testTopicBase,
+				buildIdleClaim(player, "display-draw"), resolveIdle(nil, nil, testIdleImage),
+				gatherIdleRemotes(player, testTopicBase))
+
+			mustMatch(t, got.Bus.VolumeTopic, each.wantVolume)
+			mustMatch(t, got.Bus.VolumeOwnerTopic, each.wantOwner)
+		})
+	}
+}
+
 // A unit with sinks and controllers carries the level topic and one
 // entry per controller, in spec.remotes order, so a delegate's client
 // reads the whole contract from the status alone.

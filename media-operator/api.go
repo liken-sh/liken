@@ -146,9 +146,16 @@ type PlayerIdleStatus struct {
 // publishes none. Remotes has one entry per spec.remotes entry, in spec
 // order, because that position is the index a focus moment carries.
 type PlayerIdleBus struct {
-	Address       string             `json:"address"`
-	StatusTopic   string             `json:"statusTopic"`
-	VolumeTopic   string             `json:"volumeTopic,omitempty"`
+	Address     string `json:"address"`
+	StatusTopic string `json:"statusTopic"`
+	VolumeTopic string `json:"volumeTopic,omitempty"`
+
+	// VolumeOwnerTopic carries the owner mark for the level, and it is
+	// present whenever VolumeTopic is. A non-empty payload means equipment
+	// owns the level. The client then draws no level of its own and
+	// applies none.
+	VolumeOwnerTopic string `json:"volumeOwnerTopic,omitempty"`
+
 	CommandsTopic string             `json:"commandsTopic"`
 	PanelTopic    string             `json:"panelTopic"`
 	Remotes       []PlayerIdleRemote `json:"remotes,omitempty"`

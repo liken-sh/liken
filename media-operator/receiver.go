@@ -2,8 +2,9 @@ package main
 
 // The media layer's half of the equipment operator's Receiver: the
 // match from a unit's screen to a Receiver input, the session this
-// operator applies while a Play stands, and the lift when the Play
-// ends.
+// operator applies for as long as the unit matches, the active flag on
+// that session that follows a standing Play, and the lift when the unit
+// stops matching or goes away.
 
 import (
 	"errors"
@@ -53,9 +54,15 @@ type ReceiverInput struct {
 
 // The session one Player holds on the equipment: the unit that holds
 // it, the input it plays through, and the topic the level comes from.
+//
+// Active says whether a Play stands on the unit. The session itself
+// stands at the idle screen too, so a volume press moves the room while
+// nothing plays, and the equipment operator reads Active to tell a
+// playing room from an idle one.
 type ReceiverSession struct {
 	Player      string `json:"player,omitempty"`
 	Input       string `json:"input,omitempty"`
+	Active      bool   `json:"active"`
 	VolumeTopic string `json:"volumeTopic,omitempty"`
 }
 
@@ -163,15 +170,14 @@ type receiverSession struct {
 }
 
 // reconcileReceiver builds the Player's receiver status block, and
-// applies the session while a Play stands on the unit.
+// applies the session on every pass the unit matches an input. The
+// session is active only while a Play stands on the unit.
 func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerReceiverStatus {
 	receiver, input, matched := o.matchReceiver(player)
 	if !matched {
 		return nil
 	}
-	if standing {
-		o.applySession(player, receiver, input)
-	}
+	o.applySession(player, receiver, input, standing)
 	return &PlayerReceiverStatus{
 		Name:      receiver.Metadata.Name,
 		Input:     input,
@@ -197,7 +203,7 @@ func (o *operator) applyReceiverSession(player *Player) {
 	if !matched {
 		return
 	}
-	o.applySession(player, receiver, input)
+	o.applySession(player, receiver, input, true)
 }
 
 // applySession writes spec.session under this operator's field manager,
@@ -206,12 +212,17 @@ func (o *operator) applyReceiverSession(player *Player) {
 // an unchanged session is not sent again. A unit that moved to another
 // Receiver lifts the session on the old one first, so no equipment
 // keeps a session nothing holds.
-func (o *operator) applySession(player *Player, receiver *Receiver, input string) {
+//
+// The tracking compares the whole session, so a Play that starts or
+// ends changes only the active flag, and the session is applied again
+// for that.
+func (o *operator) applySession(player *Player, receiver *Receiver, input string, active bool) {
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 	key := playerKey(namespace, name)
 	session := ReceiverSession{
 		Player:      namespace + "/" + name,
 		Input:       input,
+		Active:      active,
 		VolumeTopic: playerVolumeTopic(o.topicBase, namespace, name),
 	}
 	held, tracked := o.receiverSessions[key]
@@ -234,12 +245,13 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 	o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
 }
 
-// retainSessions lifts the session of every unit that no longer holds a
-// standing Play, the way retainPanels lifts an override. A lift that
-// fails keeps the entry, so the next pass writes it again.
-func (o *operator) retainSessions(standing map[string]bool) {
+// retainSessions lifts the session of every unit that no longer matches
+// a Receiver input, the way retainPanels lifts an override. A Play that
+// ends is no lift: the session stands and its active flag goes false. A
+// lift that fails keeps the entry, so the next pass writes it again.
+func (o *operator) retainSessions(matched map[string]bool) {
 	for key, held := range o.receiverSessions {
-		if standing[key] {
+		if matched[key] {
 			continue
 		}
 		err := ApplyReceiverSession(o.client, held.receiver, nil)
@@ -254,8 +266,10 @@ func (o *operator) retainSessions(standing map[string]bool) {
 // A unit holds a standing run while a Play names it and that Play has
 // not finished. This is the same condition that keeps its playback pod:
 // a Play created this pass carries no phase yet, and a failed Play
-// keeps its pod until it is recreated, so a Pending-or-Running test
-// would lift the session too early.
+// keeps its pod until it is recreated.
+//
+// A Pending-or-Running test would report the room idle while its film
+// is still up, which is why the test is the unfinished phase.
 func playerHasStandingPlay(player *Player, plays []Play) bool {
 	for index := range plays {
 		play := &plays[index]
