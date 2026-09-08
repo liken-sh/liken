@@ -308,6 +308,9 @@ pub fn key_name(key: &Key) -> Option<String> {
         Key::Named(NamedKey::F3 | NamedKey::BrowserSearch | NamedKey::Find) => {
             Some("search".into())
         }
+        // A remote sends KEY_ADDRESSBOOK for the person picker, and a
+        // keyboard has no such key, so F2 stands in for it.
+        Key::Named(NamedKey::F2) => Some("people".into()),
         // The space bar gives the word KEY_SPACE gives, so a space from a
         // keyboard and a space from a remote are one word.
         Key::Named(NamedKey::Space) => Some(" ".into()),

@@ -249,6 +249,20 @@ impl<S: Source, A: Art> Browser<S, A> {
         self.asleep
     }
 
+    // The picker goes up as a layer over the stack and pops nothing, so
+    // the screen under it is the one that comes back when the answer is
+    // taken. The list is read again first, and the people of the current
+    // answer start chosen. An audience that needs an answer holds none,
+    // so a picker raised by the ask starts with nobody.
+    fn raise_picker(&mut self) {
+        self.learn_people();
+        let chosen = self.audience.chosen(self.clock);
+        self.picker = Some(screens::audience::Picker::open(
+            self.audience.known().len(),
+            &chosen,
+        ));
+    }
+
     // Raise the picker where the browser has no answer to who is watching.
     // The answer is whether it went up, which is a frame to draw. A
     // browser that knows no people never asks. Neither does one under the
@@ -260,11 +274,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             && self.loading.is_none()
             && self.audience.needs_answer(self.clock);
         if due {
-            self.learn_people();
-            self.picker = Some(screens::audience::Picker::open(
-                self.audience.known().len(),
-                &[],
-            ));
+            self.raise_picker();
         }
         due
     }
@@ -493,11 +503,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                 true
             }
             ("enter", Target::Circles) => {
-                self.learn_people();
-                self.picker = Some(screens::audience::Picker::open(
-                    self.audience.known().len(),
-                    &self.audience.chosen(self.clock),
-                ));
+                self.raise_picker();
                 true
             }
             ("enter", _) => {
@@ -594,6 +600,17 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
                 }
             }
             "home" => self.home(),
+            // The people key raises the picker over whatever screen is
+            // up, the way home pops to the home page. A press that arrives
+            // while the picker stands never reaches here: the picker took
+            // it above and binds no word for people, so it stands as it
+            // was. A browser that knows no people has an empty picker to
+            // draw and nothing to ask, so the key moves nothing there, the
+            // way the ask never raises one.
+            "people" => match self.audience.known().is_empty() {
+                true => changed = false,
+                false => self.raise_picker(),
+            },
             // The power key asks for the shade. The crate decides, and the
             // sleep moment comes back here; the press itself changes
             // nothing on the screen. A press that arrives asleep never

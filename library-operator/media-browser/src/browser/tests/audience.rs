@@ -332,3 +332,65 @@ fn an_answer_from_the_re_opened_picker_reads_the_screens_again() {
     browser.pump(1.0);
     assert_eq!(browser.source.watching, ["first".to_string()]);
 }
+
+// The people key raises the picker over the screen a person is on, and
+// the answer uncovers that same screen, because the picker is a layer
+// over the stack and pops nothing off it.
+
+#[test]
+fn the_people_key_raises_the_picker_over_the_page() {
+    let mut browser = a_room_of_two();
+    browser.tick(0.0);
+    open_the_film(&mut browser);
+    assert!(browser.picker.is_none());
+
+    assert!(browser.key("people"));
+
+    let picker = browser.picker.as_ref().expect("the picker stands");
+    assert_eq!(picker.tiles(), 2);
+    assert!(picker.holds(0));
+    assert!(picker.holds(1));
+    assert_eq!(browser.stack.len(), 2);
+}
+
+#[test]
+fn the_people_key_under_the_picker_leaves_it_as_it_stands() {
+    let mut browser = a_room_of_two();
+    browser.tick(0.0);
+    open_the_film(&mut browser);
+    browser.key("people");
+    browser.key("right");
+    let raised = browser.picker.clone().expect("the picker stands");
+
+    browser.key("people");
+
+    assert_eq!(browser.picker, Some(raised));
+    assert_eq!(browser.stack.len(), 2);
+}
+
+#[test]
+fn an_answer_to_the_people_key_returns_to_the_page_it_was_raised_over() {
+    let mut browser = a_room_of_two();
+    browser.tick(0.0);
+    open_the_film(&mut browser);
+    browser.key("people");
+
+    browser.key("right");
+    browser.key("enter");
+    browser.key("escape");
+
+    assert!(browser.picker.is_none());
+    assert_eq!(browser.audience().current(0.0), ["first".to_string()]);
+    assert_eq!(browser.stack.len(), 2);
+    assert_eq!(showing_page(&browser).focus, Focus::Buttons(0));
+}
+
+#[test]
+fn the_people_key_raises_no_picker_where_the_browser_knows_no_people() {
+    let (mut browser, _bus) = watching(&[], &[]);
+    browser.tick(0.0);
+
+    assert!(!browser.key("people"));
+
+    assert!(browser.picker.is_none());
+}
