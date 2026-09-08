@@ -20,4 +20,11 @@ is built the way it is, and what it still owes an answer to.
 
 ## Completed
 
-None yet.
+* Plan 01, the `Receiver` with the `denon` protocol, the session, and
+  the level path. Proved on a living room on 2026-09-07: the Denon's
+  status followed its own remote, a `Play` selected the input, and
+  the room's remote stepped the receiver under a declared ceiling.
+  Releases 2026.09.07-001 to -003. Three things that day changed the
+  design: the Denon's `MVMAX` line is not a limit, a session must
+  adopt the receiver's position before it applies any level, and a
+  press is a direction and not a level.
