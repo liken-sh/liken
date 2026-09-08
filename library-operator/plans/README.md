@@ -50,10 +50,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
   The compose key raises the person picker, the WWW key goes home,
   and page up and down are named for a later choice. Fast follow.
-* [52, Threads](52-threads.md). The continue row across series, sets,
-  and franchises: an exact-audience thread that a guest night extends
-  and an old solo run does not, the plain successor, reasons stacked
-  on one card per leaf, and the franchise page opened on a member.
 
 ## Future
 
@@ -93,6 +89,13 @@ Plan 32 stands apart from the enrichment work.
 
 ## Completed
 
+* [52, Threads](completed/52-threads.md). Built and drilled 2026-09-08
+  in releases 2026.09.08-005 and -006. The continue row across series,
+  sets, and franchises: an exact-audience thread that a guest night
+  extends and an old solo run does not, the plain successor, reasons
+  stacked on one card per leaf, the room's circles on the heading, and
+  the franchise page opened on a member. The drill found the one-read
+  fix for franchise memberships.
 * [51, Drop the Watch](completed/51-drop-the-watch.md). Completed
   2026-09-08. The `Watch` kind, its projection, and the `watch` field
   on the play request are gone; the people on a `Play` are the whole

@@ -2,7 +2,9 @@
 
 Plan 52. The continue-watching row answers "where did we leave off" for
 the people at the screen, across series, sets, and franchises, with the
-reason on every card. It needs no resource beyond the `Play`.
+reason on every card. It needs no resource beyond the `Play`. Built
+2026-09-08 in releases 2026.09.08-005 and -006, and drilled the same
+day; the proof section ends with the drill.
 
 ## The problem
 
@@ -191,3 +193,20 @@ page on that member.
 
 The drill runs on the house against the backfilled store: a person
 alone sees none of a group's threads, and a group sees its own.
+
+### The drill
+
+The five nights are unit tests of the walk, and the browser-level tests
+cover the cards, the collapse, the presses, the circles, and the empty
+audience. The store's rows were read out of the house through the
+progress agent's query API into a file on the workstation, and the
+browser ran headless against that file and a catalog of the same
+libraries, once per audience. A person with sixteen hundred plays saw
+their own threads and their own resumes; a person with one play saw
+that film alone and nothing of the pair they are in; the pair saw its
+three plays as two threads, one of them stacked with its franchise; a
+person alone saw nothing of that pair. The first run of that drill
+took the row close to six seconds to build, because the browser read
+franchise memberships one work at a time, and release -006 reads them
+in one statement, which brought the same row to under a tenth of a
+second. On the living-room screen the home page opens in about 140 ms.
