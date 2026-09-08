@@ -70,9 +70,9 @@ pub trait Bus: std::fmt::Debug {
     /// connection this crate already holds. A client with a request of
     /// its own, such as the library layer's browser asking for a
     /// `Play`, must not open a second connection to the same broker
-    /// under a second identifier. The crate does nothing with the
-    /// topic: the rules in [`Screen`] neither read it nor subscribe to
-    /// it.
+    /// under a second identifier. The rules in [`Screen`] neither read
+    /// the topic nor act on it. The client hears a message back on it
+    /// only when the client named it to [`Reader::open`].
     fn publish(&self, topic: &str, payload: Vec<u8>, retained: bool);
 
     /// Wake the loop on every delivery, so a press shows on the next frame
@@ -108,8 +108,13 @@ impl Reader {
     ///
     /// `client_id` must name this client alone, because a broker closes the
     /// older connection when two arrive under one identifier.
-    pub fn open(wiring: &Wiring, client_id: &str) -> Option<Self> {
-        let screen = Screen::new(wiring);
+    ///
+    /// `client_topics` are topics the client owns. The reader subscribes to
+    /// them beside the screen's own on every session, and every message on
+    /// one arrives as a [`Moment::Message`]. They count as topics: a client
+    /// that names one opens a reader over a wiring that names none.
+    pub fn open(wiring: &Wiring, client_id: &str, client_topics: &[String]) -> Option<Self> {
+        let screen = Screen::new(wiring).reading(client_topics);
         let (host, port) = broker(&wiring.bus_address)?;
         if screen.filters().is_empty() {
             return None;

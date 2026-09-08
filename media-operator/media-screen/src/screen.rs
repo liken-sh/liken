@@ -80,6 +80,21 @@ pub enum Moment {
     /// means equipment owns the level. An empty one means the mark is
     /// cleared. The client decides what to draw for it.
     Owner(Vec<u8>),
+    /// One message on a topic the client owns. The rules read nothing in
+    /// the payload and hold no state from it, because the topic is the
+    /// client's own. `retained` is the broker's mark on the delivery, so a
+    /// client tells the catch-up on a topic it owns from a live write.
+    Message {
+        topic: String,
+        payload: Vec<u8>,
+        retained: bool,
+    },
+    /// The bus session started. A client that owns retained state
+    /// republishes it here, which is the bus rule that each connected
+    /// program republishes the retained state it owns when its session
+    /// reconnects. The moment arrives on the first session too, because a
+    /// client cannot tell that one from a reconnect.
+    Connected,
 }
 
 /// One message this crate sends on the bus. The client never builds one:
@@ -149,6 +164,10 @@ pub struct Screen {
     /// The last mark each controller's focus topic delivered, one per entry
     /// of `remotes`.
     marks: Vec<Mark>,
+    /// The topics the client owns. They are the client's own configuration
+    /// and not the `Player`'s wiring, so they arrive from the client and not
+    /// from a variable the operator sets.
+    client_topics: Vec<String>,
 
     /// The quiet window. Zero never arms the timer.
     fade_after: Duration,
@@ -196,6 +215,7 @@ impl Screen {
             panel_topic: wiring.panel_topic.clone(),
             marks: vec![Mark::default(); wiring.remotes.len()],
             remotes: wiring.remotes.clone(),
+            client_topics: Vec::new(),
             fade_after: wiring.fade_after,
             off_after: wiring.off_after,
             volume: None,
@@ -207,6 +227,24 @@ impl Screen {
             desire: panel::ON,
             deadline: None,
         }
+    }
+
+    /// The same screen, plus the topics the client owns. A client that keeps
+    /// retained state of its own, such as a mark for the person watching,
+    /// names those topics here and reads every message on them back as a
+    /// [`Moment::Message`]. An empty name is no topic and is dropped.
+    ///
+    /// The rules read nothing on these topics. They are a second
+    /// subscription on the one connection this crate holds, so a client
+    /// opens no session of its own under a second identifier.
+    #[must_use]
+    pub fn reading(mut self, client_topics: &[String]) -> Self {
+        self.client_topics = client_topics
+            .iter()
+            .filter(|topic| !topic.is_empty())
+            .cloned()
+            .collect();
+        self
     }
 
     /// The topics to subscribe to. An empty topic is one the operator did not
@@ -227,6 +265,7 @@ impl Screen {
             filters.push(remote.focus.clone());
         }
         filters.retain(|topic| !topic.is_empty());
+        filters.extend(self.client_topics.iter().cloned());
         filters
     }
 
@@ -275,6 +314,15 @@ impl Screen {
         }
         if !self.commands_topic.is_empty() && topic == self.commands_topic {
             return self.on_command(payload);
+        }
+        // The client's own topics are read last, so a topic that is also one
+        // of the screen's fires the screen's rule alone and never twice.
+        if self.client_topics.iter().any(|owned| owned == topic) {
+            return vec![Effect::Moment(Moment::Message {
+                topic: topic.to_string(),
+                payload: payload.to_vec(),
+                retained,
+            })];
         }
         Vec::new()
     }
@@ -331,12 +379,16 @@ impl Screen {
     /// The panel desire is this client's own retained state, so it goes out
     /// again on every session. A client that returns while the panel is dark
     /// states the on desire here, and the operator lifts the override.
+    ///
+    /// [`Moment::Connected`] tells the client the same thing, so a client
+    /// republishes the retained state it owns on the topics it named.
     pub fn connected(&mut self) -> Vec<Effect> {
         for mark in &mut self.marks {
             mark.caught_up = false;
         }
         let mut effects = Vec::new();
         self.publish_desire(&mut effects);
+        effects.push(Effect::Moment(Moment::Connected));
         effects
     }
 

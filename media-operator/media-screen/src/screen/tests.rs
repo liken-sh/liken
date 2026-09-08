@@ -190,6 +190,92 @@ fn a_topic_this_screen_did_not_subscribe_to_is_nothing() {
     assert!(screen.deliver("", b"{}", true, now).is_empty());
 }
 
+// The client's own topics.
+
+/// One topic a client owns, such as the mark the library layer's browser
+/// keeps for the person watching. The crate reads nothing in it.
+const WATCHING: &str = "liken/library/screens/house/theater/watching";
+
+#[test]
+fn a_client_subscribes_to_its_own_topics_beside_the_screens() {
+    assert_eq!(
+        Screen::new(&wiring()).reading(&[WATCHING.into()]).filters(),
+        [
+            STATUS,
+            VOLUME,
+            VOLUME_OWNER,
+            COMMANDS,
+            SOFA_EVENTS,
+            SOFA_FOCUS,
+            WATCHING
+        ]
+    );
+}
+
+#[test]
+fn a_client_topic_with_no_name_is_no_topic() {
+    assert_eq!(
+        Screen::new(&wiring())
+            .reading(&[String::new(), WATCHING.into()])
+            .filters(),
+        [
+            STATUS,
+            VOLUME,
+            VOLUME_OWNER,
+            COMMANDS,
+            SOFA_EVENTS,
+            SOFA_FOCUS,
+            WATCHING
+        ]
+    );
+}
+
+#[test]
+fn a_client_with_topics_of_its_own_and_no_wiring_still_subscribes() {
+    assert_eq!(
+        Screen::new(&Wiring::default())
+            .reading(&[WATCHING.into()])
+            .filters(),
+        [WATCHING]
+    );
+}
+
+#[test]
+fn every_message_on_a_client_topic_reaches_the_client() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now).reading(&[WATCHING.into()]);
+
+    assert_eq!(
+        moments(screen.deliver(WATCHING, b"chris", true, now)),
+        [Moment::Message {
+            topic: WATCHING.into(),
+            payload: b"chris".to_vec(),
+            retained: true,
+        }]
+    );
+    // The broker's mark travels with the message, so a client tells its own
+    // catch-up from a live write by another session.
+    assert_eq!(
+        moments(screen.deliver(WATCHING, b"", false, now)),
+        [Moment::Message {
+            topic: WATCHING.into(),
+            payload: Vec::new(),
+            retained: false,
+        }]
+    );
+}
+
+#[test]
+fn a_client_topic_that_is_also_the_screens_fires_the_screens_rule_alone() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now).reading(&[STATUS.into()]);
+
+    assert_eq!(
+        moments(screen.deliver(STATUS, &status("Playing"), true, now)),
+        [drew_status(Activity::Playing)]
+    );
+}
+
 // The status, and the play gate it sets.
 
 #[test]
@@ -1104,7 +1190,14 @@ fn a_player_with_no_panel_topic_states_no_desire() {
     };
     let mut screen = Screen::new(&wiring);
 
-    assert!(screen.connected().is_empty());
+    assert!(publishes(screen.connected()).is_empty());
+}
+
+#[test]
+fn every_bus_session_tells_the_client_it_connected() {
+    let mut screen = Screen::new(&wiring());
+
+    assert_eq!(moments(screen.connected()), [Moment::Connected]);
 }
 
 #[test]

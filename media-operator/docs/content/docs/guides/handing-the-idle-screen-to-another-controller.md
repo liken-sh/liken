@@ -128,7 +128,10 @@ There are two ways to hold that contract:
 * Take the `media-screen` crate from this repository as a git
   dependency pinned to a release tag. It reads the variables below,
   runs every rule, and hands the client what it draws: a press, the
-  shade down or up, a focus, and a fresh surface.
+  shade down or up, a focus, and a fresh surface. Name topics of your
+  own when you open the reader, and every message on one comes back on
+  the same connection, so a client reads back the retained state it
+  owns.
 * Read the same topics yourself and hold the same gates. The
   [bus reference](/docs/reference/bus/) describes each topic.
 

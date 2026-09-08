@@ -7,7 +7,9 @@
 //! the cycle request, and the re-present. [`Reader`] is the thread over the broker: it
 //! subscribes, folds each message through the rules, runs the
 //! deadlines, performs the publishes, and hands the client what it
-//! draws.
+//! draws. A client also names topics of its own, and [`Reader`]
+//! subscribes to those on the same connection, so a client reads back
+//! the retained state it owns.
 //!
 //! Two clients read it: this repository's idle screen, and the library
 //! layer's media browser, which takes it as a git dependency pinned to

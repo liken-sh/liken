@@ -165,6 +165,10 @@ impl Unit {
             // The up-next offer is for the client that wrote the `Play`. The
             // stock idle screen writes none, so it acts on none.
             Moment::PlayNext(_) => {}
+            // The stock idle screen names no topic of its own, so no message
+            // on one arrives, and it keeps no retained state to republish
+            // when a session starts.
+            Moment::Message { .. } | Moment::Connected => {}
         }
     }
 
@@ -624,6 +628,24 @@ mod tests {
         let before = unit.clone();
 
         unit.fold(Moment::PlayNext(br#"{"library":"shows"}"#.to_vec()), 2.0);
+
+        assert_eq!(unit, before);
+    }
+
+    #[test]
+    fn a_client_topic_and_a_bus_session_change_nothing_this_screen_draws() {
+        let mut unit = seeded();
+        let before = unit.clone();
+
+        unit.fold(
+            Moment::Message {
+                topic: "liken/library/screens/house/theater/watching".into(),
+                payload: b"chris".to_vec(),
+                retained: true,
+            },
+            2.0,
+        );
+        unit.fold(Moment::Connected, 2.0);
 
         assert_eq!(unit, before);
     }

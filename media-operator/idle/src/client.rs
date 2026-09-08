@@ -56,7 +56,9 @@ impl Client {
         let keys = wiring
             .preview
             .then(|| Keys::seeded(wiring.player_name.clone(), wiring.components.clone()));
-        let bus = Reader::open(&wiring.screen, &client_id);
+        // The stock idle screen owns no topic and keeps no retained state
+        // of its own, so it names none.
+        let bus = Reader::open(&wiring.screen, &client_id, &[]);
         Self {
             unit: Unit::seeded(wiring.player_name, wiring.components),
             bus: bus.map(|reader| Box::new(reader) as Box<dyn Bus>),

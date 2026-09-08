@@ -46,9 +46,15 @@ fn reader() -> (Reader, Threads) {
 /// The same reader over a wiring a test states, for the one test that needs a
 /// window short enough to run inside it.
 fn reader_over(wiring: Wiring) -> (Reader, Threads) {
+    reader_reading(wiring, &[])
+}
+
+/// The same reader over topics the client owns, for the tests about what a
+/// client reads back on a topic of its own.
+fn reader_reading(wiring: Wiring, client_topics: &[String]) -> (Reader, Threads) {
     let (client, _) = Broker::new(MqttOptions::new("test", "localhost", 1883), QUEUE_DEPTH);
     let (sender, moments) = mpsc::channel();
-    let screen = Arc::new(Mutex::new(Screen::new(&wiring)));
+    let screen = Arc::new(Mutex::new(Screen::new(&wiring).reading(client_topics)));
     let threads = Threads {
         screen: Arc::downgrade(&screen),
         client,
@@ -110,7 +116,8 @@ fn a_client_with_no_broker_and_a_client_with_no_topics_open_no_reader() {
                 bus_address: String::new(),
                 ..wiring()
             },
-            "idle-screen"
+            "idle-screen",
+            &[]
         )
         .is_none()
     );
@@ -120,21 +127,57 @@ fn a_client_with_no_broker_and_a_client_with_no_topics_open_no_reader() {
                 bus_address: "127.0.0.1:1883".into(),
                 ..Wiring::default()
             },
-            "idle-screen"
+            "idle-screen",
+            &[]
         )
         .is_none()
     );
 }
 
 #[test]
-fn a_session_subscribes_and_states_the_panel_desire() {
+fn a_client_with_only_topics_of_its_own_opens_a_reader() {
+    // Port 1 answers nothing, so the reader reports a failed session and
+    // waits. The wiring names no topic at all, and the client's own topic is
+    // the whole subscription.
+    let reader = Reader::open(
+        &Wiring {
+            bus_address: "127.0.0.1:1".into(),
+            ..Wiring::default()
+        },
+        "media-screen-test",
+        &["liken/library/screens/house/theater/watching".into()],
+    );
+
+    assert!(reader.is_some());
+}
+
+#[test]
+fn a_session_subscribes_states_the_panel_desire_and_says_it_connected() {
     let (reader, threads) = reader();
 
     read(&threads, [Ok(connected())].into_iter());
 
     // The desire is a publish, so it reaches the broker's queue and not the
-    // client, and a session that just started draws nothing.
-    assert!(reader.drain().is_empty());
+    // client. The moment is what a client with retained state of its own
+    // republishes on.
+    assert_eq!(reader.drain(), [Moment::Connected]);
+}
+
+#[test]
+fn a_message_on_a_client_topic_reaches_the_client() {
+    let owned = "liken/library/screens/house/theater/watching";
+    let (reader, threads) = reader_reading(wiring(), &[owned.into()]);
+
+    read(&threads, [Ok(publish(owned, "chris", true))].into_iter());
+
+    assert_eq!(
+        reader.drain(),
+        [Moment::Message {
+            topic: owned.into(),
+            payload: b"chris".to_vec(),
+            retained: true,
+        }]
+    );
 }
 
 #[test]
@@ -384,6 +427,7 @@ fn a_reader_takes_the_loops_waker_and_ends_with_the_client() {
             ..wiring()
         },
         "media-screen-test",
+        &[],
     )
     .expect("the wiring names a broker and topics");
 
@@ -436,6 +480,37 @@ fn listening(wanted: Vec<u8>) -> (u16, std::thread::JoinHandle<bool>) {
     (port, thread)
 }
 
+/// One topic as a SUBSCRIBE carries it: the length, the topic, and the
+/// requested QoS, which is 0 for every filter this crate sends.
+fn filter(topic: &str) -> Vec<u8> {
+    let mut wire = Vec::from((topic.len() as u16).to_be_bytes());
+    wire.extend(topic.as_bytes());
+    wire.push(0x00);
+    wire
+}
+
+#[test]
+fn a_session_subscribes_to_the_clients_own_topics() {
+    let owned = "liken/library/screens/house/theater/watching";
+    let (port, broker) = listening(filter(owned));
+
+    let reader = Reader::open(
+        &Wiring {
+            bus_address: format!("127.0.0.1:{port}"),
+            ..wiring()
+        },
+        "media-screen-test",
+        &[owned.into()],
+    )
+    .expect("the wiring names a broker and topics");
+
+    assert!(
+        broker.join().expect("the broker thread ends"),
+        "the subscribe carries the client's own topic"
+    );
+    drop(reader);
+}
+
 /// One QoS 0 PUBLISH as it travels. The topic and the payload are both
 /// short, so the remaining length is the one byte the protocol uses under
 /// 128.
@@ -464,6 +539,7 @@ fn a_clients_own_publish_goes_out_on_the_one_connection() {
             ..wiring()
         },
         "media-screen-test",
+        &[],
     )
     .expect("the wiring names a broker and topics");
 
@@ -473,6 +549,13 @@ fn a_clients_own_publish_goes_out_on_the_one_connection() {
         broker.join().expect("the broker thread ends"),
         "the publish reached the connection the reader already holds"
     );
-    // The topic is the client's, so nothing about it reaches the rules.
-    assert!(reader.drain().is_empty());
+    // The client named no topic of its own to the reader, so nothing about
+    // this one comes back. The session start is the one moment a client
+    // hears here.
+    assert!(
+        reader
+            .drain()
+            .iter()
+            .all(|moment| *moment == Moment::Connected)
+    );
 }
