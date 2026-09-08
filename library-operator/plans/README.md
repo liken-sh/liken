@@ -50,9 +50,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
   The compose key raises the person picker, the WWW key goes home,
   and page up and down are named for a later choice. Fast follow.
-* [50, The Jellyfin backfill](50-jellyfin-backfill.md). One Job carries
-  the progress Jellyfin already holds into the store, once, and the
-  `Catalog`'s status says whether it finished.
 
 ## Future
 
@@ -92,6 +89,10 @@ Plan 32 stands apart from the enrichment work.
 
 ## Completed
 
+* [50, The Jellyfin backfill](completed/50-jellyfin-backfill.md). Drilled
+  2026-09-08: one Job, every user's resumable and played items in the
+  store with Jellyfin's dates. Found and fixed the series read that
+  answered 400 without a user.
 * [47, Progress to Jellyfin over the bus](completed/47-progress-to-jellyfin-over-the-bus.md).
   Built, and drilled on the house on 2026-09-08 in release
   2026.09.07-006: a film paused on a phone showed at the same
