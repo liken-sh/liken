@@ -58,12 +58,18 @@ spec:
     - name: MPLAY
       machine: node-1
       monitor: don-0070-denon-avr
+  volume:
+    max: 72
+    step: 0.5
 ```
 
 The input name is the receiver's own spelling. The monitor id is the
 one the [`display-operator`](https://display.liken.sh) publishes for
-that cable. `kubectl get receivers` shows what the receiver last
-said:
+that cable. The volume block is in the receiver's own scale. `max` is
+the loudest a press may take the room, and a Denon requires it,
+because the limit a Denon reports moves with the volume. `step` is
+how far one press moves, and half steps are allowed. `kubectl get
+receivers` shows what the receiver last said:
 
     NAME          POWER   INPUT   VOLUME   REACHABLE   AGE
     living-room   on      MPLAY   50.0     True        2m

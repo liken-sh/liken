@@ -445,3 +445,46 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 		t.Fatal("serve did not stop")
 	}
 }
+
+// An edit to spec.volume reaches a session that is already standing, so
+// the step a press takes changes without the receiver being powered or
+// its input selected again.
+func TestAVolumeEditReachesAStandingSession(t *testing.T) {
+	api := startFakeAPI(t)
+	equipment := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	operator := newController(api.client, brokers.address())
+	operator.now = func() time.Time { return statusNow }
+
+	api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 1}))
+	mustSucceed(t, operator.pass(t.Context()))
+
+	broker := brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	adopted := broker.waitForTopic(t, testVolumeTopic)
+	broker.push(testVolumeTopic, adopted.payload)
+	equipment.waitForCommands(t, "SIGAME")
+
+	broker.push(testVolumeTopic, []byte(`{"level":77,"muted":false}`))
+	equipment.waitForCommands(t, "MV51")
+
+	api.setReceivers(playingReceiver(equipment.address(), ReceiverVolume{Max: 69.5, Step: 2}))
+	mustSucceed(t, operator.pass(t.Context()))
+	equipment.refuseCommand(t, "SIGAME", quietPeriod)
+
+	broker.push(testVolumeTopic, []byte(`{"level":85,"muted":false}`))
+	equipment.waitForCommands(t, "MV53")
+}
+
+// playingReceiver is one Denon with a session standing on it and a
+// declared scale, which is the whole of what a press needs.
+func playingReceiver(address string, rule ReceiverVolume) Receiver {
+	held := testReceiver("theater", address)
+	held.Spec.Volume = &rule
+	held.Spec.Session = &ReceiverSession{
+		Player:      "house/theater",
+		Input:       "GAME",
+		VolumeTopic: testVolumeTopic,
+	}
+	return held
+}

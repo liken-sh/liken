@@ -112,6 +112,15 @@ func TestCRDSchema(t *testing.T) {
 		}
 	})
 
+	t.Run("the volume block states a ceiling and a step", func(t *testing.T) {
+		volume := spec.Properties["volume"]
+		for _, name := range []string{"max", "step"} {
+			if _, held := volume.Properties[name]; !held {
+				t.Errorf("spec.properties.volume has no property %s", name)
+			}
+		}
+	})
+
 	t.Run("a session requires all three of its fields", func(t *testing.T) {
 		session := spec.Properties["session"]
 		for _, name := range []string{"player", "input", "volumeTopic"} {
@@ -241,7 +250,10 @@ func receiver(spec map[string]any) map[string]any {
 }
 
 func denonSpec() map[string]any {
-	return map[string]any{"denon": map[string]any{"address": "receiver.example"}}
+	return map[string]any{
+		"denon":  map[string]any{"address": "receiver.example"},
+		"volume": map[string]any{"max": 75.0},
+	}
 }
 
 func TestCRDValidatesExamples(t *testing.T) {
@@ -257,7 +269,8 @@ func TestCRDValidatesExamples(t *testing.T) {
 		{
 			name: "a receiver with inputs and a session",
 			receiver: receiver(map[string]any{
-				"denon": map[string]any{"address": "receiver.example"},
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
 				"inputs": []any{
 					map[string]any{"name": "MPLAY", "machine": "node-1", "monitor": "hdmi-a-1"},
 					map[string]any{"name": "GAME", "machine": "node-2", "monitor": "hdmi-a-1"},
@@ -270,19 +283,71 @@ func TestCRDValidatesExamples(t *testing.T) {
 			}),
 		},
 		{
+			name: "a receiver with a volume ceiling and step",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0, "step": 0.5},
+			}),
+		},
+		{
+			name: "a volume block that states only a ceiling",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
+			}),
+		},
+		{
+			name: "a volume ceiling of zero",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 0.0},
+			}),
+			wantErr: true,
+		},
+		{
+			name: "a volume step of zero",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0, "step": 0.0},
+			}),
+			wantErr: true,
+		},
+		{
+			name: "a volume step below zero",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0, "step": -1.0},
+			}),
+			wantErr: true,
+		},
+		{
+			name:     "a denon with no volume ceiling",
+			receiver: receiver(map[string]any{"denon": map[string]any{"address": "receiver.example"}}),
+			wantErr:  true,
+		},
+		{
+			name: "a denon whose volume block states only a step",
+			receiver: receiver(map[string]any{
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"step": 1.0},
+			}),
+			wantErr: true,
+		},
+		{
 			name:     "no protocol block",
 			receiver: receiver(map[string]any{}),
 			wantErr:  true,
 		},
 		{
 			name:     "a denon with no address",
-			receiver: receiver(map[string]any{"denon": map[string]any{}}),
+			receiver: receiver(map[string]any{"denon": map[string]any{}, "volume": map[string]any{"max": 75.0}}),
 			wantErr:  true,
 		},
 		{
 			name: "two inputs under one name",
 			receiver: receiver(map[string]any{
-				"denon": map[string]any{"address": "receiver.example"},
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
 				"inputs": []any{
 					map[string]any{"name": "MPLAY", "machine": "node-1", "monitor": "hdmi-a-1"},
 					map[string]any{"name": "MPLAY", "machine": "node-2", "monitor": "hdmi-a-1"},
@@ -294,6 +359,7 @@ func TestCRDValidatesExamples(t *testing.T) {
 			name: "an input with no monitor",
 			receiver: receiver(map[string]any{
 				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
 				"inputs": []any{map[string]any{"name": "MPLAY", "machine": "node-1"}},
 			}),
 			wantErr: true,
@@ -301,7 +367,8 @@ func TestCRDValidatesExamples(t *testing.T) {
 		{
 			name: "a session whose player is not namespace/name",
 			receiver: receiver(map[string]any{
-				"denon": map[string]any{"address": "receiver.example"},
+				"denon":  map[string]any{"address": "receiver.example"},
+				"volume": map[string]any{"max": 75.0},
 				"session": map[string]any{
 					"player":      "theater",
 					"input":       "MPLAY",
@@ -314,6 +381,7 @@ func TestCRDValidatesExamples(t *testing.T) {
 			name: "a session with no volume topic",
 			receiver: receiver(map[string]any{
 				"denon":   map[string]any{"address": "receiver.example"},
+				"volume":  map[string]any{"max": 75.0},
 				"session": map[string]any{"player": "house/theater", "input": "MPLAY"},
 			}),
 			wantErr: true,

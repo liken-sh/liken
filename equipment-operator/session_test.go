@@ -62,11 +62,19 @@ type sessionHarness struct {
 	brokers   *fakeBrokerServer
 	denon     *denonClient
 	holder    *sessionHolder
+	rule      ReceiverVolume
 }
 
 func newSessionHarness(t *testing.T) *sessionHarness {
+	return newSessionHarnessWith(t, ReceiverVolume{Max: 69.5})
+}
+
+// newSessionHarnessWith names the ceiling and the step the session
+// presses against, which a person states and the receiver never reports.
+func newSessionHarnessWith(t *testing.T, rule ReceiverVolume) *sessionHarness {
 	t.Helper()
 	h := &sessionHarness{
+		rule:      rule,
 		equipment: startFakeDenon(t),
 		brokers:   startFakeBrokerServer(t),
 		holder:    &sessionHolder{},
@@ -109,7 +117,7 @@ func (h *sessionHarness) begin(t *testing.T, input string) *session {
 	h.drainCommands()
 	h.holder.forget()
 	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.brokers.address())
+	started := startSession(t.Context(), "theater", spec, h.denon, h.brokers.address(), func() ReceiverVolume { return h.rule })
 	h.holder.set(started)
 	return started
 }
@@ -243,7 +251,8 @@ func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 	}()
 
 	spec := ReceiverSession{Player: "theater", Input: "GAME", VolumeTopic: testVolumeTopic}
-	startSession(t.Context(), "theater", spec, newDenonClient("127.0.0.1:1", nil), listener.Addr().String())
+	startSession(t.Context(), "theater", spec, newDenonClient("127.0.0.1:1", nil), listener.Addr().String(),
+		func() ReceiverVolume { return ReceiverVolume{Max: 69.5} })
 
 	will := connectWill(t, waitForFrame(t, frames))
 	mustMatch(t, will.Topic, ownerTopic(testVolumeTopic))
@@ -254,8 +263,14 @@ func TestTheSessionNamesAWillThatClearsTheOwnerMark(t *testing.T) {
 // listening is a harness whose session has selected its input and
 // marked itself the owner, which is where every level test starts.
 func listening(t *testing.T) (*sessionHarness, *fakeBroker, *session) {
+	return listeningWith(t, ReceiverVolume{Max: 69.5}, 72)
+}
+
+// listeningWith names the ceiling and the step, and the bus level the
+// receiver's own position lands on under them.
+func listeningWith(t *testing.T, rule ReceiverVolume, adoptLevel int) (*sessionHarness, *fakeBroker, *session) {
 	t.Helper()
-	h := newSessionHarness(t)
+	h := newSessionHarnessWith(t, rule)
 	held := h.begin(t, "GAME")
 	broker := h.brokers.waitForSession(t)
 	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
@@ -263,7 +278,7 @@ func listening(t *testing.T) (*sessionHarness, *fakeBroker, *session) {
 	// message to come back before it applies anything, so every test
 	// below starts from the other side of that boundary.
 	adopted := broker.waitForTopic(t, testVolumeTopic)
-	mustMatch(t, string(adopted.payload), `{"level":72,"muted":false}`)
+	mustMatch(t, positionOf(t, adopted), volumeState{Level: adoptLevel})
 	broker.push(testVolumeTopic, adopted.payload)
 	waitUntilAdopted(t, held)
 	h.equipment.waitForCommands(t, "SIGAME")
@@ -288,37 +303,107 @@ func waitUntilAdopted(t *testing.T, held *session) {
 	t.Fatal("the session never took its own adopt message back")
 }
 
-func TestTheLevelOnTheTopicReachesTheReceiver(t *testing.T) {
-	cases := []struct {
-		name   string
-		state  string
-		volume string
-		mute   string
-	}{
-		{"the top of the scale", `{"level":100,"muted":false}`, "MV695", denonMuteOffCommand},
-		{"half way", `{"level":50}`, "MV35", denonMuteOffCommand},
-		{"muted", `{"level":50,"muted":true}`, "MV35", denonMuteOnCommand},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			h, broker, _ := listening(t)
-
-			broker.push(testVolumeTopic, []byte(one.state))
-
-			mustMatch(t, h.equipment.waitForCommand(t), one.volume)
-			mustMatch(t, h.equipment.waitForCommand(t), one.mute)
-		})
-	}
+// positionOf reads the state a message on the volume topic carries.
+func positionOf(t *testing.T, published brokerPublish) volumeState {
+	t.Helper()
+	state, ok := parseVolumeState(published.payload)
+	mustMatch(t, ok, true)
+	return state
 }
 
-func TestABurstOfLevelsSendsOneVolume(t *testing.T) {
-	h, broker, _ := listening(t)
+// pressFrom publishes the state one press produces from a level the way
+// the sidecar does, and answers the position the session put back on the
+// topic once the receiver had answered.
+func pressFrom(t *testing.T, h *sessionHarness, broker *fakeBroker, from, by int, want string) volumeState {
+	t.Helper()
+	payload, err := marshalVolumeState(volumeState{Level: from + by})
+	mustSucceed(t, err)
+	broker.push(testVolumeTopic, payload)
+	h.equipment.waitForCommands(t, want)
+	return positionOf(t, broker.waitForTopic(t, testVolumeTopic))
+}
 
-	broker.push(testVolumeTopic, []byte(`{"level":10}`))
-	broker.push(testVolumeTopic, []byte(`{"level":60}`))
-	broker.push(testVolumeTopic, []byte(`{"level":100}`))
+// A held key arrives as one message per press, and each one moves the
+// receiver a single step from where it actually stands.
+func TestThreePressesMoveTheReceiverThreeSteps(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
-	mustMatch(t, len(h.equipment.waitForCommands(t, "MV695")), 1)
+	first := pressFrom(t, h, broker, 72, 5, "MV51")
+	mustMatch(t, first, volumeState{Level: 73})
+	second := pressFrom(t, h, broker, first.Level, 5, "MV52")
+	mustMatch(t, second, volumeState{Level: 75})
+	third := pressFrom(t, h, broker, second.Level, 5, "MV53")
+	mustMatch(t, third, volumeState{Level: 76})
+
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 106 })
+}
+
+// A press down moves the receiver down by the step a person declared.
+func TestAPressDownMovesTheReceiverDownOneStep(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 0.5}, 72)
+
+	mustMatch(t, pressFrom(t, h, broker, 72, -5, "MV495"), volumeState{Level: 71})
+}
+
+// A step of two moves the receiver two units of its own scale.
+func TestAStepOfTwoMovesTheReceiverTwoUnits(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 2}, 72)
+
+	mustMatch(t, pressFrom(t, h, broker, 72, 5, "MV52"), volumeState{Level: 75})
+}
+
+// Presses stop at the ceiling a person declared, and the topic then
+// carries the top of the bus scale.
+func TestPressesStopAtTheDeclaredCeiling(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 52, Step: 1}, 96)
+
+	mustMatch(t, pressFrom(t, h, broker, 96, 5, "MV51"), volumeState{Level: 98})
+
+	// The press that reaches the ceiling already carries the top of the
+	// bus scale, so the session has nothing further to say about it.
+	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+	h.equipment.waitForCommands(t, "MV52")
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 104 })
+
+	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+	refuseVolumeSets(t, h.equipment, quietPeriod)
+}
+
+// A ceiling above the top of a Denon's own scale is that top, so a
+// person cannot ask for a volume the receiver does not have.
+func TestACeilingAboveTheDenonScaleIsTheScaleTop(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 120, Step: 1}, 51)
+
+	mustMatch(t, pressFrom(t, h, broker, 51, 5, "MV51"), volumeState{Level: 52})
+}
+
+// A hand can leave the receiver above the ceiling. The topic then reads
+// the top of the scale, a press up moves nothing, and a press down still
+// steps.
+func TestAReceiverAboveTheCeilingStaysUntilAPressDown(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 45, Step: 1}, 100)
+
+	// The topic already reads the top of the scale, so a press up has
+	// nothing above it to ask for and the receiver stays where it is.
+	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+	refuseVolumeSets(t, h.equipment, quietPeriod)
+
+	broker.push(testVolumeTopic, []byte(`{"level":95,"muted":false}`))
+	h.equipment.waitForCommands(t, "MV49")
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 98 })
+}
+
+// The limit a Denon reports wanders while the room is playing, so the
+// session reads none of it and a new figure moves nothing.
+func TestAWanderingReportedLimitMovesNothing(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
+
+	h.equipment.driftLimit(141)
+	h.equipment.driftLimit(129)
+
+	refuseVolumeSets(t, h.equipment, quietPeriod)
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 100 })
+	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
 }
 
 func TestAKnobTurnPublishesTheLevelBack(t *testing.T) {
@@ -342,29 +427,18 @@ func TestAMuteOnTheEquipmentPublishesBack(t *testing.T) {
 }
 
 // refusePublish fails the test if anything reaches the broker on the
-// topic within the window.
-func refusePublish(t *testing.T, broker *fakeBroker, topic string, within time.Duration) {
-	t.Helper()
-	deadline := time.After(within)
-	for {
-		select {
-		case published := <-broker.pubs:
-			if published.topic == topic {
-				t.Fatalf("the operator published %q on %q", published.payload, topic)
-			}
-		case <-deadline:
-			return
-		}
-	}
-}
+// The position the session publishes comes back to it from the broker,
+// and moves neither the receiver nor the topic again.
+func TestThePositionTheSessionPublishesMovesNothingWhenItComesBack(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
 
-func TestTheEchoOfTheOperatorsOwnWritePublishesNothingBack(t *testing.T) {
-	h, broker, _ := listening(t)
+	position := pressFrom(t, h, broker, 72, 5, "MV51")
+	payload, err := marshalVolumeState(position)
+	mustSucceed(t, err)
 
-	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":true}`))
-	h.equipment.waitForCommands(t, denonMuteOnCommand)
+	broker.push(testVolumeTopic, payload)
 
-	refusePublish(t, broker, testVolumeTopic, quietPeriod)
+	refuseVolumeSets(t, h.equipment, quietPeriod)
 }
 
 func TestStoppingTheSessionClearsTheOwnerMarkAndLeavesThePowerAlone(t *testing.T) {
@@ -396,7 +470,7 @@ func TestAMessageTheSessionCannotReadMovesNothing(t *testing.T) {
 
 			broker.push(one.topic, []byte(one.payload))
 
-			h.equipment.refuseCommand(t, "MV695", 4*sessionVolumeDebounce)
+			h.equipment.refuseCommand(t, "MV695", quietPeriod)
 		})
 	}
 }
@@ -446,8 +520,8 @@ func TestASessionAdoptsTheReceiverBeforeItAppliesAnyLevel(t *testing.T) {
 	broker.push(testVolumeTopic, adopted.payload)
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 
-	h.equipment.waitForCommands(t, "MV695")
-	h.waitUntil(t, func(state denonState) bool { return state.Volume == 139 })
+	h.equipment.waitForCommands(t, "MV51")
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 102 })
 }
 
 // refuseVolumeSets fails the test if the session sets the receiver's
@@ -476,6 +550,55 @@ func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
 
 	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
 
-	mustMatch(t, h.equipment.waitForCommand(t), "MV695")
-	mustMatch(t, h.equipment.waitForCommand(t), denonMuteOffCommand)
+	h.equipment.waitForCommands(t, "MV51")
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 102 })
+}
+
+// A press that mutes the room is not a direction: the receiver is muted
+// as the message states, and the session says nothing back because the
+// topic already carries what the equipment now reports.
+func TestAPressThatMutesTheRoomMutesTheReceiver(t *testing.T) {
+	h, broker, _ := listeningWith(t, ReceiverVolume{Max: 69.5, Step: 1}, 72)
+
+	broker.push(testVolumeTopic, []byte(`{"level":72,"muted":true}`))
+
+	h.equipment.waitForCommands(t, denonMuteOnCommand)
+	h.waitUntil(t, func(state denonState) bool { return state.Mute })
+	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
+}
+
+// A press is bounded at both ends of the scale, and a receiver a hand
+// left above the ceiling is not dragged back down by a press up.
+func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
+	press := func(rule ReceiverVolume, volume int, up bool) (int, bool) {
+		held := &session{scale: func() ReceiverVolume { return rule }}
+		return held.nextPosition(denonState{Volume: volume, VolumeMax: 139}, up)
+	}
+	room := ReceiverVolume{Max: 45, Step: 1}
+
+	cases := []struct {
+		name   string
+		rule   ReceiverVolume
+		volume int
+		up     bool
+		want   int
+		moves  bool
+	}{
+		{"up inside the scale", room, 80, true, 82, true},
+		{"up onto the ceiling", room, 89, true, 90, true},
+		{"up from the ceiling", room, 90, true, 0, false},
+		{"up from above the ceiling", room, 100, true, 0, false},
+		{"down from above the ceiling", room, 100, false, 98, true},
+		{"down onto the floor", room, 1, false, 0, true},
+		{"down from the floor", room, 0, false, 0, false},
+		{"no ceiling declared", ReceiverVolume{Step: 1}, 80, true, 0, false},
+		{"a volume the receiver has not reported", room, unknownHalves, true, 0, false},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			target, moves := press(one.rule, one.volume, one.up)
+			mustMatch(t, target, one.want)
+			mustMatch(t, moves, one.moves)
+		})
+	}
 }

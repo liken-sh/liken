@@ -104,8 +104,8 @@ equipment outranks the cluster.
 
 The status is what the receiver last said, in the receiver's own
 units. A Denon reports its volume as a number from 0 to 98 in half
-steps, and `volumeMax` is the limit set in the receiver's own setup
-menu, which the Denon reports after every volume reply. `Reachable`
+steps. `volumeMax` is the last `MVMAX` line it sent, recorded and
+never acted on. `Reachable`
 is true only after a recent round trip, never on an open socket
 alone: a half-open socket after a router reboot reads as live and
 swallows writes.
@@ -117,11 +117,15 @@ next state, retained, on the `Player`'s volume topic, and every pod
 for the unit applies what it reads. mpv is one subscriber of that
 state and not its owner. The receiver is a second subscriber.
 
-While a session stands, the operator subscribes to the volume topic
-and sends the receiver a master volume for each state it reads. The
-scale is 0 to 100 on the bus, and 100 means as loud as this room ever
-goes: the operator maps 100 onto `volumeMax`, so the ceiling is set
-on the receiver and read from it. Mute is the receiver's own mute.
+While a session stands, the operator subscribes to the volume topic.
+A press is a direction, not a level: the operator moves the receiver
+one step from where it actually stands, in the receiver's own units,
+and writes the true position back to the topic. The scale is 0 to
+100 on the bus, and 100 means as loud as this room ever goes, which
+is `spec.volume.max`. The ceiling is a fact the owner states. A Denon
+reports an `MVMAX` line beside every volume, and that number moves
+with the volume, so nothing reads it as a limit. Mute is the
+receiver's own mute.
 
 The operator also publishes an owner mark, retained, on the topic
 `<volumeTopic>/owner`, and registers an MQTT last will that clears

@@ -165,6 +165,16 @@ func (f *fakeDenon) setMute(muted bool) {
 	f.send(f.muteLine())
 }
 
+// driftLimit is the receiver reporting a new MVMAX. A real AVR-X1700H
+// reported 69.5, then 70.5, then 64.5 within one evening, so the figure
+// moves under the room and nothing may be built on it.
+func (f *fakeDenon) driftLimit(halves int) {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+	f.volumeMax = halves
+	f.send("MVMAX " + halfStepDigits(f.volumeMax))
+}
+
 // dropConnections closes every open connection, the way a router reboot
 // takes the socket with it.
 func (f *fakeDenon) dropConnections() {

@@ -57,6 +57,23 @@ func (s *fakeBrokerServer) waitForSession(t *testing.T) *fakeBroker {
 	}
 }
 
+// refuseTopic fails the test if anything is published on the topic
+// inside the window.
+func (b *fakeBroker) refuseTopic(t *testing.T, topic string, within time.Duration) {
+	t.Helper()
+	deadline := time.After(within)
+	for {
+		select {
+		case published := <-b.pubs:
+			if published.topic == topic {
+				t.Fatalf("%q carried %q", topic, published.payload)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
 // waitForTopic reads publishes until it sees one on the topic it wants,
 // so a test names the one message it cares about out of the marks and
 // levels around it.

@@ -44,8 +44,17 @@ type ReceiverList struct {
 // and the session that holds the receiver now.
 type ReceiverSpec struct {
 	Denon   *DenonProtocol   `json:"denon,omitempty"`
+	Volume  *ReceiverVolume  `json:"volume,omitempty"`
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
+}
+
+// How loud the room may get and how far one press moves it, both in the
+// receiver's own scale. A Denon requires max. An absent step is one
+// whole unit of that scale.
+type ReceiverVolume struct {
+	Max  float64 `json:"max,omitempty"`
+	Step float64 `json:"step,omitempty"`
 }
 
 // The Denon and Marantz control protocol, and the address it answers

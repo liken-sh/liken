@@ -53,6 +53,11 @@ spec:
               x-kubernetes-validations:
                 - rule: "[has(self.denon)].exists_one(block, block)"
                   message: "a Receiver names exactly one protocol block"
+                # A Denon reports a limit beside every volume, and that
+                # number moves under the room, so a Denon needs a
+                # ceiling the owner states.
+                - rule: "!has(self.denon) || (has(self.volume) && has(self.volume.max))"
+                  message: "a Denon receiver states spec.volume.max"
               properties:
                 denon:
                   type: object
@@ -64,6 +69,24 @@ spec:
                       minLength: 1
                       maxLength: 253
                       description: "The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent."
+                volume:
+                  type: object
+                  description: "How loud this receiver may be driven and how far one press moves it, both in the receiver's own scale. Required for a Denon."
+                  # A ceiling of zero would mute the room, and a step of
+                  # zero would freeze it, so both must be above zero
+                  # when stated.
+                  x-kubernetes-validations:
+                    - rule: "!has(self.max) || self.max > 0"
+                      message: "the volume ceiling is above zero"
+                    - rule: "!has(self.step) || self.step > 0"
+                      message: "the volume step is above zero"
+                  properties:
+                    max:
+                      type: number
+                      description: "The loudest a press may drive this receiver, in its own scale. A Denon counts 0 to 98 and this is capped there. 100 on the bus means this value. A hand on the receiver's own remote can still go past it."
+                    step:
+                      type: number
+                      description: "How far one press moves the receiver, in its own scale. Half steps are allowed. Absent means one whole unit."
                 inputs:
                   type: array
                   maxItems: 32
@@ -131,7 +154,7 @@ spec:
                   description: "The master volume the receiver last reported, in its own scale. A Denon counts 0 to 98 in half steps."
                 volumeMax:
                   type: string
-                  description: "The volume limit set in the receiver's own menu, in the same scale. A session's level of 100 maps onto it."
+                  description: "The last MVMAX line the receiver sent, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume."
                 mute:
                   type: boolean
                   description: "Whether the receiver last reported itself muted."

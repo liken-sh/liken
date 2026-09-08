@@ -15,6 +15,7 @@ How to reach the receiver and how it is wired. The cluster owner writes every fi
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--denon"></span>`denon` | [object](#specdenon) | no | The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain commands such as MV50, and events in the same form. |
+| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | How loud this receiver may be driven and how far one press moves it, both in the receiver's own scale. Required for a Denon. |
 | <span id="spec--inputs"></span>`inputs` | [\[\]object](#specinputs) | no | The receiver's inputs that liken machines feed. Nothing can discover this wiring, so the cluster owner declares it. A receiver forwards one EDID on every input, so the monitor id alone cannot tell two machines apart, and every entry names the machine. |
 | <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that holds the receiver now. The media operator applies this block under its own field manager while a Play stands, and lifts it after. A session powers the receiver on, selects the input once, and takes the level from the volume topic. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster. |
 
@@ -25,6 +26,15 @@ The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdenon--address"></span>`address` | string | yes | The host name or IP address the receiver answers on, with an optional port. The port is 23 when absent. |
+
+### spec.volume
+
+How loud this receiver may be driven and how far one press moves it, both in the receiver's own scale. Required for a Denon.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specvolume--max"></span>`max` | number | no | The loudest a press may drive this receiver, in its own scale. A Denon counts 0 to 98 and this is capped there. 100 on the bus means this value. A hand on the receiver's own remote can still go past it. |
+| <span id="specvolume--step"></span>`step` | number | no | How far one press moves the receiver, in its own scale. Half steps are allowed. Absent means one whole unit. |
 
 ### spec.inputs[]
 
@@ -55,7 +65,7 @@ What the receiver last said, in its own units. Only the operator writes it.
 | <span id="status--power"></span>`power` | string | no | The power state the receiver last reported: on or standby. |
 | <span id="status--input"></span>`input` | string | no | The input the receiver last reported as selected, whether liken selected it or a person did. |
 | <span id="status--volume"></span>`volume` | string | no | The master volume the receiver last reported, in its own scale. A Denon counts 0 to 98 in half steps. |
-| <span id="status--volumemax"></span>`volumeMax` | string | no | The volume limit set in the receiver's own menu, in the same scale. A session's level of 100 maps onto it. |
+| <span id="status--volumemax"></span>`volumeMax` | string | no | The last MVMAX line the receiver sent, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume. |
 | <span id="status--mute"></span>`mute` | boolean | no | Whether the receiver last reported itself muted. |
 | <span id="status--soundmode"></span>`soundMode` | string | no | The sound mode the receiver last reported, such as MULTI CH IN or STEREO. |
 | <span id="status--service"></span>`service` | string | no | The Service that stands in for the receiver on the cluster network, once the operator makes one. Empty until then. |

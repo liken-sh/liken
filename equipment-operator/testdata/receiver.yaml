@@ -7,6 +7,9 @@ metadata:
 spec:
   denon:
     address: receiver.example
+  volume:
+    max: 75
+    step: 1
   inputs:
     - name: MPLAY
       machine: node-1

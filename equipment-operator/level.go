@@ -123,8 +123,8 @@ func halfStepDigits(halves int) string {
 }
 
 // halvesForLevel maps the bus scale onto the receiver's, so 100 is the
-// limit set in the receiver's own menu. A receiver that has not
-// reported that limit cannot be mapped onto.
+// ceiling the room is allowed. A ceiling that is not known yet cannot
+// be mapped onto.
 func halvesForLevel(level, maxHalves int) (int, bool) {
 	if maxHalves <= 0 {
 		return unknownHalves, false
@@ -138,8 +138,9 @@ func halvesForLevel(level, maxHalves int) (int, bool) {
 	return int(math.Round(float64(level) * float64(maxHalves) / maxLevel)), true
 }
 
-// levelForHalves maps the receiver's scale back onto the bus, which is
-// what a knob turn publishes.
+// levelForHalves maps the receiver's scale back onto the bus against
+// the same ceiling, which is what the session publishes after every
+// move.
 func levelForHalves(halves, maxHalves int) (int, bool) {
 	if maxHalves <= 0 || halves < 0 {
 		return 0, false
@@ -149,4 +150,42 @@ func levelForHalves(halves, maxHalves int) (int, bool) {
 		level = maxLevel
 	}
 	return level, true
+}
+
+// Where no step is declared, one press moves the receiver by one whole
+// unit of its own scale, which is two half steps.
+const defaultStepHalves = 2
+
+// halvesFromScale reads a figure a person wrote in the receiver's own
+// scale as a count of half steps. A figure between two half steps is
+// not one the receiver can take, so it goes to the nearest.
+func halvesFromScale(value float64) int {
+	return int(math.Round(value * 2))
+}
+
+// The top of a Denon's own scale, 98, which no declared ceiling may
+// exceed.
+const denonScaleTop = 196
+
+// ceilingHalves is what 100 on the bus means. It is the ceiling a
+// person declared and nothing else. The receiver's own MVMAX line is
+// not a limit: one AVR reported 69.5, then 70.5, then 64.5 in one
+// evening, so a ceiling read from it would move under the room.
+func ceilingHalves(rule ReceiverVolume) int {
+	stated := halvesFromScale(rule.Max)
+	if stated <= 0 {
+		return 0
+	}
+	if stated > denonScaleTop {
+		return denonScaleTop
+	}
+	return stated
+}
+
+// pressHalves is how far one press moves the receiver.
+func pressHalves(rule ReceiverVolume) int {
+	if stated := halvesFromScale(rule.Step); stated > 0 {
+		return stated
+	}
+	return defaultStepHalves
 }

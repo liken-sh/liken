@@ -221,3 +221,45 @@ func TestTheOwnerMarkNamesTheReceiverThatHoldsTheSession(t *testing.T) {
 	mustSucceed(t, json.Unmarshal(mark, &owner))
 	mustMatch(t, owner.Owner, "receiver/den")
 }
+
+// The ceiling comes from the spec alone, because a Denon's own MVMAX
+// line moves while the room plays.
+func TestCeilingHalvesTakesTheDeclaredCeilingAlone(t *testing.T) {
+	cases := []struct {
+		name string
+		rule ReceiverVolume
+		want int
+	}{
+		{"a whole unit", ReceiverVolume{Max: 52}, 104},
+		{"a half unit", ReceiverVolume{Max: 69.5}, 139},
+		{"above a Denon's own scale", ReceiverVolume{Max: 120}, denonScaleTop},
+		{"exactly the scale top", ReceiverVolume{Max: 98}, denonScaleTop},
+		{"none declared", ReceiverVolume{}, 0},
+		{"below zero", ReceiverVolume{Max: -5}, 0},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, ceilingHalves(one.rule), one.want)
+		})
+	}
+}
+
+// An absent step is one whole unit of the receiver's scale.
+func TestPressHalvesTakesTheDeclaredStep(t *testing.T) {
+	cases := []struct {
+		name string
+		rule ReceiverVolume
+		want int
+	}{
+		{"none declared", ReceiverVolume{}, defaultStepHalves},
+		{"one unit", ReceiverVolume{Step: 1}, 2},
+		{"a half unit", ReceiverVolume{Step: 0.5}, 1},
+		{"two units", ReceiverVolume{Step: 2}, 4},
+		{"below the smallest the receiver takes", ReceiverVolume{Step: 0.1}, defaultStepHalves},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			mustMatch(t, pressHalves(one.rule), one.want)
+		})
+	}
+}

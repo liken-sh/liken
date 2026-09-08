@@ -16,16 +16,9 @@ import (
 // selects the input anyway.
 var sessionPowerWait = 10 * time.Second
 
-// How long a burst of volume messages is collected before one set goes
-// to the receiver.
-var sessionVolumeDebounce = 100 * time.Millisecond
-
 // How long a stop waits for the cleared owner mark to reach the broker
 // before it closes the connection.
 var sessionStopGrace = 200 * time.Millisecond
-
-// A mute state the operator has not sent yet.
-const muteUnsent = -1
 
 // session is one live session: the connection to the broker, the level
 // it last sent the receiver, and the marks that tell an echo of its own
@@ -49,13 +42,13 @@ type session struct {
 	connectedOnce sync.Once
 	connected     chan struct{}
 
-	pending chan struct{}
+	// scale is read on every press and never held, so a spec edit reaches
+	// a standing session with no restart.
+	scale func() ReceiverVolume
 
 	mutex      sync.Mutex
 	latest     volumeState
 	haveLatest bool
-	sentVolume int
-	sentMute   int
 
 	awaiting     volumeState
 	haveAwaiting bool
@@ -64,20 +57,18 @@ type session struct {
 
 // startSession opens the session's own broker connection, claims the
 // level with a retained owner mark, and drives power and input once.
-func startSession(ctx context.Context, receiver string, spec ReceiverSession, denon *denonClient, busAddress string) *session {
+func startSession(ctx context.Context, receiver string, spec ReceiverSession, denon *denonClient, busAddress string, scale func() ReceiverVolume) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &session{
-		receiver:   receiver,
-		spec:       spec,
-		denon:      denon,
-		cancel:     cancel,
-		powerOn:    make(chan struct{}),
-		reached:    make(chan struct{}),
-		complete:   make(chan struct{}),
-		connected:  make(chan struct{}),
-		pending:    make(chan struct{}, 1),
-		sentVolume: unknownHalves,
-		sentMute:   muteUnsent,
+		receiver:  receiver,
+		spec:      spec,
+		denon:     denon,
+		cancel:    cancel,
+		scale:     scale,
+		powerOn:   make(chan struct{}),
+		reached:   make(chan struct{}),
+		complete:  make(chan struct{}),
+		connected: make(chan struct{}),
 	}
 	s.mark(denon.State())
 
@@ -89,7 +80,6 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, de
 	go s.bus.Run(ctx)
 	go s.adopt(ctx)
 	go s.selectInput(ctx)
-	go s.applyLevels(ctx)
 	return s
 }
 
@@ -118,8 +108,9 @@ func (s *session) publishOwner(payload []byte) {
 	s.bus.Publish(ownerTopic(s.spec.VolumeTopic), payload, true)
 }
 
-// receive records the latest state the topic carries and wakes the
-// sender, so a burst of presses reaches the receiver as one set.
+// receive reads one message off the topic. A message that differs from
+// the state the session holds is a press, and the session moves the
+// receiver one step in its direction.
 func (s *session) receive(topic string, payload []byte) {
 	if topic != s.spec.VolumeTopic {
 		return
@@ -148,25 +139,98 @@ func (s *session) receive(topic string, payload []byte) {
 		s.mutex.Unlock()
 		return
 	}
+	previous := s.latest
 	s.latest, s.haveLatest = state, true
 	s.mutex.Unlock()
-	poke(s.pending)
+
+	s.press(previous, state)
+}
+
+// press reads the message as a direction and moves the receiver one
+// step from where it actually stands, never to a level mapped through
+// two scales. Mute is absolute.
+func (s *session) press(previous, state volumeState) {
+	reading := s.denon.State()
+	sent := false
+	if state.Muted != reading.Mute {
+		s.denon.Send(denonMuteCommand(state.Muted))
+		sent = true
+	}
+	if state.Level != previous.Level {
+		if target, moves := s.nextPosition(reading, state.Level > previous.Level); moves {
+			s.denon.Send(denonVolumeCommand(target))
+			sent = true
+		}
+	}
+	// A press the receiver answers is reported when its answer arrives.
+	// One that moves nothing has no answer coming, so the position goes
+	// back to the topic now.
+	if !sent {
+		s.report(reading)
+	}
+}
+
+// nextPosition answers where one press puts the receiver, and whether
+// it moves at all.
+func (s *session) nextPosition(reading denonState, up bool) (int, bool) {
+	ceiling := ceilingHalves(s.scale())
+	if ceiling <= 0 || reading.Volume < 0 {
+		return 0, false
+	}
+	// A hand can leave the receiver above the ceiling. A press up then
+	// moves nothing, and never drops the receiver to the ceiling.
+	if up && reading.Volume >= ceiling {
+		return 0, false
+	}
+	// The ceiling bounds the way up and never the way down, so a receiver
+	// above it steps down one press at a time.
+	step := pressHalves(s.scale())
+	if !up {
+		target := max(reading.Volume-step, 0)
+		return target, target != reading.Volume
+	}
+	target := min(reading.Volume+step, ceiling)
+	return target, target != reading.Volume
+}
+
+// report puts where the receiver actually stands back on the topic, so
+// the sidecar's next press counts from a value that matches the
+// equipment.
+func (s *session) report(reading denonState) {
+	level, ok := levelForHalves(reading.Volume, ceilingHalves(s.scale()))
+	if !ok {
+		return
+	}
+	position := volumeState{Level: level, Muted: reading.Mute}.clamped()
+	payload, err := marshalVolumeState(position)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "publishing the level of %s: %v\n", s.spec.VolumeTopic, err)
+		return
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.haveLatest && s.latest == position {
+		return
+	}
+	s.bus.Publish(s.spec.VolumeTopic, payload, true)
+	s.latest, s.haveLatest = position, true
 }
 
 // observe is the session's half of every line the receiver sends. It
-// releases the wait on power, and it publishes a level the operator did
-// not ask for.
+// releases the waits the one-shots stand on, and it reports a position
+// the operator did not ask for, such as a knob turn.
 func (s *session) observe(event denonEvent) {
 	s.mark(event.State)
 	switch event.Field {
 	case denonVolumeField, denonMuteField:
-		s.writeBack(event)
+		s.report(event.State)
 	}
 }
 
-// mark releases the three waits a session stands on: the connection its
-// commands go out over, the power its input selection follows, and the
-// full reading the adopt publishes.
+// mark releases the three waits a session stands on: the connection the
+// commands go out over, the power the input selection follows, and the
+// volume reading the adopt needs.
 func (s *session) mark(state denonState) {
 	if state.Reachable == ConditionTrue {
 		s.reachedOnce.Do(func() { close(s.reached) })
@@ -174,7 +238,7 @@ func (s *session) mark(state denonState) {
 	if state.Power == powerOn {
 		s.powerOnce.Do(func() { close(s.powerOn) })
 	}
-	if state.Reachable == ConditionTrue && state.Volume != unknownHalves && state.VolumeMax != unknownHalves {
+	if state.Reachable == ConditionTrue && state.Volume != unknownHalves {
 		s.completeOnce.Do(func() { close(s.complete) })
 	}
 }
@@ -197,7 +261,7 @@ func (s *session) adopt(ctx context.Context) {
 	}
 
 	state := s.denon.State()
-	level, ok := levelForHalves(state.Volume, state.VolumeMax)
+	level, ok := levelForHalves(state.Volume, ceilingHalves(s.scale()))
 	if !ok {
 		return
 	}
@@ -211,42 +275,6 @@ func (s *session) adopt(ctx context.Context) {
 	s.mutex.Lock()
 	s.bus.Publish(s.spec.VolumeTopic, payload, true)
 	s.awaiting, s.haveAwaiting = held, true
-	s.mutex.Unlock()
-}
-
-// writeBack publishes what the receiver reports, unless it is the echo
-// of this operator's own last write. While the mark stands the receiver
-// owns the level, so its position is what the topic must carry.
-func (s *session) writeBack(event denonEvent) {
-	s.mutex.Lock()
-	if event.Field == denonVolumeField && event.State.Volume == s.sentVolume {
-		s.sentVolume = unknownHalves
-		s.mutex.Unlock()
-		return
-	}
-	if event.Field == denonMuteField && s.sentMute != muteUnsent && event.State.Mute == (s.sentMute == 1) {
-		s.sentMute = muteUnsent
-		s.mutex.Unlock()
-		return
-	}
-	s.mutex.Unlock()
-
-	level, ok := levelForHalves(event.State.Volume, event.State.VolumeMax)
-	if !ok {
-		return
-	}
-	payload, err := marshalVolumeState(volumeState{Level: level, Muted: event.State.Mute})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "publishing the level of %s: %v\n", s.spec.VolumeTopic, err)
-		return
-	}
-	// The session subscribes to the topic it publishes on. It holds what
-	// it published as the state it last applied, so the broker's delivery
-	// of that same message moves nothing.
-	published := volumeState{Level: level, Muted: event.State.Mute}.clamped()
-	s.mutex.Lock()
-	s.bus.Publish(s.spec.VolumeTopic, payload, true)
-	s.latest, s.haveLatest = published, true
 	s.mutex.Unlock()
 }
 
@@ -276,50 +304,4 @@ func (s *session) selectInput(ctx context.Context) {
 		return
 	}
 	s.denon.Send(denonInputCommand(s.spec.Input))
-}
-
-// applyLevels sends the receiver the latest level the topic carries,
-// one set per burst.
-func (s *session) applyLevels(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-s.pending:
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(sessionVolumeDebounce):
-		}
-		drainPokes(s.pending)
-		s.sendLevel()
-	}
-}
-
-// sendLevel maps the held level onto the receiver's scale and marks
-// what it sent, so the echo that follows publishes nothing back.
-func (s *session) sendLevel() {
-	state := s.denon.State()
-	s.mutex.Lock()
-	held, level := s.haveLatest, s.latest
-	s.mutex.Unlock()
-	if !held {
-		return
-	}
-
-	halves, ok := halvesForLevel(level.Level, state.VolumeMax)
-	if !ok {
-		return
-	}
-	s.mutex.Lock()
-	s.sentVolume = halves
-	s.sentMute = 0
-	if level.Muted {
-		s.sentMute = 1
-	}
-	s.mutex.Unlock()
-
-	s.denon.Send(denonVolumeCommand(halves))
-	s.denon.Send(denonMuteCommand(level.Muted))
 }

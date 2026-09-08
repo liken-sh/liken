@@ -34,6 +34,9 @@ type receiverUnit struct {
 	cancel     context.CancelFunc
 	dirty      chan struct{}
 	generation atomic.Int64
+	// The ceiling and the step live here and not on the session, so an
+	// edit to them reaches a standing session with no restart.
+	volume atomic.Pointer[ReceiverVolume]
 
 	mutex   sync.Mutex
 	session *session
@@ -111,10 +114,29 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 	if spec == nil {
 		return
 	}
-	started := startSession(ctx, u.name, *spec, u.denon, u.busAddress)
+	started := startSession(ctx, u.name, *spec, u.denon, u.busAddress, u.volumeRule)
 	u.mutex.Lock()
 	u.session = started
 	u.mutex.Unlock()
+}
+
+// setVolume records the ceiling and the step a person declared, which
+// every press reads.
+func (u *receiverUnit) setVolume(spec *ReceiverVolume) {
+	rule := ReceiverVolume{}
+	if spec != nil {
+		rule = *spec
+	}
+	u.volume.Store(&rule)
+}
+
+// volumeRule answers what the spec states now, so a press made after an
+// edit is measured against the edited scale.
+func (u *receiverUnit) volumeRule() ReceiverVolume {
+	if held := u.volume.Load(); held != nil {
+		return *held
+	}
+	return ReceiverVolume{}
 }
 
 // stop lifts the session and closes the connection, which is what a
@@ -193,6 +215,7 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 		c.units[name] = unit
 	}
 	unit.generation.Store(receiver.Metadata.Generation)
+	unit.setVolume(receiver.Spec.Volume)
 	unit.setSession(ctx, receiver.Spec.Session)
 }
 
@@ -207,6 +230,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		cancel:     cancel,
 		dirty:      make(chan struct{}, 1),
 	}
+	unit.setVolume(receiver.Spec.Volume)
 	unit.denon = newDenonClient(receiver.Spec.Denon.Address, unit.observe)
 	// The generation is stored before anything can write, so the first
 	// status names the spec it was built from.
