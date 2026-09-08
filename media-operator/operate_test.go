@@ -2002,6 +2002,12 @@ func theaterVolumeTopic() string {
 	return playerVolumeTopic(defaultTopicBase, "house", "theater")
 }
 
+// theaterVolumeOwnerTopic is the owner mark for the one unit these
+// tests write.
+func theaterVolumeOwnerTopic() string {
+	return playerVolumeOwnerTopic(defaultTopicBase, "house", "theater")
+}
+
 // mustPublishNoVolume drains the broker for the window a publish would
 // take and fails on any message that reached the unit's volume topic.
 func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
@@ -2148,6 +2154,38 @@ func TestAPlayWithNoLevelStartsAtTheUnitsOwn(t *testing.T) {
 	mustPublishNoVolume(t, broker)
 	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
 		"--volume=80\n--mute=no")
+}
+
+// While the owner mark stands the equipment applies the level, so the
+// pod carries no level at all and mpv starts at its own default.
+func TestAnOwnedLevelCarriesNoLevelOntoThePod(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	media, _ := volumeOperator(t, cluster)
+	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":40,"muted":false}`))
+	media.handleBusMessage(theaterVolumeOwnerTopic(), []byte("house/theater"))
+
+	media.pass()
+
+	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable), "")
+}
+
+// An empty payload clears the mark, so the unit's level reaches mpv
+// on the command line again.
+func TestAClearedMarkCarriesTheLevelOntoThePod(t *testing.T) {
+	cluster := newFakeCluster()
+	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
+	cluster.players["theater"] = housePlayer()
+	media, _ := volumeOperator(t, cluster)
+	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":40,"muted":false}`))
+	media.handleBusMessage(theaterVolumeOwnerTopic(), []byte("house/theater"))
+	media.handleBusMessage(theaterVolumeOwnerTopic(), nil)
+
+	media.pass()
+
+	mustMatch(t, envValue(cluster.pods["movie-playback"].Spec.Containers[0], playerOptionsVariable),
+		"--volume=40\n--mute=no")
 }
 
 // settledPlayer is a Player already idle, so a pass over it crosses no

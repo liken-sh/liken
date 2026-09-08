@@ -209,3 +209,22 @@ func TestVolumeDeskHoldsAndForgets(t *testing.T) {
 	_, held = desk.stateFor(key)
 	mustMatch(t, held, false)
 }
+
+// The desk holds one owner mark per unit. A unit no mark arrived for
+// is not owned, and retain drops the mark with the state.
+func TestVolumeDeskHoldsAndForgetsTheOwnerMark(t *testing.T) {
+	desk := newVolumeDesk()
+	key := playerKey("house", "theater")
+
+	mustMatch(t, desk.owned(key), false)
+
+	desk.setOwned(key, true)
+	mustMatch(t, desk.owned(key), true)
+
+	desk.setOwned(key, false)
+	mustMatch(t, desk.owned(key), false)
+
+	desk.setOwned(key, true)
+	desk.retain(map[string]bool{})
+	mustMatch(t, desk.owned(key), false)
+}

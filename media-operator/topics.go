@@ -302,10 +302,45 @@ func playerVolumeFilter(base string) string {
 	return base + "/players/+/+/" + playerVolumeKind
 }
 
+// playerVolumeOwnerFilter is the operator's one subscription across
+// every unit's owner mark. The mark is one segment below the level,
+// so playerVolumeFilter matches no mark, and this filter matches no
+// level.
+func playerVolumeOwnerFilter(base string) string {
+	return playerVolumeFilter(base) + "/owner"
+}
+
 // parsePlayerVolumeTopic maps a volume topic back to the Player it
 // names.
 func parsePlayerVolumeTopic(base, topic string) (namespace, name string, ok bool) {
 	return parsePlayerTopic(base, topic, playerVolumeKind)
+}
+
+// parsePlayerVolumeOwnerTopic maps an owner mark back to the Player
+// whose level it names. A level topic has no owner segment, so it is
+// not a mark.
+func parsePlayerVolumeOwnerTopic(base, topic string) (namespace, name string, ok bool) {
+	if !strings.HasSuffix(topic, "/owner") {
+		return "", "", false
+	}
+	return parsePlayerVolumeTopic(base, strings.TrimSuffix(topic, "/owner"))
+}
+
+// busFilters is every subscription the operator makes, in one list.
+// The list is what the operator reads off the bus, so it is readable
+// in one place and a test can check it without a broker.
+func busFilters(base string) []string {
+	return []string{
+		playStatusFilter(base),
+		playAvailabilityFilter(base),
+		remoteFocusFilter(base),
+		remoteFocusCycleFilter(base),
+		remoteAvailabilityFilter(base),
+		remoteCodesFilter(base),
+		playerPanelFilter(base),
+		playerVolumeFilter(base),
+		playerVolumeOwnerFilter(base),
+	}
 }
 
 // remoteKeysTopic carries one Remote's compiled table, the base

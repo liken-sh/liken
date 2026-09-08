@@ -299,14 +299,9 @@ func operate() {
 	// The bus handler is the only path the control plane takes a report or
 	// a focus signal.
 	media.bus = newBus(busAddress, "media-operator", nil, onConnect, media.handleBusMessage)
-	media.bus.Subscribe(playStatusFilter(topicBase))
-	media.bus.Subscribe(playAvailabilityFilter(topicBase))
-	media.bus.Subscribe(remoteFocusFilter(topicBase))
-	media.bus.Subscribe(remoteFocusCycleFilter(topicBase))
-	media.bus.Subscribe(remoteAvailabilityFilter(topicBase))
-	media.bus.Subscribe(remoteCodesFilter(topicBase))
-	media.bus.Subscribe(playerPanelFilter(topicBase))
-	media.bus.Subscribe(playerVolumeFilter(topicBase))
+	for _, filter := range busFilters(topicBase) {
+		media.bus.Subscribe(filter)
+	}
 	go media.bus.Run(context.Background())
 
 	// The first lists do two jobs: they prove the operator can read the
@@ -553,6 +548,13 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 			return
 		}
 		o.volumes.setState(playerKey(namespace, name), state)
+		return
+	}
+	// The owner mark. A payload means equipment holds the level, and an
+	// empty payload clears the mark. The operator reads it for one
+	// decision: a pod for an owned unit carries no level of its own.
+	if namespace, name, ok := parsePlayerVolumeOwnerTopic(o.topicBase, topic); ok {
+		o.volumes.setOwned(playerKey(namespace, name), len(payload) > 0)
 		return
 	}
 }
@@ -929,6 +931,12 @@ func (o *operator) volumeFor(play *Play) (volumeState, bool) {
 	return o.volumes.stateFor(playerKey(play.Metadata.Namespace, playerName(play)))
 }
 
+// volumeOwnedFor answers whether equipment holds the level of the
+// unit this Play runs on.
+func (o *operator) volumeOwnedFor(play *Play) bool {
+	return o.volumes.owned(playerKey(play.Metadata.Namespace, playerName(play)))
+}
+
 // publishRePresent publishes the re-present to a Player's commands
 // topic, not retained, because a re-present is an event and not a
 // state. The idle screen client subscribes to that topic and maps a
@@ -1260,8 +1268,12 @@ func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved r
 	// Play declared, so the pod builder reads one field and never
 	// reads the bus. It is the same move the saved place above makes:
 	// the pod is built from the Play as the run stands right now.
+	//
+	// While the owner mark stands the equipment applies the level, so
+	// the pod carries none and mpv starts at its own default, unity.
+	// The sidecar holds mpv at unity from there.
 	resume.Spec.Volume = nil
-	if volume, held := o.volumeFor(play); held {
+	if volume, held := o.volumeFor(play); held && !o.volumeOwnedFor(play) {
 		resume.Spec.Volume = volume.asPlayVolume()
 	}
 	return o.createPod(&resume, claim, resolved, prefs, remotes)

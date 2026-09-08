@@ -958,3 +958,78 @@ func ownedCommander(bus *Bus, mpv net.Conn) *commander {
 		mpv:              mpv,
 	}
 }
+
+// The retained mark reaches the sidecar before mpv opens its socket,
+// so the sidecar has no socket to write. Applying the state again once
+// the socket is live starts the film at unity while the equipment
+// holds the level.
+func TestTheHeldMarkReachesMpvWhenTheSocketOpens(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(nil, nil)
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+
+	driveInBackground(t, c, client)
+
+	skipObserves(t, lines)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+	mustNoLine(t, lines, 100*time.Millisecond)
+}
+
+// A level that arrived before the socket opened is applied the same
+// way, so a film starts at the level the unit holds.
+func TestTheHeldLevelReachesMpvWhenTheSocketOpens(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(nil, nil)
+	c.handle(c.volumeTopic, []byte(`{"level":40,"muted":false}`))
+
+	driveInBackground(t, c, client)
+
+	skipObserves(t, lines)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","40"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+	mustNoLine(t, lines, 100*time.Millisecond)
+}
+
+// A sidecar no message reached holds no state to apply, so it writes
+// no level and mpv keeps the level its command line set.
+func TestASocketWithNoHeldStateGetsNoLevel(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(nil, nil)
+
+	driveInBackground(t, c, client)
+
+	skipObserves(t, lines)
+	mustNoLine(t, lines, 100*time.Millisecond)
+}
+
+// driveInBackground runs the socket loop against a connection the
+// test reads, and ends it when the test ends.
+func driveInBackground(t *testing.T, c *commander, conn net.Conn) {
+	t.Helper()
+	ctx, stop := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		stop()
+		conn.Close()
+	})
+	go c.drive(ctx, conn, func(playReport) error { return nil })
+}
+
+// skipObserves reads the observe requests attach writes, so the next
+// read is the first command the sidecar sent of its own.
+func skipObserves(t *testing.T, lines <-chan string) {
+	t.Helper()
+	for index, name := range observedProperties {
+		mustMatch(t, waitForLine(t, lines),
+			fmt.Sprintf(`{"command":["observe_property",%d,%q]}`, index+1, name))
+	}
+}

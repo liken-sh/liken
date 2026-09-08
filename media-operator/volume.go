@@ -156,10 +156,16 @@ func (v volumeState) asPlayVolume() *PlayVolume {
 type volumeDesk struct {
 	mutex sync.Mutex
 	state map[string]volumeState
+
+	// marks holds each unit's owner mark, true while equipment holds
+	// the level. The pod builder reads it, so a pod for an owned unit
+	// starts mpv at its own default, unity, and not at the level the
+	// equipment applies.
+	marks map[string]bool
 }
 
 func newVolumeDesk() *volumeDesk {
-	return &volumeDesk{state: map[string]volumeState{}}
+	return &volumeDesk{state: map[string]volumeState{}, marks: map[string]bool{}}
 }
 
 // setState records one unit's state, whether it arrived on the bus
@@ -181,14 +187,36 @@ func (d *volumeDesk) stateFor(key string) (volumeState, bool) {
 	return state, held
 }
 
+// setOwned records one unit's owner mark, as the owner topic
+// delivered it: a payload is a mark, and an empty payload clears it.
+func (d *volumeDesk) setOwned(key string, owned bool) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.marks[key] = owned
+}
+
+// owned answers whether equipment holds this unit's level. A unit no
+// mark ever arrived for is not owned.
+func (d *volumeDesk) owned(key string) bool {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	return d.marks[key]
+}
+
 // retain drops the units the cluster no longer holds, so a
-// long-running operator does not keep a key per deleted Player.
+// long-running operator does not keep a key per deleted Player. The
+// mark goes with the state.
 func (d *volumeDesk) retain(live map[string]bool) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	for key := range d.state {
 		if !live[key] {
 			delete(d.state, key)
+		}
+	}
+	for key := range d.marks {
+		if !live[key] {
+			delete(d.marks, key)
 		}
 	}
 }
