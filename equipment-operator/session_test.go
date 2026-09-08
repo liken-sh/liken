@@ -62,7 +62,23 @@ type sessionHarness struct {
 	brokers   *fakeBrokerServer
 	denon     *denonClient
 	holder    *sessionHolder
-	rule      ReceiverVolume
+
+	rules sync.Mutex
+	rule  ReceiverVolume
+}
+
+// setRule states the ceiling and the step from the test goroutine while
+// the session reads them from its own.
+func (h *sessionHarness) setRule(rule ReceiverVolume) {
+	h.rules.Lock()
+	defer h.rules.Unlock()
+	h.rule = rule
+}
+
+func (h *sessionHarness) volumeRule() ReceiverVolume {
+	h.rules.Lock()
+	defer h.rules.Unlock()
+	return h.rule
 }
 
 func newSessionHarness(t *testing.T) *sessionHarness {
@@ -117,7 +133,7 @@ func (h *sessionHarness) begin(t *testing.T, input string) *session {
 	h.drainCommands()
 	h.holder.forget()
 	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic}
-	started := startSession(t.Context(), "theater", spec, h.denon, h.brokers.address(), func() ReceiverVolume { return h.rule })
+	started := startSession(t.Context(), "theater", spec, h.denon, h.brokers.address(), h.volumeRule)
 	h.holder.set(started)
 	return started
 }
@@ -601,4 +617,26 @@ func TestNextPositionIsBoundedAtBothEndsOfTheScale(t *testing.T) {
 			mustMatch(t, moves, one.moves)
 		})
 	}
+}
+
+// A session can start before anyone has declared a ceiling, so the
+// adopt waits for one instead of giving up and ignoring every press.
+func TestASessionWaitsForACeilingBeforeItAdopts(t *testing.T) {
+	h := newSessionHarnessWith(t, ReceiverVolume{})
+	held := h.begin(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	broker.refuseTopic(t, testVolumeTopic, quietPeriod)
+
+	h.setRule(ReceiverVolume{Max: 72, Step: 1})
+
+	adopted := broker.waitForTopic(t, testVolumeTopic)
+	mustMatch(t, positionOf(t, adopted), volumeState{Level: 69})
+	broker.push(testVolumeTopic, adopted.payload)
+	waitUntilAdopted(t, held)
+
+	broker.push(testVolumeTopic, []byte(`{"level":80,"muted":false}`))
+	h.equipment.waitForCommands(t, "MV51")
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 102 })
 }

@@ -463,6 +463,7 @@ func TestAVolumeEditReachesAStandingSession(t *testing.T) {
 	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 	adopted := broker.waitForTopic(t, testVolumeTopic)
 	broker.push(testVolumeTopic, adopted.payload)
+	waitUntilSessionAdopted(t, operator, "theater")
 	equipment.waitForCommands(t, "SIGAME")
 
 	broker.push(testVolumeTopic, []byte(`{"level":77,"muted":false}`))
@@ -487,4 +488,19 @@ func playingReceiver(address string, rule ReceiverVolume) Receiver {
 		VolumeTopic: testVolumeTopic,
 	}
 	return held
+}
+
+// waitUntilSessionAdopted waits for a unit's session to take the
+// broker's delivery of its own adopt message, which is the point from
+// which a press moves the receiver.
+func waitUntilSessionAdopted(t *testing.T, operator *controller, name string) {
+	t.Helper()
+	unit, running := operator.units[name]
+	if !running {
+		t.Fatalf("no unit is running for receiver %s", name)
+	}
+	unit.mutex.Lock()
+	held := unit.session
+	unit.mutex.Unlock()
+	waitUntilAdopted(t, held)
 }

@@ -16,6 +16,11 @@ import (
 // selects the input anyway.
 var sessionPowerWait = 10 * time.Second
 
+// How often the adopt looks again for what it needs. The spec that
+// states the ceiling can land after the session starts, so an adopt
+// that cannot map a level yet waits and does not give up.
+var sessionAdoptRetry = 500 * time.Millisecond
+
 // How long a stop waits for the cleared owner mark to reach the broker
 // before it closes the connection.
 var sessionStopGrace = 200 * time.Millisecond
@@ -260,22 +265,39 @@ func (s *session) adopt(ctx context.Context) {
 	case <-s.connected:
 	}
 
+	ticker := time.NewTicker(sessionAdoptRetry)
+	defer ticker.Stop()
+	for !s.publishPosition() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// publishPosition puts the receiver's position on the topic and answers
+// whether it went out. Everything that can stop it is something the
+// next try may have: a ceiling nobody had declared yet, or a volume the
+// receiver has not reported.
+func (s *session) publishPosition() bool {
 	state := s.denon.State()
 	level, ok := levelForHalves(state.Volume, ceilingHalves(s.scale()))
 	if !ok {
-		return
+		return false
 	}
 	held := volumeState{Level: level, Muted: state.Mute}.clamped()
 	payload, err := marshalVolumeState(held)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "adopting the level of %s: %v\n", s.spec.VolumeTopic, err)
-		return
+		return false
 	}
 
 	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	s.bus.Publish(s.spec.VolumeTopic, payload, true)
 	s.awaiting, s.haveAwaiting = held, true
-	s.mutex.Unlock()
+	return true
 }
 
 // selectInput powers the receiver on, waits for it to say so, and
