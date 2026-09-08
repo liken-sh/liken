@@ -5,6 +5,10 @@ package main
 // operator applies for as long as the unit matches, the active flag on
 // that session that follows a standing Play, and the lift when the unit
 // stops matching or goes away.
+//
+// The session also carries an awake flag, which follows the panel
+// desire and not the Play, so the power key at the idle screen reaches
+// the equipment too.
 
 import (
 	"errors"
@@ -59,10 +63,15 @@ type ReceiverInput struct {
 // stands at the idle screen too, so a volume press moves the room while
 // nothing plays, and the equipment operator reads Active to tell a
 // playing room from an idle one.
+//
+// Awake says whether the unit's panel is up. It follows the panel
+// desire the idle client publishes: the off desire is a dark room, and
+// every other desire, none at all included, is a room that is awake.
 type ReceiverSession struct {
 	Player      string `json:"player,omitempty"`
 	Input       string `json:"input,omitempty"`
 	Active      bool   `json:"active"`
+	Awake       bool   `json:"awake"`
 	VolumeTopic string `json:"volumeTopic,omitempty"`
 }
 
@@ -172,12 +181,18 @@ type receiverSession struct {
 // reconcileReceiver builds the Player's receiver status block, and
 // applies the session on every pass the unit matches an input. The
 // session is active only while a Play stands on the unit.
+//
+// The awake flag comes from the panel desk on every pass, so a wake or
+// sleep press at the idle screen reaches the equipment as the same
+// session with one flag changed.
 func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerReceiverStatus {
 	receiver, input, matched := o.matchReceiver(player)
 	if !matched {
 		return nil
 	}
-	o.applySession(player, receiver, input, standing)
+	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
+	awake := o.panels.stateFor(key) != panelDesireOff
+	o.applySession(player, receiver, input, standing, awake)
 	return &PlayerReceiverStatus{
 		Name:      receiver.Metadata.Name,
 		Input:     input,
@@ -198,12 +213,15 @@ func (o *operator) matchReceiver(player *Player) (*Receiver, string, bool) {
 // applyReceiverSession applies the session before the playback pod is
 // created, so the equipment is on and on the right input by the time
 // mpv draws.
+//
+// A Play that starts wakes the room, so the creating pass applies an
+// awake session, and the next pass reads the panel desire.
 func (o *operator) applyReceiverSession(player *Player) {
 	receiver, input, matched := o.matchReceiver(player)
 	if !matched {
 		return
 	}
-	o.applySession(player, receiver, input, true)
+	o.applySession(player, receiver, input, true, true)
 }
 
 // applySession writes spec.session under this operator's field manager,
@@ -216,13 +234,17 @@ func (o *operator) applyReceiverSession(player *Player) {
 // The tracking compares the whole session, so a Play that starts or
 // ends changes only the active flag, and the session is applied again
 // for that.
-func (o *operator) applySession(player *Player, receiver *Receiver, input string, active bool) {
+//
+// A panel a person turns off or on changes only the awake flag, and the
+// session is applied again for that too.
+func (o *operator) applySession(player *Player, receiver *Receiver, input string, active, awake bool) {
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 	key := playerKey(namespace, name)
 	session := ReceiverSession{
 		Player:      namespace + "/" + name,
 		Input:       input,
 		Active:      active,
+		Awake:       awake,
 		VolumeTopic: playerVolumeTopic(o.topicBase, namespace, name),
 	}
 	held, tracked := o.receiverSessions[key]

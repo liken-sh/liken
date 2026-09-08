@@ -235,6 +235,7 @@ func TestAnIdleUnitReportsItsReceiverAndHoldsAnIdleSession(t *testing.T) {
 	mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
 		Player:      "house/theater",
 		Input:       "GAME",
+		Awake:       true,
 		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
 	})
 }
@@ -284,6 +285,7 @@ func TestAStandingPlayHoldsOneSessionOnTheReceiver(t *testing.T) {
 		Player:      "house/theater",
 		Input:       "GAME",
 		Active:      true,
+		Awake:       true,
 		VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
 	})
 	mustMatch(t, media.receiverSessions[playerKey("house", "theater")].receiver, "living-room-denon")
@@ -315,6 +317,74 @@ func appliedActive(cluster *fakeCluster) string {
 		flags[index] = "lift"
 		if applied.session != nil {
 			flags[index] = strconv.FormatBool(applied.session.Active)
+		}
+	}
+	return strings.Join(flags, ", ")
+}
+
+// statePanelDesire hands the operator one panel desire off the bus, the
+// way the idle client publishes it.
+func statePanelDesire(media *operator, desire string) {
+	media.handleBusMessage(playerPanelTopic(defaultTopicBase, "house", "theater"),
+		[]byte(`{"desire":"`+desire+`"}`))
+}
+
+// The awake flag follows the unit's panel desire, and a unit that
+// published no desire at all is awake.
+func TestThePanelDesireMovesTheAwakeFlag(t *testing.T) {
+	cases := []struct {
+		name   string
+		desire string
+		want   bool
+	}{
+		{name: "no desire published", want: true},
+		{name: "the panel is on", desire: panelDesireOn, want: true},
+		{name: "the panel is off", desire: panelDesireOff, want: false},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			cluster := receiverCluster()
+			media := testOperator(t, cluster, make(chan struct{}, 1))
+			if each.desire != "" {
+				statePanelDesire(media, each.desire)
+			}
+
+			runPlayers(media, []Player{*housePlayer()}, nil)
+
+			mustMatch(t, len(cluster.sessions), 1)
+			mustMatch(t, *cluster.sessions[0].session, ReceiverSession{
+				Player:      "house/theater",
+				Input:       "GAME",
+				Awake:       each.want,
+				VolumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+			})
+		})
+	}
+}
+
+// The press that turns the panel on is applied on the next pass,
+// because the tracking compares the whole session and only the awake
+// flag changed.
+func TestThePressThatWakesThePanelAppliesTheSessionAgain(t *testing.T) {
+	cluster := receiverCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+
+	statePanelDesire(media, panelDesireOff)
+	runPlayers(media, []Player{*housePlayer()}, nil)
+	statePanelDesire(media, panelDesireOn)
+	runPlayers(media, []Player{*housePlayer()}, nil)
+
+	mustMatch(t, appliedAwake(cluster), "false, true")
+}
+
+// appliedAwake reads the awake flag of every session apply the passes
+// made, in order, and reads a lift as the word.
+func appliedAwake(cluster *fakeCluster) string {
+	flags := make([]string, len(cluster.sessions))
+	for index, applied := range cluster.sessions {
+		flags[index] = "lift"
+		if applied.session != nil {
+			flags[index] = strconv.FormatBool(applied.session.Awake)
 		}
 	}
 	return strings.Join(flags, ", ")

@@ -165,6 +165,9 @@ func TestPutRemoteStatusWritesTheStatusSubresource(t *testing.T) {
 // The session apply reaches the Receiver's own path, under this
 // operator's field manager, as an apply patch that carries the session
 // alone. A nil session carries an empty spec, which is the lift.
+//
+// The active and awake flags are always on the wire, so a session that
+// carries neither still states both as false.
 func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -173,8 +176,13 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 	}{
 		{
 			name:    "a session the run holds",
-			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, VolumeTopic: "liken/media/players/house/theater/volume"},
-			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","active":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, Awake: true, VolumeTopic: "liken/media/players/house/theater/volume"},
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
+		},
+		{
+			name:    "a session at a dark panel",
+			session: &ReceiverSession{Player: "house/theater", Input: "GAME", VolumeTopic: "liken/media/players/house/theater/volume"},
+			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"living-room-denon"},"spec":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false,"volumeTopic":"liken/media/players/house/theater/volume"}}}`,
 		},
 		{
 			name: "the lift",
