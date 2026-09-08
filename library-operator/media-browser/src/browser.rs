@@ -138,7 +138,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         // The first read is the one a person waits for, so the run says
         // how long it took, the way the reader thread says it of a re-read.
         let started = std::time::Instant::now();
-        let home = screens::Screen::Home(home::Home::open(&mut source, &[]));
+        let home = screens::Screen::Home(home::Home::open(&mut source, &[], &[]));
         let ms = started.elapsed().as_secs_f64() * 1_000.0;
         eprintln!("media-browser: the home page opened in {ms:.1} ms");
         let reader = reader::Reader::new(source.reader());
@@ -362,7 +362,8 @@ impl<S: Source, A: Art> Browser<S, A> {
             return false;
         }
         let people = self.audience.current(self.clock).to_vec();
-        self.reader.ask(&mut self.source, today, people);
+        let letters = self.audience.letters(self.clock);
+        self.reader.ask(&mut self.source, today, people, letters);
         self.landed_home()
     }
 

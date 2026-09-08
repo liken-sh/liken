@@ -1,5 +1,7 @@
-// What the progress store answers a screen: where one play reached, and
-// the work a continue-watching row draws for it.
+// What the progress store answers a screen: where one play reached, the
+// work it names, and the thread rule the continue-watching row walks.
+
+pub mod thread;
 
 use super::draw::Date;
 
@@ -99,8 +101,8 @@ impl Played {
     }
 }
 
-/// One work an audience has a play of: the catalog columns a slot needs,
-/// and where the latest play of it reached.
+/// One play of one work an audience is on: the catalog columns a slot
+/// needs, and where the play reached.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resume {
     /// The library that holds the work, as `namespace/name`.
@@ -115,12 +117,14 @@ pub struct Resume {
     pub released: String,
     /// The path of the primary art, relative to the library root.
     pub art: String,
-    /// Where the latest play of the work reached. For a series it is the
-    /// latest episode row.
+    /// Where the play reached. For a series it is one episode row.
     pub progress: Progress,
+    // Whether the play names exactly the people the read was made for, and
+    // not those people and more. The thread rule reads it.
+    pub exact: bool,
 }
 
-/// One resume as `--print-progress` writes it: eight tab-separated fields,
+/// One play as `--print-progress` writes it: nine tab-separated fields,
 /// so a drill reads the store with no screen.
 pub fn line(resume: &Resume) -> String {
     let numbers = if resume.progress.season == 0 && resume.progress.episode == 0 {
@@ -134,8 +138,13 @@ pub fn line(resume: &Resume) -> String {
         _ => "-",
     };
 
+    let audience = match resume.exact {
+        true => "exact",
+        false => "more",
+    };
+
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}/{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}/{}\t{}\t{}\t{}",
         resume.kind,
         resume.library,
         resume.id,
@@ -145,6 +154,7 @@ pub fn line(resume: &Resume) -> String {
         resume.progress.duration,
         state,
         stamp(resume.progress.recorded),
+        audience,
     )
 }
 
@@ -238,6 +248,7 @@ mod tests {
             released: "1999".into(),
             art: "poster.jpg".into(),
             progress,
+            exact: true,
         }
     }
 
@@ -254,8 +265,15 @@ mod tests {
         assert_eq!(
             line,
             "movie\tscreening/films\tmovie:tmdb:1\tSome Film (1999)\t-\t600/6000\trunning\t\
-             2025-09-06T12:14:02Z"
+             2025-09-06T12:14:02Z\texact"
         );
+    }
+
+    #[test]
+    fn a_play_of_more_people_than_the_audience_ends_its_line_with_more() {
+        let mut resume = resume(Progress::default());
+        resume.exact = false;
+        assert!(line(&resume).ends_with("\tmore"));
     }
 
     #[test]

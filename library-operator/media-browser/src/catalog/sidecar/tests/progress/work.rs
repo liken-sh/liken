@@ -1,27 +1,12 @@
 // The three reads that name a work or a library rather than the whole
-// audience: where the audience last reached in one movie or series, where
-// they reached in each episode, and the map of every film of one library
-// they have a play of, which a wall draws its bars from.
+// audience: every play of one work, where they reached in each episode,
+// and the map of every film of one library they have a play of, which a
+// wall draws its bars from.
 
 use super::*;
 
 #[test]
-fn a_movie_answers_where_its_latest_play_reached() {
-    let dir = TempDir::new().unwrap();
-    let catalog = fixture(&dir);
-    let store = progress_fixture(&dir);
-    a_film(&catalog);
-    film_play(&store, "old", &["first"], (60, 6000, 10));
-    film_play(&store, "new", &["first"], (900, 6000, 20));
-    let mut source = source_over(&catalog, store);
-
-    let progress = source.progress_of(FILMS, FILM, &names(&["first"])).unwrap();
-    assert_eq!(progress.play, "new");
-    assert_eq!(progress.position, 900);
-}
-
-#[test]
-fn a_series_answers_its_latest_episode_row() {
+fn a_series_answers_its_episode_plays_latest_first() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
@@ -30,23 +15,27 @@ fn a_series_answers_its_latest_episode_row() {
     show_play(&store, "later", (200, 1320, 20), (1, 2));
     let mut source = source_over(&catalog, store);
 
-    let progress = source.progress_of(SHOWS, SHOW, &names(&["first"])).unwrap();
-    assert_eq!((progress.season, progress.episode), (1, 2));
+    let numbers: Vec<(i64, i64)> = source
+        .plays_of(SHOWS, SHOW, &names(&["first"]))
+        .iter()
+        .map(|play| (play.progress.season, play.progress.episode))
+        .collect();
+    assert_eq!(numbers, [(1, 2), (1, 1)]);
 }
 
 #[test]
-fn a_work_no_play_names_has_no_progress() {
+fn a_work_no_play_names_has_no_plays() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
     a_film(&catalog);
     let mut source = source_over(&catalog, store);
 
-    assert_eq!(source.progress_of(FILMS, FILM, &names(&["first"])), None);
+    assert_eq!(source.plays_of(FILMS, FILM, &names(&["first"])), []);
 }
 
 #[test]
-fn a_play_the_audience_was_not_in_is_no_progress_of_the_work() {
+fn a_play_the_audience_was_not_in_is_no_play_of_the_work() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
@@ -54,7 +43,58 @@ fn a_play_the_audience_was_not_in_is_no_progress_of_the_work() {
     film_play(&store, "one", &["second"], (600, 6000, 10));
     let mut source = source_over(&catalog, store);
 
-    assert_eq!(source.progress_of(FILMS, FILM, &names(&["first"])), None);
+    assert_eq!(source.plays_of(FILMS, FILM, &names(&["first"])), []);
+}
+
+#[test]
+fn every_play_of_one_work_comes_back_newest_first_and_no_other_works() {
+    let dir = TempDir::new().unwrap();
+    let catalog = fixture(&dir);
+    let store = progress_fixture(&dir);
+    a_film(&catalog);
+    a_show(&catalog);
+    film_play(&store, "old", &["first"], (60, 6000, 10));
+    film_play(&store, "new", &["first", "second"], (900, 6000, 20));
+    show_play(&store, "show", (300, 1320, 30), (2, 5));
+    let mut source = source_over(&catalog, store);
+
+    let plays: Vec<(String, bool)> = source
+        .plays_of(FILMS, FILM, &names(&["first"]))
+        .into_iter()
+        .map(|play| (play.progress.play, play.exact))
+        .collect();
+    assert_eq!(plays, [("new".into(), false), ("old".into(), true)]);
+    assert_eq!(source.plays_of(FILMS, FILM, &names(&["second"])).len(), 1);
+    assert_eq!(source.plays_of(SHOWS, SHOW, &names(&["second"])), []);
+}
+
+#[test]
+fn an_episode_is_marked_when_every_person_has_a_play_of_it_in_any_group() {
+    let dir = TempDir::new().unwrap();
+    let catalog = fixture(&dir);
+    let store = progress_fixture(&dir);
+    a_show(&catalog);
+    let episode = |play: &str, people: &[&str], reached, numbers| {
+        insert_play(&store, play, &[SHOW_ALIAS], people, reached, numbers);
+    };
+    episode("first-e1", &["first"], (1320, 1320, 10), (1, 1));
+    episode("second-e1", &["second", "third"], (600, 1320, 20), (1, 1));
+    episode("first-e2", &["first"], (1320, 1320, 30), (1, 2));
+    let mut source = source_over(&catalog, store);
+
+    let mut marked = |people: &[&str]| -> Vec<(i64, i64, String)> {
+        source
+            .episode_progress(SHOWS, SHOW, &names(people))
+            .into_iter()
+            .map(|row| (row.season, row.episode, row.play))
+            .collect()
+    };
+    assert_eq!(marked(&["first", "second"]), [(1, 1, "second-e1".into())]);
+    assert_eq!(
+        marked(&["first"]),
+        [(1, 1, "first-e1".into()), (1, 2, "first-e2".into())]
+    );
+    assert_eq!(marked(&["first", "fourth"]), []);
 }
 
 #[test]
@@ -173,6 +213,29 @@ fn every_film_of_one_library_the_audience_played_answers_its_latest_play() {
             ),
         ]
     );
+}
+
+#[test]
+fn a_film_is_marked_when_every_person_has_a_play_of_it_in_any_group() {
+    let dir = TempDir::new().unwrap();
+    let catalog = fixture(&dir);
+    let store = progress_fixture(&dir);
+    a_shelf(&catalog);
+    film_play(&store, "alone", &["first"], (600, 6000, 10));
+    film_play(&store, "together", &["second", "third"], (3000, 6000, 20));
+    let mut source = source_over(&catalog, store);
+
+    assert_eq!(
+        by_item(&mut source, FILMS, &["first", "second"]),
+        [(
+            FILM.to_string(),
+            Played {
+                position: 3000,
+                duration: 6000
+            }
+        )]
+    );
+    assert_eq!(by_item(&mut source, FILMS, &["first", "fourth"]), []);
 }
 
 #[test]

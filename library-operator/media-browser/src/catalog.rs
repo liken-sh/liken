@@ -484,30 +484,33 @@ pub trait Source {
         Identity::default()
     }
 
-    /// Every work these people have a play of, one row per work across
-    /// every library, newest first. The row is the latest play, finished
-    /// or not. A source with no progress store answers nothing.
+    /// Every play these people are on, one row per play and work across
+    /// every library, newest first, finished or not. A source with no
+    /// progress store answers nothing.
     fn continue_watching(&mut self, _people: &[String]) -> Vec<Resume> {
         Vec::new()
     }
 
-    /// Where these people last reached in one movie or one series, or
-    /// nothing where no play of theirs names it. A series answers its latest
-    /// episode row.
-    fn progress_of(&mut self, _library: &str, _id: &str, _people: &[String]) -> Option<Progress> {
-        None
+    // Every play these people are on of one movie or one series, newest
+    // first. A source with no progress store answers nothing.
+    fn plays_of(&mut self, _library: &str, _id: &str, _people: &[String]) -> Vec<Resume> {
+        Vec::new()
     }
 
     /// Every movie of one library these people have a play of, keyed by the
     /// movie's id, with the latest play's position and duration. Finished
     /// plays are in it; series ids are not. A source with no progress store
     /// answers an empty map.
+    // A movie is in the map when every one of these people has a play of it,
+    // in any group.
     fn progress_by_item(&mut self, _library: &str, _people: &[String]) -> HashMap<String, Played> {
         HashMap::new()
     }
 
     /// Where these people reached in each episode of one series: the latest
     /// play per episode, in aired order.
+    // An episode is in the answer when every one of these people has a play
+    // of it, in any group.
     fn episode_progress(
         &mut self,
         _library: &str,

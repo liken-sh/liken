@@ -1,5 +1,5 @@
 // The continue-watching read over a real catalog file and a real progress
-// file, and the fixtures all three progress reads are tested from.
+// file, and the fixtures every progress read is tested from.
 
 mod store;
 mod work;
@@ -153,6 +153,7 @@ fn a_film_the_audience_started_comes_back_as_a_resume() {
                 season: 0,
                 episode: 0,
             },
+            exact: true,
         }]
     );
 }
@@ -177,7 +178,7 @@ fn a_play_no_library_holds_is_skipped() {
 }
 
 #[test]
-fn one_work_answers_its_latest_play_alone() {
+fn one_work_answers_every_play_of_it_newest_first() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
@@ -187,9 +188,25 @@ fn one_work_answers_its_latest_play_alone() {
     let mut source = source_over(&catalog, store);
 
     let resumes = watching(&mut source, &["first"]);
-    assert_eq!(resumes.len(), 1);
-    assert_eq!(resumes[0].progress.play, "new");
+    let plays: Vec<&str> = resumes
+        .iter()
+        .map(|resume| resume.progress.play.as_str())
+        .collect();
+    assert_eq!(plays, ["new", "old"]);
     assert!(resumes[0].progress.finished);
+}
+
+#[test]
+fn a_play_that_names_the_audience_and_nobody_more_is_exact() {
+    let dir = TempDir::new().unwrap();
+    let catalog = fixture(&dir);
+    let store = progress_fixture(&dir);
+    a_film(&catalog);
+    film_play(&store, "one", &["first", "second"], (600, 6000, 10));
+    let mut source = source_over(&catalog, store);
+
+    assert!(!watching(&mut source, &["first"])[0].exact);
+    assert!(watching(&mut source, &["first", "second"])[0].exact);
 }
 
 #[test]
@@ -262,6 +279,7 @@ fn an_empty_audience_reads_the_plays_that_name_nobody() {
     let resumes = watching(&mut source, &[]);
     assert_eq!(resumes.len(), 1);
     assert_eq!(resumes[0].progress.play, "alone");
+    assert!(resumes[0].exact);
 }
 
 #[test]
@@ -283,7 +301,7 @@ fn resumes_come_back_newest_first() {
 }
 
 #[test]
-fn a_series_resume_carries_the_numbers_of_its_latest_episode() {
+fn a_series_answers_its_latest_episode_play_first() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
@@ -293,7 +311,7 @@ fn a_series_resume_carries_the_numbers_of_its_latest_episode() {
     let mut source = source_over(&catalog, store);
 
     let resumes = watching(&mut source, &["first"]);
-    assert_eq!(resumes.len(), 1);
+    assert_eq!(resumes.len(), 2);
     assert_eq!(resumes[0].id, SHOW);
     assert_eq!(
         (resumes[0].progress.season, resumes[0].progress.episode),

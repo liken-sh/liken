@@ -1,13 +1,13 @@
-// The continue-watching row at the browser: what the progress store's
-// resumes become on the page, what a finished work leaves behind it, and
-// the page a press on one of the slots opens.
+// The continue-watching row at the browser: what the audience's plays
+// become on the page, the reasons the cards carry, and the page a press on
+// a card opens.
 
 use super::*;
 use crate::catalog::Progress;
 
-// One work the audience is in the middle of, as the progress read answers
-// it.
-fn resume(kind: &str, id: &str, title: &str, progress: Progress) -> Resume {
+// One play of one work. It is the audience's own unless the case says
+// otherwise.
+fn play(kind: &str, id: &str, title: &str, progress: Progress) -> Resume {
     Resume {
         library: match kind {
             "movie" => "screening/films".to_string(),
@@ -19,64 +19,71 @@ fn resume(kind: &str, id: &str, title: &str, progress: Progress) -> Resume {
         released: "1980".into(),
         art: format!("{id}.jpg"),
         progress,
+        exact: true,
     }
 }
 
-// Where one play reached, by the numbers the store holds.
-fn reached(position: i64, duration: i64, numbers: (i64, i64)) -> Progress {
+// Where one play reached, in the numbers the store holds, and the second
+// it was recorded.
+fn reached(position: i64, duration: i64, numbers: (i64, i64), recorded: i64) -> Progress {
     Progress {
-        play: format!("play-{position}"),
+        play: format!("play-{recorded}"),
         position,
         duration,
         finished: crate::catalog::progress::finished(position, duration),
         running: false,
-        recorded: 10,
+        recorded,
         season: numbers.0,
         episode: numbers.1,
     }
 }
 
-// One resume for every branch the row folds: a film the audience stopped
-// in, a film they finished, a show they stopped inside an episode of, a
-// show whose episode they finished with another after it, and a show whose
-// last episode they finished.
-fn resumes() -> Vec<Resume> {
+// One play for every branch the row folds, oldest first: a film the
+// audience stopped in, a film they finished, a show they stopped inside an
+// episode of, a show whose episode they finished with another after it,
+// and a show whose last episode they finished.
+fn plays() -> Vec<Resume> {
     vec![
-        resume("movie", "movies:1", "Entry 1", reached(600, 5_400, (0, 0))),
-        resume(
+        play(
+            "movie",
+            "movies:1",
+            "Entry 1",
+            reached(600, 5_400, (0, 0), 10),
+        ),
+        play(
             "movie",
             "movies:2",
             "Entry 2",
-            reached(5_400, 5_400, (0, 0)),
+            reached(5_400, 5_400, (0, 0), 20),
         ),
-        resume(
+        play(
             "series",
             SERIAL,
             "The Serial",
-            reached(1_200, 2_760, (1, 2)),
+            reached(1_200, 2_760, (1, 2), 30),
         ),
-        resume(
+        play(
             "series",
             OTHER_SERIAL,
             "Another Serial",
-            reached(2_760, 2_760, (1, 2)),
+            reached(2_760, 2_760, (1, 2), 40),
         ),
-        resume(
+        play(
             "series",
             LAST_SERIAL,
             "Last Serial",
-            reached(2_760, 2_760, (2, 4)),
+            reached(2_760, 2_760, (2, 4), 50),
         ),
     ]
 }
 
 // The browser on a bus, over an audience of one, whose progress store
-// answers those five resumes and whose catalog resolves one file to play.
+// answers these plays and whose catalog resolves one file to play.
 // `orders` says whether the films carry a set and belong to franchises, so
 // a finished work has something after it.
-fn continuing_with(orders: bool) -> (Browser<Fake, NoArt>, FakeBus) {
+fn watched(plays: Vec<Resume>, orders: bool) -> (Browser<Fake, NoArt>, FakeBus) {
     let (mut browser, bus) = playing(vec![one_item()]);
-    browser.source.continues = resumes();
+    browser.source.continues = plays;
     browser.source.sets = orders;
     browser.source.orders = orders;
     if orders {
@@ -84,7 +91,7 @@ fn continuing_with(orders: bool) -> (Browser<Fake, NoArt>, FakeBus) {
     }
     browser.source.reached.insert(
         ("screening/films".to_string(), "movies:1".to_string()),
-        reached(600, 5_400, (0, 0)),
+        reached(600, 5_400, (0, 0), 10),
     );
     let mut browser = browser.with_audience(
         vec![crate::audience::Person {
@@ -100,21 +107,19 @@ fn continuing_with(orders: bool) -> (Browser<Fake, NoArt>, FakeBus) {
 // The browser whose catalog holds no set and no franchise, so a work the
 // audience finished leaves the row and nothing takes its place.
 fn continuing() -> (Browser<Fake, NoArt>, FakeBus) {
-    continuing_with(false)
+    watched(plays(), false)
 }
 
 // The browser whose catalog holds the set and the three orders, so a work
 // the audience finished names the works after it.
 fn following() -> (Browser<Fake, NoArt>, FakeBus) {
-    continuing_with(true)
+    watched(plays(), true)
 }
 
 // The browser with focus on the continue-watching row, the first row under
 // the banner.
-fn on_the_row() -> (Browser<Fake, NoArt>, FakeBus) {
-    let (mut browser, bus) = continuing();
+fn on_the_row(browser: &mut Browser<Fake, NoArt>) {
     browser.key("up");
-    (browser, bus)
 }
 
 // The continue-watching row's strip.
@@ -122,36 +127,51 @@ fn row(browser: &Browser<Fake, NoArt>) -> &crate::screens::home::Strip {
     strip_at(browser, 1)
 }
 
-// The captions of the row, in the order it draws them.
-fn captions(browser: &Browser<Fake, NoArt>) -> Vec<String> {
+// The two lines of every card of the row, in the order the row draws
+// them.
+fn lines(browser: &Browser<Fake, NoArt>) -> Vec<(String, String)> {
     row(browser)
         .items
         .iter()
-        .map(|item| item.caption.clone())
+        .map(|item| (item.caption.clone(), item.under.clone()))
+        .collect()
+}
+
+fn ids(browser: &Browser<Fake, NoArt>) -> Vec<String> {
+    row(browser)
+        .items
+        .iter()
+        .map(|item| item.id.clone())
         .collect()
 }
 
 #[test]
-fn the_row_holds_every_work_the_audience_can_go_back_to() {
+fn the_row_holds_every_leaf_the_audiences_threads_offer_newest_first() {
     let (browser, _bus) = continuing();
-    let row = row(&browser);
 
-    assert_eq!(row.heading, "Continue watching");
-    let captions: Vec<&str> = row.items.iter().map(|item| item.caption.as_str()).collect();
-    assert_eq!(captions, ["Entry 1", "Segment 2", "Segment 3"]);
+    assert_eq!(row(&browser).heading, "Continue watching · ");
+    assert_eq!(
+        lines(&browser),
+        [
+            (
+                "E03 · Segment 3".to_string(),
+                "Next in Another Serial · S01".to_string()
+            ),
+            (
+                "E02 · Segment 2".to_string(),
+                "Resume · The Serial · S01".to_string()
+            ),
+            ("Entry 1".to_string(), "Resume".to_string()),
+        ]
+    );
 }
 
 #[test]
 fn a_work_the_audience_finished_with_nothing_after_it_leaves_the_row() {
     let (browser, _bus) = continuing();
-    let ids: Vec<&str> = row(&browser)
-        .items
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect();
 
-    assert!(!ids.contains(&"movies:2"), "{ids:?}");
-    assert_eq!(ids.len(), 3);
+    assert!(!ids(&browser).contains(&"movies:2".to_string()));
+    assert_eq!(ids(&browser).len(), 3);
 }
 
 #[test]
@@ -163,30 +183,33 @@ fn a_slot_the_audience_stopped_inside_carries_how_far_they_reached() {
         .map(|item| item.progress.map(|played| played.position))
         .collect();
 
-    assert_eq!(reached, [Some(600), Some(1_200), None]);
+    assert_eq!(reached, [None, Some(1_200), Some(600)]);
 }
 
 #[test]
-fn a_film_of_the_row_reads_as_its_title_over_its_facts() {
+fn a_film_of_the_row_reads_as_its_title_over_its_reason() {
     let (browser, _bus) = continuing();
-    let film = &row(&browser).items[0];
+    let film = &row(&browser).items[2];
 
     assert_eq!(film.library, "screening/films");
     assert_eq!(film.kind, "movies");
     assert_eq!(film.art, "movies:1.jpg");
-    assert_eq!(film.under, "1980 · 1h 30m · PG");
+    assert_eq!(film.caption, "Entry 1");
+    assert_eq!(film.under, "Resume");
     assert_eq!(film.episode, None);
+    assert_eq!(film.franchise, None);
 }
 
 #[test]
-fn an_episode_of_the_row_reads_as_its_title_over_its_show() {
+fn an_episode_of_the_row_reads_as_its_title_over_its_reason() {
     let (browser, _bus) = continuing();
     let episode = &row(&browser).items[1];
 
     assert_eq!(episode.kind, "episodes");
     assert_eq!(episode.id, "episode:1:2");
     assert_eq!(episode.art, "s1e2.jpg");
-    assert_eq!(episode.under, "The Serial · S01 · E02 · 46m");
+    assert_eq!(episode.caption, "E02 · Segment 2");
+    assert_eq!(episode.under, "Resume · The Serial · S01");
     assert_eq!(
         episode.episode,
         Some(InSeries {
@@ -201,7 +224,7 @@ fn an_episode_of_the_row_reads_as_its_title_over_its_show() {
 #[test]
 fn a_show_whose_episode_the_audience_finished_stands_at_the_next_one() {
     let (browser, _bus) = continuing();
-    let next = &row(&browser).items[2];
+    let next = &row(&browser).items[0];
 
     assert_eq!(next.id, "episode:1:3");
     assert_eq!(next.progress, None);
@@ -224,45 +247,59 @@ fn the_row_is_read_for_the_people_in_the_room() {
 }
 
 #[test]
-fn a_film_the_audience_finished_is_followed_by_its_set_and_its_franchises() {
+fn a_play_that_names_more_people_than_the_audience_seeds_no_thread() {
+    let mut plays = plays();
+    for play in &mut plays {
+        play.exact = false;
+    }
+    let (browser, _bus) = watched(plays, true);
+
+    assert!(row(&browser).items.is_empty());
+}
+
+#[test]
+fn every_container_offers_its_next_leaf_with_its_reason() {
     let (browser, _bus) = following();
 
+    // The run is cut to the last serial's first season. The play of its last
+    // episode falls outside the run, so the run has no thread.
+
     assert_eq!(
-        captions(&browser),
+        lines(&browser),
         [
-            "Entry 1",
-            "Entry 3",
-            "Last Serial",
-            "Segment 2",
-            "Segment 3",
-            "Entry 4",
+            (
+                "Entry 1".to_string(),
+                "Resume · Next in The Saga".to_string()
+            ),
+            (
+                "E03 · Segment 3".to_string(),
+                "Next in Another Serial · S01".to_string()
+            ),
+            (
+                "E02 · Segment 2".to_string(),
+                "Resume · The Serial · S01".to_string()
+            ),
+            (
+                "Entry 3".to_string(),
+                "Next in The Entries · Next in The Cycle".to_string()
+            ),
         ]
     );
 }
 
 #[test]
-fn a_work_the_set_and_a_franchise_both_name_takes_one_card() {
+fn a_leaf_two_threads_offer_takes_the_newer_time() {
     let (browser, _bus) = following();
-    let ids: Vec<&str> = row(&browser)
-        .items
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect();
 
-    assert_eq!(ids.iter().filter(|id| **id == "movies:3").count(), 1);
-}
-
-#[test]
-fn a_work_the_audience_is_in_the_middle_of_is_never_drawn_as_a_successor() {
-    let (browser, _bus) = following();
-    let ids: Vec<&str> = row(&browser)
-        .items
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect();
-
-    assert_eq!(ids.iter().filter(|id| **id == "movies:1").count(), 1);
-    assert!(row(&browser).items[0].progress.is_some());
+    // The audience stopped in the film long ago, and the saga's thread
+    // reached it on the newest night.
+    assert_eq!(ids(&browser)[0], "movies:1");
+    assert_eq!(
+        row(&browser).items[0]
+            .progress
+            .map(|played| played.position),
+        Some(600)
+    );
 }
 
 #[test]
@@ -274,32 +311,100 @@ fn a_work_the_audience_has_not_started_carries_no_bar() {
         .map(|item| item.progress.map(|played| played.position))
         .collect();
 
-    assert_eq!(reached, [Some(600), None, None, Some(1_200), None, None]);
+    assert_eq!(reached, [Some(600), None, Some(1_200), None]);
+}
+
+// The plays of a household that finished the last serial's second
+// episode, so its series and its two franchises offer one episode.
+fn mid_serial() -> Vec<Resume> {
+    vec![play(
+        "series",
+        LAST_SERIAL,
+        "Last Serial",
+        reached(2_760, 2_760, (1, 2), 50),
+    )]
 }
 
 #[test]
-fn a_show_that_follows_a_film_draws_as_a_show() {
-    let (browser, _bus) = following();
-    let show = &row(&browser).items[2];
+fn an_episode_a_series_and_its_franchises_offer_is_one_card_with_every_reason() {
+    let (browser, _bus) = watched(mid_serial(), true);
 
-    assert_eq!(show.kind, "series");
-    assert_eq!(show.id, LAST_SERIAL);
-    assert_eq!(show.episode, None);
+    assert_eq!(
+        lines(&browser),
+        [(
+            "E03 · Segment 3".to_string(),
+            "Next in Last Serial · Next in The Saga · Next in The Run · S01".to_string()
+        )]
+    );
 }
 
 #[test]
-fn a_show_whose_last_episode_the_audience_finished_is_followed_by_its_franchise() {
-    let (browser, _bus) = following();
-    let after = &row(&browser).items[5];
+fn a_press_on_a_card_with_a_series_reason_opens_the_series_page_on_that_episode() {
+    let (mut browser, bus) = watched(mid_serial(), true);
+    on_the_row(&mut browser);
 
-    assert_eq!(after.kind, "movies");
-    assert_eq!(after.id, "movies:4");
-    assert_eq!(after.caption, "Entry 4");
+    browser.key("enter");
+
+    let page = showing_series(&browser);
+    assert_eq!(page.id, LAST_SERIAL);
+    assert_eq!(page.focus, SeriesFocus::Still(2));
+    assert!(published_nothing(&bus));
+}
+
+#[test]
+fn a_series_member_cut_to_a_run_ends_where_the_run_ends() {
+    let (browser, _bus) = watched(
+        vec![play(
+            "series",
+            LAST_SERIAL,
+            "Last Serial",
+            reached(2_760, 2_760, (1, 4), 50),
+        )],
+        true,
+    );
+
+    assert_eq!(
+        lines(&browser),
+        [
+            (
+                "E01 · Segment 1".to_string(),
+                "Next in Last Serial · Next in The Saga · S02".to_string()
+            ),
+            ("Entry 4".to_string(), "Next in The Run".to_string()),
+        ]
+    );
+    assert_eq!(ids(&browser)[0], "episode:2:1");
+}
+
+#[test]
+fn a_press_on_a_card_only_a_franchise_offers_opens_the_franchise_page_on_the_member() {
+    let (mut browser, bus) = watched(
+        vec![play(
+            "series",
+            LAST_SERIAL,
+            "Last Serial",
+            reached(2_760, 2_760, (1, 4), 50),
+        )],
+        true,
+    );
+    on_the_row(&mut browser);
+    browser.key("right");
+
+    browser.key("enter");
+
+    let page = showing_franchise(&browser);
+    assert_eq!(page.title, "The Run");
+    assert_eq!(page.focus, 1);
+    assert_eq!(page.rows[1].cell.id, "movies:4");
+    assert!(published_nothing(&bus));
 }
 
 #[test]
 fn a_press_on_a_film_of_the_row_opens_its_page_on_resume() {
-    let (mut browser, bus) = on_the_row();
+    let (mut browser, bus) = continuing();
+    on_the_row(&mut browser);
+    browser.key("right");
+    browser.key("right");
 
     browser.key("enter");
 
@@ -317,7 +422,8 @@ fn a_press_on_a_film_of_the_row_opens_its_page_on_resume() {
 
 #[test]
 fn a_press_on_an_episode_of_the_row_opens_the_series_page_on_that_episode() {
-    let (mut browser, bus) = on_the_row();
+    let (mut browser, bus) = continuing();
+    on_the_row(&mut browser);
     browser.key("right");
 
     browser.key("enter");
@@ -332,9 +438,8 @@ fn a_press_on_an_episode_of_the_row_opens_the_series_page_on_that_episode() {
 
 #[test]
 fn a_press_on_an_episode_the_audience_has_not_started_opens_the_series_page_on_it() {
-    let (mut browser, bus) = on_the_row();
-    browser.key("right");
-    browser.key("right");
+    let (mut browser, bus) = continuing();
+    on_the_row(&mut browser);
 
     browser.key("enter");
 
@@ -346,9 +451,139 @@ fn a_press_on_an_episode_the_audience_has_not_started_opens_the_series_page_on_i
 
 #[test]
 fn a_row_the_store_answers_nothing_for_holds_nothing() {
-    let (mut browser, _bus) = playing(Vec::new());
-    browser.pump(0.0);
+    let (browser, _bus) = watched(Vec::new(), false);
 
     assert!(row(&browser).items.is_empty());
-    assert_eq!(row(&browser).heading, "Continue watching");
+    assert_eq!(row(&browser).heading, "Continue watching · ");
+    assert_eq!(row(&browser).letters, ["F"]);
+}
+
+#[test]
+fn the_heading_carries_the_letters_of_the_people_at_the_screen() {
+    let (browser, _bus) = continuing();
+
+    assert_eq!(row(&browser).letters, ["F"]);
+    assert!(!row(&browser).rung);
+}
+
+#[test]
+fn left_from_the_first_card_reaches_the_circles_and_right_returns() {
+    let (mut browser, _bus) = continuing();
+    on_the_row(&mut browser);
+
+    assert!(browser.key("left"));
+    assert!(row(&browser).rung);
+    assert_eq!(row(&browser).focus, 0);
+    assert!(browser.picker.is_none());
+
+    assert!(browser.key("right"));
+    assert!(!row(&browser).rung);
+    assert_eq!(row(&browser).focus, 0);
+}
+
+#[test]
+fn enter_on_the_circles_raises_the_picker_with_the_room_chosen() {
+    let (mut browser, _bus) = continuing();
+    on_the_row(&mut browser);
+    browser.key("left");
+
+    assert!(browser.key("enter"));
+
+    let picker = browser.picker.as_ref().expect("the picker stands");
+    assert_eq!(picker.tiles(), 1);
+    assert!(picker.holds(0));
+}
+
+#[test]
+fn up_from_any_card_reaches_the_circles_and_up_again_leaves_the_row_upward() {
+    let (mut browser, _bus) = continuing();
+    on_the_row(&mut browser);
+    browser.key("right");
+    assert_eq!(row(&browser).focus, 1);
+
+    assert!(browser.key("up"));
+    assert!(row(&browser).rung);
+    assert_eq!(showing_home(&browser).focus, 1);
+    assert!(!browser.on_strip);
+
+    // The banner over this row holds nothing, so up goes on to the
+    // browser's strip, as up from a card of the row does.
+    assert!(browser.key("up"));
+    assert!(browser.on_strip);
+    assert_eq!(showing_home(&browser).focus, 1);
+}
+
+#[test]
+fn down_from_the_circles_returns_to_the_card_focus_left() {
+    let (mut browser, _bus) = continuing();
+    on_the_row(&mut browser);
+    browser.key("right");
+    browser.key("up");
+    assert!(row(&browser).rung);
+
+    assert!(browser.key("down"));
+
+    assert_eq!(showing_home(&browser).focus, 1);
+    assert!(!row(&browser).rung);
+    assert_eq!(row(&browser).focus, 1);
+}
+
+#[test]
+fn leaving_the_row_puts_focus_back_on_the_cards() {
+    let (mut browser, _bus) = continuing();
+    on_the_row(&mut browser);
+    browser.key("left");
+    assert!(row(&browser).rung);
+
+    // Down returns to the card, down again leaves the row, and up comes
+    // back to the row on its cards.
+    browser.key("down");
+    browser.key("down");
+    assert_ne!(showing_home(&browser).focus, 1);
+    browser.key("up");
+
+    assert_eq!(showing_home(&browser).focus, 1);
+    assert!(!row(&browser).rung);
+}
+
+// Whether the home page holds the continue-watching row at all.
+fn holds_the_row(browser: &Browser<Fake, NoArt>) -> bool {
+    showing_home(browser)
+        .blocks
+        .iter()
+        .filter_map(|block| block.strip())
+        .any(|strip| strip.row == crate::screens::home::Row::Continue)
+}
+
+#[test]
+fn an_empty_audience_draws_no_continue_watching_row() {
+    let (mut browser, _bus) = continuing();
+    assert!(holds_the_row(&browser));
+
+    // The answer lapses, the picker rises, and back answers nobody.
+    browser.tick(crate::audience::IDLE_SECONDS + 1.0);
+    browser.key("escape");
+    browser.pump(crate::audience::IDLE_SECONDS + 2.0);
+
+    assert!(!holds_the_row(&browser));
+}
+
+#[test]
+fn the_row_comes_back_with_the_pickers_answer() {
+    let (mut browser, _bus) = continuing();
+    browser.tick(crate::audience::IDLE_SECONDS + 1.0);
+    browser.key("escape");
+    browser.pump(crate::audience::IDLE_SECONDS + 2.0);
+    assert!(!holds_the_row(&browser));
+
+    // The people key raises the picker, and the one tile is chosen and
+    // answered.
+    browser.key("people");
+    browser.key("enter");
+    browser.key("down");
+    browser.key("enter");
+    browser.pump(crate::audience::IDLE_SECONDS + 3.0);
+
+    assert!(holds_the_row(&browser));
+    assert_eq!(row(&browser).letters, ["F"]);
 }

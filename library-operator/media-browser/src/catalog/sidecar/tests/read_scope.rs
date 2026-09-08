@@ -147,11 +147,11 @@ fn a_reader_without_streams_starts_a_fresh_scope_for_each_page() {
         day: 3,
     };
 
-    let first = home::read(&mut *reader, today, &[]);
+    let first = home::read(&mut *reader, today, &[], &[]);
     assert_eq!(person_strip_headshot(&first), "");
     add_other_entry(&path, "tmdb", "31");
 
-    let second = home::read(&mut *reader, today, &[]);
+    let second = home::read(&mut *reader, today, &[], &[]);
     assert_eq!(
         person_strip_headshot(&second),
         format!("{OTHER}/headshot.jpg")
@@ -349,6 +349,7 @@ fn a_page_read_ends_its_scope_when_the_source_panics() {
                 month: 9,
                 day: 3,
             },
+            &[],
             &[],
         )
     }));

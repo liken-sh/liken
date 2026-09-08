@@ -50,6 +50,10 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
   The compose key raises the person picker, the WWW key goes home,
   and page up and down are named for a later choice. Fast follow.
+* [52, Threads](52-threads.md). The continue row across series, sets,
+  and franchises: an exact-audience thread that a guest night extends
+  and an old solo run does not, the plain successor, reasons stacked
+  on one card per leaf, and the franchise page opened on a member.
 
 ## Future
 

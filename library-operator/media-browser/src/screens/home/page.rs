@@ -17,6 +17,9 @@ pub struct Page {
     /// The people the continue-watching row was read for. The screen keeps
     /// them so a re-read of its own asks for the same audience.
     pub people: Vec<String>,
+    // The letters of those people, one per person in the same order, which
+    // the row's heading draws.
+    pub letters: Vec<String>,
     /// The rows in the page's order, each one read, with no focus in any
     /// of them.
     pub blocks: Vec<Block>,
@@ -47,12 +50,16 @@ impl Drop for PageRead<'_> {
 ///
 /// Read every row of the page. `people` is the audience the
 /// continue-watching row is read for.
-pub fn read(source: &mut dyn Source, today: Date, people: &[String]) -> Page {
+// `letters` are their letters for the row's heading. An empty audience
+// takes no continue-watching row at all, neither a heading nor cards, and
+// the row is back with the next answer.
+pub fn read(source: &mut dyn Source, today: Date, people: &[String], letters: &[String]) -> Page {
     let scope = PageRead::begin(source);
     let source = &mut *scope.source;
     let seconds = today.seconds();
     let mut blocks: Vec<Block> = rows(seconds, draw::draw(today, &source.pool()))
         .into_iter()
+        .filter(|row| !(people.is_empty() && *row == Row::Continue))
         .map(Block::new)
         .collect();
     // The released strip's items are in hand while the added strip reads,
@@ -61,7 +68,7 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String]) -> Page {
     for index in 0..blocks.len() {
         let released = released(&blocks);
         if let Block::Strip(strip) = &mut blocks[index] {
-            strip.reread(source, seconds, &released, people);
+            strip.reread(source, seconds, &released, people, letters);
         }
     }
     let titles = titles(&blocks, source);
@@ -74,6 +81,7 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String]) -> Page {
     Page {
         date: today,
         people: people.to_vec(),
+        letters: letters.to_vec(),
         blocks,
     }
 }

@@ -101,26 +101,58 @@ pub const CIRCLE: f32 = GLASS;
 // thing.
 const CIRCLE_GAP: f32 = 6.0;
 
+// The width a row of this many circles takes, and nothing at all where
+// the room is empty.
+pub fn circles_width(count: usize) -> f32 {
+    match count {
+        0 => 0.0,
+        _ => count as f32 * CIRCLE + (count - 1) as f32 * CIRCLE_GAP,
+    }
+}
+
 /// The box this many circles take in a frame this wide: a row that ends a
 /// margin before the glass, and nothing at all where the room is empty.
 pub fn circles_at(width: f32, count: usize) -> Rectangle {
-    let taken = match count {
-        0 => 0.0,
-        _ => count as f32 * CIRCLE + (count - 1) as f32 * CIRCLE_GAP,
-    };
+    let taken = circles_width(count);
     let right = glass_at(width).x - band::PAD;
     area(right - taken, (band::HEIGHT - CIRCLE) / 2.0, taken, CIRCLE)
 }
 
 /// The box one circle of the row draws in.
 pub fn circle_at(width: f32, count: usize, index: usize) -> Rectangle {
-    let row = circles_at(width, count);
+    circle_in(circles_at(width, count), index)
+}
+
+// The box one circle of a row draws in, by its index, for a row that
+// starts at this box.
+pub fn circle_in(row: Rectangle, index: usize) -> Rectangle {
     area(
         row.x + index as f32 * (CIRCLE + CIRCLE_GAP),
         row.y,
         CIRCLE,
         CIRCLE,
     )
+}
+
+// One circle of the room: a muted disc with the letter on it, the way the
+// strip and the continue-watching row's heading both draw a person.
+pub fn circle(frame: &mut canvas::Frame<Renderer>, at: Rectangle, letter: &str) {
+    frame.fill(
+        &canvas::Path::circle(Point::new(at.center_x(), at.center_y()), at.width / 2.0),
+        look::muted(),
+    );
+    text::shown(
+        frame,
+        letter,
+        area(
+            at.x,
+            at.center_y() - text::height(1, look::FACE) / 2.0,
+            at.width,
+            text::height(1, look::FACE),
+        ),
+        look::FACE,
+        look::text(),
+    );
 }
 
 impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
@@ -158,23 +190,7 @@ impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
         if !self.letters.is_empty() && self.field.is_none() {
             let count = self.letters.len();
             for (index, letter) in self.letters.iter().enumerate() {
-                let at = circle_at(bounds.width, count, index);
-                frame.fill(
-                    &canvas::Path::circle(Point::new(at.center_x(), at.center_y()), at.width / 2.0),
-                    look::muted(),
-                );
-                text::shown(
-                    &mut frame,
-                    letter,
-                    area(
-                        at.x,
-                        at.center_y() - text::height(1, look::FACE) / 2.0,
-                        at.width,
-                        text::height(1, look::FACE),
-                    ),
-                    look::FACE,
-                    look::text(),
-                );
+                circle(&mut frame, circle_at(bounds.width, count, index), letter);
             }
             if self.focus == Some(Target::Circles) {
                 mark(&mut frame, circles_at(bounds.width, count));

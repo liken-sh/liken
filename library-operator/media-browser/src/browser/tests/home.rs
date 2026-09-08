@@ -53,7 +53,6 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
     assert_eq!(
         headings(&browser),
         [
-            "Continue watching",
             "Recently released",
             "Recently added",
             "Libraries",
@@ -61,10 +60,10 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
             "Franchises · 2"
         ]
     );
-    assert_eq!(home.focus, 2);
+    assert_eq!(home.focus, 1);
 
     let strips = strips(&browser);
-    let released = strips[1];
+    let released = strips[0];
     assert_eq!(
         released.last.as_ref().map(|last| last.words.as_str()),
         Some("See all")
@@ -75,39 +74,39 @@ fn the_page_holds_the_two_recency_strips_over_the_libraries() {
     assert_eq!(released.items[0].under, "The Serial · S01 · E02 · 46m");
     assert_eq!(released.items[0].art, "s1e2.jpg");
     assert_eq!(released.items[1].caption, "The Serial");
-    let added = strips[2];
+    let added = strips[1];
     assert_eq!(added.items.len(), 1);
     assert_eq!(added.items[0].caption, "Entry 1");
-    assert!(strips[3].last.is_none());
-    assert_eq!(strips[3].lines, 2);
+    assert!(strips[2].last.is_none());
+    assert_eq!(strips[2].lines, 2);
 }
 
 #[test]
 fn up_and_down_move_between_the_strips_and_each_remembers_its_focus() {
     let mut browser = on_strips(3);
     browser.key("right");
-    assert_eq!(at(&browser), (2, 1));
+    assert_eq!(at(&browser), (1, 1));
 
     browser.key("down");
-    assert_eq!(at(&browser), (3, 0));
+    assert_eq!(at(&browser), (2, 0));
     browser.key("right");
     browser.key("down");
+    assert_eq!(at(&browser), (3, 0));
+    browser.key("down");
     assert_eq!(at(&browser), (4, 0));
     browser.key("down");
     assert_eq!(at(&browser), (5, 0));
     browser.key("down");
-    assert_eq!(at(&browser), (6, 0));
-    browser.key("down");
-    assert_eq!(at(&browser), (6, 0));
+    assert_eq!(at(&browser), (5, 0));
 
     browser.key("up");
-    assert_eq!(at(&browser), (5, 0));
-    browser.key("up");
     assert_eq!(at(&browser), (4, 0));
     browser.key("up");
-    assert_eq!(at(&browser), (3, 1));
+    assert_eq!(at(&browser), (3, 0));
     browser.key("up");
     assert_eq!(at(&browser), (2, 1));
+    browser.key("up");
+    assert_eq!(at(&browser), (1, 1));
 }
 
 #[test]
@@ -116,9 +115,9 @@ fn right_reaches_see_all_and_no_further() {
     for _ in 0..6 {
         browser.key("right");
     }
-    assert_eq!(at(&browser), (2, 2));
+    assert_eq!(at(&browser), (1, 2));
     browser.key("left");
-    assert_eq!(at(&browser), (2, 1));
+    assert_eq!(at(&browser), (1, 1));
 }
 
 #[test]
@@ -149,19 +148,19 @@ fn up_from_the_first_strip_reaches_the_banner_then_the_strip_and_down_returns() 
     assert!(!browser.on_strip);
     assert_eq!(showing_home(&browser).focus, 0);
     browser.key("down");
-    assert_eq!(at(&browser), (2, 1));
+    assert_eq!(at(&browser), (1, 1));
 }
 
 #[test]
 fn an_empty_strip_is_skipped_and_up_from_the_libraries_reaches_the_strip() {
     let mut browser = browser(3);
-    assert_eq!(at(&browser), (4, 0));
+    assert_eq!(at(&browser), (3, 0));
 
     browser.key("up");
 
     assert!(browser.on_strip);
     browser.key("down");
-    assert_eq!(at(&browser), (4, 0));
+    assert_eq!(at(&browser), (3, 0));
 }
 
 #[test]
@@ -216,19 +215,19 @@ fn see_all_opens_the_wall_of_every_title_and_back_returns_to_it() {
 
     browser.key("escape");
 
-    assert_eq!(at(&browser), (3, 1));
+    assert_eq!(at(&browser), (2, 1));
 }
 
 #[test]
 fn the_released_strip_holds_the_window_of_today_and_the_added_strip_the_rest() {
     let browser = on_strips(3);
     let strips = strips(&browser);
-    let released: Vec<&str> = strips[1]
+    let released: Vec<&str> = strips[0]
         .items
         .iter()
         .map(|item| item.id.as_str())
         .collect();
-    let added: Vec<&str> = strips[2]
+    let added: Vec<&str> = strips[1]
         .items
         .iter()
         .map(|item| item.id.as_str())
@@ -294,14 +293,14 @@ fn a_select_on_a_library_opens_its_wall() {
 fn a_change_rereads_the_strips_and_keeps_the_focus() {
     let mut browser = browser(3);
     browser.key("right");
-    assert_eq!(at(&browser), (4, 1));
+    assert_eq!(at(&browser), (3, 1));
 
     browser.source.recent = true;
     browser.source.changed = true;
     assert!(browser.pump(1.0));
 
-    assert_eq!(at(&browser), (4, 1));
-    assert_eq!(strips(&browser)[1].items.len(), 2);
+    assert_eq!(at(&browser), (3, 1));
+    assert_eq!(strips(&browser)[0].items.len(), 2);
 }
 
 #[test]
@@ -313,7 +312,7 @@ fn a_change_that_empties_the_focused_strip_moves_focus_to_the_next() {
     browser.source.changed = true;
     browser.pump(1.0);
 
-    assert_eq!(at(&browser), (4, 0));
+    assert_eq!(at(&browser), (3, 0));
 }
 
 #[test]
@@ -323,10 +322,10 @@ fn a_change_that_empties_every_strip_leaves_focus_on_a_row_that_holds_titles() {
     browser.source.movies = 0;
     browser.source.changed = true;
     browser.pump(1.0);
-    assert_eq!(strips(&browser)[3].items.len(), 2);
+    assert_eq!(strips(&browser)[2].items.len(), 2);
 
     browser.key("down");
-    assert_eq!(at(&browser), (5, 0));
+    assert_eq!(at(&browser), (4, 0));
 }
 
 #[test]
@@ -423,20 +422,19 @@ fn headings(browser: &Browser<Fake, NoArt>) -> Vec<&str> {
 fn the_drawn_strips_sit_between_the_recency_strips_and_the_libraries() {
     let browser = with_draw();
     let headings = headings(&browser);
-    assert_eq!(headings.len(), 10);
-    assert_eq!(headings[0], "Continue watching");
-    assert_eq!(headings[1], "Recently released");
-    assert_eq!(headings[2], "Recently added");
-    assert_eq!(headings[7], "Libraries");
-    assert_eq!(headings[8], "Genres");
-    assert_eq!(headings[9], "Franchises · 2");
-    let mut drawn: Vec<&str> = headings[3..7].to_vec();
+    assert_eq!(headings.len(), 9);
+    assert_eq!(headings[0], "Recently released");
+    assert_eq!(headings[1], "Recently added");
+    assert_eq!(headings[6], "Libraries");
+    assert_eq!(headings[7], "Genres");
+    assert_eq!(headings[8], "Franchises · 2");
+    let mut drawn: Vec<&str> = headings[2..6].to_vec();
     drawn.sort_unstable();
     assert_eq!(drawn, [PLAYER_STRIP, "Drama", "The Entries", "Western"]);
-    let first_three = &headings[3..6];
+    let first_three = &headings[2..5];
     assert!(first_three.contains(&PLAYER_STRIP));
     assert!(first_three.contains(&"The Entries"));
-    let last: Vec<(&str, Option<&str>)> = strips(&browser)[3..7]
+    let last: Vec<(&str, Option<&str>)> = strips(&browser)[2..6]
         .iter()
         .map(|strip| {
             (
@@ -550,13 +548,13 @@ fn a_reread_keeps_focus_on_the_drawn_strip_it_was_on() {
         browser.key("down");
     }
     browser.key("right");
-    let before = headings(&browser)[4].to_string();
+    let before = headings(&browser)[3].to_string();
 
     browser.source.changed = true;
     browser.pump(1.0);
 
-    assert_eq!(at(&browser), (5, 1));
-    assert_eq!(headings(&browser)[4], before);
+    assert_eq!(at(&browser), (4, 1));
+    assert_eq!(headings(&browser)[3], before);
 }
 
 #[test]
@@ -573,7 +571,6 @@ fn a_pool_that_empties_takes_its_strips_with_it() {
     assert_eq!(
         headings(&browser),
         [
-            "Continue watching",
             "Recently released",
             "Recently added",
             "Libraries",
@@ -581,7 +578,7 @@ fn a_pool_that_empties_takes_its_strips_with_it() {
             "Franchises · 2"
         ]
     );
-    assert_eq!(at(&browser), (5, 0));
+    assert_eq!(at(&browser), (4, 0));
 }
 
 #[test]
@@ -593,8 +590,8 @@ fn the_genres_strip_holds_every_genre() {
 
     let (row, slot) = at(&browser);
     let strips = strips(&browser);
-    let genres = strips[4];
-    assert_eq!((row, slot), (5, 0));
+    let genres = strips[3];
+    assert_eq!((row, slot), (4, 0));
     assert_eq!(genres.heading, "Genres");
     assert!(genres.last.is_none());
     let names: Vec<&str> = genres.items.iter().map(|item| item.name.as_str()).collect();
@@ -685,7 +682,7 @@ fn back_from_a_page_with_nothing_changed_reads_the_home_page_no_further() {
     browser.key("escape");
 
     assert!(browser.source.calls.is_empty());
-    assert_eq!(at(&browser), (2, 0));
+    assert_eq!(at(&browser), (1, 0));
 }
 
 #[test]
@@ -699,7 +696,7 @@ fn back_from_a_page_after_a_change_reads_the_home_page_again() {
     browser.key("escape");
 
     assert!(browser.source.calls.contains(&"pool"));
-    assert_eq!(at(&browser), (2, 0));
+    assert_eq!(at(&browser), (1, 0));
 }
 
 #[test]
@@ -726,7 +723,7 @@ fn the_franchises_strip_ends_the_page_and_holds_every_franchise() {
     let (row, slot) = at(&browser);
     let strips = strips(&browser);
     let franchises = strips.last().expect("the page ends with the franchises");
-    assert_eq!((row, slot), (6, 0));
+    assert_eq!((row, slot), (5, 0));
     assert_eq!(franchises.heading, "Franchises · 2");
     assert!(franchises.last.is_none());
     let names: Vec<&str> = franchises

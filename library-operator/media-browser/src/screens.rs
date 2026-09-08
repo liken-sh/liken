@@ -70,6 +70,10 @@ pub enum Step {
     /// Put this screen in the place of the one that answered, so back
     /// climbs to the screen that one was opened from.
     Replace(Screen),
+    // Ask who is watching: raise the person picker with the room already
+    // chosen, which is what enter on the circles of the continue-watching row
+    // asks for. Only the browser holds the picker.
+    Ask,
     /// Ask the operator to play what the person chose.
     Play {
         /// The library the choice resolves against.
@@ -269,6 +273,19 @@ pub struct Item {
     /// How far a play of the work reached, on the slots of the
     /// continue-watching row, and nothing on every other item.
     pub progress: Option<Played>,
+    // The franchise member a press opens the franchise page on. It is set
+    // only on a card of the continue-watching row whose first reason is a
+    // franchise, and it is nothing on every other item.
+    pub franchise: Option<InFranchise>,
+}
+
+// The franchise page a card opens and the member its focus lands on, by
+// the member's position in story order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InFranchise {
+    pub library: String,
+    pub id: String,
+    pub position: i64,
 }
 
 impl Item {
@@ -293,8 +310,25 @@ impl Item {
     /// behind it, because the row is read from the progress store and not
     /// from a wall, so its card takes the facts spelling every slot outside
     /// a person's or a set's strip takes.
-    pub fn resumed(slot: Slot) -> Self {
-        Self::spelled(slot, Spelling::Facts)
+    // The second line is `under`, the reasons the row gives for the card,
+    // and `franchise` is the member a press opens where the first reason is a
+    // franchise.
+    // An episode card leads with the episode number and the title, `E06 ·
+    // Delusion`, two digits as every still spells them.
+    pub fn resumed(slot: Slot, under: String, franchise: Option<InFranchise>) -> Self {
+        let caption = slot
+            .episode
+            .as_ref()
+            .map(|place| format!("E{:02} · {}", place.episode, slot.title));
+        let mut item = Self::spelled(slot, Spelling::Facts);
+        if let Some(caption) = caption {
+            item.fitted = caption.clone();
+            item.caption = caption;
+        }
+        item.under_fitted = under.clone();
+        item.under = under;
+        item.franchise = franchise;
+        item
     }
 
     // One slot as an item, with both caption lines cut to the spelling the
@@ -362,6 +396,7 @@ impl Item {
             episode: slot.episode,
             new: slot.new,
             progress: slot.progress,
+            franchise: None,
         }
     }
 

@@ -81,7 +81,6 @@ fn a_page_read_on_the_thread_lands_on_a_later_pump() {
     assert_eq!(
         headings(&browser),
         [
-            "Continue watching",
             "Recently released",
             "Recently added",
             "Libraries",
@@ -89,7 +88,7 @@ fn a_page_read_on_the_thread_lands_on_a_later_pump() {
             "Franchises · 2"
         ]
     );
-    assert_eq!(strip_at(&browser, 2).items.len(), 2);
+    assert_eq!(strip_at(&browser, 1).items.len(), 2);
     assert!(!browser.source.calls.contains(&"pool"));
 }
 

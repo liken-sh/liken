@@ -52,6 +52,7 @@ fn entry(position: i64, span: (f64, f64), universes: &[&str]) -> Entry {
         universes: universes.iter().map(|name| name.to_string()).collect(),
         held: Some(held(&format!("movie:path:{position}"))),
         episodes: 0,
+        runs: Vec::new(),
     }
 }
 

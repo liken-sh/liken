@@ -71,7 +71,31 @@ impl Franchise {
     /// franchise under that id. Focus lands on the first row, so a press opens
     /// the first entry of the story.
     pub fn open(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
+        Self::read(library, id, source).map(|(page, _)| page)
+    }
+
+    // The page with focus on the row of the entry at this position in story
+    // order, which is where a press on a card of the continue-watching row
+    // lands. Focus stays on the first row where the order holds no entry at
+    // that position.
+    pub fn open_at(
+        library: &str,
+        id: &str,
+        position: i64,
+        source: &mut dyn Source,
+    ) -> Option<Self> {
+        let (mut page, positions) = Self::read(library, id, source)?;
+        if let Some(row) = positions.iter().position(|at| *at == position) {
+            page.focus = row;
+        }
+        Some(page)
+    }
+
+    // The page with focus on the first row, and the story position of every
+    // row, so an entry by position finds its row.
+    fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<(Self, Vec<i64>)> {
         let read = source.franchise(library, id)?;
+        let positions = read.entries.iter().map(|entry| entry.position).collect();
         let today = Date::today().iso();
         let universes = wall::columns(&read);
         let rows = wall::story(&read, &universes, &today);
@@ -81,7 +105,7 @@ impl Franchise {
         // read, because they answer the same words on every frame.
         let time = wall::time_width(&rows);
         let caption = wall::caption(&read.calendar, time);
-        Some(Self {
+        let page = Self {
             library: library.to_string(),
             id: id.to_string(),
             title: read.title,
@@ -93,7 +117,8 @@ impl Franchise {
             headings,
             focus: 0,
             scrolled: cell::Cell::new(0.0),
-        })
+        };
+        Some((page, positions))
     }
 
     /// Read the page again, because a scan can write the order while

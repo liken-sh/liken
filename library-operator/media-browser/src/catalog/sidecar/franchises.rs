@@ -187,9 +187,12 @@ pub fn franchise(
     Ok(found)
 }
 
-// The two columns both member reads select after [`COLUMNS`]: how many
-// episodes of a series run the catalog holds, and the tagline of the held
-// item. A card of the wall and a card of the strip both draw them.
+// The three columns both member reads select after [`COLUMNS`]: how many
+// episodes of a series run the catalog holds, the tagline of the held
+// item, and the runs of the member. A card of the wall and a card of the
+// strip draw the first two.
+// The runs column is a JSON list of season and episode pairs, and the
+// continue-watching row cuts a series member to them.
 const HELD: &str = "(SELECT count(*) FROM episodes e \
                      JOIN aliases sa ON sa.library = e.library AND sa.item = e.series \
                      WHERE sa.alias = m.alias \
@@ -202,19 +205,39 @@ const HELD: &str = "(SELECT count(*) FROM episodes e \
                                          AND r.franchise = m.franchise \
                                          AND r.position = m.position AND r.season = e.season \
                                          AND r.episode IN (0, e.episode)))) AS held_episodes, \
-                    json_extract(i.body, '$.tagline')";
+                    json_extract(i.body, '$.tagline'), \
+                    (SELECT json_group_array(json_array(r.season, r.episode)) \
+                     FROM franchise_runs r \
+                     WHERE r.library = m.library AND r.franchise = m.franchise \
+                       AND r.position = m.position)";
 
 // How many columns [`COLUMNS`] names, so a read counts the ones it
 // selects after them from where the member's own end.
 const MEMBER: usize = 19;
 
-// The two columns [`HELD`] adds, folded into the entry the row opened.
+// The three columns [`HELD`] adds, folded into the entry the row opened.
 fn held(row: &Row<'_>, at: usize, member: &mut Entry) -> rusqlite::Result<()> {
     member.episodes = row.get(at)?;
     if let Some(held) = member.held.as_mut() {
         held.tagline = item::text(row, at + 1)?;
     }
+    member.runs = runs(&item::text(row, at + 2)?);
     Ok(())
+}
+
+// The runs column as pairs, in the order the store answers them. A
+// malformed column reads as no runs.
+fn runs(json: &str) -> Vec<(i64, i64)> {
+    let Ok(Value::Array(pairs)) = serde_json::from_str::<Value>(json) else {
+        return Vec::new();
+    };
+    pairs
+        .iter()
+        .filter_map(|pair| {
+            let numbers = pair.as_array()?;
+            Some((numbers.first()?.as_i64()?, numbers.get(1)?.as_i64()?))
+        })
+        .collect()
 }
 
 // Every entry of one franchise in story order, held or not. The
@@ -239,7 +262,7 @@ fn entries(connection: &Connection, library: &str, id: &str) -> rusqlite::Result
         let mut member = entry(row, 0)?;
         held(row, MEMBER, &mut member)?;
         if let Some(held) = member.held.as_mut() {
-            held.plot = item::text(row, MEMBER + 2)?;
+            held.plot = item::text(row, MEMBER + 3)?;
         }
         Ok(member)
     })
@@ -279,6 +302,7 @@ fn entry(row: &Row<'_>, at: usize) -> rusqlite::Result<Entry> {
         universes: item::strings(&item::text(row, at + 8)?),
         held,
         episodes: 0,
+        runs: Vec::new(),
     })
 }
 
@@ -334,6 +358,14 @@ fn word(block: &serde_json::Map<String, Value>, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_runs_column_reads_as_pairs_and_anything_else_as_none() {
+        assert_eq!(runs("[[1,0],[2,3]]"), [(1, 0), (2, 3)]);
+        assert_eq!(runs("[]"), []);
+        assert_eq!(runs(""), []);
+        assert_eq!(runs("[[1]]"), []);
+    }
 
     #[test]
     fn a_body_with_no_calendar_answers_none() {

@@ -364,9 +364,10 @@ fn the_sample_catalog_holds_no_progress() {
     let people = ["first".to_string()];
 
     assert!(catalog.continue_watching(&people).is_empty());
-    assert_eq!(
-        catalog.progress_of("sample/features", "movie:sample:1", &people),
-        None
+    assert!(
+        catalog
+            .plays_of("sample/features", "movie:sample:1", &people)
+            .is_empty()
     );
     assert!(
         catalog

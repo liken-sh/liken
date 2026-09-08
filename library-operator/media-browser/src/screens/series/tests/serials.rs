@@ -251,6 +251,24 @@ impl Source for Serials {
         self.progress.clone()
     }
 
+    // The same plays as whole rows, every one the audience's own, so the
+    // wall opens on the episode the marks say.
+    fn plays_of(
+        &mut self,
+        _library: &str,
+        _id: &str,
+        _people: &[String],
+    ) -> Vec<crate::catalog::Resume> {
+        self.progress
+            .iter()
+            .map(|progress| crate::catalog::Resume {
+                progress: progress.clone(),
+                exact: true,
+                ..crate::catalog::Resume::default()
+            })
+            .collect()
+    }
+
     fn wake_by(&mut self, _wake: Waker) {}
 }
 

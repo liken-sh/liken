@@ -208,6 +208,7 @@ fn film(position: i64, number: i64, span: (f64, f64), universes: &[&str]) -> Ent
             duration: title.duration,
         }),
         episodes: 0,
+        runs: Vec::new(),
     }
 }
 
@@ -243,6 +244,7 @@ fn run(position: i64, number: i64, span: (f64, f64), episodes: i64) -> Entry {
             duration: 0,
         }),
         episodes,
+        runs: Vec::new(),
     }
 }
 
@@ -275,6 +277,7 @@ fn gap(
         universes: Vec::new(),
         held: None,
         episodes: 0,
+        runs: Vec::new(),
     }
 }
 

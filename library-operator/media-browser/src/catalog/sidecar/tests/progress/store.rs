@@ -11,7 +11,7 @@ fn a_source_with_no_progress_store_reads_no_progress() {
     let mut source = SidecarSource::new(&catalog, NO_AGENT);
 
     assert_eq!(watching(&mut source, &["first"]), []);
-    assert_eq!(source.progress_of(FILMS, FILM, &names(&["first"])), None);
+    assert_eq!(source.plays_of(FILMS, FILM, &names(&["first"])), []);
     assert_eq!(source.episode_progress(SHOWS, SHOW, &names(&["first"])), []);
 }
 
@@ -37,7 +37,7 @@ fn the_reads_never_write_the_progress_file() {
     let mut source = source_over(&catalog, store.clone());
 
     watching(&mut source, &["first"]);
-    source.progress_of(FILMS, FILM, &names(&["first"]));
+    source.plays_of(FILMS, FILM, &names(&["first"]));
     source.episode_progress(SHOWS, SHOW, &names(&["first"]));
 
     assert_eq!(fs::read(&store).unwrap(), before);

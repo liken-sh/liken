@@ -93,11 +93,24 @@ Enter on the rail's sort button cycles the wall's order.
 
 ## 5. The screens
 
-The home page is the bottom of the stack. It draws a banner, what was
-recently released and recently added, a few strips chosen for the day,
-the libraries row, and every genre. Selecting a library or a genre
-opens a wall of posters under a heading with its count. A wall longer
-than eight rows draws the rail.
+The home page is the bottom of the stack. It draws a banner, a
+continue-watching row, what was recently released and recently added,
+a few strips chosen for the day, the libraries row, and every genre.
+Selecting a library or a genre opens a wall of posters under a heading
+with its count. A wall longer than eight rows draws the rail.
+
+The continue-watching row belongs to the people at the screen. The
+browser asks who is watching, and every play it requests records those
+people. The row then reads the plays that named exactly them: a person
+alone sees what they watched alone, and a family sees what the family
+watched together. A night with one more person in the room still
+counts, as long as it carried on from where the group had reached. For
+each series, set, and franchise those plays touch, the row offers the
+next thing in its order, or the thing to resume, and the card's second
+line says why it is there: "Resume", "Next in" the series, the set, or
+the franchise. A card that is next in a series or a set opens that
+title's page. A card that is next in a franchise alone opens the
+franchise page on that member.
 
 A movie's page shows its art, its facts, its people, and the set or
 franchise it is part of. A series' page shows its seasons as a wall

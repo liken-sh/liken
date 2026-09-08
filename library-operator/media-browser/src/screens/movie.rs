@@ -19,6 +19,7 @@ use super::franchise::strips::{self, Move, Place, Strips};
 use super::{Item, Screen, Step, facts, foot, franchise, person, stripes};
 use crate::art::Art;
 use crate::catalog::draw::Date;
+use crate::catalog::progress::thread;
 use crate::catalog::{MovieDetails, MovieSet, Progress, Query, Selection, Slot, Source};
 use crate::focus;
 use crate::views::curtain::{Curtain, Head, Layer};
@@ -173,8 +174,21 @@ impl Movie {
     /// Read how far these people reached in the film. The browser calls it
     /// at every open and at every re-read, because only the browser holds
     /// the audience.
+    // The film is a container of one leaf, and the thread rule over its
+    // plays says whether the page resumes, so the page and the
+    // continue-watching row agree. A film the thread finished, or one with no
+    // play that names exactly these people, draws the Play row.
     pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
-        self.progress = source.progress_of(&self.library, &self.id, people);
+        let plays: Vec<thread::Play> = source
+            .plays_of(&self.library, &self.id, people)
+            .into_iter()
+            .map(|play| thread::Play {
+                leaf: 0,
+                progress: play.progress,
+                exact: play.exact,
+            })
+            .collect();
+        self.progress = thread::walk(1, &plays).map(|offer| offer.standing);
         self.focus = self.hold(self.focus);
     }
 

@@ -4,7 +4,7 @@
 
 use super::super::*;
 use super::{Films, words};
-use crate::catalog::Progress;
+use crate::catalog::{Progress, Resume};
 
 // The one `Person` these cases record their plays against. The name is
 // invented; a test names no person of a cluster.
@@ -15,11 +15,11 @@ const REACHED: i64 = 2_912;
 const RUNTIME: i64 = 6_720;
 
 // A page of a film this audience played, with a trailer file, after the
-// browser read the progress of it.
-fn watched(progress: Option<Progress>) -> (Movie, Films) {
+// browser read the plays of it.
+fn after_plays(plays: Vec<Resume>) -> (Movie, Films) {
     let mut source = Films {
         trailer: true,
-        progress,
+        plays,
         ..Films::default()
     };
     let mut page =
@@ -28,15 +28,42 @@ fn watched(progress: Option<Progress>) -> (Movie, Films) {
     (page, source)
 }
 
+// The same page after one play of the audience's own, or after none.
+fn watched(progress: Option<Progress>) -> (Movie, Films) {
+    after_plays(
+        progress
+            .into_iter()
+            .map(|progress| own(progress, true))
+            .collect(),
+    )
+}
+
+// One play of the film as the store answers it: the audience's own where
+// `exact`, and a play that named more people where not.
+fn own(progress: Progress, exact: bool) -> Resume {
+    Resume {
+        progress,
+        exact,
+        ..Resume::default()
+    }
+}
+
 // A play that stopped in the middle of the film, or one that reached the
 // end of it.
 fn progress(finished: bool) -> Option<Progress> {
-    Some(Progress {
-        position: REACHED,
+    Some(reached(REACHED, finished, 10))
+}
+
+// A play that reached this second, finished or not, recorded then.
+fn reached(position: i64, finished: bool, recorded: i64) -> Progress {
+    Progress {
+        play: format!("play-{recorded}"),
+        position,
         duration: RUNTIME,
         finished,
+        recorded,
         ..Progress::default()
-    })
+    }
 }
 
 #[test]
@@ -54,6 +81,38 @@ fn a_film_the_audience_is_in_the_middle_of_leads_with_resume() {
 
     assert_eq!(words(&page), ["Resume", "Start over", "Trailer"]);
     assert_eq!(page.focus, Focus::Buttons(0));
+}
+
+#[test]
+fn a_play_that_named_more_people_than_the_audience_draws_no_resume() {
+    let (page, _) = after_plays(vec![own(reached(REACHED, false, 10), false)]);
+
+    assert_eq!(words(&page), ["Play", "Trailer"]);
+    assert_eq!(page.progress, None);
+}
+
+#[test]
+fn a_later_play_with_more_people_moves_the_audiences_own_thread() {
+    let (page, _) = after_plays(vec![
+        own(reached(100, false, 10), true),
+        own(reached(REACHED, false, 20), false),
+    ]);
+
+    assert_eq!(words(&page), ["Resume", "Start over", "Trailer"]);
+    assert_eq!(
+        page.progress.as_ref().map(|reached| reached.position),
+        Some(REACHED)
+    );
+}
+
+#[test]
+fn a_play_with_more_people_that_finished_the_film_leaves_the_play_row() {
+    let (page, _) = after_plays(vec![
+        own(reached(100, false, 10), true),
+        own(reached(RUNTIME, true, 20), false),
+    ]);
+
+    assert_eq!(words(&page), ["Play", "Trailer"]);
 }
 
 #[test]
@@ -125,7 +184,7 @@ fn a_progress_read_that_shortens_the_row_keeps_focus_on_a_button_it_holds() {
     let (mut page, mut source) = watched(progress(false));
     page.key("right", &mut source);
     page.key("right", &mut source);
-    source.progress = progress(true);
+    source.plays = vec![own(reached(REACHED, true, 20), true)];
 
     page.read_progress(&mut source, &[WATCHER.to_string()]);
 

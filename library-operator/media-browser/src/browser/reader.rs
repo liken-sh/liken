@@ -54,10 +54,17 @@ impl Reader {
 
     /// Ask for one page of this date, for these people. A read already in
     /// flight is left to land, and one read follows it.
-    pub fn ask(&mut self, source: &mut dyn Source, today: Date, people: Vec<String>) {
+    pub fn ask(
+        &mut self,
+        source: &mut dyn Source,
+        today: Date,
+        people: Vec<String>,
+        letters: Vec<String>,
+    ) {
         let ask = Ask {
             date: today,
             people,
+            letters,
         };
         let Some(thread) = &self.thread else {
             self.landed = Some(read(source, &ask, &self.timed));
@@ -109,6 +116,8 @@ impl Reader {
 struct Ask {
     date: Date,
     people: Vec<String>,
+    // The letters of those people, for the row's heading.
+    letters: Vec<String>,
 }
 
 // The thread over the second source: the asks it reads on, the pages
@@ -150,7 +159,7 @@ impl Thread {
 // One read, and the milliseconds it took where the run measures them.
 fn read(source: &mut dyn Source, ask: &Ask, timed: &AtomicBool) -> Page {
     let started = Instant::now();
-    let page = home::read(source, ask.date, &ask.people);
+    let page = home::read(source, ask.date, &ask.people, &ask.letters);
     if timed.load(Ordering::Relaxed) {
         let ms = started.elapsed().as_secs_f64() * 1_000.0;
         eprintln!("media-browser: the home page read in {ms:.1} ms");

@@ -38,9 +38,9 @@ struct Films {
     // Whether the movie belongs to a franchise, which puts a strip
     // under the set strip.
     franchise: bool,
-    // Where the audience reached in every film of this catalog, and the
-    // people the last read of it named.
-    progress: Option<crate::catalog::Progress>,
+    // Every play of every film of this catalog, as the store answers them,
+    // and the people the last read of it named.
+    plays: Vec<crate::catalog::Resume>,
     watching: Vec<String>,
 }
 
@@ -254,14 +254,14 @@ impl Source for Films {
         Vec::new()
     }
 
-    fn progress_of(
+    fn plays_of(
         &mut self,
         _library: &str,
         _id: &str,
         people: &[String],
-    ) -> Option<crate::catalog::Progress> {
+    ) -> Vec<crate::catalog::Resume> {
         self.watching = people.to_vec();
-        self.progress.clone()
+        self.plays.clone()
     }
 
     fn changed(&mut self) -> bool {

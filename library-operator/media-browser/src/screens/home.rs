@@ -28,7 +28,6 @@ use super::{Step, slots};
 use crate::art::Art;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
-use crate::focus;
 use crate::views::{self, area, band, strip};
 
 // The band's heading on the home page is the word "Home" and not the
@@ -87,20 +86,24 @@ pub struct Home {
     /// The people the page was last read for, so a re-read of the page asks
     /// the progress store for the same audience.
     pub people: Vec<String>,
+    // The letters of those people, as the continue-watching row's heading
+    // draws them.
+    pub letters: Vec<String>,
 }
 
 impl Home {
     /// Read every row, with focus on the first row that holds anything.
     /// Read the home page. `people` is the audience the continue-watching
     /// row is read for.
-    pub fn open(source: &mut dyn Source, people: &[String]) -> Self {
+    pub fn open(source: &mut dyn Source, people: &[String], letters: &[String]) -> Self {
         let mut home = Self {
             heading: HEADING.to_string(),
             blocks: Vec::new(),
             focus: 0,
             people: Vec::new(),
+            letters: Vec::new(),
         };
-        home.apply(read(source, Date::today(), people));
+        home.apply(read(source, Date::today(), people, letters));
         home
     }
 
@@ -111,7 +114,8 @@ impl Home {
     /// stays.
     pub fn reread(&mut self, source: &mut dyn Source) {
         let people = std::mem::take(&mut self.people);
-        self.apply(read(source, Date::today(), &people));
+        let letters = std::mem::take(&mut self.letters);
+        self.apply(read(source, Date::today(), &people, &letters));
     }
 
     /// Take a page the reader answered. A row the page holds and the
@@ -120,6 +124,7 @@ impl Home {
     pub fn apply(&mut self, page: Page) {
         let focused = self.blocks.get(self.focus).map(Block::row);
         self.people = page.people;
+        self.letters = page.letters;
         let mut banner: Option<Banner> = None;
         let mut kept: Vec<Strip> = Vec::new();
         for block in std::mem::take(&mut self.blocks) {
@@ -201,26 +206,64 @@ impl Home {
     /// from the first row moves nothing, which is how a press reaches
     /// the browser's strip.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
+        // Up from a card of a row that draws the circles lands on them
+        // first, and up from the circles goes on to the row above. Down
+        // from the circles returns to the card focus left.
         match key {
+            "up" if self.climbs() => {}
             "up" => match self.above(self.focus) {
-                Some(index) => self.focus = index,
+                Some(index) => self.leave_for(index),
                 None => return Step::Still,
             },
+            "down" if self.descends() => {}
             "down" => {
                 if let Some(index) = self.below(self.focus) {
-                    self.focus = index;
+                    self.leave_for(index);
                 }
             }
             _ => match self.blocks.get_mut(self.focus) {
                 Some(Block::Banner(banner)) => return banner.key(key, source),
                 Some(Block::Strip(strip)) if key == "enter" => return strip.select(source),
-                Some(Block::Strip(strip)) => {
-                    strip.focus = focus::row(strip.focus, strip.count(), key);
-                }
+                Some(Block::Strip(strip)) => strip.moved(key),
                 None => {}
             },
         }
         Step::Stay
+    }
+
+    // Whether an up press stops at the focused row's circles, which it
+    // does when the row draws some and a card holds focus. The press then
+    // moves focus to the circles and answers true.
+    fn climbs(&mut self) -> bool {
+        match self.blocks.get_mut(self.focus) {
+            Some(Block::Strip(strip)) if !strip.rung && !strip.letters.is_empty() => {
+                strip.rung = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // Whether a down press returns from the focused row's circles to its
+    // card, which it does while the circles hold focus. The press then
+    // moves focus back and answers true.
+    fn descends(&mut self) -> bool {
+        match self.blocks.get_mut(self.focus) {
+            Some(Block::Strip(strip)) if strip.rung => {
+                strip.rung = false;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // Focus moves to another row, and the row it leaves stands on a card
+    // again, so a return to it lands on the cards and not on the circles.
+    fn leave_for(&mut self, index: usize) {
+        if let Some(Block::Strip(strip)) = self.blocks.get_mut(self.focus) {
+            strip.rung = false;
+        }
+        self.focus = index;
     }
 
     /// Whether a rest of focus on this page is worth a prefetch: while the
@@ -390,9 +433,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
                         store,
                         &strip::Strip {
                             headed: false,
+                            letters: &strip.letters,
+                            circled: focused && strip.rung,
                             members: &strip.items,
                             current: None,
-                            focus: focused.then_some(strip.focus),
+                            focus: (focused && !strip.rung).then_some(strip.focus),
                             heading: &strip.heading,
                             library: "",
                             last: strip.last.as_ref().map(Last::view),
@@ -414,7 +459,7 @@ mod tests {
 
     #[test]
     fn a_reread_keeps_the_rows_and_the_row_focus_was_on() {
-        let mut home = Home::open(&mut Catalog, &[]);
+        let mut home = Home::open(&mut Catalog, &[], &[]);
         home.key("down", &mut Catalog);
         let focus = home.focus;
         let rows = home.blocks.len();
@@ -425,18 +470,18 @@ mod tests {
 
     #[test]
     fn a_press_moves_over_a_drawn_row_that_holds_nothing() {
-        let mut home = Home::open(&mut Catalog, &[]);
+        let mut home = Home::open(&mut Catalog, &[], &[]);
         home.blocks.insert(1, Block::Strip(Strip::new(Row::Genres)));
         home.focus = 0;
         home.key("down", &mut Catalog);
-        assert_eq!(home.focus, 3);
+        assert_eq!(home.focus, 2);
         home.key("up", &mut Catalog);
         assert_eq!(home.focus, 0);
     }
 
     #[test]
     fn a_press_past_the_rows_prefetches_nothing_and_moves_nothing() {
-        let mut home = Home::open(&mut Catalog, &[]);
+        let mut home = Home::open(&mut Catalog, &[], &[]);
         home.focus = 99;
         assert!(!home.prefetches());
         assert!(matches!(home.key("enter", &mut Catalog), Step::Stay));

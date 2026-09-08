@@ -215,7 +215,20 @@ pub const SETS: &str = "sets";
 /// three kinds no other wall holds: a set opens the wall of its members,
 /// a franchise opens its page, and a person opens theirs. Nothing where
 /// the catalog no longer holds the item.
+// A card whose first reason is a franchise opens the franchise page on
+// that member, before the kind is read.
 pub fn opened(item: &Item, source: &mut dyn Source) -> Step {
+    if let Some(place) = &item.franchise {
+        return match franchise::Franchise::open_at(
+            &place.library,
+            &place.id,
+            place.position,
+            source,
+        ) {
+            Some(page) => Step::Open(Screen::Franchise(Box::new(page))),
+            None => Step::Stay,
+        };
+    }
     if item.kind == SETS {
         let query = Query::Set {
             library: item.library.clone(),

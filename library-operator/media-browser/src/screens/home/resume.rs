@@ -1,283 +1,221 @@
-// The continue-watching row: the slots the progress store's resumes become.
-// It is the one row of the home page whose slots come from the progress
-// store and not from a wall read. A press on one of its slots opens the
-// work's page, as a press on every other row does.
+// The continue-watching row: the leaves the audience's threads offer,
+// one card per leaf with the reasons stacked on it, newest thread first.
+// The row reads every play of the audience once, finds the containers
+// those plays seed (the film, its set, the series, and every franchise the
+// work belongs to), walks each one, and folds the offers into cards. A
+// press on a card opens the page its first reason points at.
 
-mod next;
+mod containers;
+mod reason;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+pub use reason::Reason;
+
+use self::containers::{Container, MOVIES, Work};
+use crate::catalog::progress::thread;
 use crate::catalog::recency::SHOWN;
-use crate::catalog::{Episode, InSeries, Played, Resume, Slot, Source};
+use crate::catalog::{Resume, Slot, Source};
+use crate::screens::{InFranchise, Item, facts};
 
 /// The heading over the row.
 pub const HEADING: &str = "Continue watching";
 
-// The kind word a resume of a series carries, as the progress read writes
+// The kind word a play of a series carries, as the progress read writes
 // it.
 const SERIES: &str = "series";
 
-// The kind words the slots carry. They are the catalog's own item tables,
-// so a slot of this row reads as every other slot of that kind.
-const MOVIES: &str = "movies";
-const EPISODES: &str = "episodes";
-
-/// What this audience is in the middle of, as slots, newest first: the
-/// movie they stopped in, the episode they stopped in, or the episode after
-/// the one they finished. A work they finished yields the works that follow
-/// it instead, and nothing where none follows it.
-pub fn slots(source: &mut dyn Source, people: &[String]) -> Vec<Slot> {
-    let runs: Vec<Run> = source
-        .continue_watching(people)
-        .into_iter()
-        .map(|resume| run(source, resume))
-        .collect();
-    ordered(runs).into_iter().take(SHOWN).collect()
+// One card of the row: the leaf as a slot, with the position to resume
+// at where a thread stands unfinished on it; the reasons in their order;
+// and the recorded time of the newest play that moved a thread onto it,
+// which the row sorts on.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Card {
+    pub slot: Slot,
+    pub reasons: Vec<Reason>,
+    pub recorded: i64,
 }
 
-// The slots one resume yields: the work itself while the audience is in
-// the middle of it, and the works that follow it once they finished it.
-#[derive(Default)]
-struct Run {
-    current: Option<Slot>,
-    after: Vec<Slot>,
-}
-
-// The runs as one row, in the order the resumes came in, so a work's
-// successors sit together where the resume that named them stood. A work
-// the row already draws is never drawn a second time, and a successor gives
-// way to the card of a work the audience is in the middle of.
-fn ordered(runs: Vec<Run>) -> Vec<Slot> {
-    let held: HashSet<(String, String)> = runs
-        .iter()
-        .filter_map(|run| run.current.as_ref())
-        .map(key)
-        .collect();
-    let mut drawn: HashSet<(String, String)> = HashSet::new();
-    let mut slots = Vec::new();
-    for run in runs {
-        if let Some(slot) = run.current
-            && drawn.insert(key(&slot))
-        {
-            slots.push(slot);
-        }
-        for slot in run.after {
-            let at = key(&slot);
-            if held.contains(&at) || !drawn.insert(at) {
-                continue;
-            }
-            slots.push(slot);
-        }
-    }
-    slots
-}
-
-// The library and the id that name one work, which is what tells two cards
-// of the row apart.
-fn key(slot: &Slot) -> (String, String) {
-    (slot.library.clone(), slot.id.clone())
-}
-
-// One resume as the slots the row draws, by the kind of work it names.
-fn run(source: &mut dyn Source, resume: Resume) -> Run {
-    match resume.kind.as_str() {
-        SERIES => series(source, resume),
-        _ => movie(source, resume),
-    }
-}
-
-// The movie the audience stopped in, with the bar under it. A movie they
-// finished yields the works that follow it, and one the catalog no longer
-// holds yields nothing.
-fn movie(source: &mut dyn Source, resume: Resume) -> Run {
-    let Some(details) = source.movie(&resume.library, &resume.id) else {
-        return Run::default();
-    };
-    if resume.progress.finished {
-        return Run {
-            current: None,
-            after: next::after(source, &resume.library, &resume.id, &details.set_id),
+// The row for these people: at most `SHOWN` cards, newest first.
+pub fn cards(source: &mut dyn Source, people: &[String]) -> Vec<Card> {
+    let plays = grouped(source.continue_watching(people));
+    let mut cards: Vec<Card> = Vec::new();
+    for container in seeded(source, &plays) {
+        let leaves = containers::leaves(source, &container);
+        let Some(offer) = thread::walk(leaves.len(), &containers::on_leaves(&leaves, &plays))
+        else {
+            continue;
         };
+        let leaf = &leaves[offer.leaf];
+        let reason = match &offer.progress {
+            Some(_) => Reason::Resume {
+                series: leaf
+                    .slot
+                    .episode
+                    .as_ref()
+                    .map(|place| place.name.clone())
+                    .unwrap_or_default(),
+            },
+            None => match containers::title(source, &container) {
+                Some(title) => next_in(&container, leaf.member, title),
+                None => continue,
+            },
+        };
+        let mut slot = leaf.slot.clone();
+        slot.progress = offer.progress;
+        fold(&mut cards, slot, reason, offer.recorded);
     }
-    Run {
-        current: Some(Slot {
-            library: resume.library,
+    for card in &mut cards {
+        reason::stacked(&mut card.reasons);
+    }
+    cards.sort_by_key(|card| std::cmp::Reverse(card.recorded));
+    cards.truncate(SHOWN);
+    cards
+}
+
+// The "next in" reason of one container, spelled with its title.
+fn next_in(container: &Container, member: i64, title: String) -> Reason {
+    match container {
+        Container::Film(_) | Container::Series { .. } => Reason::Series(title),
+        Container::Set { .. } => Reason::Set(title),
+        Container::Franchise(membership) => Reason::Franchise {
+            library: membership.library.clone(),
+            id: membership.id.clone(),
+            position: member,
+            title,
+        },
+    }
+}
+
+// One offer onto the cards. The card of the same leaf takes the reason,
+// the newer time, and the resume position where this thread resumes. A
+// leaf no card holds becomes one.
+fn fold(cards: &mut Vec<Card>, slot: Slot, reason: Reason, recorded: i64) {
+    let same = |card: &Card| {
+        card.slot.library == slot.library && card.slot.kind == slot.kind && card.slot.id == slot.id
+    };
+    match cards.iter_mut().find(|card| same(card)) {
+        Some(card) => {
+            card.reasons.push(reason);
+            card.recorded = card.recorded.max(recorded);
+            if slot.progress.is_some() {
+                card.slot.progress = slot.progress;
+            }
+        }
+        None => cards.push(Card {
+            slot,
+            reasons: vec![reason],
+            recorded,
+        }),
+    }
+}
+
+// Every play of the audience, keyed by the work it names, in the order
+// the read answered them.
+fn grouped(plays: Vec<Resume>) -> HashMap<Work, Vec<Resume>> {
+    let mut grouped: HashMap<Work, Vec<Resume>> = HashMap::new();
+    for play in plays {
+        grouped
+            .entry((play.library.clone(), play.id.clone()))
+            .or_default()
+            .push(play);
+    }
+    grouped
+}
+
+// The containers the plays seed, each once, in the order of the newest
+// play of each work. Only a work with a play that names exactly the
+// audience seeds any, because a container with no such play has no
+// thread. A film seeds itself, its set, and its franchises. A series seeds
+// itself and its franchises.
+fn seeded(source: &mut dyn Source, plays: &HashMap<Work, Vec<Resume>>) -> Vec<Container> {
+    let mut works: Vec<&Resume> = plays
+        .values()
+        .filter_map(|plays| plays.iter().find(|play| play.exact))
+        .collect();
+    works.sort_by_key(|work| {
+        (
+            std::cmp::Reverse(work.progress.recorded),
+            work.library.clone(),
+            work.id.clone(),
+        )
+    });
+    let mut seen: HashSet<(u8, String, String)> = HashSet::new();
+    let mut containers = Vec::new();
+    for work in works {
+        for container in of_work(source, work) {
+            if seen.insert(container.key()) {
+                containers.push(container);
+            }
+        }
+    }
+    containers
+}
+
+// The containers one work seeds.
+fn of_work(source: &mut dyn Source, work: &Resume) -> Vec<Container> {
+    let mut containers = Vec::new();
+    if work.kind == SERIES {
+        containers.push(Container::Series {
+            library: work.library.clone(),
+            id: work.id.clone(),
+            title: work.title.clone(),
+        });
+    } else {
+        let Some(details) = source.movie(&work.library, &work.id) else {
+            return Vec::new();
+        };
+        containers.push(Container::Film(Box::new(Slot {
+            library: work.library.clone(),
             kind: MOVIES.to_string(),
-            id: resume.id,
-            title: resume.title,
-            released: resume.released,
-            art: resume.art,
+            id: work.id.clone(),
+            title: work.title.clone(),
+            released: work.released.clone(),
+            art: work.art.clone(),
             duration: details.duration,
             rating: details.rating,
             tagline: details.tagline,
-            progress: Some(resume.progress.played()),
             ..Slot::default()
+        })));
+        if !details.set_id.is_empty() {
+            containers.push(Container::Set {
+                library: work.library.clone(),
+                id: details.set_id,
+            });
+        }
+    }
+    for membership in source.franchises_of(&work.library, &work.id) {
+        containers.push(Container::Franchise(membership));
+    }
+    containers
+}
+
+// One card as the item the strip draws: the caption every slot of its
+// kind takes, the reasons as the second line, and the member the first
+// reason opens where that reason is a franchise.
+pub fn item(card: Card) -> Item {
+    let season = card
+        .slot
+        .episode
+        .as_ref()
+        .map(|place| format!("S{:02}", place.season))
+        .unwrap_or_default();
+    let under = facts::joined(&[&reason::line(&card.reasons), &season]);
+    let franchise = match card.reasons.first() {
+        Some(Reason::Franchise {
+            library,
+            id,
+            position,
+            ..
+        }) => Some(InFranchise {
+            library: library.clone(),
+            id: id.clone(),
+            position: *position,
         }),
-        after: Vec::new(),
-    }
-}
-
-// The episode of the show the row draws: the one the audience stopped in,
-// with the bar under it, or the next one in aired order after the one they
-// finished, with no bar, because they have not started it. A show whose
-// last episode they finished yields the works that follow the show.
-fn series(source: &mut dyn Source, resume: Resume) -> Run {
-    let episodes = source.episodes(&resume.library, &resume.id);
-    let at = (resume.progress.season, resume.progress.episode);
-    if !resume.progress.finished {
-        let played = resume.progress.played();
-        return Run {
-            current: reached(episodes, at).map(|episode| still(&resume, episode, Some(played))),
-            after: Vec::new(),
-        };
-    }
-    match following(episodes, at) {
-        Some(episode) => Run {
-            current: Some(still(&resume, episode, None)),
-            after: Vec::new(),
-        },
-        None => Run {
-            current: None,
-            after: next::after(source, &resume.library, &resume.id, ""),
-        },
-    }
-}
-
-// One episode of the show the resume names, as the slot the row draws.
-fn still(resume: &Resume, episode: Episode, progress: Option<Played>) -> Slot {
-    Slot {
-        library: resume.library.clone(),
-        kind: EPISODES.to_string(),
-        id: episode.id,
-        title: episode.title,
-        released: episode.released,
-        art: episode.art,
-        duration: episode.duration,
-        episode: Some(InSeries {
-            series: resume.id.clone(),
-            name: resume.title.clone(),
-            season: episode.season,
-            episode: episode.episode,
-        }),
-        progress,
-        ..Slot::default()
-    }
-}
-
-// The episode the play reached, by its aired numbers, or nothing where the
-// catalog holds no episode under them.
-fn reached(episodes: Vec<Episode>, at: (i64, i64)) -> Option<Episode> {
-    episodes
-        .into_iter()
-        .find(|episode| (episode.season, episode.episode) == at)
-}
-
-// The first episode after this one in aired order, which is the order the
-// source answers episodes in.
-fn following(episodes: Vec<Episode>, at: (i64, i64)) -> Option<Episode> {
-    episodes
-        .into_iter()
-        .find(|episode| (episode.season, episode.episode) > at)
+        _ => None,
+    };
+    Item::resumed(card.slot, under, franchise)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn episodes() -> Vec<Episode> {
-        [(1, 1), (1, 2), (2, 1)]
-            .into_iter()
-            .map(|(season, episode)| Episode {
-                id: format!("episode:{season}:{episode}"),
-                season,
-                episode,
-                ..Episode::default()
-            })
-            .collect()
-    }
-
-    fn numbers(episode: Option<Episode>) -> Option<(i64, i64)> {
-        episode.map(|episode| (episode.season, episode.episode))
-    }
-
-    #[test]
-    fn the_episode_a_play_reached_is_the_one_its_numbers_name() {
-        assert_eq!(numbers(reached(episodes(), (1, 2))), Some((1, 2)));
-        assert_eq!(numbers(reached(episodes(), (3, 1))), None);
-    }
-
-    #[test]
-    fn the_next_episode_crosses_into_the_season_after_it() {
-        assert_eq!(numbers(following(episodes(), (1, 1))), Some((1, 2)));
-        assert_eq!(numbers(following(episodes(), (1, 2))), Some((2, 1)));
-        assert_eq!(numbers(following(episodes(), (2, 1))), None);
-    }
-
-    fn card(library: &str, id: &str) -> Slot {
-        Slot {
-            library: library.to_string(),
-            kind: MOVIES.to_string(),
-            id: id.to_string(),
-            ..Slot::default()
-        }
-    }
-
-    fn drawn(runs: Vec<Run>) -> Vec<String> {
-        ordered(runs)
-            .into_iter()
-            .map(|slot| format!("{}/{}", slot.library, slot.id))
-            .collect()
-    }
-
-    #[test]
-    fn a_works_successors_sit_together_after_the_work_the_resume_named() {
-        let runs = vec![
-            Run {
-                current: None,
-                after: vec![card("films", "one"), card("films", "two")],
-            },
-            Run {
-                current: Some(card("films", "three")),
-                after: Vec::new(),
-            },
-        ];
-
-        assert_eq!(drawn(runs), ["films/one", "films/two", "films/three"]);
-    }
-
-    #[test]
-    fn two_successors_that_name_one_work_leave_one_card() {
-        let runs = vec![Run {
-            current: None,
-            after: vec![card("films", "one"), card("films", "one")],
-        }];
-
-        assert_eq!(drawn(runs), ["films/one"]);
-    }
-
-    #[test]
-    fn a_successor_the_audience_is_in_the_middle_of_gives_way_to_their_own_card() {
-        let runs = vec![
-            Run {
-                current: None,
-                after: vec![card("films", "one")],
-            },
-            Run {
-                current: Some(card("films", "one")),
-                after: Vec::new(),
-            },
-        ];
-
-        assert_eq!(drawn(runs), ["films/one"]);
-    }
-
-    #[test]
-    fn one_id_in_two_libraries_names_two_works() {
-        let runs = vec![Run {
-            current: None,
-            after: vec![card("films", "one"), card("shorts", "one")],
-        }];
-
-        assert_eq!(drawn(runs), ["films/one", "shorts/one"]);
-    }
-}
+mod tests;

@@ -58,7 +58,7 @@ fn printed(flags: &[&str]) -> Output {
 }
 
 #[test]
-fn the_print_writes_one_line_per_resume_and_ends() {
+fn the_print_writes_one_line_per_play_and_ends() {
     let dir = workspace("print-progress");
     let (database, _volume) = fixture(&dir);
     let progress = store(&dir, &database);
@@ -77,7 +77,7 @@ fn the_print_writes_one_line_per_resume_and_ends() {
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
         "movie\tdrill/films\tmovie:path:one\tVespera Coppice\t-\t600/5400\trunning\t\
-         2025-09-04T15:33:20Z\n"
+         2025-09-04T15:33:20Z\texact\n"
     );
 }
 

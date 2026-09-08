@@ -209,6 +209,10 @@ pub struct Entry {
     pub universes: Vec<String>,
     pub held: Option<Held>,
     pub episodes: i64,
+    // The runs of a series member, as (season, episode) pairs. Episode zero
+    // is a whole season. An empty list is a member the file does not cut,
+    // which is the whole show.
+    pub runs: Vec<(i64, i64)>,
 }
 
 // The two kinds a franchise entry names.
@@ -223,6 +227,17 @@ impl Entry {
             Some(held) => &held.title,
             None => &self.title,
         }
+    }
+
+    // Whether one aired episode is inside the member's runs. Every episode
+    // is, where the file names no run. Otherwise a run names a season, and an
+    // episode inside it where it names one.
+    pub fn covers(&self, season: i64, episode: i64) -> bool {
+        self.runs.is_empty()
+            || self
+                .runs
+                .iter()
+                .any(|run| run.0 == season && (run.1 == 0 || run.1 == episode))
     }
 
     /// Whether some library holds the entry, the title is still to come, or
@@ -545,6 +560,33 @@ mod tests {
                 ..film("A Film")
             };
             let _ = entry.standing("2026-09-04");
+        }
+    }
+
+    #[test]
+    fn a_member_with_no_runs_covers_every_episode() {
+        assert!(film("A Show").covers(3, 7));
+    }
+
+    #[test]
+    fn a_run_covers_a_whole_season_or_one_episode_of_it() {
+        let member = Entry {
+            runs: vec![(1, 0), (2, 3)],
+            ..film("A Show")
+        };
+        let cases = [
+            ((1, 1), true),
+            ((1, 9), true),
+            ((2, 3), true),
+            ((2, 4), false),
+            ((3, 1), false),
+        ];
+        for ((season, episode), covered) in cases {
+            assert_eq!(
+                member.covers(season, episode),
+                covered,
+                "S{season}E{episode}"
+            );
         }
     }
 

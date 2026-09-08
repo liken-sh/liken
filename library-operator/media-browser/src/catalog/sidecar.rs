@@ -42,7 +42,7 @@ pub struct SidecarSource {
     database: PathBuf,
     // The progress store's file, attached beside the catalog on the same
     // connection, so a progress read is one statement across the two.
-    // Nothing here means the three progress reads answer empty.
+    // Nothing here means the progress reads answer empty.
     store: Option<PathBuf>,
     connection: Option<Connection>,
     shared: Arc<updates::Shared>,
@@ -95,7 +95,7 @@ impl SidecarSource {
     /// The same source with the progress store beside the catalog.
     /// `updates` is the progress agent's own HTTP API base; a change to its
     /// two tables marks the same changed flag the catalog's tables do. A
-    /// file that is not there yet leaves the three progress reads empty.
+    /// file that is not there yet leaves the progress reads empty.
     pub fn with_progress(mut self, path: PathBuf, updates: &str) -> Self {
         if !path.exists() {
             eprintln!("media-browser: no progress store at {}", path.display());
@@ -145,7 +145,7 @@ impl SidecarSource {
     // SQLite opens an attached file with the flags the main file carries,
     // and the main file is read-only, so the store is read-only too, and no
     // write from here can bypass the agent's bookkeeping. A failed attach
-    // leaves the three progress reads answering empty, and the log line is
+    // leaves the progress reads answering empty, and the log line is
     // the only sign of the difference from an empty store.
     fn attach(&self, connection: &Connection) {
         let Some(store) = &self.store else {
@@ -528,10 +528,8 @@ impl Source for SidecarSource {
         self.stored(|connection| progress::resumes(connection, people))
     }
 
-    fn progress_of(&mut self, library: &str, id: &str, people: &[String]) -> Option<Progress> {
-        self.stored(|connection| progress::of(connection, library, id, people))
-            .into_iter()
-            .next()
+    fn plays_of(&mut self, library: &str, id: &str, people: &[String]) -> Vec<Resume> {
+        self.stored(|connection| progress::plays(connection, library, id, people))
     }
 
     fn progress_by_item(&mut self, library: &str, people: &[String]) -> HashMap<String, Played> {

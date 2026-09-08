@@ -70,6 +70,7 @@ fn film(position: i64, span: (f64, f64), universes: &[&str]) -> Entry {
         universes: universes.iter().map(|name| name.to_string()).collect(),
         held: Some(held(position, "movies")),
         episodes: 0,
+        runs: Vec::new(),
     }
 }
 
@@ -248,6 +249,22 @@ fn page() -> Franchise {
 fn a_franchise_no_library_holds_opens_no_page() {
     assert!(Franchise::open(ORDERS, CYCLE, &mut Orders { empty: true }).is_none());
     assert!(Franchise::open(ORDERS, "franchise:name:none", &mut Orders::default()).is_none());
+}
+
+#[test]
+fn the_page_opens_on_the_row_of_the_entry_at_a_position() {
+    let page = Franchise::open_at(ORDERS, CYCLE, 5, &mut Orders::default())
+        .expect("the fake holds the order");
+    assert_eq!(page.focus, 4);
+    assert_eq!(page.rows[4].cell.kind, "series");
+}
+
+#[test]
+fn a_position_the_order_does_not_hold_opens_on_the_first_row() {
+    let page = Franchise::open_at(ORDERS, CYCLE, 9, &mut Orders::default())
+        .expect("the fake holds the order");
+    assert_eq!(page.focus, 0);
+    assert!(Franchise::open_at(ORDERS, CYCLE, 1, &mut Orders { empty: true }).is_none());
 }
 
 #[test]

@@ -60,10 +60,10 @@ pub fn split(heading: &str) -> (&str, &str) {
     }
 }
 
-// The words that stand between the name of a strip and the scope after
-// it. The library bands join their facts with the same three
-// characters.
-const DOT: &str = " · ";
+/// The words that stand between the name of a strip and the scope after
+/// it. The library bands join their facts with the same three
+/// characters.
+pub const DOT: &str = " · ";
 
 // The heading over a strip, in two colors: the name bright, and the dot and
 // the words after it muted. The whole heading draws muted, and the name draws
@@ -87,6 +87,21 @@ fn headed(frame: &mut canvas::Frame<Renderer>, region: Rectangle, heading: &str)
             region.width,
         ));
     }
+}
+
+// The box the circles of the room take after the heading: on the
+// heading's line, one circle per letter, half a circle after the
+// heading's words as the shaper sets them. The estimate the captions cut
+// by would put the circles a wide space off, so the shaper measures the
+// words.
+pub fn circles_box(region: Rectangle, heading: &str, count: usize) -> Rectangle {
+    let height = text::height(1, look::HEADING);
+    area(
+        region.x + text::measured(heading.trim_end(), look::HEADING) + clock::strip::CIRCLE / 2.0,
+        region.y + (height - clock::strip::CIRCLE) / 2.0,
+        clock::strip::circles_width(count),
+        clock::strip::CIRCLE,
+    )
 }
 
 /// The box the heading over a strip draws in, which the mark follows
@@ -153,6 +168,11 @@ pub struct Strip<'a, T> {
     /// heading opens a page of its own takes focus there as well as on
     /// its members, and the mark says which.
     pub headed: bool,
+    // The letters of the people at the screen, drawn as circles after the
+    // heading the way the browser's strip draws the room, and none on a strip
+    // that draws no room; and whether those circles hold focus.
+    pub letters: &'a [String],
+    pub circled: bool,
     /// The part of the frame the strip draws in.
     pub region: Rectangle,
 }
@@ -212,6 +232,15 @@ pub fn draw<T: Card, A: Art>(
     headed(frame, strip.region, strip.heading);
     if strip.headed {
         mark(frame, heading_box(strip.region, strip.heading));
+    }
+    if !strip.letters.is_empty() {
+        let row = circles_box(strip.region, strip.heading, strip.letters.len());
+        for (index, letter) in strip.letters.iter().enumerate() {
+            clock::strip::circle(frame, clock::strip::circle_in(row, index), letter);
+        }
+        if strip.circled {
+            mark(frame, row);
+        }
     }
 
     let slots = placed(strip.members, strip.last.is_some());
@@ -395,6 +424,8 @@ mod tests {
         focus: Option<usize>,
     ) -> Strip<'a, Member> {
         Strip {
+            letters: &[],
+            circled: false,
             members,
             current,
             focus,

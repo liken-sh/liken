@@ -118,13 +118,13 @@ fn a_title_with_no_backdrop_never_enters_the_banner_and_focus_skips_it() {
         NoArt::default(),
     );
     assert!(banner(&browser).is_empty());
-    assert_eq!(showing_home(&browser).focus, 2);
+    assert_eq!(showing_home(&browser).focus, 1);
 
     browser.key("up");
     assert!(browser.on_strip);
     browser.key("down");
     assert!(!browser.on_strip);
-    assert_eq!(showing_home(&browser).focus, 2);
+    assert_eq!(showing_home(&browser).focus, 1);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn up_from_the_banner_reaches_the_strip_and_down_returns_to_the_title_it_held() 
 fn down_from_the_banner_reaches_the_first_strip_and_up_returns() {
     let mut browser = with_banner();
     browser.key("down");
-    assert_eq!(showing_home(&browser).focus, 2);
+    assert_eq!(showing_home(&browser).focus, 1);
     browser.key("up");
     assert_eq!(showing_home(&browser).focus, 0);
 }
@@ -218,7 +218,7 @@ fn a_change_that_empties_the_banner_moves_focus_to_the_first_strip_that_holds() 
     browser.pump(1.0);
 
     assert!(banner(&browser).is_empty());
-    assert_eq!(showing_home(&browser).focus, 4);
+    assert_eq!(showing_home(&browser).focus, 3);
 }
 
 #[test]

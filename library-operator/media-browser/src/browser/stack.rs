@@ -34,6 +34,7 @@ impl<S: Source, A: Art> Browser<S, A> {
     pub(super) fn take(&mut self, step: Step) {
         match step {
             Step::Stay | Step::Still => {}
+            Step::Ask => self.raise_picker(),
             Step::Open(screen) => self.opened(screen),
             Step::Replace(screen) => {
                 self.stack.pop();

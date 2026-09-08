@@ -3,7 +3,8 @@
 // next.
 
 use super::{Focus, Series, Still};
-use crate::catalog::{Progress, Source};
+use crate::catalog::progress::thread;
+use crate::catalog::{Progress, Resume, Source};
 
 /// Read how far these people reached in each episode of the series, and
 /// hang each row on the still it names. Focus lands on the episode to watch
@@ -25,7 +26,8 @@ pub fn read(page: &mut Series, source: &mut dyn Source, people: &[String]) {
         }
     }
     if !page.placed {
-        page.focus = Focus::Still(next_episode(&page.stills));
+        let plays = source.plays_of(&page.library, &page.id, people);
+        page.focus = Focus::Still(next_episode(&page.stills, &plays));
         page.refoot(source);
     }
 }
@@ -51,46 +53,53 @@ pub fn start(still: &Still) -> Option<i64> {
         .map(|progress| progress.position)
 }
 
-/// The episode the wall opens on: the one the latest play of the series
-/// reached while they are in the middle of it, the one after it where they
-/// finished it, and the first episode where the series holds neither.
-pub fn next_episode(stills: &[Still]) -> usize {
-    let Some(index) = latest(stills) else {
-        return 0;
-    };
-    let finished = stills[index]
-        .progress
-        .as_ref()
-        .is_some_and(|progress| progress.finished);
-    match (finished, index + 1 < stills.len()) {
-        (true, true) => index + 1,
-        (true, false) => 0,
-        (false, _) => index,
-    }
-}
-
-// The still of the latest play of the series, by the second the store last
-// wrote its row, or nothing where no play names an episode the wall holds.
-fn latest(stills: &[Still]) -> Option<usize> {
-    stills
+// The episode the wall opens on: the leaf the thread rule offers over
+// the stills in aired order and these plays of the series, which is the
+// episode the continue-watching row's card names. The first episode where
+// the walk offers nothing.
+pub fn next_episode(stills: &[Still], plays: &[Resume]) -> usize {
+    let on: Vec<thread::Play> = plays
         .iter()
-        .enumerate()
-        .filter_map(|(index, still)| {
-            still
-                .progress
-                .as_ref()
-                .map(|progress| (index, progress.recorded))
+        .filter_map(|play| {
+            let numbers = (play.progress.season, play.progress.episode);
+            let leaf = stills
+                .iter()
+                .position(|still| (still.season, still.episode) == numbers)?;
+            Some(thread::Play {
+                leaf,
+                progress: play.progress.clone(),
+                exact: play.exact,
+            })
         })
-        .max_by_key(|(_, recorded)| *recorded)
-        .map(|(index, _)| index)
+        .collect();
+    thread::walk(stills.len(), &on)
+        .map(|offer| offer.leaf)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // A wall of four episodes, with a play on each one the case names: the
-    // second it was recorded, and whether it finished.
+    // One play of one episode of a wall of four: the second it was recorded,
+    // and whether it finished.
+    fn play(index: usize, recorded: i64, finished: bool) -> Progress {
+        Progress {
+            play: format!("play-{recorded}"),
+            position: match finished {
+                true => 2_700,
+                false => 900,
+            },
+            duration: 2_760,
+            finished,
+            recorded,
+            season: 1,
+            episode: index as i64 + 1,
+            ..Progress::default()
+        }
+    }
+
+    // A wall of four episodes, with a play on each one the case names.
     fn stills(played: &[(usize, i64, bool)]) -> Vec<Still> {
         let mut stills: Vec<Still> = (1..=4)
             .map(|episode| Still {
@@ -100,38 +109,61 @@ mod tests {
             })
             .collect();
         for (index, recorded, finished) in played {
-            stills[*index].progress = Some(Progress {
-                position: match finished {
-                    true => 2_700,
-                    false => 900,
-                },
-                duration: 2_760,
-                finished: *finished,
-                recorded: *recorded,
-                ..Progress::default()
-            });
+            stills[*index].progress = Some(play(*index, *recorded, *finished));
         }
         stills
     }
 
+    // The same plays as the store answers them, every one the audience's
+    // own.
+    fn plays(played: &[(usize, i64, bool)]) -> Vec<Resume> {
+        played
+            .iter()
+            .map(|(index, recorded, finished)| Resume {
+                progress: play(*index, *recorded, *finished),
+                exact: true,
+                ..Resume::default()
+            })
+            .collect()
+    }
+
+    // The still the wall opens on after these plays.
+    fn opens_on(played: &[(usize, i64, bool)]) -> usize {
+        next_episode(&stills(played), &plays(played))
+    }
+
     #[test]
     fn a_series_no_play_names_opens_on_its_first_episode() {
-        assert_eq!(next_episode(&stills(&[])), 0);
+        assert_eq!(opens_on(&[]), 0);
     }
 
     #[test]
     fn a_series_opens_on_the_episode_the_latest_play_stopped_in() {
-        assert_eq!(next_episode(&stills(&[(0, 100, true), (1, 200, false)])), 1);
+        assert_eq!(opens_on(&[(0, 100, true), (1, 200, false)]), 1);
     }
 
     #[test]
     fn a_series_opens_on_the_episode_after_the_one_they_finished() {
-        assert_eq!(next_episode(&stills(&[(0, 200, true), (1, 100, true)])), 1);
+        assert_eq!(opens_on(&[(0, 200, true), (1, 100, true)]), 1);
     }
 
     #[test]
     fn a_series_they_finished_to_the_end_opens_on_its_first_episode() {
-        assert_eq!(next_episode(&stills(&[(3, 100, true)])), 0);
+        assert_eq!(opens_on(&[(3, 100, true)]), 0);
+    }
+
+    #[test]
+    fn a_play_of_more_people_alone_opens_the_wall_on_its_first_episode() {
+        let mut plays = plays(&[(1, 100, true)]);
+        plays[0].exact = false;
+        assert_eq!(next_episode(&stills(&[]), &plays), 0);
+    }
+
+    #[test]
+    fn a_play_of_an_episode_the_wall_does_not_hold_is_not_in_the_walk() {
+        let mut plays = plays(&[(0, 100, true), (1, 200, true)]);
+        plays[1].progress.season = 9;
+        assert_eq!(next_episode(&stills(&[]), &plays), 1);
     }
 
     #[test]

@@ -281,6 +281,122 @@ episode_play 10 "$second_series" 4 1 480 $((12 * hour)) "$(people_of 1)"
 movie_play 11 0 100% $((20 * day)) "$(people_of 2)"
 movie_play 12 6 30% 0 "$(people_of 1 2 3)" running
 
+# The thread scenarios of plan 52. Each one is a night the continue row
+# has to read the right way: a guest joins a group, an old solo run of
+# one person meets a new group's run, a film sits in a set and a
+# franchise with different successors, a film sits in a franchise alone,
+# and a series sits inside a franchise.
+
+# One play of every episode of a series, all finished, one hour apart
+# and ending at the moment given. A series the scenario needs whole.
+series_run() {
+  local scenario="$1" series_row="$2" ago="$3" audience="$4"
+  local library_key series_id count index season episode
+  IFS="$tab" read -r library_key series_id <<<"$series_row"
+  mapfile -t run < <(catalog_query "SELECT season, episode FROM episodes
+    WHERE library = $(quoted "$library_key") AND series = $(quoted "$series_id")
+      AND duration > 0 AND season > 0 ORDER BY season, episode")
+  count="${#run[@]}"
+  for index in "${!run[@]}"; do
+    IFS="$tab" read -r season episode <<<"${run[$index]}"
+    episode_play "$scenario" "$series_row" "$season" "$episode" 99% \
+      "$((ago + (count - index) * hour))" "$audience"
+  done
+}
+
+# A film in a set with a film before and after it, and in a franchise
+# whose next member is held and is not the set's next film. The play
+# before it is the film before it in the set, so the pair reads as a run.
+mapfile -t crossing < <(catalog_query "
+  SELECT m.library, m.id, m.slug, m.duration,
+         (SELECT p.id FROM movies p WHERE p.library = m.library AND p.set_id = m.set_id
+            AND p.released < m.released ORDER BY p.released DESC LIMIT 1)
+  FROM movies m
+  JOIN aliases a ON a.library = m.library AND a.item = m.id
+  JOIN franchise_members fm ON fm.alias = a.alias
+  WHERE m.duration > 0 AND m.set_id != ''
+    AND EXISTS (SELECT 1 FROM movies p WHERE p.library = m.library
+                AND p.set_id = m.set_id AND p.released < m.released)
+    AND EXISTS (SELECT 1 FROM movies s WHERE s.library = m.library
+                AND s.set_id = m.set_id AND s.released > m.released)
+    AND EXISTS (SELECT 1 FROM franchise_members n JOIN aliases b ON b.alias = n.alias
+                WHERE n.library = fm.library AND n.franchise = fm.franchise
+                  AND n.position = fm.position + 1
+                  AND NOT EXISTS (SELECT 1 FROM movies s
+                                  WHERE s.library = b.library AND s.id = b.item
+                                    AND s.set_id = m.set_id))
+  ORDER BY fm.franchise, fm.position LIMIT 1")
+
+# A film in no set, in a franchise whose next member is held.
+mapfile -t lone < <(catalog_query "
+  SELECT m.library, m.id, m.slug, m.duration FROM movies m
+  JOIN aliases a ON a.library = m.library AND a.item = m.id
+  JOIN franchise_members fm ON fm.alias = a.alias
+  WHERE m.duration > 0 AND m.set_id = ''
+    AND EXISTS (SELECT 1 FROM franchise_members n JOIN aliases b ON b.alias = n.alias
+                WHERE n.library = fm.library AND n.franchise = fm.franchise
+                  AND n.position = fm.position + 1)
+  ORDER BY fm.franchise, fm.position LIMIT 1")
+
+# A series held in a franchise, and the first episode of its first run
+# there, or S01E01 where the file names no run.
+mapfile -t within < <(catalog_query "
+  SELECT s.library, s.id,
+         coalesce((SELECT r.season FROM franchise_runs r
+                   WHERE r.library = fm.library AND r.franchise = fm.franchise
+                     AND r.position = fm.position ORDER BY r.season, r.episode LIMIT 1), 1),
+         coalesce((SELECT max(r.episode, 1) FROM franchise_runs r
+                   WHERE r.library = fm.library AND r.franchise = fm.franchise
+                     AND r.position = fm.position ORDER BY r.season, r.episode LIMIT 1), 1)
+  FROM series s
+  JOIN aliases a ON a.library = s.library AND a.item = s.id
+  JOIN franchise_members fm ON fm.alias = a.alias AND fm.kind = 'series'
+  WHERE EXISTS (SELECT 1 FROM episodes e WHERE e.library = s.library AND e.series = s.id
+                AND e.duration > 0 AND e.season > 0)
+  ORDER BY fm.franchise, fm.position LIMIT 1")
+
+if [ "${#crossing[@]}" -lt 1 ] || [ "${#lone[@]}" -lt 1 ] || [ "${#within[@]}" -lt 1 ]; then
+  echo "local/seed-progress: the catalog holds no franchise with a film in a set, a film in no set, and a series; scan a franchises library first" >&2
+  exit 1
+fi
+
+# One play of a film named by its catalog row rather than by its index
+# in the seven above.
+movie_row_play() {
+  local scenario="$1" library_key="$2" id="$3" slug="$4" duration="$5"
+  local spec="$6" ago="$7" audience="$8"
+  emit_play "seed-$scenario-$slug" "$library_key" "$id" 0 0 \
+    "$(position_of "$spec" "$duration")" "$duration" "$((now - ago))" "$audience" finished
+}
+
+# 13. A guest night. The three of scenario 6 watch the next episode with
+# a fourth person, so the group's thread moves on without the guest.
+episode_play 13 "$third_series" 3 5 99% "$day" "$(people_of 1 2 3 4)"
+
+# 14. An old solo run. One person finished a whole series long ago, and
+# a new group with that person in it starts it. Alone, that person sees
+# nothing of the group's run.
+series_run 14 "$short_series" $((40 * day)) "$(people_of 3)"
+episode_play 15 "$short_series" 1 1 99% $((5 * hour)) "$(people_of 3 4 5)"
+
+# 16. A film in a set and a franchise. The set's next film and the
+# franchise's next member are two cards with two reasons.
+IFS="$tab" read -r library_key id slug duration before <<<"${crossing[0]}"
+IFS="$tab" read -r before_slug before_duration <<<"$(catalog_query "
+  SELECT slug, duration FROM movies WHERE library = $(quoted "$library_key") AND id = $(quoted "$before")")"
+movie_row_play 16 "$library_key" "$before" "$before_slug" "$before_duration" 98% $((7 * day)) "$(people_of 1 2 3)"
+movie_row_play 16 "$library_key" "$id" "$slug" "$duration" 98% $((6 * day)) "$(people_of 1 2 3)"
+
+# 17. A film in a franchise and no set, so the one reason is the
+# franchise and the card opens the franchise page.
+IFS="$tab" read -r library_key id slug duration <<<"${lone[0]}"
+movie_row_play 17 "$library_key" "$id" "$slug" "$duration" 98% $((9 * day)) "$(people_of 2 4)"
+
+# 18. A series inside a franchise. The next episode is one card with the
+# series and the franchise stacked on it.
+IFS="$tab" read -r library_key id season episode <<<"${within[0]}"
+episode_play 18 "$(printf '%s\t%s' "$library_key" "$id")" "$season" "$episode" 99% $((2 * day)) "$(people_of 1 2 3)"
+
 # One batch of statements, posted and answered as a whole. An answer other
 # than 200, or one statement the agent refused, ends the run before anything
 # is reported as written.

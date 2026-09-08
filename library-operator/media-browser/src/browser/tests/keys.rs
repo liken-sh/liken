@@ -73,7 +73,7 @@ fn a_space_moves_no_focus_on_the_home_page() {
 
     browser.key(" ");
 
-    assert_eq!(strip_at(&browser, 4).focus, 1);
+    assert_eq!(strip_at(&browser, 3).focus, 1);
     assert!(browser.stack.is_empty());
 }
 

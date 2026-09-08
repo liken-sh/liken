@@ -492,6 +492,23 @@ fn a_run_that_names_episodes_counts_the_ones_it_names() {
 }
 
 #[test]
+fn both_reads_carry_the_runs_of_a_series_member() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    an_order(&path);
+    insert_run(&path, CYCLE, 2, 1, 0);
+    insert_run(&path, CYCLE, 2, 2, 3);
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    let page = source.franchise(ORDERS, CYCLE).expect("the order is there");
+    let strip = source.franchises_of("screening/films", "movie:path:one");
+
+    assert_eq!(page.entries[1].runs, [(1, 0), (2, 3)]);
+    assert_eq!(page.entries[0].runs, []);
+    assert_eq!(strip[0].members[1].runs, [(1, 0), (2, 3)]);
+}
+
+#[test]
 fn a_franchise_no_library_holds_has_no_page_and_no_answer() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);

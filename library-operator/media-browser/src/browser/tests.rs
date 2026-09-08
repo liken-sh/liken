@@ -241,7 +241,7 @@ fn order_member(position: i64, library: &str, id: &str, kind: &str, title: &str)
 // The three orders the fake titles belong to. The Cycle ends on the film
 // after the finished one. The Saga runs from that film through the last
 // serial to the film the audience is in the middle of. The Run puts a film
-// after the last serial.
+// after the last serial, and cuts that serial to its first season.
 fn orders() -> Vec<Membership> {
     let films = "screening/films";
     let order = |id: &str, title: &str, members: Vec<Entry>| Membership {
@@ -274,7 +274,10 @@ fn orders() -> Vec<Membership> {
             "franchise:name:the-run",
             "The Run",
             vec![
-                order_member(1, SERIALS, LAST_SERIAL, "series", "Last Serial"),
+                Entry {
+                    runs: vec![(1, 0)],
+                    ..order_member(1, SERIALS, LAST_SERIAL, "series", "Last Serial")
+                },
                 order_member(2, films, "movies:4", "movies", "Entry 4"),
             ],
         ),
@@ -332,7 +335,19 @@ impl Source for Fake {
 
     // The page of the first franchise, so a select on the strip opens
     // one. The order holds the two films of the fake set.
+    // The Run's page is its order, so a card of the continue-watching row
+    // opens it on a member.
     fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
+        if id == "franchise:name:the-run" {
+            let order = orders().pop().expect("the run is the last order");
+            return Some(Franchise {
+                library: library.to_string(),
+                id: id.to_string(),
+                title: order.title,
+                entries: order.members,
+                ..Franchise::default()
+            });
+        }
         if id != "franchise:name:the-cycle" {
             return None;
         }
@@ -626,14 +641,6 @@ impl Source for Fake {
         self.continues.clone()
     }
 
-    fn progress_of(&mut self, library: &str, id: &str, people: &[String]) -> Option<Progress> {
-        self.calls.push("progress_of");
-        self.watching = people.to_vec();
-        self.reached
-            .get(&(library.to_string(), id.to_string()))
-            .cloned()
-    }
-
     // The plays of one library, out of the same rows the work read answers
     // from, so one fixture field feeds a page and a wall alike.
     fn progress_by_item(&mut self, library: &str, people: &[String]) -> HashMap<String, Played> {
@@ -654,6 +661,41 @@ impl Source for Fake {
         self.calls.push("episode_progress");
         self.watching = people.to_vec();
         self.episodes_reached.clone()
+    }
+
+    // The plays of one work: the rows the continue-watching read answers,
+    // the play of the work the `reached` map holds, and the episode rows of a
+    // series. The last two are always the audience's own.
+    fn plays_of(&mut self, library: &str, id: &str, people: &[String]) -> Vec<Resume> {
+        self.calls.push("plays_of");
+        self.watching = people.to_vec();
+        let mut plays: Vec<Resume> = self
+            .continues
+            .iter()
+            .filter(|play| play.library == library && play.id == id)
+            .cloned()
+            .collect();
+        plays.extend(
+            self.reached
+                .get(&(library.to_string(), id.to_string()))
+                .map(|progress| Resume {
+                    library: library.to_string(),
+                    kind: "movie".into(),
+                    id: id.to_string(),
+                    progress: progress.clone(),
+                    exact: true,
+                    ..Resume::default()
+                }),
+        );
+        plays.extend(self.episodes_reached.iter().map(|progress| Resume {
+            library: library.to_string(),
+            kind: "series".into(),
+            id: id.to_string(),
+            progress: progress.clone(),
+            exact: true,
+            ..Resume::default()
+        }));
+        plays
     }
 
     fn credits(&mut self, _library: &str, _id: &str) -> Credits {

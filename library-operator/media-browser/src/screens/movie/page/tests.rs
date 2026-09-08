@@ -88,6 +88,7 @@ fn crowded(focus: Focus) -> Movie {
                 tiles: Vec::new(),
                 new: 0,
                 progress: None,
+                franchise: None,
             }],
             current: 0,
         }),

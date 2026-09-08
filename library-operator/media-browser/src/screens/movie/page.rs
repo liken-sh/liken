@@ -219,6 +219,8 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 &mut frame,
                 store,
                 &strip::Strip {
+                    letters: &[],
+                    circled: false,
                     members: &set.members,
                     current: Some(set.current),
                     focus: match focus {
@@ -251,6 +253,8 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 &mut frame,
                 store,
                 &strip::Strip {
+                    letters: &[],
+                    circled: false,
                     members: &band.members,
                     current: band.current,
                     focus: match focus {

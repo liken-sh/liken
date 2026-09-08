@@ -117,7 +117,7 @@ mod tests {
     const PAGE: f32 = 1080.0;
 
     fn home() -> Home {
-        Home::open(&mut Catalog, &[])
+        Home::open(&mut Catalog, &[], &[])
     }
 
     #[test]
@@ -125,7 +125,7 @@ mod tests {
         let home = home();
         let layout = Layout::of(&home, PAGE);
         let banner = layout.tops[0].expect("the banner holds titles");
-        let first = layout.tops[2].expect("the released strip holds slots");
+        let first = layout.tops[1].expect("the released strip holds slots");
         assert_eq!(banner, wall::HEAD);
         assert_eq!(first, banner + banner::height(PAGE) + GAP);
     }
@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn focus_on_the_first_strip_shows_the_whole_banner_over_it() {
         let mut home = home();
-        home.focus = 2;
+        home.focus = 1;
         let layout = Layout::of(&home, PAGE);
         let offset = layout.scroll(&home, PAGE, PAGE - band::HEIGHT);
         assert_eq!(offset, 0.0);
@@ -150,7 +150,7 @@ mod tests {
     fn the_first_strip_that_holds_anything_stands_under_the_whole_banner() {
         let mut home = home();
         home.blocks.insert(1, Block::Strip(Strip::new(Row::Genres)));
-        home.focus = 3;
+        home.focus = 2;
         let layout = Layout::of(&home, PAGE);
         assert_eq!(layout.tops[1], None);
         assert_eq!(layout.scroll(&home, PAGE, PAGE - band::HEIGHT), 0.0);
@@ -159,15 +159,15 @@ mod tests {
     #[test]
     fn a_short_viewport_scrolls_the_first_strip_whole_into_view_and_no_further() {
         let mut home = home();
-        home.focus = 2;
+        home.focus = 1;
         let layout = Layout::of(&home, PAGE);
-        let strip = layout.tops[2].expect("the released strip holds slots");
+        let strip = layout.tops[1].expect("the released strip holds slots");
         let bottom = strip + strip::height(2) + wall::HEAD;
         let short = bottom - 100.0;
         let offset = layout.scroll(&home, PAGE, short);
         assert_eq!(offset, 100.0);
         let region = layout
-            .region(&home, 2, offset, 1920.0, PAGE)
+            .region(&home, 1, offset, 1920.0, PAGE)
             .expect("the released strip has a region");
         assert_eq!(region.y + region.height + wall::HEAD, band::HEIGHT + short);
         assert_eq!(
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn focus_on_the_second_strip_scrolls_the_banner_up_under_the_band() {
         let mut home = home();
-        home.focus = 3;
+        home.focus = 2;
         let layout = Layout::of(&home, PAGE);
         let offset = layout.scroll(&home, PAGE, PAGE - band::HEIGHT);
         assert!(offset > 0.0);
@@ -188,7 +188,7 @@ mod tests {
             .expect("the banner has a region");
         assert!(region.y < band::HEIGHT);
         let region = layout
-            .region(&home, 3, offset, 1920.0, PAGE)
+            .region(&home, 2, offset, 1920.0, PAGE)
             .expect("the second strip has a region");
         assert_eq!(region.y, band::HEIGHT + wall::HEAD);
     }
