@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -258,8 +259,33 @@ func listening(t *testing.T) (*sessionHarness, *fakeBroker, *session) {
 	held := h.begin(t, "GAME")
 	broker := h.brokers.waitForSession(t)
 	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	// The session publishes where the receiver stands and waits for that
+	// message to come back before it applies anything, so every test
+	// below starts from the other side of that boundary.
+	adopted := broker.waitForTopic(t, testVolumeTopic)
+	mustMatch(t, string(adopted.payload), `{"level":72,"muted":false}`)
+	broker.push(testVolumeTopic, adopted.payload)
+	waitUntilAdopted(t, held)
 	h.equipment.waitForCommands(t, "SIGAME")
 	return h, broker, held
+}
+
+// waitUntilAdopted waits for the session to take the broker's delivery
+// of its own adopt message, which is the point from which a press moves
+// the receiver.
+func waitUntilAdopted(t *testing.T, held *session) {
+	t.Helper()
+	deadline := time.Now().Add(testTimeout)
+	for time.Now().Before(deadline) {
+		held.mutex.Lock()
+		adopted := held.adopted
+		held.mutex.Unlock()
+		if adopted {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("the session never took its own adopt message back")
 }
 
 func TestTheLevelOnTheTopicReachesTheReceiver(t *testing.T) {
@@ -399,4 +425,57 @@ func TestTheSessionsOwnWriteBackDoesNotMoveTheEquipment(t *testing.T) {
 func halvesForLevelOrZero(level int) int {
 	halves, _ := halvesForLevel(level, 139)
 	return halves
+}
+
+// A level left on the topic by an earlier player is in another unit's
+// scale, so the session publishes where the receiver stands and applies
+// nothing until the broker delivers that message back to it.
+func TestASessionAdoptsTheReceiverBeforeItAppliesAnyLevel(t *testing.T) {
+	h := newSessionHarness(t)
+	h.begin(t, "GAME")
+	broker := h.brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+
+	adopted := broker.waitForTopic(t, testVolumeTopic)
+	mustMatch(t, string(adopted.payload), `{"level":72,"muted":false}`)
+	mustMatch(t, adopted.retained, true)
+
+	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+	refuseVolumeSets(t, h.equipment, quietPeriod)
+
+	broker.push(testVolumeTopic, adopted.payload)
+	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+
+	h.equipment.waitForCommands(t, "MV695")
+	h.waitUntil(t, func(state denonState) bool { return state.Volume == 139 })
+}
+
+// refuseVolumeSets fails the test if the session sets the receiver's
+// volume at all, as opposed to asking it what the volume is.
+func refuseVolumeSets(t *testing.T, equipment *fakeDenon, within time.Duration) {
+	t.Helper()
+	deadline := time.After(within)
+	var seen []string
+	for {
+		select {
+		case command := <-equipment.commands:
+			seen = append(seen, command)
+			if strings.HasPrefix(command, denonVolumeCommandPrefix) && command != "MV?" {
+				t.Fatalf("the session set the volume with %q (seen %v)", command, seen)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// A level published after the adopt is a press, and it moves the
+// receiver.
+func TestAPressAfterTheAdoptMovesTheReceiver(t *testing.T) {
+	h, broker, _ := listening(t)
+
+	broker.push(testVolumeTopic, []byte(`{"level":100,"muted":false}`))
+
+	mustMatch(t, h.equipment.waitForCommand(t), "MV695")
+	mustMatch(t, h.equipment.waitForCommand(t), denonMuteOffCommand)
 }

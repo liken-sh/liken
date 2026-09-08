@@ -43,6 +43,12 @@ type session struct {
 	reachedOnce sync.Once
 	reached     chan struct{}
 
+	completeOnce sync.Once
+	complete     chan struct{}
+
+	connectedOnce sync.Once
+	connected     chan struct{}
+
 	pending chan struct{}
 
 	mutex      sync.Mutex
@@ -50,6 +56,10 @@ type session struct {
 	haveLatest bool
 	sentVolume int
 	sentMute   int
+
+	awaiting     volumeState
+	haveAwaiting bool
+	adopted      bool
 }
 
 // startSession opens the session's own broker connection, claims the
@@ -63,6 +73,8 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, de
 		cancel:     cancel,
 		powerOn:    make(chan struct{}),
 		reached:    make(chan struct{}),
+		complete:   make(chan struct{}),
+		connected:  make(chan struct{}),
 		pending:    make(chan struct{}, 1),
 		sentVolume: unknownHalves,
 		sentMute:   muteUnsent,
@@ -75,6 +87,7 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, de
 	s.bus = newBus(busAddress, "equipment-operator-"+receiver, will, s.claim, s.receive)
 	s.bus.Subscribe(spec.VolumeTopic)
 	go s.bus.Run(ctx)
+	go s.adopt(ctx)
 	go s.selectInput(ctx)
 	go s.applyLevels(ctx)
 	return s
@@ -98,6 +111,7 @@ func (s *session) claim(*Bus) {
 		return
 	}
 	s.publishOwner(mark)
+	s.connectedOnce.Do(func() { close(s.connected) })
 }
 
 func (s *session) publishOwner(payload []byte) {
@@ -115,6 +129,18 @@ func (s *session) receive(topic string, payload []byte) {
 		return
 	}
 	s.mutex.Lock()
+	// The broker delivers a client's own publish back to it, and it sends
+	// the topic's old retained state ahead of it. So the session's own
+	// adopt message coming back is the line between the level a previous
+	// session left and a press meant for this one. Everything before that
+	// line was written for mpv's scale and moves nothing.
+	if !s.adopted {
+		if s.haveAwaiting && s.awaiting == state {
+			s.latest, s.haveLatest, s.adopted = state, true, true
+		}
+		s.mutex.Unlock()
+		return
+	}
 	// A state the session already holds is its own message coming back.
 	// Applying it again would map the level onto a half step the equipment
 	// is not on.
@@ -135,20 +161,12 @@ func (s *session) observe(event denonEvent) {
 	switch event.Field {
 	case denonVolumeField, denonMuteField:
 		s.writeBack(event)
-	case denonVolumeMaxField:
-		// A level read before the receiver reported its limit could not be
-		// mapped, so the limit's arrival is a second chance to send it.
-		s.mutex.Lock()
-		held := s.haveLatest
-		s.mutex.Unlock()
-		if held {
-			poke(s.pending)
-		}
 	}
 }
 
-// mark releases the two waits the one-shots stand on: the connection
-// the commands go out over, and the power the input selection follows.
+// mark releases the three waits a session stands on: the connection its
+// commands go out over, the power its input selection follows, and the
+// full reading the adopt publishes.
 func (s *session) mark(state denonState) {
 	if state.Reachable == ConditionTrue {
 		s.reachedOnce.Do(func() { close(s.reached) })
@@ -156,6 +174,44 @@ func (s *session) mark(state denonState) {
 	if state.Power == powerOn {
 		s.powerOnce.Do(func() { close(s.powerOn) })
 	}
+	if state.Reachable == ConditionTrue && state.Volume != unknownHalves && state.VolumeMax != unknownHalves {
+		s.completeOnce.Do(func() { close(s.complete) })
+	}
+}
+
+// adopt is what makes the session willing to apply a level. The topic
+// holds whatever the last session left on it, in mpv's scale and not
+// this receiver's. So the session publishes where the equipment already
+// stands and takes that as the state it holds. Until that message comes
+// back, every message on the topic is history and moves nothing.
+func (s *session) adopt(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-s.complete:
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-s.connected:
+	}
+
+	state := s.denon.State()
+	level, ok := levelForHalves(state.Volume, state.VolumeMax)
+	if !ok {
+		return
+	}
+	held := volumeState{Level: level, Muted: state.Mute}.clamped()
+	payload, err := marshalVolumeState(held)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "adopting the level of %s: %v\n", s.spec.VolumeTopic, err)
+		return
+	}
+
+	s.mutex.Lock()
+	s.bus.Publish(s.spec.VolumeTopic, payload, true)
+	s.awaiting, s.haveAwaiting = held, true
+	s.mutex.Unlock()
 }
 
 // writeBack publishes what the receiver reports, unless it is the echo
