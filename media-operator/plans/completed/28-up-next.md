@@ -1,10 +1,11 @@
 # 28, Up next
 
-Proposed. A `Play` carries the work that follows it, the display offers
-that work on the scrubber, and a select on the offer starts it. The
+Built, and drilled on `liken-1` on 2026-09-08 in release 2026.09.08-004.
+A `Play` carries the work that follows it, the display offers that work
+on the scrubber, and a select on the offer starts it. The
 browser decides what follows and starts the next `Play`; this plan is
 the media-operator half. The library-operator half is
-[library-operator plan 53](https://github.com/liken-sh/library-operator/blob/main/plans/53-up-next.md).
+[library-operator plan 53](https://github.com/liken-sh/library-operator/blob/main/plans/completed/53-up-next.md).
 
 ## The problem
 
@@ -95,8 +96,10 @@ the main button stays play-pause, and a select on the offer takes two
 presses from a hidden OSD: one summons, up focuses, select acts. The
 stop is present only while a `Play` carries a `next` block.
 
-**Waiting.** A select on the offer broadcasts `liken-next`, the way a
-back at the bare video broadcasts `liken-exit`. The card dims and its
+**Waiting.** A select on the chip grows it into the card, so a person
+sees what the offer starts before a press starts it. A select on the
+card broadcasts `liken-next`, the way a back at the bare video
+broadcasts `liken-exit`. A card the rise raised takes one press. The card dims and its
 last line reads "Starting". From then on the display routes every
 press to nothing except back, which exits the run the way it always
 does. The film plays on under the card until the operator ends the
@@ -175,6 +178,21 @@ in the iced crate and has no Lua port today. The card dims and says
 "Starting" instead.
 
 ## The proof
+
+Drilled on `liken-1` on 2026-09-08. Over the bus, up, up, and select on
+a Play with a `next` block published one `play-next`, the browser
+answered with a play request in the same second, the next `Play` was
+Pending at five seconds, and the old `Play` was gone and the new one
+Running at eight seconds. The store held the old `Play` with its ended
+mark at 607 of 712 seconds, and the new one running under its own
+season and episode. Chris drilled the film chain from the remote, and
+three findings from that drill are in the display: the first select
+opens the card, the chip is measured by the face's own advances, and
+the card's fill is darker. The first series drill also found rumqttc's
+ten-kilobyte packet cap, which a whole-season play request crossed;
+the reader now allows 256 KiB.
+
+The plan as written:
 
 Local first, on vega, in the headless harness: a `Play` with a `next`
 block draws the chip, the card at ninety percent, the sliver, and the

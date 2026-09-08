@@ -28,10 +28,6 @@ These plans are designed. Each keeps its number and moves to
 * [26, Prometheus metrics](26-prometheus-metrics.md). Proposed.
   Playback outcomes, startup delay, and report freshness per `Player`,
   with explicit rules for retained reports, pause, and normal endings.
-* [28, Up next](28-up-next.md). Proposed. A `Play` carries the
-  work that follows it, the display offers it on the scrubber, a
-  select publishes the ask on the bus, and the newest `Play` on a
-  `Player` is the one that runs.
 
 ## Completed
 
@@ -255,6 +251,11 @@ These plans are designed. Each keeps its number and moves to
   2026.09.08-001. The scrubber keeps one trickplay request in flight
   and the bridge serves the newest, so a held scan stops on the
   release instead of playing back a queue of tiles.
+* [28, Up next](completed/28-up-next.md). Built, and drilled on
+  `liken-1` on 2026-09-08 in release 2026.09.08-004. A `Play` carries
+  the work that follows it, the display offers it on the scrubber as a
+  chip and then a card, a select publishes the ask on the bus, and the
+  newest `Play` on a `Player` is the one that runs.
 
 ## Open problems
 
