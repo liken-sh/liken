@@ -4,6 +4,11 @@
 # libraries it opens by name on a real machine. The build context is this
 # directory alone, so the crate is the only source the image sees.
 
+# The runtime base of the last stage. An argument a FROM line reads has
+# to be declared before the first stage, so it is here and not beside
+# the stage that uses it.
+ARG VULKAN_BASE=ghcr.io/liken-sh/vulkan:2026.09.08-001
+
 FROM rust:1.97.1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS build
 WORKDIR /src
 
@@ -53,47 +58,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     touch src/main.rs src/lib.rs brand/iced/src/*.rs \
     && cargo build --release --locked
 
-# A distribution base, unlike the operator's scratch. The toolkit opens a wide
-# dynamic closure at run time, the Wayland client libraries and the Vulkan
-# loader with its driver, and the closure comes soundest from the distribution
-# that built them.
+# The runtime is liken's Vulkan base: the loader, the Intel and AMD
+# drivers, and the Wayland and keyboard libraries the toolkit opens by
+# name, on scratch. The display operator builds it beside the compositor,
+# so the client and the compositor run one Mesa, and a node that runs
+# both holds the drivers once. The base carries the zoneinfo database
+# too, because Rust's standard library has no time zones.
 #
-# The digest pins the base to one exact image, so a rebuild starts from the same
-# bytes after Ubuntu republishes the 26.04 tag. To move to a newer base, read
-# the new digest with docker inspect and replace it here.
-FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
-
-# libwayland-client0 and libxkbcommon0 are the Wayland and keyboard libraries
-# winit opens by name. libvulkan1 with mesa-vulkan-drivers is the renderer's
-# path to the Intel graphics these machines have.
-#
-# The image installs no font package. The binary carries the brand's two
-# faces and loads them at startup, so no text is resolved through
-# fontconfig.
-#
-# tzdata carries the zoneinfo database, because Rust's standard library has
-# no time zones and the clock reads the zone the environment names.
-#
-# The Snapshot line pins apt to the archive as it stood at one instant, so the
-# versions below stay fetchable after Ubuntu publishes newer ones. To move the
-# image forward, set a later serial and refresh the five versions from a build
-# at that serial. snapshot.ubuntu.com serves over HTTPS, and the base carries no
-# certificate store, so the build installs ca-certificates from the default
-# archive first, then purges it after the pinned install so it leaves no trace
-# in the runtime.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && sed -i '/^Signed-By:/a Snapshot: 20260822T000000Z' /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libwayland-client0=1.24.0-2 \
-        libxkbcommon0=1.13.1-1 \
-        libvulkan1=1.4.341.0-1 \
-        mesa-vulkan-drivers=26.0.8-1ubuntu0.3 \
-        tzdata=2026c-0ubuntu0.26.04.1 \
-    && apt-get purge -y ca-certificates \
-    && apt-get autoremove -y --purge \
-    && rm -rf /var/lib/apt/lists/*
+# The tag pins the base to one release of the display operator. The
+# argument is declared at the top of the file, and a workstation may set
+# it to a base it built itself.
+FROM ${VULKAN_BASE}
 
 COPY --from=build /src/target/release/media-browser /media-browser
 
