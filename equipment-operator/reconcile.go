@@ -94,15 +94,18 @@ func (u *receiverUnit) write() {
 	u.applied, u.written = status, true
 }
 
-// setSession starts, replaces, or lifts the session. A session that has
-// not changed is left alone, because power and input are one-shots the
-// receiver answers once.
+// setSession starts, flips, replaces, or lifts the session. A session
+// that has not changed is left alone, because power and input are one-
+// shots the receiver answers once. A flip of active is not a change of
+// session: it reaches the session that stands, which keeps its broker
+// connection and its adopted level.
 func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession) {
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
 
-	if held != nil && spec != nil && held.spec == *spec {
+	if held != nil && spec != nil && held.spec == spec.withoutActive() {
+		held.setActive(spec.Active)
 		return
 	}
 	if held != nil {

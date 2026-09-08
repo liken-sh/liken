@@ -126,13 +126,25 @@ func (h *sessionHarness) drainCommands() {
 	}
 }
 
-// begin starts the session with the connect queries already read, so
-// the next command is the session's own.
+// begin starts a session with a Play standing on it, with the connect
+// queries already read, so the next command is the session's own.
 func (h *sessionHarness) begin(t *testing.T, input string) *session {
+	t.Helper()
+	return h.beginSession(t, input, true)
+}
+
+// beginIdle starts the session the media operator holds while the
+// Player shows its idle screen.
+func (h *sessionHarness) beginIdle(t *testing.T, input string) *session {
+	t.Helper()
+	return h.beginSession(t, input, false)
+}
+
+func (h *sessionHarness) beginSession(t *testing.T, input string, active bool) *session {
 	t.Helper()
 	h.drainCommands()
 	h.holder.forget()
-	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic}
+	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, Active: active}
 	started := startSession(t.Context(), "theater", spec, h.denon, h.brokers.address(), h.volumeRule)
 	h.holder.set(started)
 	return started
@@ -288,17 +300,25 @@ func listeningWith(t *testing.T, rule ReceiverVolume, adoptLevel int) (*sessionH
 	t.Helper()
 	h := newSessionHarnessWith(t, rule)
 	held := h.begin(t, "GAME")
+	broker, adopted := adoptTheLevel(t, h, held)
+	mustMatch(t, positionOf(t, adopted), volumeState{Level: adoptLevel})
+	h.equipment.waitForCommands(t, "SIGAME")
+	return h, broker, held
+}
+
+// adoptTheLevel takes the session past the point from which a press
+// moves the receiver, and answers the message it adopted.
+func adoptTheLevel(t *testing.T, h *sessionHarness, held *session) (*fakeBroker, brokerPublish) {
+	t.Helper()
 	broker := h.brokers.waitForSession(t)
 	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
 	// The session publishes where the receiver stands and waits for that
 	// message to come back before it applies anything, so every test
 	// below starts from the other side of that boundary.
 	adopted := broker.waitForTopic(t, testVolumeTopic)
-	mustMatch(t, positionOf(t, adopted), volumeState{Level: adoptLevel})
 	broker.push(testVolumeTopic, adopted.payload)
 	waitUntilAdopted(t, held)
-	h.equipment.waitForCommands(t, "SIGAME")
-	return h, broker, held
+	return broker, adopted
 }
 
 // waitUntilAdopted waits for the session to take the broker's delivery

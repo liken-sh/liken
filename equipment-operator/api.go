@@ -71,12 +71,24 @@ type ReceiverInput struct {
 	Monitor string `json:"monitor"`
 }
 
-// The Player that holds the receiver, the input it plays through, and
-// the topic it takes the level from.
+// The Player that holds the receiver, the input it plays through, the
+// topic it takes the level from, and whether a Play stands on it. The
+// media operator holds a session whenever the Player has a screen, the
+// idle screen included, so a session with Active false owns the level
+// and sends the equipment nothing.
 type ReceiverSession struct {
 	Player      string `json:"player"`
 	Input       string `json:"input"`
 	VolumeTopic string `json:"volumeTopic"`
+	Active      bool   `json:"active,omitempty"`
+}
+
+// withoutActive is the session apart from the flag, which is what tells
+// one session from another. A flip of the flag reaches the session that
+// already stands. Anything else replaces it.
+func (s ReceiverSession) withoutActive() ReceiverSession {
+	s.Active = false
+	return s
 }
 
 // What the receiver last said, in its own units, and the Reachable

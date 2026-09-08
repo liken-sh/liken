@@ -78,10 +78,12 @@ receivers` shows what the receiver last said:
 
 Nothing more is declared. The `media-operator` resolves each
 `Player`'s screen to a machine and a monitor id, finds the input
-that matches both, and applies `spec.session` while a `Play` stands.
-The session powers the receiver on, selects the input once, and
-takes the level from the `Player`'s volume topic. The remote's volume
-keys then turn the receiver, and the playback pod runs at unity.
+that matches both, and applies `spec.session` for as long as the
+`Player` has that screen, at the idle screen included. The session
+takes the level from the `Player`'s volume topic the whole time, so
+the remote's volume keys turn the receiver whether a film plays or
+not. When a `Play` starts, the session powers the receiver on and
+selects the input, once. An idle screen never wakes the receiver.
 
 A person at the receiver's own remote outranks the cluster. If they
 select another input, the status records it and nothing switches

@@ -317,13 +317,15 @@ func TestPassAnswersTheErrorWhenTheListFails(t *testing.T) {
 	mustFail(t, operator.pass(t.Context()))
 }
 
-// sessionedReceiver is a Receiver that names a session on one input.
+// sessionedReceiver is a Receiver that names a session on one input,
+// with a Play standing on it.
 func sessionedReceiver(name, address, input string) Receiver {
 	held := testReceiver(name, address)
 	held.Spec.Session = &ReceiverSession{
 		Player:      "house/theater",
 		Input:       input,
 		VolumeTopic: "liken/media/players/house/theater/volume",
+		Active:      true,
 	}
 	return held
 }
@@ -477,9 +479,17 @@ func TestAVolumeEditReachesAStandingSession(t *testing.T) {
 	equipment.waitForCommands(t, "MV53")
 }
 
-// playingReceiver is one Denon with a session standing on it and a
+// playingReceiver is one Denon with a Play standing on it and a
 // declared scale, which is the whole of what a press needs.
 func playingReceiver(address string, rule ReceiverVolume) Receiver {
+	held := idleReceiver(address, rule)
+	held.Spec.Session.Active = true
+	return held
+}
+
+// idleReceiver is the same receiver with the Player at its idle screen:
+// a session that owns the level and asks the equipment for nothing.
+func idleReceiver(address string, rule ReceiverVolume) Receiver {
 	held := testReceiver("theater", address)
 	held.Spec.Volume = &rule
 	held.Spec.Session = &ReceiverSession{
@@ -495,12 +505,49 @@ func playingReceiver(address string, rule ReceiverVolume) Receiver {
 // which a press moves the receiver.
 func waitUntilSessionAdopted(t *testing.T, operator *controller, name string) {
 	t.Helper()
+	waitUntilAdopted(t, heldSession(t, operator, name))
+}
+
+// heldSession answers the session a unit runs now, which is the same
+// pointer across a change that does not restart the session.
+func heldSession(t *testing.T, operator *controller, name string) *session {
+	t.Helper()
 	unit, running := operator.units[name]
 	if !running {
 		t.Fatalf("no unit is running for receiver %s", name)
 	}
 	unit.mutex.Lock()
-	held := unit.session
-	unit.mutex.Unlock()
-	waitUntilAdopted(t, held)
+	defer unit.mutex.Unlock()
+	return unit.session
+}
+
+// The media operator holds the session whenever the Player has a
+// screen, and flips active when a Play starts. The flip must reach the
+// session that stands: the same connection, the same owner mark, and no
+// second adopt.
+func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
+	api := startFakeAPI(t)
+	equipment := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	operator := newController(api.client, brokers.address())
+	operator.now = func() time.Time { return statusNow }
+	rule := ReceiverVolume{Max: 69.5, Step: 1}
+
+	api.setReceivers(idleReceiver(equipment.address(), rule))
+	mustSucceed(t, operator.pass(t.Context()))
+	broker := brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	adopted := broker.waitForTopic(t, testVolumeTopic)
+	broker.push(testVolumeTopic, adopted.payload)
+	waitUntilSessionAdopted(t, operator, "theater")
+	equipment.refuseCommand(t, "SIGAME", quietPeriod)
+	before := heldSession(t, operator, "theater")
+
+	api.setReceivers(playingReceiver(equipment.address(), rule))
+	mustSucceed(t, operator.pass(t.Context()))
+
+	equipment.waitForCommands(t, "SIGAME")
+	mustMatch(t, heldSession(t, operator, "theater"), before)
+	broker.refuseTopic(t, ownerTopic(testVolumeTopic), quietPeriod)
+	mustMatch(t, len(brokers.sessions), 0)
 }

@@ -17,7 +17,7 @@ How to reach the receiver and how it is wired. The cluster owner writes every fi
 | <span id="spec--denon"></span>`denon` | [object](#specdenon) | no | The receiver speaks the Denon and Marantz control protocol on TCP port 23: plain commands such as MV50, and events in the same form. |
 | <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | How loud this receiver may be driven and how far one press moves it, both in the receiver's own scale. Required for a Denon. |
 | <span id="spec--inputs"></span>`inputs` | [\[\]object](#specinputs) | no | The receiver's inputs that liken machines feed. Nothing can discover this wiring, so the cluster owner declares it. A receiver forwards one EDID on every input, so the monitor id alone cannot tell two machines apart, and every entry names the machine. |
-| <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that holds the receiver now. The media operator applies this block under its own field manager while a Play stands, and lifts it after. A session powers the receiver on, selects the input once, and takes the level from the volume topic. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster. |
+| <span id="spec--session"></span>`session` | [object](#specsession) | no | The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time. Power and input go out once, when active turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster. |
 
 ### spec.denon
 
@@ -48,13 +48,14 @@ The receiver's inputs that liken machines feed. Nothing can discover this wiring
 
 ### spec.session
 
-The Player that holds the receiver now. The media operator applies this block under its own field manager while a Play stands, and lifts it after. A session powers the receiver on, selects the input once, and takes the level from the volume topic. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster.
+The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time. Power and input go out once, when active turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specsession--player"></span>`player` | string | yes | The Player, as namespace/name. Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9]*[a-z0-9])?$`. |
 | <span id="specsession--input"></span>`input` | string | yes | The input the Player plays through, by its name in spec.inputs. |
 | <span id="specsession--volumetopic"></span>`volumeTopic` | string | yes | The Player's volume topic on the media bus. The operator follows it, owns the level while the session stands, and writes the receiver's own knob back to it. |
+| <span id="specsession--active"></span>`active` | boolean | no | Whether a Play stands on the Player. When it turns on, the receiver is powered on and its input selected, once. While it is off, the session owns the level and sends the receiver nothing, so an idle screen never wakes the room. Absent means off. |
 
 ## status
 

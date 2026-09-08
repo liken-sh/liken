@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,10 +34,21 @@ type session struct {
 	spec     ReceiverSession
 	denon    *denonClient
 	bus      *Bus
-	cancel   context.CancelFunc
+	// The session's own context, held because a flip to active starts the
+	// one-shots long after the session started, and they stop when it
+	// does.
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	powerOnce sync.Once
-	powerOn   chan struct{}
+	// Whether a Play stands. It is the gate on the one-shots and on
+	// nothing else: the level path runs either way.
+	active atomic.Bool
+
+	// The gate the input selection waits on, closed when the receiver
+	// reports itself on. It is armed again for each selection, so a second
+	// Play waits for its own power-on.
+	powerMutex sync.Mutex
+	powered    chan struct{}
 
 	reachedOnce sync.Once
 	reached     chan struct{}
@@ -60,17 +72,21 @@ type session struct {
 	adopted      bool
 }
 
-// startSession opens the session's own broker connection, claims the
-// level with a retained owner mark, and drives power and input once.
+// startSession opens the session's own broker connection and claims the
+// level with a retained owner mark. Power and input go out only for a
+// session that starts active. A session that starts idle owns the level
+// and sends the equipment nothing, so a browser that comes up after a
+// reboot never wakes the receiver.
 func startSession(ctx context.Context, receiver string, spec ReceiverSession, denon *denonClient, busAddress string, scale func() ReceiverVolume) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &session{
 		receiver:  receiver,
-		spec:      spec,
+		spec:      spec.withoutActive(),
 		denon:     denon,
+		ctx:       ctx,
 		cancel:    cancel,
 		scale:     scale,
-		powerOn:   make(chan struct{}),
+		powered:   make(chan struct{}),
 		reached:   make(chan struct{}),
 		complete:  make(chan struct{}),
 		connected: make(chan struct{}),
@@ -84,8 +100,21 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, de
 	s.bus.Subscribe(spec.VolumeTopic)
 	go s.bus.Run(ctx)
 	go s.adopt(ctx)
-	go s.selectInput(ctx)
+	s.setActive(spec.Active)
 	return s
+}
+
+// setActive takes the flip the media operator makes when a Play starts
+// or ends. Each false to true selects the input once. True to false
+// sends nothing, because the room may still be listening.
+func (s *session) setActive(active bool) {
+	if !active {
+		s.active.Store(false)
+		return
+	}
+	if s.active.CompareAndSwap(false, true) {
+		go s.selectInput(s.ctx)
+	}
 }
 
 // stop clears the owner mark, waits for it to reach the broker, and
@@ -241,11 +270,32 @@ func (s *session) mark(state denonState) {
 		s.reachedOnce.Do(func() { close(s.reached) })
 	}
 	if state.Power == powerOn {
-		s.powerOnce.Do(func() { close(s.powerOn) })
+		s.notePower()
 	}
 	if state.Reachable == ConditionTrue && state.Volume != unknownHalves {
 		s.completeOnce.Do(func() { close(s.complete) })
 	}
+}
+
+// notePower releases whoever waits for the receiver to come on.
+func (s *session) notePower() {
+	s.powerMutex.Lock()
+	defer s.powerMutex.Unlock()
+	select {
+	case <-s.powered:
+	default:
+		close(s.powered)
+	}
+}
+
+// armPower answers the gate that closes when the receiver next reports
+// itself on. A selection arms it before it reads the power, so a
+// receiver that answers in between still releases the wait.
+func (s *session) armPower() <-chan struct{} {
+	s.powerMutex.Lock()
+	defer s.powerMutex.Unlock()
+	s.powered = make(chan struct{})
+	return s.powered
 }
 
 // adopt is what makes the session willing to apply a level. The topic
@@ -301,8 +351,9 @@ func (s *session) publishPosition() bool {
 }
 
 // selectInput powers the receiver on, waits for it to say so, and
-// selects the input once. The input is never re-asserted: a hand on the
-// equipment outranks the cluster.
+// selects the input once for the Play that asked. It runs once per flip
+// to active and never re-asserts inside one: a hand on the equipment
+// outranks the cluster.
 func (s *session) selectInput(ctx context.Context) {
 	// A command sent before the connection is open is dropped, and a one-
 	// shot is never re-asserted, so the wait for the connection is what
@@ -313,14 +364,15 @@ func (s *session) selectInput(ctx context.Context) {
 		return
 	case <-s.reached:
 	}
+	powered := s.armPower()
 	if s.denon.State().Power != powerOn {
 		s.denon.Send(denonPowerOnCommand)
-	}
-	select {
-	case <-ctx.Done():
-		return
-	case <-s.powerOn:
-	case <-time.After(sessionPowerWait):
+		select {
+		case <-ctx.Done():
+			return
+		case <-powered:
+		case <-time.After(sessionPowerWait):
+		}
 	}
 	if ctx.Err() != nil {
 		return

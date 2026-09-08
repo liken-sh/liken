@@ -93,10 +93,14 @@ server-side apply under its own field manager, the way it applies
 `spec.override` on a `Display` today, and it lifts it when the unit
 goes away. The cluster owner never writes it.
 
-A session means: power the receiver on, select the input, and own the
-level from the named volume topic. Power and input are one-shots. The
-operator sends them when the session appears or changes, and never
-holds them. If a person selects another input on the receiver's own
+A session means: own the level from the named volume topic, and,
+while `active` is true, power the receiver on and select the input.
+The media operator holds the session whenever the Player has the
+screen, the idle screen included, and sets `active` only while a
+Play stands. So a volume press at the idle screen turns the receiver,
+and an idle screen that comes up after a reboot never wakes it. Power
+and input are one-shots. The operator sends them when `active` turns
+on, and never holds them. If a person selects another input on the receiver's own
 remote, the status records it and nothing fights back. A hand on the
 equipment outranks the cluster.
 
@@ -170,9 +174,9 @@ one-client rule, such as a WiiM's HTTP API, makes no Service.
 
 The media operator resolves a `Player`'s display to a node and a
 monitor id, as it does today, and looks for a `Receiver` input that
-matches both. When a `Play` starts on that `Player`, it applies the
-session before it creates the pod, and it hands the pod the owner
-mark's topic. The command sidecar subscribes to the mark and gates
+matches both. It applies the session for as long as the match holds,
+sets `active` when a `Play` starts, before it creates the pod, and
+hands the pod and the idle client the owner mark's topic. The command sidecar subscribes to the mark and gates
 mpv on it. When the unit goes away, the session is lifted.
 
 A `Player` with no matching `Receiver` works as it does today. A
