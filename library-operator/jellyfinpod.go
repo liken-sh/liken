@@ -88,25 +88,12 @@ func buildJellyfinPod(catalog *NamespaceCatalog, operatorImage, busAddress, topi
 // a provider key reaches an enricher, so the key never passes through the
 // operator.
 func jellyfinRole(catalog *NamespaceCatalog, image, busAddress, topicBase, mediaBase string) Container {
-	jellyfin := catalog.Spec.Jellyfin
 	return Container{
 		Name:    jellyfinContainer,
 		Image:   image,
 		Command: []string{"/library-operator", jellyfinMode},
-		Env: []EnvVar{
-			{Name: libraryNamespaceVariable, Value: catalog.Metadata.Namespace},
-			{Name: busAddressVariable, Value: busAddress},
-			{Name: topicBaseVariable, Value: topicBase},
-			{Name: mediaTopicBaseVariable, Value: mediaBase},
-			{Name: jellyfinURLVariable, Value: jellyfin.URL},
-			{Name: jellyfinAPIKeyVariable, ValueFrom: &EnvVarSource{
-				SecretKeyRef: &SecretKeySelector{
-					Name: jellyfin.SecretRef.Name,
-					Key:  jellyfin.SecretRef.secretKey(),
-				},
-			}},
-			{Name: jellyfinListenVariable, Value: defaultJellyfinListen},
-		},
+		Env: append(jellyfinEnv(catalog, busAddress, topicBase, mediaBase),
+			EnvVar{Name: jellyfinListenVariable, Value: defaultJellyfinListen}),
 		Ports: []ContainerPort{
 			{Name: jellyfinPortName, ContainerPort: jellyfinPort},
 		},
@@ -121,6 +108,27 @@ func jellyfinRole(catalog *NamespaceCatalog, image, busAddress, topicBase, media
 			Limits:   map[string]string{"memory": scannerMemoryLimit},
 		},
 		SecurityContext: unprivileged(),
+	}
+}
+
+// the environment every container that reads the Jellyfin server takes: the
+// namespace, the broker, both topic trees, the server, and the API key
+// through its secretKeyRef. The role adds the address it listens on, and the
+// backfill Job listens on none.
+func jellyfinEnv(catalog *NamespaceCatalog, busAddress, topicBase, mediaBase string) []EnvVar {
+	jellyfin := catalog.Spec.Jellyfin
+	return []EnvVar{
+		{Name: libraryNamespaceVariable, Value: catalog.Metadata.Namespace},
+		{Name: busAddressVariable, Value: busAddress},
+		{Name: topicBaseVariable, Value: topicBase},
+		{Name: mediaTopicBaseVariable, Value: mediaBase},
+		{Name: jellyfinURLVariable, Value: jellyfin.URL},
+		{Name: jellyfinAPIKeyVariable, ValueFrom: &EnvVarSource{
+			SecretKeyRef: &SecretKeySelector{
+				Name: jellyfin.SecretRef.Name,
+				Key:  jellyfin.SecretRef.secretKey(),
+			},
+		}},
 	}
 }
 

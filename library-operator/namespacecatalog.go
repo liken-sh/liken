@@ -151,8 +151,30 @@ type CatalogStatus struct {
 	StorageSize string          `json:"storageSize,omitempty"`
 	Replicas    CatalogReplicas `json:"replicas,omitzero"`
 	Screens     []CatalogScreen `json:"screens,omitempty"`
-	Conditions  []Condition     `json:"conditions,omitempty"`
+	// the Jellyfin half of the status, which a Catalog that names no
+	// server does not carry.
+	Jellyfin   *CatalogJellyfinStatus `json:"jellyfin,omitempty"`
+	Conditions []Condition            `json:"conditions,omitempty"`
 }
+
+// what the namespace's Jellyfin server has given the progress store. Server
+// is the URL the backfill ran against, so a Catalog that names another server
+// runs the backfill again. Backfill is where that one-time run stands, and
+// Backfilled is when it finished, absent until it did.
+type CatalogJellyfinStatus struct {
+	Server     string `json:"server"`
+	Backfill   string `json:"backfill"`
+	Backfilled string `json:"backfilled,omitempty"`
+}
+
+// the four states the backfill takes: it waits for the progress store, it
+// runs, it gave up past its backoff, and it finished.
+const (
+	backfillPending  = "Pending"
+	backfillRunning  = "Running"
+	backfillFailed   = "Failed"
+	backfillFinished = "Finished"
+)
 
 // The durable copies of the namespace's two stores: how many are up, and
 // how many the Catalog asks for.

@@ -83,3 +83,40 @@ once more when the `Play` ends.
 A person's Jellyfin user name must be their `Person` name. A Jellyfin
 user with no `Person` of that name still records a row, and no screen
 shows it, because no `Person` claims it.
+
+## 4. The backfill
+
+The operator runs one backfill on its own, with no step for you to
+take. It waits until every durable copy of the progress store is up,
+then runs one Job named after the `Catalog` with the suffix
+`-jellyfin-backfill`. For every Jellyfin user, the Job reads the items
+with a resume point and the items the user finished, and records each
+one in the progress store under the title's provider ids, with the
+position, whether the user finished it, and the date Jellyfin last
+saw it played.
+
+Jellyfin holds one state per item and no list of viewings, so the
+backfill carries no history. An item with no provider ids is counted
+and skipped. The backfill makes no `Person`: a Jellyfin user with no
+`Person` of that name records rows that no screen shows.
+
+A rerun is safe. The store keeps the newer timestamp, so a backfilled
+row never overwrites a newer play, and a row the backfill writes twice
+is the same row.
+
+`status.jellyfin` on the `Catalog` says where the backfill stands:
+
+```yaml
+status:
+  jellyfin:
+    server: http://jellyfin.jellyfin.svc:8096
+    backfill: Finished
+    backfilled: "2026-09-08T14:02:11Z"
+```
+
+`backfill` is `Pending`, `Running`, `Failed`, or `Finished`. To run
+the backfill again, clear `status.jellyfin` or change
+`spec.jellyfin.url`, because the status names the server it ran
+against. The counts of the run, users, items published, and items
+skipped, are in the Job's log, which stays for an hour after the Job
+ends.

@@ -293,7 +293,7 @@ func TestReconcileCatalogsStandsTheProgressClusterToo(t *testing.T) {
 	// the pod this pass creates, the way the catalog slice does.
 	cluster.pods["den-tv-media-browser"] = progressPodAt("den-tv-media-browser", "house", "10.42.1.9")
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 	if cluster.heldPod("house-catalog-progress-0") == nil {
 		t.Fatal("the pass stood no progress pod")
@@ -345,7 +345,7 @@ func TestReconcileCatalogsStandsNoProgressClusterForManyCatalogs(t *testing.T) {
 	first := seedCatalog(cluster, "house-catalog", "house")
 	second := seedCatalog(cluster, "another-catalog", "house")
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second), nil, nil, testNow)
 
 	if cluster.heldPod("house-catalog-progress-0") != nil {
 		t.Error("the pass stood a progress pod for a namespace with two Catalogs")

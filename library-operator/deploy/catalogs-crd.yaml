@@ -245,6 +245,20 @@ spec:
                       phase:
                         type: string
                         description: "The screen pod's phase, as the kubelet reports it."
+                jellyfin:
+                  type: object
+                  description: "The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, where it stands, and when it finished. Present only while spec.jellyfin names a server."
+                  properties:
+                    server:
+                      type: string
+                      description: "The server address the backfill ran against, from spec.jellyfin.url. A Catalog that changes the address runs the backfill again against the new one."
+                    backfill:
+                      type: string
+                      description: "Where the backfill stands. Pending waits for every durable copy of the progress store to be up. Running means the Job is running. Failed means the Job failed past its backoff limit, and the operator deletes it and creates it again after a wait that doubles each time. Finished means the Job exited zero. To run the backfill again against the same server, clear status.jellyfin."
+                    backfilled:
+                      type: string
+                      format: date-time
+                      description: "When the backfill finished, in UTC. Absent until it did."
                 conditions:
                   type: array
                   description: "The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up."

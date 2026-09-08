@@ -220,7 +220,7 @@ func TestReconcileCatalogsStandsTheJellyfinPairTheCatalogAsksFor(t *testing.T) {
 			catalog := seedCatalog(cluster, "house-catalog", "house")
 			catalog.Spec.Jellyfin = one.block
 
-			testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+			testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 			if held := cluster.heldPod("house-catalog-jellyfin") != nil; held != one.stands {
 				t.Errorf("the jellyfin pod stands = %v, want %v", held, one.stands)

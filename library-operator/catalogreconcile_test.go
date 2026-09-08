@@ -25,7 +25,7 @@ func TestReconcileCatalogsStandsTheClusterFromOneCatalog(t *testing.T) {
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	pod := scannerPodAt("movies-scanner", "house", "10.42.1.7", "nuc-1")
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{pod}, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{pod}, nil, testNow)
 
 	if cluster.heldPod("house-catalog-catalog-0") == nil {
 		t.Fatal("the pass stood no catalog pod")
@@ -68,7 +68,7 @@ func TestReconcileCatalogsStandsEveryCopyOfBothStores(t *testing.T) {
 	catalog.Spec.Storage.Replicas = 3
 	catalog.Spec.Progress.Replicas = 2
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 	for _, name := range []string{
 		"house-catalog-catalog-0", "house-catalog-catalog-1", "house-catalog-catalog-2",
@@ -102,7 +102,7 @@ func TestReconcileCatalogsStandsOneCopyOnAClassThatIsNotPerNode(t *testing.T) {
 	catalog.Spec.Storage.StorageClassName = "local-path"
 	catalog.Spec.Storage.Replicas = 3
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 	if cluster.heldPod("house-catalog-catalog-0") == nil {
 		t.Error("the pass stood no catalog pod")
@@ -131,7 +131,7 @@ func TestReconcileCatalogsTakesDownTheCopiesItNoLongerAsksFor(t *testing.T) {
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	standingCatalogCopies(cluster, catalog, 3)
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 	if cluster.heldPod("house-catalog-catalog-0") == nil || cluster.heldClaim("house-catalog-catalog") == nil {
 		t.Error("the pass took down the copy the Catalog still asks for")
@@ -208,7 +208,7 @@ func TestReconcileCatalogsMountsTheClaimTheCatalogNames(t *testing.T) {
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	catalog.Spec.Storage.ClaimName = "catalog-of-my-own"
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 	if cluster.heldClaim("house-catalog-catalog-0") != nil {
 		t.Error("the pass provisioned a claim over the one the Catalog names")
@@ -230,7 +230,7 @@ func TestReconcileCatalogsIsReadyWhenTheCatalogPodIsUp(t *testing.T) {
 	pod := readyCatalogPod("house-catalog", "house")
 	cluster.pods["house-catalog-catalog-0"] = pod
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{*pod}, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), []Pod{*pod}, nil, testNow)
 
 	status := cluster.heldCatalog("house-catalog").Status
 	ready := conditionOf(t, LibraryStatus{Conditions: status.Conditions}, catalogConditionReady)
@@ -247,7 +247,7 @@ func TestReconcileCatalogsMarksEveryCatalogBlockedWhenThereAreTwo(t *testing.T) 
 	first := seedCatalog(cluster, "first", "house")
 	second := seedCatalog(cluster, "second", "house")
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", first, second), nil, nil, testNow)
 
 	if cluster.heldService("house", catalogServiceName) != nil {
 		t.Error("the pass stood a catalog Service for a namespace with two Catalogs")
@@ -271,7 +271,7 @@ func TestReconcileCatalogsCarriesOnFromAFailedWrite(t *testing.T) {
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	cluster.broken["/api/v1/namespaces/house/pods/house-catalog-catalog-0"] = http.StatusInternalServerError
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 	if cluster.heldService("house", catalogServiceName) == nil {
 		t.Error("the pass stood no catalog Service after the pod failed")

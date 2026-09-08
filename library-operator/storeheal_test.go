@@ -49,7 +49,7 @@ func TestAStrandedCopyLosesItsPodAndItsClaim(t *testing.T) {
 	cluster.nodes["nuc-2"] = nodeAt("nuc-2", "False", 11*time.Minute)
 
 	testOperator(t, cluster).reconcileCatalogs(t.Context(),
-		oneNamespace("house", catalog), []Pod{*stranded}, testNow)
+		oneNamespace("house", catalog), []Pod{*stranded}, nil, testNow)
 
 	if got := cluster.countRequests(http.MethodDelete, "pods"); got != 1 {
 		t.Errorf("pod deletes = %d, want the one stranded copy", got)
@@ -247,7 +247,7 @@ func TestReconcileCatalogsStandsTheStoresWhenTheNodeListFails(t *testing.T) {
 	catalog := seedCatalog(cluster, "house-catalog", "house")
 	cluster.broken[nodesPath] = http.StatusInternalServerError
 
-	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, testNow)
+	testOperator(t, cluster).reconcileCatalogs(t.Context(), oneNamespace("house", catalog), nil, nil, testNow)
 
 	if cluster.heldPod("house-catalog-catalog-0") == nil {
 		t.Error("the pass stood no catalog pod after the node list failed")

@@ -6,6 +6,9 @@ package main
 // namespace is a Job: a scan runs on a schedule from a CronJob, a
 // folder scan runs once from a Job the webhook creates, and a departure
 // runs once from a Job of its own.
+//
+// the Jellyfin backfill is a worker too, and it belongs to a Catalog rather
+// than to a Library.
 
 import (
 	"context"
@@ -90,6 +93,13 @@ func (j *Job) active() bool { return j.Status.Active > 0 }
 // before. A Job that waits out its backoff with no pod is unfinished.
 func (j *Job) finished() bool {
 	return j.holds(jobComplete) || j.holds(jobFailed)
+}
+
+// A Job with no pod running and a failed pod behind it has given
+// up, because Kubernetes replaced that pod up to the backoff limit
+// before it stopped.
+func (j *Job) gaveUp() bool {
+	return !j.active() && j.Status.Succeeded == 0 && j.Status.Failed > 0
 }
 
 // succeeded is true when the controller ended the Job on a pod that exited

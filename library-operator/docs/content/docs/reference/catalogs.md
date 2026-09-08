@@ -127,6 +127,7 @@ The cluster the Catalog stands, written only by the library operator.
 | <span id="status--storagesize"></span>`storageSize` | string | no | The storage size the agents were given. |
 | <span id="status--replicas"></span>`replicas` | [object](#statusreplicas) | no | The durable copies of the namespace's two stores: for each, the count that is up beside the count the Catalog asks for. |
 | <span id="status--screens"></span>`screens` | [\[\]object](#statusscreens) | no | One entry per screen pod in the namespace, in Player order: the Player it draws for, the claim its catalog agent runs on, the claim its art cache is on, the node it runs on, and its phase. A screen whose namespace has no single Catalog runs on emptyDirs and names neither claim. |
+| <span id="status--jellyfin"></span>`jellyfin` | [object](#statusjellyfin) | no | The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, where it stands, and when it finished. Present only while spec.jellyfin names a server. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this Catalog, in the standard Kubernetes form. Ready is True when every durable copy of the catalog runs with every container ready. It is False with the reason ClassNotPerNode when the Catalog asks for copies of a store on a class that cannot hold more than one, and otherwise False with the reason PodPending, PodFailed, or ManyCatalogs, naming the first copy that is not up. |
 
 ### status.replicas
@@ -167,6 +168,16 @@ One entry per screen pod in the namespace, in Player order: the Player it draws 
 | <span id="statusscreens--artclaim"></span>`artClaim` | string | no | The claim the screen's art cache is on, or empty for a screen on an emptyDir. |
 | <span id="statusscreens--node"></span>`node` | string | no | The node the screen pod runs on. On a node-local class it is the node both of its claims are bound to. |
 | <span id="statusscreens--phase"></span>`phase` | string | no | The screen pod's phase, as the kubelet reports it. |
+
+### status.jellyfin
+
+The one-time backfill of the progress the namespace's Jellyfin server already held before this operator recorded it: the server it ran against, where it stands, and when it finished. Present only while spec.jellyfin names a server.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusjellyfin--server"></span>`server` | string | no | The server address the backfill ran against, from spec.jellyfin.url. A Catalog that changes the address runs the backfill again against the new one. |
+| <span id="statusjellyfin--backfill"></span>`backfill` | string | no | Where the backfill stands. Pending waits for every durable copy of the progress store to be up. Running means the Job is running. Failed means the Job failed past its backoff limit, and the operator deletes it and creates it again after a wait that doubles each time. Finished means the Job exited zero. To run the backfill again against the same server, clear status.jellyfin. |
+| <span id="statusjellyfin--backfilled"></span>`backfilled` | string | no | When the backfill finished, in UTC. Absent until it did. |
 
 ### status.conditions[]
 

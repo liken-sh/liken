@@ -100,7 +100,7 @@ func (o *operator) standCleanupJob(ctx context.Context, library *Library, jobs [
 	if live.Metadata.DeletionTimestamp != "" {
 		return live, nil
 	}
-	if cleanupFailed(live) {
+	if live.gaveUp() {
 		if err := DeleteJob(ctx, o.client, namespace, cleanupJobName(name)); err != nil {
 			return nil, err
 		}
@@ -118,17 +118,10 @@ func cleanupJobOf(jobs []Job, namespace, library string) *Job {
 	return &held[0]
 }
 
-// A Job with no pod running and a failed pod behind it has given
-// up, because Kubernetes replaced that pod up to the backoff limit
-// before it stopped.
-func cleanupFailed(job *Job) bool {
-	return !job.active() && job.Status.Succeeded == 0 && job.Status.Failed > 0
-}
-
 // The sentence a person acts on when a cleanup Job will not
 // finish, in the cluster's own counts.
 func cleanupBlocker(job *Job) string {
-	if job == nil || !cleanupFailed(job) {
+	if job == nil || !job.gaveUp() {
 		return ""
 	}
 	return fmt.Sprintf("the cleanup job %s failed after %d attempts",

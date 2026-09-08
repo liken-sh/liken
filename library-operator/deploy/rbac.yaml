@@ -201,10 +201,11 @@ rules:
   # schedule, a Job runs one folder scan for a webhook, and a Job runs
   # the sweep of a departing Library. The list and watch are
   # cluster-scoped for the reason the pods are, and every pass re-reads
-  # with the list. The delete verb covers three deletes: the schedule of
+  # with the list. The delete verb covers four deletes: the schedule of
   # a Library that no longer stands one, a cleanup Job that failed and
-  # is stood again on a backoff, and the retirement of a cleanup Job
-  # when its library is released. A CronJob is also updated, because a
+  # is stood again on a backoff, the retirement of a cleanup Job
+  # when its library is released, and a Jellyfin backfill Job that
+  # failed or that a Catalog no longer asks for. A CronJob is also updated, because a
   # changed schedule or a new image rewrites it in place. A Job is
   # never updated: it runs once as it was created.
   - apiGroups: [batch]

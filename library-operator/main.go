@@ -39,6 +39,9 @@ func main() {
 		case jellyfinMode:
 			runJellyfin()
 			return
+		case jellyfinBackfillMode:
+			runJellyfinBackfill()
+			return
 		}
 	}
 

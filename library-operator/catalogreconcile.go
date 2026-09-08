@@ -37,11 +37,17 @@ import (
 // Service, one pair per namespace. A Catalog that names none stands neither,
 // and the pass deletes the pair it stood before.
 //
+// the same Catalog stands one more thing, once: the backfill Job that carries
+// what Jellyfin already held into the progress store. The pass reads the
+// worker Jobs it was handed to tell where that run stands, and reports it on
+// the Catalog's own status.
+//
 // The members the pass hands in are every pod that holds a catalog agent,
 // read once for the whole pass: the durable copies of the catalog, the
 // pods of the Jobs that are running, and the screen pods. The progress
 // agents and the nodes are read here, because this step alone needs them.
-func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string][]*NamespaceCatalog, members []Pod, now time.Time) {
+func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string][]*NamespaceCatalog,
+	members []Pod, jobs []Job, now time.Time) {
 	// A list that fails costs this pass its progress slices and nothing
 	// else. The pods stand, and the next pass writes the slices.
 	progressMembers, err := ListProgressMemberPods(ctx, o.client)
@@ -102,6 +108,12 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		if err := o.standJellyfin(ctx, catalog); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the jellyfin role in %s: %v\n", namespace, err)
 		}
+		// the one-time backfill stands after the pair, on the Jobs
+		// this pass already listed and the copies of the progress
+		// store it just stood. It reports where it stands rather than
+		// failing, because a backfill that cannot run costs the
+		// Catalog nothing else.
+		backfill := o.standJellyfinBackfill(ctx, catalog, jobs, progressPods, now)
 		// The classes are read before the status is built, so a Catalog
 		// that asks for copies a class cannot hold reports that on the
 		// same pass.
@@ -111,6 +123,10 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		}
 		status := standingCatalogStatus(catalog, catalogPods, progressPods, members,
 			blocker{reason: reason, message: message}, now)
+		// the Jellyfin half is set here and not built with the rest,
+		// because it is the verdict of the step above and not a
+		// reading of the pods this status reports.
+		status.Jellyfin = backfill
 		if err := o.writeCatalogStatus(ctx, catalog, status); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the catalog status in %s: %v\n", namespace, err)
 		}

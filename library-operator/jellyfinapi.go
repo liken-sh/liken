@@ -44,6 +44,10 @@ const (
 	jellyfinAPIVersion  = "1"
 	jellyfinItemsPath   = "/Items?recursive=true&includeItemTypes=Movie,Episode,Series&fields=ProviderIds,Path"
 	jellyfinSeriesQuery = "?fields=ProviderIds"
+	// the listing one user takes. It names the user, so every item
+	// carries that person's own user data, and the caller adds the filter
+	// that narrows the answer.
+	jellyfinUserItemsQuery = "&recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds"
 )
 
 // The three item types the role reads. Jellyfin writes them in this case, and
@@ -88,6 +92,9 @@ type jellyfinUser struct {
 // One item of the listing. The provider ids are the identity the catalog
 // shares with Jellyfin; an episode carries its own ids and its series' id,
 // and the season and episode numbers beside them.
+// the run time and the user data are the two fields the backfill reads and
+// the index does not. A listing that names no user carries no user data, and
+// both read as zero there.
 type jellyfinItem struct {
 	ID                string            `json:"Id"`
 	Type              string            `json:"Type"`
@@ -95,6 +102,8 @@ type jellyfinItem struct {
 	SeriesID          string            `json:"SeriesId"`
 	ParentIndexNumber int               `json:"ParentIndexNumber"`
 	IndexNumber       int               `json:"IndexNumber"`
+	RunTimeTicks      int64             `json:"RunTimeTicks"`
+	UserData          jellyfinUserData  `json:"UserData"`
 }
 
 // The listing's envelope. Jellyfin answers a query with the items under one
@@ -127,6 +136,18 @@ func (a *jellyfinAPI) users(ctx context.Context) ([]jellyfinUser, error) {
 func (a *jellyfinAPI) items(ctx context.Context) ([]jellyfinItem, error) {
 	list := jellyfinItemList{}
 	if err := a.get(ctx, jellyfinItemsPath, &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// the items of one user, with that person's user data on each. The query the
+// caller adds is what narrows the answer, because two filters narrow together
+// and the backfill needs the two answers apart.
+func (a *jellyfinAPI) userItems(ctx context.Context, user, query string) ([]jellyfinItem, error) {
+	list := jellyfinItemList{}
+	path := "/Items?userId=" + url.QueryEscape(user) + jellyfinUserItemsQuery + query
+	if err := a.get(ctx, path, &list); err != nil {
 		return nil, err
 	}
 	return list.Items, nil

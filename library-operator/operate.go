@@ -119,6 +119,11 @@ type operator struct {
 	// the Library goes.
 	cleanupStands map[string]cleanupStand
 
+	// the recreate backoff of each Catalog's Jellyfin backfill Job, keyed
+	// the same way, and dropped when the backfill finishes or the Catalog
+	// names no server.
+	backfillStands map[string]cleanupStand
+
 	// Which of the classes this pass has read are served by the per-node
 	// driver, by class name. The pass clears it when it starts, so an
 	// answer is one pass old at most and the operator watches no
@@ -151,6 +156,7 @@ func newOperator(client *Client, scannerImage, corrosionImage, browserImage, bus
 		mediaTopicBase: defaultMediaTopicBase,
 		wake:           wake,
 		cleanupStands:  map[string]cleanupStand{},
+		backfillStands: map[string]cleanupStand{},
 		perNodeClasses: map[string]bool{},
 		providerBases:  defaultProviderBases(),
 		providerClient: &http.Client{Timeout: providerCheckTimeout},
@@ -506,7 +512,7 @@ func (o *operator) pass() {
 	// the API server has minted its name.
 	o.reconcileProgress(ctx, plays.Items, people.Items, watches.Items, stores, now)
 
-	o.reconcileCatalogs(ctx, byNamespace, members.Items, now)
+	o.reconcileCatalogs(ctx, byNamespace, members.Items, jobs.Items, now)
 
 	// The sweep goes last, after every reconcile, so a sweep the server
 	// refuses costs the pass its volume cleanup and nothing else.
