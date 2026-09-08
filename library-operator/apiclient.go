@@ -215,6 +215,9 @@ const (
 	// is recorded for every Play in the cluster and not only for the
 	// ones a screen of this operator's asked for.
 	playsAllPath = "/apis/" + playerAPIVersion + "/plays"
+	// The Watches, listed across every namespace, the same shape as the
+	// Libraries.
+	watchesPath = "/apis/" + libraryAPIVersion + "/watches"
 	// The people, cluster-scoped, in the group people-operator serves.
 	peoplePath = "/apis/" + personAPIVersion + "/people"
 	// The MediaPreferences, cluster-scoped and read-only here, for the
@@ -274,6 +277,11 @@ func playsPath(namespace string) string {
 // the finalizer it holds on the Play.
 func playPath(namespace, name string) string {
 	return playsPath(namespace) + "/" + name
+}
+
+// watchPath is one Watch by name, in its own namespace.
+func watchPath(namespace, name string) string {
+	return libraryPrefix + namespace + "/watches/" + name
 }
 
 // personPath is one Person by name. A Person is cluster-scoped, so the
@@ -704,6 +712,44 @@ func PatchPlayMetadata(ctx context.Context, c *Client, namespace, name, resource
 		patch["annotations"] = metadata.Annotations
 	}
 	return patchMetadata(ctx, c, playPath(namespace, name), patch)
+}
+
+// ListWatches reads every Watch in the cluster with one request, the
+// way the pass reads the Libraries.
+func ListWatches(ctx context.Context, c *Client) (*WatchList, error) {
+	list := &WatchList{}
+	if err := c.RequestJSON(ctx, http.MethodGet, watchesPath, nil, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// PatchWatchOwnerReferences writes the owners of a Watch: one Person
+// per name in its spec. A Watch goes when the last of its people goes,
+// and the garbage collector is what takes it, so these references are
+// the whole of that rule.
+func PatchWatchOwnerReferences(ctx context.Context, c *Client, namespace, name, resourceVersion string, owners []OwnerReference) (string, error) {
+	return patchMetadata(ctx, c, watchPath(namespace, name), map[string]any{
+		"resourceVersion": resourceVersion,
+		"ownerReferences": owners,
+	})
+}
+
+// UpdateWatchStatus writes the projection through the status
+// subresource, so this request can never touch the spec a person
+// declared. The resourceVersion in the body makes the write
+// conditional, and a Watch that changed underneath answers ErrConflict.
+func UpdateWatchStatus(ctx context.Context, c *Client, watch *Watch) (*Watch, error) {
+	body, err := json.Marshal(watch)
+	if err != nil {
+		return nil, err
+	}
+	written := &Watch{}
+	path := watchPath(watch.Metadata.Namespace, watch.Metadata.Name) + "/status"
+	if err := c.RequestJSON(ctx, http.MethodPut, path, body, written); err != nil {
+		return nil, err
+	}
+	return written, nil
 }
 
 // ListPeople reads every Person in the cluster with one request. A
