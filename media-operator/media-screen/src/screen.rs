@@ -1,6 +1,7 @@
 //! The rules a screen client holds for one `Player`: the quiet window and the
-//! off window, the focus gate, the shade, the level a press steps, the cycle
-//! request, and the panel desire.
+//! off window, the focus gate, the shade, the level a press steps and the
+//! mark that says equipment owns it, the cycle request, and the panel
+//! desire.
 //!
 //! [`Screen`] reaches no socket and holds no clock. Every rule below is
 //! a function of what arrived and what time it is, so a test proves
@@ -64,6 +65,10 @@ pub enum Moment {
     /// The unit's listening level. `pressed` is false for the broker's
     /// catch-up and true for a press.
     Level { volume: Volume, pressed: bool },
+    /// The owner mark as it stands, as the raw payload. A non-empty mark
+    /// means equipment owns the level. An empty one means the mark is
+    /// cleared. The client decides what to draw for it.
+    Owner(Vec<u8>),
 }
 
 /// One message this crate sends on the bus. The client never builds one:
@@ -114,6 +119,8 @@ pub struct Screen {
     /// the speaker gate: the client subscribes to no level and answers no
     /// volume press.
     volume_topic: String,
+    /// The owner mark's topic, present only when the volume topic is.
+    volume_owner_topic: Option<String>,
     commands_topic: String,
     panel_topic: String,
     /// The unit's controllers, in `spec.remotes` order, so a controller's
@@ -160,6 +167,7 @@ impl Screen {
             player_name: wiring.player_name.clone(),
             status_topic: wiring.status_topic.clone(),
             volume_topic: wiring.volume_topic.clone(),
+            volume_owner_topic: wiring.volume_owner_topic.clone(),
             commands_topic: wiring.commands_topic.clone(),
             panel_topic: wiring.panel_topic.clone(),
             marks: vec![Mark::default(); wiring.remotes.len()],
@@ -187,6 +195,7 @@ impl Screen {
         let mut filters = vec![
             self.status_topic.clone(),
             self.volume_topic.clone(),
+            self.volume_owner_topic.clone().unwrap_or_default(),
             self.commands_topic.clone(),
         ];
         for remote in &self.remotes {
@@ -224,6 +233,11 @@ impl Screen {
         // read before the command vocabulary below.
         if !self.volume_topic.is_empty() && topic == self.volume_topic {
             return self.on_level(payload, retained);
+        }
+        // The mark is a state beside the level, read for the same reason
+        // the level is. The client decides what an owner means.
+        if self.volume_owner_topic.as_deref() == Some(topic) {
+            return vec![Effect::Moment(Moment::Owner(payload.to_vec()))];
         }
         // A controller's presses are checked before the commands topic,
         // because a key event is not the operator's command vocabulary.

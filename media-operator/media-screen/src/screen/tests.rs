@@ -8,6 +8,7 @@ use crate::status::Activity;
 const PLAYER: &str = "theater";
 const STATUS: &str = "liken/media/players/house/theater/status";
 const VOLUME: &str = "liken/media/players/house/theater/volume";
+const VOLUME_OWNER: &str = "liken/media/players/house/theater/volume/owner";
 const COMMANDS: &str = "liken/media/players/house/theater/commands";
 const PANEL: &str = "liken/media/players/house/theater/panel";
 const SOFA_EVENTS: &str = "liken/media/remotes/house/sofa/events";
@@ -21,6 +22,7 @@ fn wiring() -> Wiring {
         player_name: PLAYER.into(),
         status_topic: STATUS.into(),
         volume_topic: VOLUME.into(),
+        volume_owner_topic: Some(VOLUME_OWNER.into()),
         commands_topic: COMMANDS.into(),
         panel_topic: PANEL.into(),
         remotes: vec![Remote {
@@ -126,6 +128,7 @@ fn the_screen_subscribes_to_every_topic_the_operator_named() {
         [
             STATUS,
             VOLUME,
+            VOLUME_OWNER,
             COMMANDS,
             ARMCHAIR_EVENTS,
             ARMCHAIR_FOCUS,
@@ -139,11 +142,24 @@ fn the_screen_subscribes_to_every_topic_the_operator_named() {
 fn a_unit_with_no_sinks_subscribes_to_no_level() {
     let wiring = Wiring {
         volume_topic: String::new(),
+        volume_owner_topic: None,
         ..wiring()
     };
     assert_eq!(
         Screen::new(&wiring).filters(),
         [STATUS, COMMANDS, SOFA_EVENTS, SOFA_FOCUS]
+    );
+}
+
+#[test]
+fn a_unit_whose_operator_named_no_owner_topic_subscribes_to_no_mark() {
+    let wiring = Wiring {
+        volume_owner_topic: None,
+        ..wiring()
+    };
+    assert_eq!(
+        Screen::new(&wiring).filters(),
+        [STATUS, VOLUME, COMMANDS, SOFA_EVENTS, SOFA_FOCUS]
     );
 }
 
@@ -158,7 +174,7 @@ fn a_controller_with_no_focus_topic_subscribes_to_no_mark() {
     };
     assert_eq!(
         Screen::new(&wiring).filters(),
-        [STATUS, VOLUME, COMMANDS, SOFA_EVENTS]
+        [STATUS, VOLUME, VOLUME_OWNER, COMMANDS, SOFA_EVENTS]
     );
 }
 
@@ -730,6 +746,46 @@ fn a_level_repeat_after_the_mark_moves_away_steps_nothing() {
     assert!(
         screen
             .deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 2), false, now)
+            .is_empty()
+    );
+}
+
+// The owner mark.
+
+#[test]
+fn an_owner_mark_reaches_the_client_as_the_payload_it_carries() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now);
+
+    assert_eq!(
+        moments(screen.deliver(VOLUME_OWNER, b"receiver", true, now)),
+        [Moment::Owner(b"receiver".to_vec())]
+    );
+}
+
+#[test]
+fn a_cleared_owner_mark_reaches_the_client_empty() {
+    let now = Instant::now();
+    let mut screen = idling(&wiring(), now);
+
+    assert_eq!(
+        moments(screen.deliver(VOLUME_OWNER, b"", false, now)),
+        [Moment::Owner(Vec::new())]
+    );
+}
+
+#[test]
+fn a_unit_whose_operator_named_no_owner_topic_reads_no_mark() {
+    let wiring = Wiring {
+        volume_owner_topic: None,
+        ..wiring()
+    };
+    let now = Instant::now();
+    let mut screen = idling(&wiring, now);
+
+    assert!(
+        screen
+            .deliver(VOLUME_OWNER, b"receiver", true, now)
             .is_empty()
     );
 }

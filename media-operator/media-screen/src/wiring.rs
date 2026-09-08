@@ -29,6 +29,11 @@ pub const STATUS_TOPIC: &str = "MEDIA_PLAYER_STATUS_TOPIC";
 /// subscribes to no level, draws no volume row, and answers no volume press.
 pub const VOLUME_TOPIC: &str = "MEDIA_PLAYER_VOLUME_TOPIC";
 
+/// The `Player`'s retained owner-mark topic, set beside the volume topic.
+/// A non-empty retained payload on it means equipment owns the level, and
+/// the client draws no volume row of its own while it stands.
+pub const VOLUME_OWNER_TOPIC: &str = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC";
+
 /// The `Player`'s commands topic. It carries the operator's
 /// `re-present` and nothing else: the presses reach a client on the
 /// controllers' own topics, and a client brings its own shade down in
@@ -74,6 +79,8 @@ pub struct Wiring {
     pub player_name: String,
     pub status_topic: String,
     pub volume_topic: String,
+    /// The owner mark's topic, present only when the volume topic is.
+    pub volume_owner_topic: Option<String>,
     pub commands_topic: String,
     pub panel_topic: String,
     /// The controllers in `spec.remotes` order.
@@ -99,11 +106,20 @@ impl Wiring {
 
         let fade_after = seconds(&read(FADE_AFTER_SECONDS));
         let off_after = seconds(&read(OFF_AFTER_SECONDS));
+        let volume_topic = read(VOLUME_TOPIC);
+        // The speaker gate covers the mark too: no level means no owner
+        // topic, whatever the variable says.
+        let volume_owner_topic = read(VOLUME_OWNER_TOPIC);
+        let volume_owner_topic = match volume_topic.is_empty() || volume_owner_topic.is_empty() {
+            true => None,
+            false => Some(volume_owner_topic),
+        };
         Self {
             bus_address: read(BUS_ADDRESS),
             player_name: read(PLAYER_NAME),
             status_topic: read(STATUS_TOPIC),
-            volume_topic: read(VOLUME_TOPIC),
+            volume_topic,
+            volume_owner_topic,
             commands_topic: read(COMMANDS_TOPIC),
             panel_topic: read(PANEL_TOPIC),
             remotes: remotes(&read(REMOTE_EVENTS_TOPICS), &read(REMOTE_FOCUS_TOPICS)),
@@ -189,6 +205,7 @@ mod tests {
             (PLAYER_NAME, "den-tv"),
             (STATUS_TOPIC, "media/players/den/tv/status"),
             (VOLUME_TOPIC, "media/players/den/tv/volume"),
+            (VOLUME_OWNER_TOPIC, "media/players/den/tv/volume/owner"),
             (COMMANDS_TOPIC, "media/players/den/tv/commands"),
             (PANEL_TOPIC, "media/players/den/tv/panel"),
             (REMOTE_EVENTS_TOPICS, "events/sofa\nevents/armchair"),
@@ -201,10 +218,26 @@ mod tests {
         assert_eq!(read.player_name, "den-tv");
         assert_eq!(read.status_topic, "media/players/den/tv/status");
         assert_eq!(read.volume_topic, "media/players/den/tv/volume");
+        assert_eq!(
+            read.volume_owner_topic.as_deref(),
+            Some("media/players/den/tv/volume/owner")
+        );
         assert_eq!(read.commands_topic, "media/players/den/tv/commands");
         assert_eq!(read.panel_topic, "media/players/den/tv/panel");
         assert_eq!(read.fade_after, Duration::from_secs(600));
         assert_eq!(read.off_after, Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn a_unit_with_no_sinks_reads_no_owner_topic() {
+        let read = wiring(&[(VOLUME_OWNER_TOPIC, "media/players/den/tv/volume/owner")]);
+        assert_eq!(read.volume_owner_topic, None);
+    }
+
+    #[test]
+    fn a_unit_whose_operator_named_no_owner_topic_reads_none() {
+        let read = wiring(&[(VOLUME_TOPIC, "media/players/den/tv/volume")]);
+        assert_eq!(read.volume_owner_topic, None);
     }
 
     #[test]

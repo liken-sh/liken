@@ -1,6 +1,6 @@
 # media-screen is the bus half of a screen client for one Player: the
-# timers, the focus gate, the shade, the volume step, the cycle request,
-# and the panel desire. Each screen client holds these rules in its own
+# timers, the focus gate, the shade, the volume step and the owner mark,
+# the cycle request, and the panel desire. Each screen client holds these rules in its own
 # process, and this crate is how two clients in two repositories hold
 # the same ones.
 #

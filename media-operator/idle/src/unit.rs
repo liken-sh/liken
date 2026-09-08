@@ -159,6 +159,9 @@ impl Unit {
             // idle screen draws no list, so the unit changes for none
             // of them.
             Moment::Press(_) => {}
+            // The stock idle screen draws the level it holds and nothing
+            // about who owns it.
+            Moment::Owner(_) => {}
         }
     }
 
@@ -589,6 +592,27 @@ mod tests {
         );
         assert_eq!(unit.volume.level, 45);
         assert_eq!(unit.pressed, Some(2.5));
+    }
+
+    #[test]
+    fn an_owner_mark_changes_no_level_this_screen_draws() {
+        let mut unit = seeded();
+        let volume = Volume {
+            level: 40,
+            muted: false,
+        };
+        unit.fold(
+            Moment::Level {
+                volume,
+                pressed: false,
+            },
+            1.0,
+        );
+
+        unit.fold(Moment::Owner(b"receiver".to_vec()), 2.0);
+
+        assert_eq!(unit.volume, volume);
+        assert_eq!(unit.pressed, None);
     }
 
     #[test]
