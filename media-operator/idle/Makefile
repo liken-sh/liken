@@ -33,7 +33,11 @@ test:
 # The two gates share one instrumented target tree, and the idle test
 # binary links media-screen, so its profiles count media-screen lines
 # the idle tests never reach. Each gate starts from no profiles, so it
-# measures its own tests alone.
+# measures its own tests alone. The first gate also starts from no
+# objects: llvm-cov reads every test binary left in the target tree,
+# and the idle binaries from an earlier run carry a second copy of
+# media-screen that the media-screen tests never run, which reads as
+# half the crate uncovered.
 #
 # Each gate is followed by a report of the same run, as a Cobertura
 # file at the workspace root. `cargo llvm-cov report` reads the
@@ -41,7 +45,7 @@ test:
 # deletes them. A report after both gates would measure one crate
 # under the other's tests. The two files are inputs to
 # `make coverage-report`, which draws the page the site publishes.
-	cd $(ROOT) && cargo llvm-cov clean --workspace --profraw-only
+	cd $(ROOT) && cargo llvm-cov clean --workspace
 	cd $(ROOT) && cargo llvm-cov -p media-screen --all-targets \
 		--fail-under-lines $(SCREEN_COVERAGE_FLOOR)
 	cd $(ROOT) && cargo llvm-cov report -p media-screen \
