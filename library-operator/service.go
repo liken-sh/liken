@@ -69,6 +69,11 @@ type ServicePort struct {
 	Name     string `json:"name"`
 	Protocol string `json:"protocol"`
 	Port     int32  `json:"port"`
+	// The port on the pod behind this Service, by the name the container
+	// gives it. A gossip Service names none, because it stands on an
+	// EndpointSlice this operator writes and that slice names the port
+	// itself.
+	TargetPort string `json:"targetPort,omitempty"`
 }
 
 // buildCatalogService builds the Service for one namespace. It is a

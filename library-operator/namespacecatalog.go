@@ -42,6 +42,22 @@ type CatalogSpec struct {
 	Libraries CatalogLibraries `json:"libraries,omitzero"`
 	// The settings every screen pod in the namespace takes.
 	Screens CatalogScreens `json:"screens,omitzero"`
+	// The Jellyfin server this namespace keeps progress with.
+	Jellyfin *CatalogJellyfin `json:"jellyfin,omitempty"`
+}
+
+// The Jellyfin server the namespace keeps a person's playback position the
+// same with, in both directions. The block is optional. A Catalog that names
+// one makes the operator stand the jellyfin pod and its Service beside the
+// progress store. A Catalog that names none stands neither, and the operator
+// deletes the pair it stood before.
+//
+// URL is the server's address inside the cluster. SecretRef names the Secret
+// that holds one administrator API key, and the key reaches the pod through a
+// secretKeyRef, the way a provider key reaches an enricher.
+type CatalogJellyfin struct {
+	URL       string       `json:"url"`
+	SecretRef SecretKeyRef `json:"secretRef"`
 }
 
 // The progress store's claim. It has a size and a class of its own,

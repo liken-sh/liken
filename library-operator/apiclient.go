@@ -622,6 +622,17 @@ func CreateService(ctx context.Context, c *Client, service *Service) (*Service, 
 	return created, nil
 }
 
+// DeleteService removes one Service this operator stands. An absent Service
+// is success, because a Catalog that drops a block the operator stood a
+// Service for is reconciled on every pass.
+func DeleteService(ctx context.Context, c *Client, namespace, name string) error {
+	err := c.RequestJSON(ctx, http.MethodDelete, servicesPath(namespace)+"/"+name, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 // UpdateService writes the whole Service back. The resourceVersion in
 // the body makes the write conditional, so a Service that changed
 // underneath answers ErrConflict, and the next pass reads it again.

@@ -16,6 +16,10 @@ package main
 // release the Play's finalizer. Every one of these messages is
 // retained, so a restart on either side reads the current state back
 // from the broker.
+//
+// The outside play is the one message in this file that is not retained. The
+// jellyfin role publishes it for a play that ran outside the cluster, and the
+// next post repeats the position.
 
 import "strings"
 
@@ -39,6 +43,7 @@ const (
 // operator's tree.
 const (
 	playAudienceKind    = "audience"
+	playOutsideKind     = "outside"
 	playFinalKind       = "final"
 	playRecordedKind    = "recorded"
 	watchProgressKind   = "progress"
@@ -71,6 +76,32 @@ type playAudience struct {
 	// that has none.
 	Season  int `json:"season,omitempty"`
 	Episode int `json:"episode,omitempty"`
+}
+
+// One play that ran outside this cluster, published by the jellyfin role and
+// recorded by the progress role.
+// The message is not retained, and the newer at wins over what the row holds.
+type outsidePlay struct {
+	// The name of the outside player, jellyfin, in the column that names
+	// a Player.
+	Player string `json:"player"`
+	// The people who watched, as Person names.
+	People []string `json:"people"`
+	// The work's ids by provider, and for an episode the series' ids.
+	Aliases map[string]string `json:"aliases"`
+	// The season and episode numbers for an episode, and 0 for a work
+	// that has neither.
+	Season  int `json:"season"`
+	Episode int `json:"episode"`
+	// The position and the duration in seconds, which is the shape the
+	// store holds.
+	Position int `json:"position"`
+	Duration int `json:"duration"`
+	// True on a stop, which marks the row ended.
+	Ended bool `json:"ended"`
+	// The Unix time of the event, which the store writes as the recorded
+	// time.
+	At int64 `json:"at"`
 }
 
 // playFinal is a Play's last status, read off the API by the operator
@@ -138,6 +169,12 @@ func playAudienceTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/" + playAudienceKind
 }
 
+// Carries one play that ran outside this cluster. Not retained; the jellyfin
+// role publishes it and nothing clears it.
+func playOutsideTopic(base, namespace, name string) string {
+	return base + "/plays/" + namespace + "/" + name + "/" + playOutsideKind
+}
+
 // Carries the last status of an ended Play. Retained; the operator
 // publishes and clears it.
 func playFinalTopic(base, namespace, name string) string {
@@ -165,6 +202,12 @@ func playFinalFilter(base, namespace string) string {
 
 func playRecordedFilter(base string) string {
 	return base + "/plays/+/+/" + playRecordedKind
+}
+
+// Reaches every outside play in one namespace, which the progress role
+// records beside the Plays of its own.
+func playOutsideFilter(base, namespace string) string {
+	return base + "/plays/" + namespace + "/+/" + playOutsideKind
 }
 
 // Carries one Watch's projection out of the store. Retained; the

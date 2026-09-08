@@ -110,6 +110,54 @@ func (s *progressStore) recordAudience(ctx context.Context, play string, audienc
 	return s.apply(ctx, statements)
 }
 
+// recordOutside writes one play that ran outside this cluster: its audience,
+// its position, and the time of the event as the recorded time.
+// The read of the recorded time comes first, because the newer at wins and a
+// Corrosion transaction cannot branch.
+// The row names no Library and no Watch, because nothing in this cluster
+// played it.
+func (s *progressStore) recordOutside(ctx context.Context, play string, outside outsidePlay) error {
+	cells, err := s.row(ctx, `SELECT recorded FROM plays WHERE play = ? LIMIT 1`, []any{play})
+	if err != nil {
+		return err
+	}
+	if len(cells) > 0 && int64(cellInt(cells[0])) >= outside.At {
+		return nil
+	}
+
+	at := time.Unix(outside.At, 0).UTC()
+	phase := playPhaseRunning
+	var ended int64
+	if outside.Ended {
+		phase = playPhaseFinished
+		ended = outside.At
+	}
+	statements := []statement{
+		startPlay(play, at),
+		{
+			sql: `UPDATE plays SET player = ?, library = ?, watch = ?, season = ?, episode = ?,` +
+				` position = ?, duration = ?, phase = ?, recorded = ?, ended = ? WHERE play = ?`,
+			params: []any{outside.Player, "", "", outside.Season, outside.Episode,
+				outside.Position, outside.Duration, phase, outside.At, ended, play},
+		},
+		{sql: `DELETE FROM play_people WHERE play = ?`, params: []any{play}},
+		{sql: `DELETE FROM play_aliases WHERE play = ?`, params: []any{play}},
+	}
+	for _, person := range outside.People {
+		statements = append(statements, statement{
+			sql:    `INSERT INTO play_people (play, person) VALUES (?, ?)`,
+			params: []any{play, person},
+		})
+	}
+	for _, provider := range slices.Sorted(maps.Keys(outside.Aliases)) {
+		statements = append(statements, statement{
+			sql:    `INSERT INTO play_aliases (play, provider, id) VALUES (?, ?, ?)`,
+			params: []any{play, provider, outside.Aliases[provider]},
+		})
+	}
+	return s.apply(ctx, statements)
+}
+
 // recordFinal writes the last status of a Play and marks the row ended.
 // The operator reads that mark back off the bus before it releases the
 // Play, so a Play is never deleted before its last position is here.

@@ -169,6 +169,130 @@ func TestTheFinalMarksTheRowEnded(t *testing.T) {
 	}
 }
 
+// The time the outside plays here are recorded at, which is the time the
+// event carries and not the time of the write.
+const testOutsideAt int64 = 1_757_300_000
+
+// One outside play writes the whole row: the player, the episode, the people,
+// the aliases, the position, and the time of the event as the recorded time.
+func TestAnOutsidePlayWritesTheWholeRow(t *testing.T) {
+	store, db := newSQLiteProgressStore(t)
+	outside := outsidePlay{
+		Player:  "jellyfin",
+		People:  []string{"chris"},
+		Aliases: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+		Season:  2, Episode: 4,
+		Position: 4210, Duration: 8160, At: testOutsideAt,
+	}
+
+	if err := store.recordOutside(t.Context(), "jellyfin-7-19", outside); err != nil {
+		t.Fatal(err)
+	}
+
+	row := heldPlay(t, db, "jellyfin-7-19")
+	if row.Player != "jellyfin" || row.Library != "" || row.Watch != "" {
+		t.Errorf("row = %+v, want the outside player and no Library and no Watch", row)
+	}
+	if row.Season != 2 || row.Episode != 4 || row.Position != 4210 || row.Duration != 8160 {
+		t.Errorf("row = %+v, want the episode, the position, and the duration", row)
+	}
+	if row.Phase != playPhaseRunning || row.Ended != 0 {
+		t.Errorf("row = %+v, want a play still running", row)
+	}
+	if row.Recorded != testOutsideAt || row.Started != testOutsideAt {
+		t.Errorf("row = %+v, want the time of the event", row)
+	}
+	if people := heldPeople(t, db, "jellyfin-7-19"); len(people) != 1 || people["chris"] != 1 {
+		t.Errorf("people = %v, want chris", people)
+	}
+	if aliases := heldAliases(t, db, "jellyfin-7-19"); aliases["tmdb"] != "603" || aliases["imdb"] != "tt0133093" {
+		t.Errorf("aliases = %v, want the two provider ids", aliases)
+	}
+}
+
+// The newer event wins. A message whose time is not past the time the row
+// holds writes nothing, so a post that arrives late never moves a position
+// backward.
+func TestTheNewerOutsidePlayWins(t *testing.T) {
+	cases := []struct {
+		name     string
+		at       int64
+		position int
+		want     int
+		recorded int64
+	}{
+		{name: "an older event", at: testOutsideAt - 60, position: 10, want: 4210, recorded: testOutsideAt},
+		{name: "the same second", at: testOutsideAt, position: 10, want: 4210, recorded: testOutsideAt},
+		{name: "a newer event", at: testOutsideAt + 60, position: 7000, want: 7000, recorded: testOutsideAt + 60},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, db := newSQLiteProgressStore(t)
+			first := outsidePlay{Player: "jellyfin", People: []string{"chris"},
+				Position: 4210, Duration: 8160, At: testOutsideAt}
+			if err := store.recordOutside(t.Context(), "jellyfin-7-19", first); err != nil {
+				t.Fatal(err)
+			}
+
+			second := outsidePlay{Player: "jellyfin", People: []string{"thora"},
+				Position: testCase.position, Duration: 8160, At: testCase.at}
+			if err := store.recordOutside(t.Context(), "jellyfin-7-19", second); err != nil {
+				t.Fatal(err)
+			}
+
+			row := heldPlay(t, db, "jellyfin-7-19")
+			if row.Position != testCase.want || row.Recorded != testCase.recorded {
+				t.Errorf("row = %+v, want position %d recorded %d",
+					row, testCase.want, testCase.recorded)
+			}
+		})
+	}
+}
+
+// A message the store did not take leaves the people it did not write, which
+// is how a reader sees that the whole apply was skipped.
+func TestAnOlderOutsidePlayLeavesThePeople(t *testing.T) {
+	store, db := newSQLiteProgressStore(t)
+	first := outsidePlay{Player: "jellyfin", People: []string{"chris"}, At: testOutsideAt}
+	if err := store.recordOutside(t.Context(), "jellyfin-7-19", first); err != nil {
+		t.Fatal(err)
+	}
+
+	older := outsidePlay{Player: "jellyfin", People: []string{"thora"}, At: testOutsideAt - 60}
+	if err := store.recordOutside(t.Context(), "jellyfin-7-19", older); err != nil {
+		t.Fatal(err)
+	}
+
+	people := heldPeople(t, db, "jellyfin-7-19")
+	if len(people) != 1 || people["chris"] != 1 {
+		t.Errorf("people = %v, want chris alone", people)
+	}
+}
+
+// A stop marks the row ended and finished, which is what a screen reads as a
+// work watched to the end.
+func TestAnEndedOutsidePlayMarksTheRowEnded(t *testing.T) {
+	store, db := newSQLiteProgressStore(t)
+	running := outsidePlay{Player: "jellyfin", Position: 4210, Duration: 8160, At: testOutsideAt}
+	if err := store.recordOutside(t.Context(), "jellyfin-7-19", running); err != nil {
+		t.Fatal(err)
+	}
+
+	stopped := outsidePlay{Player: "jellyfin", Position: 8160, Duration: 8160,
+		Ended: true, At: testOutsideAt + 3600}
+	if err := store.recordOutside(t.Context(), "jellyfin-7-19", stopped); err != nil {
+		t.Fatal(err)
+	}
+
+	row := heldPlay(t, db, "jellyfin-7-19")
+	if row.Phase != playPhaseFinished || row.Position != 8160 {
+		t.Errorf("row = %+v, want the finished phase and the last position", row)
+	}
+	if row.Ended != testOutsideAt+3600 || row.Recorded != testOutsideAt+3600 {
+		t.Errorf("row = %+v, want the time the play stopped", row)
+	}
+}
+
 // Forgetting a person takes their rows out of every Play and leaves the
 // Plays and the people who remain, because a shared record belongs to
 // the people who are still in it.

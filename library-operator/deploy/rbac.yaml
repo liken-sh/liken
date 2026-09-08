@@ -217,12 +217,14 @@ rules:
   # Catalog, read by name. The grant is cluster-wide because a Catalog
   # can be in any namespace, and the operator is one Deployment for the
   # cluster. There is no list and no watch: it is read by name, in the
-  # namespaces the Catalog list already named. There is no delete verb:
-  # the Service is owned by the Catalog, and the garbage collector
-  # removes it with the Catalog.
+  # namespaces the Catalog list already named.
+  #
+  # The delete verb is for the jellyfin Service alone. A Catalog
+  # that drops spec.jellyfin keeps the Catalog, so the garbage collector
+  # removes nothing and the operator deletes that Service itself.
   - apiGroups: [""]
     resources: [services]
-    verbs: [get, create, update]
+    verbs: [get, create, update, delete]
   # The people file every screen reads, one ConfigMap per namespace
   # that holds a Player, written from the Person list and rewritten
   # when it changes. Owned by the namespace's Catalog where one stands.

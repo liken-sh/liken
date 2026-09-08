@@ -60,6 +60,12 @@ func TestARefusedWriteIsLoggedAndDropped(t *testing.T) {
 			says:    "could not record the final status",
 		},
 		{
+			name:    "an outside play",
+			topic:   playOutsideTopic(defaultTopicBase, "house", "play-1"),
+			payload: `{"player":"jellyfin","position":10,"at":1757300000}`,
+			says:    "could not record the outside play",
+		},
+		{
 			name:    "a forget request",
 			topic:   personForgetTopic(defaultTopicBase, "thora"),
 			payload: `{"at":"2026-09-06T21:00:00Z"}`,
@@ -92,6 +98,8 @@ func TestAMessageOfTheWrongShapeWritesNothing(t *testing.T) {
 			says: "reads as no audience"},
 		{name: "a final status", topic: playFinalTopic(defaultTopicBase, "house", "play-1"),
 			says: "reads as no status"},
+		{name: "an outside play", topic: playOutsideTopic(defaultTopicBase, "house", "play-1"),
+			says: "reads as no play"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

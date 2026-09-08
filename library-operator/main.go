@@ -36,6 +36,9 @@ func main() {
 		case progressMode:
 			runProgress()
 			return
+		case jellyfinMode:
+			runJellyfin()
+			return
 		}
 	}
 

@@ -51,6 +51,7 @@ Where the catalog is stored and how large each agent's copy is.
 | <span id="spec--progress"></span>`progress` | [object](#specprogress) | no | The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size. |
 | <span id="spec--libraries"></span>`libraries` | [object](#speclibraries) | no | The claims each Library's scan and enrichment Jobs run on. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. |
 | <span id="spec--screens"></span>`screens` | [object](#specscreens) | no | The settings every screen pod in the namespace takes. |
+| <span id="spec--jellyfin"></span>`jellyfin` | [object](#specjellyfin) | no | The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator stand a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, neither stands, and the operator deletes the pair it stood before. |
 
 ### spec.storage
 
@@ -97,6 +98,24 @@ The volume each screen's browser keeps its scaled art on: posters, backdrops, ep
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specscreensartcache--size"></span>`size` | string | no | The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change reaches new screens and not standing ones, because a bound claim's spec is immutable; delete a standing screen's claim and the next pass creates it at the new size. Default: `2Gi`. |
+
+### spec.jellyfin
+
+The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator stand a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, neither stands, and the operator deletes the pair it stood before.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specjellyfin--url"></span>`url` | string | yes | The Jellyfin server's address, as the cluster reaches it, such as http://jellyfin.jellyfin.svc:8096. |
+| <span id="specjellyfin--secretref"></span>`secretRef` | [object](#specjellyfinsecretref) | yes | The Secret in this namespace that holds a Jellyfin API key, and the key inside it. The API key is one an administrator issues on the server, because the pod writes the playback position of any user. |
+
+#### spec.jellyfin.secretRef
+
+The Secret in this namespace that holds a Jellyfin API key, and the key inside it. The API key is one an administrator issues on the server, because the pod writes the playback position of any user.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specjellyfinsecretref--name"></span>`name` | string | yes | The Secret's name, in this Catalog's own namespace. |
+| <span id="specjellyfinsecretref--key"></span>`key` | string | no | The key inside that Secret. When omitted, token. Default: `token`. |
 
 ## status
 

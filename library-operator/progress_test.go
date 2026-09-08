@@ -61,6 +61,7 @@ func TestTheProgressRoleSubscribesToEveryTopicItRecords(t *testing.T) {
 		mediaPlayAvailabilityFilter(defaultMediaTopicBase, "house"),
 		playAudienceFilter(defaultTopicBase, "house"),
 		playFinalFilter(defaultTopicBase, "house"),
+		playOutsideFilter(defaultTopicBase, "house"),
 		personForgetFilter(defaultTopicBase),
 	} {
 		if !held[filter] {
@@ -153,6 +154,54 @@ func TestAnEmptyAudienceLeavesTheRowsAlone(t *testing.T) {
 	}
 	if people := heldPeople(t, db, "play-1"); people["chris"] != 1 {
 		t.Errorf("people = %v, want the row the clear left alone", people)
+	}
+}
+
+// One outside message writes the whole row, because the jellyfin role carries
+// the audience and the position in the one message.
+func TestAnOutsideMessageWritesTheWholeRow(t *testing.T) {
+	role, db := recordingProgress(t)
+	payload, _ := json.Marshal(outsidePlay{
+		Player: "jellyfin", People: []string{"chris"},
+		Aliases:  map[string]string{"tmdb": "603"},
+		Position: 4210, Duration: 8160, At: 1_757_300_000,
+	})
+
+	role.onMessage(playOutsideTopic(defaultTopicBase, "house", "jellyfin-7-19"), payload)
+
+	row := heldPlay(t, db, "jellyfin-7-19")
+	if row.Player != "jellyfin" || row.Position != 4210 || row.Recorded != 1_757_300_000 {
+		t.Errorf("row = %+v, want the outside play the message named", row)
+	}
+	if people := heldPeople(t, db, "jellyfin-7-19"); people["chris"] != 1 {
+		t.Errorf("people = %v, want chris", people)
+	}
+	if aliases := heldAliases(t, db, "jellyfin-7-19"); aliases["tmdb"] != "603" {
+		t.Errorf("aliases = %v, want the tmdb id", aliases)
+	}
+}
+
+// An empty message is a cleared topic on every kind the role records, and a
+// clear writes no row.
+func TestAnEmptyMessageWritesNoRow(t *testing.T) {
+	cases := []struct {
+		name  string
+		topic string
+	}{
+		{name: "a position", topic: mediaPlayStatusTopic("house", "play-1")},
+		{name: "a final status", topic: playFinalTopic(defaultTopicBase, "house", "play-1")},
+		{name: "an outside play", topic: playOutsideTopic(defaultTopicBase, "house", "play-1")},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			role, db := recordingProgress(t)
+
+			role.onMessage(testCase.topic, nil)
+
+			if heldPlay(t, db, "play-1").Play != "" {
+				t.Errorf("the role wrote a row from an empty message on %q", testCase.topic)
+			}
+		})
 	}
 }
 

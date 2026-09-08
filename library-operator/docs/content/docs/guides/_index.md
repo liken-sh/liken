@@ -12,8 +12,9 @@ over a volume, what a [scan](/docs/guides/scanning/) reads, the
 [browser](/docs/guides/browser/) on a screen,
 [enrichment](/docs/guides/enrichment/) from the providers, the
 [webhooks](/docs/guides/webhooks/) that rescan an import,
-[franchises](/docs/guides/franchises/) as a library of their own, and
-what to expect on a [small machine](/docs/guides/small-machines/).
+[franchises](/docs/guides/franchises/) as a library of their own,
+[progress kept with Jellyfin](/docs/guides/jellyfin/), and what to
+expect on a [small machine](/docs/guides/small-machines/).
 
 ## How the pieces fit
 

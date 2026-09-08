@@ -381,12 +381,17 @@ type Container struct {
 	RestartPolicy string `json:"restartPolicy,omitempty"`
 	// The two probes on the catalog agent. The startupProbe gates
 	// the start of the container beside it, and the livenessProbe covers
-	// the agent's running life. There is no readinessProbe: a pod's
-	// readiness gates its place in the catalog gossip EndpointSlice, and a
-	// momentary API hiccup must not drop the agent from the bootstrap
-	// list.
+	// the agent's running life. Neither Corrosion agent carries a
+	// readinessProbe: a pod's readiness gates its place in the catalog
+	// gossip EndpointSlice, and a momentary API hiccup must not drop the
+	// agent from the bootstrap list.
 	StartupProbe  *Probe `json:"startupProbe,omitempty"`
 	LivenessProbe *Probe `json:"livenessProbe,omitempty"`
+	// The readinessProbe gates a container's place in the endpoints of a
+	// Service that states a selector. The jellyfin role stands behind
+	// such a Service, so its readiness decides whether Jellyfin's webhook
+	// post reaches it.
+	ReadinessProbe *Probe `json:"readinessProbe,omitempty"`
 }
 
 // A ContainerPort is one port a container listens on. Declaring it changes
@@ -402,12 +407,26 @@ type ContainerPort struct {
 // operator probes the catalog agent by running a command inside the
 // container, because the agent's API binds loopback alone, so nothing
 // the kubelet dials over the pod network reaches it.
+//
+// A role that listens on the pod network is probed by an httpGet instead,
+// which costs no process inside the container.
 type Probe struct {
-	Exec                *ExecAction `json:"exec,omitempty"`
-	InitialDelaySeconds int         `json:"initialDelaySeconds,omitempty"`
-	PeriodSeconds       int         `json:"periodSeconds,omitempty"`
-	TimeoutSeconds      int         `json:"timeoutSeconds,omitempty"`
-	FailureThreshold    int         `json:"failureThreshold,omitempty"`
+	Exec *ExecAction `json:"exec,omitempty"`
+	// A container that binds a port on the pod network is probed by an
+	// httpGet from the kubelet, because the kubelet reaches that port and
+	// no command has to run inside the container.
+	HTTPGet             *HTTPGetAction `json:"httpGet,omitempty"`
+	InitialDelaySeconds int            `json:"initialDelaySeconds,omitempty"`
+	PeriodSeconds       int            `json:"periodSeconds,omitempty"`
+	TimeoutSeconds      int            `json:"timeoutSeconds,omitempty"`
+	FailureThreshold    int            `json:"failureThreshold,omitempty"`
+}
+
+// An HTTPGetAction is one GET the kubelet makes against the container's own
+// address. A status under 400 is the check passing.
+type HTTPGetAction struct {
+	Path string `json:"path,omitempty"`
+	Port int32  `json:"port"`
 }
 
 // An ExecAction runs a command inside the container. An exit of

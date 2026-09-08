@@ -105,6 +105,9 @@ func (p *progress) subscribe() {
 	p.bus.Subscribe(mediaPlayAvailabilityFilter(p.mediaBase, p.namespace))
 	p.bus.Subscribe(playAudienceFilter(p.topicBase, p.namespace))
 	p.bus.Subscribe(playFinalFilter(p.topicBase, p.namespace))
+	// The outside plays are the jellyfin role's, on the same tree, and
+	// one namespace's role records only its own.
+	p.bus.Subscribe(playOutsideFilter(p.topicBase, p.namespace))
 	// A Person is cluster-scoped, so every namespace's role answers
 	// every forget request.
 	p.bus.Subscribe(personForgetFilter(p.topicBase))
@@ -159,6 +162,8 @@ func (p *progress) onMessage(topic string, payload []byte) {
 		switch kind {
 		case playAudienceKind:
 			p.recordAudience(ctx, play, payload)
+		case playOutsideKind:
+			p.recordOutside(ctx, play, payload)
 		case playFinalKind:
 			p.recordFinal(ctx, play, payload)
 		}
@@ -220,6 +225,25 @@ func (p *progress) recordAudience(ctx context.Context, play string, payload []by
 		return
 	}
 	p.publishWatch(ctx, play)
+}
+
+// recordOutside writes one play that ran outside this cluster, whole, from
+// the one message that carries it.
+// It publishes nothing back, because no Play resource holds this row and no
+// Watch owns it.
+func (p *progress) recordOutside(ctx context.Context, play string, payload []byte) {
+	if len(payload) == 0 {
+		return
+	}
+	outside := outsidePlay{}
+	if err := json.Unmarshal(payload, &outside); err != nil {
+		p.logf("the outside play %s reads as no play: %v", play, err)
+		return
+	}
+
+	if err := p.store.recordOutside(ctx, play, outside); err != nil {
+		p.logf("could not record the outside play %s: %v", play, err)
+	}
 }
 
 // recordFinal writes the last status of a Play and publishes the ended

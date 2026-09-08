@@ -33,6 +33,10 @@ import (
 // rebuilt by a rescan and progress is not, so they hold different
 // durability rules.
 //
+// A Catalog that names a Jellyfin server also stands the jellyfin pod and its
+// Service, one pair per namespace. A Catalog that names none stands neither,
+// and the pass deletes the pair it stood before.
+//
 // The members the pass hands in are every pod that holds a catalog agent,
 // read once for the whole pass: the durable copies of the catalog, the
 // pods of the Jobs that are running, and the screen pods. The progress
@@ -91,6 +95,12 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 		}
 		if err := o.standProgressEndpoints(ctx, namespace, owners, progressMembers.Items); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the progress endpoints in %s: %v\n", namespace, err)
+		}
+		// The jellyfin pair stands beside the progress store while
+		// the Catalog names a Jellyfin server, and comes down when it
+		// names none.
+		if err := o.standJellyfin(ctx, catalog); err != nil {
+			fmt.Fprintf(os.Stderr, "standing the jellyfin role in %s: %v\n", namespace, err)
 		}
 		// The classes are read before the status is built, so a Catalog
 		// that asks for copies a class cannot hold reports that on the

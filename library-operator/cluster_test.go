@@ -748,6 +748,12 @@ func (f *fakeCluster) serveService(w http.ResponseWriter, r *http.Request, key s
 		f.writeService(w, r, "1")
 	case http.MethodPut:
 		f.writeService(w, r, "2")
+	case http.MethodDelete:
+		if _, held := f.services[key]; !held {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		delete(f.services, key)
 	default:
 		answer(w, f.services[key])
 	}

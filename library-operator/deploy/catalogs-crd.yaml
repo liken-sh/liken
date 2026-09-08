@@ -159,6 +159,30 @@ spec:
                           type: string
                           default: 2Gi
                           description: "The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change reaches new screens and not standing ones, because a bound claim's spec is immutable; delete a standing screen's claim and the next pass creates it at the new size."
+                jellyfin:
+                  type: object
+                  required: [url, secretRef]
+                  description: "The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator stand a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, neither stands, and the operator deletes the pair it stood before."
+                  properties:
+                    url:
+                      type: string
+                      format: uri
+                      minLength: 1
+                      description: "The Jellyfin server's address, as the cluster reaches it, such as http://jellyfin.jellyfin.svc:8096."
+                    secretRef:
+                      type: object
+                      required: [name]
+                      description: "The Secret in this namespace that holds a Jellyfin API key, and the key inside it. The API key is one an administrator issues on the server, because the pod writes the playback position of any user."
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                          description: "The Secret's name, in this Catalog's own namespace."
+                        key:
+                          type: string
+                          minLength: 1
+                          default: token
+                          description: "The key inside that Secret. When omitted, token."
             status:
               type: object
               description: >-
