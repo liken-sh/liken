@@ -189,6 +189,45 @@ fn a_titles_strip_holds_the_whole_order_the_libraries_hold() {
 }
 
 #[test]
+fn one_read_answers_every_franchise_any_of_many_works_belongs_to_once() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    an_order(&path);
+    insert_franchise(&path, "franchise:name:another", "Another Order", "{}");
+    insert_member(
+        &path,
+        "franchise:name:another",
+        1,
+        (MOVIE, "movie:tmdb:2", "Two", 1980),
+        None,
+        "[]",
+    );
+    insert_movie(&path, "screening/films", "movie:path:lone", "Lone", "lone");
+    let mut source = SidecarSource::new(&path, NO_AGENT);
+
+    let works = [
+        ("screening/films".to_string(), "movie:path:one".to_string()),
+        ("screening/films".to_string(), "movie:path:two".to_string()),
+        ("screening/films".to_string(), "movie:path:lone".to_string()),
+        ("screening/shows".to_string(), "series:path:one".to_string()),
+    ];
+    let memberships = source.memberships(&works);
+
+    let named: Vec<(&str, usize)> = memberships
+        .iter()
+        .map(|membership| (membership.id.as_str(), membership.members.len()))
+        .collect();
+    assert_eq!(named, [("franchise:name:another", 1), (CYCLE, 3)]);
+    assert_eq!(memberships[1].title, "The Cycle");
+    assert_eq!(
+        memberships[1],
+        source.franchises_of("screening/films", "movie:path:one")[0]
+    );
+    assert_eq!(source.memberships(&works[2..3]), []);
+    assert_eq!(source.memberships(&[]), []);
+}
+
+#[test]
 fn a_strip_carries_the_library_and_the_kind_a_press_opens() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);

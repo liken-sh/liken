@@ -333,7 +333,7 @@ fn an_episode_a_series_and_its_franchises_offer_is_one_card_with_every_reason() 
         lines(&browser),
         [(
             "E03 · Segment 3".to_string(),
-            "Next in Last Serial · Next in The Saga · Next in The Run · S01".to_string()
+            "Next in Last Serial · Next in The Run · Next in The Saga · S01".to_string()
         )]
     );
 }

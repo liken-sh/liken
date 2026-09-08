@@ -493,6 +493,13 @@ impl Source for SidecarSource {
         self.read(|connection| franchises::strips(connection, library, id))
     }
 
+    fn memberships(&mut self, works: &[(String, String)]) -> Vec<Membership> {
+        if works.is_empty() {
+            return Vec::new();
+        }
+        self.read(|connection| franchises::memberships(connection, works))
+    }
+
     fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise> {
         self.read(|connection| franchises::franchise(connection, library, id))
             .into_iter()

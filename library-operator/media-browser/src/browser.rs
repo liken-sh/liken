@@ -461,14 +461,33 @@ impl<S: Source, A: Art> Browser<S, A> {
             time: self.time,
             field: self.top().field(),
             focus: self.on_strip.then_some(focus),
-            letters: self.audience.letters(self.clock),
+            letters: match self.nobody_watching() {
+                true => vec!["?".to_string()],
+                false => self.audience.letters(self.clock),
+            },
+            asking: self.nobody_watching(),
         })
     }
 
     // Whether the strip draws the circles of the room: where somebody is
-    // watching and no search field stands over the same band.
+    // watching, or nobody is and the "?" circle stands for them, and no
+    // search field stands over the same band.
     fn circles(&self) -> bool {
-        !self.audience.current(self.clock).is_empty() && self.top().field().is_none()
+        (self.nobody_watching() || !self.audience.current(self.clock).is_empty())
+            && self.top().field().is_none()
+    }
+
+    // Whether the strip draws the one "?" circle in place of the room:
+    // the browser knows people, nobody is watching (an answer of nobody,
+    // or a lapsed one), and the picker is not up. It is the way back to
+    // the picker for a person who answered nobody. A browser that knows
+    // no people never asks and would raise an empty picker, so it draws
+    // none, the way the people key moves nothing there. Under the picker
+    // the strip draws no circles.
+    fn nobody_watching(&self) -> bool {
+        self.picker.is_none()
+            && !self.audience.known().is_empty()
+            && self.audience.current(self.clock).is_empty()
     }
 
     // Put the browser's focus on the strip, at the glass, which is where a
@@ -488,7 +507,7 @@ impl<S: Source, A: Art> Browser<S, A> {
     // One press while the strip holds focus. Left from the glass reaches
     // the circles of the room, where there are any, and right returns to
     // the glass. Select on the circles asks who is watching again, with the
-    // room already chosen. Select on the glass opens the search wall with
+    // room already chosen, and with nobody chosen from the "?" circle. Select on the glass opens the search wall with
     // the grid, or shows the grid on a search wall. Down gives focus back
     // to the screen. A word that edits the field types into it on a search
     // wall and gives focus back with it. Every other word moves nothing.

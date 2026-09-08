@@ -453,6 +453,28 @@ pub trait Source {
     /// match and no library reads another's volume.
     fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership>;
 
+    // Every franchise any of these works belongs to, each once, in the
+    // order of the franchise's library and id, with the members some
+    // library holds in story order: the same rows `franchises_of` answers
+    // for one work. It is one read for the continue-watching row's seeds,
+    // which are hundreds of works. The default folds `franchises_of` over
+    // the works, which a source with few works may keep.
+    fn memberships(&mut self, works: &[(String, String)]) -> Vec<Membership> {
+        let mut found: Vec<Membership> = Vec::new();
+        for (library, id) in works {
+            for membership in self.franchises_of(library, id) {
+                if !found
+                    .iter()
+                    .any(|held| held.library == membership.library && held.id == membership.id)
+                {
+                    found.push(membership);
+                }
+            }
+        }
+        found.sort_by(|one, other| (&one.library, &one.id).cmp(&(&other.library, &other.id)));
+        found
+    }
+
     /// One franchise as its own page draws it, or nothing where that
     /// `Library` holds no franchise under that id. Every entry is in story
     /// order, held or not, so a gap draws with the file's own title.

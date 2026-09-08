@@ -89,8 +89,12 @@ pub struct Strip<'a> {
     /// not hold the browser's focus.
     pub focus: Option<Target>,
     /// The first letter of each person in the room, in the order of the
-    /// answer, and none where the browser holds no answer.
+    /// answer; one "?" where nobody is watching and the picker is not
+    /// up; and none where the browser holds no answer.
     pub letters: Vec<String>,
+    // Whether the letters are the one "?" that stands for nobody, which
+    // draws fainter than a person's circle.
+    pub asking: bool,
 }
 
 /// The side of one circle of the room: the glass's own size, so the
@@ -137,9 +141,15 @@ pub fn circle_in(row: Rectangle, index: usize) -> Rectangle {
 // One circle of the room: a muted disc with the letter on it, the way the
 // strip and the continue-watching row's heading both draw a person.
 pub fn circle(frame: &mut canvas::Frame<Renderer>, at: Rectangle, letter: &str) {
+    disc(frame, at, letter, look::muted());
+}
+
+// A disc of this fill with the letter on it. The "?" of nobody draws in
+// the faint fill, and a person's circle in the muted one.
+fn disc(frame: &mut canvas::Frame<Renderer>, at: Rectangle, letter: &str, fill: Color) {
     frame.fill(
         &canvas::Path::circle(Point::new(at.center_x(), at.center_y()), at.width / 2.0),
-        look::muted(),
+        fill,
     );
     text::shown(
         frame,
@@ -189,8 +199,17 @@ impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
         // the circles stand down while a search wall is on top.
         if !self.letters.is_empty() && self.field.is_none() {
             let count = self.letters.len();
+            let fill = match self.asking {
+                true => look::faint(),
+                false => look::muted(),
+            };
             for (index, letter) in self.letters.iter().enumerate() {
-                circle(&mut frame, circle_at(bounds.width, count, index), letter);
+                disc(
+                    &mut frame,
+                    circle_at(bounds.width, count, index),
+                    letter,
+                    fill,
+                );
             }
             if self.focus == Some(Target::Circles) {
                 mark(&mut frame, circles_at(bounds.width, count));

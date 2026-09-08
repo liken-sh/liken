@@ -282,14 +282,94 @@ fn left_from_the_glass_reaches_the_circles_and_right_returns() {
     );
 }
 
-#[test]
-fn left_from_the_glass_moves_nothing_where_nobody_is_watching() {
+// A browser over one person, asked on the first frame, whose picker
+// answered nobody.
+fn nobody_watching() -> Browser<Fake, NoArt> {
     let (mut browser, _bus) = watching(&["first"], &[]);
     browser.tick(0.0);
-    // The first frame asks who is watching, and the link answers nobody.
-    browser.key("down");
-    browser.key("enter");
+    browser.key("escape");
+    assert!(browser.picker.is_none());
+    browser
+}
+
+#[test]
+fn the_strip_carries_one_question_mark_where_nobody_is_watching() {
+    let browser = nobody_watching();
+
+    let strip = browser.strip().expect("the strip draws");
+    assert_eq!(strip.letters, ["?".to_string()]);
+    assert!(strip.asking);
+}
+
+#[test]
+fn the_strip_carries_the_letters_of_the_room_and_no_question_mark() {
+    let mut browser = a_room_of_two();
+
+    browser.tick(0.0);
+
+    let strip = browser.strip().expect("the strip draws");
+    assert_eq!(strip.letters, ["C".to_string(), "K".to_string()]);
+    assert!(!strip.asking);
+}
+
+#[test]
+fn the_strip_carries_no_question_mark_under_the_picker() {
+    let (mut browser, _bus) = watching(&["first"], &[]);
+
+    browser.tick(0.0);
+
+    assert!(browser.picker.is_some());
+    let strip = browser.strip().expect("the strip draws");
+    assert!(strip.letters.is_empty());
+    assert!(!strip.asking);
+}
+
+#[test]
+fn the_strip_carries_no_question_mark_where_the_browser_knows_no_people() {
+    let (mut browser, _bus) = watching(&[], &[]);
+
+    browser.tick(0.0);
+
+    assert!(browser.strip().expect("the strip draws").letters.is_empty());
+}
+
+#[test]
+fn left_from_the_glass_reaches_the_question_mark_and_right_returns() {
+    let mut browser = nobody_watching();
     reach_the_strip(&mut browser);
+
+    assert!(browser.key("left"));
+    assert_eq!(
+        browser.strip().expect("the strip draws").focus,
+        Some(Target::Circles)
+    );
+
+    assert!(browser.key("right"));
+    assert_eq!(
+        browser.strip().expect("the strip draws").focus,
+        Some(Target::Glass)
+    );
+}
+
+#[test]
+fn enter_on_the_question_mark_asks_again_with_nobody_chosen() {
+    let mut browser = nobody_watching();
+    reach_the_strip(&mut browser);
+    browser.key("left");
+
+    assert!(browser.key("enter"));
+
+    let picker = browser.picker.as_ref().expect("the picker stands");
+    assert_eq!(picker.tiles(), 1);
+    assert!(!picker.holds(0));
+}
+
+#[test]
+fn left_from_the_glass_moves_nothing_over_a_search_field_with_nobody_watching() {
+    let mut browser = nobody_watching();
+    browser.key("s");
+    browser.key("up");
+    assert!(browser.on_strip, "the strip holds focus");
 
     assert!(!browser.key("left"));
     assert_eq!(

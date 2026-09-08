@@ -100,10 +100,39 @@ pub fn strips(
     library: &str,
     id: &str,
 ) -> rusqlite::Result<Vec<Membership>> {
+    memberships_of(
+        connection,
+        "SELECT alias FROM aliases WHERE library = ?1 AND item = ?2",
+        &[&library, &id],
+    )
+}
+
+// Every franchise any of these works belongs to, each once, through one
+// statement. The works bind as one JSON list of library and id pairs, so
+// hundreds of works are one parameter and one pass over the aliases.
+pub fn memberships(
+    connection: &Connection,
+    works: &[(String, String)],
+) -> rusqlite::Result<Vec<Membership>> {
+    let pairs = serde_json::to_string(works).unwrap_or_default();
+    memberships_of(
+        connection,
+        "SELECT alias FROM aliases \
+         WHERE (library, item) IN (SELECT value ->> 0, value ->> 1 FROM json_each(?1))",
+        &[&pairs],
+    )
+}
+
+// The statement behind both membership reads. `mine` selects the aliases
+// of the works asked about, and the rest is one row per held member of
+// every franchise those aliases are in, folded by franchise.
+fn memberships_of(
+    connection: &Connection,
+    mine: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> rusqlite::Result<Vec<Membership>> {
     let sql = format!(
-        "WITH mine AS (\
-           SELECT alias FROM aliases WHERE library = ?1 AND item = ?2\
-         ), found AS (\
+        "WITH mine AS ({mine}), found AS (\
            SELECT DISTINCT library, franchise FROM franchise_members \
            WHERE alias IN (SELECT alias FROM mine)\
          ), items AS ({ITEMS}) \
@@ -124,7 +153,7 @@ pub fn strips(
          GROUP BY m.library, m.franchise, m.position \
          ORDER BY m.library, m.franchise, m.position"
     );
-    let members = collect(connection, &sql, &[&library, &id], |row| {
+    let members = collect(connection, &sql, params, |row| {
         // The membership's own five columns stand before the member's.
         let mut member = entry(row, 5)?;
         held(row, 5 + MEMBER, &mut member)?;

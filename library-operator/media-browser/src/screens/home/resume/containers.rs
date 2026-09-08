@@ -66,13 +66,32 @@ pub fn title(source: &mut dyn Source, container: &Container) -> Option<String> {
     }
 }
 
+// The episodes of every series one `cards` call listed, by the series,
+// so a series that is a container of its own and a member of two
+// franchises is read once.
+#[derive(Default)]
+pub struct Episodes(HashMap<Work, Vec<Episode>>);
+
+impl Episodes {
+    fn of(&mut self, source: &mut dyn Source, library: &str, id: &str) -> Vec<Episode> {
+        self.0
+            .entry((library.to_string(), id.to_string()))
+            .or_insert_with(|| source.episodes(library, id))
+            .clone()
+    }
+}
+
 // The leaves of one container in its order. A member no library holds
 // and an episode outside a member's runs contribute none.
-pub fn leaves(source: &mut dyn Source, container: &Container) -> Vec<Leaf> {
+pub fn leaves(
+    source: &mut dyn Source,
+    episodes: &mut Episodes,
+    container: &Container,
+) -> Vec<Leaf> {
     match container {
         Container::Film(slot) => vec![leaf((**slot).clone(), 0)],
-        Container::Series { library, id, title } => source
-            .episodes(library, id)
+        Container::Series { library, id, title } => episodes
+            .of(source, library, id)
             .into_iter()
             .map(|episode| leaf(still(library, id, title, episode), 0))
             .collect(),
@@ -86,7 +105,7 @@ pub fn leaves(source: &mut dyn Source, container: &Container) -> Vec<Leaf> {
         Container::Franchise(membership) => membership
             .members
             .iter()
-            .flat_map(|entry| member(source, entry))
+            .flat_map(|entry| member(source, episodes, entry))
             .collect(),
     }
 }
@@ -97,15 +116,15 @@ fn leaf(slot: Slot, member: i64) -> Leaf {
 
 // The leaves of one franchise member: the film, or the episodes of the
 // series inside its runs.
-fn member(source: &mut dyn Source, entry: &franchise::Entry) -> Vec<Leaf> {
+fn member(source: &mut dyn Source, episodes: &mut Episodes, entry: &franchise::Entry) -> Vec<Leaf> {
     let Some(held) = &entry.held else {
         return Vec::new();
     };
     if held.kind != "series" {
         return vec![leaf(franchise::slot(held.clone()), entry.position)];
     }
-    source
-        .episodes(&held.library, &held.id)
+    episodes
+        .of(source, &held.library, &held.id)
         .into_iter()
         .filter(|episode| entry.covers(episode.season, episode.episode))
         .map(|episode| {

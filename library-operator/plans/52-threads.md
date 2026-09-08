@@ -123,7 +123,11 @@ to the card focus left, and enter raises the person picker with the
 room already chosen. With
 nobody at the screen, the home page draws no row at all, neither
 heading nor cards, and draws it again as soon as the picker is
-answered. Nobody watching is the browser's incognito mode.
+answered. Nobody watching is the browser's incognito mode. The top
+strip then draws one circle with a question mark where the room's
+circles would be, and enter on it raises the picker, so there is a way
+back from nobody. The `people` key word raises the picker from any
+page, as plan 49 states, and a remote binds a button to it.
 
 A card of an episode spells the episode on its first line, `E06 ·
 Delusion`, and the season after the reasons on its second, `Next in

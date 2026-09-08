@@ -15,7 +15,7 @@ pub use reason::Reason;
 use self::containers::{Container, MOVIES, Work};
 use crate::catalog::progress::thread;
 use crate::catalog::recency::SHOWN;
-use crate::catalog::{Resume, Slot, Source};
+use crate::catalog::{Entry, Membership, Resume, Slot, Source};
 use crate::screens::{InFranchise, Item, facts};
 
 /// The heading over the row.
@@ -40,8 +40,9 @@ pub struct Card {
 pub fn cards(source: &mut dyn Source, people: &[String]) -> Vec<Card> {
     let plays = grouped(source.continue_watching(people));
     let mut cards: Vec<Card> = Vec::new();
+    let mut episodes = containers::Episodes::default();
     for container in seeded(source, &plays) {
-        let leaves = containers::leaves(source, &container);
+        let leaves = containers::leaves(source, &mut episodes, &container);
         let Some(offer) = thread::walk(leaves.len(), &containers::on_leaves(&leaves, &plays))
         else {
             continue;
@@ -128,6 +129,9 @@ fn grouped(plays: Vec<Resume>) -> HashMap<Work, Vec<Resume>> {
 // audience seeds any, because a container with no such play has no
 // thread. A film seeds itself, its set, and its franchises. A series seeds
 // itself and its franchises.
+// The franchises come from one read over every seed work, and each
+// franchise is walked once, in the order of the newest play of the works
+// that seeded it.
 fn seeded(source: &mut dyn Source, plays: &HashMap<Work, Vec<Resume>>) -> Vec<Container> {
     let mut works: Vec<&Resume> = plays
         .values()
@@ -140,10 +144,21 @@ fn seeded(source: &mut dyn Source, plays: &HashMap<Work, Vec<Resume>>) -> Vec<Co
             work.id.clone(),
         )
     });
+    let named: Vec<Work> = works
+        .iter()
+        .map(|work| (work.library.clone(), work.id.clone()))
+        .collect();
+    let mut franchises = source.memberships(&named);
     let mut seen: HashSet<(u8, String, String)> = HashSet::new();
     let mut containers = Vec::new();
     for work in works {
-        for container in of_work(source, work) {
+        let mut of_work = of_work(source, work);
+        let (mine, rest): (Vec<Membership>, Vec<Membership>) = franchises
+            .drain(..)
+            .partition(|membership| membership.members.iter().any(|entry| names(entry, work)));
+        franchises = rest;
+        of_work.extend(mine.into_iter().map(Container::Franchise));
+        for container in of_work {
             if seen.insert(container.key()) {
                 containers.push(container);
             }
@@ -152,7 +167,15 @@ fn seeded(source: &mut dyn Source, plays: &HashMap<Work, Vec<Resume>>) -> Vec<Co
     containers
 }
 
-// The containers one work seeds.
+// Whether one entry of an order is this work.
+fn names(entry: &Entry, work: &Resume) -> bool {
+    entry
+        .held
+        .as_ref()
+        .is_some_and(|held| held.library == work.library && held.id == work.id)
+}
+
+// The containers one work seeds, its franchises aside.
 fn of_work(source: &mut dyn Source, work: &Resume) -> Vec<Container> {
     let mut containers = Vec::new();
     if work.kind == SERIES {
@@ -183,9 +206,6 @@ fn of_work(source: &mut dyn Source, work: &Resume) -> Vec<Container> {
                 id: details.set_id,
             });
         }
-    }
-    for membership in source.franchises_of(&work.library, &work.id) {
-        containers.push(Container::Franchise(membership));
     }
     containers
 }
