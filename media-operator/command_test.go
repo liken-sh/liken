@@ -808,8 +808,8 @@ func requestFor(name string) <-chan clientMessage {
 	return messages
 }
 
-// While the owner mark stands, the equipment holds the level. mpv goes
-// to unity, a level off the topic reaches no mpv command and draws no
+// While the owner mark stands, the equipment holds the level: mpv goes
+// to unity, a level off the topic re-asserts unity and draws no
 // indicator, and a press still publishes the next state from the level
 // the topic delivered.
 func TestWhileTheMarkStandsTheLevelDoesNotReachMpv(t *testing.T) {
@@ -826,6 +826,8 @@ func TestWhileTheMarkStandsTheLevelDoesNotReachMpv(t *testing.T) {
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
 	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 	mustNoLine(t, lines, 100*time.Millisecond)
 	mustMatch(t, c.heldVolume(), volumeState{Level: 45})
 
@@ -854,10 +856,9 @@ func TestALevelThatArrivesBeforeTheMarkEndsAtUnity(t *testing.T) {
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 }
 
-// The unity write happens once for the owner that holds the level, so a
-// redelivered mark writes nothing more. A fresh bus session redelivers
-// the mark, and mpv goes to unity again.
-func TestTheUnityWriteHappensOncePerOwner(t *testing.T) {
+// Every mark re-asserts unity, so a redelivered mark writes unity again
+// and a mark that arrives after a reconnect does too.
+func TestEveryMarkReAssertsUnity(t *testing.T) {
 	bus, _, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	server, client := net.Pipe()
@@ -871,12 +872,38 @@ func TestTheUnityWriteHappensOncePerOwner(t *testing.T) {
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
 	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
-	mustNoLine(t, lines, 100*time.Millisecond)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
 	c.onConnect(bus)
 	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+}
+
+// Every message on the volume topic re-asserts unity while the mark
+// stands, and the level it carries never reaches mpv.
+func TestEveryLevelWhileOwnedReAssertsUnity(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close() })
+	lines := readAsync(server)
+
+	c := ownedCommander(nil, client)
+
+	c.handle(c.volumeOwnerTopic, []byte("house/theater"))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+
+	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+
+	c.handle(c.volumeTopic, []byte(`{"level":30,"muted":true}`))
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
+
+	mustNoLine(t, lines, 100*time.Millisecond)
+	mustMatch(t, c.heldVolume(), volumeState{Level: 30, Muted: true})
 }
 
 // An empty payload is the mark cleared. mpv takes the level back at the
@@ -894,7 +921,8 @@ func TestTheClearedMarkGivesTheLevelBackToMpv(t *testing.T) {
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
 	c.handle(c.volumeTopic, []byte(`{"level":45,"muted":false}`))
-	mustNoLine(t, lines, 100*time.Millisecond)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","100"]}`)
+	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","mute","no"]}`)
 
 	c.handle(c.volumeOwnerTopic, nil)
 	mustMatch(t, waitForLine(t, lines), `{"command":["no-osd","set","volume","45"]}`)

@@ -110,10 +110,7 @@ type commander struct {
 
 	// volumeOwned is the owner mark: equipment holds the level, so a state
 	// the topic delivers is recorded and never written to mpv.
-	// unityApplied marks that mpv was set to unity for the owner that
-	// holds it now, so the sidecar sets it once and not on every state.
-	volumeOwned  bool
-	unityApplied bool
+	volumeOwned bool
 
 	// volumeCaughtUp marks that this bus session has already
 	// delivered a level. The first message of a session is the
@@ -260,10 +257,6 @@ func (c *commander) onConnect(bus *Bus) {
 	// is a catch-up again and applies silently again.
 	c.volumeMutex.Lock()
 	c.volumeCaughtUp = false
-	// A fresh session redelivers the mark too, and mpv is the same process
-	// it was, so the unity write is owed again only if the mark still
-	// stands.
-	c.unityApplied = false
 	c.volumeMutex.Unlock()
 	bus.Publish(c.availabilityTopic, []byte(availabilityOnline), true)
 	c.reportMutex.Lock()
@@ -358,7 +351,13 @@ func (c *commander) applyVolume(payload []byte) {
 	// While the mark stands the level is the equipment's. The state is
 	// recorded for the next press, and mpv is left at unity with no
 	// indicator drawn.
+	//
+	// Every message re-asserts unity instead of setting it once, so no
+	// earlier write leaves mpv below unity while the mark stands.
 	if owned {
+		for _, command := range volumeCommands(defaultVolumeState()) {
+			c.command(command)
+		}
 		return
 	}
 	for _, command := range volumeCommands(state) {
@@ -370,20 +369,18 @@ func (c *commander) applyVolume(payload []byte) {
 }
 
 // applyVolumeOwner folds one message off the owner topic. A non-empty
-// payload hands the level to equipment, and mpv goes to unity once. An
+// payload hands the level to equipment, and mpv goes to unity. An
 // empty payload is the mark cleared, and mpv takes the level back at
 // the state the topic last delivered.
+//
+// Every non-empty mark writes unity, a redelivered one included, so a
+// mark that still stands is enough on its own to put mpv back at unity.
 func (c *commander) applyVolumeOwner(payload []byte) {
 	owned := len(payload) > 0
 	c.volumeMutex.Lock()
 	c.volumeOwned = owned
-	apply, state := false, defaultVolumeState()
-	switch {
-	case owned && !c.unityApplied:
-		c.unityApplied = true
-		apply = true
-	case !owned:
-		c.unityApplied = false
+	apply, state := true, defaultVolumeState()
+	if !owned {
 		apply, state = c.haveVolume, c.volume
 	}
 	c.volumeMutex.Unlock()
