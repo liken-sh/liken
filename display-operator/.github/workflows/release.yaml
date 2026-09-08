@@ -85,6 +85,12 @@ jobs:
             echo "  - name: ghcr.io/liken-sh/weston"
             echo "    newTag: $VERSION"
             echo '```'
+            echo
+            echo "The Vulkan base for a client image's FROM line:"
+            echo
+            echo '```'
+            echo "ghcr.io/liken-sh/vulkan:$VERSION"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: docker/setup-buildx-action@v3
@@ -95,7 +101,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Both images build here and neither one pushes yet. The
+      # All three images build here and none pushes yet. The
       # compositor has to start before anything reaches ghcr.io, and a
       # push that happened first would leave a broken :latest behind
       # when the start failed.
@@ -104,6 +110,19 @@ jobs:
       # image. A tag's release of a commit whose development build
       # already ran here rebuilds nothing, and a pull request's builds
       # in ci.yaml read the same tags.
+      - name: Build the Vulkan base
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: vulkan
+          load: true
+          cache-from: type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache
+          cache-to: type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max
+          tags: |
+            ghcr.io/liken-sh/vulkan:${{ env.VERSION }}
+            ghcr.io/liken-sh/vulkan:latest
+
       - name: Build the compositor
         uses: docker/build-push-action@v6
         with:
@@ -189,16 +208,19 @@ jobs:
           echo "the ci run for $commit did not finish within ten minutes" >&2
           exit 1
 
-      # The operator image is built from the compositor image, so the
-      # two share every layer and the second push sends one binary.
+      # Each image is built from the one before it, so the three share
+      # every layer, and after the first push the next two send one
+      # layer each.
       #
       # :latest marks the newest release and nothing else. A
       # development build pushes its own tag only.
-      - name: Push both images
+      - name: Push the three images
         run: |
+          docker push "ghcr.io/liken-sh/vulkan:$VERSION"
           docker push "ghcr.io/liken-sh/weston:$VERSION"
           docker push "ghcr.io/liken-sh/display-operator:$VERSION"
           if [ "$RELEASE" = true ]; then
+            docker push "ghcr.io/liken-sh/vulkan:latest"
             docker push "ghcr.io/liken-sh/weston:latest"
             docker push "ghcr.io/liken-sh/display-operator:latest"
           fi

@@ -1,14 +1,20 @@
-# Two images from one file.
+# Three images from one file, each built on the one before it.
 #
-#   --target weston    ghcr.io/liken-sh/weston, the compositor and
-#                      every library it loads, on nothing else.
+#   --target vulkan    ghcr.io/liken-sh/vulkan, the Vulkan loader, the
+#                      Intel and AMD drivers, and the client libraries
+#                      a Wayland program opens, on nothing else. The
+#                      media browser and the idle screen build FROM it.
+#   --target weston    ghcr.io/liken-sh/weston, that image plus the
+#                      compositor and every library it loads.
 #   the default        ghcr.io/liken-sh/display-operator, that image
 #                      plus the operator's binary.
 #
-# The operator image is built from the weston image rather than beside
-# it, so the compositor that the release starts is the same set of
-# bytes that the pod runs. The two share every layer, so a node that
-# pulls both pulls the second one for the size of one binary.
+# Each image is built from the one below it rather than beside it. The
+# compositor that the release starts is the same set of bytes that the
+# pod runs, and a node that draws with the compositor and the clients
+# holds glibc, libdrm and LLVM once. Docker shares a layer only when
+# the whole chain under it matches, which is why the order is fixed:
+# the base first, the compositor on it, the operator on that.
 #
 # The compositor ships in a workload's image and not in the read-only
 # root that every liken machine boots. That is why the device operator
@@ -50,6 +56,9 @@ FROM debian:trixie-slim AS closure
 # compositor advertises and is the first thing to read when a client
 # connects and draws nothing. kubectl exec runs it by name, which is
 # the only way to run anything in an image with no shell.
+# mesa-vulkan-drivers and libvulkan1 are the drivers and the loader of
+# the vulkan image. libxkbcommon0 and tzdata carry the keymap data and
+# the zoneinfo that its clients read.
 # ddcutil is the diagnostic for the panels. It reads a panel's whole
 # capabilities string and every VCP code over the same i2c node this
 # operator writes two codes on, so it answers whether the panel or
@@ -63,12 +72,22 @@ RUN apt-get update \
         libgl1-mesa-dri \
         wayland-utils \
         ddcutil \
+        mesa-vulkan-drivers \
+        libvulkan1 \
+        libxkbcommon0 \
+        tzdata \
     && rm -rf /var/lib/apt/lists/*
-COPY weston-closure.sh /
-RUN sh /weston-closure.sh /out
+COPY closure.sh vulkan-closure.sh weston-closure.sh /
+# The weston tree is computed whole, then less every file the vulkan
+# tree holds, so the weston layer carries only what the base lacks.
+RUN sh /vulkan-closure.sh /out/vulkan \
+    && sh /weston-closure.sh /out/weston /out/vulkan
 
-FROM scratch AS weston
-COPY --from=closure /out /
+FROM scratch AS vulkan
+COPY --from=closure /out/vulkan /
+
+FROM vulkan AS weston
+COPY --from=closure /out/weston /
 # The operator preloads this library into the compositor. It moves
 # the compositor's hotplug subscription onto the kernel's netlink
 # group. The loader opens the library by absolute path, so it needs no

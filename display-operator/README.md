@@ -69,13 +69,18 @@ of is documented in `liken`'s repository, in
 
     go build ./...
     go test ./...
+    docker build --target vulkan -t vulkan .
     docker build --target weston -t weston .
     docker build -t display-operator .
 
-One `Dockerfile` builds two images. `ghcr.io/liken-sh/weston` is the
-compositor and every library it loads, on nothing else.
-`ghcr.io/liken-sh/display-operator` is that image plus the operator's
-static binary, and it is the image the `DaemonSet` runs. The EDID
+One `Dockerfile` builds three images, each on the one before it.
+`ghcr.io/liken-sh/vulkan` is the Vulkan loader, the Intel and AMD
+drivers, and the client libraries a Wayland program opens, on nothing
+else. It is the base image for every Vulkan client liken ships.
+`ghcr.io/liken-sh/weston` is that image plus the compositor and every
+library it loads. `ghcr.io/liken-sh/display-operator` is that image
+plus the operator's static binary, and it is the image the
+`DaemonSet` runs. The EDID
 fixtures in `testdata` are read off real monitors with
 `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`.
 

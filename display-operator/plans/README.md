@@ -168,6 +168,11 @@ say why it is built the way it is.
 * [15, The output states its scale](15-the-output-states-its-scale.md).
   An output whose mode is 3840 wide or wider gets `scale=2` in its
   section, so every client draws a 4K panel at the 1080p size.
+* [16, The Vulkan base image](16-the-vulkan-base-image.md). Built on
+  2026-09-08. A third image, `ghcr.io/liken-sh/vulkan`, under the
+  compositor: the loader, the Intel and AMD drivers, and the client
+  libraries, on scratch. The media browser and the idle screen build
+  from it, and a node that draws holds LLVM once.
 
 ## Open problems
 
@@ -181,7 +186,9 @@ decided yet what work they become.
 * [LLVM is two thirds of the image](open-problems/llvm-is-two-thirds-of-the-image.md).
   The image is already on scratch, and 68% of it is LLVM and the
   libraries only LLVM needs, because Debian builds mesa with llvmpipe
-  and no liken machine runs llvmpipe.
+  and no liken machine runs llvmpipe. Plan 16 puts that LLVM in one
+  layer the compositor and the Vulkan clients share, and leaves the
+  problem itself open.
 * [The compositor drives one card](open-problems/the-compositor-drives-one-card.md).
   One Weston binds one DRM device, so a node with two graphics cards
   serves only the card the claim took.

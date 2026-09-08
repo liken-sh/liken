@@ -11,15 +11,17 @@
 # operator uses and omits the other eight.
 #
 # Run it in a builder that has the packages installed. It writes a
-# rootfs to the directory named on the command line.
+# rootfs to the first directory named on the command line, less every
+# file the second directory already holds. The second is the tree of
+# the vulkan image, which the weston image builds FROM, so the two
+# share glibc, libdrm, libwayland and the LLVM that gallium and the AMD
+# Vulkan driver both link.
 set -eu
 
-out=$1
+. "$(dirname "$0")/closure.sh"
 
-# The multiarch directory that holds every library below. dpkg
-# names it for the architecture this builds on, so no architecture is
-# written down here.
-lib=$(dirname "$(dpkg -L libweston-14-0 | grep '/libweston-14$')")
+out=$1
+base=$2
 
 # The dynamic loader finds a library by its DT_NEEDED name, and ldd
 # reports that whole graph. It reports nothing about a library that a
@@ -96,60 +98,5 @@ data="
 /usr/share/libinput
 "
 
-# Every hop of a symlink chain, then the file at the end of it. A
-# soname is a link to a versioned file, and the loader opens the
-# soname, so copying only one end of the chain breaks the load.
-hops() {
-	path=$1
-	while [ -L "$path" ]; do
-		printf '%s\n' "$path"
-		target=$(readlink "$path")
-		case $target in
-		/*) path=$target ;;
-		*) path=$(dirname "$path")/$target ;;
-		esac
-	done
-	printf '%s\n' "$path"
-}
-
-# ldd prints the whole DT_NEEDED graph of one file, so one call for
-# each seed reaches every library the loader resolves at load time.
-# linux-vdso has no file behind it, and the loader's own line prints
-# with no arrow.
-needed() {
-	ldd "$1" | sed -n 's/.*=> \(\/[^ ]*\).*/\1/p; s/^\t\(\/[^ ]*\) (0x.*/\1/p'
-}
-
-# /lib and /lib64 are symlinks to the directories under /usr, and ldd
-# reports every library under the name it resolved, which is the one
-# that goes through them. The loader's own path names /lib64. Copying
-# the two links first lets every copy below write the path exactly as
-# it was resolved.
-mkdir -p "$out$lib" "$out/usr/lib64" "$out/usr/bin"
-for link in /lib /lib64; do
-	if [ -L "$link" ]; then
-		cp -a --parents "$link" "$out"
-	fi
-done
-
-for seed in $seeds; do
-	{
-		hops "$seed"
-		needed "$(readlink -f "$seed")" | while read -r path; do hops "$path"; done
-	} >>"$out/.closure"
-done
-sort -u "$out/.closure" | while read -r path; do
-	cp -a --parents "$path" "$out"
-done
-rm -f "$out/.closure"
-
-for path in $data; do
-	cp -a --parents "$path" "$out"
-done
-
-# Without a cache the loader searches its built-in directory list on
-# every open, and that list does not name the multiarch directory
-# that holds every library above.
-mkdir -p "$out/etc"
-printf '%s\n' "$lib" >"$out/etc/ld.so.conf"
-ldconfig -r "$out"
+collect "$out" "$seeds" "$data"
+subtract "$out" "$base"

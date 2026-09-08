@@ -1,7 +1,12 @@
 # LLVM is two thirds of the image
 
 Open problem. The compositor image is already `FROM scratch`, and it is
-still 234,346,900 bytes. `libLLVM.so.19.1` and the three libraries that
+still 234,346,900 bytes. Since [plan 16](../16-the-vulkan-base-image.md)
+that LLVM sits in the `vulkan` base layer, where the AMD Vulkan driver
+links it too, and the media browser and the idle screen share the one
+copy with the compositor. The cost per node is one LLVM instead of
+three. The cost per image is unchanged, and this document is about
+that. `libLLVM.so.19.1` and the three libraries that
 only LLVM needs are 159,444,752 of them, which is 68% of the image.
 LLVM is in the closure because Debian builds mesa with llvmpipe, and
 llvmpipe is the one driver in that build that no liken machine ever
