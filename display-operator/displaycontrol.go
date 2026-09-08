@@ -207,17 +207,19 @@ func (d *displayControl) pass(ctx context.Context) error {
 // problem records, so the heal waits for the flap to end.
 const canvasSettleWindow = 5 * time.Second
 
-// The canvas heal. The compositor's own registry reports when
-// an output was destroyed and re-created, and weston never gives the
-// clients on the surviving screens a corrected size. A fresh
-// compositor places every surface at its own output's size, so the
-// restart is the repair.
+// The canvas heal. The compositor's own registry reports when an output
+// was destroyed and re-created, and weston never gives the clients on
+// the surviving screens a corrected size. A fresh compositor places
+// every surface at its own output's size, so the restart is the repair.
+// The watch decides before it reports: an output that comes back on its
+// connector carrying the same monitor at the same mode owes nothing,
+// because every canvas is already the size it should be.
 //
-// it waits on three things: a claim that holds any screen on
-// this card, an output set that is still moving, and a panel whose
-// restore is still writing. The first is the workload's screen, the
-// second is the hazard window upstream documents, and the third is a
-// panel on its way back that has enough to do.
+// It waits on three things: a claim that holds any screen on this card,
+// an output set that is still moving, and a panel whose restore is
+// still writing. The first is the workload's screen, the second is the
+// hazard window upstream documents, and the third is a panel on its way
+// back that has enough to do.
 func (d *displayControl) healCanvas(held map[string]bool) {
 	owed, settled := d.canvasDebt()
 	if !owed || d.restart == nil {
@@ -237,14 +239,17 @@ func (d *displayControl) healCanvas(held map[string]bool) {
 		}
 		d.canvasHealed()
 		d.deferred = false
+		// The line a person reads in the operator's log. It stands for a re-
+		// creation that changed the screen, so it names the change.
 		fmt.Printf("an output was re-created: the compositor restarts and every canvas is laid out again\n")
 	}
 }
 
-// What the compositor reported. Every output global that
-// arrives or leaves starts the settling window again, and an output
-// the watch saw re-created owes the restart. The operator's own
-// restarts end the watch's connection and start a new baseline, so
+// What the compositor reported. Every output global that arrives or
+// leaves starts the settling window again, and a re-creation that
+// changed the screen owes the restart. Recreated means an output that
+// came back carrying another monitor or another mode. The operator's
+// own restarts end the watch's connection and start a new baseline, so
 // they report nothing here.
 func (d *displayControl) outputsMoved(recreated bool) {
 	d.mu.Lock()

@@ -46,12 +46,15 @@ type westonBench struct {
 	arrived chan *compositorSession
 }
 
-// One output of the fake compositor: the connector it names,
-// and the modes it states, each one flags, width, height, and a
-// refresh in millihertz. The mode whose flags carry 1 is the mode it
-// serves.
+// One output of the fake compositor: the connector it names, the
+// monitor its geometry event states, and the modes it states, each one
+// flags, width, height, and a refresh in millihertz. The mode whose
+// flags carry 1 is the mode it serves. An output whose monitor a test
+// does not state carries the lab monitor.
 type westonOutput struct {
 	connector string
+	vendor    string
+	model     string
 	modes     [][]uint32
 }
 
@@ -237,12 +240,16 @@ func (s *compositorSession) serve() {
 func (s *compositorSession) burst(id, global, version uint32) {
 	output := s.server.output(global)
 
+	vendor, model := output.vendor, output.model
+	if vendor == "" && model == "" {
+		vendor, model = "LGD", "LG ULTRAWIDE"
+	}
 	var geometry waylandWords
 	for _, value := range []uint32{0, 0, 600, 340, 0} {
 		geometry.putUint(value)
 	}
-	geometry.putText("LGD")
-	geometry.putText("LG ULTRAWIDE")
+	geometry.putText(vendor)
+	geometry.putText(model)
 	geometry.putUint(0)
 	s.send(id, wlOutputGeometry, geometry)
 
@@ -373,43 +380,123 @@ func TestTheOutputsOfAFreshConnectionOweNoHeal(t *testing.T) {
 	bench.quiet()
 }
 
-// The case a comparison of monitor identities missed. The
-// same panel sleeps and wakes, the kernel mode on its connector
-// changes, and weston destroys and re-creates the output under the
-// same monitor.
-func TestAnOutputThatIsReCreatedOwesAHeal(t *testing.T) {
+// The monitor sleeps and wakes, the kernel mode on its connector
+// changes, and weston destroys and re-creates the output for it. The
+// clients on the surviving screens hold a canvas sized for the output
+// that went, so this re-creation owes a heal.
+func TestAnOutputThatComesBackAtAnotherModeOwesAHeal(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1", 2: "DP-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(2)
+	// The identity an output leaves with is the one its last closed batch
+	// stated, so the test waits for that batch before it moves the output.
+	bench.awaitServed(map[string]string{"HDMI-A-1": "3840x1600@60", "DP-1": "3840x1600@60"})
+
+	server.remove(session, 1)
+	if bench.report() {
+		t.Error("a removal with no output back yet owes a heal")
+	}
+	server.serve(session, 3, westonOutput{
+		connector: "HDMI-A-1",
+		modes:     [][]uint32{{3, 1920, 1080, 60000}},
+	})
+	if !bench.report() {
+		t.Error("an output that came back at another mode owes no heal")
+	}
+	bench.quiet()
+}
+
+// The measured case. An A/V receiver switches its input, the HDMI link
+// renegotiates, and weston destroys and re-creates the output. The
+// panel that comes back is the same one at the same mode, so every
+// canvas is already the size it should be, and a restart would end
+// every client for nothing.
+func TestAnOutputThatComesBackTheSamePanelOwesNoHeal(t *testing.T) {
+	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1", 2: "DP-1"})
+	bench := newWatchBench(t, server)
+	session := server.client()
+	bench.reported(2)
+	bench.awaitServed(map[string]string{"HDMI-A-1": "3840x1600@60", "DP-1": "3840x1600@60"})
 
 	server.remove(session, 1)
 	if bench.report() {
 		t.Error("a removal with no output back yet owes a heal")
 	}
 	server.add(session, 3, "HDMI-A-1")
-	if !bench.report() {
-		t.Error("an output that left and came back owes no heal")
+	if bench.report() {
+		t.Error("the same panel back at the same mode owes a heal")
 	}
 	bench.quiet()
 }
 
-// An output that arrives before the one it replaces leaves is
-// the same re-creation, because weston defers a destruction across a
-// pending flip.
+// A different monitor on the connector is a different screen, whatever
+// mode it runs, so every canvas is laid out again.
+func TestAnOutputThatComesBackAsAnotherMonitorOwesAHeal(t *testing.T) {
+	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
+	bench := newWatchBench(t, server)
+	session := server.client()
+	bench.reported(1)
+	bench.awaitMode("HDMI-A-1", "3840x1600@60")
+
+	server.remove(session, 1)
+	bench.report()
+	server.serve(session, 2, westonOutput{
+		connector: "HDMI-A-1",
+		vendor:    "DEN",
+		model:     "DENON AVR",
+		modes:     labWestonModes(),
+	})
+	if !bench.report() {
+		t.Error("another monitor on the connector owes no heal")
+	}
+	bench.quiet()
+}
+
+// An output that arrives before the one it replaces leaves is the same
+// re-creation, because weston defers a destruction across a pending
+// flip. The two halves are paired on the connector they share, in
+// either order.
 func TestAnOutputThatArrivesBeforeTheOldOneLeavesOwesAHeal(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(1)
+	bench.awaitMode("HDMI-A-1", "3840x1600@60")
 
-	server.add(session, 2, "HDMI-A-1")
+	server.serve(session, 2, westonOutput{
+		connector: "HDMI-A-1",
+		modes:     [][]uint32{{3, 1920, 1080, 60000}},
+	})
 	if bench.report() {
 		t.Error("an output that arrived alone owes a heal")
 	}
+	bench.awaitMode("HDMI-A-1", "1920x1080@60")
 	server.remove(session, 1)
 	if !bench.report() {
 		t.Error("the removal that completes the re-creation owes no heal")
+	}
+}
+
+// A compositor older than the done event closes no batch, so its
+// outputs never state which connector they drive or what mode they run.
+// A creation on one has only the moment it binds to report in, and it
+// pairs with a removal the way a re-creation paired before an output
+// could name itself.
+func TestAnOutputThatStatesNoDoneEventReportsWhenItBinds(t *testing.T) {
+	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
+	server.version = 1
+	bench := newWatchBench(t, server)
+	session := server.client()
+	bench.reported(1)
+
+	server.remove(session, 1)
+	if bench.report() {
+		t.Error("a removal with no output back yet owes a heal")
+	}
+	server.add(session, 2, "HDMI-A-1")
+	if !bench.report() {
+		t.Error("an output that left and came back owes no heal on a compositor that states no done event")
 	}
 }
 

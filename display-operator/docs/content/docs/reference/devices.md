@@ -387,7 +387,12 @@ waits for the compositor even though the wire does not need one.
 taint a device has, and it means the output can serve nobody
 right now. It appears in two cases:
 
-* the connector has no monitor,
+* the connector has had no monitor for longer than 90 seconds, or a
+  different monitor arrived on it. A link that goes down and comes
+  back with the same monitor inside that time taints nothing, because
+  an A/V receiver renegotiates its HDMI link on every input change
+  and holds the connector dark for over a minute while a 4K handshake
+  settles,
 * nothing answers on the compositor's socket, which covers the
   moment before the compositor's container is up and every restart
   of that container. The kubelet restarts a dead compositor alone,

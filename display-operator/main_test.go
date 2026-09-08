@@ -189,7 +189,7 @@ func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
 
 	// The socket file is there and nothing answers on it, which is what
 	// a compositor killed uncleanly leaves.
-	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls)
+	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls, newLinkHistory())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, newLinkHistory()); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.updated == nil {
@@ -235,6 +235,52 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 			t.Errorf("%s: taints = %+v, want %d of them",
 				device.Name, device.Taints, wantTaints[device.Name])
 		}
+	}
+}
+
+// The link on a monitor's connector goes down. The pass inside the
+// grace publishes the connector with no taint, so the clients drawing
+// on it keep drawing, and the pass past the grace publishes the taint
+// that ends them.
+func TestReconcileHoldsTheTaintWhileALinkIsDown(t *testing.T) {
+	compositorFixture(t)
+	socket := servingSocket(t, t.TempDir())
+	fixture := &slicePublishFixture{}
+	client := testClient(t, fixture.handler(t))
+	links := newLinkHistory()
+	clock := time.Now()
+	links.now = func() time.Time { return clock }
+
+	pass := func() []DeviceTaint {
+		t.Helper()
+		fixture.created = nil
+		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, links); err != nil {
+			t.Fatal(err)
+		}
+		if fixture.created == nil {
+			t.Fatal("nothing published")
+		}
+		for _, device := range fixture.created.Spec.Devices {
+			if device.Name == "hdmi-a-1" {
+				return device.Taints
+			}
+		}
+		t.Fatal("the slice published no hdmi-a-1 device")
+		return nil
+	}
+
+	pass()
+	// The A/V receiver switches its input, the HDMI link goes down, and
+	// the pass inside the grace taints nothing.
+	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "")
+	clock = clock.Add(time.Second)
+	if taints := pass(); len(taints) != 0 {
+		t.Errorf("the connector taints one second into the relink: %+v", taints)
+	}
+
+	clock = clock.Add(disconnectGrace + time.Second)
+	if taints := pass(); len(taints) != 1 || taints[0].Key != disconnectedTaint {
+		t.Errorf("taints past the grace = %+v", taints)
 	}
 }
 
@@ -258,7 +304,7 @@ func publishedModes(t *testing.T, current func() (map[string]string, error)) map
 	client := testClient(t, fixture.handler(t))
 
 	socket := servingSocket(t, t.TempDir())
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls, newLinkHistory()); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.created == nil {

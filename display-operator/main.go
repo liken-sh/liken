@@ -245,8 +245,11 @@ func operate() {
 	// channel every other source uses. The retry costs the loop no
 	// time and takes the same settle window.
 	retries := make(chan struct{}, 1)
+	// The link history is the operator's own, one for the process, because
+	// the grace it holds is measured across passes.
+	links := newLinkHistory()
 	publish := func() {
-		if err := reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls); err != nil {
+		if err := reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls, links); err != nil {
 			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
 			time.AfterFunc(writeRetryDelay, func() {
 				select {
@@ -362,8 +365,13 @@ func eventsEnded(ctx context.Context) error {
 // A read that fails costs the attribute and nothing else. The
 // rest of the slice is what sysfs says, and a card that cannot answer
 // the ioctl still has connectors, monitors, and a compositor.
+//
+// The link history holds the taint on a dark connector back for the
+// grace, so an HDMI link that goes down and comes back carrying the
+// same monitor taints nothing. One pass writes the history once, so no
+// other caller may pass one in.
 func reconcile(client *Client, nodeName string, owner OwnerReference, card, socketPath string,
-	currentModes func() (map[string]string, error), controls *panelControls) error {
+	currentModes func() (map[string]string, error), controls *panelControls, links *linkHistory) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
@@ -376,7 +384,7 @@ func reconcile(client *Client, nodeName string, owner OwnerReference, card, sock
 	// is cached against the monitor's EDID, so a pass over unchanged
 	// hardware sends nothing on any i2c wire, and a panel that refuses
 	// DDC/CI publishes no control attribute and no control device.
-	devices := sliceDevices(withControls(withCurrentModes(outputs, modes), controls))
+	devices := sliceDevices(withLinks(withControls(withCurrentModes(outputs, modes), controls), links))
 	if !compositorServing(socketPath) {
 		// No compositor holds the screens, so every output says it
 		// serves nobody, and the NoExecute taint is what ends the

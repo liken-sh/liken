@@ -163,10 +163,12 @@ func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
 // screen by model or by serial, or select any output that fits and
 // take whichever one is free.
 //
-// The compositor's config has an [output] section for every
-// connector, so only one fact taints a device: whether a monitor is
-// connected. A monitor that arrives on any connector can serve a
-// client as soon as the compositor enables its head.
+// The compositor's config has an [output] section for every connector,
+// so a monitor that arrives on any connector can serve a client as soon
+// as the compositor enables its head. What taints a device is a
+// connector that no monitor can be reached on, which unservable holds,
+// and the link history is what decides when a dark connector has been
+// dark long enough to count.
 func sliceDevices(outputs []Output) []SliceDevice {
 	devices := make([]SliceDevice, 0, len(outputs))
 	for _, output := range outputs {
@@ -215,7 +217,7 @@ func sliceDevices(outputs []Output) []SliceDevice {
 			addControl(device.Attributes, "controlsBrightness", output.Controls.Brightness)
 			addControl(device.Attributes, "controlsPower", output.Controls.Power)
 		}
-		if !output.Connected {
+		if unservable(output) {
 			device.Taints = unservableTaints()
 		}
 		devices = append(devices, device)
@@ -319,6 +321,15 @@ func drawDevice(output Output, taints []DeviceTaint) SliceDevice {
 		Attributes:               attributes,
 		Taints:                   taints,
 	}
+}
+
+// unservable answers whether the output can serve nobody now. A dark
+// connector serves nobody, and the link history holds the answer back
+// while a link that went down is coming back up. A connector that came
+// back carrying a different monitor serves nobody the claim on it asked
+// for, so it taints while a monitor is on the wire.
+func unservable(output Output) bool {
+	return output.Replaced || (!output.Connected && !output.Relinking)
 }
 
 // unservableTaints is the taint set of an output that can serve

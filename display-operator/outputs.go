@@ -81,6 +81,15 @@ type Output struct {
 	// and never what it drives. It is empty when the output drives
 	// nothing and when the card could not answer.
 	CurrentMode string
+	// Relinking says the connector is dark and inside the grace the link
+	// history holds it in, so the devices carry no taint yet. It is false
+	// until withLinks has run, which keeps every other reader on the old
+	// rule.
+	Relinking bool
+	// Replaced says the connector came back carrying a different monitor
+	// than the one it left with, so the devices taint while a monitor is
+	// on the wire. It is false until withLinks has run.
+	Replaced bool
 }
 
 // WithCurrentModes puts the card's readback beside what sysfs

@@ -318,11 +318,13 @@ every machine it ever plugs into.
 
 ## Unplugged monitors, moved monitors, and second screens
 
-**A monitor unplugged.** The device keeps its place in the slice and
-gains the `disconnected` taint. After your `tolerationSeconds`, the
-eviction controller ends the pod. A cable reseated within the
-toleration costs nothing: the client's Wayland connection never
-breaks, and its picture returns with the output.
+**A monitor unplugged.** The device keeps its place in the slice.
+After 90 seconds dark it gains the `disconnected` taint, and after
+your `tolerationSeconds` on top of that, the eviction controller ends
+the pod. A cable reseated within that time costs nothing: the
+client's Wayland connection never breaks, and its picture returns
+with the output. The same holds for an A/V receiver that switches
+its input and back, which renegotiates the link the same way.
 
 **A monitor moved to another connector.** A claim that selects by
 `model` or by `serial` instead of by `connector` follows the

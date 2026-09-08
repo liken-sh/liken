@@ -60,10 +60,17 @@ const (
 	registryGlobalEvent       uint16 = 0
 	registryGlobalRemoveEvent uint16 = 1
 	callbackDoneEvent         uint16 = 0
+	outputGeometryEvent       uint16 = 0
 	outputModeEvent           uint16 = 1
 	outputDoneEvent           uint16 = 2
 	outputNameEvent           uint16 = 4
 )
+
+// The arguments of the geometry event that come before the monitor's
+// make and model: the position, the physical size, and the subpixel
+// order. The client reads none of them and skips them by count, because
+// a Wayland argument list has no names in it.
+const outputGeometryLeader = 5
 
 // The one flag of the mode event this client reads: the mode
 // the output runs now. The other flag marks the monitor's preferred
@@ -79,6 +86,12 @@ const (
 	outputInterface = "wl_output"
 	outputVersion   = 4
 )
+
+// The version at which an output closes its batches with a done event.
+// The name is what keys an output to its connector, and the done event
+// is what makes a batch the output's answer, so an output bound below
+// this version states neither.
+const outputDoneVersion uint32 = 2
 
 // Libwayland's own connection buffer is 4096 bytes, so no
 // message a compositor sends is larger. The bound keeps a corrupt
@@ -112,6 +125,15 @@ func (f *waylandFields) uint() uint32 {
 	value := binary.LittleEndian.Uint32(f.body)
 	f.body = f.body[4:]
 	return value
+}
+
+// skip reads past arguments a caller has no use for, by count. Every
+// argument before them has to be read first, because the wire states no
+// names and no offsets.
+func (f *waylandFields) skip(count int) {
+	for range count {
+		f.uint()
+	}
 }
 
 // A string argument is a length that counts the null
@@ -157,6 +179,26 @@ type waylandEvent struct {
 	object uint32
 	opcode uint16
 	fields waylandFields
+}
+
+// The panel on a connector, as much of it as decides whether a re-
+// created output owes the canvas a restart: which monitor it is and
+// what mode it runs. The link history compares the monitor alone,
+// because a claim asks for a screen and not for a mode.
+type panelIdentity struct {
+	monitor string
+	mode    string
+}
+
+// What one output states about itself: the connector it drives, and the
+// panel on it. The panel is the compositor's own answer, the make and
+// the model it read out of the EDID and the mode it serves. At the
+// moment an output leaves, the kernel has already marked the connector
+// disconnected, and sysfs answers nothing about the monitor that was on
+// it.
+type outputIdentity struct {
+	connector string
+	panel     panelIdentity
 }
 
 // The connection. Object ids a client creates are its own to
@@ -208,11 +250,13 @@ func (c *waylandClient) event() (waylandEvent, error) {
 	return waylandEvent{object: object, opcode: opcode, fields: waylandFields{body: body}}, nil
 }
 
-// The standing connection to the compositor, and what it
-// reports. moved runs for every wl_output global that arrives or
-// leaves, and its argument is true when the connection has seen both
-// a removal and a creation since this compositor started, in either
-// order, which is an output that was re-created.
+// The standing connection to the compositor, and what it reports. moved
+// is one report per output global that arrives or leaves. Its argument
+// is true when an output was re-created carrying a different panel or a
+// different mode than the one it replaced. A re-creation under the same
+// identity reports false: the canvases the surviving screens draw on
+// are the right size already, and a restart would end every client for
+// nothing.
 type outputWatch struct {
 	socketPath string
 	moved      func(recreated bool)
@@ -377,7 +421,8 @@ func (w *outputWatch) connection(ctx context.Context) error {
 
 	// What this connection has seen. live turns on when the
 	// first burst ends, and the two marks are the halves of one
-	// re-creation, cleared together when the report pairs them.
+	// re-creation by an output the compositor never named, cleared
+	// together when the report pairs them.
 	var live, removed, created bool
 	outputs := map[uint32]uint32{}
 	bound := map[uint32]uint32{}
@@ -386,6 +431,20 @@ func (w *outputWatch) connection(ctx context.Context) error {
 	// at the done event, so a mode is not the output's answer until
 	// the done event closes the batch it came in.
 	stating := map[uint32]string{}
+	// What each output has said about itself so far, built up from the
+	// geometry, name, and mode events of its own batches.
+	stated := map[uint32]outputIdentity{}
+	// The outputs bound since the baseline whose first batch has not
+	// closed yet. An output means nothing to the canvas until it has named
+	// its connector and its mode, so the report on a creation waits for
+	// its done event.
+	arriving := map[uint32]bool{}
+	// The two halves of a named re-creation, each keyed by the connector:
+	// what a connector's output left with, and what arrived on a connector
+	// before the output it replaces left. Weston defers a destruction
+	// across a pending flip, so the two halves arrive in either order.
+	departed := map[string]panelIdentity{}
+	arrived := map[string]panelIdentity{}
 	report := func() {
 		if removed && created {
 			removed, created = false, false
@@ -393,6 +452,12 @@ func (w *outputWatch) connection(ctx context.Context) error {
 			return
 		}
 		w.moved(false)
+	}
+	// The two halves of one re-creation, paired. The debt is the
+	// difference between them: a connector that comes back carrying the
+	// same panel at the same mode has nothing for a restart to correct.
+	relink := func(left, back panelIdentity) {
+		w.moved(left != back)
 	}
 
 	for {
@@ -422,15 +487,23 @@ func (w *outputWatch) connection(ctx context.Context) error {
 				continue
 			}
 			id := client.newID()
+			agreed := min(version, outputVersion)
 			words = waylandWords{}
 			words.putUint(global)
 			words.putText(outputInterface)
-			words.putUint(min(version, outputVersion))
+			words.putUint(agreed)
 			words.putUint(id)
 			if err := client.request(registry, registryBind, words); err != nil {
 				return err
 			}
 			outputs[global], bound[id] = id, global
+			// An output that states no done event closes no batch, so it never
+			// names itself, and the only moment it has to report is this one.
+			// Every compositor this operator runs states one.
+			if live && agreed >= outputDoneVersion {
+				arriving[id] = true
+				continue
+			}
 			created = created || live
 			report()
 		case event.object == registry && event.opcode == registryGlobalRemoveEvent:
@@ -445,21 +518,50 @@ func (w *outputWatch) connection(ctx context.Context) error {
 			delete(outputs, global)
 			delete(bound, id)
 			delete(stating, id)
+			delete(arriving, id)
+			left := stated[id]
+			delete(stated, id)
 			w.forget(global)
-			removed = removed || live
-			report()
+			switch {
+			case !live:
+				w.moved(false)
+			case left.connector == "":
+				removed = true
+				report()
+			default:
+				if back, waiting := arrived[left.connector]; waiting {
+					delete(arrived, left.connector)
+					relink(left.panel, back)
+					continue
+				}
+				departed[left.connector] = left.panel
+				w.moved(false)
+			}
 		default:
 			global, ours := bound[event.object]
 			if !ours {
 				continue
 			}
 			switch event.opcode {
+			case outputGeometryEvent:
+				event.fields.skip(outputGeometryLeader)
+				vendor := event.fields.text()
+				model := event.fields.text()
+				if err := event.fields.err; err != nil {
+					return err
+				}
+				identity := stated[event.object]
+				identity.panel.monitor = vendor + " " + model
+				stated[event.object] = identity
 			case outputNameEvent:
 				connector := event.fields.text()
 				if err := event.fields.err; err != nil {
 					return err
 				}
 				w.name(global, connector)
+				identity := stated[event.object]
+				identity.connector = connector
+				stated[event.object] = identity
 			case outputModeEvent:
 				flags := event.fields.uint()
 				width := event.fields.uint()
@@ -473,8 +575,30 @@ func (w *outputWatch) connection(ctx context.Context) error {
 				}
 				stating[event.object] = westonMode(width, height, refresh)
 			case outputDoneEvent:
-				w.serves(global, stating[event.object])
+				mode := stating[event.object]
+				w.serves(global, mode)
 				delete(stating, event.object)
+				identity := stated[event.object]
+				if mode != "" {
+					identity.panel.mode = mode
+					stated[event.object] = identity
+				}
+				if !arriving[event.object] {
+					continue
+				}
+				delete(arriving, event.object)
+				if identity.connector == "" {
+					created = true
+					report()
+					continue
+				}
+				if left, waiting := departed[identity.connector]; waiting {
+					delete(departed, identity.connector)
+					relink(left, identity.panel)
+					continue
+				}
+				arrived[identity.connector] = identity.panel
+				w.moved(false)
 			}
 		}
 	}
