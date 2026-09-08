@@ -130,21 +130,21 @@ func (h *sessionHarness) drainCommands() {
 // queries already read, so the next command is the session's own.
 func (h *sessionHarness) begin(t *testing.T, input string) *session {
 	t.Helper()
-	return h.beginSession(t, input, true)
+	return h.beginSession(t, input, true, false)
 }
 
 // beginIdle starts the session the media operator holds while the
 // Player shows its idle screen.
 func (h *sessionHarness) beginIdle(t *testing.T, input string) *session {
 	t.Helper()
-	return h.beginSession(t, input, false)
+	return h.beginSession(t, input, false, false)
 }
 
-func (h *sessionHarness) beginSession(t *testing.T, input string, active bool) *session {
+func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake bool) *session {
 	t.Helper()
 	h.drainCommands()
 	h.holder.forget()
-	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, Active: active}
+	spec := ReceiverSession{Player: "theater", Input: input, VolumeTopic: testVolumeTopic, Active: active, Awake: awake}
 	started := startSession(t.Context(), "theater", spec, h.denon, h.brokers.address(), h.volumeRule)
 	h.holder.set(started)
 	return started

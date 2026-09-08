@@ -121,7 +121,7 @@ spec:
                 session:
                   type: object
                   required: [player, input, volumeTopic]
-                  description: "The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time. Power and input go out once, when active turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster."
+                  description: "The Player that holds the receiver now. The media operator applies this block under its own field manager for as long as the Player has a screen on this receiver, and lifts it after. The session owns the level from the volume topic the whole time. Power and input go out once, each time active or awake turns on. Nothing here is re-asserted: a person at the receiver's own remote outranks the cluster."
                   properties:
                     player:
                       type: string
@@ -142,6 +142,9 @@ spec:
                     active:
                       type: boolean
                       description: "Whether a Play stands on the Player. When it turns on, the receiver is powered on and its input selected, once. While it is off, the session owns the level and sends the receiver nothing, so an idle screen never wakes the room. Absent means off."
+                    awake:
+                      type: boolean
+                      description: "Whether the room's screen is awake. It is the second trigger for the same one-shots as active: each time it turns on, the receiver is powered on and its input selected, once, whatever active says. Turning off sends the receiver nothing. Absent means asleep."
             status:
               type: object
               description: "What the receiver last said, in its own units. Only the operator writes it."

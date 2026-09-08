@@ -94,13 +94,15 @@ server-side apply under its own field manager, the way it applies
 goes away. The cluster owner never writes it.
 
 A session means: own the level from the named volume topic, and,
-while `active` is true, power the receiver on and select the input.
-The media operator holds the session whenever the Player has the
-screen, the idle screen included, and sets `active` only while a
-Play stands. So a volume press at the idle screen turns the receiver,
-and an idle screen that comes up after a reboot never wakes it. Power
-and input are one-shots. The operator sends them when `active` turns
-on, and never holds them. If a person selects another input on the receiver's own
+each time `active` or `awake` turns on, power the receiver on and
+select the input. The media operator holds the session whenever the
+Player has the screen, the idle screen included. It sets `active`
+while a Play stands, and `awake` while the room's screen is on, which
+the remote's power key controls. So a volume press at the idle screen
+turns the receiver, the power key wakes the receiver and brings the
+browser up, and an idle screen that comes up after a reboot never
+wakes it. Power and input are one-shots. The operator sends them when
+a flag turns on, and never holds them. If a person selects another input on the receiver's own
 remote, the status records it and nothing fights back. A hand on the
 equipment outranks the cluster.
 

@@ -479,6 +479,39 @@ func TestAVolumeEditReachesAStandingSession(t *testing.T) {
 	equipment.waitForCommands(t, "MV53")
 }
 
+// A Play that starts on a waking screen turns both flags on in one
+// write, and the session selects the input once and at once.
+func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
+	waited := sessionPowerWait
+	sessionPowerWait = 500 * time.Millisecond
+	t.Cleanup(func() { sessionPowerWait = waited })
+
+	api := startFakeAPI(t)
+	equipment := startFakeDenon(t)
+	brokers := startFakeBrokerServer(t)
+	operator := newController(api.client, brokers.address())
+	operator.now = func() time.Time { return statusNow }
+
+	rule := ReceiverVolume{Max: 69.5, Step: 1}
+	api.setReceivers(idleReceiver(equipment.address(), rule))
+	mustSucceed(t, operator.pass(t.Context()))
+	broker := brokers.waitForSession(t)
+	broker.waitForTopic(t, ownerTopic(testVolumeTopic))
+	adopted := broker.waitForTopic(t, testVolumeTopic)
+	broker.push(testVolumeTopic, adopted.payload)
+	waitUntilSessionAdopted(t, operator, "theater")
+
+	woken := playingReceiver(equipment.address(), rule)
+	woken.Spec.Session.Awake = true
+	api.setReceivers(woken)
+	flipped := time.Now()
+	mustSucceed(t, operator.pass(t.Context()))
+
+	equipment.waitForCommands(t, "SIGAME")
+	mustMatch(t, time.Since(flipped) < sessionPowerWait/2, true)
+	equipment.refuseCommand(t, "SIGAME", 2*sessionPowerWait)
+}
+
 // playingReceiver is one Denon with a Play standing on it and a
 // declared scale, which is the whole of what a press needs.
 func playingReceiver(address string, rule ReceiverVolume) Receiver {

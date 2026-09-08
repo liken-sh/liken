@@ -34,15 +34,17 @@ type session struct {
 	spec     ReceiverSession
 	denon    *denonClient
 	bus      *Bus
-	// The session's own context, held because a flip to active starts the
-	// one-shots long after the session started, and they stop when it
+	// The session's own context, held because a flip of either flag starts
+	// the one-shots long after the session started, and they stop when it
 	// does.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// Whether a Play stands. It is the gate on the one-shots and on
-	// nothing else: the level path runs either way.
+	// The two flags: whether a Play stands, and whether the room's screen
+	// is awake. They gate the one-shots and nothing else. The level path
+	// runs whatever they say.
 	active atomic.Bool
+	awake  atomic.Bool
 
 	// The gate the input selection waits on, closed when the receiver
 	// reports itself on. It is armed again for each selection, so a second
@@ -73,15 +75,16 @@ type session struct {
 }
 
 // startSession opens the session's own broker connection and claims the
-// level with a retained owner mark. Power and input go out only for a
-// session that starts active. A session that starts idle owns the level
-// and sends the equipment nothing, so a browser that comes up after a
-// reboot never wakes the receiver.
+// level with a retained owner mark.
+//
+// Power and input go out once for a session that starts with either
+// flag on, and once only when both are on at the start. A session that
+// starts with both off owns the level and sends the equipment nothing.
 func startSession(ctx context.Context, receiver string, spec ReceiverSession, denon *denonClient, busAddress string, scale func() ReceiverVolume) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &session{
 		receiver:  receiver,
-		spec:      spec.withoutActive(),
+		spec:      spec.withoutFlags(),
 		denon:     denon,
 		ctx:       ctx,
 		cancel:    cancel,
@@ -100,21 +103,33 @@ func startSession(ctx context.Context, receiver string, spec ReceiverSession, de
 	s.bus.Subscribe(spec.VolumeTopic)
 	go s.bus.Run(ctx)
 	go s.adopt(ctx)
-	s.setActive(spec.Active)
+	s.setFlags(spec.Active, spec.Awake)
 	return s
 }
 
-// setActive takes the flip the media operator makes when a Play starts
-// or ends. Each false to true selects the input once. True to false
-// sends nothing, because the room may still be listening.
-func (s *session) setActive(active bool) {
-	if !active {
-		s.active.Store(false)
-		return
-	}
-	if s.active.CompareAndSwap(false, true) {
+// setFlags takes both flags as the media operator wrote them: active
+// when a Play starts or ends, awake when the room's screen wakes or
+// sleeps. Either one turning on runs the one-shots once, and both
+// turning on in one write runs them once and not twice. A screen that
+// wakes under a standing Play selects the input again, which is what a
+// person who reached for the receiver's own power button needs.
+func (s *session) setFlags(active, awake bool) {
+	played := s.raise(&s.active, active)
+	woke := s.raise(&s.awake, awake)
+	if played || woke {
 		go s.selectInput(s.ctx)
 	}
+}
+
+// raise stores one flag and answers whether this is the false to true
+// that runs the one-shots. True to false sends nothing, because the
+// room may still be listening.
+func (s *session) raise(flag *atomic.Bool, on bool) bool {
+	if !on {
+		flag.Store(false)
+		return false
+	}
+	return flag.CompareAndSwap(false, true)
 }
 
 // stop clears the owner mark, waits for it to reach the broker, and
@@ -351,9 +366,10 @@ func (s *session) publishPosition() bool {
 }
 
 // selectInput powers the receiver on, waits for it to say so, and
-// selects the input once for the Play that asked. It runs once per flip
-// to active and never re-asserts inside one: a hand on the equipment
-// outranks the cluster.
+// selects the input once for whoever asked.
+//
+// It runs once per flip of either flag, and never re-asserts inside
+// one: a hand on the equipment outranks the cluster.
 func (s *session) selectInput(ctx context.Context) {
 	// A command sent before the connection is open is dropped, and a one-
 	// shot is never re-asserted, so the wait for the connection is what
