@@ -54,12 +54,25 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [45, The browser at 4K](45-the-browser-at-4k.md). Layout in
   logical pixels, art decoded at physical pixels, a `--scale` test
   knob, and a browser that draws no frame while a film covers it.
+* [46, The power key brings the room up](46-the-power-key-brings-the-room-up.md).
+  One press wakes the panel, the receiver, and the input, and ends
+  with the browser presented and focused. Fast follow: the receiver
+  half shipped, the browser half is owed.
+* [49, Remote keys for people and home](49-remote-keys-for-people-and-home.md).
+  The compose key raises the person picker, the WWW key goes home,
+  and page up and down are named for a later choice. Fast follow.
 
 ## Future
 
 These plans are named so the design accounts for them. Each is a stub
 for a later agent to shape.
 
+* [47, Progress to Jellyfin over the bus](47-progress-to-jellyfin-over-the-bus.md).
+  A bus consumer mirrors each person's position into Jellyfin, and
+  reads Jellyfin's back.
+* [48, Larger type on banners and headings](48-larger-type-on-banners-and-headings.md).
+  One step up on the brand's type scale for banners, headings, and
+  franchise cards, with wall captions unchanged. Waits for a UI round.
 * [12, The organizer](12-the-organizer.md). Renaming and moving files to
   a library's naming convention.
 * [13, More kinds](13-more-kinds.md). Music, photos, audiobooks, books,
