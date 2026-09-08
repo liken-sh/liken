@@ -28,7 +28,7 @@ func TestCatalogServiceIsHeadlessAndPublishesEveryAddress(t *testing.T) {
 	if !service.Spec.PublishNotReadyAddresses {
 		t.Error("the Service drops not-ready addresses, so a forming cluster has no peers")
 	}
-	want := ServicePort{Name: catalogPortName, Protocol: catalogPortProtocol, Port: catalogPort}
+	want := ServicePort{Name: catalogPortName, Protocol: catalogPortProtocol, Port: catalogPort, TargetPort: "8787"}
 	if len(service.Spec.Ports) != 1 || service.Spec.Ports[0] != want {
 		t.Errorf("ports = %+v, want %+v", service.Spec.Ports, want)
 	}
@@ -293,5 +293,58 @@ func TestSameServiceComparesWhatTheOperatorStates(t *testing.T) {
 				t.Errorf("sameService = %v, want %v", got, one.same)
 			}
 		})
+	}
+}
+
+// The API server defaults a port's targetPort to the port number, so
+// a gossip Service reads back with a number where the operator wrote
+// nothing, and the jellyfin Service reads back with the name it wrote.
+func TestAServicePortReadsAndWritesEitherSpellingOfItsTargetPort(t *testing.T) {
+	cases := []struct {
+		body string
+		port TargetPort
+	}{
+		{`{"name":"gossip","protocol":"UDP","port":8787,"targetPort":8787}`, "8787"},
+		{`{"name":"webhook","protocol":"TCP","port":8090,"targetPort":"webhook"}`, "webhook"},
+	}
+	for _, testCase := range cases {
+		t.Run(string(testCase.port), func(t *testing.T) {
+			port := ServicePort{}
+			if err := json.Unmarshal([]byte(testCase.body), &port); err != nil {
+				t.Fatal(err)
+			}
+			if port.TargetPort != testCase.port {
+				t.Errorf("targetPort = %q, want %q", port.TargetPort, testCase.port)
+			}
+			written, err := json.Marshal(port)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(written) != testCase.body {
+				t.Errorf("wrote %s, want %s", written, testCase.body)
+			}
+		})
+	}
+}
+
+// The live Service carries the defaulted targetPort, and the pass must
+// read that as the Service it built, or every pass would write it.
+func TestStandCatalogServiceReadsTheDefaultedTargetPortAsItsOwn(t *testing.T) {
+	cluster := newFakeCluster()
+	operator := testOperator(t, cluster)
+	owners := []OwnerReference{catalogOwner("movies", "movies-uid")}
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
+		t.Fatal(err)
+	}
+	service := cluster.heldService(testLibraryNamespace, catalogServiceName)
+	if got := service.Spec.Ports[0].TargetPort; got != "8787" {
+		t.Errorf("targetPort = %q, want the port number the API server would default", got)
+	}
+
+	if err := operator.standCatalogService(t.Context(), testLibraryNamespace, owners); err != nil {
+		t.Fatal(err)
+	}
+	if writes := cluster.countRequests(http.MethodPut, "services"); writes != 0 {
+		t.Errorf("puts = %d, want none over a Service that only carries the default", writes)
 	}
 }

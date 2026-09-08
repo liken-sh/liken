@@ -23,7 +23,7 @@ func TestProgressServiceIsHeadlessOnItsOwnPort(t *testing.T) {
 	if service.Spec.ClusterIP != headlessClusterIP || !service.Spec.PublishNotReadyAddresses {
 		t.Errorf("spec = %+v, want a headless Service that publishes not-ready addresses", service.Spec)
 	}
-	want := ServicePort{Name: catalogPortName, Protocol: catalogPortProtocol, Port: progressPort}
+	want := ServicePort{Name: catalogPortName, Protocol: catalogPortProtocol, Port: progressPort, TargetPort: "8788"}
 	if len(service.Spec.Ports) != 1 || service.Spec.Ports[0] != want {
 		t.Errorf("ports = %+v, want %+v", service.Spec.Ports, want)
 	}

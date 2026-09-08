@@ -12,9 +12,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
 )
 
 // gossipCluster is one of the two Corrosion clusters a namespace
@@ -69,11 +71,39 @@ type ServicePort struct {
 	Name     string `json:"name"`
 	Protocol string `json:"protocol"`
 	Port     int32  `json:"port"`
-	// The port on the pod behind this Service, by the name the container
-	// gives it. A gossip Service names none, because it stands on an
-	// EndpointSlice this operator writes and that slice names the port
-	// itself.
-	TargetPort string `json:"targetPort,omitempty"`
+	// The port on the pod behind this Service: the name the container
+	// gives it, or the port's own number. A gossip Service stands on an
+	// EndpointSlice this operator writes, and that slice names the port
+	// itself, so its target is the number.
+	TargetPort TargetPort `json:"targetPort,omitempty"`
+}
+
+// TargetPort is a port name or a port number, held as text. The API
+// server writes a number as a JSON number and a name as a string, and
+// it refuses a number spelled as a string, so the two methods below keep
+// each spelling on the wire. A Service that names no target port reads
+// back with its own port number, because the API server defaults it.
+type TargetPort string
+
+func (p *TargetPort) UnmarshalJSON(body []byte) error {
+	var name string
+	if json.Unmarshal(body, &name) == nil {
+		*p = TargetPort(name)
+		return nil
+	}
+	var number int64
+	if err := json.Unmarshal(body, &number); err != nil {
+		return err
+	}
+	*p = TargetPort(strconv.FormatInt(number, 10))
+	return nil
+}
+
+func (p TargetPort) MarshalJSON() ([]byte, error) {
+	if number, err := strconv.ParseInt(string(p), 10, 32); err == nil {
+		return json.Marshal(number)
+	}
+	return json.Marshal(string(p))
 }
 
 // buildCatalogService builds the Service for one namespace. It is a
@@ -99,8 +129,13 @@ func buildGossipService(cluster gossipCluster, namespace string, owners []OwnerR
 		Spec: ServiceSpec{
 			ClusterIP:                headlessClusterIP,
 			PublishNotReadyAddresses: true,
+			// The target is the port's own number, which is what the API
+			// server would default it to, so the Service the pass builds
+			// reads back as itself and the compare below finds no
+			// divergence.
 			Ports: []ServicePort{
-				{Name: catalogPortName, Protocol: catalogPortProtocol, Port: cluster.port},
+				{Name: catalogPortName, Protocol: catalogPortProtocol, Port: cluster.port,
+					TargetPort: TargetPort(strconv.FormatInt(int64(cluster.port), 10))},
 			},
 		},
 	}
