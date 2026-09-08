@@ -170,11 +170,13 @@ operator's log and dropped, because the screen has no way to answer.
 | `start` | string | no | Where the first item begins, as a decimal count of seconds. It reaches the `Play`'s `spec.start` unchanged, because the player parses it and the operator does not. Omit it to start at the beginning. |
 | `next` | object | no | The work that follows this one, which the player offers on its scrubber. It carries the three lines of the offer card, `reason`, `title`, and `detail`, spelled the way the continue-watching row spells them; `art`, a path relative to the root of `next.library`; `library`, the `namespace/name` of the next work's own `Library`, which may differ from `library` above; and `request`, an object the operator copies onto the `Play` unread. The operator joins `art` to the claim of `next.library` the way it joins an item's art, and the player publishes `request` back on the `Player`'s commands topic when a person takes the offer. |
 
-The project's browser publishes the chosen item first and the rest of
-its season after it, leaves out every empty field, sends `start` only
-for a resume, and sends `next` only where the page the person started
-from names a natural successor: the next episode of a series, the next
-film of a set, or the next member of a franchise.
+The project's browser publishes one item, the film or the chosen
+episode, leaves out every empty field, sends `start` only for a
+resume, and sends `next` only where the page the person started from
+names a natural successor: the next episode of a series, the next film
+of a set, or the next member of a franchise. A series continues
+through `next` and not through the item list, so every episode is its
+own `Play` and its own row of progress.
 
     {
       "library": "den/movies",

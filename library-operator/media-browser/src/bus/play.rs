@@ -12,11 +12,10 @@ use crate::screens::upnext::Next;
 /// The request as bytes. `library` is the catalog's library column,
 /// `namespace/name`, and every path is relative to that library's root.
 ///
-/// The slug is the chosen item's, which is the first of the list: the
-/// movie, or the episode a person picked, with the rest of its season
-/// after it. The operator folds it into the `Play`'s name. A list that
-/// resolved nothing carries an empty slug, and the operator then names
-/// the `Play` after the unit alone.
+/// The slug is the chosen item's, which is the first of the list. The
+/// operator folds it into the `Play`'s name. A list that resolved
+/// nothing carries an empty slug, and the operator then names the
+/// `Play` after the unit alone.
 ///
 /// `people` names who is watching, by `Person` name, and `identity` names
 /// the work the progress store keys on. Each is left out where it holds

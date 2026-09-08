@@ -71,6 +71,16 @@ by the franchise page when it opens them and by nothing else. The
 The art of the next work is the leaf's slot art, an episode still or a
 film poster.
 
+### One episode per Play
+
+Before this plan, an episode's play request carried the chosen episode
+and every later episode of its season, so mpv rolled through the
+season on its own. That list is gone. A series play request carries
+one item, and the show continues through `next`. Every episode is then
+its own `Play` and its own row of progress, the request stays small,
+and a person who walks away gets one episode. An album keeps its list,
+because its tracks are one work.
+
 ### The browser starts the next work
 
 The player publishes `{"action": "play-next", "request": {...}}` on

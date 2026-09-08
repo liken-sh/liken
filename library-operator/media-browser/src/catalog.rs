@@ -480,11 +480,11 @@ pub trait Source {
     /// order, held or not, so a gap draws with the file's own title.
     fn franchise(&mut self, library: &str, id: &str) -> Option<Franchise>;
 
-    /// The play list one choice resolves to. A movie is one item or
-    /// none. An episode is itself and every later episode of its season,
-    /// in episode order. A choice whose own main file is missing
-    /// resolves to nothing, because a play that skipped what the person
-    /// chose is worse than no play at all.
+    /// The play list one choice resolves to: one item, or none. The list is
+    /// for an album, one work in several files. An episode is a work of its
+    /// own, so what follows it is the `Play`'s next block and not a second
+    /// item.
+    /// A choice whose own main file is missing resolves to nothing.
     fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem>;
 
     /// One title's credited people, split by part and in billing
@@ -583,7 +583,7 @@ pub enum Selection {
         /// The movie's id inside its library.
         id: String,
     },
-    /// One episode, and with it the rest of its season.
+    // One episode, which is one work.
     Episode {
         /// The parent series' id inside the library.
         series: String,

@@ -115,12 +115,14 @@ fn a_select_on_an_episode_names_the_episode_the_still_carries() {
     );
 }
 
+// A list of several files is one work, which is what an album will be. A
+// film and an episode are each one item.
+// be. A film and an episode are each one item.
 #[test]
-fn a_select_on_an_episode_publishes_the_list_in_the_order_it_resolved() {
+fn a_play_publishes_every_item_the_catalog_resolved_in_order() {
     let mut second = one_item();
     second.path = "Later.mkv".into();
     let (mut browser, bus) = playing(vec![one_item(), second]);
-    browser.key("right");
     browser.key("enter");
     browser.key("enter");
 

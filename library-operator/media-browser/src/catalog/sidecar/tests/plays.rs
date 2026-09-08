@@ -1,5 +1,5 @@
 // The play lists a choice resolves to: a movie's main file, a movie's
-// trailer, and an episode with the rest of its season.
+// trailer, and one episode.
 
 use super::*;
 
@@ -96,8 +96,11 @@ fn a_movie_with_two_encodings_plays_one_of_them() {
     );
 }
 
+// The season around the chosen episode stays in the catalog, and the play
+// list holds the one work the person chose.
+// the play list holds the one work the person chose.
 #[test]
-fn an_episode_plays_itself_and_the_rest_of_its_season() {
+fn an_episode_plays_itself_alone() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     a_season(&path);
@@ -112,10 +115,10 @@ fn an_episode_plays_itself_and_the_rest_of_its_season() {
     let mut source = SidecarSource::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(2));
     let paths: Vec<&str> = items.iter().map(|item| item.path.as_str()).collect();
-    assert_eq!(paths, ["Lost/S01E2.mkv", "Lost/S01E3.mkv"]);
+    assert_eq!(paths, ["Lost/S01E2.mkv"]);
 }
 
-// The operator names a Play after the chosen item, so every item
+// The operator names a Play after the chosen item, so the item
 // carries the slug its own row holds.
 #[test]
 fn every_item_carries_the_slug_its_row_holds() {
@@ -126,7 +129,7 @@ fn every_item_carries_the_slug_its_row_holds() {
     let mut source = SidecarSource::new(&path, NO_AGENT);
     let items = source.play("default/shows", &episode_chosen(2));
     let slugs: Vec<&str> = items.iter().map(|item| item.slug.as_str()).collect();
-    assert_eq!(slugs, ["s01e02", "s01e03"]);
+    assert_eq!(slugs, ["s01e02"]);
 }
 
 #[test]
@@ -163,11 +166,12 @@ fn an_episode_the_catalog_dates_carries_the_date_and_not_the_year() {
     insert_main_file(&path, "default/shows", "Lost/S01E2.mkv", "e2");
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    let items = source.play("default/shows", &episode_chosen(1));
-    assert_eq!(items[0].presentation.date, "2004-09-22");
-    assert_eq!(items[0].presentation.year, 0);
-    assert_eq!(items[1].presentation.date, "");
-    assert_eq!(items[1].presentation.year, 2004);
+    let dated = source.play("default/shows", &episode_chosen(1));
+    assert_eq!(dated[0].presentation.date, "2004-09-22");
+    assert_eq!(dated[0].presentation.year, 0);
+    let yearly = source.play("default/shows", &episode_chosen(2));
+    assert_eq!(yearly[0].presentation.date, "");
+    assert_eq!(yearly[0].presentation.year, 2004);
 }
 
 #[test]
@@ -185,9 +189,10 @@ fn an_episode_with_no_still_presents_the_art_of_its_series() {
     clear_episode_art(&path, "default/shows", "episode:tvdb:1");
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    let items = source.play("default/shows", &episode_chosen(1));
-    assert_eq!(items[0].presentation.art, "Lost/fanart.jpg");
-    assert_eq!(items[1].presentation.art, "episode:tvdb:2.jpg");
+    let cleared = source.play("default/shows", &episode_chosen(1));
+    assert_eq!(cleared[0].presentation.art, "Lost/fanart.jpg");
+    let held = source.play("default/shows", &episode_chosen(2));
+    assert_eq!(held[0].presentation.art, "episode:tvdb:2.jpg");
 }
 
 #[test]

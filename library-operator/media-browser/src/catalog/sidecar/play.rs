@@ -82,11 +82,12 @@ pub fn trailer(
     })
 }
 
-/// The chosen episode and every later episode of its season, in
-/// episode order. An episode with no main file drops out of the join,
-/// and a list that does not start with the chosen episode is no list
-/// at all. The series row carries the art an episode with no still of
-/// its own is presented with.
+/// The chosen episode alone. What follows it is the `Play`'s own next
+/// block, so the list holds one work, and a list of several files is left
+/// for an album.
+/// An episode with no main file resolves to nothing. The series row
+/// carries the art an episode with no still of its own is presented
+/// with.
 pub fn episodes(
     connection: &Connection,
     library: &str,
@@ -100,23 +101,22 @@ pub fn episodes(
                 IFNULL(parent.art, ''), IFNULL(parent.arts, '[]') \
          FROM episodes item {} \
          LEFT JOIN series parent ON parent.library = item.library AND parent.id = item.series \
-         WHERE item.library = ? AND item.series = ? AND item.season = ? AND item.episode >= ? \
-         GROUP BY item.id ORDER BY item.episode",
+         WHERE item.library = ? AND item.series = ? AND item.season = ? AND item.episode = ? \
+         GROUP BY item.id",
         video("primary")
     );
-    let found = collect(
+    collect(
         connection,
         &sql,
         &[&library, &series, &season, &chosen],
         |row| {
-            let number: i64 = row.get(0)?;
             let released: String = row.get(2)?;
             let mut presentation = Presentation {
                 kind: "video".into(),
                 hint: "series".into(),
                 series: row.get(4)?,
                 season,
-                episode: number,
+                episode: row.get(0)?,
                 episode_title: row.get(1)?,
                 art: art::still(
                     &item::text(row, 3)?,
@@ -127,20 +127,13 @@ pub fn episodes(
                 ..Presentation::default()
             };
             dated(&mut presentation, released);
-            Ok((
-                number,
-                PlayItem {
-                    path: row.get(5)?,
-                    slug: row.get(7)?,
-                    presentation,
-                },
-            ))
+            Ok(PlayItem {
+                path: row.get(5)?,
+                slug: row.get(7)?,
+                presentation,
+            })
         },
-    )?;
-    if found.first().map(|(number, _)| *number) != Some(chosen) {
-        return Ok(Vec::new());
-    }
-    Ok(found.into_iter().map(|(_, item)| item).collect())
+    )
 }
 
 // An episode carries the release the catalog holds: a full ISO date

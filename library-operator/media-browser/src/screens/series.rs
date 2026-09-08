@@ -294,7 +294,7 @@ impl Series {
     /// Fold one press in. Left and right move inside one season, up and
     /// down move by a row and cross the dividers, down from the last row
     /// reaches the franchise strips and then the stripes, and select plays
-    /// the episode and the rest of its season.
+    /// the episode.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         let held = self.focus;
         let step = match self.focus {
