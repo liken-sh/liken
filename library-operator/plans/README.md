@@ -43,17 +43,6 @@ movie, and play it on the same `Player`. Plan 10 documents that.
 * [37, Prometheus metrics](37-prometheus-metrics.md). Proposed.
   Enrichment progress, work needing attention, worker outcomes, and
   observation health, with optional collection and quiet idle libraries.
-* [41, The people on the screen](41-the-people-on-the-screen.md). The
-  screen half of plan 14: a second agent on every screen pod, the
-  browser asks who is watching and sends the answer with every play
-  request, and continue watching and history draw from the local copy.
-* [44, Copies on per-node volumes](44-copies-on-per-node-volumes.md).
-  Every claim can bind to a `per-node` volume the operator writes up
-  front; the copies of a store share one claim, and the heal shrinks
-  to a pod delete.
-* [45, The browser at 4K](45-the-browser-at-4k.md). Layout in
-  logical pixels, art decoded at physical pixels, a `--scale` test
-  knob, and a browser that draws no frame while a film covers it.
 * [46, The power key brings the room up](46-the-power-key-brings-the-room-up.md).
   One press wakes the panel, the receiver, and the input, and ends
   with the browser presented and focused. Fast follow: the receiver
@@ -267,6 +256,21 @@ that took a hearing-impaired flag for Hindi.
   and `spec.libraries` classes a `Library`'s two working copies, so a
   cluster keeps its two central stores on a durable class and every
   copy on a node-local one. Each field defaults to `spec.storage`.
+* [41, The people on the screen](completed/41-the-people-on-the-screen.md).
+  Built in 435db0f and on the house since 2026-09-07. A second agent
+  on every screen pod, the person picker, the continue row, and the
+  progress marks on pages and walls. Still owed from its build: how
+  the `Person` list reaches a pod, the `watch` message over the bus,
+  a history page, and bars on series and episode wall cards.
+* [44, Copies on per-node volumes](completed/44-copies-on-per-node-volumes.md).
+  Built with `per-node-csi-driver` 2026.09.07-001 and on the house
+  since 2026-09-07. Every copy of a store binds to a `per-node`
+  volume the operator writes up front.
+* [45, The browser at 4K](completed/45-the-browser-at-4k.md). Built
+  in 2026.09.07-004 and proved on the living room on 2026-09-07 at
+  scale 2: the 1080p layout with art at the panel's resolution, and a
+  browser that draws no frame under a film. The memory reading at the
+  end of a film is still owed to the plan.
 * [32, A screen keeps its catalog](completed/32-a-screen-keeps-its-catalog.md).
   Built in 2026.09.02-009 and drilled on `liken-1` on 2026-09-02.
   Every screen's agent runs on a claim of its own, so a restart holds
