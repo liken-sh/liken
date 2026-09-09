@@ -263,7 +263,7 @@ These plans are designed. Each keeps its number and moves to
 owes an answer to. Those documents have no number, because nobody
 has decided yet what work they become.
 
-* [The player image is still Debian](open-problems/the-player-image-is-still-debian.md).
+* [The player image is still a distribution](open-problems/the-player-image-is-still-a-distribution.md).
   The operator image is one binary on `scratch`; the player image is
   a distribution base, because `mpv`'s runtime closure is wide. The
   audio operator's closure-on-scratch treatment applies, with the

@@ -117,6 +117,14 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		// it through fontconfig against the two OTF files the image installs.
 		"--osd-font=" + overlayFont,
 	}
+	// --quiet is the default because mpv prints its status line about
+	// eight times a second, this process's stdout is the pod log on the
+	// machine's disk, and containerd and the kubelet tail it. --quiet
+	// drops that line and keeps warnings and errors. MEDIA_PLAYER_VERBOSE
+	// with any value brings the full output back; the shim adds no -v.
+	if os.Getenv(playerVerboseVariable) == "" {
+		argv = append(argv, "--quiet")
+	}
 	// A run of nothing but music draws no video, so the display owns the
 	// whole frame instead of annotating the cover art mpv would frame. One
 	// item that is not music keeps video on for the whole run.

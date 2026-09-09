@@ -16,6 +16,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 		name          string
 		applicationID string
 		start         string
+		verbose       string
 		items         []string
 		blocks        []json.RawMessage
 		want          []string
@@ -29,6 +30,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--script=/test-display",
 				"--osc=no",
 				"--osd-font=Source Sans 3",
+				"--quiet",
 				"--", "/media/0/film.mkv",
 			},
 		},
@@ -42,6 +44,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--script=/test-display",
 				"--osc=no",
 				"--osd-font=Source Sans 3",
+				"--quiet",
 				"--wayland-app-id=display-0",
 				"--", "https://media.example.net/one.mkv", "/media/0/two.mkv",
 			},
@@ -63,6 +66,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--script=/test-display",
 				"--osc=no",
 				"--osd-font=Source Sans 3",
+				"--quiet",
 				"--vid=no", "--force-window=yes",
 				"--", "/ipc/album-1.edl", "/media/1/track.flac",
 			},
@@ -81,6 +85,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--script=/test-display",
 				"--osc=no",
 				"--osd-font=Source Sans 3",
+				"--quiet",
 				"--", "/media/1/film.mkv", "/ipc/album-2.edl",
 			},
 		},
@@ -96,7 +101,23 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--script=/test-display",
 				"--osc=no",
 				"--osd-font=Source Sans 3",
+				"--quiet",
 				"--start=0:10:00",
+				"--", "/media/0/film.mkv",
+			},
+		},
+		{
+			// MEDIA_PLAYER_VERBOSE drops --quiet from the list, so mpv prints
+			// its status line into the pod log, and the shim adds no -v.
+			name:    "the operator asks for mpv's full output",
+			verbose: "1",
+			items:   []string{"/media/0/film.mkv"},
+			want: []string{
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
+				"--script=/test-display",
+				"--osc=no",
+				"--osd-font=Source Sans 3",
 				"--", "/media/0/film.mkv",
 			},
 		},
@@ -106,6 +127,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 		t.Run(each.name, func(t *testing.T) {
 			t.Setenv(displayAppIDVariable, each.applicationID)
 			t.Setenv(playStartVariable, each.start)
+			t.Setenv(playerVerboseVariable, each.verbose)
 			argv, err := playerArgv(each.items, each.blocks)
 			mustSucceed(t, err)
 			// argv[0] is the resolved binary, so the want list is the

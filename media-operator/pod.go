@@ -75,7 +75,7 @@ func podName(play string) string {
 // resolved playlist in spec order.
 func buildPod(
 	play *Play, claim *ResourceClaim, resolved resolution, image, sidecarImage, busAddress, topicBase string,
-	remotes []boundRemote, prefs resolvedPreferences,
+	remotes []boundRemote, prefs resolvedPreferences, playerVerbose string,
 ) *Pod {
 	grace := int64(playbackGracePeriod)
 	// The IPC volume is unconditional, so mpv serves its socket at one
@@ -133,6 +133,14 @@ func buildPod(
 	if prefs.TimeZone != "" {
 		container.Env = append(container.Env,
 			EnvVar{Name: timeZoneVariable, Value: prefs.TimeZone})
+	}
+	// The one switch that turns mpv's full output back on. The operator
+	// read it from its own environment at startup, so a change on the
+	// Deployment reaches every playback pod created after it. A pod
+	// already running keeps the setting it was created with.
+	if playerVerbose != "" {
+		container.Env = append(container.Env,
+			EnvVar{Name: playerVerboseVariable, Value: playerVerbose})
 	}
 	// The player container holds every request the claim asks for,
 	// because the playback claim holds the player's roles alone.

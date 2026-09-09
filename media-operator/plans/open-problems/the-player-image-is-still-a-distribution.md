@@ -1,9 +1,9 @@
-# The player image is still Debian
+# The player image is still a distribution
 
 The operator image is one static binary on `scratch`. The player
-image is not: it is `debian:stable-slim` plus `mpv`,
-`intel-media-va-driver`, `libgl1-mesa-dri`, and `pipewire-bin`,
-because `mpv` opens a wide dynamic closure at run time: the GL and
+image is not: it is `ubuntu:26.04`, pinned by digest and by apt
+snapshot, plus `mpv`, `intel-media-va-driver`, `libgl1-mesa-dri`,
+`pipewire-bin`, `fonts-droid-fallback`, and `tzdata`, because `mpv` opens a wide dynamic closure at run time: the GL and
 EGL stack, the VA-API driver, and the PipeWire client libraries,
 which refuse to build a client context without
 `/usr/share/pipewire/client.conf`.
@@ -15,7 +15,7 @@ this system, which makes its image the one that most deserves a
 floor this low.
 
 The audio operator already walked the path out. Its plan 02, "A
-closure on scratch", replaced the Debian base with a named file set
+closure on scratch", replaced its distribution base with a named file set
 measured from the running daemons' memory maps, with a release gate
 that starts the daemons and fails on any mapped file the image
 lacks. The player image can take the same treatment, with one

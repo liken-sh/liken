@@ -119,8 +119,13 @@ type operator struct {
 	// claims. An empty value turns the idle screen off, so reconcileIdle
 	// builds nothing.
 	idleDisplayClass string
-	bus              *Bus
-	reports          *reports
+	// playerVerbose is MEDIA_PLAYER_VERBOSE from the operator's own
+	// environment. Empty leaves mpv quiet. The operator copies it onto
+	// every playback pod it creates, so `kubectl set env` on the
+	// Deployment turns mpv's full output on for the pods that follow.
+	playerVerbose string
+	bus           *Bus
+	reports       *reports
 	// focus is the desk for the retained focus mark, built on the same
 	// wake as the report desk: a cycle request on the bus wakes the pass
 	// that arbitrates it.
@@ -241,6 +246,10 @@ func operate() {
 	// screen off, so the operator runs with no idle pods rather than
 	// exiting the way a missing image or broker does.
 	idleDisplayClass := os.Getenv(idleDisplayClassVariable)
+	// The verbose switch is optional and read once: unset, every
+	// playback pod's mpv is quiet; set, it reaches the pods this operator
+	// creates from now on.
+	playerVerbose := os.Getenv(playerVerboseVariable)
 
 	client, err := InClusterClient()
 	if err != nil {
@@ -270,6 +279,7 @@ func operate() {
 		busAddress:            busAddress,
 		topicBase:             topicBase,
 		idleDisplayClass:      idleDisplayClass,
+		playerVerbose:         playerVerbose,
 		reports:               desk,
 		focus:                 focusDesk,
 		peripherals:           newPeripheralDesk(),
@@ -1305,7 +1315,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if err != nil {
 		return nil, false, err
 	}
-	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs)
+	desired := buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)
 	if !claimChanged && sameRemoteSet(running, desired) {
 		return running, false, nil
 	}
@@ -1374,7 +1384,7 @@ func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved r
 // pod first.
 func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs))
+	created, err := CreatePod(o.client, buildPod(play, claim, resolved, o.image, o.sidecarImage, o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose))
 	if errors.Is(err, ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}

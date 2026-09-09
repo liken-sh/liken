@@ -34,7 +34,9 @@ RUN CGO_ENABLED=0 go build -trimpath -o /media-operator .
 FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
 
 # mpv plays. intel-media-va-driver decodes on the Intel iGPUs these
-# machines have. libgl1-mesa-dri renders the gpu video output.
+# machines have. libgl1-mesa-dri carries Mesa's GL drivers. The
+# dmabuf-wayland output renders nothing through them; they stay for the
+# gpu output, which MEDIA_PLAYER_OPTIONS can still select.
 #
 # pipewire-bin is not optional: libpipewire refuses to build a
 # client context without /usr/share/pipewire/client.conf, that file

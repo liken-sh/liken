@@ -128,6 +128,27 @@ From here, the work is declaring resources. The
 [the message bus](/docs/reference/bus/) describes every topic the
 pods and your own programs share.
 
+## Read the player's full output
+
+The playback pod runs mpv with `--quiet`, because mpv's status line
+prints about eight times a second and every line lands in the pod
+log. Warnings and errors still print. To read everything mpv says,
+set one variable on the operator:
+
+```sh
+kubectl set env deployment/media-operator MEDIA_PLAYER_VERBOSE=1
+```
+
+The switch removes `--quiet` and adds nothing else. It reaches every
+playback pod created after it, so it takes effect on the next `Play`,
+and a pod already running keeps the setting it started with. Read the
+log with `kubectl logs <play>-playback -c player`. To turn the switch
+off again:
+
+```sh
+kubectl set env deployment/media-operator MEDIA_PLAYER_VERBOSE-
+```
+
 ## Remove the operator
 
 Deleting a `Play` stops its run, and deleting a `Player` or a

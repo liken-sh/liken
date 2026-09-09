@@ -67,6 +67,13 @@ const (
 	// shim splits them and appends each to mpv's argv.
 	playerOptionsVariable = "MEDIA_PLAYER_OPTIONS"
 
+	// MEDIA_PLAYER_VERBOSE brings mpv's full output back, the status
+	// line included. The shim runs mpv with --quiet unless this holds any
+	// value. The operator copies it from its own environment onto every
+	// playback pod it creates, so one variable on the Deployment is the
+	// whole switch.
+	playerVerboseVariable = "MEDIA_PLAYER_VERBOSE"
+
 	// TZ is the standard name, not a MEDIA_ variable. The playback pod
 	// and the idle pod both set it, and each clock reads it against its
 	// own image's tz database to show the household's wall-clock zone.
