@@ -355,7 +355,7 @@ func TestUnprepareRemovesTheSpecAndRepeats(t *testing.T) {
 // one device.
 func inputsOf(t *testing.T, spec cdiSpec, device int) []string {
 	t.Helper()
-	return spec.Devices[device].Inputs
+	return spec.Devices[device].inputs()
 }
 
 // The classes a claim asked for are written beside the nodes it

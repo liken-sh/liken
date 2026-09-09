@@ -345,7 +345,7 @@ func eachDeliveredDevice(visit func(prepared deliveredDevice)) {
 				claimUID: claimUID,
 				device:   allocated,
 				nodes:    nodes,
-				inputs:   device.Inputs,
+				inputs:   device.inputs(),
 			})
 		}
 	}

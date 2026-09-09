@@ -216,7 +216,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
 			ContainerEdits: edits,
-			Inputs:         inputs,
+			Annotations:    annotateInputs(inputs),
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,

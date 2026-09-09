@@ -103,3 +103,34 @@ func TestClaimUIDFromSpecName(t *testing.T) {
 		}
 	}
 }
+
+// The container runtime validates a spec file against the CDI schema
+// and refuses one with a field the schema does not name, which leaves
+// the consumer's pod unable to start. A device entry may carry only
+// the schema's own fields, with this driver's record under
+// annotations.
+func TestADeviceEntryCarriesOnlyTheSchemasFields(t *testing.T) {
+	device := cdiDevice{
+		Name:           "claim-controller",
+		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event8"})},
+		Annotations:    annotateInputs([]string{"joystick", "key"}),
+	}
+	encoded, err := json.Marshal(device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for field := range fields {
+		switch field {
+		case "name", "containerEdits", "annotations":
+		default:
+			t.Errorf("the device entry carries %q, which the CDI schema does not allow", field)
+		}
+	}
+	if got := device.inputs(); len(got) != 2 || got[0] != "joystick" || got[1] != "key" {
+		t.Errorf("inputs() = %v, want the two classes back", got)
+	}
+}
