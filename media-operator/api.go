@@ -852,6 +852,18 @@ type PodSpec struct {
 	InitContainers                []Container        `json:"initContainers,omitempty"`
 	Containers                    []Container        `json:"containers"`
 	Volumes                       []Volume           `json:"volumes,omitempty"`
+	Tolerations                   []Toleration       `json:"tolerations,omitempty"`
+}
+
+// A node taint keeps pods off a machine, and a toleration is how one
+// pod asks to land there. This is not the DeviceToleration above: that
+// one answers a taint on a device, and this one answers a taint on the
+// node the pod runs on.
+type Toleration struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Effect   string `json:"effect,omitempty"`
 }
 
 // A pod names a claim once, and its containers refer to that name

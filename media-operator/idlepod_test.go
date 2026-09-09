@@ -186,6 +186,21 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 	}
 }
 
+// The idle client draws on the screen machine and has nowhere else to
+// run, so it tolerates the taint that keeps unrelated work off that
+// machine. It tolerates that key alone, and for scheduling alone, so a
+// NoExecute taint still moves it away.
+func TestBuildIdlePodToleratesThePlayerNodeTaint(t *testing.T) {
+	player := standingIdlePlayer()
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testBusAddress, testTopicBase, "America/New_York")
+
+	want := []Toleration{{Key: "media.liken.sh/player", Operator: "Exists", Effect: "NoSchedule"}}
+	if !reflect.DeepEqual(pod.Spec.Tolerations, want) {
+		t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, want)
+	}
+}
+
 // The idle client pod runs the client alone. The client holds the
 // timers, the focus gate, the shade, the volume step, and the panel
 // desire in its own process, so no unit's client pod carries a second

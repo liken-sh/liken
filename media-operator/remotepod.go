@@ -115,7 +115,8 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 				Name:              podClaimName,
 				ResourceClaimName: claim.Metadata.Name,
 			}},
-			Containers: []Container{container},
+			Containers:  []Container{container},
+			Tolerations: playerNodeTolerations(),
 		},
 	}
 }

@@ -138,6 +138,20 @@ func TestBuildRemotePodRunsTheReaderInTheRemoteMode(t *testing.T) {
 	}
 }
 
+// The reader pod holds a controller that is paired to one machine, so
+// it tolerates the taint that keeps unrelated work off that machine. It
+// tolerates that key alone, and for scheduling alone, so a NoExecute
+// taint still moves it away.
+func TestBuildRemotePodToleratesThePlayerNodeTaint(t *testing.T) {
+	remote := standingRemote()
+	pod := buildRemotePod(remote, buildRemoteClaim(remote), testSidecarImage, testBusAddress, testTopicBase)
+
+	want := []Toleration{{Key: "media.liken.sh/player", Operator: "Exists", Effect: "NoSchedule"}}
+	if !reflect.DeepEqual(pod.Spec.Tolerations, want) {
+		t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, want)
+	}
+}
+
 // A Remote that asks for discovery carries the mode to its reader as
 // one variable, and a Remote that does not carries none, so an
 // ordinary Remote's pod spec is what it always was.

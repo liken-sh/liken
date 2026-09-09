@@ -334,7 +334,8 @@ func buildIdlePod(
 				Name:              podClaimName,
 				ResourceClaimName: claim.Metadata.Name,
 			}},
-			Containers: []Container{container},
+			Containers:  []Container{container},
+			Tolerations: playerNodeTolerations(),
 		},
 	}
 }

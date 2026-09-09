@@ -197,6 +197,20 @@ func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 	}
 }
 
+// A cluster owner taints the machine that drives one screen, so scan
+// jobs and other unrelated work stay off a small box. The playback pod
+// holds that machine's display, so it tolerates the taint. It tolerates
+// that key alone, and for scheduling alone, so a NoExecute taint still
+// moves it away.
+func TestBuildPodToleratesThePlayerNodeTaint(t *testing.T) {
+	pod := testPod(t)
+
+	want := []Toleration{{Key: "media.liken.sh/player", Operator: "Exists", Effect: "NoSchedule"}}
+	if !reflect.DeepEqual(pod.Spec.Tolerations, want) {
+		t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, want)
+	}
+}
+
 // The volume belongs to the pod and the mount belongs to the
 // container, so the resolution splits across the two. The IPC volume
 // follows the media in both lists.

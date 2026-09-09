@@ -30,6 +30,27 @@ const (
 	playbackLabelValue = "playback"
 )
 
+// playerNodeTaint marks a machine that exists to drive one screen. A
+// cluster owner taints such a machine so scan jobs and other unrelated
+// work stay off a small box.
+const playerNodeTaint = "media.liken.sh/player"
+
+// playerNodeTolerations is what every pod this operator pins to a
+// screen machine carries. A pod that holds that machine's display or
+// its controller has nowhere else to run, so the taint must not keep it
+// out.
+//
+// The toleration names the key, so the pod still refuses every other
+// taint. It names NoSchedule alone, so the node's NoExecute taints,
+// unreachable and disk pressure among them, still move the pod away.
+func playerNodeTolerations() []Toleration {
+	return []Toleration{{
+		Key:      playerNodeTaint,
+		Operator: "Exists",
+		Effect:   "NoSchedule",
+	}}
+}
+
 // An init container with restartPolicy Always is what Kubernetes calls a
 // native sidecar: the kubelet starts it before the player, keeps it
 // beside the player, and restarts it alone when it exits. An ordinary
@@ -151,6 +172,7 @@ func buildPod(
 			InitContainers: initContainers,
 			Containers:     []Container{container},
 			Volumes:        volumes,
+			Tolerations:    playerNodeTolerations(),
 		},
 	}
 }
