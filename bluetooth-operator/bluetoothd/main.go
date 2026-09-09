@@ -159,6 +159,15 @@ func busSocket(address string) (string, error) {
 // glib, and glib reads a value it does not recognize as false, so a
 // misspelled "yes" reads as false and disables the protection with no
 // error.
+//
+// UserspaceHID=false hands a classic HID connection to the kernel's
+// hidp module once bluetoothd has set it up. With BlueZ's default,
+// bluetoothd reads every input report from the L2CAP interrupt
+// channel and writes it to /dev/uhid, which wakes it for each report;
+// a DualSense sends about 400 a second. Over hidp the kernel owns
+// both channels and bluetoothd never wakes for a report. HID over
+// GATT, which Low Energy remotes use, is a different profile and
+// keeps going through uhid whatever this setting says.
 func writeInputConf(path, bondedOnly string) error {
 	switch bondedOnly {
 	case "":
@@ -167,7 +176,7 @@ func writeInputConf(path, bondedOnly string) error {
 	default:
 		return fmt.Errorf("%s must be true or false, not %q", classicBondedOnlyVar, bondedOnly)
 	}
-	contents := fmt.Sprintf("[General]\nClassicBondedOnly=%s\n", bondedOnly)
+	contents := fmt.Sprintf("[General]\nClassicBondedOnly=%s\nUserspaceHID=false\n", bondedOnly)
 	return os.WriteFile(path, []byte(contents), 0o644)
 }
 

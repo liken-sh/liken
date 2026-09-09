@@ -44,7 +44,7 @@ func TestWriteInputConfDefaultsToBondedOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading it back: %v", err)
 	}
-	if want := "[General]\nClassicBondedOnly=true\n"; string(contents) != want {
+	if want := "[General]\nClassicBondedOnly=true\nUserspaceHID=false\n"; string(contents) != want {
 		t.Errorf("input.conf = %q, want %q", contents, want)
 	}
 }
@@ -58,7 +58,7 @@ func TestWriteInputConfWritesFalseWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading it back: %v", err)
 	}
-	if want := "[General]\nClassicBondedOnly=false\n"; string(contents) != want {
+	if want := "[General]\nClassicBondedOnly=false\nUserspaceHID=false\n"; string(contents) != want {
 		t.Errorf("input.conf = %q, want %q", contents, want)
 	}
 }
