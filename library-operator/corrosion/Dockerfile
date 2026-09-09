@@ -3,46 +3,15 @@
 # The Corrosion sidecar's image. A Corrosion agent runs beside every
 # scanner and every media browser and replicates the catalog to them,
 # and a second agent from the same image replicates the progress store.
-# The project builds it from one pinned upstream commit, so every
-# agent in a cluster runs the same bytes, and a move to a newer
-# commit is a change to this file that a release carries.
-FROM rust:1.89-bookworm@sha256:948f9b08a66e7fe01b03a98ef1c7568292e07ec2e4fe90d88c07bb14563c84ff AS build
-
-WORKDIR /usr/src/corrosion
-
-# The base carries the toolchain Corrosion's own rust-toolchain.toml
-# names, so no toolchain installs at build time, and it carries git
-# and the C toolchain. Corrosion's .cargo/config.toml links with
-# clang and mold, so those two packages are the whole of what the
-# build adds.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends clang mold \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN git init . \
-    && git remote add origin https://github.com/superfly/corrosion.git \
-    && git fetch --depth 1 origin 936de111d223a5e80d476bd1195e21b3eaca9762 \
-    && git checkout FETCH_HEAD
-
-# The project's patches to Corrosion apply here, between the checkout
-# and the build. There are none, so there is no patches/ directory.
-
-# The cache mounts keep the cargo registry and the git checkouts
-# between builds, so only a change to the lock file downloads again.
 #
-# Upstream's release profile keeps debug information, which makes the
-# binary 314 MiB. The environment variable overrides that one profile
-# setting, so the image carries the stripped binary and no patch to
-# upstream.
-RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/usr/local/cargo/git \
-    CARGO_PROFILE_RELEASE_STRIP=true cargo build --release --locked --bin corrosion
-
-FROM gcr.io/distroless/cc-debian12@sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa
-
-# The runtime is distroless: a libc and nothing else, no shell and no
-# tools, because the sidecar holds the catalog and answers on the
-# pod's network.
-COPY --from=build /usr/src/corrosion/target/release/corrosion /corrosion
+# The binary comes from liken's fork of Corrosion,
+# https://github.com/liken-sh/corrosion, which publishes upstream plus
+# a short stack of upstream-bound changes as one image. This file
+# pins that image by digest, so every agent in a cluster runs the
+# same bytes, and a move to a newer Corrosion is a change to this
+# line that a release carries. The fork's liken/README.md lists what
+# its stack holds at each release.
+FROM ghcr.io/liken-sh/corrosion:2026.09.09-002@sha256:a17aff43ee315f48a3e2f5a073dab4638e4fd592eea3231eb40b6a7f2602b9cb
 
 # The configurations and the schemas arrive in the image because the
 # pod has no shell to render a file and no `ConfigMap` for the sidecar.
@@ -54,9 +23,8 @@ COPY schema/ /etc/corrosion/schema/
 COPY progress.toml /etc/corrosion/progress.toml
 COPY progress-schema/ /etc/corrosion/progress-schema/
 
-# The entrypoint is the bare binary, so `corrosion cluster members` and
-# the other commands still run from this image with their own
-# arguments. The default command is the catalog agent, and a progress
-# agent names `progress.toml` in its own arguments.
-ENTRYPOINT ["/corrosion"]
+# The entrypoint is the fork image's bare binary, so `corrosion cluster
+# members` and the other commands still run from this image with their
+# own arguments. The default command is the catalog agent, and a
+# progress agent names `progress.toml` in its own arguments.
 CMD ["agent", "--config", "/etc/corrosion/config.toml"]
