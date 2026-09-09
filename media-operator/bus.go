@@ -249,6 +249,17 @@ func (b *Bus) Publish(topic string, payload []byte, retained bool) {
 	}
 }
 
+// Connected reports whether the client holds a live session right now,
+// which is the same test Publish makes before it enqueues. A caller whose
+// publish is the only record of an act, such as clearing a retained topic,
+// asks first and does the act on a later pass instead of losing it to a
+// dropped QoS 0 publish.
+func (b *Bus) Connected() bool {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	return b.out != nil
+}
+
 // Subscribe remembers the filter and sends it if the client is
 // connected. The remembered set is what runSession re-sends on every
 // reconnect, so a subscription outlives the connection it was made on.

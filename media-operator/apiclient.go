@@ -88,13 +88,17 @@ func InClusterClient() (*Client, error) {
 	}, serviceAccountDir), nil
 }
 
-// The two content types this client sends. A body is JSON,
+// The three content types this client sends. A body is JSON,
 // except an apply, which the API server reads as a partial object
 // under the caller's field manager. The apply media type is named for
 // YAML and accepts JSON, because YAML is its superset.
+//
+// The merge patch type writes one metadata field and leaves every other
+// field of the object alone.
 const (
 	jsonContentType  = "application/json"
 	applyContentType = "application/apply-patch+yaml"
+	mergePatchType   = "application/merge-patch+json"
 )
 
 // Do sends one request and hands back the open response, which is
@@ -253,6 +257,29 @@ func DeletePlay(c *Client, namespace, name string) error {
 		return nil
 	}
 	return err
+}
+
+// PatchPlayFinalizers writes one Play's finalizer list and answers the
+// resourceVersion the write left behind. The resourceVersion the caller
+// read the Play at rides in the patch, so a write another program made
+// first answers ErrConflict rather than overwriting it. An absent Play
+// answers ErrNotFound.
+func PatchPlayFinalizers(c *Client, namespace, name, resourceVersion string, finalizers []string) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"resourceVersion": resourceVersion,
+			"finalizers":      finalizers,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	patched := &Play{}
+	if err := c.requestJSON(http.MethodPatch, playPath(namespace, name),
+		mergePatchType, body, patched); err != nil {
+		return "", err
+	}
+	return patched.Metadata.ResourceVersion, nil
 }
 
 // ListPlayers answers a pass with one request across every

@@ -9,6 +9,10 @@
 # and deleting the Play, the Player, or the Remote is the whole stop.
 # The one object a person created that it deletes is a Play that
 # finished and outlived its own window.
+#
+# The one write beyond those is the finalizer media.liken.sh/bus-topics,
+# which the operator patches onto every Play's metadata and takes off
+# again once the run's retained bus topics are cleared.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -31,9 +35,15 @@ rules:
   # the Play's own, so the record of what played stands for as long as
   # whoever created the Play asked, and the list does not grow one entry
   # per film forever.
+  #
+  # The patch verb writes one thing only: the finalizer
+  # media.liken.sh/bus-topics on a Play's metadata, which is what keeps a
+  # Play until the operator has cleared the run's retained bus topics. The
+  # spec is still beyond this operator, because a merge patch of
+  # metadata.finalizers names no other field.
   - apiGroups: [media.liken.sh]
     resources: [plays]
-    verbs: [get, list, watch, delete]
+    verbs: [get, list, watch, patch, delete]
   # Only the status half. The API server's subresource split is what
   # keeps this operator from ever rewriting a spec a person declared.
   - apiGroups: [media.liken.sh]

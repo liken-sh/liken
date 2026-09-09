@@ -58,6 +58,14 @@ availability, a panel, or a volume topic for that reason. It
 publishes those clears itself, and reading one back as a signal
 would act on a run or a unit that no longer exists.
 
+An operator clears the topics of an object it owns on a finalizer, so
+the object is never gone from the API server while its topics still
+stand on the broker. The media operator's finalizer on a `Play` is
+`media.liken.sh/bus-topics`. A sweep on every pass is the backstop
+behind it: it clears the topics of any run the pass's own list of
+`Play`s does not hold, which is what finds a run whose clear the broker
+never received.
+
 ## The topic names the object
 
 The topic names the object and the payload does not. A `Play`'s

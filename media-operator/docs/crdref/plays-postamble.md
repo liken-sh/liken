@@ -76,16 +76,15 @@ The operator folds each report into the `Play`'s Kubernetes status,
 so a program that only needs the current position can read either
 one.
 
-Two writers clear the topic. The pod clears it with an empty
-retained payload when its run ends cleanly, so a finished `Play`
-leaves no report that reads as still playing. A pod that dies
-uncleanly leaves its last report behind, so the operator clears the
-topic as well: two minutes after the `Play` itself is gone, deleted
-by a person or retired at the end of its `ttlSecondsAfterFinished`
-window, the operator publishes an empty retained payload on `status`
-and on `availability`. The two minutes let a subscriber that reads
-just after the delete still see the run's final state. A `Play`
-recreated under the same name inside that window is not cleared.
+Two writers clear the topic. The pod clears it with an empty retained
+payload when its run ends cleanly. The operator clears it as well, which
+is what a pod that died uncleanly needs, and it does so on its
+finalizer: it holds `media.liken.sh/bus-topics` on every `Play`, and
+when the `Play` is deleted it deletes the pod, waits for the pod to be
+gone, publishes an empty retained payload on `status` and on
+`availability`, and only then takes its finalizer off. So the `Play` is
+never gone while its topics still stand, and a deleted `Play` leaves no
+report on the broker.
 
 ### `availability`
 
@@ -93,6 +92,8 @@ recreated under the same name inside that window is not cleared.
 [availability](/docs/reference/bus/#availability) signal for the
 report above. The pod names this topic as its MQTT Last Will with
 `offline` as the payload, publishes `online` once it connects, and
-publishes `offline` itself when its run ends cleanly. The operator
-clears the topic with an empty retained payload two minutes after
-the `Play` is gone, on the same terms as `status`.
+publishes `offline` itself when its run ends cleanly.
+
+The operator clears this topic with an empty retained payload on the
+same terms as `status`: on its finalizer, once the `Play` is deleted and
+its pod is gone.

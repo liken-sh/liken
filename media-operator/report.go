@@ -149,10 +149,10 @@ func (r *reports) retain(live map[string]bool) {
 	}
 }
 
-// stale returns the runs the desk has seen a bus message for that no
-// longer exist. Each is a deleted Play whose retained status and
-// availability the broker still holds, and which the operator clears
-// after a grace period.
+// stale returns the runs the desk has seen a bus message for that the
+// pass's list of Plays does not hold. Each is a Play the API server no
+// longer holds whose retained status and availability the broker still
+// holds, and the operator clears both on the pass that reads it.
 func (r *reports) stale(live map[string]bool) []string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()

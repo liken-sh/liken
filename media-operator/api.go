@@ -7,7 +7,10 @@ package main
 // type carries only the fields this operator reads or writes; the
 // API server fills in the rest.
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"slices"
+)
 
 // The group this operator serves, and the two Kubernetes groups it
 // writes into: claims live under resource.k8s.io and pods under the
@@ -42,6 +45,36 @@ type ObjectMeta struct {
 	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
 	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
+	// Finalizers is the list the API server waits on before it removes the
+	// object. This operator holds playFinalizer in it.
+	Finalizers []string `json:"finalizers,omitempty"`
+}
+
+// deleting reports whether the API server has stamped this object for
+// deletion, so a pass tears it down instead of reconciling it.
+func (m ObjectMeta) deleting() bool { return m.DeletionTimestamp != "" }
+
+// holds reports whether this object carries the named finalizer.
+func (m ObjectMeta) holds(finalizer string) bool {
+	return slices.Contains(m.Finalizers, finalizer)
+}
+
+// with answers the finalizer list with one added, and without answers it
+// with one removed. Both answer a new slice, so a patch that fails leaves
+// the caller's copy of the object alone. Every other finalizer on the
+// object, another operator's included, is carried through unchanged.
+func (m ObjectMeta) with(finalizer string) []string {
+	return append(slices.Clone(m.Finalizers), finalizer)
+}
+
+func (m ObjectMeta) without(finalizer string) []string {
+	kept := []string{}
+	for _, held := range m.Finalizers {
+		if held != finalizer {
+			kept = append(kept, held)
+		}
+	}
+	return kept
 }
 
 // An ownerReference ties an object's life to its owner's: the

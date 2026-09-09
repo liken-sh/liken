@@ -10,6 +10,7 @@ import (
 	"path"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,11 @@ type fakeCluster struct {
 	claims     map[string]*ResourceClaim
 	pods       map[string]*Pod
 	requests   []string
+
+	// podsLinger names the pods this server leaves standing after a
+	// delete, with a deletionTimestamp on them, the way a real pod stays
+	// Terminating while its containers stop.
+	podsLinger map[string]bool
 
 	// The hardware the display-operator publishes: one Display
 	// per panel, and the slices that name each allocated device. applies
@@ -83,6 +89,7 @@ func newFakeCluster() *fakeCluster {
 		mediaprefs: map[string]*MediaPreferences{},
 		claims:     map[string]*ResourceClaim{},
 		pods:       map[string]*Pod{},
+		podsLinger: map[string]bool{},
 		displays:   map[string]*Display{},
 
 		receivers: map[string]*Receiver{},
@@ -171,6 +178,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 				list.Items = append(list.Items, *f.receivers[key])
 			}
 			_ = json.NewEncoder(w).Encode(list)
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
+			f.patchPlay(w, r, name)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/"):
 			f.applySession(w, r, name)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/displays/"):
@@ -195,7 +204,11 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			delete(f.plays, name)
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/pods/"):
-			delete(f.pods, name)
+			if pod, standing := f.pods[name]; standing && f.podsLinger[name] {
+				pod.Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
+			} else {
+				delete(f.pods, name)
+			}
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/resourceclaims/"):
 			delete(f.claims, name)
@@ -205,6 +218,36 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
+}
+
+// patchPlay folds one merge patch onto a Play's finalizer list, on the
+// API server's own terms: the resourceVersion the patch names must be the
+// one the object carries, the write moves that version on, and a deleting
+// Play whose last finalizer went is one the server removes.
+func (f *fakeCluster) patchPlay(w http.ResponseWriter, r *http.Request, name string) {
+	held, standing := f.plays[name]
+	if !standing {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var patch struct {
+		Metadata struct {
+			ResourceVersion string   `json:"resourceVersion"`
+			Finalizers      []string `json:"finalizers"`
+		} `json:"metadata"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&patch)
+	if patch.Metadata.ResourceVersion != held.Metadata.ResourceVersion {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	held.Metadata.Finalizers = patch.Metadata.Finalizers
+	version, _ := strconv.Atoi(held.Metadata.ResourceVersion)
+	held.Metadata.ResourceVersion = strconv.Itoa(version + 1)
+	if held.Metadata.deleting() && len(held.Metadata.Finalizers) == 0 {
+		delete(f.plays, name)
+	}
+	_ = json.NewEncoder(w).Encode(held)
 }
 
 // apply folds one server-side apply onto a Display. The
@@ -304,7 +347,6 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		positionWrites:        map[string]time.Time{},
 		keysPublished:         map[string]string{},
 		playerStatusPublished: map[string]string{},
-		playReclaim:           map[string]time.Time{},
 		recreateBackoff:       map[string]backoffState{},
 		wake:                  wake,
 	}
@@ -473,9 +515,8 @@ func TestAPlayWithAnUnknownSchemeFailsAndCreatesNothing(t *testing.T) {
 }
 
 // A Play the operator already retired, still inside its window, is read
-// and left alone; the pass makes no request about the play itself, only the
-// reads every pass makes: the four collection lists and the default
-// MediaPreferences.
+// and left alone. The one write the first pass makes about it is the
+// finalizer, which every later pass reads as already there.
 func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
@@ -487,6 +528,8 @@ func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	cluster.plays["movie"] = finished
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
+	media.pass()
+	cluster.requests = nil
 	media.pass()
 
 	want := "GET " + playsPath +
@@ -1565,52 +1608,6 @@ func TestAPlayWhosePlayerNamesAMissingRemoteFailsBeforeItsPod(t *testing.T) {
 	}
 	if _, held := cluster.pods["movie-playback"]; held {
 		t.Errorf("a missing remote created the playback pod: %v", cluster.pods)
-	}
-}
-
-// A deleted Play's retained status and availability are cleared, but only
-// after the grace: for a short while the operator holds them so a
-// subscriber that reads just after the delete still sees the final state,
-// then it empties both topics.
-func TestADeletedPlayIsReclaimedAfterTheGrace(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	broker := brokers[0]
-	wake := make(chan struct{}, 1)
-	media := &operator{
-		topicBase:   defaultTopicBase,
-		bus:         bus,
-		reports:     newReports(wake),
-		playReclaim: map[string]time.Time{},
-	}
-
-	// The desk has seen the run, and the collection no longer holds it.
-	media.reports.availability("den", "old-film", false)
-	live := map[string]bool{}
-
-	// Inside the grace, nothing is cleared.
-	media.reclaimPlays(live)
-	select {
-	case got := <-broker.pubs:
-		t.Fatalf("a Play was reclaimed inside the grace: %+v", got)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	// Past the grace, the status and the availability are both cleared.
-	media.playReclaim[runKey("den", "old-film")] = time.Now().Add(-2 * playReclaimGrace)
-	media.reclaimPlays(live)
-
-	cleared := map[string]bool{}
-	for range 2 {
-		published := waitForPublish(t, broker.pubs)
-		if len(published.payload) != 0 || !published.retained {
-			t.Errorf("reclaim published %+v, want an empty retained clear", published)
-		}
-		cleared[published.topic] = true
-	}
-	if !cleared[playStatusTopic(defaultTopicBase, "den", "old-film")] ||
-		!cleared[playAvailabilityTopic(defaultTopicBase, "den", "old-film")] {
-		t.Errorf("cleared topics = %v, want the status and the availability", cleared)
 	}
 }
 

@@ -10,6 +10,17 @@ claims that pod needs, all owned by the `Play`, so deleting the
 `Play` is the whole teardown: the garbage collector takes the pod
 and the claims with it. A `Finished` run leaves nothing running.
 
+The operator holds the finalizer `media.liken.sh/bus-topics` on every
+`Play`, so a delete completes only after the operator has torn the run
+down. Inside that window it deletes the playback pod, waits until the
+pod is gone, and clears the run's retained `status` and `availability`
+topics on the bus. The finalizer owns the clear because a `Play` must
+never be gone from the API server while its topics still stand on the
+broker, and because the pod's own closing messages have to land before
+the operator's clear or they would overwrite it. A `Play` that stays
+deleting for longer than a few seconds has a pod that will not go, and
+`kubectl describe` on the pod says why.
+
 The spec is immutable, like a `Job`'s template. A `Play` whose
 player or media changed mid-run would describe a different run;
 delete the `Play` and create another.

@@ -128,9 +128,23 @@ func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus,
 		}
 	}
 
+	// The test waits for Run to end before it returns, because Run reads the
+	// backoff bounds that shorterBackoff restores on its own cleanup, and a
+	// client still reconnecting would read them as they were written.
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go bus.Run(ctx)
+	ended := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-ended:
+		case <-time.After(busTestTimeout):
+			t.Error("the client kept running after the test ended")
+		}
+	})
+	go func() {
+		defer close(ended)
+		bus.Run(ctx)
+	}()
 	return bus, brokers, connected
 }
 
@@ -147,6 +161,35 @@ func waitForConnect(t *testing.T, connected <-chan *Bus) {
 	case <-connected:
 	case <-time.After(busTestTimeout):
 		t.Fatal("the client never connected")
+	}
+}
+
+// The client reports a session between its CONNACK and the end of that
+// connection. A caller whose publish must not be lost reads it before it
+// publishes.
+func TestTheBusReportsWhetherItHoldsASession(t *testing.T) {
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	if !bus.Connected() {
+		t.Fatal("the client reports no session after its CONNACK")
+	}
+
+	waitForDisconnect(t, bus, brokers[0])
+}
+
+// waitForDisconnect closes the broker's end of the connection and waits for
+// the client to report that it holds no session. The scripted dialer hands out
+// no second connection, so the client stays disconnected for the rest of the
+// test.
+func waitForDisconnect(t *testing.T, bus *Bus, broker *fakeBroker) {
+	t.Helper()
+	broker.conn.Close()
+	deadline := time.Now().Add(busTestTimeout)
+	for bus.Connected() {
+		if time.Now().After(deadline) {
+			t.Fatal("the client still reports a session after the broker closed")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

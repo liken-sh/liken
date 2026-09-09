@@ -71,17 +71,6 @@ const backstopInterval = 10 * time.Second
 // writes on every tick.
 const positionWriteInterval = 8 * time.Second
 
-// playReclaimGrace is how long a deleted Play's retained status and
-// availability stay on the bus before the operator clears them. The
-// command sidecar clears its own status on a clean exit but marks the
-// availability offline and never clears it, and an unclean exit leaves
-// both, so without this a deleted Play's gravestone would sit on the
-// broker forever. The grace is short but not zero: a subscriber that
-// reads the topic in the moment after the delete still sees the run's
-// final state, and then the retained topics go empty. It is a variable so
-// a test drives the reclaim without waiting minutes.
-var playReclaimGrace = 2 * time.Minute
-
 // volumeSeedGrace is how long the pass waits after a broker session
 // begins before it seeds any unit's level. The broker delivers the
 // retained levels within milliseconds of the subscribe, and the wait
@@ -206,11 +195,6 @@ type operator struct {
 	// touches it.
 	playerStatusPublished map[string]string
 
-	// playReclaim stamps when the operator first saw a deleted Play whose
-	// retained topics still stand, so it clears them once the grace has
-	// passed. Only the pass goroutine touches it.
-	playReclaim map[string]time.Time
-
 	// recreateBackoff holds one run's recreate count and the earliest time it
 	// may recreate again, so a pod that keeps failing recreates slower up to a
 	// cap. Only the pass goroutine touches it.
@@ -292,7 +276,6 @@ func operate() {
 		positionWrites:        map[string]time.Time{},
 		keysPublished:         map[string]string{},
 		playerStatusPublished: map[string]string{},
-		playReclaim:           map[string]time.Time{},
 		recreateBackoff:       map[string]backoffState{},
 		wake:                  wake,
 	}
@@ -410,17 +393,17 @@ func (o *operator) pass() {
 		namespace, name := play.Metadata.Namespace, play.Metadata.Name
 		live[runKey(namespace, name)] = true
 		// A deleting Play keeps its pod until its finalizers clear, because
-		// garbage collection waits for them, and the pod keeps the unit's
-		// claim while it waits. The operator deletes the pod itself, so the
-		// claim frees at once and the next run starts. A deleting Play is
-		// reconciled no further, so nothing recreates the pod of a run that
-		// is over.
-		if play.Metadata.DeletionTimestamp != "" {
-			if err := DeletePod(o.client, namespace, podName(name)); err != nil {
-				fmt.Fprintf(os.Stderr, "deleting the pod of play %s/%s: %v\n", namespace, name, err)
-			}
+		// garbage collection waits for them, and the pod keeps the unit's claim
+		// while it waits. So releasePlay deletes the pod itself, the claim frees
+		// at once, and the next run starts. A deleting Play is reconciled no
+		// further, so nothing recreates the pod of a run that is over.
+		if play.Metadata.deleting() {
+			o.releasePlay(play)
 			continue
 		}
+		// The finalizer goes on before the run does, so a Play deleted moments
+		// after it was created is still one the operator clears the topics of.
+		o.holdPlay(play)
 		// An older Play on a unit that a newer Play also names ends here.
 		// The delete is the whole ending: the sidecar quits mpv on the pod's
 		// termination signal, and the library's store records the last
@@ -646,11 +629,10 @@ func (o *operator) retire(play *Play) error {
 			return err
 		}
 	}
-	// Deleting the Play is the whole teardown. The ownerReferences collect
-	// anything the two deletes above did not, and reclaimPlays clears the
-	// retained topics on the same terms as a Play a person deleted: the next
-	// pass reads the Play gone, so the run counts as stale and its grace
-	// begins.
+	// Deleting the Play is the whole teardown, and the ownerReferences
+	// collect anything the two deletes above did not. The retained topics go
+	// on the same terms as a Play a person deleted: the operator's finalizer
+	// holds the Play until the pod is gone and the topics are cleared.
 	if now.Sub(finished) >= playTTL(play) {
 		return DeletePlay(o.client, namespace, name)
 	}
@@ -748,35 +730,6 @@ func finishedTime(play *Play, now time.Time) (time.Time, bool) {
 		return now, false
 	}
 	return stamped, true
-}
-
-// reclaimPlays clears the retained topics a deleted Play leaves on the
-// bus. The desk reports the runs it has seen a message for that no longer
-// exist; the operator holds each for playReclaimGrace, so a subscriber
-// that reads just after the delete still sees the final state, then it
-// clears the status and the availability with an empty retained publish
-// and forgets the run. A run that reappears before the grace passes, a
-// Play recreated under the same name, drops its timer and is not cleared.
-func (o *operator) reclaimPlays(live map[string]bool) {
-	now := time.Now()
-	for _, key := range o.reports.stale(live) {
-		if _, tracked := o.playReclaim[key]; !tracked {
-			o.playReclaim[key] = now
-		}
-		if now.Sub(o.playReclaim[key]) < playReclaimGrace {
-			continue
-		}
-		namespace, name := splitRunKey(key)
-		o.bus.Publish(playStatusTopic(o.topicBase, namespace, name), nil, true)
-		o.bus.Publish(playAvailabilityTopic(o.topicBase, namespace, name), nil, true)
-		o.reports.forget(key)
-		delete(o.playReclaim, key)
-	}
-	for key := range o.playReclaim {
-		if live[key] {
-			delete(o.playReclaim, key)
-		}
-	}
 }
 
 // loadKeymaps reads every Keymap once per pass and indexes it by
