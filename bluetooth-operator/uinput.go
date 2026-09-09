@@ -33,8 +33,16 @@ const (
 // test drives the policy with no kernel at all.
 type inputKernel interface {
 	readCapabilities(path string) (evdevCapabilities, error)
-	open(path string) (io.ReadCloser, error)
+	open(path string) (realNode, error)
 	createVirtual(caps evdevCapabilities, phys string) (virtualDevice, error)
+}
+
+// realNode is one open evdev node of a controller. It carries the
+// narrowing as well as the read, because what a claim asks for is
+// actuated on the node's own fd and nowhere else.
+type realNode interface {
+	io.ReadCloser
+	narrow(masks []eventMask) error
 }
 
 // virtualDevice is one uinput device this operator holds open. The
@@ -99,11 +107,6 @@ func uiGetSysname(size uint32) uint32 { return ioc(iocRead, size, uinputLetter, 
 
 // linuxInput is the kernel itself.
 type linuxInput struct{}
-
-// open opens a real evdev node for reading.
-func (linuxInput) open(path string) (io.ReadCloser, error) {
-	return os.Open(path)
-}
 
 // createVirtual builds one uinput device from a capability snapshot
 // and holds it open.

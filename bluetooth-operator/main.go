@@ -222,6 +222,11 @@ func main() {
 	// anything else runs, so a claim on a controller that is asleep is
 	// prepared with the node the previous pod published.
 	keep.restore(readAdapter)
+	// Running containers still hold the claims the kubelet prepared
+	// before this operator started, and their demand decides what
+	// each pump reads, so it is restored before the first pass opens a
+	// real node.
+	held.restorePrepared()
 
 	// The plugin registers with the kubelet only after bluetoothd is up
 	// and the relays are restored, so the driver appears when it can

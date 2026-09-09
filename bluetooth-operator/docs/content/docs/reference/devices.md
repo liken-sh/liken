@@ -36,6 +36,9 @@ per node, named `<node>-bluetooth.liken.sh`, beside `liken`'s own
             addressType: {string: public}
             icon: {string: input-gaming}
             input: {bool: true}
+            joystick: {bool: true}
+            accelerometer: {bool: true}
+            touchpad: {bool: true}
         - name: 04-4a-69-66-92-27-media
           attributes:
             address: {string: "04:4A:69:66:92:27"}
@@ -116,6 +119,37 @@ nothing:
 | `input` | HID, classic or over GATT: the device is an input device |
 | `battery` | the device reports a battery level |
 | `serialPort` | raw RFCOMM serial |
+
+The input classes come from the evdev nodes the controller
+registered, not from Bluetooth. Each one is `true` when any of the
+controller's nodes carries the class and absent otherwise.
+
+The names are `udev`'s own `ID_INPUT_*` properties in lower case.
+The operator applies the rules of `systemd`'s `input_id` builtin to
+the bitmaps the kernel reports for each node, so a controller carries
+the classes `udevadm info` would print for it on any Linux machine.
+[The `inputs` parameter](#the-inputs-parameter) uses the same words
+to say which of them a claim receives.
+
+| Attribute | The class |
+|---|---|
+| `key` | the node carries `KEY_*` codes, or only a scroll wheel |
+| `keyboard` | the node carries every one of the first 31 key codes |
+| `mouse` | the node has a `BTN_MOUSE` button and relative axes |
+| `pointingstick` | the node is the stick between the keys |
+| `touchpad` | the node reports a finger and no pen, and is not direct |
+| `touchscreen` | the node reports touch on the display itself |
+| `tablet` | the node reports a stylus or a pen |
+| `tablet_pad` | the node is a tablet's own buttons and ring |
+| `joystick` | the node has joystick buttons or joystick axes |
+| `accelerometer` | the node reports motion |
+| `switch` | the node carries `EV_SW` codes |
+
+The operator reads a controller's capabilities the first time it
+connects and keeps them in the bond's `Secret`, so the classes stay
+published while the controller sleeps. A bond that has never
+connected carries `input` and no class, because the operator has not
+read a node for it yet.
 
 The split between always and absent is a contract. The operator
 omits an attribute it has no value for, rather than publishing it
@@ -229,7 +263,9 @@ and they split by owner:
 operator's own claim template names it and the pod cannot start
 without it. `bluetooth-input` is yours to create, because a class a
 workload claims through is cluster policy, and
-[Install the operator](/docs/guides/install/) gives its YAML. It
+[Install the operator](/docs/guides/install/) gives its YAML. A class
+of your own can also carry a default [`inputs`
+block](#the-inputs-parameter). It
 selects the `input` attribute rather than the whole driver, because
 the driver publishes more than input devices: a paired speaker
 publishes as its bond record, no workload should hold one, and the
@@ -263,6 +299,93 @@ gives the whole flow, with the pod that takes the claim. In a
 standing `ResourceClaim`, because a standing claim keeps its
 allocation across an eviction.
 
+## The inputs parameter
+
+A controller publishes every capability it has, and a claim states
+which classes of input the container receives. The two are separate
+because a consumer rarely wants everything. A DualSense at rest
+reports about 2400 motion events a second on its accelerometer node,
+and a pod that reads its buttons would drop every one of them. With
+`inputs`, a class nobody asked for is delivered to nobody, and its
+events never leave the kernel.
+
+    spec:
+      devices:
+        requests:
+          - name: controller
+            exactly:
+              deviceClassName: bluetooth-input
+        config:
+          - requests: [controller]
+            opaque:
+              driver: bluetooth.liken.sh
+              parameters:
+                inputs: [joystick]
+
+A claim with no configuration block, or with a block that has no
+`inputs` key, receives every class. An empty list is refused when the
+claim is prepared, and the pod stays in `ContainerCreating` with the
+refusal in its events. A name outside the table below is refused the
+same way, and the message lists the names.
+
+The classes are `udev`'s `ID_INPUT_*` properties in lower case, and
+the rules that assign them are a port of `systemd`'s `input_id`
+builtin. `udevadm info` on any input device prints the same words.
+
+| Class | The `udev` property | What qualifies |
+|---|---|---|
+| `key` | `ID_INPUT_KEY` | any `KEY_*` code below `BTN_MISC`, or in the two `KEY_*` blocks above it, or a node whose only capability is a scroll wheel |
+| `keyboard` | `ID_INPUT_KEYBOARD` | every one of the first 31 key codes, which is escape, the numbers, and Q to D |
+| `mouse` | `ID_INPUT_MOUSE` | a `BTN_MOUSE` button with `REL_X` and `REL_Y`, or with no absolute axes |
+| `pointingstick` | `ID_INPUT_POINTINGSTICK` | the `INPUT_PROP_POINTING_STICK` property, or a mouse on the i2c bus |
+| `touchpad` | `ID_INPUT_TOUCHPAD` | `BTN_TOOL_FINGER` and no pen, on a node that is not `INPUT_PROP_DIRECT` |
+| `touchscreen` | `ID_INPUT_TOUCHSCREEN` | absolute or multi-touch coordinates with `BTN_TOUCH`, or the `INPUT_PROP_DIRECT` property |
+| `tablet` | `ID_INPUT_TABLET` | `BTN_STYLUS` or `BTN_TOOL_PEN` with absolute coordinates |
+| `tablet_pad` | `ID_INPUT_TABLET_PAD` | `BTN_0` and `BTN_1` on a tablet, or with a wheel and no relative coordinates |
+| `joystick` | `ID_INPUT_JOYSTICK` | a button in the `BTN_JOYSTICK` range, a trigger or D-pad button, or an axis from `ABS_RX` to `ABS_PRESSURE` |
+| `accelerometer` | `ID_INPUT_ACCELEROMETER` | the `INPUT_PROP_ACCELEROMETER` property, or three absolute axes and no keys |
+| `switch` | `ID_INPUT_SWITCH` | any `EV_SW` code |
+
+A node can carry several classes, the way `udev` sets several
+properties on one node: a remote with a gyroscopic cursor is `key`
+and `mouse` at once. The operator meets the demand per node. A node
+no prepared claim asks for is never read. A node that carries a class
+the claim asked for and one it did not is narrowed to the event types
+of the classes it asked for, so that remote claimed with
+`inputs: [key]` delivers its keys and none of its pointer motion.
+
+Two claims on one controller each receive what they asked for. The
+operator delivers the union of what the prepared claims demand, and
+narrows again when one of them ends.
+
+A default belongs on a `DeviceClass`. A class of your own may carry
+an `inputs` block, and every claim through that class receives it. A
+claim's own block wins over the class's.
+
+    apiVersion: resource.k8s.io/v1
+    kind: DeviceClass
+    metadata:
+      name: gamepad
+    spec:
+      selectors:
+        - cel:
+            expression: |
+              device.driver == "bluetooth.liken.sh" &&
+              has(device.attributes["bluetooth.liken.sh"].joystick)
+      config:
+        - opaque:
+            driver: bluetooth.liken.sh
+            parameters:
+              inputs: [joystick]
+
+The selector and the `inputs` block are two separate statements: the
+selector picks which devices the claim may allocate, and `inputs`
+decides which events reach the container once one is allocated.
+
+The `bluetooth-input` class that [Install the
+operator](/docs/guides/install/) gives carries no `inputs` block, so a
+claim through it receives every class.
+
 ## What a claim delivers
 
 What a claim delivers depends on the device it allocated. Both kinds
@@ -272,9 +395,11 @@ container creation, and neither delivers any privilege.
 A claim on a controller delivers device nodes, and nothing else:
 `/dev/input/event*`, one for each evdev node the controller
 registers. No host mount, no environment variable. The container's
-user must be able to open the nodes. A claim on the media bus
-delivers the mount and the variable that [The media
-bus](#the-media-bus) lists, and no device node.
+user must be able to open the nodes. Every node is delivered whatever
+the claim asked for, and [the `inputs`
+parameter](#the-inputs-parameter) decides which events arrive on
+each. A claim on the media bus delivers the mount and the variable
+that [The media bus](#the-media-bus) lists, and no device node.
 
 The legacy `/dev/input/jsN` interface stays out. `liken`'s kernel may
 not enable `CONFIG_INPUT_JOYDEV` at all, and joydev publishes a

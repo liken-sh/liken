@@ -3,13 +3,17 @@ package main
 // The input relay, which is what a claim on a controller delivers.
 //
 // For each bonded controller the operator holds one virtual input
-// device open for each evdev node the controller registers, and moves
-// the controller's events into it whenever the real node exists. The
-// virtual node's number is fixed for as long as the operator holds the
-// uinput fd open, so the node a consumer's container received at start
-// is still there when the controller sleeps and returns on a different
-// event number. A sleeping controller is a virtual device that emits
-// nothing.
+// device open for each evdev node the controller registers, whether or
+// not any claim names the controller. The virtual node's number is
+// fixed for as long as the operator holds the uinput fd open, so the
+// node a consumer's container received at start is still there when
+// the controller sleeps and returns on a different event number. A
+// sleeping controller is a virtual device that emits nothing.
+//
+// Which events cross is the other half, in demand.go. A node's events
+// cross only while a prepared claim asks for a class the node carries.
+// So a virtual device exists for every node, and it carries only what
+// somebody claimed.
 //
 // A real node is matched to its virtual device by the name the kernel
 // reports for it (EVIOCGNAME), so a reconnect maps each of a DualSense's
@@ -28,7 +32,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"slices"
 	"strings"
@@ -50,19 +53,25 @@ func newRelays(kernel inputKernel) *relays {
 }
 
 // controllerRelay is one controller's virtual devices, keyed by the
-// name the real node reports for itself.
+// name the real node reports for itself, and what each prepared claim
+// on the controller asks those devices to deliver, keyed by the
+// claim's UID.
 type controllerRelay struct {
-	nodes map[string]*nodeRelay
+	nodes  map[string]*nodeRelay
+	demand map[string]inputClasses
 }
 
 // nodeRelay is one virtual device and the real node its events come
 // from. source is nil while the controller is off the air, which is
-// the resting state of a Low Energy remote.
+// the resting state of a Low Energy remote. narrowed says whether the
+// kernel holds a mask on the open fd, which decides whether widening
+// the demand has anything to undo.
 type nodeRelay struct {
 	caps       evdevCapabilities
 	device     virtualDevice
-	source     io.ReadCloser
+	source     realNode
 	sourcePath string
+	narrowed   bool
 }
 
 // reads reports whether one of this controller's relays already moves
@@ -88,11 +97,7 @@ func (r *relays) ensure(mac string, nodes []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	held := r.held[mac]
-	if held == nil {
-		held = &controllerRelay{nodes: map[string]*nodeRelay{}}
-		r.held[mac] = held
-	}
+	held := r.controller(mac)
 
 	// A virtual device that could not be created on an earlier pass is
 	// created here, so a snapshot that restored before /dev/uinput
@@ -131,8 +136,22 @@ func (r *relays) ensure(mac string, nodes []string) {
 				publishedMAC(mac), caps.Name, path)
 			continue
 		}
-		r.read(mac, relay, path)
+		r.read(mac, relay, path, held.demanded())
 	}
+}
+
+// controller is one controller's relay, created empty the first time
+// anything names the controller. The caller holds the lock.
+func (r *relays) controller(mac string) *controllerRelay {
+	held := r.held[mac]
+	if held == nil {
+		held = &controllerRelay{
+			nodes:  map[string]*nodeRelay{},
+			demand: map[string]inputClasses{},
+		}
+		r.held[mac] = held
+	}
+	return held
 }
 
 // restore creates one controller's virtual devices from the snapshot
@@ -156,11 +175,7 @@ func (r *relays) restore(mac string, stored []byte) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	held := r.held[mac]
-	if held == nil {
-		held = &controllerRelay{nodes: map[string]*nodeRelay{}}
-		r.held[mac] = held
-	}
+	held := r.controller(mac)
 	for _, caps := range document.Nodes {
 		if _, found := held.nodes[caps.Name]; found {
 			continue
@@ -219,6 +234,26 @@ func (r *relays) virtualNodes(mac string) []string {
 	return nodes
 }
 
+// classes are the input classes one controller carries: the union of
+// what udev would set on every node it registers. They come from the
+// capabilities the relay holds, so a controller that connected once
+// still reports them while it sleeps, from the snapshot in its bond's
+// Secret. A bond that has never connected has no node here and
+// carries no class.
+func (r *relays) classes(mac string) inputClasses {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	held := r.held[mac]
+	if held == nil {
+		return 0
+	}
+	var carried inputClasses
+	for _, relay := range held.nodes {
+		carried |= nodeInputClasses(relay.caps)
+	}
+	return carried
+}
+
 // stop takes one controller's virtual devices away. It runs during an
 // unpair, after the claim that held the controller has been released.
 // A teardown repeats a step whenever a pass fails, so stopping a
@@ -264,15 +299,18 @@ func (r *relays) create(mac string, relay *nodeRelay) bool {
 	return true
 }
 
-// read opens a real node and starts moving its events. The caller
-// holds the lock.
-func (r *relays) read(mac string, relay *nodeRelay, path string) {
+// read opens a real node, limits it to what the controller's prepared
+// claims demand, and starts moving its events. A fresh fd carries no
+// mask, so the demand is applied before the pump reads anything. The
+// caller holds the lock.
+func (r *relays) read(mac string, relay *nodeRelay, path string, want inputClasses) {
 	source, err := r.kernel.open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "relay: opening %s of controller %s: %v\n", path, publishedMAC(mac), err)
 		return
 	}
-	relay.source, relay.sourcePath = source, path
+	relay.source, relay.sourcePath, relay.narrowed = source, path, false
+	relay.narrow(mac, want)
 	go r.pump(relay, source)
 }
 
@@ -282,12 +320,17 @@ func (r *relays) read(mac string, relay *nodeRelay, path string) {
 // error. The relay then waits for the next ensure that names a node
 // again.
 //
+// A pump whose node no prepared claim demands never wakes. The kernel
+// queues nothing on the fd and drops the frame marker of an empty
+// frame, so the goroutine stays blocked in the read, and the events
+// cost this operator nothing.
+//
 // The events are bytes here, and nothing decodes them. A read returns
 // whole input_event records, and the same bytes written to the uinput
 // fd are the same events on the virtual device. A read error means the
 // controller disconnected and its node is gone, so the pump closes the
 // source and the relay waits for the next pass that names a node.
-func (r *relays) pump(relay *nodeRelay, source io.ReadCloser) {
+func (r *relays) pump(relay *nodeRelay, source realNode) {
 	buffer := make([]byte, inputEventSize*64)
 	partial := 0
 	for {

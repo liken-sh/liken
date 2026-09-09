@@ -35,6 +35,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -169,6 +170,10 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 
 	var specDevices []cdiDevice
 	var devices []*drav1.Device
+	// The demand each allocated controller takes on. It is recorded
+	// after the spec file is written, so the record on disk and the
+	// record in memory never disagree.
+	demand := map[string]inputClasses{}
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != DriverName {
 			// This is another driver's allocation in the same claim.
@@ -181,6 +186,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		// variable, it registers no evdev node, and it is ready
 		// whenever bluetoothd serves, so no relay stands behind it.
 		var edits cdiEdits
+		var inputs []string
 		if isMediaBusName(result.Device) {
 			edits = busEdits()
 		} else {
@@ -194,12 +200,23 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 				// somebody switches the controller on once.
 				return fail("controller %s has no input relay yet; it has not connected since it was paired", publishedMAC(mac))
 			}
+			// A configuration this driver cannot read fails the
+			// prepare, so a claim that misnames a class reports it in
+			// the pod's events, and does not receive everything by
+			// accident.
+			want, err := claimInputs(allocated.Status.Allocation.Devices.Config, result.Request)
+			if err != nil {
+				return fail("the inputs of device %s: %v", result.Device, err)
+			}
+			demand[mac] = want
+			inputs = recordedInputs(want)
 			edits = cdiEdits{DeviceNodes: deviceNodes(current)}
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
 			ContainerEdits: edits,
+			Inputs:         inputs,
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,
@@ -213,14 +230,22 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			return fail("writing the CDI spec: %v", err)
 		}
 	}
+	// The file is written first, because a restart rebuilds the
+	// demand from it. A pump narrowed for a claim that has no file
+	// would never widen again.
+	for mac, want := range demand {
+		p.relays.prepare(mac, claim.Uid, want)
+	}
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
-// NodeUnprepareResources removes each claim's CDI spec. As with
-// prepare, every claim gets an answer and failures stay specific to
-// each claim. Nothing else has to be given back: the relay holds a
-// controller's virtual node whether or not a claim names it, and the
-// next claim delivers the same node.
+// NodeUnprepareResources removes each claim's CDI spec and withdraws
+// its demand. As with prepare, every claim gets an answer and
+// failures stay specific to each claim. The virtual node is not given
+// back: the relay holds a controller's node whether or not a claim
+// names it, and the next claim delivers the same node. What is given
+// back is the claim's share of the demand, so a node no remaining
+// claim asks for stops being read.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -228,6 +253,7 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 			resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{Error: err.Error()}
 			continue
 		}
+		p.relays.unprepare(claim.Uid)
 		resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{}
 	}
 	return resp, nil
@@ -263,9 +289,28 @@ type ResourceClaim struct {
 		Allocation *struct {
 			Devices struct {
 				Results []AllocatedDevice `json:"results"`
+				Config  []AllocatedConfig `json:"config"`
 			} `json:"devices"`
 		} `json:"allocation"`
 	} `json:"status"`
+}
+
+// AllocatedConfig is one block of configuration the allocation
+// carries. Source says where the block came from, FromClass for a
+// DeviceClass's own block and FromClaim for the claim's, and Requests
+// scopes it to some of the claim's requests rather than all of them.
+type AllocatedConfig struct {
+	Source   string        `json:"source"`
+	Requests []string      `json:"requests"`
+	Opaque   *OpaqueConfig `json:"opaque"`
+}
+
+// OpaqueConfig is one driver's own parameters. The API server carries
+// them without reading them, and Driver says whose they are, so a
+// claim can configure several drivers at once.
+type OpaqueConfig struct {
+	Driver     string          `json:"driver"`
+	Parameters json.RawMessage `json:"parameters"`
 }
 
 // AllocatedDevice is one allocation result. The scheduler chose

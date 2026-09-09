@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"runtime"
 	"unsafe"
 )
 
@@ -112,6 +113,97 @@ func eviocgbit(event, size uint32) uint32 { return ioc(iocRead, size, evdevLette
 
 func eviocgabs(axis uint32) uint32 {
 	return ioc(iocRead, uint32(unsafe.Sizeof(absInfo{})), evdevLetter, 0x40+axis)
+}
+
+// eviocsmask limits what the kernel queues on one open node. It is
+// the one evdev call this operator makes that writes.
+var eviocsmask = ioc(iocWrite, uint32(unsafe.Sizeof(inputMask{})), evdevLetter, 0x93)
+
+// inputMask is struct input_mask, the argument EVIOCSMASK takes: the
+// event type the mask limits, the length of the mask in bytes, and
+// the address of the mask itself.
+type inputMask struct {
+	Type      uint32
+	CodesSize uint32
+	CodesPtr  uint64
+}
+
+// maskLength is how many bytes a mask over the codes up to max takes.
+// The kernel reads a mask in whole longs and answers EINVAL for any
+// other length, so the bitmap is rounded up to a whole number of
+// them.
+func maskLength(max int) int {
+	const word = int(unsafe.Sizeof(uintptr(0)))
+	return (bitmapSize(max) + word - 1) / word * word
+}
+
+// evdevNode is one real evdev node the relay reads. The type carries
+// the narrowing, because a node the kernel filters is the whole
+// mechanism by which a class nobody claimed costs nothing.
+type evdevNode struct {
+	file *os.File
+}
+
+func (n *evdevNode) Read(events []byte) (int, error) { return n.file.Read(events) }
+func (n *evdevNode) Close() error                    { return n.file.Close() }
+
+// narrow tells the kernel which events to queue on this fd. The mask
+// for event type EV_SYN is the mask of event types, and EV_SYN itself
+// is never filtered, so a node narrowed to nothing still reports the
+// end of a frame and nothing inside it.
+//
+// The fd is reached through the runtime's own accessor rather than
+// through Fd, which would take the file out of the poller and leave a
+// Close unable to end the read in flight on it.
+func (n *evdevNode) narrow(masks []eventMask) error {
+	control, err := n.file.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var failed error
+	if err := control.Control(func(fd uintptr) {
+		for _, mask := range masks {
+			if failed = setEventMask(int(fd), mask); failed != nil {
+				return
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	return failed
+}
+
+// setEventMask makes one EVIOCSMASK call.
+func setEventMask(fd int, mask eventMask) error {
+	bits := make([]byte, maskLength(mask.max))
+	for _, code := range mask.codes {
+		if int(code) <= mask.max {
+			bits[code/8] |= 1 << (code % 8)
+		}
+	}
+	argument := inputMask{
+		Type:      mask.event,
+		CodesSize: uint32(len(bits)),
+		CodesPtr:  uint64(uintptr(unsafe.Pointer(&bits[0]))),
+	}
+	err := ioctlPtr(fd, eviocsmask, unsafe.Pointer(&argument))
+	// The kernel reads the mask through an address this program put in
+	// a field, which the garbage collector does not follow, so the
+	// bitmap is held until the call has returned.
+	runtime.KeepAlive(bits)
+	if err != nil {
+		return fmt.Errorf("limiting event type %d: %w", mask.event, err)
+	}
+	return nil
+}
+
+// open opens a real evdev node for reading.
+func (linuxInput) open(path string) (realNode, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return &evdevNode{file: file}, nil
 }
 
 // The event types this operator mirrors, with the code limit and the

@@ -88,9 +88,17 @@ type cdiSpec struct {
 	Devices []cdiDevice `json:"devices"`
 }
 
+// cdiDevice is one allocated device's grant. Inputs is this driver's
+// own key and no part of the CDI schema: it records the input classes
+// the claim asked for, so a restart of this operator rebuilds each
+// pump's demand from the same files that record which nodes the
+// consumer holds. A CDI reader ignores a key it does not know, and a
+// claim that receives every class writes none, so a file this driver
+// wrote before the parameter existed reads back as the default.
 type cdiDevice struct {
 	Name           string   `json:"name"`
 	ContainerEdits cdiEdits `json:"containerEdits"`
+	Inputs         []string `json:"bluetooth.liken.sh/inputs,omitempty"`
 }
 
 type cdiEdits struct {

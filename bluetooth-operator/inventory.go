@@ -236,8 +236,8 @@ func (pass *inventoryPass) runAgainIn(after time.Duration) {
 // reaching prepare afterwards.
 func claimedDevices() map[string]bool {
 	held := map[string]bool{}
-	eachDeliveredDevice(func(device string, _ []string) {
-		held[device] = true
+	eachDeliveredDevice(func(prepared deliveredDevice) {
+		held[prepared.device] = true
 	})
 	return held
 }
@@ -254,15 +254,12 @@ func claimedDevices() map[string]bool {
 // so a read failure taints nothing.
 func movedControllers(virtual map[string][]string) map[string]bool {
 	moved := map[string]bool{}
-	eachDeliveredDevice(func(device string, delivered []string) {
-		if isMediaBusName(device) {
+	eachDeliveredDevice(func(prepared deliveredDevice) {
+		mac, ok := prepared.controller()
+		if !ok {
 			return
 		}
-		mac := macFromDeviceName(device)
-		if !validMAC(mac) {
-			return
-		}
-		if !sameNodes(delivered, virtual[mac]) {
+		if !sameNodes(prepared.nodes, virtual[mac]) {
 			moved[mac] = true
 		}
 	})
@@ -282,6 +279,30 @@ func sameNodes(delivered, current []string) bool {
 	return slices.Equal(a, b)
 }
 
+// deliveredDevice is one prepared claim's grant of one device: which
+// claim holds it, which published device it is, the node paths the
+// container received, and the input classes the claim asked for.
+type deliveredDevice struct {
+	claimUID string
+	device   string
+	nodes    []string
+	inputs   []string
+}
+
+// controller answers with the MAC of the controller a grant names,
+// and whether the grant names one at all. The media bus and a name
+// that is not an address are not controllers.
+func (d deliveredDevice) controller() (string, bool) {
+	if isMediaBusName(d.device) {
+		return "", false
+	}
+	mac := macFromDeviceName(d.device)
+	if !validMAC(mac) {
+		return "", false
+	}
+	return mac, true
+}
+
 // eachDeliveredDevice visits every device a prepared claim holds, with
 // the node paths its CDI spec delivered. The kubelet prepares a claim
 // before the consumer's container starts and unprepares it after the
@@ -289,7 +310,7 @@ func sameNodes(delivered, current []string) bool {
 // removes it, so a file that names a device is a claim that still
 // holds it. A file this cannot parse is skipped, and a claim the
 // kubelet unprepared between the listing and the read is gone by then.
-func eachDeliveredDevice(visit func(device string, nodes []string)) {
+func eachDeliveredDevice(visit func(prepared deliveredDevice)) {
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
 		// No directory means no claim has been prepared on this boot.
@@ -320,7 +341,12 @@ func eachDeliveredDevice(visit func(device string, nodes []string)) {
 			for _, node := range device.ContainerEdits.DeviceNodes {
 				nodes = append(nodes, node.Path)
 			}
-			visit(allocated, nodes)
+			visit(deliveredDevice{
+				claimUID: claimUID,
+				device:   allocated,
+				nodes:    nodes,
+				inputs:   device.Inputs,
+			})
 		}
 	}
 }

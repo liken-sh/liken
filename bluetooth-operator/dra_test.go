@@ -22,13 +22,25 @@ import (
 const testClaimUID = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
 
 // allocatedClaim serves one ResourceClaim whose allocation holds these
-// results.
+// results and no configuration, which is the claim that receives every
+// input class.
 func allocatedClaim(t *testing.T, results ...AllocatedDevice) http.Handler {
 	t.Helper()
+	return configuredClaim(t, nil, results...)
+}
+
+// configuredClaim serves one ResourceClaim whose allocation carries
+// configuration blocks as well as results.
+func configuredClaim(t *testing.T, config []AllocatedConfig, results ...AllocatedDevice) http.Handler {
+	t.Helper()
+	devices := map[string]any{"results": results}
+	if config != nil {
+		devices["config"] = config
+	}
 	claim := map[string]any{
 		"metadata": map[string]any{"name": "player-one", "namespace": "arcade", "uid": testClaimUID},
 		"status": map[string]any{
-			"allocation": map[string]any{"devices": map[string]any{"results": results}},
+			"allocation": map[string]any{"devices": devices},
 		},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -336,5 +348,85 @@ func TestUnprepareRemovesTheSpecAndRepeats(t *testing.T) {
 	}
 	if _, err := os.Stat(cdiSpecPath(testClaimUID)); !os.IsNotExist(err) {
 		t.Fatal("the spec file is still there")
+	}
+}
+
+// inputsOf are the classes a prepared claim's spec file records for
+// one device.
+func inputsOf(t *testing.T, spec cdiSpec, device int) []string {
+	t.Helper()
+	return spec.Devices[device].Inputs
+}
+
+// The classes a claim asked for are written beside the nodes it
+// received, because the spec file is what a restart of this operator
+// rebuilds each pump's demand from.
+func TestPrepareClaimRecordsTheClassesTheClaimAsksFor(t *testing.T) {
+	plugin := preparePlugin(t,
+		configuredClaim(t,
+			[]AllocatedConfig{driverConfig("FromClaim", `{"inputs":["joystick"]}`)},
+			controllerAllocation()),
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
+	)
+
+	resp := plugin.prepareClaim(testClaim())
+	if resp.Error != "" {
+		t.Fatalf("prepare failed: %s", resp.Error)
+	}
+	spec := readSpec(t, cdiSpecPath(testClaimUID))
+	if got := inputsOf(t, spec, 0); !reflect.DeepEqual(got, []string{"joystick"}) {
+		t.Errorf("inputs = %v, want [joystick]", got)
+	}
+}
+
+// A claim that receives every class records no list, so a spec file
+// this driver wrote before the parameter existed reads back the same
+// way.
+func TestPrepareClaimRecordsNoListForEveryClass(t *testing.T) {
+	plugin := preparePlugin(t,
+		allocatedClaim(t, controllerAllocation()),
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
+	)
+
+	if resp := plugin.prepareClaim(testClaim()); resp.Error != "" {
+		t.Fatalf("prepare failed: %s", resp.Error)
+	}
+	if got := inputsOf(t, readSpec(t, cdiSpecPath(testClaimUID)), 0); got != nil {
+		t.Errorf("inputs = %v, want none", got)
+	}
+}
+
+// A configuration this driver cannot read fails the claim rather than
+// delivering something the claim did not ask for. The pod waits in
+// ContainerCreating and a describe of it says what is wrong.
+func TestPrepareClaimRefusesAConfigurationItCannotRead(t *testing.T) {
+	cases := []struct {
+		name       string
+		parameters string
+		says       string
+	}{
+		{name: "an empty list", parameters: `{"inputs":[]}`, says: "empty"},
+		{name: "an unknown class", parameters: `{"inputs":["buttons"]}`, says: `"buttons"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			plugin := preparePlugin(t,
+				configuredClaim(t,
+					[]AllocatedConfig{driverConfig("FromClaim", c.parameters)},
+					controllerAllocation()),
+				dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
+			)
+
+			resp := plugin.prepareClaim(testClaim())
+			if resp.Error == "" {
+				t.Fatal("prepare accepted a configuration it cannot read")
+			}
+			if !strings.Contains(resp.Error, c.says) {
+				t.Errorf("the failure does not say %s: %s", c.says, resp.Error)
+			}
+			if _, err := os.Stat(cdiSpecPath(testClaimUID)); !os.IsNotExist(err) {
+				t.Fatal("a failed prepare wrote a spec file")
+			}
+		})
 	}
 }

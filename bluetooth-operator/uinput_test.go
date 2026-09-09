@@ -4,13 +4,17 @@ package main
 // arithmetic: an ioctl request number this file computes must equal the
 // number linux/input.h and linux/uinput.h define, because a wrong
 // number reaches a different driver call or none. The second needs a
-// kernel: the real-kernel test creates a uinput device and reads back
-// the node the kernel gave it. It skips where /dev/uinput is not
-// openable, which is CI.
+// kernel: the real-kernel tests create a uinput device, read back the
+// node the kernel gave it, and hold the kernel to what a mask on that
+// node filters. They skip where /dev/uinput is not openable, which is
+// CI.
 
 import (
+	"encoding/binary"
 	"os"
+	"slices"
 	"testing"
+	"time"
 )
 
 // The request numbers as the kernel's headers define them. Each one is
@@ -27,6 +31,7 @@ func TestIoctlRequestNumbersMatchTheKernelHeaders(t *testing.T) {
 		{name: "EVIOCGPROP(4)", request: eviocgprop(4), want: 0x80044509},
 		{name: "EVIOCGBIT(0, 4)", request: eviocgbit(0, 4), want: 0x80044520},
 		{name: "EVIOCGABS(ABS_X)", request: eviocgabs(0), want: 0x80184540},
+		{name: "EVIOCSMASK", request: eviocsmask, want: 0x40104593},
 		{name: "UI_DEV_CREATE", request: uiDevCreate, want: 0x5501},
 		{name: "UI_DEV_DESTROY", request: uiDevDestroy, want: 0x5502},
 		{name: "UI_DEV_SETUP", request: uiDevSetup, want: 0x405c5503},
@@ -146,5 +151,99 @@ func TestReadBackTheCapabilitiesOfADeviceThisTestCreated(t *testing.T) {
 	}
 	if len(caps.Axes) != 1 || caps.Axes[0] != want.Axes[0] {
 		t.Errorf("axes = %+v, want %+v", caps.Axes, want.Axes)
+	}
+}
+
+// rawEvent is one struct input_event as the kernel lays it out: two
+// timestamp words this program leaves at zero, then the type, the
+// code, and the value.
+func rawEvent(eventType, code uint16, value int32) []byte {
+	record := make([]byte, inputEventSize)
+	binary.NativeEndian.PutUint16(record[16:], eventType)
+	binary.NativeEndian.PutUint16(record[18:], code)
+	binary.NativeEndian.PutUint32(record[20:], uint32(value))
+	return record
+}
+
+// deliveredEventTypes reads one batch from a real node and answers
+// with the type of each record in it. A read that never returns is a
+// mask that filtered more than the test asked it to, so the wait is
+// bounded and a timeout fails the test.
+func deliveredEventTypes(t *testing.T, node realNode) []uint16 {
+	t.Helper()
+	records := make(chan []byte, 1)
+	go func() {
+		buffer := make([]byte, inputEventSize*64)
+		read, err := node.Read(buffer)
+		if err != nil {
+			records <- nil
+			return
+		}
+		records <- buffer[:read]
+	}()
+	select {
+	case got := <-records:
+		var types []uint16
+		for at := 0; at+inputEventSize <= len(got); at += inputEventSize {
+			types = append(types, binary.NativeEndian.Uint16(got[at+16:]))
+		}
+		return types
+	case <-time.After(2 * time.Second):
+		t.Fatal("the node delivered nothing within two seconds")
+		return nil
+	}
+}
+
+// The kernel filters what it queues on a node this operator narrowed.
+// This is the whole mechanism by which a class no claim asked for
+// costs nothing: the events are dropped before they reach the fd, so
+// the pump never wakes for them.
+func TestNarrowARealNodeOnTheRealKernel(t *testing.T) {
+	file, err := os.OpenFile(uinputPath, os.O_WRONLY, 0)
+	if err != nil {
+		t.Skipf("this machine does not permit %s: %v", uinputPath, err)
+	}
+	_ = file.Close()
+
+	device, err := linuxInput{}.createVirtual(testCapabilities(), "bluetooth.liken.sh/a0:ab:51:33:b7:12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = device.close() })
+	node, err := linuxInput{}.open(device.node())
+	if err != nil {
+		// The operator opens a controller's node as root, and a
+		// workstation user is not in the group that owns one.
+		t.Skipf("this machine does not permit reading %s: %v", device.node(), err)
+	}
+	t.Cleanup(func() { _ = node.Close() })
+
+	// With no mask the node delivers every type the device declares.
+	frame := append(rawEvent(evAbs, 0x00, 100), rawEvent(evSyn, 0, 0)...)
+	if err := device.write(frame); err != nil {
+		t.Fatal(err)
+	}
+	if types := deliveredEventTypes(t, node); !slices.Contains(types, uint16(evAbs)) {
+		t.Fatalf("the unmasked node delivered types %v, want an absolute event", types)
+	}
+
+	if err := node.narrow([]eventMask{{event: evSyn, max: eventTypeMax, codes: []uint16{evKey}}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The absolute frame is dropped whole, because the kernel drops the
+	// frame marker of a frame it emptied.
+	frame = append(rawEvent(evAbs, 0x00, 200), rawEvent(evSyn, 0, 0)...)
+	frame = append(frame, rawEvent(evKey, 0x130, 1)...)
+	frame = append(frame, rawEvent(evSyn, 0, 0)...)
+	if err := device.write(frame); err != nil {
+		t.Fatal(err)
+	}
+	types := deliveredEventTypes(t, node)
+	if slices.Contains(types, uint16(evAbs)) {
+		t.Errorf("the narrowed node delivered types %v, want no absolute event", types)
+	}
+	if !slices.Contains(types, uint16(evKey)) {
+		t.Errorf("the narrowed node delivered types %v, want the key event", types)
 	}
 }

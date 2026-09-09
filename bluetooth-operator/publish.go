@@ -128,10 +128,10 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 	}
 
 	published := without(controllers, keepOut)
-	virtual := p.relay(published, nodes)
+	virtual, classes := p.relay(published, nodes)
 	moved := movedControllers(virtual)
 	p.reportMoved(moved)
-	devices := sliceDevices(published, virtual, moved)
+	devices := sliceDevices(published, virtual, classes, moved)
 	// The media bus joins every slice this pass publishes, as soon as
 	// bluetoothd has named the adapter. It goes at the front of the
 	// list so the overflow truncation below can only drop controllers:
@@ -162,18 +162,21 @@ func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapter
 
 // relay makes each published controller's virtual input devices agree
 // with the evdev nodes the controller registers now, and answers with
-// the nodes a claim on each controller delivers.
+// the nodes a claim on each controller delivers and the input classes
+// each controller carries.
 //
 // A controller a teardown has retired is not in this set, so its relay
 // is neither started again nor asked for a node. unpair.go stops that
 // relay in the same step that takes the device out of the slice.
-func (p *publisher) relay(controllers map[string]controller, nodes map[string][]string) map[string][]string {
+func (p *publisher) relay(controllers map[string]controller, nodes map[string][]string) (map[string][]string, map[string]inputClasses) {
 	virtual := make(map[string][]string, len(controllers))
+	classes := make(map[string]inputClasses, len(controllers))
 	for mac := range controllers {
 		p.relays.ensure(mac, nodes[mac])
 		virtual[mac] = p.relays.virtualNodes(mac)
+		classes[mac] = p.relays.classes(mac)
 	}
-	return virtual
+	return virtual, classes
 }
 
 // reportMoved prints one line for each controller that joins the moved

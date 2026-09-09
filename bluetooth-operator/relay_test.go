@@ -35,6 +35,10 @@ type fakeKernel struct {
 	// can send events into the relay and can end the read.
 	writers map[string]*io.PipeWriter
 
+	// opens holds each opened real node, so a test can read back what
+	// the relay told the kernel to queue on it.
+	opens map[string]*fakeNode
+
 	// virtual is every device the relay created, newest last.
 	virtual []*fakeVirtual
 
@@ -46,6 +50,7 @@ func newFakeKernel() *fakeKernel {
 	return &fakeKernel{
 		capabilities: map[string]evdevCapabilities{},
 		writers:      map[string]*io.PipeWriter{},
+		opens:        map[string]*fakeNode{},
 	}
 }
 
@@ -70,7 +75,7 @@ func (k *fakeKernel) readCapabilities(path string) (evdevCapabilities, error) {
 	return caps, nil
 }
 
-func (k *fakeKernel) open(path string) (io.ReadCloser, error) {
+func (k *fakeKernel) open(path string) (realNode, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if _, found := k.capabilities[path]; !found {
@@ -78,7 +83,57 @@ func (k *fakeKernel) open(path string) (io.ReadCloser, error) {
 	}
 	reader, writer := io.Pipe()
 	k.writers[path] = writer
-	return reader, nil
+	node := &fakeNode{ReadCloser: reader}
+	k.opens[path] = node
+	return node, nil
+}
+
+// node answers with one opened real node, so a test reads the mask
+// the relay set on it.
+func (k *fakeKernel) node(t *testing.T, path string) *fakeNode {
+	t.Helper()
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	node, found := k.opens[path]
+	if !found {
+		t.Fatalf("the relay never opened %s", path)
+	}
+	return node
+}
+
+// fakeNode is one open real node: the read end of its pipe, and the
+// mask the relay last set on it. The kernel keeps a mask until
+// another one replaces it, and so does this.
+type fakeNode struct {
+	io.ReadCloser
+	mu    sync.Mutex
+	masks []eventMask
+	calls int
+}
+
+func (n *fakeNode) narrow(masks []eventMask) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.masks, n.calls = masks, n.calls+1
+	return nil
+}
+
+// delivers reports whether the mask on this node lets one event type
+// through. A node with no mask delivers every type.
+func (n *fakeNode) delivers(event uint16) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.masks) == 0 {
+		return true
+	}
+	return slices.Contains(n.masks[0].codes, event)
+}
+
+// narrowings is how many masks the relay has set on this node.
+func (n *fakeNode) narrowings() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.calls
 }
 
 func (k *fakeKernel) createVirtual(caps evdevCapabilities, phys string) (virtualDevice, error) {

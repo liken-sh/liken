@@ -136,6 +136,7 @@ func TestEnsureIgnoresTheServersTaintTimestamp(t *testing.T) {
 		map[string]controller{"a0:ab:51:33:b7:12": {Connected: false}},
 		nil,
 		nil,
+		nil,
 	)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), fresh); err != nil {
 		t.Fatal(err)
@@ -159,7 +160,7 @@ func TestEnsureReplacesAChangedSliceAndBumpsTheGeneration(t *testing.T) {
 
 	// The controller went off the air, so it takes both taints and
 	// stays in the slice.
-	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil)
+	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil, nil)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), tainted); err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 	// The controller is paired and switched off, so it publishes with
 	// both taints on it.
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(),
-		sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil)); err != nil {
+		sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil, nil)); err != nil {
 		t.Fatal(err)
 	}
 	want := "slice: created generation 1, 1 device, 1 tainted: a0-ab-51-33-b7-12 has " +
@@ -236,7 +237,7 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	// The controller went off the air. The device count does not move,
 	// so the taints are the whole event, and they evict the pod that
 	// held the claim.
-	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil)
+	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil, nil)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), tainted); err != nil {
 		t.Fatal(err)
 	}
