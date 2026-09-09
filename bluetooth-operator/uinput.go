@@ -43,6 +43,8 @@ type inputKernel interface {
 type realNode interface {
 	io.ReadCloser
 	narrow(masks []eventMask) error
+	axisRange(code uint16) (absInfo, error)
+	setAxisRange(code uint16, info absInfo) error
 }
 
 // virtualDevice is one uinput device this operator holds open. The

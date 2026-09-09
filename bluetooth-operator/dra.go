@@ -173,7 +173,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 	// The demand each allocated controller takes on. It is recorded
 	// after the spec file is written, so the record on disk and the
 	// record in memory never disagree.
-	demand := map[string]inputClasses{}
+	demand := map[string]delivery{}
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != DriverName {
 			// This is another driver's allocation in the same claim.
@@ -187,6 +187,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		// whenever bluetoothd serves, so no relay stands behind it.
 		var edits cdiEdits
 		var inputs []string
+		var axes string
 		if isMediaBusName(result.Device) {
 			edits = busEdits()
 		} else {
@@ -204,19 +205,19 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			// prepare, so a claim that misnames a class reports it in
 			// the pod's events, and does not receive everything by
 			// accident.
-			want, err := claimInputs(allocated.Status.Allocation.Devices.Config, result.Request)
+			want, err := claimDelivery(allocated.Status.Allocation.Devices.Config, result.Request)
 			if err != nil {
-				return fail("the inputs of device %s: %v", result.Device, err)
+				return fail("the configuration of device %s: %v", result.Device, err)
 			}
 			demand[mac] = want
-			inputs = recordedInputs(want)
+			inputs, axes = recordedInputs(want.classes), want.axes.record()
 			edits = cdiEdits{DeviceNodes: deviceNodes(current)}
 		}
 		name := claim.Uid + "-" + result.Device
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
 			ContainerEdits: edits,
-			Annotations:    annotateInputs(inputs),
+			Annotations:    annotateDelivery(inputs, axes),
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,

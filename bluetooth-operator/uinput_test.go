@@ -86,7 +86,10 @@ func testCapabilities() evdevCapabilities {
 			"EV_KEY": {0x130},
 			"EV_ABS": {0x00},
 		},
-		Axes: []absAxis{{Code: 0x00, Minimum: 0, Maximum: 255, Flat: 15}},
+		// The fuzz and the flat travel with the axis, so a consumer
+		// reading the virtual node sees the same smoothing the real one
+		// reports.
+		Axes: []absAxis{{Code: 0x00, Minimum: 0, Maximum: 255, Fuzz: 3, Flat: 15}},
 	}
 }
 
@@ -171,6 +174,18 @@ func rawEvent(eventType, code uint16, value int32) []byte {
 // bounded and a timeout fails the test.
 func deliveredEventTypes(t *testing.T, node realNode) []uint16 {
 	t.Helper()
+	var types []uint16
+	for at, got := 0, deliveredEventRecords(t, node); at+inputEventSize <= len(got); at += inputEventSize {
+		types = append(types, binary.NativeEndian.Uint16(got[at+16:]))
+	}
+	return types
+}
+
+// deliveredEventRecords reads one batch from a real node. A read that
+// never returns is a mask or an axis that filtered more than the test
+// asked it to, so the wait is bounded and a timeout fails the test.
+func deliveredEventRecords(t *testing.T, node realNode) []byte {
+	t.Helper()
 	records := make(chan []byte, 1)
 	go func() {
 		buffer := make([]byte, inputEventSize*64)
@@ -183,11 +198,7 @@ func deliveredEventTypes(t *testing.T, node realNode) []uint16 {
 	}()
 	select {
 	case got := <-records:
-		var types []uint16
-		for at := 0; at+inputEventSize <= len(got); at += inputEventSize {
-			types = append(types, binary.NativeEndian.Uint16(got[at+16:]))
-		}
-		return types
+		return got
 	case <-time.After(2 * time.Second):
 		t.Fatal("the node delivered nothing within two seconds")
 		return nil
@@ -245,5 +256,100 @@ func TestNarrowARealNodeOnTheRealKernel(t *testing.T) {
 	}
 	if !slices.Contains(types, uint16(evKey)) {
 		t.Errorf("the narrowed node delivered types %v, want the key event", types)
+	}
+}
+
+// steadyAxis is one axis with no smoothing at all, which is a stick
+// that reports every step of its position noise.
+func steadyAxis() evdevCapabilities {
+	return evdevCapabilities{
+		Name:  "Wireless Controller",
+		ID:    evdevID{Bus: 0x0005, Vendor: 0x054c, Product: 0x0ce6},
+		Codes: map[string][]uint16{"EV_KEY": {0x130}, "EV_ABS": {0x00}},
+		Axes:  []absAxis{{Code: 0x00, Minimum: 0, Maximum: 255}},
+	}
+}
+
+// deliveredAxisValues reads one batch from a real node and answers
+// with the value of each absolute event in it.
+func deliveredAxisValues(t *testing.T, node realNode) []int32 {
+	t.Helper()
+	var values []int32
+	for at, got := 0, deliveredEventRecords(t, node); at+inputEventSize <= len(got); at += inputEventSize {
+		if binary.NativeEndian.Uint16(got[at+16:]) != evAbs {
+			continue
+		}
+		values = append(values, int32(binary.NativeEndian.Uint32(got[at+20:])))
+	}
+	return values
+}
+
+// The kernel drops a position change smaller than half the axis fuzz
+// before any handler sees it. This is the whole mechanism by which a
+// stick's noise at rest costs nothing: the events never reach the fd,
+// so the pump never wakes for them.
+func TestTuneARealAxisOnTheRealKernel(t *testing.T) {
+	file, err := os.OpenFile(uinputPath, os.O_WRONLY, 0)
+	if err != nil {
+		t.Skipf("this machine does not permit %s: %v", uinputPath, err)
+	}
+	_ = file.Close()
+
+	device, err := linuxInput{}.createVirtual(steadyAxis(), "bluetooth.liken.sh/a0:ab:51:33:b7:12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = device.close() })
+	node, err := linuxInput{}.open(device.node())
+	if err != nil {
+		// The operator opens a controller's node as root, and a
+		// workstation user is not in the group that owns one.
+		t.Skipf("this machine does not permit reading %s: %v", device.node(), err)
+	}
+	t.Cleanup(func() { _ = node.Close() })
+
+	// The axis settles at 100 with no smoothing, and one step of noise
+	// reaches the reader.
+	writeFrames(t, device, [][2]int32{{evAbs, 100}, {evAbs, 101}})
+	if got := deliveredAxisValues(t, node); !slices.Contains(got, 101) {
+		t.Fatalf("the untuned axis delivered %v, want the one-step change", got)
+	}
+
+	current, err := node.axisRange(0x00)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tuned := tunedAxis(absAxis{Code: 0x00}, current, axisOverride{Fuzz: ptr(int32(4))})
+	if err := node.setAxisRange(0x00, tuned); err != nil {
+		t.Fatal(err)
+	}
+	if back, err := node.axisRange(0x00); err != nil || back.Fuzz != 4 {
+		t.Fatalf("the axis reports fuzz %d after the write: %v", back.Fuzz, err)
+	}
+
+	// One step of noise is now smaller than half the fuzz, so the
+	// kernel drops it and drops the frame it emptied. A real move
+	// still arrives.
+	writeFrames(t, device, [][2]int32{{evAbs, 102}, {evAbs, 150}})
+	got := deliveredAxisValues(t, node)
+	if slices.Contains(got, 102) {
+		t.Errorf("the tuned axis delivered %v, want the one-step change dropped", got)
+	}
+	if !slices.Contains(got, 150) {
+		t.Errorf("the tuned axis delivered %v, want the real move", got)
+	}
+}
+
+// writeFrames injects one event and a frame marker for each pair, the
+// way a device reports a position change.
+func writeFrames(t *testing.T, device virtualDevice, frames [][2]int32) {
+	t.Helper()
+	var records []byte
+	for _, frame := range frames {
+		records = append(records, rawEvent(uint16(frame[0]), 0x00, frame[1])...)
+		records = append(records, rawEvent(evSyn, 0, 0)...)
+	}
+	if err := device.write(records); err != nil {
+		t.Fatal(err)
 	}
 }

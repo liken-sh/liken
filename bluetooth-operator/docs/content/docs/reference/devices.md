@@ -384,7 +384,68 @@ decides which events reach the container once one is allocated.
 
 The `bluetooth-input` class that [Install the
 operator](/docs/guides/install/) gives carries no `inputs` block, so a
-claim through it receives every class.
+claim through it receives every class. A class can carry [an `axes`
+block](#the-axes-parameter) the same way.
+
+## The axes parameter
+
+A stick reports position noise while it rests. A DualSense's right
+stick moves one step on `ABS_RX` and `ABS_RY` about 270 times a second
+per axis with nobody touching it, so its node emits about a thousand
+events a second, and every reader of the node pays for each one. The
+kernel's answer to a noisy axis is the axis's fuzz, and `axes` is
+where a claim sets it.
+
+    spec:
+      devices:
+        requests:
+          - name: controller
+            exactly:
+              deviceClassName: gamepad
+        config:
+          - requests: [controller]
+            opaque:
+              driver: bluetooth.liken.sh
+              parameters:
+                inputs: [joystick]
+                axes:
+                  ABS_RX: {fuzz: 4}
+                  ABS_RY: {fuzz: 4}
+
+The input core drops a position change smaller than half the axis's
+fuzz and smooths one smaller than the fuzz before any handler sees
+it, and it reports a position within the flat of the axis centre as
+the centre.
+
+This is what `systemd`'s hwdb does for known devices: its `EVDEV_ABS_`
+entries in `60-evdev.hwdb` set the same two fields with the same
+`EVIOCSABS` ioctl. The operator carries no hardware database, and the
+claim holder knows the pad, so the claim states them instead.
+
+The keys are the kernel's own `ABS_*` code names, from
+`linux/input-event-codes.h`. Each one takes `fuzz`, `flat`, or both,
+and no other field:
+
+| Field | What it is |
+|---|---|
+| `fuzz` | the noise of the axis, in steps of its own range |
+| `flat` | the dead zone around the axis centre, in the same steps |
+
+A code name outside the kernel's list, a field beside those two, or a
+negative value is refused when the claim is prepared. The pod stays
+in `ContainerCreating`, and the message names what is accepted.
+`ABS_MT_SLOT` is refused too, because the kernel does not change the
+number of contacts a device reserved.
+
+An axis takes the largest `fuzz` and the largest `flat` any prepared
+claim on the controller states, so each claim receives at least the
+smoothing it asked for. An axis no remaining claim states goes back
+to the values the device reported when it first connected, which the
+operator keeps in the bond's `Secret`.
+
+The operator writes the values to the controller's real node when the
+claim is prepared, and again each time the controller reconnects,
+because a reconnect is a new kernel device that carries none of them.
 
 ## What a claim delivers
 

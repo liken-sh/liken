@@ -115,6 +115,13 @@ func eviocgabs(axis uint32) uint32 {
 	return ioc(iocRead, uint32(unsafe.Sizeof(absInfo{})), evdevLetter, 0x40+axis)
 }
 
+// eviocsabs writes one axis's absinfo back to the device. It is how
+// systemd's hwdb applies an EVDEV_ABS_ entry, and how this driver
+// applies a claim's axes.
+func eviocsabs(axis uint32) uint32 {
+	return ioc(iocWrite, uint32(unsafe.Sizeof(absInfo{})), evdevLetter, 0xc0+axis)
+}
+
 // eviocsmask limits what the kernel queues on one open node. It is
 // the one evdev call this operator makes that writes.
 var eviocsmask = ioc(iocWrite, uint32(unsafe.Sizeof(inputMask{})), evdevLetter, 0x93)
@@ -151,26 +158,15 @@ func (n *evdevNode) Close() error                    { return n.file.Close() }
 // for event type EV_SYN is the mask of event types, and EV_SYN itself
 // is never filtered, so a node narrowed to nothing still reports the
 // end of a frame and nothing inside it.
-//
-// The fd is reached through the runtime's own accessor rather than
-// through Fd, which would take the file out of the poller and leave a
-// Close unable to end the read in flight on it.
 func (n *evdevNode) narrow(masks []eventMask) error {
-	control, err := n.file.SyscallConn()
-	if err != nil {
-		return err
-	}
-	var failed error
-	if err := control.Control(func(fd uintptr) {
+	return n.control(func(fd int) error {
 		for _, mask := range masks {
-			if failed = setEventMask(int(fd), mask); failed != nil {
-				return
+			if err := setEventMask(fd, mask); err != nil {
+				return err
 			}
 		}
-	}); err != nil {
-		return err
-	}
-	return failed
+		return nil
+	})
 }
 
 // setEventMask makes one EVIOCSMASK call.
@@ -195,6 +191,47 @@ func setEventMask(fd int, mask eventMask) error {
 		return fmt.Errorf("limiting event type %d: %w", mask.event, err)
 	}
 	return nil
+}
+
+// axisRange reads one axis's absinfo as the kernel reports it now,
+// which is what this operator last wrote when it has written one.
+func (n *evdevNode) axisRange(code uint16) (absInfo, error) {
+	var info absInfo
+	err := n.control(func(fd int) error {
+		if err := ioctlPtr(fd, eviocgabs(uint32(code)), unsafe.Pointer(&info)); err != nil {
+			return fmt.Errorf("reading axis %d: %w", code, err)
+		}
+		return nil
+	})
+	return info, err
+}
+
+// setAxisRange writes one axis's absinfo. The whole structure is
+// written, the current position included, so the caller reads it
+// first and changes only the fields it means to change.
+func (n *evdevNode) setAxisRange(code uint16, info absInfo) error {
+	return n.control(func(fd int) error {
+		if err := ioctlPtr(fd, eviocsabs(uint32(code)), unsafe.Pointer(&info)); err != nil {
+			return fmt.Errorf("setting axis %d: %w", code, err)
+		}
+		return nil
+	})
+}
+
+// control runs one call against this node's file descriptor. The fd
+// is reached through the runtime's own accessor rather than through
+// Fd, which would take the file out of the poller and leave a Close
+// unable to end the read in flight on it.
+func (n *evdevNode) control(call func(fd int) error) error {
+	connection, err := n.file.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var failed error
+	if err := connection.Control(func(fd uintptr) { failed = call(int(fd)) }); err != nil {
+		return err
+	}
+	return failed
 }
 
 // open opens a real evdev node for reading.

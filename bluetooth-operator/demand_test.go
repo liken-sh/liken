@@ -6,6 +6,7 @@ package main
 // from the files that record what each consumer holds.
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -61,7 +62,7 @@ func TestANodeNoClaimHoldsDeliversNothing(t *testing.T) {
 func TestAClaimWithNoInputsReceivesEveryClass(t *testing.T) {
 	kernel, held := relayingOne(t, dualSenseGamepad())
 
-	held.prepare(testMAC, testClaimUID, everyInputClass)
+	held.prepare(testMAC, testClaimUID, delivery{classes: everyInputClass})
 
 	node := kernel.node(t, "/dev/input/event5")
 	for _, event := range []uint16{evKey, evAbs, evRel, evMsc} {
@@ -76,7 +77,7 @@ func TestAClaimWithNoInputsReceivesEveryClass(t *testing.T) {
 func TestAClaimNarrowsANodeToTheClassesItAsksFor(t *testing.T) {
 	kernel, held := relayingOne(t, airMouse())
 
-	held.prepare(testMAC, testClaimUID, classKey)
+	held.prepare(testMAC, testClaimUID, delivery{classes: classKey})
 
 	node := kernel.node(t, "/dev/input/event5")
 	if !node.delivers(evKey) || !node.delivers(evMsc) {
@@ -93,8 +94,8 @@ func TestTwoClaimsOnOneControllerUnionTheirDemand(t *testing.T) {
 	kernel, held := relayingOne(t, airMouse())
 	const otherClaim = "8b2c4d6e-1f30-4a5b-9c7d-0e1f2a3b4c5d"
 
-	held.prepare(testMAC, testClaimUID, classKey)
-	held.prepare(testMAC, otherClaim, classMouse)
+	held.prepare(testMAC, testClaimUID, delivery{classes: classKey})
+	held.prepare(testMAC, otherClaim, delivery{classes: classMouse})
 
 	node := kernel.node(t, "/dev/input/event5")
 	if !node.delivers(evKey) || !node.delivers(evRel) {
@@ -119,12 +120,12 @@ func TestAWidenedDemandNeedsNoReconnect(t *testing.T) {
 	kernel, held := relayingOne(t, airMouse())
 	node := kernel.node(t, "/dev/input/event5")
 
-	held.prepare(testMAC, testClaimUID, classKey)
+	held.prepare(testMAC, testClaimUID, delivery{classes: classKey})
 	if node.delivers(evRel) {
 		t.Fatal("the node delivers the pointer events before anything asked for them")
 	}
 
-	held.prepare(testMAC, testClaimUID, everyInputClass)
+	held.prepare(testMAC, testClaimUID, delivery{classes: everyInputClass})
 
 	if !node.delivers(evRel) {
 		t.Error("the widened claim does not receive the pointer events")
@@ -137,7 +138,7 @@ func TestAWidenedDemandNeedsNoReconnect(t *testing.T) {
 // The last claim on a controller ends, and the node stops being read.
 func TestUnprepareLeavesANodeDeliveringNothing(t *testing.T) {
 	kernel, held := relayingOne(t, dualSenseGamepad())
-	held.prepare(testMAC, testClaimUID, everyInputClass)
+	held.prepare(testMAC, testClaimUID, delivery{classes: everyInputClass})
 
 	held.unprepare(testClaimUID)
 
@@ -151,7 +152,7 @@ func TestUnprepareLeavesANodeDeliveringNothing(t *testing.T) {
 // one before the pump reads anything.
 func TestAReconnectedNodeTakesTheDemandTheClaimsAlreadyHold(t *testing.T) {
 	kernel, held := relayingOne(t, airMouse())
-	held.prepare(testMAC, testClaimUID, classKey)
+	held.prepare(testMAC, testClaimUID, delivery{classes: classKey})
 
 	// The controller slept, and returned on a different event number.
 	if err := kernel.writer(t, "/dev/input/event5").Close(); err != nil {
@@ -250,5 +251,189 @@ func TestRelayClassesAreNoneForABondThatHasNeverConnected(t *testing.T) {
 	held := newRelays(newFakeKernel())
 	if got := held.classes(testMAC); got != 0 {
 		t.Errorf("classes = %s, want none", got)
+	}
+}
+
+// jitteryStick is a pad's right stick as the kernel reports it: two
+// axes with no smoothing at all, which is what makes the pad report
+// position noise at rest.
+func jitteryStick() evdevCapabilities {
+	return evdevCapabilities{
+		Name: "Wireless Controller",
+		Codes: map[string][]uint16{
+			"EV_KEY": codeRange(0x130, 0x13e),
+			"EV_ABS": {0x00, 0x01, 0x03, 0x04},
+		},
+		Axes: []absAxis{
+			{Code: 0x00, Minimum: 0, Maximum: 255},
+			{Code: 0x01, Minimum: 0, Maximum: 255},
+			{Code: 0x03, Minimum: 0, Maximum: 255},
+			{Code: 0x04, Minimum: 0, Maximum: 255},
+		},
+	}
+}
+
+// A claim that states an axis writes it, and the axes it says nothing
+// about take no write at all.
+func TestAClaimTunesOnlyTheAxesItStates(t *testing.T) {
+	kernel, held := relayingOne(t, jitteryStick())
+
+	held.prepare(testMAC, testClaimUID, delivery{
+		classes: classJoystick,
+		axes:    axisOverrides{0x03: {Fuzz: ptr(int32(4))}, 0x04: {Fuzz: ptr(int32(4))}},
+	})
+
+	node := kernel.node(t, "/dev/input/event5")
+	for _, code := range []uint16{0x03, 0x04} {
+		if got := node.axis(code).Fuzz; got != 4 {
+			t.Errorf("%s reports fuzz %d, want 4", absCodeName(code), got)
+		}
+	}
+	for _, code := range []uint16{0x00, 0x01} {
+		if got := node.axis(code).Fuzz; got != 0 {
+			t.Errorf("%s reports fuzz %d, want the device's own 0", absCodeName(code), got)
+		}
+	}
+	if got := node.writes(); got != 2 {
+		t.Errorf("the relay wrote %d axes, want the two the claim states", got)
+	}
+}
+
+// A controller nothing has claimed takes no write, because the device
+// reports what it reports until somebody asks for something else.
+func TestANodeNoClaimHoldsTakesNoAxisWrite(t *testing.T) {
+	kernel, _ := relayingOne(t, jitteryStick())
+
+	if got := kernel.node(t, "/dev/input/event5").writes(); got != 0 {
+		t.Errorf("the relay wrote %d axes with no claim prepared", got)
+	}
+}
+
+// Two claims on one controller both get what they asked for, so an
+// axis takes the largest value either one states.
+func TestTwoClaimsUniteTheLargestValueOfEachAxis(t *testing.T) {
+	kernel, held := relayingOne(t, jitteryStick())
+	const otherClaim = "8b2c4d6e-1f30-4a5b-9c7d-0e1f2a3b4c5d"
+
+	held.prepare(testMAC, testClaimUID, delivery{
+		classes: classJoystick,
+		axes:    axisOverrides{0x03: {Fuzz: ptr(int32(4))}},
+	})
+	held.prepare(testMAC, otherClaim, delivery{
+		classes: classJoystick,
+		axes:    axisOverrides{0x03: {Fuzz: ptr(int32(8)), Flat: ptr(int32(15))}},
+	})
+
+	node := kernel.node(t, "/dev/input/event5")
+	if got := node.axis(0x03); got.Fuzz != 8 || got.Flat != 15 {
+		t.Errorf("ABS_RX reports fuzz %d and flat %d, want 8 and 15", got.Fuzz, got.Flat)
+	}
+
+	// The claim that asked for more ends. The axis keeps what the
+	// remaining claim asked for, and gives back the rest.
+	held.unprepare(otherClaim)
+	if got := node.axis(0x03); got.Fuzz != 4 || got.Flat != 0 {
+		t.Errorf("ABS_RX reports fuzz %d and flat %d, want 4 and the device's own 0", got.Fuzz, got.Flat)
+	}
+}
+
+// The last claim that stated an axis goes away, and the device's own
+// values come back.
+func TestUnprepareRestoresTheDevicesOwnAxisValues(t *testing.T) {
+	device := jitteryStick()
+	// This pad reports a little smoothing of its own.
+	device.Axes[2] = absAxis{Code: 0x03, Minimum: 0, Maximum: 255, Fuzz: 1, Flat: 2}
+	kernel, held := relayingOne(t, device)
+
+	held.prepare(testMAC, testClaimUID, delivery{
+		classes: classJoystick,
+		axes:    axisOverrides{0x03: {Fuzz: ptr(int32(4)), Flat: ptr(int32(15))}},
+	})
+	held.unprepare(testClaimUID)
+
+	if got := kernel.node(t, "/dev/input/event5").axis(0x03); got.Fuzz != 1 || got.Flat != 2 {
+		t.Errorf("ABS_RX reports fuzz %d and flat %d, want the device's own 1 and 2", got.Fuzz, got.Flat)
+	}
+}
+
+// A controller that sleeps and returns is a new kernel device, which
+// carries none of what this operator wrote, so the axes are tuned
+// again on the way in.
+func TestAReconnectedNodeIsTunedAgain(t *testing.T) {
+	kernel, held := relayingOne(t, jitteryStick())
+	held.prepare(testMAC, testClaimUID, delivery{
+		classes: classJoystick,
+		axes:    axisOverrides{0x03: {Fuzz: ptr(int32(4))}},
+	})
+
+	if err := kernel.writer(t, "/dev/input/event5").Close(); err != nil {
+		t.Fatal(err)
+	}
+	kernel.registerNode("/dev/input/event9", jitteryStick())
+	waitFor(t, "the relay to read the node that returned", func() bool {
+		held.ensure(testMAC, []string{"/dev/input/event9"})
+		return kernel.opened() == 2
+	})
+
+	if got := kernel.node(t, "/dev/input/event9").axis(0x03).Fuzz; got != 4 {
+		t.Errorf("the reconnected node reports fuzz %d, want 4", got)
+	}
+}
+
+// This operator restarts while the controller stays connected, so the
+// kernel still reports what the previous pod wrote. The stored
+// snapshot must keep the device's own values, or the axis could never
+// be put back.
+func TestTheSnapshotKeepsTheDevicesOwnValuesUnderATunedAxis(t *testing.T) {
+	device := jitteryStick()
+	device.Axes[2] = absAxis{Code: 0x03, Minimum: 0, Maximum: 255, Fuzz: 1}
+	kernel, held := relayingOne(t, device)
+	held.prepare(testMAC, testClaimUID, delivery{
+		classes: classJoystick,
+		axes:    axisOverrides{0x03: {Fuzz: ptr(int32(4))}},
+	})
+
+	// The kernel now reports the applied fuzz, and the next pass reads
+	// the node again.
+	tuned := device
+	tuned.Axes = append([]absAxis(nil), device.Axes...)
+	tuned.Axes[2] = absAxis{Code: 0x03, Minimum: 0, Maximum: 255, Fuzz: 4}
+	kernel.registerNode("/dev/input/event5", tuned)
+	held.ensure(testMAC, []string{"/dev/input/event5"})
+
+	var stored evdevSnapshot
+	if err := json.Unmarshal(held.snapshot(testMAC), &stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, axis := range stored.Nodes[0].Axes {
+		if axis.Code == 0x03 && axis.Fuzz != 1 {
+			t.Errorf("the snapshot records fuzz %d for ABS_RX, want the device's own 1", axis.Fuzz)
+		}
+	}
+}
+
+// The claims prepared before this operator started still hold their
+// axes, so a restart applies the same values to the same axes.
+func TestRestorePreparedRebuildsTheAxesFromTheSpecFiles(t *testing.T) {
+	cdiTempDir(t)
+	first := newRelays(newFakeKernel())
+	plugin := &draPlugin{
+		client: testClient(t, configuredClaim(t,
+			[]AllocatedConfig{driverConfig("FromClaim",
+				`{"inputs":["joystick"],"axes":{"ABS_RX":{"fuzz":4}}}`)},
+			controllerAllocation())),
+		relays: first,
+	}
+	first.restore(testMAC, storedCapabilities(t))
+	if resp := plugin.prepareClaim(testClaim()); resp.Error != "" {
+		t.Fatalf("prepare failed: %s", resp.Error)
+	}
+	first.stop(testMAC)
+
+	kernel, restarted := relayingOne(t, jitteryStick())
+	restarted.restorePrepared()
+
+	if got := kernel.node(t, "/dev/input/event5").axis(0x03).Fuzz; got != 4 {
+		t.Errorf("the restored demand reports fuzz %d for ABS_RX, want 4", got)
 	}
 }

@@ -9,17 +9,17 @@
 # The gate measures on a pinned toolchain. The CI step says why.
 #
 # The number is what CI measures, not what a developer's machine
-# measures. Three tests create a virtual input device through
+# measures. Four tests create a virtual input device through
 # /dev/uinput, and CI's runner does not permit that, so a machine
 # that does measures about two points higher. To measure what CI
-# measures, skip those three tests:
+# measures, skip those four tests:
 #
-#   go test -skip 'TestCreateAVirtualDeviceOnTheRealKernel|TestReadBackTheCapabilitiesOfADeviceThisTestCreated|TestNarrowARealNodeOnTheRealKernel' -coverprofile=coverage.out ./...
+#   go test -skip 'TestCreateAVirtualDeviceOnTheRealKernel|TestReadBackTheCapabilitiesOfADeviceThisTestCreated|TestNarrowARealNodeOnTheRealKernel|TestTuneARealAxisOnTheRealKernel' -coverprofile=coverage.out ./...
 
 profile: coverage.out
 
 threshold:
-  total: 68
+  total: 69
 
 override:
   # The bluetoothd supervisor: what is testable is the argument

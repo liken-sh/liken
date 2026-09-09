@@ -113,7 +113,7 @@ func TestADeviceEntryCarriesOnlyTheSchemasFields(t *testing.T) {
 	device := cdiDevice{
 		Name:           "claim-controller",
 		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event8"})},
-		Annotations:    annotateInputs([]string{"joystick", "key"}),
+		Annotations:    annotateDelivery([]string{"joystick", "key"}, "ABS_RX=4:"),
 	}
 	encoded, err := json.Marshal(device)
 	if err != nil {
@@ -132,5 +132,24 @@ func TestADeviceEntryCarriesOnlyTheSchemasFields(t *testing.T) {
 	}
 	if got := device.inputs(); len(got) != 2 || got[0] != "joystick" || got[1] != "key" {
 		t.Errorf("inputs() = %v, want the two classes back", got)
+	}
+	if got := device.axes(); got != "ABS_RX=4:" {
+		t.Errorf("axes() = %q, want the applied values back", got)
+	}
+}
+
+// A claim that asks for nothing beyond the default leaves the device
+// unannotated, so a spec file this driver wrote before these
+// parameters existed reads back the same way.
+func TestADeviceEntryCarriesNoAnnotationForTheDefault(t *testing.T) {
+	device := cdiDevice{Name: "claim-controller", Annotations: annotateDelivery(nil, "")}
+	if device.Annotations != nil {
+		t.Errorf("annotations = %v, want none", device.Annotations)
+	}
+	if got := device.inputs(); got != nil {
+		t.Errorf("inputs() = %v, want none", got)
+	}
+	if got := device.axes(); got != "" {
+		t.Errorf("axes() = %q, want none", got)
 	}
 }

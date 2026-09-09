@@ -407,6 +407,9 @@ func TestPrepareClaimRefusesAConfigurationItCannotRead(t *testing.T) {
 	}{
 		{name: "an empty list", parameters: `{"inputs":[]}`, says: "empty"},
 		{name: "an unknown class", parameters: `{"inputs":["buttons"]}`, says: `"buttons"`},
+		{name: "an unknown axis", parameters: `{"axes":{"ABS_NOPE":{"fuzz":4}}}`, says: "ABS_NOPE"},
+		{name: "a field an axis does not take", parameters: `{"axes":{"ABS_X":{"maximum":9}}}`, says: "maximum"},
+		{name: "a negative fuzz", parameters: `{"axes":{"ABS_X":{"fuzz":-1}}}`, says: "negative"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -428,5 +431,30 @@ func TestPrepareClaimRefusesAConfigurationItCannotRead(t *testing.T) {
 				t.Fatal("a failed prepare wrote a spec file")
 			}
 		})
+	}
+}
+
+// The axis values a claim applied are recorded beside its classes,
+// because a restart of this operator applies the same values to the
+// same axes.
+func TestPrepareClaimRecordsTheAxesItApplied(t *testing.T) {
+	plugin := preparePlugin(t,
+		configuredClaim(t,
+			[]AllocatedConfig{driverConfig("FromClaim",
+				`{"inputs":["joystick"],"axes":{"ABS_RX":{"fuzz":4},"ABS_RY":{"fuzz":4}}}`)},
+			controllerAllocation()),
+		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
+	)
+
+	resp := plugin.prepareClaim(testClaim())
+	if resp.Error != "" {
+		t.Fatalf("prepare failed: %s", resp.Error)
+	}
+	spec := readSpec(t, cdiSpecPath(testClaimUID))
+	if got := spec.Devices[0].axes(); got != "ABS_RX=4:,ABS_RY=4:" {
+		t.Errorf("axes = %q, want the two axes the claim states", got)
+	}
+	if got := inputsOf(t, spec, 0); !reflect.DeepEqual(got, []string{"joystick"}) {
+		t.Errorf("inputs = %v, want [joystick]", got)
 	}
 }

@@ -58,7 +58,7 @@ func newRelays(kernel inputKernel) *relays {
 // claim's UID.
 type controllerRelay struct {
 	nodes  map[string]*nodeRelay
-	demand map[string]inputClasses
+	demand map[string]delivery
 }
 
 // nodeRelay is one virtual device and the real node its events come
@@ -127,6 +127,14 @@ func (r *relays) ensure(mac string, nodes []string) {
 		// is not rebuilt to match, because rebuilding it takes the node away
 		// from a container that holds it open. The next start of this pod
 		// creates the device from the new snapshot.
+		//
+		// The one exception is an axis this operator tunes. The kernel
+		// reports back the value this operator wrote, so the snapshot
+		// keeps the value it already holds for that axis. Otherwise a
+		// restart with the controller still connected would record
+		// this operator's own smoothing as the device's, and the axis
+		// could never be put back.
+		caps.Axes = ownAxes(relay.caps.Axes, caps.Axes, held.demanded().axes)
 		relay.caps = caps
 		if relay.device == nil && !r.create(mac, relay) {
 			continue
@@ -147,7 +155,7 @@ func (r *relays) controller(mac string) *controllerRelay {
 	if held == nil {
 		held = &controllerRelay{
 			nodes:  map[string]*nodeRelay{},
-			demand: map[string]inputClasses{},
+			demand: map[string]delivery{},
 		}
 		r.held[mac] = held
 	}
@@ -300,17 +308,19 @@ func (r *relays) create(mac string, relay *nodeRelay) bool {
 }
 
 // read opens a real node, limits it to what the controller's prepared
-// claims demand, and starts moving its events. A fresh fd carries no
-// mask, so the demand is applied before the pump reads anything. The
-// caller holds the lock.
-func (r *relays) read(mac string, relay *nodeRelay, path string, want inputClasses) {
+// claims demand, tunes its axes the same way, and starts moving its
+// events. A reconnect is a new kernel device, so it carries neither
+// the mask nor the axis values, and both are applied before the pump
+// reads anything. The caller holds the lock.
+func (r *relays) read(mac string, relay *nodeRelay, path string, want delivery) {
 	source, err := r.kernel.open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "relay: opening %s of controller %s: %v\n", path, publishedMAC(mac), err)
 		return
 	}
 	relay.source, relay.sourcePath, relay.narrowed = source, path, false
-	relay.narrow(mac, want)
+	relay.narrow(mac, want.classes)
+	relay.tune(mac, want.axes)
 	go r.pump(relay, source)
 }
 
@@ -362,4 +372,27 @@ func (r *relays) pump(relay *nodeRelay, source realNode) {
 // stands for.
 func relayPhys(mac string) string {
 	return DriverName + "/" + normalizeMAC(mac)
+}
+
+// ownAxes is the device's own absinfo for every axis of a node: what
+// the kernel reports now, except for the axes this operator tunes,
+// which keep the values the snapshot already holds.
+func ownAxes(stored, read []absAxis, tuned axisOverrides) []absAxis {
+	if len(tuned) == 0 {
+		return read
+	}
+	own := make(map[uint16]absAxis, len(stored))
+	for _, axis := range stored {
+		own[axis.Code] = axis
+	}
+	kept := make([]absAxis, 0, len(read))
+	for _, axis := range read {
+		if _, overridden := tuned[axis.Code]; overridden {
+			if before, found := own[axis.Code]; found {
+				axis.Fuzz, axis.Flat = before.Fuzz, before.Flat
+			}
+		}
+		kept = append(kept, axis)
+	}
+	return kept
 }

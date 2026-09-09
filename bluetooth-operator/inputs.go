@@ -61,20 +61,30 @@ func recordedInputs(want inputClasses) []string {
 	return want.names()
 }
 
-// inputsParameters is the shape this driver reads out of an opaque
-// configuration block. Inputs is a pointer so that a block which
-// states nothing about inputs is not read as a block that states an
-// empty list.
-type inputsParameters struct {
-	Inputs *[]string `json:"inputs"`
+// delivery is what one allocated controller's claim asked for: which
+// classes of input reach the container, and how each absolute axis is
+// tuned on the way.
+type delivery struct {
+	classes inputClasses
+	axes    axisOverrides
 }
 
-// claimInputs is what one allocated device of a claim receives. The
+// claimParameters is the shape this driver reads out of an opaque
+// configuration block. Each field is a pointer so that a block which
+// states nothing about it is not read as a block that states an empty
+// value.
+type claimParameters struct {
+	Inputs *[]string                   `json:"inputs"`
+	Axes   *map[string]json.RawMessage `json:"axes"`
+}
+
+// claimDelivery is what one allocated device of a claim receives. The
 // blocks arrive from the DeviceClass and from the claim, and the
-// claim's own block wins, so a cluster owner can put a default on a
-// class and a workload can still ask for something else.
-func claimInputs(config []AllocatedConfig, request string) (inputClasses, error) {
-	want := everyInputClass
+// claim's own block wins for each parameter on its own, so a cluster
+// owner can put a default on a class and a workload can still ask for
+// something else.
+func claimDelivery(config []AllocatedConfig, request string) (delivery, error) {
+	want := delivery{classes: everyInputClass}
 	// The class's block is read first and the claim's second, so the
 	// claim's answer overwrites the class's whichever order the API
 	// server lists them in.
@@ -83,18 +93,24 @@ func claimInputs(config []AllocatedConfig, request string) (inputClasses, error)
 			if block.Source != source || !block.appliesTo(request) {
 				continue
 			}
-			var parameters inputsParameters
+			var parameters claimParameters
 			if err := json.Unmarshal(block.Opaque.Parameters, &parameters); err != nil {
-				return 0, fmt.Errorf("reading the %s configuration: %w", source, err)
+				return delivery{}, fmt.Errorf("reading the %s configuration: %w", source, err)
 			}
-			if parameters.Inputs == nil {
-				continue
+			if parameters.Inputs != nil {
+				classes, err := parseInputClasses(*parameters.Inputs)
+				if err != nil {
+					return delivery{}, err
+				}
+				want.classes = classes
 			}
-			classes, err := parseInputClasses(*parameters.Inputs)
-			if err != nil {
-				return 0, err
+			if parameters.Axes != nil {
+				axes, err := parseAxisOverrides(*parameters.Axes)
+				if err != nil {
+					return delivery{}, err
+				}
+				want.axes = axes
 			}
-			want = classes
 		}
 	}
 	return want, nil

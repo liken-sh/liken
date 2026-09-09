@@ -299,10 +299,10 @@ func TestClaimInputs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := claimInputs(c.config, c.request)
+			got, err := claimDelivery(c.config, c.request)
 			if c.problem != "" {
 				if err == nil {
-					t.Fatalf("claimInputs = %s, want a refusal", got)
+					t.Fatalf("claimDelivery = %s, want a refusal", got.classes)
 				}
 				if !strings.Contains(err.Error(), c.problem) {
 					t.Errorf("the refusal does not say %s: %v", c.problem, err)
@@ -312,8 +312,8 @@ func TestClaimInputs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got != c.want {
-				t.Errorf("classes = %s, want %s", got, c.want)
+			if got.classes != c.want {
+				t.Errorf("classes = %s, want %s", got.classes, c.want)
 			}
 		})
 	}
@@ -333,5 +333,77 @@ func TestInputClassesRecordOnlyANarrowedDemand(t *testing.T) {
 		if got := recordedInputs(c.want); !reflect.DeepEqual(got, c.recorded) {
 			t.Errorf("recordedInputs(%s) = %v, want %v", c.want, got, c.recorded)
 		}
+	}
+}
+
+// The axes resolve the same way the classes do, and on their own: a
+// class can carry the smoothing a pad needs while the claim states
+// which inputs it reads.
+func TestClaimDeliveryReadsTheAxesBesideTheInputs(t *testing.T) {
+	cases := []struct {
+		name    string
+		config  []AllocatedConfig
+		classes inputClasses
+		axes    axisOverrides
+		problem string
+	}{
+		{
+			name:    "no configuration at all",
+			classes: everyInputClass,
+			axes:    nil,
+		},
+		{
+			name: "both parameters in one block",
+			config: []AllocatedConfig{driverConfig("FromClaim",
+				`{"inputs":["joystick"],"axes":{"ABS_RX":{"fuzz":4}}}`)},
+			classes: classJoystick,
+			axes:    axisOverrides{0x03: {Fuzz: ptr(int32(4))}},
+		},
+		{
+			name: "the class states the axes and the claim states the inputs",
+			config: []AllocatedConfig{
+				driverConfig("FromClass", `{"axes":{"ABS_RX":{"fuzz":4}}}`),
+				driverConfig("FromClaim", `{"inputs":["joystick"]}`),
+			},
+			classes: classJoystick,
+			axes:    axisOverrides{0x03: {Fuzz: ptr(int32(4))}},
+		},
+		{
+			name: "the claim's axes win over the class's",
+			config: []AllocatedConfig{
+				driverConfig("FromClass", `{"axes":{"ABS_RX":{"fuzz":4}}}`),
+				driverConfig("FromClaim", `{"axes":{"ABS_RY":{"fuzz":8}}}`),
+			},
+			classes: everyInputClass,
+			axes:    axisOverrides{0x04: {Fuzz: ptr(int32(8))}},
+		},
+		{
+			name:    "an axis this driver cannot read",
+			config:  []AllocatedConfig{driverConfig("FromClaim", `{"axes":{"ABS_NOPE":{"fuzz":4}}}`)},
+			problem: "ABS_NOPE",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := claimDelivery(c.config, "controller")
+			if c.problem != "" {
+				if err == nil {
+					t.Fatalf("claimDelivery = %+v, want a refusal", got)
+				}
+				if !strings.Contains(err.Error(), c.problem) {
+					t.Errorf("the refusal does not say %s: %v", c.problem, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.classes != c.classes {
+				t.Errorf("classes = %s, want %s", got.classes, c.classes)
+			}
+			if !reflect.DeepEqual(got.axes, c.axes) {
+				t.Errorf("axes = %v, want %v", got.axes, c.axes)
+			}
+		})
 	}
 }

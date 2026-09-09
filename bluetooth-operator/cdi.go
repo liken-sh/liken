@@ -91,14 +91,24 @@ type cdiSpec struct {
 // cdiDevice is one allocated device's grant. Its annotations are the
 // one place the CDI schema leaves for a driver's own record, and the
 // container runtime refuses a spec with any other extra field. This
-// driver records the input classes the claim asked for there, so a
-// restart rebuilds each pump's demand from the same files that record
-// which nodes the consumer holds. A claim that receives every class
-// writes no annotation, so a file written before the parameter
+// driver records what the claim asked for there, so a restart rebuilds
+// each pump's demand from the same files that record which nodes the
+// consumer holds. A claim that asked for nothing beyond the default
+// writes no annotation, so a file written before these parameters
 // existed reads back as the default.
-// inputsAnnotation is the annotation that holds a claim's input
-// classes, as a comma-separated list of their names.
-const inputsAnnotation = DriverName + "/inputs"
+type cdiDevice struct {
+	Name           string            `json:"name"`
+	ContainerEdits cdiEdits          `json:"containerEdits"`
+	Annotations    map[string]string `json:"annotations,omitempty"`
+}
+
+// The two annotations this driver writes: the input classes the claim
+// asked for, as a comma-separated list of their names, and the axis
+// values it applied, in the form axes.go records.
+const (
+	inputsAnnotation = DriverName + "/inputs"
+	axesAnnotation   = DriverName + "/axes"
+)
 
 // inputs reads the recorded classes back, and none for a device
 // recorded without the annotation.
@@ -110,19 +120,27 @@ func (d cdiDevice) inputs() []string {
 	return strings.Split(recorded, ",")
 }
 
-// annotateInputs records a narrowed demand on a device. Every class
-// leaves the device unannotated.
-func annotateInputs(inputs []string) map[string]string {
-	if len(inputs) == 0 {
-		return nil
-	}
-	return map[string]string{inputsAnnotation: strings.Join(inputs, ",")}
+// axes reads the recorded axis values back, and an empty string for a
+// device recorded without the annotation.
+func (d cdiDevice) axes() string {
+	return d.Annotations[axesAnnotation]
 }
 
-type cdiDevice struct {
-	Name           string            `json:"name"`
-	ContainerEdits cdiEdits          `json:"containerEdits"`
-	Annotations    map[string]string `json:"annotations,omitempty"`
+// annotateDelivery records what a claim asked for on one device. A
+// claim that takes every class and tunes no axis leaves the device
+// unannotated.
+func annotateDelivery(inputs []string, axes string) map[string]string {
+	annotations := map[string]string{}
+	if len(inputs) > 0 {
+		annotations[inputsAnnotation] = strings.Join(inputs, ",")
+	}
+	if axes != "" {
+		annotations[axesAnnotation] = axes
+	}
+	if len(annotations) == 0 {
+		return nil
+	}
+	return annotations
 }
 
 type cdiEdits struct {

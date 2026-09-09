@@ -281,12 +281,14 @@ func sameNodes(delivered, current []string) bool {
 
 // deliveredDevice is one prepared claim's grant of one device: which
 // claim holds it, which published device it is, the node paths the
-// container received, and the input classes the claim asked for.
+// container received, and what the claim asked for: the input classes
+// and the axis values, each as this driver recorded them.
 type deliveredDevice struct {
 	claimUID string
 	device   string
 	nodes    []string
 	inputs   []string
+	axes     string
 }
 
 // controller answers with the MAC of the controller a grant names,
@@ -346,6 +348,7 @@ func eachDeliveredDevice(visit func(prepared deliveredDevice)) {
 				device:   allocated,
 				nodes:    nodes,
 				inputs:   device.inputs(),
+				axes:     device.axes(),
 			})
 		}
 	}
