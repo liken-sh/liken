@@ -24,8 +24,8 @@ use tempfile::TempDir;
 
 use super::SidecarSource;
 use crate::catalog::{
-    Answer, Counts, Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails, PlayItem,
-    Presentation, Query, Selection, SeriesDetails, Slot, Sort, Source,
+    Answer, Change, Counts, Credit, FileFacts, Fold, InSeries, LibraryEntry, MovieDetails,
+    PlayItem, Presentation, Query, Selection, SeriesDetails, Slot, Sort, Source,
 };
 
 // One library's wall, as the libraries strip opens it.

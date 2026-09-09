@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-use crate::catalog::Source;
 use crate::catalog::sidecar::SidecarSource;
+use crate::catalog::{Change, Source};
 
 // One event as the pinned Corrosion agent sent it, captured from
 // `/v1/updates/movies` on the local harness.
@@ -176,14 +176,14 @@ fn an_event_marks_changed_and_fires_the_waker() {
     source.wake_by(Arc::new(move || {
         let _ = sender.send(());
     }));
-    assert!(!source.changed());
+    assert_eq!(source.changed(), Change::None);
 
     assert!(within(DEADLINE, || agent.movies_streams() >= 1));
     agent.send_event();
 
     receiver.recv_timeout(DEADLINE).unwrap();
-    assert!(source.changed());
-    assert!(!source.changed());
+    assert_eq!(source.changed(), Change::Catalog);
+    assert_eq!(source.changed(), Change::None);
 }
 
 #[test]
@@ -201,5 +201,5 @@ fn a_dropped_stream_reconnects_and_marks_everything_changed() {
             >= 2
     });
     assert!(reconnected, "requests seen: {:?}", agent.requests());
-    assert!(within(DEADLINE, || source.changed()));
+    assert!(within(DEADLINE, || source.changed().catalog()));
 }

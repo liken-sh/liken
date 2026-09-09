@@ -35,7 +35,7 @@ use crate::art::{ArtCounts, Image};
 use crate::catalog::draw::Date;
 use crate::catalog::pool::Candidate;
 use crate::catalog::{
-    Answer, Credit, CreditSlot, Credits, Entry, Episode, FileFacts, Fold, Franchise,
+    Answer, Change, Credit, CreditSlot, Credits, Entry, Episode, FileFacts, Fold, Franchise,
     FranchiseEntry, GenreEntry, GenreSort, Held, Identity, InSeries, LibraryEntry, Membership,
     MovieDetails, MovieSet, Order, Person, PlayItem, Played, Presentation, Progress, Query, Resume,
     SeriesDetails, Slot, Title,
@@ -67,6 +67,9 @@ const IN_SET: usize = 4;
 struct Fake {
     movies: usize,
     changed: bool,
+    // A change on the progress store alone, which the browser coalesces
+    // rather than reads at once.
+    progressed: bool,
     woken: bool,
     calls: Vec<&'static str>,
     // The play list this source answers, and the last choice it was asked
@@ -711,8 +714,11 @@ impl Source for Fake {
         Vec::new()
     }
 
-    fn changed(&mut self) -> bool {
-        std::mem::take(&mut self.changed)
+    fn changed(&mut self) -> Change {
+        match std::mem::take(&mut self.changed) {
+            true => Change::Catalog,
+            false => Change::of(false, std::mem::take(&mut self.progressed)),
+        }
     }
 
     fn wake_by(&mut self, _wake: Waker) {

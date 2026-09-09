@@ -5,6 +5,7 @@
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::catalog::Change;
 use crate::catalog::search::PEOPLE;
 use crate::catalog::sidecar::search::read;
 
@@ -201,7 +202,7 @@ fn a_change_on_the_feed_rebuilds_the_index_after_the_quiet_period() {
     assert_eq!(awaited(&mut source, &query).slots.len(), 1);
 
     insert_set(&path, FEATURES, "set:2", "The Coppice Cycle Again");
-    source.shared.mark();
+    source.shared.mark(Change::Catalog);
     let deadline = Instant::now() + LANDS_IN;
     let mut answer = source.wall(&query);
     while answer.slots.len() < 2 && Instant::now() < deadline {

@@ -3,8 +3,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use super::*;
 use crate::catalog::draw::Date;
 use crate::catalog::{
-    Credits, Episode, Franchise, FranchiseEntry, GenreEntry, Membership, MovieDetails, MovieSet,
-    Person, PlayItem,
+    Change, Credits, Episode, Franchise, FranchiseEntry, GenreEntry, Membership, MovieDetails,
+    MovieSet, Person, PlayItem,
 };
 use crate::harness::Waker;
 use crate::screens::home::{self, Row};
@@ -156,7 +156,7 @@ fn a_reader_without_streams_starts_a_fresh_scope_for_each_page() {
         person_strip_headshot(&second),
         format!("{OTHER}/headshot.jpg")
     );
-    assert!(!reader.changed());
+    assert_eq!(reader.changed(), Change::None);
 }
 
 #[test]
@@ -331,8 +331,8 @@ impl Source for PanickingSource {
         unreachable!()
     }
 
-    fn changed(&mut self) -> bool {
-        false
+    fn changed(&mut self) -> Change {
+        Change::None
     }
 
     fn wake_by(&mut self, _wake: Waker) {}

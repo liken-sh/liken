@@ -2,8 +2,8 @@ use super::super::*;
 use crate::catalog::franchise::{Entry, Held, SERIES as SERIES_KIND};
 use crate::catalog::{Answer, Episode};
 use crate::catalog::{
-    Credit, CreditSlot, Credits, FileFacts, Franchise, GenreEntry, LibraryEntry, Membership,
-    MovieDetails, MovieSet, Person, PlayItem, Query, SeriesDetails,
+    Change, Credit, CreditSlot, Credits, FileFacts, Franchise, GenreEntry, LibraryEntry,
+    Membership, MovieDetails, MovieSet, Person, PlayItem, Query, SeriesDetails,
 };
 use crate::harness::Waker;
 
@@ -237,8 +237,8 @@ impl Source for Serials {
         Vec::new()
     }
 
-    fn changed(&mut self) -> bool {
-        false
+    fn changed(&mut self) -> Change {
+        Change::None
     }
 
     fn episode_progress(

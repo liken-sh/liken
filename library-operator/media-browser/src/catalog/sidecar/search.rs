@@ -130,6 +130,7 @@ fn wait(shared: &Shared, built: u64, quiet: Duration) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Change;
 
     // A quiet period short enough to measure in a test.
     const BRIEF: Duration = Duration::from_millis(120);
@@ -144,7 +145,7 @@ mod tests {
     #[test]
     fn a_change_rebuilds_only_after_the_feed_falls_quiet() {
         let shared = Shared::default();
-        shared.mark();
+        shared.mark(Change::Catalog);
         let started = Instant::now();
         assert_eq!(wait(&shared, 0, BRIEF), Some(1));
         assert!(started.elapsed() >= BRIEF);
@@ -153,11 +154,11 @@ mod tests {
     #[test]
     fn a_further_change_puts_the_quiet_period_out_again() {
         let shared = Arc::new(Shared::default());
-        shared.mark();
+        shared.mark(Change::Catalog);
         let again = shared.clone();
         thread::spawn(move || {
             thread::sleep(BRIEF / 2);
-            again.mark();
+            again.mark(Change::Catalog);
         });
         let started = Instant::now();
         assert_eq!(wait(&shared, 0, BRIEF), Some(2));
@@ -178,7 +179,7 @@ mod tests {
     #[test]
     fn a_stop_during_the_quiet_period_ends_the_wait() {
         let shared = Arc::new(Shared::default());
-        shared.mark();
+        shared.mark(Change::Catalog);
         let stopping = shared.clone();
         thread::spawn(move || {
             thread::sleep(BRIEF / 4);

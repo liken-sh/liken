@@ -190,3 +190,37 @@ fn the_wake_reaches_the_bus() {
 
     assert_eq!(bus.woken.load(Ordering::SeqCst), 1);
 }
+
+// The shade hides the same frames a film does, so a change under it is
+// held and not read: nobody would see the read, and the catalog changes
+// all day.
+#[test]
+fn a_change_under_the_shade_reads_nothing() {
+    let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    assert!(browser.asleep());
+
+    browser.source.calls.clear();
+    browser.source.changed = true;
+    browser.pump(2.0);
+
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+}
+
+// The wake runs the one read the shade held, so the screen a person
+// comes back to is the catalog as it stands.
+#[test]
+fn a_page_held_under_the_shade_is_read_again_on_the_wake() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.key("enter");
+    browser.pump(1.0);
+    browser.source.calls.clear();
+    browser.source.changed = true;
+    browser.pump(2.0);
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
+    browser.pump(3.0);
+
+    assert!(browser.source.calls.contains(&"wall"));
+}

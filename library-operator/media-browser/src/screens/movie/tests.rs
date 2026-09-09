@@ -7,7 +7,7 @@ use super::*;
 use crate::catalog::Answer;
 use crate::catalog::franchise::{Entry, Held, MOVIE};
 use crate::catalog::{
-    Credit, CreditSlot, Credits, Episode, FileFacts, Franchise, GenreEntry, LibraryEntry,
+    Change, Credit, CreditSlot, Credits, Episode, FileFacts, Franchise, GenreEntry, LibraryEntry,
     Membership, Person, PlayItem, Query, SeriesDetails, Title,
 };
 
@@ -264,8 +264,8 @@ impl Source for Films {
         self.plays.clone()
     }
 
-    fn changed(&mut self) -> bool {
-        false
+    fn changed(&mut self) -> Change {
+        Change::None
     }
 
     fn wake_by(&mut self, _wake: Waker) {}

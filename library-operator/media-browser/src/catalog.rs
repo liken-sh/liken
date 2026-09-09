@@ -383,6 +383,42 @@ pub struct Person {
     pub headshot_path: String,
 }
 
+/// What a source found changed since the browser last asked. The browser
+/// keeps the two stores apart because they change on different terms:
+/// the catalog changes when a scan lands, and the progress store changes
+/// every second a film plays somewhere in the house.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Change {
+    #[default]
+    None,
+    Catalog,
+    Progress,
+    Both,
+}
+
+impl Change {
+    /// The two flags a source holds, as one value.
+    pub fn of(catalog: bool, progress: bool) -> Self {
+        match (catalog, progress) {
+            (false, false) => Self::None,
+            (true, false) => Self::Catalog,
+            (false, true) => Self::Progress,
+            (true, true) => Self::Both,
+        }
+    }
+
+    /// Whether the catalog itself changed. A person sees that change at
+    /// once, so the browser reads it at once.
+    pub fn catalog(self) -> bool {
+        matches!(self, Self::Catalog | Self::Both)
+    }
+
+    /// Whether the progress store changed.
+    pub fn progress(self) -> bool {
+        matches!(self, Self::Progress | Self::Both)
+    }
+}
+
 /// What the views read. Every list comes back in the order the views draw
 /// it, so the views sort nothing: titles by the scanner's sort key, and
 /// episodes by their aired numbers.
@@ -390,8 +426,8 @@ pub struct Person {
 /// Every method reads local state and returns at once; no call waits on a
 /// network. [`Source::changed`] carries the freshness contract from plan
 /// 06: a source with an update stream folds events in behind these calls,
-/// wakes the loop through the handle from [`Source::wake_by`], and answers
-/// true once, and the views then re-read what they show.
+/// wakes the loop through the handle from [`Source::wake_by`], and names
+/// what changed once, and the views then re-read what they show.
 pub trait Source {
     /// Start one home page read. A source can retain repeated answers until
     /// [`Source::end_page_read`].
@@ -550,8 +586,8 @@ pub trait Source {
         None
     }
 
-    /// Whether anything changed since the last call.
-    fn changed(&mut self) -> bool;
+    /// What changed since the last call.
+    fn changed(&mut self) -> Change;
 
     /// A second source over the same catalog, for a reader thread of its
     /// own, so a read runs off the frame thread. A source that has no

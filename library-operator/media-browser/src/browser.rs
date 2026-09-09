@@ -30,11 +30,15 @@ use crate::views;
 
 mod keys;
 mod reader;
+// The refresh policy: the one place that decides when the browser reads
+// the catalog again.
+mod refresh;
 // The stack module: the screens a person descended through, and every
 // move across them.
 mod stack;
 
 use keys::key_of;
+use refresh::Refresh;
 
 /// The browsing screen, generic over where its rows and its art
 /// come from, so one browser draws the sidecar's file, a test fixture, and
@@ -84,14 +88,12 @@ pub struct Browser<S: Source, A: Art> {
     // Where the `Person` list is read from again each time the picker
     // opens, or nothing on a run that named no file.
     people_file: Option<std::path::PathBuf>,
-    // Whether the shade is down. The browser never decides it: it asks for
-    // the shade, the crate decides, and the moment comes back here.
-    asleep: bool,
-    // Whether a film covers the surface. The bus says so in every status
-    // whose activity is playing, and the harness builds no frame while it
-    // stands. It lifts on the status that returns to idle, on the wake,
-    // and on the present.
-    covered: bool,
+    // The refresh policy. It holds the shade and the cover, and the
+    // browser decides neither: it asks for the shade, the crate decides,
+    // and the moment comes back here; the bus says in every status
+    // whether a film covers the surface. It also holds every change that
+    // waits to be read, and it alone says when a read runs.
+    refresh: Refresh,
     // Whether a present asked for a fresh Wayland surface.
     surface_due: bool,
     // Whether the return waits for that surface. The return runs on the
@@ -167,8 +169,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             now: clock::seconds,
             audience: Audience::default(),
             people_file: None,
-            asleep: false,
-            covered: false,
+            refresh: Refresh::default(),
             surface_due: false,
             returning: false,
             page: PAGE,
@@ -265,7 +266,7 @@ impl<S: Source, A: Art> Browser<S, A> {
 
     /// Whether the shade is down. The frame is black while it is.
     pub fn asleep(&self) -> bool {
-        self.asleep
+        self.refresh.asleep()
     }
 
     // The picker goes up as a layer over the stack and pops nothing, so
@@ -294,7 +295,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             self.clear_audience();
         }
         let due = self.picker.is_none()
-            && !self.asleep
+            && !self.asleep()
             && self.loading.is_none()
             && self.audience.needs_answer(self.clock);
         if due {
@@ -448,22 +449,22 @@ impl<S: Source, A: Art> Browser<S, A> {
                     self.key(key);
                 }
             }
-            Moment::Sleep => self.asleep = true,
+            Moment::Sleep => self.refresh.shade(true),
             Moment::Wake => {
-                self.asleep = false;
-                self.covered = false;
+                self.refresh.shade(false);
+                self.refresh.cover(false);
                 self.presented();
                 self.lifted();
             }
             Moment::Present => {
                 self.surface_due = true;
-                self.covered = false;
+                self.refresh.cover(false);
                 self.returning = true;
                 self.lifted();
             }
             // Starting leaves the page and its pulse on the screen; the
             // film covers it once it plays.
-            Moment::Status(status) => self.covered = status.activity == Activity::Playing,
+            Moment::Status(status) => self.refresh.cover(status.activity == Activity::Playing),
             // A level brings up the volume row, which draws over every
             // screen.
             Moment::Level { volume, pressed } => self.level.fold(volume, pressed, self.clock),
@@ -640,7 +641,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             true => self.strip_focus,
             false => views::clock::strip::Target::Glass,
         };
-        (!self.asleep).then(|| views::clock::strip::Strip {
+        (!self.asleep()).then(|| views::clock::strip::Strip {
             time: self.time,
             field: self.top().field(),
             focus: self.on_strip.then_some(focus),
@@ -755,7 +756,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // The shade means dark, so a sleeping browser clears to black and
     // not to the theme ground.
     fn background(&self) -> Color {
-        if self.asleep {
+        if self.asleep() {
             return Color::BLACK;
         }
         look::BACKGROUND
@@ -862,7 +863,13 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         let folded = self.drain_bus();
         let delivered = self.store.get_mut().delivered();
         let landed = self.landed_home();
-        if self.source.changed() {
+        // The source names what changed and the policy decides the read.
+        // Nothing else here decides one, so a film's progress rows, which
+        // arrive once a second for two hours, cannot order a full read of
+        // the screen once a second.
+        let change = self.source.changed();
+        self.refresh.changed(change, at);
+        if self.refresh.due(at) {
             // A change marks the home page behind whether or not a page
             // covers it, because back pops to the home page with no read of
             // its own.
@@ -875,7 +882,9 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // draws the continue-watching row. A read already in flight is left
         // to land, because the ask would otherwise repeat on every pass of
         // the loop.
-        let refreshed = !self.reader.reading() && self.refresh_home();
+        // The policy gates this ask too. It is the second way a read
+        // starts, and a hidden screen must start neither.
+        let refreshed = self.refresh.shown() && !self.reader.reading() && self.refresh_home();
         let asked = self.ask();
         folded || delivered || landed || refreshed || asked
     }
@@ -998,18 +1007,20 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // the loop's own floor rate; the volume row, which asks for a frame
     // through each of its fades and names the second it starts to leave
     // through the hold between them; and the clock, which asks for the
-    // second the minute turns. Nothing under a film schedules a frame,
-    // because those frames would draw a black shade nobody sees.
+    // second the minute turns. A fifth wakes the loop with no frame: the
+    // second a held read comes due. Nothing under a film schedules a
+    // frame, because those frames would draw a black shade nobody sees.
     fn covered(&self) -> bool {
-        self.covered
+        self.refresh.covered()
     }
 
     fn next_frame(&self, at: f64) -> Option<f64> {
-        let drawing = !self.asleep;
+        let drawing = !self.refresh.asleep();
         let loading = (drawing && self.loading.is_some()).then_some(at);
         let level = drawing.then(|| self.level.next_frame(at)).flatten();
         let minute = drawing.then_some(self.minute).flatten();
-        [loading, level, minute, self.rest]
+        let read = self.refresh.next_due();
+        [loading, level, minute, self.rest, read]
             .into_iter()
             .flatten()
             .min_by(f64::total_cmp)

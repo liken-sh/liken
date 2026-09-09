@@ -9,7 +9,7 @@ use super::*;
 use crate::art::Image;
 use crate::catalog::Person as Entry;
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, Franchise, GenreEntry, LibraryEntry, Membership,
+    Answer, Change, Credits, Episode, FileFacts, Franchise, GenreEntry, LibraryEntry, Membership,
     MovieDetails, MovieSet, PlayItem, Selection, SeriesDetails, Slot,
 };
 use crate::harness::Waker;
@@ -162,8 +162,8 @@ impl Source for People {
         Vec::new()
     }
 
-    fn changed(&mut self) -> bool {
-        false
+    fn changed(&mut self) -> Change {
+        Change::None
     }
 
     fn wake_by(&mut self, _wake: Waker) {}

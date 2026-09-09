@@ -9,6 +9,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::catalog::Change;
 use crate::harness::Waker;
 
 // The connect timeout bounds one connection attempt. The read timeout
@@ -28,6 +29,10 @@ const STOP_POLL: Duration = Duration::from_millis(50);
 // revision it last built, and the condvar wakes it on each change.
 pub(super) struct Shared {
     pub changed: AtomicBool,
+    // The progress store's own flag, apart from the catalog's, because a
+    // film marks this one every second and the browser reads the two on
+    // different terms.
+    pub progressed: AtomicBool,
     pub wake: Mutex<Option<Waker>>,
     pub stop: AtomicBool,
     pub revision: Mutex<u64>,
@@ -38,6 +43,7 @@ impl Default for Shared {
     fn default() -> Self {
         Self {
             changed: AtomicBool::new(false),
+            progressed: AtomicBool::new(false),
             wake: Mutex::new(None),
             stop: AtomicBool::new(false),
             revision: Mutex::new(0),
@@ -60,13 +66,25 @@ impl Shared {
 
     // The flag is set before the waker fires, so a woken loop always
     // reads changed as true.
-    pub(super) fn mark(&self) {
-        self.changed.store(true, Ordering::Release);
-        *self
-            .revision
-            .lock()
-            .unwrap_or_else(|held| held.into_inner()) += 1;
-        self.signal.notify_all();
+    // The mark names its kind because the stream that carries it follows
+    // one table, and the table says which of the two stores changed.
+    pub(super) fn mark(&self, change: Change) {
+        if change.catalog() {
+            self.changed.store(true, Ordering::Release);
+        }
+        if change.progress() {
+            self.progressed.store(true, Ordering::Release);
+        }
+        // Only a catalog change moves the revision, because the search
+        // index is built over the catalog's tables and a progress row
+        // holds nothing it indexes.
+        if change.catalog() {
+            *self
+                .revision
+                .lock()
+                .unwrap_or_else(|held| held.into_inner()) += 1;
+            self.signal.notify_all();
+        }
         let wake = self.wake.lock().unwrap().clone();
         if let Some(wake) = wake {
             wake();
@@ -77,7 +95,7 @@ impl Shared {
 // The thread runs for the life of the source. The backoff resets once
 // a stream answers, so a healthy sidecar is rejoined at the floor
 // after a single drop.
-pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str) {
+pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str, change: Change) {
     thread::spawn(move || {
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(CONNECT_TIMEOUT)
@@ -86,7 +104,7 @@ pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str) {
         let url = format!("{base}/v1/updates/{table}");
         let mut backoff = BACKOFF_FLOOR;
         while !shared.stopping() {
-            if stream(&agent, &url, &shared) {
+            if stream(&agent, &url, &shared, change) {
                 backoff = BACKOFF_FLOOR;
             }
             pause(&shared, backoff);
@@ -99,7 +117,7 @@ pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str) {
 // and the next stream are gone, and only a full re-read covers them. A
 // failed connect does not mark, because the end that preceded it
 // already did.
-fn stream(agent: &ureq::Agent, url: &str, shared: &Shared) -> bool {
+fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, change: Change) -> bool {
     let Ok(response) = agent.post(url).call() else {
         return false;
     };
@@ -113,7 +131,7 @@ fn stream(agent: &ureq::Agent, url: &str, shared: &Shared) -> bool {
             Ok(0) => break,
             Ok(_) => {
                 if !line.trim().is_empty() {
-                    shared.mark();
+                    shared.mark(change);
                 }
                 line.clear();
             }
@@ -123,7 +141,7 @@ fn stream(agent: &ureq::Agent, url: &str, shared: &Shared) -> bool {
             Err(_) => break,
         }
     }
-    shared.mark();
+    shared.mark(change);
     true
 }
 

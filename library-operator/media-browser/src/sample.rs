@@ -6,7 +6,7 @@ use crate::art::{Art, Image};
 use crate::catalog::franchise;
 use crate::catalog::recency::{self, Candidate};
 use crate::catalog::{
-    Answer, Credit, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
+    Answer, Change, Credit, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
     LibraryEntry, Membership, MovieDetails, MovieSet, Person, PlayItem, Query, Selection,
     SeriesDetails, Slot, Sort, Source, TILES, Title, library_name, pool,
 };
@@ -308,8 +308,8 @@ impl Source for Catalog {
         Vec::new()
     }
 
-    fn changed(&mut self) -> bool {
-        false
+    fn changed(&mut self) -> Change {
+        Change::None
     }
 
     fn wake_by(&mut self, _wake: Waker) {}

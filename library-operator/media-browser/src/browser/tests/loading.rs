@@ -183,8 +183,9 @@ fn the_loop_draws_the_state_and_goes_quiet_after_it() {
 // The film covers the surface and the bus says so in the status. The
 // crate sends no sleep during a film, so the status is the one word the
 // browser has that the film is up. The harness builds no frame while
-// the browser answers covered, whatever the page, the store, or the
-// source deliver under it, so the browser guards none of those itself.
+// the browser answers covered, and the browser starts no read of its
+// own either: a read is not a frame, so the harness cannot hold it, and
+// a film's progress rows would order one every second.
 fn status(activity: Activity) -> Moment {
     Moment::Status(Status {
         activity,
@@ -280,4 +281,88 @@ fn the_state_draws_over_the_page() {
     browser.tick(PRESS + look::DEPARTURE);
 
     let _ = browser.view();
+}
+
+// A film writes a progress row about once a second, and each one marks
+// the source changed. A read under the cover draws nothing and costs a
+// full read of the screen, so nothing is read until the cover lifts.
+#[test]
+fn a_change_under_the_film_reads_nothing() {
+    let (mut browser, _bus) = on_bus(3, vec![status(Activity::Playing)]);
+    browser.pump(1.0);
+    assert!(browser.covered());
+
+    browser.source.calls.clear();
+    browser.source.changed = true;
+    browser.pump(2.0);
+
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+}
+
+// The held read runs on the moment the cover lifts, so the first frame
+// after the film draws the rows that changed under it.
+#[test]
+fn the_change_under_the_film_is_read_when_the_film_ends() {
+    let (mut browser, bus) = on_bus(3, vec![status(Activity::Playing)]);
+    browser.pump(1.0);
+    browser.source.changed = true;
+    browser.pump(2.0);
+    browser.source.calls.clear();
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(3.0);
+
+    assert!(browser.source.calls.contains(&"pool"));
+}
+
+// The held read covers the page a person left, so a page deep in the
+// stack comes back current after the film.
+#[test]
+fn a_page_held_under_the_film_is_read_again_on_the_present() {
+    let (mut browser, bus) = on_a_movie();
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(PRESS + 1.0);
+    browser.source.calls.clear();
+    browser.source.changed = true;
+    browser.pump(PRESS + 2.0);
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    browser.pump(PRESS + 3.0);
+
+    assert!(browser.source.calls.contains(&"movie"));
+}
+
+// A cover that lifts with nothing changed under it reads nothing.
+#[test]
+fn a_film_that_changed_nothing_reads_nothing_when_it_ends() {
+    let (mut browser, bus) = on_bus(3, vec![status(Activity::Playing)]);
+    browser.pump(1.0);
+    browser.source.calls.clear();
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(2.0);
+
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+}
+
+// A film writes a progress row a second, whether or not it plays on
+// this screen. A shown browser reads once the rows go quiet, not once
+// per row, and the loop wakes for the second that read comes due.
+#[test]
+fn the_progress_rows_a_film_writes_are_coalesced() {
+    let (mut browser, _bus) = on_bus(3, Vec::new());
+    browser.source.calls.clear();
+
+    for second in 0..5 {
+        browser.source.progressed = true;
+        browser.pump(f64::from(second));
+    }
+
+    assert_eq!(browser.source.calls, Vec::<&str>::new());
+
+    assert_eq!(browser.next_frame(4.0), Some(6.0));
+    browser.pump(7.0);
+
+    assert!(browser.source.calls.contains(&"pool"));
 }

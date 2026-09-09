@@ -4,8 +4,8 @@
 use super::*;
 use crate::catalog::franchise::{Calendar, Entry, Era, Held, MOVIE, Membership, SERIES};
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet, Person,
-    PlayItem, Query, Selection, SeriesDetails, pool,
+    Answer, Change, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
+    Person, PlayItem, Query, Selection, SeriesDetails, pool,
 };
 use crate::harness::Waker;
 
@@ -234,8 +234,8 @@ impl Source for Orders {
         None
     }
 
-    fn changed(&mut self) -> bool {
-        false
+    fn changed(&mut self) -> Change {
+        Change::None
     }
 
     fn wake_by(&mut self, _wake: Waker) {}

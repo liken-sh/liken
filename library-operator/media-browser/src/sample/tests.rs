@@ -267,7 +267,7 @@ fn a_serial_the_sample_never_invented_has_no_page() {
 
 #[test]
 fn the_sample_reports_no_changes_and_answers_no_reader() {
-    assert!(!Catalog.changed());
+    assert_eq!(Catalog.changed(), Change::None);
     assert!(Catalog.reader().is_none());
 }
 

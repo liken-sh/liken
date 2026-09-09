@@ -293,7 +293,7 @@ fn a_fresh_source_reports_no_change() {
     let path = fixture(&dir);
 
     let mut source = SidecarSource::new(&path, NO_AGENT);
-    assert!(!source.changed());
+    assert_eq!(source.changed(), Change::None);
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn a_reader_reads_the_same_file_and_leaves_the_streams_running() {
     reader.wake_by(Arc::new(|| {}));
 
     assert_eq!(reader.libraries(), source.libraries());
-    assert!(!reader.changed());
+    assert_eq!(reader.changed(), Change::None);
     assert_eq!(reader.wall(&library("default/films")).slots.len(), 1);
 
     let shared = source.shared.clone();

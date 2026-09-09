@@ -14,7 +14,7 @@ use crate::catalog::franchise;
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::DRAWN;
 use crate::catalog::{
-    Answer, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
+    Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
     LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Played, Progress,
     Query, Resume, Selection, SeriesDetails, Slot, Sort, Source, TILES, library_name, recency,
 };
@@ -76,7 +76,7 @@ impl SidecarSource {
     fn quieting(database: impl Into<PathBuf>, api: &str, quiet: Duration) -> Self {
         let shared = Arc::new(updates::Shared::default());
         for table in ["movies", "series", "episodes"] {
-            updates::follow(shared.clone(), api.to_string(), table);
+            updates::follow(shared.clone(), api.to_string(), table, Change::Catalog);
         }
         let database = database.into();
         let shelf = Arc::new(search::Shelf::default());
@@ -102,7 +102,12 @@ impl SidecarSource {
             return self;
         }
         for table in ["plays", "play_people"] {
-            updates::follow(self.shared.clone(), updates.to_string(), table);
+            updates::follow(
+                self.shared.clone(),
+                updates.to_string(),
+                table,
+                Change::Progress,
+            );
         }
         self.store = Some(path);
         self
@@ -554,8 +559,14 @@ impl Source for SidecarSource {
         self.stored(|connection| progress::episodes(connection, library, series, people))
     }
 
-    fn changed(&mut self) -> bool {
-        self.streams && self.shared.changed.swap(false, Ordering::AcqRel)
+    fn changed(&mut self) -> Change {
+        if !self.streams {
+            return Change::None;
+        }
+        Change::of(
+            self.shared.changed.swap(false, Ordering::AcqRel),
+            self.shared.progressed.swap(false, Ordering::AcqRel),
+        )
     }
 
     fn wake_by(&mut self, wake: Waker) {
