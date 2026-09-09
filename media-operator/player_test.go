@@ -24,7 +24,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			name:  "one film with no display claim",
 			items: []string{"/media/0/film.mkv"},
 			want: []string{
-				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -37,7 +37,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			applicationID: "display-0",
 			items:         []string{"https://media.example.net/one.mkv", "/media/0/two.mkv"},
 			want: []string{
-				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -58,7 +58,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				json.RawMessage(`{"type":"music"}`),
 			},
 			want: []string{
-				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -76,7 +76,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				json.RawMessage(`{"type":"music","hint":"album"}`),
 			},
 			want: []string{
-				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -91,7 +91,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			start: "0:10:00",
 			items: []string{"/media/0/film.mkv"},
 			want: []string{
-				"--vo=gpu", "--gpu-context=wayland", "--hwdec=vaapi", "--fullscreen",
+				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",

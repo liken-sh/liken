@@ -70,11 +70,15 @@ func runPlayer(items []string) {
 	}
 }
 
-// playerArgv is the whole of how mpv is told to play. The gpu video
-// output with the Wayland EGL context, because the display claim
-// delivers a compositor socket and Debian's mpv segfaults in
-// --vo=dmabuf-wayland. VAAPI, because the render claim delivers the
-// node that decodes. The PipeWire audio output, because Wayland
+// playerArgv is the whole of how mpv is told to play. The dmabuf-wayland
+// video output, because the display claim delivers a compositor socket
+// and this output hands each decoded frame to the compositor as a
+// dmabuf: no shader pass in mpv, and a fullscreen surface can go to a
+// display plane. The gpu output renders every frame through EGL and
+// costs a render thread plus the compositor's copy of it, which matters
+// on a passively cooled machine. VAAPI, because the render claim
+// delivers the node that decodes, and this output needs a hardware
+// surface. The PipeWire audio output, because Wayland
 // carries no audio and the sink claim delivers that socket. The IPC
 // server stays because the command sidecar drives that same socket to
 // run each named command and read the report. The display script directory
@@ -102,8 +106,7 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 	}
 	argv := []string{
 		path,
-		"--vo=gpu",
-		"--gpu-context=wayland",
+		"--vo=dmabuf-wayland",
 		"--hwdec=vaapi",
 		"--fullscreen",
 		"--ao=pipewire",
