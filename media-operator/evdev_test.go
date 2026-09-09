@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"os"
 	"testing"
 )
 
@@ -279,4 +280,84 @@ func TestTheVerdictLineCarriesTheDecisionAndItsCounts(t *testing.T) {
 			mustMatch(t, each.node.line(), each.want)
 		})
 	}
+}
+
+// The mask the reader sets on a node and the publishable gate must
+// agree code for code: an event the kernel still delivers and the
+// gate then drops is work the reader did for nothing.
+func TestTheEventMaskDeliversExactlyWhatThePodPublishes(t *testing.T) {
+	types := publishableTypes()
+	axes := publishableAxes()
+
+	t.Run("the event types", func(t *testing.T) {
+		for evType := range uint16(len(types) * 8) {
+			// A type passes the mask when any code of that type is
+			// publishable, and EV_KEY carries every key code.
+			want := evType == evKey || evType == evAbs
+			mustMatch(t, bitmapHasCode(types, evType), want)
+		}
+	})
+
+	t.Run("the absolute axes", func(t *testing.T) {
+		for code := range uint16(len(axes) * 8) {
+			want := publishable(inputEvent{Type: evAbs, Code: code})
+			mustMatch(t, bitmapHasCode(axes, code), want)
+		}
+	})
+}
+
+// The kernel reads a mask's length in whole machine words and answers
+// EINVAL for any other length, so a bitmap that covers the codes is
+// not enough on its own.
+func TestTheMaskLengthsAreWholeMachineWords(t *testing.T) {
+	cases := []struct {
+		name   string
+		bitmap []byte
+	}{
+		{name: "the event types", bitmap: publishableTypes()},
+		{name: "the absolute axes", bitmap: publishableAxes()},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			mustMatch(t, len(each.bitmap)%maskWordBytes, 0)
+		})
+	}
+}
+
+// maskBytes rounds a count of codes up to the length the kernel takes.
+func TestMaskBytesRoundsUpToAWholeWord(t *testing.T) {
+	cases := []struct {
+		name  string
+		codes int
+		want  int
+	}{
+		{name: "the event types, which need four bytes", codes: eventTypeCount, want: 8},
+		{name: "the absolute axes, which need eight", codes: absCodeCount, want: 8},
+		{name: "one code", codes: 1, want: 8},
+		{name: "no codes at all", codes: 0, want: 0},
+		{name: "every key code", codes: 0x300, want: 96},
+		{name: "one code past a word", codes: 65, want: 16},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			mustMatch(t, maskBytes(each.codes), each.want)
+		})
+	}
+}
+
+func TestMaskRequestNumber(t *testing.T) {
+	mustMatch(t, maskRequest(), uintptr(0x40104593))
+}
+
+// A descriptor that is not an event node refuses the mask, and the
+// reader has to hear that rather than believe it narrowed a node it
+// did not.
+func TestTheMaskIsRefusedOnADescriptorThatIsNotANode(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "node")
+	mustSucceed(t, err)
+	defer file.Close()
+
+	mustFail(t, restrictToPublishable(int(file.Fd())))
 }

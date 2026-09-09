@@ -208,3 +208,29 @@ func TestAnOrdinaryReaderLogsNoEvent(t *testing.T) {
 	waitForPublish(t, broker.pubs)
 	mustMatch(t, log.String(), "")
 }
+
+// Outside discovery the reader narrows every node it keeps, and in
+// discovery it narrows nothing. The nodes here are regular files, so a
+// reader that asked the kernel logs the refusal, and a reader that
+// never asked logs nothing.
+func TestOnlyAnOrdinaryReaderNarrowsWhatItsNodesDeliver(t *testing.T) {
+	cases := []struct {
+		name      string
+		discovery bool
+		asked     bool
+	}{
+		{name: "an ordinary reader", discovery: false, asked: true},
+		{name: "a reader in discovery", discovery: true, asked: false},
+	}
+
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			file, err := os.CreateTemp(t.TempDir(), "node")
+			mustSucceed(t, err)
+			defer file.Close()
+
+			r := &reader{discovery: each.discovery}
+			mustMatch(t, r.restrictNode(int(file.Fd())) != nil, each.asked)
+		})
+	}
+}

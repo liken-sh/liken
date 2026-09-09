@@ -5,6 +5,7 @@ package main
 // in its remote mode, and the reconcile that creates each once.
 
 import (
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"strings"
@@ -249,4 +250,65 @@ func TestReconcileRemoteCreatesTheClaimAndThePodOnce(t *testing.T) {
 	if posts != 0 {
 		t.Errorf("the second reconcile created objects: %v", cluster.requests[created:])
 	}
+}
+
+// The Remote's parameters reach its claim as one opaque block for the
+// controller's request, byte for byte, because this operator reads
+// none of the values.
+func TestTheDeviceParametersReachTheRemoteClaim(t *testing.T) {
+	remote := standingRemote()
+	remote.Spec.Device.Parameters = &DeviceParameters{
+		Driver: "bluetooth.liken.sh",
+		Values: json.RawMessage(`{"inputs":["joystick"]}`),
+	}
+
+	config := buildRemoteClaim(remote).Spec.Devices.Config
+	if len(config) != 1 {
+		t.Fatalf("config = %+v, want one block", config)
+	}
+	mustMatchAll(t, config[0].Requests, []string{"remote-sofa"})
+	if config[0].Opaque == nil {
+		t.Fatalf("config = %+v, want an opaque block", config[0])
+	}
+	mustMatch(t, config[0].Opaque.Driver, "bluetooth.liken.sh")
+	mustMatch(t, string(config[0].Opaque.Parameters), `{"inputs":["joystick"]}`)
+}
+
+// A Remote without parameters carries no configuration block, so a
+// claim that needs none is the same claim as before the field existed.
+func TestARemoteWithNoParametersCarriesNoConfiguration(t *testing.T) {
+	mustMatch(t, len(buildRemoteClaim(standingRemote()).Spec.Devices.Config), 0)
+}
+
+// A claim is immutable, so a changed parameters block is a
+// replacement: the pass deletes the claim and the pod that holds it,
+// and the next pass creates both with the new block.
+func TestChangingTheParametersReplacesTheClaim(t *testing.T) {
+	cluster := newFakeCluster()
+	media := testOperator(t, cluster, make(chan struct{}, 1))
+	remote := standingRemote()
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
+
+	remote.Spec.Device.Parameters = &DeviceParameters{
+		Driver: "bluetooth.liken.sh",
+		Values: json.RawMessage(`{"inputs":["joystick","touchpad"]}`),
+	}
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
+	if _, held := cluster.claims["sofa-remote-devices"]; held {
+		t.Fatalf("the claim was not deleted: %v", cluster.requests)
+	}
+	if _, held := cluster.pods["sofa-remote"]; held {
+		t.Fatalf("the pod that holds the claim was not deleted: %v", cluster.requests)
+	}
+
+	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
+	claim, held := cluster.claims["sofa-remote-devices"]
+	if !held {
+		t.Fatalf("the claim did not come back: %v", cluster.requests)
+	}
+	config := claim.Spec.Devices.Config
+	if len(config) != 1 || config[0].Opaque == nil {
+		t.Fatalf("config = %+v, want the new block", config)
+	}
+	mustMatch(t, string(config[0].Opaque.Parameters), `{"inputs":["joystick","touchpad"]}`)
 }

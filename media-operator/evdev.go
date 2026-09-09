@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"syscall"
 	"unsafe"
@@ -129,6 +130,107 @@ func declaredHatAxes(bitmap []byte) []uint16 {
 // players that map the controller differently.
 func controllerBitmaps(keys, axes []byte) bool {
 	return len(declaredKeyCodes(keys)) > 0 || len(declaredHatAxes(axes)) > 0
+}
+
+// The reader asks the kernel to deliver only the events it publishes.
+// A pad's motion node reports thousands of events a second while the
+// pad rests on a table, and a reader that reads them all and drops
+// them after publishable spends most of a small machine's CPU on
+// nothing. The mask below is publishable stated to the kernel, one
+// bit per code, so the two never disagree: the test in evdev_test.go
+// checks them code for code.
+
+// inputMask is the kernel's struct input_mask, the argument of
+// EVIOCSMASK. One call sets the mask for one event type. The call for
+// type EV_SYN is special: its bitmap is the mask of event types, not
+// of SYN codes.
+type inputMask struct {
+	Type      uint32
+	CodesSize uint32
+	CodesPtr  uint64
+}
+
+const (
+	// EV_SYN's slot holds the mask of event types.
+	maskTypeSlot uint16 = 0x00
+
+	// EV_CNT and ABS_CNT, the sizes of the two bitmaps the reader sets.
+	eventTypeCount = 0x20
+	absCodeCount   = 0x40
+
+	// The kernel reads a mask in whole longs, and a length that is not
+	// a multiple of one is EINVAL, so every bitmap is padded to this.
+	maskWordBytes = 8
+)
+
+// maskRequest builds the EVIOCSMASK ioctl number by hand, the way
+// bitmapRequest builds EVIOCGBIT. The direction is write, the size is
+// the structure's, and the command is 0x93.
+func maskRequest() uintptr {
+	return uintptr(1)<<30 | uintptr(unsafe.Sizeof(inputMask{}))<<16 | uintptr(0x45)<<8 | uintptr(0x93)
+}
+
+// maskBytes is how many bytes hold one bit per code, rounded up to the
+// whole machine words the kernel takes.
+func maskBytes(codes int) int {
+	words := (codes + maskWordBytes*8 - 1) / (maskWordBytes * 8)
+	return words * maskWordBytes
+}
+
+// setBitmapCode sets one code's bit, the write bitmapHasCode reads.
+func setBitmapCode(bitmap []byte, code uint16) {
+	bitmap[code/8] |= 1 << (code % 8)
+}
+
+// publishableTypes is the event-type mask: the two types publishable
+// keeps.
+func publishableTypes() []byte {
+	bitmap := make([]byte, maskBytes(eventTypeCount))
+	setBitmapCode(bitmap, evKey)
+	setBitmapCode(bitmap, evAbs)
+	return bitmap
+}
+
+// publishableAxes is the EV_ABS mask: the hat axes a Keymap binds, and
+// no other axis.
+func publishableAxes() []byte {
+	bitmap := make([]byte, maskBytes(absCodeCount))
+	for _, code := range axisCodes {
+		setBitmapCode(bitmap, code)
+	}
+	return bitmap
+}
+
+// setEventMask narrows what one open descriptor delivers for one event
+// type. An empty bitmap silences the type.
+func setEventMask(descriptor int, evType uint16, codes []byte) error {
+	mask := inputMask{Type: uint32(evType), CodesSize: uint32(len(codes))}
+	if len(codes) > 0 {
+		mask.CodesPtr = uint64(uintptr(unsafe.Pointer(&codes[0])))
+	}
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		uintptr(descriptor),
+		maskRequest(),
+		uintptr(unsafe.Pointer(&mask)),
+	)
+	runtime.KeepAlive(codes)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+// restrictToPublishable narrows one open node to EV_KEY and the two
+// hat axes. EV_SYN frames still arrive; the kernel never filters them.
+// A kernel that refuses the call delivers everything, and the reader
+// stays correct, because publishable still drops what it never
+// publishes; the node only costs more to read.
+func restrictToPublishable(descriptor int) error {
+	if err := setEventMask(descriptor, maskTypeSlot, publishableTypes()); err != nil {
+		return err
+	}
+	return setEventMask(descriptor, evAbs, publishableAxes())
 }
 
 // nodeVerdict is what the reader decided about one node, with the

@@ -9,6 +9,12 @@ that does not autorepeat. That work runs beside the device because
 that is where hwdb runs on any Linux machine, and one pod then serves
 every consumer at once.
 
+The pod asks the kernel for only the keys and the hats it publishes,
+so a device that reports motion while it rests costs the pod nothing.
+What reaches the node at all is the driver's decision, and the claim's
+`parameters` are where a `Remote` states it. A pod in `spec.discovery`
+asks for no narrowing and reads every event the claim delivers.
+
 The claim tolerates the `bluetooth.liken.sh/disconnected`
 taint with no time limit, so a controller that sleeps keeps its
 allocation and the pod keeps running. It does not tolerate

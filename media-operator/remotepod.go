@@ -62,7 +62,14 @@ func buildRemoteClaim(remote *Remote) *ResourceClaim {
 	}
 	claim.add(
 		remoteRequestName(remote.Metadata.Name),
-		PlayerDevice{Class: remote.Spec.Device.Class, Selector: remote.Spec.Device.Selector},
+		PlayerDevice{
+			Class:    remote.Spec.Device.Class,
+			Selector: remote.Spec.Device.Selector,
+			// The parameters reach the claim as the Remote wrote them.
+			// This operator never reads them; the input driver defines
+			// them and validates its own block.
+			Parameters: remote.Spec.Device.Parameters,
+		},
 		tolerateForever(remoteDisconnectedTaint),
 	)
 	return claim

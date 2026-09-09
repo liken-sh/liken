@@ -665,12 +665,13 @@ type RemoteSpec struct {
 }
 
 // The controller is selected the way a Player's display is, by a
-// DeviceClass and a CEL expression. There is no parameters field,
-// because nothing prepares an input device the way a codec prepares
-// a sink.
+// DeviceClass and a CEL expression, and it carries the same opaque
+// parameters block. A Remote uses the block to name the classes of
+// input the driver delivers, in the driver's own vocabulary.
 type RemoteDevice struct {
-	Class    string `json:"class"`
-	Selector string `json:"selector,omitempty"`
+	Class      string            `json:"class"`
+	Selector   string            `json:"selector,omitempty"`
+	Parameters *DeviceParameters `json:"parameters,omitempty"`
 }
 
 type RemoteList struct {

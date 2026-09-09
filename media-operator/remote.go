@@ -264,11 +264,25 @@ func (r *reader) matchingNodes() []openNode {
 			syscall.Close(descriptor)
 			continue
 		}
+		if err := r.restrictNode(descriptor); err != nil {
+			fmt.Fprintf(r.log, "remote: %s reports every event it has, because the kernel refused the event mask: %v\n",
+				node.label(), err)
+		}
 		node.file = os.NewFile(uintptr(descriptor), path)
 		nodes = append(nodes, node)
 	}
 	r.logVerdicts(verdicts)
 	return nodes
+}
+
+// restrictNode narrows a node to what the pod publishes, except in
+// discovery. Discovery exists to show a person every code the device
+// emits, so that pod reads its nodes as the claim delivers them.
+func (r *reader) restrictNode(descriptor int) error {
+	if r.discovery {
+		return nil
+	}
+	return restrictToPublishable(descriptor)
 }
 
 // logVerdicts writes one line per node, and only when the picture

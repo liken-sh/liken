@@ -17,3 +17,17 @@ lists it, and one controller can drive several units.
         class: gamepad
         selector: device.attributes["bluetooth.liken.sh"].address == "04:4A:5B:11:22:33"
       keymap: dualsense
+
+`spec.device.parameters` is opaque configuration for the driver that
+prepares the controller. A `Remote` uses it to name the classes of
+input it needs, in the driver's own words. The bluetooth operator's
+manual documents its `inputs` parameter and the classes it accepts.
+
+    spec:
+      device:
+        class: gamepad
+        selector: device.attributes["bluetooth.liken.sh"].address == "7C:66:EF:22:E7:80"
+        parameters:
+          driver: bluetooth.liken.sh
+          values:
+            inputs: [joystick]

@@ -65,9 +65,8 @@ spec:
                   required: [class]
                   description: >-
                     The controller itself, selected out of the
-                    devices the hardware operators publish. There
-                    are no parameters: nothing prepares an input
-                    device, and its nodes are read as they are.
+                    devices the hardware operators publish, and the
+                    parameters its driver prepares it with.
                   properties:
                     class:
                       type: string
@@ -83,6 +82,29 @@ spec:
                         picks this one controller, such as a match
                         on its address. Omit it, and the class alone
                         chooses.
+                    parameters:
+                      type: object
+                      required: [driver]
+                      description: >-
+                        Opaque configuration for the driver that
+                        prepares the controller, carried onto the claim
+                        unread. This is where a Remote names the
+                        classes of input it needs. The bluetooth
+                        operator's manual documents its inputs
+                        parameter.
+                      properties:
+                        driver:
+                          type: string
+                          description: >-
+                            The driver the parameters are for, such
+                            as bluetooth.liken.sh.
+                        values:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          description: >-
+                            The parameters themselves. The driver
+                            defines them, and this operator carries
+                            them.
                 keymap:
                   type: string
                   description: >-
@@ -106,6 +128,9 @@ spec:
                     drives its unit. Turning the mode on or off
                     replaces the standing pod, which drops controller
                     input for a few seconds.
+                    A pod in discovery reads every event the claim
+                    delivers. Outside discovery the pod reads only the
+                    keys and hats it publishes.
             status:
               type: object
               description: >-

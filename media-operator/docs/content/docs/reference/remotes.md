@@ -26,6 +26,20 @@ lists it, and one controller can drive several units.
         selector: device.attributes["bluetooth.liken.sh"].address == "04:4A:5B:11:22:33"
       keymap: dualsense
 
+`spec.device.parameters` is opaque configuration for the driver that
+prepares the controller. A `Remote` uses it to name the classes of
+input it needs, in the driver's own words. The bluetooth operator's
+manual documents its `inputs` parameter and the classes it accepts.
+
+    spec:
+      device:
+        class: gamepad
+        selector: device.attributes["bluetooth.liken.sh"].address == "7C:66:EF:22:E7:80"
+        parameters:
+          driver: bluetooth.liken.sh
+          values:
+            inputs: [joystick]
+
 One physical controller, selected by its device and mapped by the base table and, where its model needs one, by its Keymap. A Player names the Remotes it owns; the Remote names no player.
 
 ## spec
@@ -34,18 +48,28 @@ The controller, and the Keymap for its model where its model needs one.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--device"></span>`device` | [object](#specdevice) | yes | The controller itself, selected out of the devices the hardware operators publish. There are no parameters: nothing prepares an input device, and its nodes are read as they are. |
+| <span id="spec--device"></span>`device` | [object](#specdevice) | yes | The controller itself, selected out of the devices the hardware operators publish, and the parameters its driver prepares it with. |
 | <span id="spec--keymap"></span>`keymap` | string | no | The Keymap for this controller's model, by name. A Keymap is cluster-scoped, so the name carries no namespace. The field is optional and rarely needed: the base already passes every KEY_* code and turns the hats into the arrows, so a Keymap is for a device the kernel names wrongly. A device maps one way on every unit, as it does under hwdb. |
-| <span id="spec--discovery"></span>`discovery` | boolean | no | The teaching mode for unknown hardware. The standing pod keeps every input node the claim delivered and logs each event the way a Keymap names it, so a person presses every button and reads the codes out of the pod log. The pod folds and publishes keys in discovery exactly as it does outside it, so a controller a person maps still drives its unit. Turning the mode on or off replaces the standing pod, which drops controller input for a few seconds. |
+| <span id="spec--discovery"></span>`discovery` | boolean | no | The teaching mode for unknown hardware. The standing pod keeps every input node the claim delivered and logs each event the way a Keymap names it, so a person presses every button and reads the codes out of the pod log. The pod folds and publishes keys in discovery exactly as it does outside it, so a controller a person maps still drives its unit. Turning the mode on or off replaces the standing pod, which drops controller input for a few seconds. A pod in discovery reads every event the claim delivers. Outside discovery the pod reads only the keys and hats it publishes. |
 
 ### spec.device
 
-The controller itself, selected out of the devices the hardware operators publish. There are no parameters: nothing prepares an input device, and its nodes are read as they are.
+The controller itself, selected out of the devices the hardware operators publish, and the parameters its driver prepares it with.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdevice--class"></span>`class` | string | yes | The DeviceClass the claim allocates through. Consumer classes are the cluster owner's vocabulary, so the name is whatever this cluster calls its controllers. |
 | <span id="specdevice--selector"></span>`selector` | string | no | A CEL expression over device.attributes that picks this one controller, such as a match on its address. Omit it, and the class alone chooses. |
+| <span id="specdevice--parameters"></span>`parameters` | [object](#specdeviceparameters) | no | Opaque configuration for the driver that prepares the controller, carried onto the claim unread. This is where a Remote names the classes of input it needs. The bluetooth operator's manual documents its inputs parameter. |
+
+#### spec.device.parameters
+
+Opaque configuration for the driver that prepares the controller, carried onto the claim unread. This is where a Remote names the classes of input it needs. The bluetooth operator's manual documents its inputs parameter.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdeviceparameters--driver"></span>`driver` | string | yes | The driver the parameters are for, such as bluetooth.liken.sh. |
+| <span id="specdeviceparameters--values"></span>`values` | object | no | The parameters themselves. The driver defines them, and this operator carries them. |
 
 ## status
 
@@ -77,6 +101,12 @@ kernel's key name, and synthesises the repeat stream for a control
 that does not autorepeat. That work runs beside the device because
 that is where hwdb runs on any Linux machine, and one pod then serves
 every consumer at once.
+
+The pod asks the kernel for only the keys and the hats it publishes,
+so a device that reports motion while it rests costs the pod nothing.
+What reaches the node at all is the driver's decision, and the claim's
+`parameters` are where a `Remote` states it. A pod in `spec.discovery`
+asks for no narrowing and reads every event the claim delivers.
 
 The claim tolerates the `bluetooth.liken.sh/disconnected`
 taint with no time limit, so a controller that sleeps keeps its
