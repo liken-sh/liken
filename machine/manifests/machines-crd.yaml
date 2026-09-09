@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "3"
+    liken.sh/schema-revision: "4"
 spec:
   group: liken.sh
   names:
@@ -737,11 +737,6 @@ spec:
                         node-role.kubernetes.io, which is the one exception
                         because no controller manages it, or a namespace of
                         your own
-                    - rule: >-
-                        self.all(t, !t.key.matches('^([^/]*[.])?liken[.]sh/'))
-                      message: >-
-                        the liken.sh namespace belongs to the operating
-                        system, which sets its own taints
                   items:
                     type: object
                     required: [key, effect]
