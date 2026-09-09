@@ -297,6 +297,11 @@ operator holds a finalizer on every `Play` and releases it only when
 `ended` is true, so a `Play` is never deleted before its last position
 is in the store. `at` is the time of the write, RFC 3339 in UTC.
 
+The mark never goes back to `ended: false`. Once the row is ended, the
+progress role writes nothing more for that `Play` and publishes no new
+mark, so a position report that reaches the bus after the final leaves
+the row and the mark where the final put them.
+
     {"item": 1, "position": "1:52:10", "ended": true, "at": "2026-08-29T23:01:14Z"}
 
 ## An outside play

@@ -187,6 +187,11 @@ type mediaPlayStatus struct {
 // recordStatus writes where one Play reached and publishes what it
 // wrote. An empty payload is a cleared topic, and it leaves the rows
 // alone, because the rows are the history.
+//
+// A status for a Play the store already holds as ended writes nothing
+// and publishes nothing. The playback pod reports for about a second
+// past the final, and a recorded message that said ended false again
+// would hold the Play's finalizer for good.
 func (p *progress) recordStatus(ctx context.Context, play string, payload []byte) {
 	if len(payload) == 0 {
 		return
@@ -199,8 +204,12 @@ func (p *progress) recordStatus(ctx context.Context, play string, payload []byte
 	position := p.seconds(play, status.Position)
 	duration := p.seconds(play, status.Duration)
 
-	if err := p.store.recordPosition(ctx, play, status.Item, position, duration, time.Now().UTC()); err != nil {
+	wrote, err := p.store.recordPosition(ctx, play, status.Item, position, duration, time.Now().UTC())
+	if err != nil {
 		p.logf("could not record the position of %s: %v", play, err)
+		return
+	}
+	if !wrote {
 		return
 	}
 	p.publishRecorded(play, status.Item, position, false)

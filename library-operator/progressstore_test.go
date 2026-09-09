@@ -32,8 +32,13 @@ func newSQLiteProgressStore(t *testing.T) (*progressStore, *sql.DB) {
 func TestTheFirstPositionCreatesTheRow(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
 
-	if err := store.recordPosition(t.Context(), "play-1", 2, 61, 3600, testRecordedAt); err != nil {
+	wrote, err := store.recordPosition(t.Context(), "play-1", 2, 61, 3600, testRecordedAt)
+	if err != nil {
 		t.Fatal(err)
+	}
+
+	if !wrote {
+		t.Error("the store says it wrote no position for a Play that is running")
 	}
 
 	row := heldPlay(t, db, "play-1")
@@ -55,12 +60,12 @@ func TestTheFirstPositionCreatesTheRow(t *testing.T) {
 // the time the Play started where it was.
 func TestALaterPositionKeepsTheStart(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
-	if err := store.recordPosition(t.Context(), "play-1", 0, 10, 3600, testRecordedAt); err != nil {
+	if _, err := store.recordPosition(t.Context(), "play-1", 0, 10, 3600, testRecordedAt); err != nil {
 		t.Fatal(err)
 	}
 
 	later := testRecordedAt.Add(time.Minute)
-	if err := store.recordPosition(t.Context(), "play-1", 0, 70, 3600, later); err != nil {
+	if _, err := store.recordPosition(t.Context(), "play-1", 0, 70, 3600, later); err != nil {
 		t.Fatal(err)
 	}
 
@@ -150,7 +155,7 @@ func TestAnAudienceCreatesTheRowItNames(t *testing.T) {
 // finalizer knowing the last position is in the store.
 func TestTheFinalMarksTheRowEnded(t *testing.T) {
 	store, db := newSQLiteProgressStore(t)
-	if err := store.recordPosition(t.Context(), "play-1", 0, 10, 3600, testRecordedAt); err != nil {
+	if _, err := store.recordPosition(t.Context(), "play-1", 0, 10, 3600, testRecordedAt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -166,6 +171,33 @@ func TestTheFinalMarksTheRowEnded(t *testing.T) {
 	}
 	if row.Ended != ended.Unix() || row.Recorded != ended.Unix() {
 		t.Errorf("row = %+v, want the time the Play ended", row)
+	}
+}
+
+// A position that arrives after the final changes no column and says
+// it wrote nothing.
+func TestAPositionAfterTheFinalWritesNothing(t *testing.T) {
+	store, db := newSQLiteProgressStore(t)
+	final := playFinal{Phase: playPhaseFinished, Item: 1}
+	if err := store.recordFinal(t.Context(), "play-1", final, 472, 7200, testRecordedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	later := testRecordedAt.Add(time.Second)
+	wrote, err := store.recordPosition(t.Context(), "play-1", 1, 473, 7200, later)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if wrote {
+		t.Error("the store says it wrote a position over an ended row")
+	}
+	row := heldPlay(t, db, "play-1")
+	if row.Position != 472 || row.Phase != playPhaseFinished {
+		t.Errorf("row = %+v, want the final's position and phase", row)
+	}
+	if row.Ended != testRecordedAt.Unix() || row.Recorded != testRecordedAt.Unix() {
+		t.Errorf("row = %+v, want the time of the final", row)
 	}
 }
 
@@ -325,7 +357,7 @@ func TestTheStoreAnswersTheFailureItsAgentGives(t *testing.T) {
 	t.Cleanup(server.Close)
 	store := newProgressStore(server.URL, server.Client())
 
-	err := store.recordPosition(t.Context(), "play-1", 0, 10, 3600, testRecordedAt)
+	_, err := store.recordPosition(t.Context(), "play-1", 0, 10, 3600, testRecordedAt)
 
 	if err == nil {
 		t.Fatal("the store hid a refused write")

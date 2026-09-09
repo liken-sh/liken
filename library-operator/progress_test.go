@@ -313,6 +313,52 @@ func TestTheRolePublishesTheEndedMark(t *testing.T) {
 	}
 }
 
+// publishesBefore reads every publish up to a marker topic. A wait on
+// one topic proves a message arrived; this proves one did not.
+func publishesBefore(t *testing.T, broker *fakeBroker, topic, marker string) []brokerPublish {
+	t.Helper()
+	var held []brokerPublish
+	deadline := time.After(scanTestTimeout)
+	for {
+		select {
+		case got := <-broker.pubs:
+			if got.topic == marker {
+				return held
+			}
+			if got.topic == topic {
+				held = append(held, got)
+			}
+		case <-deadline:
+			t.Fatalf("no publish reached the broker on %q", marker)
+			return nil
+		}
+	}
+}
+
+// A status the playback pod sends after the final leaves the ended
+// mark and the row alone.
+func TestALateStatusLeavesTheEndedMarkStanding(t *testing.T) {
+	role, broker, db := servingProgress(t)
+	waitForTopic(t, broker, role.availabilityTopic)
+	final, _ := json.Marshal(playFinal{Phase: "Finished", Item: 1, Position: "0:07:52", Duration: "2:00:00"})
+	role.onMessage(playFinalTopic(defaultTopicBase, "house", "play-1"), final)
+	waitForTopic(t, broker, playRecordedTopic(defaultTopicBase, "house", "play-1"))
+
+	role.onMessage(mediaPlayStatusTopic("house", "play-1"),
+		[]byte(`{"item":1,"position":"0:07:53","duration":"2:00:00"}`))
+	role.onMessage(personForgetTopic(defaultTopicBase, "thora"), []byte(`{"at":"2026-09-08T21:00:00Z"}`))
+
+	after := publishesBefore(t, broker, playRecordedTopic(defaultTopicBase, "house", "play-1"),
+		personForgottenTopic(defaultTopicBase, "thora", "house"))
+	if len(after) != 0 {
+		t.Errorf("the role published %d more recorded messages, want none", len(after))
+	}
+	row := heldPlay(t, db, "play-1")
+	if row.Position != 472 || row.Ended == 0 {
+		t.Errorf("row = %+v, want the final's position and the ended mark", row)
+	}
+}
+
 // The role answers a forget request with one message per namespace, so
 // the operator releases the Person's finalizer once every store has
 // answered.

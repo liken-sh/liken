@@ -183,7 +183,7 @@ func TestTheStoreRefusesAShortAnswer(t *testing.T) {
 			t.Cleanup(server.Close)
 			store := newProgressStore(server.URL, server.Client())
 
-			err := store.recordPosition(t.Context(), "play-1", 0, 1, 2, testRecordedAt)
+			_, err := store.recordPosition(t.Context(), "play-1", 0, 1, 2, testRecordedAt)
 
 			if err == nil || !strings.Contains(err.Error(), testCase.says) {
 				t.Errorf("err = %v, want %q", err, testCase.says)

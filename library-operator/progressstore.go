@@ -70,15 +70,25 @@ type playRow struct {
 // time the row started and the update moves everything a report
 // carries, so a report for a Play the store has not seen creates its
 // row.
-func (s *progressStore) recordPosition(ctx context.Context, play string, item, position, duration int, at time.Time) error {
-	return s.apply(ctx, []statement{
+//
+// The answer is whether anything was written. The update names
+// ended = 0 because a report the playback pod sends after the final
+// must not reopen an ended row, and only an ended row leaves both
+// statements with no row to change. So the rows the batch changed say
+// whether this wrote.
+func (s *progressStore) recordPosition(ctx context.Context, play string, item, position, duration int, at time.Time) (bool, error) {
+	rows, err := s.applyRows(ctx, []statement{
 		startPlay(play, at),
 		{
 			sql: `UPDATE plays SET item = ?, position = ?, duration = ?, phase = ?, recorded = ?` +
-				` WHERE play = ?`,
+				` WHERE play = ? AND ended = 0`,
 			params: []any{item, position, duration, playPhaseRunning, at.Unix(), play},
 		},
 	})
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // recordAudience writes what the operator knows about a Play: the
@@ -203,10 +213,20 @@ func cellInt(cell any) int {
 	return int(number)
 }
 
-// apply posts one batch of statements. The batch is small by nature:
-// one Play's audience is a row, its people, and its aliases, so there
-// is no chunking here.
+// apply is applyRows for the callers that read no count.
 func (s *progressStore) apply(ctx context.Context, statements []statement) error {
+	_, err := s.applyRows(ctx, statements)
+	return err
+}
+
+// applyRows posts one batch of statements. The batch is small by
+// nature: one Play's audience is a row, its people, and its aliases, so
+// there is no chunking here.
+//
+// The count is the rows every statement changed. A statement whose
+// WHERE matches no row changes nothing and is no failure, so the count
+// is how a guarded write learns that it wrote nothing.
+func (s *progressStore) applyRows(ctx context.Context, statements []statement) (int, error) {
 	body := make([]any, len(statements))
 	for at, held := range statements {
 		params := held.params
@@ -221,29 +241,31 @@ func (s *progressStore) apply(ctx context.Context, statements []statement) error
 
 	resp, err := s.post(ctx, transactionsPath, payload)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer drain(resp.Body)
 	if err := progressFailure("write", resp); err != nil {
-		return err
+		return 0, err
 	}
 
 	var result transactionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("the progress store: decoding the answer: %w", err)
+		return 0, fmt.Errorf("the progress store: decoding the answer: %w", err)
 	}
 	// One result per statement is the contract, so a short answer is a
 	// failure and never a batch that applied.
 	if len(result.Results) != len(statements) {
-		return fmt.Errorf("the progress store: %d results for %d statements",
+		return 0, fmt.Errorf("the progress store: %d results for %d statements",
 			len(result.Results), len(statements))
 	}
+	changed := 0
 	for _, held := range result.Results {
 		if held.Error != "" {
-			return fmt.Errorf("the progress store: %s", held.Error)
+			return changed, fmt.Errorf("the progress store: %s", held.Error)
 		}
+		changed += held.RowsAffected
 	}
-	return nil
+	return changed, nil
 }
 
 // row runs one read and answers the first row's cells, or nil where the
