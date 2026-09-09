@@ -10,6 +10,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -394,6 +395,20 @@ func TestScreenPodHoldsTheDisplayClaim(t *testing.T) {
 	}
 	if claims[1] != (ResourceClaim{Name: displayClaimName, Request: "render"}) {
 		t.Errorf("claims[1] = %+v, want the render request", claims[1])
+	}
+}
+
+// The screen pod tolerates the taint a cluster owner puts on a machine
+// that drives one screen, and nothing else. It tolerates no NoExecute
+// taint, so the browser still leaves an unreachable node.
+func TestScreenPodToleratesThePlayerTaintAlone(t *testing.T) {
+	pod := testScreenPod(denScreen(), houseLibraries())
+
+	want := []Toleration{
+		{Key: "media.liken.sh/player", Operator: "Exists", Effect: "NoSchedule"},
+	}
+	if !slices.Equal(pod.Spec.Tolerations, want) {
+		t.Errorf("tolerations = %+v, want %+v", pod.Spec.Tolerations, want)
 	}
 }
 

@@ -327,6 +327,23 @@ type PodSpec struct {
 	// The scheduling rules the pod carries. The durable copies of a store
 	// are the only pods this operator gives any.
 	Affinity *Affinity `json:"affinity,omitempty"`
+	// The taints the pod accepts. A screen pod is the only pod this
+	// operator gives any, because its display claim already pins it to
+	// one machine. Every other pod this operator builds stays off a
+	// tainted machine, which is why the cluster owner set the taint.
+	Tolerations []Toleration `json:"tolerations,omitempty"`
+}
+
+// One taint the pod accepts. The fields are core/v1's, so the JSON this
+// operator sends is the JSON the API server reads. Operator Exists
+// matches a taint under Key whatever its value, and Value is then
+// empty. Effect names one effect, and an empty Effect would accept
+// every effect of that key, which this operator never asks for.
+type Toleration struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Effect   string `json:"effect,omitempty"`
 }
 
 // The one kind of affinity this operator states: the rule that keeps two

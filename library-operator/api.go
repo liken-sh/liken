@@ -25,6 +25,12 @@ const (
 // and writes none, so the group appears here for the read path alone.
 const playerAPIVersion = "media.liken.sh/v1alpha1"
 
+// The taint key a cluster owner sets on a machine that exists to drive
+// one screen. The key belongs to media-operator's vocabulary, because
+// the Player is media's object, and it appears here beside the group
+// for the same reason.
+const playerTaintKey = "media.liken.sh/player"
+
 // The group people-operator serves. A Person is a subject of the whole
 // cluster, and this operator holds a finalizer on each one and writes
 // nothing else.

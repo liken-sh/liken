@@ -228,7 +228,22 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 			ResourceClaims: []PodResourceClaim{
 				{Name: displayClaimName, ResourceClaimName: player.idle().Claim},
 			},
+			Tolerations: screenTolerations(),
 		},
+	}
+}
+
+// The one taint a screen pod accepts. A cluster owner taints a machine
+// that exists to drive one screen, which keeps scan jobs, catalog
+// replicas, and every other pod off a small box. The screen pod belongs
+// there: its display claim already pins it to that machine.
+//
+// The toleration names the key and NoSchedule alone. It tolerates no
+// NoExecute taint, so the node controller still evicts the browser from
+// a node that goes unreachable or runs out of disk.
+func screenTolerations() []Toleration {
+	return []Toleration{
+		{Key: playerTaintKey, Operator: "Exists", Effect: "NoSchedule"},
 	}
 }
 

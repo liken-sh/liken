@@ -70,6 +70,17 @@ func TestCatalogPodStandsAndAnswersOnNoPort(t *testing.T) {
 	}
 }
 
+// the catalog pod tolerates nothing. A cluster owner taints the machine
+// that drives one screen to keep pods like this one off it, and only the
+// screen pod belongs there.
+func TestCatalogPodToleratesNoTaint(t *testing.T) {
+	pod := testCatalogPod(housekeepingCatalog(), 0)
+
+	if len(pod.Spec.Tolerations) != 0 {
+		t.Errorf("tolerations = %+v, want none", pod.Spec.Tolerations)
+	}
+}
+
 // the reporter runs this operator's own image in its report role, and
 // it learns the namespace, the broker, and the catalog API from its
 // environment alone.
