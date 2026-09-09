@@ -222,21 +222,21 @@ func gapClause(fact, column, missing string) string {
 // carry a release date binds today's date as ?5, and no other query
 // names a fifth parameter.
 //
-// A probe gap is a present video file with no duration, which is what a file
-// with no streamdetails in its sidecar looks like in the catalog. An identity
-// gap is an item whose id is its folder key, so no provider named it. Both
-// exclude an item with an attempt inside that attempt's own window. A probe
-// whose details landed closes its gap through the duration on the next scan,
-// and a probe whose details landed nowhere the scanner reads is tried again
-// after the window.
+// A probe gap is a present video or audio file whose probed column is not
+// its modified column: no probe has read the file, or the file changed after
+// one did. An identity gap is an item whose id is its folder key, so no
+// provider named it. Both exclude an item with an attempt inside that
+// attempt's own window. A probe closes its own gap through the probed column
+// the next scan reads off the ledger. A probe whose record landed nowhere
+// the scanner reads is tried again after the window.
 var gapQueries = map[string]string{
 	// A video with a length and no tiles beside it.
 	factTrickplay: trickplayGapSQL(),
 	// A present video the arrival ledger holds no entry for.
 	factArrival: arrivalGapSQL(),
 	factProbe: `SELECT path FROM files ` +
-		`WHERE library = ?1 AND type = 'video' AND present = 1 ` +
-		`AND ` + gapClause(factProbe, "path", `duration_ms = 0`),
+		`WHERE library = ?1 AND type IN ('video','audio') AND present = 1 ` +
+		`AND ` + gapClause(factProbe, "path", `probed != modified`),
 	// The folder key stays in the outer condition, not the source, so a
 	// refresh opens a title a provider has already named.
 	factIdentity: `SELECT id FROM (` +

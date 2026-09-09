@@ -328,7 +328,7 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 
 	n, err = catalog.sweep(ctx, filePruneSQL(), []any{library, epoch, walkStart(epoch), pruneBatch},
 		func(ctx context.Context, keys []string) (int, error) {
-			return catalog.DeleteFiles(ctx, library, keys)
+			return deleteFilesWithStreams(ctx, catalog, library, keys)
 		})
 	if err != nil {
 		return removed, err
@@ -413,6 +413,16 @@ func pruneLibrary(ctx context.Context, catalog *Catalog, library string, epoch i
 		return removed, err
 	}
 	return removed, nil
+}
+
+// Removes the streams of each file the sweep found, then the files
+// themselves, and returns the count of file rows removed. The streams go
+// first so a failure never leaves a stream without its file.
+func deleteFilesWithStreams(ctx context.Context, catalog *Catalog, library string, paths []string) (int, error) {
+	if _, err := catalog.DeleteStreamsOfFiles(ctx, library, paths); err != nil {
+		return 0, err
+	}
+	return catalog.DeleteFiles(ctx, library, paths)
 }
 
 // fileItemKeys splits each composite key the link sweep read back into the
@@ -548,7 +558,7 @@ func pruneScope(ctx context.Context, catalog *Catalog, library, folder string, e
 
 	n, err = catalog.sweep(ctx, scopedFilePruneSQL(), append(scopedItemPruneParams(library, folder, epoch)[:5], walkStart(epoch), pruneBatch),
 		func(ctx context.Context, keys []string) (int, error) {
-			return catalog.DeleteFiles(ctx, library, keys)
+			return deleteFilesWithStreams(ctx, catalog, library, keys)
 		})
 	if err != nil {
 		return removed, err

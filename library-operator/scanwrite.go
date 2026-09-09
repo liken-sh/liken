@@ -33,6 +33,7 @@ func upsertWalk(ctx context.Context, catalog *Catalog, result *walkResult) error
 		func() (int, error) { return catalog.UpsertSeries(ctx, result.series) },
 		func() (int, error) { return catalog.UpsertEpisodes(ctx, result.episodes) },
 		func() (int, error) { return catalog.UpsertFiles(ctx, result.files) },
+		func() (int, error) { return catalog.UpsertStreams(ctx, result.streams) },
 		func() (int, error) { return catalog.UpsertFileItems(ctx, result.files) },
 		func() (int, error) { return catalog.UpsertAliases(ctx, result.aliases) },
 		func() (int, error) { return catalog.UpsertAttempts(ctx, result.attempts) },

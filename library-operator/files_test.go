@@ -226,7 +226,7 @@ func TestStatFileOnAMissingPath(t *testing.T) {
 // and an error, so the folder marks the walk incomplete rather than
 // sweeping its files as departed.
 func TestFolderFilesOnAnUnreadableDirectory(t *testing.T) {
-	rows, subdirectories, err := folderFiles{
+	rows, streams, subdirectories, err := folderFiles{
 		root:    "testdata",
 		dir:     "testdata/nowhere",
 		library: "house/movies",
@@ -235,8 +235,8 @@ func TestFolderFilesOnAnUnreadableDirectory(t *testing.T) {
 	if err == nil {
 		t.Error("read answered a directory that cannot be read without an error")
 	}
-	if rows != nil || subdirectories != nil {
-		t.Errorf("read = %v %v, want nothing from a directory that cannot be read", rows, subdirectories)
+	if rows != nil || streams != nil || subdirectories != nil {
+		t.Errorf("read = %v %v %v, want nothing from a directory that cannot be read", rows, streams, subdirectories)
 	}
 }
 

@@ -265,11 +265,11 @@ func TestUpsertFilesCarriesPresentAsAnInteger(t *testing.T) {
 			if !strings.Contains(got.sql, "INSERT INTO files") {
 				t.Errorf("sql = %q, want an upsert on files", got.sql)
 			}
-			if len(got.params) != 16 {
-				t.Fatalf("params = %d, want 16", len(got.params))
+			if len(got.params) != 18 {
+				t.Fatalf("params = %d, want 18", len(got.params))
 			}
-			if got.params[10].(float64) != testCase.want {
-				t.Errorf("present param = %v, want %v", got.params[10], testCase.want)
+			if got.params[12].(float64) != testCase.want {
+				t.Errorf("present param = %v, want %v", got.params[12], testCase.want)
 			}
 		})
 	}
@@ -299,11 +299,33 @@ func TestUpsertFilesCarriesTheClassification(t *testing.T) {
 			t.Errorf("sql = %q, want it to update %s in place", got.sql, column)
 		}
 	}
-	if got.params[11] != fileTypeSubtitle || got.params[12] != fileRoleForced || got.params[13] != "en" {
-		t.Errorf("params = %v, want the type, role, and language bound", got.params[11:14])
+	if got.params[13] != fileTypeSubtitle || got.params[14] != fileRoleForced || got.params[15] != "en" {
+		t.Errorf("params = %v, want the type, role, and language bound", got.params[13:16])
 	}
-	if got.params[14].(float64) != 1700000000 {
-		t.Errorf("modified param = %v, want the Unix seconds", got.params[14])
+	if got.params[16].(float64) != 1700000000 {
+		t.Errorf("modified param = %v, want the Unix seconds", got.params[16])
+	}
+}
+
+// The container's bit rate and the probe mark go through the same upsert
+// as the rest of a file row.
+func TestUpsertFilesCarriesTheBitrateAndTheProbeMark(t *testing.T) {
+	rec := &catalogRecorder{}
+	catalog := testCatalog(t, rec)
+
+	row := fileRow{Path: "One/one.mkv", Bitrate: 64000000, Probed: 1700000000}
+	if _, err := catalog.UpsertFiles(context.Background(), []fileRow{row}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := rec.all()[0]
+	for _, column := range []string{"bitrate", "probed"} {
+		if !strings.Contains(got.sql, column+" = excluded."+column) {
+			t.Errorf("sql = %q, want it to update %s in place", got.sql, column)
+		}
+	}
+	if got.params[9].(float64) != 64000000 || got.params[10].(float64) != 1700000000 {
+		t.Errorf("params = %v, want the bit rate and the probe mark bound", got.params[9:11])
 	}
 }
 

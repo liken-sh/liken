@@ -1,8 +1,9 @@
 package main
 
-// probe.go is the probe fact: the one container that opens a video file.
-// The answer goes into the .nfo and not into the catalog alone, because the
-// volume holds the truth. A rebuilt catalog reads the sidecar and probes
+// probe.go is the probe fact: the one container that opens a media file. It
+// writes the whole answer into .liken/probe.yaml, and then writes a video's
+// stream details into the .nfo from that record. The ledger is the truth,
+// because the volume holds it. A rebuilt catalog reads the ledger and probes
 // nothing.
 
 import (
@@ -32,8 +33,8 @@ type mediaProbe func(ctx context.Context, path string) ([]byte, error)
 // a test answers in ffprobe's place.
 var probeFile mediaProbe = ffprobeFile
 
-// The probe fact's whole run: the gap of files with no duration, read with
-// ffprobe.
+// The probe fact's whole run: the gap of files with no current probe record,
+// each read with ffprobe.
 func (e *enricher) probeFact(ctx context.Context) error {
 	return e.probeGap(ctx, probeFile)
 }
@@ -60,16 +61,16 @@ func (e *enricher) probeGap(ctx context.Context, probe mediaProbe) error {
 		e.probeOne(ctx, probe, path)
 		probed++
 	}
-	e.logf("probed %d of the %d files with no stream details", probed, len(paths))
+	e.logf("probed %d of the %d files with no current probe", probed, len(paths))
 	return nil
 }
 
-// One file: read it, write its stream details into the sidecar the scanner
-// reads them from, and record what happened either way.
+// One file: read it, record what it holds, and record the attempt whatever
+// the outcome.
 func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) {
 	absolute := filepath.Join(e.root, path)
 	result := attemptFound
-	if err := e.writeStreamDetails(ctx, probe, absolute); err != nil {
+	if err := e.recordProbe(ctx, probe, absolute); err != nil {
 		e.logf("could not probe %s: %v", path, err)
 		result = attemptError
 	}
@@ -77,10 +78,10 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 	e.recordAttempt(folder, factProbe, entry, result, time.Now().UTC())
 }
 
-// The answer is one surgical edit of the sidecar, so every other element the
-// sidecar holds stays as it was. A file with no sidecar gets a minimal one,
-// and the later facts edit that same file.
-func (e *enricher) writeStreamDetails(ctx context.Context, probe mediaProbe, absolute string) error {
+// The record is the truth, so it is written first and the sidecar follows
+// from it. An audio file gets a record and no sidecar, because no player
+// reads an .nfo beside a music file.
+func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute string) error {
 	output, err := probe(ctx, absolute)
 	if err != nil {
 		return err
@@ -89,7 +90,32 @@ func (e *enricher) writeStreamDetails(ctx context.Context, probe mediaProbe, abs
 	if err := json.Unmarshal(output, &read); err != nil {
 		return fmt.Errorf("reading the probe of %s: %w", absolute, err)
 	}
-	element, err := xml.MarshalIndent(read.fileInfo(), "  ", "  ")
+	size, modified, err := statFile(absolute)
+	if err != nil {
+		return err
+	}
+	folder, entry := likenFolderFor(e.kind, absolute)
+	record := read.probedFile()
+	record.Path, record.At = entry, time.Now().UTC()
+	record.Size, record.Modified = size, modified
+	record.Container = containerFromExtension(absolute)
+	err = e.writer.updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
+		ledger.noteProbe(record)
+	})
+	if err != nil {
+		return err
+	}
+	if fileTypeOf(absolute) != fileTypeVideo {
+		return nil
+	}
+	return e.writeStreamDetails(absolute, record)
+}
+
+// The answer is one surgical edit of the sidecar, so every other element the
+// sidecar holds stays as it was. A file with no sidecar gets a minimal one,
+// and the later facts edit that same file.
+func (e *enricher) writeStreamDetails(absolute string, record probedFile) error {
+	element, err := xml.MarshalIndent(record.fileInfo(), "  ", "  ")
 	if err != nil {
 		return err
 	}
@@ -139,31 +165,6 @@ func minimalNFO(rootElement, title string) []byte {
 		rootElement, escaped.String(), rootElement)
 }
 
-// The ffprobe answer this container reads: the container's own facts and one
-// entry per stream.
-type ffprobeAnswer struct {
-	Streams []ffprobeStream `json:"streams"`
-	Format  ffprobeFormat   `json:"format"`
-}
-
-type ffprobeFormat struct {
-	Duration string `json:"duration"`
-}
-
-type ffprobeStream struct {
-	CodecType string      `json:"codec_type"`
-	CodecName string      `json:"codec_name"`
-	Width     int         `json:"width"`
-	Height    int         `json:"height"`
-	Channels  int         `json:"channels"`
-	Duration  string      `json:"duration"`
-	Tags      ffprobeTags `json:"tags"`
-}
-
-type ffprobeTags struct {
-	Language string `json:"language"`
-}
-
 // The streamdetails block, in the shape nfo.go reads and Kodi and Jellyfin
 // both write.
 type nfoFileInfoElement struct {
@@ -179,9 +180,11 @@ type nfoStreamDetailsBody struct {
 
 type nfoVideoElement struct {
 	Codec    string `xml:"codec"`
-	Width    int    `xml:"width"`
-	Height   int    `xml:"height"`
+	Aspect   string `xml:"aspect,omitempty"`
+	Width    int    `xml:"width,omitempty"`
+	Height   int    `xml:"height,omitempty"`
 	Duration int    `xml:"durationinseconds"`
+	HDRType  string `xml:"hdrtype,omitempty"`
 }
 
 type nfoAudioElement struct {
@@ -194,42 +197,73 @@ type nfoSubtitleElement struct {
 	Language string `xml:"language,omitempty"`
 }
 
-// The container's duration wins over a stream's, because it is the length of
-// the file as a player sees it. Every video, audio, and subtitle stream is
-// written, not the first of each, because a second audio track is a fact a
-// person looks for.
-func (a ffprobeAnswer) fileInfo() nfoFileInfoElement {
+// The part of the record Kodi reads. Every video, audio, and subtitle
+// stream is written, not the first of each, because a second audio track is
+// a fact a person looks for. A cover and a data stream are left out, because
+// Kodi reads neither.
+func (p probedFile) fileInfo() nfoFileInfoElement {
 	var details nfoStreamDetailsBody
-	seconds := probeSeconds(a.Format.Duration)
-	for _, stream := range a.Streams {
-		switch stream.CodecType {
+	for _, stream := range p.Streams {
+		switch stream.Kind {
 		case fileTypeVideo:
-			duration := seconds
-			if duration == 0 {
-				duration = probeSeconds(stream.Duration)
-			}
 			details.Video = append(details.Video, nfoVideoElement{
-				Codec: stream.CodecName, Width: stream.Width, Height: stream.Height, Duration: duration,
+				Codec:    stream.Codec,
+				Aspect:   aspectRatio(stream.Width, stream.Height),
+				Width:    stream.Width,
+				Height:   stream.Height,
+				Duration: probeSeconds(p.Duration),
+				HDRType:  stream.hdrType(),
 			})
 		case fileTypeAudio:
 			details.Audio = append(details.Audio, nfoAudioElement{
-				Codec: stream.CodecName, Channels: stream.Channels, Language: stream.Tags.Language,
+				Codec: stream.Codec, Channels: stream.Channels, Language: stream.Language,
 			})
 		case fileTypeSubtitle:
-			details.Subtitle = append(details.Subtitle, nfoSubtitleElement{Language: stream.Tags.Language})
+			details.Subtitle = append(details.Subtitle, nfoSubtitleElement{Language: stream.Language})
 		}
 	}
 	return nfoFileInfoElement{StreamDetails: details}
 }
 
-// A duration ffprobe states as a decimal string reads as whole seconds, which
-// is what the sidecar carries.
-func probeSeconds(value string) int {
-	seconds, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-	if err != nil || seconds <= 0 {
-		return 0
+// The aspect in Kodi's own form: width over height as a decimal with two
+// places.
+func aspectRatio(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
 	}
-	return int(seconds + 0.5)
+	return strconv.FormatFloat(float64(width)/float64(height), 'f', 2, 64)
+}
+
+// Which of Kodi's three HDR words a stream gets, or none when the transfer
+// function is not an HDR one. Dolby Vision wins over HDR10, because a Dolby
+// Vision stream carries an HDR10 base layer.
+func (s probedStream) hdrType() string {
+	switch {
+	case s.DolbyVision:
+		return hdrDolbyVision
+	case s.Color.Transfer == transferPQ:
+		return hdrHDR10
+	case s.Color.Transfer == transferHLG:
+		return hdrHLG
+	}
+	return ""
+}
+
+// The three HDR words Kodi reads, and the transfer functions ffprobe names
+// two of them by: SMPTE 2084 is the PQ curve of HDR10, and ARIB STD-B67 is
+// HLG.
+const (
+	hdrDolbyVision = "dolbyvision"
+	hdrHDR10       = "hdr10"
+	hdrHLG         = "hlg"
+	transferPQ     = "smpte2084"
+	transferHLG    = "arib-std-b67"
+)
+
+// A duration ffprobe states as a decimal reads as whole seconds, which is
+// what the sidecar carries.
+func probeSeconds(duration float64) int {
+	return int(duration + 0.5)
 }
 
 // The one call that opens a file. The timeout is per file, so one file that

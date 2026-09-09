@@ -85,7 +85,12 @@ type likenLedger struct {
 	// The arrival fact's own list, in the file that is its ledger: one entry
 	// per video file with the time it arrived. Only the arrival fact writes it,
 	// and the walk reads it for the added and arrived columns.
-	Files    []arrivalEntry `yaml:"files,omitempty"`
+	Files []arrivalEntry `yaml:"files,omitempty"`
+	// The probe fact's own list, in the file that is its ledger: one record
+	// per file it opened, with every stream ffprobe found. Only the probe
+	// fact writes it. The walk reads it for the technical columns and the
+	// stream rows, so a rebuilt catalog never opens the files again.
+	Probes   []probedFile   `yaml:"probes,omitempty"`
 	Attempts []likenAttempt `yaml:"attempts,omitempty"`
 }
 
@@ -237,4 +242,16 @@ func (l *likenLedger) noteItem(item likenItem) {
 		}
 	}
 	l.Items = append(l.Items, item)
+}
+
+// One path holds one record, the latest, so a file that is probed again
+// replaces what the ledger held for it.
+func (l *likenLedger) noteProbe(file probedFile) {
+	for at, held := range l.Probes {
+		if held.Path == file.Path {
+			l.Probes[at] = file
+			return
+		}
+	}
+	l.Probes = append(l.Probes, file)
 }

@@ -104,15 +104,18 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 	episodeFiles, err := collectEpisodeFiles(dir, ignore)
 	result.noteReadError(err)
 	arrivals := episodeArrivals(episodeFiles, result)
+	ledgers := newProbeLedgers(libraryKindSeries)
 	for _, episode := range episodeFiles {
 		before := len(result.episodes)
-		folders.note(episode, scanEpisode(root, library, seriesID, episode, arrivals[episode], result))
+		probes, err := ledgers.of(episode.dir)
+		result.noteReadError(err)
+		folders.note(episode, scanEpisode(root, library, seriesID, episode, arrivals[episode], probes, result))
 		for _, row := range result.episodes[before:] {
 			result.series[series].Added = earliestArrival(result.series[series].Added, row.Added)
 		}
 	}
 
-	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, result)
+	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, ledgers, result)
 }
 
 // The arrival of every episode file, read from one ledger per folder that
@@ -180,17 +183,21 @@ func (f seriesFolders) note(episode episodeFile, episodeItemIDs []string) {
 // Every folder this pass reads files from has its .liken lifted here, because
 // the probe records an attempt beside every file it opens, an extras folder's
 // among them.
-func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, folders seriesFolders, result *walkResult) {
-	rows, subdirectories, err := folderFiles{
+func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, folders seriesFolders, ledgers *probeLedgers, result *walkResult) {
+	probes, err := ledgers.of(dir)
+	result.noteReadError(err)
+	rows, streams, subdirectories, err := folderFiles{
 		root:    root,
 		dir:     dir,
 		library: library,
 		place:   filePlace{kind: libraryKindSeries},
 		item:    constantItem(seriesID),
 		held:    folders.videos[dir],
+		probes:  probes,
 	}.read()
 	result.noteReadError(err)
 	result.files = append(result.files, rows...)
+	result.streams = append(result.streams, streams...)
 
 	for _, name := range subdirectories {
 		if ignore.skips(name) {
@@ -203,16 +210,20 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, fold
 		} else {
 			place.season = true
 		}
-		rows, _, err := folderFiles{
+		probes, err := ledgers.of(child)
+		result.noteReadError(err)
+		rows, streams, _, err := folderFiles{
 			root:    root,
 			dir:     child,
 			library: library,
 			place:   place,
 			item:    episodeItem(folders.episodes[child], seriesID),
 			held:    folders.videos[child],
+			probes:  probes,
 		}.read()
 		result.noteReadError(err)
 		result.files = append(result.files, rows...)
+		result.streams = append(result.streams, streams...)
 		readLikenSidecar(likenSidecar{
 			root: root, dir: child, library: library,
 			item: seriesID, items: folders.items[child],
@@ -301,7 +312,7 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, err
 // episode .nfo beside the file where there is one, and from the season folder and
 // the file name where none does. An episode the scanner cannot number is left
 // out and reports no id, because it has no place under the series.
-func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fileArrival, result *walkResult) []string {
+func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fileArrival, probes folderProbes, result *walkResult) []string {
 	metas, err := episodeIdentity(episode)
 	// An episode whose sidecar could not be read has no numbers this
 	// pass, and a row read from the file name alone could carry another
@@ -367,7 +378,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 		return episodeItemIDs
 	}
 	class := classifyFile(episode.file, filePlace{kind: libraryKindSeries, season: true})
-	result.files = append(result.files, fileRow{
+	row := fileRow{
 		Path:       relativePath(root, absolute),
 		Library:    library,
 		Container:  container,
@@ -384,7 +395,9 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 		Modified:   modified,
 		Arrived:    arrival.arrived,
 		Items:      episodeItemIDs,
-	})
+	}
+	result.streams = append(result.streams, probes.fill(&row, episode.file)...)
+	result.files = append(result.files, row)
 	return episodeItemIDs
 }
 

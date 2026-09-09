@@ -123,8 +123,8 @@ func TestEveryGapQueryRunsAgainstTheRealSchema(t *testing.T) {
 			{Id: "series:path:show", Library: "house/movies", Kind: libraryKindSeries, Path: "Show", Title: "Show"},
 		},
 		files: []fileRow{
-			{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Items: []string{"movie:path:one-2001"}},
-			{Path: "Two (2002)/two.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, DurationMs: 6540000, Items: []string{"movie:tmdb:2"}},
+			{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Modified: ledgerTime.Unix(), Items: []string{"movie:path:one-2001"}},
+			{Path: "Two (2002)/two.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, DurationMs: 6540000, Modified: ledgerTime.Unix(), Probed: ledgerTime.Unix(), Items: []string{"movie:tmdb:2"}},
 		},
 	}
 	if err := upsertWalk(ctx, catalog, seed); err != nil {
@@ -136,7 +136,7 @@ func TestEveryGapQueryRunsAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	if gaps[factProbe] != 1 {
-		t.Errorf("probe gap = %d, want the one file with no duration", gaps[factProbe])
+		t.Errorf("probe gap = %d, want the one file no probe has read", gaps[factProbe])
 	}
 	if gaps[factIdentity] != 2 {
 		t.Errorf("identity gap = %d, want the movie and the series with a path id", gaps[factIdentity])
@@ -149,7 +149,7 @@ func TestAnAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 
 	seed := &walkResult{
 		movies: []movieRow{{Id: "movie:path:one-2001", Library: "house/movies", Kind: libraryKindMovies, Path: "One (2001)", Title: "One"}},
-		files:  []fileRow{{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Items: []string{"movie:path:one-2001"}}},
+		files:  []fileRow{{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Modified: ledgerTime.Unix(), Items: []string{"movie:path:one-2001"}}},
 		attempts: []attemptRow{
 			{Library: "house/movies", Item: "movie:path:one-2001", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
 			{Library: "house/movies", Item: "One (2001)/one.mkv", Fact: factProbe, At: ledgerTime.Unix(), Result: attemptFound},

@@ -6,22 +6,30 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
 
-// The ffprobe answer these tests read, which carries a video stream, an audio
-// stream, a subtitle stream, and the container's own duration.
-const ffprobeOfOneFile = `{
-  "streams": [
-    {"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"duration":"6540.000000"},
-    {"codec_type":"audio","codec_name":"ac3","channels":6,"tags":{"language":"eng"}},
-    {"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"eng"}},
-    {"codec_type":"data","codec_name":"bin_data"}
-  ],
-  "format": {"duration":"6540.000000"}
-}`
+// The answers these tests hand the container, as ffprobe itself wrote them
+// about four real files, with the names and paths removed.
+var (
+	ffprobeOfOneFile          = ffprobeCapture("video-1080p-h264.json")
+	ffprobeOfAnHDRFile        = ffprobeCapture("video-2160p-hdr10.json")
+	ffprobeOfADolbyVisionFile = ffprobeCapture("video-2160p-dolbyvision.json")
+	ffprobeOfAMusicFile       = ffprobeCapture("audio-mp3-with-cover.json")
+)
+
+// A capture that cannot be read stops the package, because every probe test
+// works from one.
+func ffprobeCapture(name string) string {
+	data, err := os.ReadFile(filepath.Join("testdata", "ffprobe", name))
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
 
 // The probe a test hands the container. It answers for every file and never
 // opens one.
@@ -31,15 +39,18 @@ func answeringProbe(answer string) mediaProbe {
 	}
 }
 
-// seedProbeGap seeds one movie title with one video file that carries no
-// duration, which is the shape of a probe gap.
+// seedProbeGap seeds one movie title with one video file no probe has
+// read, which is the shape of a probe gap.
 func seedProbeGap(t *testing.T, catalog *Catalog, root, folder, file string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, folder, file), "video")
 	path := filepath.Join(folder, file)
 	seed := &walkResult{
 		movies: []movieRow{{Id: "movie:path:x", Library: "house/movies", Kind: libraryKindMovies, Path: folder, Title: folder}},
-		files:  []fileRow{{Path: path, Library: "house/movies", Present: true, Type: fileTypeVideo, Items: []string{"movie:path:x"}}},
+		files: []fileRow{{
+			Path: path, Library: "house/movies", Present: true, Type: fileTypeVideo,
+			Modified: modifiedOf(t, filepath.Join(root, path)), Items: []string{"movie:path:x"},
+		}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 		t.Fatal(err)
@@ -58,8 +69,8 @@ func TestTheProbeWritesStreamDetailsIntoAMinimalSidecar(t *testing.T) {
 
 	sidecar := readFileString(t, filepath.Join(root, "The Thing (1982)", movieSidecarName))
 	for _, want := range []string{"<title>The Thing</title>", "<codec>h264</codec>", "<width>1920</width>",
-		"<durationinseconds>6540</durationinseconds>", "<codec>ac3</codec>", "<channels>6</channels>",
-		"<subtitle>"} {
+		"<durationinseconds>8673</durationinseconds>", "<aspect>1.78</aspect>",
+		"<codec>ac3</codec>", "<channels>6</channels>", "<subtitle>"} {
 		if !strings.Contains(sidecar, want) {
 			t.Errorf("the sidecar holds no %s:\n%s", want, sidecar)
 		}
@@ -90,7 +101,7 @@ func TestTheProbeSidecarIsReadBackAsTheStreamTheScannerWants(t *testing.T) {
 	if meta.Stream.Width != 1920 || meta.Stream.VideoCodec != "h264" || meta.Stream.AudioCodec != "ac3" {
 		t.Errorf("stream = %+v, want the resolution and the codecs", meta.Stream)
 	}
-	if meta.Duration != 6540 {
+	if meta.Duration != 8673 {
 		t.Errorf("duration = %d, want the container's own seconds", meta.Duration)
 	}
 }
@@ -279,33 +290,177 @@ func TestTheSidecarAFileWritesIntoIsTheOneTheScannerReads(t *testing.T) {
 func TestADurationReadsBackAsWholeSeconds(t *testing.T) {
 	cases := []struct {
 		name  string
-		value string
+		value float64
 		want  int
 	}{
-		{name: "a decimal that rounds down", value: "6540.400000", want: 6540},
-		{name: "a decimal that rounds up", value: "6540.600000", want: 6541},
-		{name: "no duration at all", value: "", want: 0},
-		{name: "a value that is not a number", value: "N/A", want: 0},
-		{name: "a negative duration", value: "-1", want: 0},
+		{name: "a decimal that rounds down", value: 6540.4, want: 6540},
+		{name: "a decimal that rounds up", value: 6540.6, want: 6541},
+		{name: "no duration at all", value: 0, want: 0},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			if got := probeSeconds(test.value); got != test.want {
-				t.Errorf("probeSeconds(%q) = %d, want %d", test.value, got, test.want)
+				t.Errorf("probeSeconds(%v) = %d, want %d", test.value, got, test.want)
 			}
 		})
 	}
 }
 
-func TestAVideoStreamTakesItsOwnDurationWhereTheContainerStatesNone(t *testing.T) {
-	answer := ffprobeAnswer{Streams: []ffprobeStream{
-		{CodecType: fileTypeVideo, CodecName: "h264", Duration: "120.0"},
-	}}
+func TestTheStreamDetailsAreWrittenFromTheRecord(t *testing.T) {
+	cases := []struct {
+		name   string
+		record probedFile
+		want   nfoStreamDetailsBody
+	}{
+		{
+			name: "a plain video with an audio track and a subtitle",
+			record: probedFile{Duration: 6540.4, Streams: []probedStream{
+				{Kind: fileTypeVideo, Codec: "h264", Width: 1920, Height: 1080},
+				{Kind: fileTypeAudio, Codec: "ac3", Channels: 6, Language: "eng"},
+				{Kind: fileTypeSubtitle, Codec: "subrip", Language: "eng"},
+			}},
+			want: nfoStreamDetailsBody{
+				Video: []nfoVideoElement{{Codec: "h264", Aspect: "1.78", Width: 1920,
+					Height: 1080, Duration: 6540}},
+				Audio:    []nfoAudioElement{{Codec: "ac3", Channels: 6, Language: "eng"}},
+				Subtitle: []nfoSubtitleElement{{Language: "eng"}},
+			},
+		},
+		{
+			name: "dolby vision over an HDR10 transfer",
+			record: probedFile{Streams: []probedStream{{Kind: fileTypeVideo, Codec: "hevc",
+				Width: 3840, Height: 2160, DolbyVision: true,
+				Color: probedColor{Transfer: "smpte2084"}}}},
+			want: nfoStreamDetailsBody{Video: []nfoVideoElement{{Codec: "hevc", Aspect: "1.78",
+				Width: 3840, Height: 2160, HDRType: "dolbyvision"}}},
+		},
+		{
+			name: "an HDR10 transfer",
+			record: probedFile{Streams: []probedStream{{Kind: fileTypeVideo, Codec: "hevc",
+				Width: 3840, Height: 1600, Color: probedColor{Transfer: "smpte2084"}}}},
+			want: nfoStreamDetailsBody{Video: []nfoVideoElement{{Codec: "hevc", Aspect: "2.40",
+				Width: 3840, Height: 1600, HDRType: "hdr10"}}},
+		},
+		{
+			name: "an HLG transfer",
+			record: probedFile{Streams: []probedStream{{Kind: fileTypeVideo, Codec: "hevc",
+				Width: 3840, Height: 2160, Color: probedColor{Transfer: "arib-std-b67"}}}},
+			want: nfoStreamDetailsBody{Video: []nfoVideoElement{{Codec: "hevc", Aspect: "1.78",
+				Width: 3840, Height: 2160, HDRType: "hlg"}}},
+		},
+		{
+			name: "a cover and a data stream, which the sidecar does not carry",
+			record: probedFile{Streams: []probedStream{
+				{Kind: fileTypeImage, Codec: "mjpeg", Width: 600, Height: 600},
+				{Kind: probedKindData, Codec: "bin_data"},
+			}},
+			want: nfoStreamDetailsBody{},
+		},
+		{
+			name: "a video of no stated size",
+			record: probedFile{Streams: []probedStream{
+				{Kind: fileTypeVideo, Codec: "h264"},
+			}},
+			want: nfoStreamDetailsBody{Video: []nfoVideoElement{{Codec: "h264"}}},
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := test.record.fileInfo().StreamDetails
 
-	info := answer.fileInfo()
+			if !reflect.DeepEqual(got, test.want) {
+				t.Errorf("stream details = %+v, want %+v", got, test.want)
+			}
+		})
+	}
+}
 
-	if len(info.StreamDetails.Video) != 1 || info.StreamDetails.Video[0].Duration != 120 {
-		t.Errorf("video = %+v, want the stream's own duration", info.StreamDetails.Video)
+func TestTheProbeWritesTheWholeAnswerIntoItsOwnLedger(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+
+	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfAnHDRFile)); err != nil {
+		t.Fatal(err)
+	}
+
+	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Probes) != 1 {
+		t.Fatalf("probes = %+v, want one record", ledger.Probes)
+	}
+	record := ledger.Probes[0]
+	if record.Path != "The Thing (1982).mkv" || record.Container != "mkv" {
+		t.Errorf("record = %+v, want the file's own path and container", record)
+	}
+	if record.Duration != 8462.752 || record.Bitrate != 19535025 || len(record.Streams) != 4 {
+		t.Errorf("record = %+v, want the container's facts and every stream", record)
+	}
+	if record.Size != int64(len("video")) || record.Modified == 0 || record.At.IsZero() {
+		t.Errorf("record = %+v, want the file's size, its change time, and the time of the probe", record)
+	}
+}
+
+func TestASecondProbeOfAFileLeavesOneRecordInTheLedger(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	seedProbeGap(t, catalog, root, "The Thing (1982)", "The Thing (1982).mkv")
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+
+	for range 2 {
+		if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Probes) != 1 {
+		t.Errorf("probes = %+v, want the one record the second run replaced", ledger.Probes)
+	}
+}
+
+func TestAnAudioFileIsRecordedAndGetsNoSidecar(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "A Perfect Circle", "01 The Track.mp3"), "audio")
+	work, _ := testEnricher(t, libraryKindMovies, root, nil)
+
+	work.probeOne(t.Context(), answeringProbe(ffprobeOfAMusicFile),
+		filepath.Join("A Perfect Circle", "01 The Track.mp3"))
+
+	ledger, err := readLikenLedger(filepath.Join(root, "A Perfect Circle"), factProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Probes) != 1 || len(ledger.Probes[0].Streams) != 2 {
+		t.Fatalf("probes = %+v, want the track and its cover", ledger.Probes)
+	}
+	if ledger.Attempts[0].Result != attemptFound {
+		t.Errorf("attempt = %+v, want one that found the streams", ledger.Attempts[0])
+	}
+	if _, err := os.Stat(filepath.Join(root, "A Perfect Circle", "01 The Track.nfo")); err == nil {
+		t.Error("the probe wrote a sidecar beside a music file")
+	}
+}
+
+func TestAFileTheProbeCannotStatIsAnError(t *testing.T) {
+	root := t.TempDir()
+	work, _ := testEnricher(t, libraryKindMovies, root, nil)
+
+	work.probeOne(t.Context(), answeringProbe(ffprobeOfOneFile),
+		filepath.Join("The Thing (1982)", "The Thing (1982).mkv"))
+
+	ledger, err := readLikenLedger(filepath.Join(root, "The Thing (1982)"), factProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Probes) != 0 || ledger.Attempts[0].Result != attemptError {
+		t.Errorf("ledger = %+v, want no record and an error attempt", ledger)
 	}
 }
 

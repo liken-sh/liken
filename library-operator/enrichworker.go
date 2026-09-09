@@ -160,8 +160,17 @@ func (e *enricher) logf(format string, args ...any) {
 // the file sits in a movie's extras.
 func likenFolderFor(kind, absolute string) (string, string) {
 	dir := filepath.Dir(absolute)
-	if kind == libraryKindMovies && extrasFolderName(filepath.Base(dir)) != "" {
-		return filepath.Dir(dir), filepath.Join(filepath.Base(dir), filepath.Base(absolute))
+	if folder := likenFolderOf(kind, dir); folder != dir {
+		return folder, filepath.Join(filepath.Base(dir), filepath.Base(absolute))
 	}
 	return dir, filepath.Base(absolute)
+}
+
+// The folder whose .liken directory holds the entries for the files of one
+// directory. For a movie's extras folder, that is the title folder above it.
+func likenFolderOf(kind, dir string) string {
+	if kind == libraryKindMovies && extrasFolderName(filepath.Base(dir)) != "" {
+		return filepath.Dir(dir)
+	}
+	return dir
 }

@@ -49,7 +49,10 @@ type walkResult struct {
 	series   []seriesRow
 	episodes []episodeRow
 	files    []fileRow
-	aliases  []aliasRow
+	// The streams of the files above, one row per stream, from the probe
+	// ledger the walk read beside them.
+	streams []streamRow
+	aliases []aliasRow
 	// The volume holds the attempts and the catalog only derives them, so a
 	// folder that left takes its attempts with it.
 	attempts []attemptRow
@@ -109,6 +112,7 @@ func appendFolder(buffer, folder *walkResult) {
 	buffer.series = append(buffer.series, folder.series...)
 	buffer.episodes = append(buffer.episodes, folder.episodes...)
 	buffer.files = append(buffer.files, folder.files...)
+	buffer.streams = append(buffer.streams, folder.streams...)
 	buffer.aliases = append(buffer.aliases, folder.aliases...)
 	buffer.attempts = append(buffer.attempts, folder.attempts...)
 	buffer.credits = append(buffer.credits, folder.credits...)

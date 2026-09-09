@@ -175,7 +175,9 @@ CREATE INDEX episodes_library_added ON episodes (library, added);
 -- and its own trickplay path. Every file a title folder holds is a row
 -- here, and not the video files alone, so a media
 -- browser draws a title's art, subtitles, and extras from the catalog and
--- never from the volume.
+-- never from the volume. The technical columns of a video or an audio
+-- file come from the probe ledger, and the streams table holds the rest of
+-- what the probe found.
 --
 -- present is 1 on every row the scanner writes. The mark-and-sweep pass
 -- in prune.go deletes a file that left the volume rather than marking it
@@ -192,8 +194,10 @@ CREATE INDEX episodes_library_added ON episodes (library, added);
 -- arrived is the time the arrival ledger beside the file holds for it, in
 -- Unix seconds, and 0 where the ledger holds no entry. The walk writes it
 -- from the ledger alone and never from the change time, so the arrival
--- fact's gap is every video with 0 here. The column is last because
--- Corrosion adds a column to a table that exists at its end.
+-- fact's gap is every video with 0 here.
+--
+-- The columns after arrived came later. Corrosion adds a column to a table
+-- that exists at its end, so a new column always goes last here.
 CREATE TABLE files (
     library TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
@@ -211,6 +215,12 @@ CREATE TABLE files (
     language TEXT NOT NULL DEFAULT '',
     modified INTEGER NOT NULL DEFAULT 0,
     arrived INTEGER NOT NULL DEFAULT 0,
+    -- bitrate is the container's bit rate in bits per second, from the
+    -- probe ledger. probed is the modified value the file carried when a
+    -- probe last read it, and 0 where no probe has read it. The probe gap
+    -- is every media file where probed differs from modified.
+    bitrate INTEGER NOT NULL DEFAULT 0,
+    probed INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (library, path)
 );
 
@@ -218,6 +228,46 @@ CREATE TABLE files (
 -- video of one library with no arrival, led by the library column as every
 -- index in this schema is.
 CREATE INDEX files_library_arrived ON files (library, arrived);
+
+-- One row per stream of one media file, keyed by the library, the file's
+-- path, and the stream's ordinal in the container, so (library, path) names
+-- the files row the stream belongs to. The walk writes every row from the
+-- probe ledger, and a file's streams leave with the file.
+--
+-- kind is one of video, audio, subtitle, image, and data. One wide table
+-- holds all five, and a stream leaves the columns of the other kinds at
+-- their defaults. codec and profile are ffprobe's own names. depth is bits
+-- per sample. The three color columns and dolby_vision are the raw facts a
+-- reader derives HDR from; the table stores no hdr column of its own.
+--
+-- Every read of a file's streams leads with the library and the path, which
+-- the primary key covers, so the table carries no index of its own.
+CREATE TABLE streams (
+    library TEXT NOT NULL DEFAULT '',
+    path TEXT NOT NULL DEFAULT '',
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT '',
+    codec TEXT NOT NULL DEFAULT '',
+    profile TEXT NOT NULL DEFAULT '',
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    depth INTEGER NOT NULL DEFAULT 0,
+    frame_rate TEXT NOT NULL DEFAULT '',
+    color_primaries TEXT NOT NULL DEFAULT '',
+    color_transfer TEXT NOT NULL DEFAULT '',
+    color_space TEXT NOT NULL DEFAULT '',
+    dolby_vision INTEGER NOT NULL DEFAULT 0,
+    channels INTEGER NOT NULL DEFAULT 0,
+    layout TEXT NOT NULL DEFAULT '',
+    sample_rate INTEGER NOT NULL DEFAULT 0,
+    bitrate INTEGER NOT NULL DEFAULT 0,
+    language TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    is_default INTEGER NOT NULL DEFAULT 0,
+    forced INTEGER NOT NULL DEFAULT 0,
+    present INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (library, path, ordinal)
+);
 
 -- The many-to-many link between a file and the items it holds, within
 -- one library: a multi-episode file names more than one item, and an

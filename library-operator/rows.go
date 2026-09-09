@@ -181,7 +181,13 @@ type fileRow struct {
 	// The time the arrival ledger holds for the file, and zero where the ledger
 	// holds no entry, which is the arrival fact's gap.
 	Arrived int64
-	Items   []string
+	// The container's bit rate in bits per second, from the probe ledger.
+	Bitrate int64
+	// The modified value the file carried when a probe last read it, and zero
+	// where no probe has read it. The probe gap is every media file where
+	// this differs from Modified.
+	Probed int64
+	Items  []string
 }
 
 // fileItemKey names one row of the link table: the file's path, and the id of

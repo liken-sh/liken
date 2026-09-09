@@ -96,6 +96,9 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 	result.noteReadError(err)
 	arrivals, err := folderArrivals(dir, files)
 	result.noteReadError(err)
+	ledgers := newProbeLedgers(libraryKindMovies)
+	probes, err := ledgers.of(dir)
+	result.noteReadError(err)
 	var added int64
 	if len(files) > 0 {
 		added = arrivals[files[0]].added
@@ -133,10 +136,11 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 		if err != nil {
 			continue
 		}
+		result.streams = append(result.streams, probes.fill(&row, video)...)
 		result.files = append(result.files, row)
 	}
 
-	scanMovieFiles(root, dir, library, id, videos, result)
+	scanMovieFiles(root, dir, library, id, videos, ledgers, result)
 
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeMovie, meta.ProviderIDs, key, id)...)
 	readLikenSidecar(likenSidecar{root: root, dir: dir, library: library, item: id}, result)
@@ -233,31 +237,40 @@ func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo, a
 // scanMovieFiles reads the rest of a movie title folder: the sidecar, the art,
 // the subtitles, the trickplay directory, and the extras folders beside the
 // feature. Every one of them links to the movie.
-func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, result *walkResult) {
-	rows, subdirectories, err := folderFiles{
+func scanMovieFiles(root, dir, library, itemID string, videos map[string]bool, ledgers *probeLedgers, result *walkResult) {
+	probes, err := ledgers.of(dir)
+	result.noteReadError(err)
+	rows, streams, subdirectories, err := folderFiles{
 		root:    root,
 		dir:     dir,
 		library: library,
 		place:   filePlace{kind: libraryKindMovies},
 		item:    constantItem(itemID),
 		held:    videos,
+		probes:  probes,
 	}.read()
 	result.noteReadError(err)
 	result.files = append(result.files, rows...)
+	result.streams = append(result.streams, streams...)
 
 	for _, name := range subdirectories {
 		extras := extrasFolderName(name)
 		if extras == "" {
 			continue
 		}
-		rows, _, err := folderFiles{
+		child := filepath.Join(dir, name)
+		probes, err := ledgers.of(child)
+		result.noteReadError(err)
+		rows, streams, _, err := folderFiles{
 			root:    root,
-			dir:     filepath.Join(dir, name),
+			dir:     child,
 			library: library,
 			place:   filePlace{kind: libraryKindMovies, extras: extras},
 			item:    constantItem(itemID),
+			probes:  probes,
 		}.read()
 		result.noteReadError(err)
 		result.files = append(result.files, rows...)
+		result.streams = append(result.streams, streams...)
 	}
 }

@@ -79,6 +79,29 @@ func TestUpsertWalkWritesTheItemFileAndAlias(t *testing.T) {
 	}
 }
 
+// The streams a walk carries are written in the same batch as the files
+// they belong to.
+func TestUpsertWalkWritesTheStreamsBesideTheFiles(t *testing.T) {
+	catalog, recorder := recordingCatalog(t)
+	walk := oneMovie("movie:tmdb:1", "One")
+	walk.streams = []streamRow{{
+		Library: "house/movies", Path: "One/movie.mkv", Ordinal: 0,
+		Kind: "video", Codec: "hevc", Present: true,
+	}}
+
+	if err := upsertWalk(t.Context(), catalog, walk); err != nil {
+		t.Fatal(err)
+	}
+
+	kinds := sqlKinds(recorder)
+	if !containsKind(kinds, "INSERT STREAMS") {
+		t.Errorf("statements = %v, want the stream upsert", kinds)
+	}
+	if !postedWith(recorder, "hevc") {
+		t.Error("the stream's codec never reached the catalog")
+	}
+}
+
 func TestUpsertWalkWritesNothingForAnEmptyWalk(t *testing.T) {
 	catalog, recorder := recordingCatalog(t)
 	if err := upsertWalk(t.Context(), catalog, &walkResult{}); err != nil {
