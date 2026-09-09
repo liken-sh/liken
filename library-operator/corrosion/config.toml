@@ -75,6 +75,16 @@ plaintext = true
 # one name serves every agent.
 bootstrap = ["catalog:8787"]
 
+[perf]
+# How long the agent waits, in milliseconds, before it applies a batch of
+# peer changes smaller than its threshold. Corrosion's default is 10 ms,
+# and the agent re-arms that wait forever while its queue is empty, so an
+# idle agent wakes a hundred times a second. At 100 ms it wakes ten
+# times a second, and a peer's change lands within a tenth of a second,
+# which no screen can notice. Every agent reads this, so the whole
+# cluster pays the lower idle cost.
+apply_queue_timeout = 100
+
 [admin]
 # The admin socket answers `corrosion cluster members` and the other
 # operator commands. It moves off its default under `/var/run` so that
