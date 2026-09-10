@@ -9,6 +9,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: library-media-browser
+  namespace: liken-system
 spec:
   namespaceSelector:
     any: true

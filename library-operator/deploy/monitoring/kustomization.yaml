@@ -4,16 +4,25 @@
 # applies nothing here. liken milestone 65 is the contract this
 # component follows: the ports, the names, and the PodMonitor shape.
 #
-# The namespace is stated here and not left to whatever kustomization
-# names this component, so every PodMonitor lands beside the operator
-# in liken-system whether or not a fleet repository's own top-level
-# kustomization sets one.
+# The dashboard ConfigMap belongs in the monitoring namespace, where
+# the kube-prometheus-stack sidecar watches for the grafana_dashboard
+# label, not beside the operator. A top-level namespace: here would
+# move that ConfigMap too, so each PodMonitor states liken-system on
+# itself instead.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
-
-namespace: liken-system
 
 resources:
   - podmonitor-operator.yaml
   - podmonitor-catalog.yaml
   - podmonitor-browser.yaml
+
+configMapGenerator:
+  - name: library-operator-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/library-operator.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

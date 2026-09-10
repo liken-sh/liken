@@ -10,6 +10,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: library-catalog
+  namespace: liken-system
 spec:
   namespaceSelector:
     any: true
