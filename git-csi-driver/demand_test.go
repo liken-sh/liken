@@ -447,7 +447,7 @@ func TestADriverOutsideAClusterWatchesNothing(t *testing.T) {
 	outside.follow(t.Context())
 }
 
-// watchRestartsOf is what gitcsi_watch_restarts_total reads for the
+// watchRestartsOf is what git_csi_watch_restarts_total reads for the
 // kind, and false when nothing has counted one yet.
 func watchRestartsOf(t *testing.T, readings *metrics, kind string) (float64, bool) {
 	t.Helper()
@@ -456,7 +456,7 @@ func watchRestartsOf(t *testing.T, readings *metrics, kind string) (float64, boo
 		t.Fatalf("gathering the metrics: %v", err)
 	}
 	for _, family := range families {
-		if family.GetName() != "gitcsi_watch_restarts_total" {
+		if family.GetName() != "git_csi_watch_restarts_total" {
 			continue
 		}
 		for _, metric := range family.GetMetric() {
@@ -470,7 +470,7 @@ func watchRestartsOf(t *testing.T, readings *metrics, kind string) (float64, boo
 	return 0, false
 }
 
-func TestARestartedWatchCountsOnGitcsiWatchRestartsTotal(t *testing.T) {
+func TestARestartedWatchCountsOnGitCSIWatchRestartsTotal(t *testing.T) {
 	answering, _ := testNode(t, io.Discard)
 	answering.demands.resync = 10 * time.Millisecond
 	cluster(t, answering).PrependWatchReactor("persistentvolumes",
@@ -500,6 +500,6 @@ func TestARestartedWatchCountsOnGitcsiWatchRestartsTotal(t *testing.T) {
 	}
 
 	if count, found := watchRestartsOf(t, answering.readings, persistentVolumeKind); !found || count == 0 {
-		t.Errorf("gitcsi_watch_restarts_total reads %v (found: %v), want at least one restart", count, found)
+		t.Errorf("git_csi_watch_restarts_total reads %v (found: %v), want at least one restart", count, found)
 	}
 }

@@ -99,7 +99,7 @@ func newServer(ctx context.Context, cfg *config, logger *slog.Logger) (*server, 
 		// registry exists only once a node does.
 		readings.registerNodeFacts(answering.volumesByRepo)
 		// A fresh pod measures the store once here, so
-		// gitcsi_store_bytes reports what the driver resumed and not a
+		// git_csi_store_bytes reports what the driver resumed and not a
 		// zero that waits for the first sweep. It runs off the start,
 		// the way the sweep and the demand watch do, so a large store
 		// never holds the socket back from opening.
@@ -188,7 +188,7 @@ func logCalls(logger *slog.Logger) grpc.UnaryServerInterceptor {
 // own name, which milestone 65 calls the reconcile loop's kind. A call
 // that changes nothing still counts as one duration reading, and a call
 // that answers any error counts once more on
-// gitcsi_reconcile_errors_total.
+// git_csi_reconcile_errors_total.
 func recordCalls(readings *metrics) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,

@@ -416,7 +416,7 @@ func (n *node) stagedVolume(handle string) *volume {
 }
 
 // volumesByRepo counts the volumes this node has mounted, by the
-// repository each one follows. gitcsi_volumes reads this at every
+// repository each one follows. git_csi_volumes reads this at every
 // scrape, so the count is never a second bookkeeping a publish or an
 // unpublish could fall out of step with.
 func (n *node) volumesByRepo() map[string]float64 {

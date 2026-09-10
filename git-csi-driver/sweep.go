@@ -83,7 +83,7 @@ func (n *node) sweepStore(ctx context.Context) {
 	n.measureStore(ctx)
 }
 
-// measureStore records gitcsi_store_bytes on the sweep's own timer. A
+// measureStore records git_csi_store_bytes on the sweep's own timer. A
 // walk of the whole store costs too much to repeat on every scrape, and
 // the sweep already walks it once an interval to collect what nothing
 // uses.

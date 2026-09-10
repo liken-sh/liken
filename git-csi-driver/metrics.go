@@ -116,28 +116,28 @@ func newMetrics() *metrics {
 		// reading, the way milestone 65 counts a reconcile that changes
 		// nothing as one run.
 		callDuration: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{Name: "gitcsi_reconcile_duration_seconds",
+			prometheus.HistogramOpts{Name: "git_csi_reconcile_duration_seconds",
 				Help: "How long a CSI call took to answer.", Buckets: callBuckets}, callLabels),
 		callErrors: prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "gitcsi_reconcile_errors_total",
+			prometheus.CounterOpts{Name: "git_csi_reconcile_errors_total",
 				Help: "CSI calls that answered an error."}, callLabels),
 		// A watch the API closes and the node reopens is one restart.
 		// Only the node plugin watches PersistentVolumes, so only its
 		// registry moves this past zero.
 		watchRestarts: prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "gitcsi_watch_restarts_total",
+			prometheus.CounterOpts{Name: "git_csi_watch_restarts_total",
 				Help: "Watches the API closed that the driver reopened."}, callLabels),
 		// Layer 3, plan 13: what the plan's table asks for. volumes is
 		// wired to the node's own map of what is mounted in
 		// registerNodeFacts, once a node exists to read.
 		fetchDuration: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{Name: "gitcsi_fetch_duration_seconds",
+			prometheus.HistogramOpts{Name: "git_csi_fetch_duration_seconds",
 				Help: "How long a fetch from the forge took.", Buckets: callBuckets}, repoLabels),
 		fetchFailures: prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "gitcsi_fetch_failures_total",
+			prometheus.CounterOpts{Name: "git_csi_fetch_failures_total",
 				Help: "Fetches from the forge that failed."}, repoLabels),
 		storeBytes: prometheus.NewGauge(
-			prometheus.GaugeOpts{Name: "gitcsi_store_bytes",
+			prometheus.GaugeOpts{Name: "git_csi_store_bytes",
 				Help: "Bytes the store's bare repositories and work trees hold on this node."}),
 		// One when a class of this driver arms the volume, zero when none
 		// does.
@@ -202,7 +202,7 @@ func (m *metrics) registerWebhook() {
 // watch restart counter beside it: the facts only the node plugin has,
 // because only it fetches, holds a store, or watches a
 // PersistentVolume. byRepo answers what volumesByRepo reads live off
-// the node, so gitcsi_volumes never drifts from its own accounting of
+// the node, so git_csi_volumes never drifts from its own accounting of
 // what is mounted.
 func (m *metrics) registerNodeFacts(byRepo func() map[string]float64) {
 	m.volumes = newVolumesCollector(byRepo)
@@ -218,7 +218,7 @@ func (m *metrics) reportBuildInfo(version string) {
 }
 
 // observeCall records one CSI call's duration under the operation's own
-// name, and counts it again on gitcsi_reconcile_errors_total when it
+// name, and counts it again on git_csi_reconcile_errors_total when it
 // answered one. The CSI calls are this driver's reconcile loop, so a
 // call that changes nothing still counts as one duration reading.
 func (m *metrics) observeCall(kind string, duration time.Duration, failed bool) {
@@ -239,7 +239,7 @@ func (m *metrics) watchRestarted(kind string) {
 
 // timeFetch runs one git fetch and records how long it took under the
 // repository's short name. A fetch that answers an error also counts on
-// gitcsi_fetch_failures_total, so a forge that is slow and a forge that
+// git_csi_fetch_failures_total, so a forge that is slow and a forge that
 // is down read differently on the graph.
 func (m *metrics) timeFetch(repo string, run func() error) error {
 	start := time.Now()
@@ -261,7 +261,7 @@ func (m *metrics) setStoreBytes(bytes int64) {
 	m.storeBytes.Set(float64(bytes))
 }
 
-// volumesCollector reports gitcsi_volumes{repo} from the node's own map
+// volumesCollector reports git_csi_volumes{repo} from the node's own map
 // of what is mounted, read fresh at every scrape rather than kept on a
 // gauge of its own. A gauge a publish sets and an unpublish clears would
 // drift the moment either one took a path the other did not expect; a
@@ -275,7 +275,7 @@ type volumesCollector struct {
 
 func newVolumesCollector(byRepo func() map[string]float64) *volumesCollector {
 	return &volumesCollector{
-		desc: prometheus.NewDesc("gitcsi_volumes",
+		desc: prometheus.NewDesc("git_csi_volumes",
 			"Volumes this node has mounted, by the repository each one follows.",
 			repoLabels, nil),
 		byRepo: byRepo,

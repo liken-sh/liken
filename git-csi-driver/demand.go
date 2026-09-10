@@ -20,7 +20,7 @@ import (
 // because it is what a person reads in kubectl describe.
 const demandAnnotation = "git.liken.sh/pull-requested-at"
 
-// persistentVolumeKind is what gitcsi_watch_restarts_total names the
+// persistentVolumeKind is what git_csi_watch_restarts_total names the
 // one watch this driver holds.
 const persistentVolumeKind = "PersistentVolume"
 
@@ -56,7 +56,7 @@ func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Log
 // follow holds the watch for the driver's whole run. A driver outside
 // a cluster holds no client, so it reads no demand. Every pass after
 // the first is a watch the API closed, or the resync timer, reopened,
-// which is what gitcsi_watch_restarts_total counts.
+// which is what git_csi_watch_restarts_total counts.
 func (d *demanding) follow(ctx context.Context) {
 	if d.client == nil {
 		return
