@@ -2,6 +2,7 @@
 // headless run has no keyboard and no screenshot tool, so the flags stand in
 // for both.
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -23,6 +24,12 @@ pub const PLAY_TOPIC: &str = "LIBRARY_PLAY_TOPIC";
 /// own variable for the same reason the play topic is, and the browser is
 /// the only program that writes it.
 pub const AUDIENCE_TOPIC: &str = "LIBRARY_AUDIENCE_TOPIC";
+
+/// The address the Prometheus listener binds, from milestone 65's
+/// contract. An unset, empty, or unparseable value serves no metrics,
+/// which is what a run outside a pod gets and what a pod gets until the
+/// operator sets it.
+pub const METRICS_ADDRESS: &str = "METRICS_LISTEN_ADDRESS";
 
 /// The help the binary prints for `--help`.
 pub const HELP: &str = "\
@@ -123,6 +130,9 @@ pub struct Options {
     /// The audience topic, from [`AUDIENCE_TOPIC`]. A run that misses it
     /// keeps who is watching to itself, and asks again after a restart.
     pub audience_topic: String,
+    /// The metrics listener's address, from [`METRICS_ADDRESS`]. `None`
+    /// serves no metrics.
+    pub metrics_address: Option<SocketAddr>,
 }
 
 impl Default for Options {
@@ -149,6 +159,7 @@ impl Default for Options {
             window_grace: None,
             play_topic: String::new(),
             audience_topic: String::new(),
+            metrics_address: None,
         }
     }
 }
@@ -261,7 +272,19 @@ impl Options {
         self.window_grace = grace(&value(WINDOW_GRACE).unwrap_or_default());
         self.play_topic = value(PLAY_TOPIC).unwrap_or_default();
         self.audience_topic = value(AUDIENCE_TOPIC).unwrap_or_default();
+        self.metrics_address = metrics_address(&value(METRICS_ADDRESS).unwrap_or_default());
     }
+}
+
+/// The metrics listener's address. An empty string, or text that is not
+/// a `host:port` pair, serves no metrics rather than stopping the run:
+/// a browser that cannot be watched still has to draw its screen.
+fn metrics_address(text: &str) -> Option<SocketAddr> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    text.parse().ok()
 }
 
 /// The window grace, in seconds. Anything but a positive number leaves

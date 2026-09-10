@@ -148,6 +148,10 @@ impl Art for Volumes {
         self.store.counts()
     }
 
+    fn cache_bytes(&self) -> Option<usize> {
+        Some(self.store.cache_bytes())
+    }
+
     fn wake_by(&mut self, wake: Waker) {
         *self.wake.lock().expect("the wake cell is never poisoned") = Some(wake);
     }
@@ -230,6 +234,7 @@ mod tests {
                 from_source: 1,
             }
         );
+        assert_eq!(volumes.cache_bytes(), Some(40 * 60 * 4));
     }
 
     #[test]

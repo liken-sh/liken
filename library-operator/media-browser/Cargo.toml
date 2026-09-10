@@ -76,11 +76,29 @@ ureq = { version = "=2.12.1", default-features = false }
 # The search fold decomposes every string (NFD) and drops the combining
 # marks, so "Amélie" answers to "amelie".
 unicode-normalization = "=0.1.25"
+# metrics is the facade milestone 65 puts behind every gauge and
+# histogram in the crate, so the recording call sites name nothing about
+# where the numbers go.
+metrics = "=0.24.6"
+# The Prometheus exporter serves the registry the facade above writes
+# to. push-gateway is off because a scrape reads this process directly.
+metrics-exporter-prometheus = { version = "=0.18.3", default-features = false, features = [
+    "http-listener",
+] }
+# metrics-process is layer 1's process_* series: the memory, the file
+# descriptors, and the CPU time every liken process reports the same way.
+metrics-process = "=2.4.3"
 
 [dev-dependencies]
 # tempfile holds the fixture databases and the fixture volumes the
 # tests build.
 tempfile = "=3.27.0"
+# metrics-util's debugging recorder is the test double for the facade:
+# it holds what a test recorded instead of serving it, so a test proves
+# a metric without opening a port.
+metrics-util = { version = "=0.20.4", default-features = false, features = [
+    "debugging",
+] }
 
 # The measurements need optimized code with symbols the profile does not strip.
 [profile.release]

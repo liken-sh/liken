@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -182,6 +183,34 @@ func TestCountTitlesCountsMoviesAndSeries(t *testing.T) {
 	}
 	if titles != 2 {
 		t.Errorf("titles = %d, want the movie and the series", titles)
+	}
+}
+
+// The kind breakdown sums to the same four tables countItems reads, kept
+// apart, so the library_items metric and the status count never disagree.
+func TestCountItemsByKindSumsToCountItems(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	seedTwoLibrariesInEveryTable(t, catalog)
+
+	byKind, err := catalog.countItemsByKind(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{libraryKindMovies: 1, libraryKindSeries: 1, "episodes": 1, libraryKindFranchises: 0}
+	if !maps.Equal(byKind, want) {
+		t.Errorf("byKind = %v, want %v", byKind, want)
+	}
+
+	total, err := catalog.countItems(t.Context(), "house/movies")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := 0
+	for _, count := range byKind {
+		sum += count
+	}
+	if sum != total {
+		t.Errorf("the kinds sum to %d, want countItems' %d", sum, total)
 	}
 }
 

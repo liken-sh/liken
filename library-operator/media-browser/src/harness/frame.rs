@@ -89,6 +89,7 @@ impl<S: Screen> Ready<S> {
             }
         }
         self.stats.sample_rss(at);
+        crate::metrics::set_art_cache_bytes(self.screen.art_cache_bytes());
 
         if self.resized {
             let size = self.window.inner_size();
@@ -196,6 +197,11 @@ impl<S: Screen> Ready<S> {
         // nothing about the cost of a frame and stays out of the numbers.
         self.stats
             .frame(build_ms, millis(loop_start.elapsed()), !captured);
+        // The histogram takes every drawn frame, captures included: a
+        // capture is a real frame on the glass, and the count of samples
+        // a scrape sees is itself the read of a covered screen, which
+        // draws none.
+        crate::metrics::record_frame_seconds(build_ms / 1000.0);
 
         if self.timeline.past_deadline(at) || self.captured_everything() {
             self.stop(event_loop);

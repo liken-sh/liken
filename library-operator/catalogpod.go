@@ -5,8 +5,10 @@ package main
 // of them on the store's one claim. The first copy reports
 // what it holds over the bus. They are the standing members of the gossip
 // cluster, and every worker Job joins that cluster for the length of its
-// run. They answer on no port: the agent's API is loopback only, and the
-// reporter reads it from inside its own pod.
+// run. The agent's write API is loopback only, and the reporter reads it
+// from inside its own pod. The agent also answers on the pod network,
+// with the Prometheus metrics port Corrosion's own configuration opens
+// (corrosion/config.toml), which the catalog PodMonitor scrapes.
 
 import (
 	"context"

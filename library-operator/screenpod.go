@@ -31,6 +31,15 @@ import (
 // The container's name reaches a person through kubectl logs, so it
 const browserContainer = "browser"
 
+// The port the browser serves Prometheus metrics on, and the name a
+// PodMonitor reads it by. Milestone 65 assigns 9231 to the media
+// browser; every other liken process has a port of its own on the same
+// table.
+const (
+	browserMetricsPort     = 9231
+	browserMetricsPortName = "metrics"
+)
+
 // The name label value a screen pod carries. It is neither a
 // worker Job's value nor the catalog pod's, so one list answers one
 // kind of pod.
@@ -312,6 +321,11 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 	idle := player.idle()
 	environment := []EnvVar{
 		{Name: windowGraceVariable, Value: windowGraceSeconds},
+		// The browser's own metrics listener, on milestone 65's port for
+		// it. This is not gated behind a Player's bus wiring below: a
+		// browser drawing no room's remotes still has a frame time and
+		// an art cache worth a graph.
+		{Name: metricsAddressVariable, Value: ":" + strconv.Itoa(browserMetricsPort)},
 	}
 	// The clock reads TZ against the image's tz database. Set it only
 	// when the household stated a zone, so an unset zone leaves the pod
@@ -372,10 +386,13 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 	}
 
 	return Container{
-		Name:            browserContainer,
-		Image:           image,
-		Args:            args,
-		Env:             environment,
+		Name:  browserContainer,
+		Image: image,
+		Args:  args,
+		Env:   environment,
+		Ports: []ContainerPort{
+			{Name: browserMetricsPortName, ContainerPort: browserMetricsPort},
+		},
 		VolumeMounts:    mounts,
 		Resources:       ResourceRequirements{Claims: claims},
 		SecurityContext: unprivileged(),

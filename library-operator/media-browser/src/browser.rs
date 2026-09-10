@@ -951,6 +951,10 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         self.store.borrow().counts()
     }
 
+    fn art_cache_bytes(&self) -> Option<usize> {
+        self.store.borrow().cache_bytes()
+    }
+
     // The size of the source's search index, for the stats line. A
     // source with no index answers nothing, and the line leaves the
     // numbers out.

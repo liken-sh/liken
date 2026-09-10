@@ -96,7 +96,10 @@ func (o *operator) checkProviders(ctx context.Context, providers []MetadataProvi
 	for index := range providers {
 		provider := &providers[index]
 		set[libraryKey(provider.Metadata.Namespace, provider.Metadata.Name)] = provider
-		if err := o.checkProvider(ctx, provider, now); err != nil {
+		started := time.Now()
+		err := o.checkProvider(ctx, provider, now)
+		o.metrics.observeReconcile(kindMetadataProvider, time.Since(started), err)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "checking the metadata provider %s/%s: %v\n",
 				provider.Metadata.Namespace, provider.Metadata.Name, err)
 		}

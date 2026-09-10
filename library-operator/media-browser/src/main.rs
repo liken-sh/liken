@@ -66,6 +66,10 @@ fn main() {
             // binary reads them here, after the flags and before the
             // window.
             options.from_environment();
+            // The listener starts before the window, so a scrape that
+            // arrives while the compositor is still handing over a
+            // surface still finds the process's own numbers.
+            media_browser::metrics::install(options.metrics_address);
             if let Err(error) = run(*options, &wiring) {
                 eprintln!("media-browser: {error}");
                 std::process::exit(1);

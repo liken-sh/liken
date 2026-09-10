@@ -10,6 +10,7 @@ pub mod clock;
 pub mod focus;
 pub mod harness;
 pub mod look;
+pub mod metrics;
 pub mod sample;
 pub mod screens;
 pub mod views;

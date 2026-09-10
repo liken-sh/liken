@@ -129,15 +129,15 @@ func TestScannerContainerReadsTheVolumeReadOnly(t *testing.T) {
 	}
 }
 
-// no container in a worker pod answers on a port. The webhook is on the
-// operator now, and the catalog agent's API is loopback only.
-func TestScanPodDeclaresNoPort(t *testing.T) {
-	pod := testScanPod(studioMovies())
+// The scanner answers on no port: the webhook is on the operator now,
+// and the catalog agent's write API is loopback only. The catalog agent
+// still declares its own metrics port, proved in
+// TestCatalogContainerDeclaresItsMetricsPort.
+func TestScanPodDeclaresNoPortOnTheScanner(t *testing.T) {
+	scanner := podContainer(t, testScanPod(studioMovies()), scannerContainer)
 
-	for _, container := range append(append([]Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
-		if len(container.Ports) != 0 {
-			t.Errorf("%s declares %+v, want no port", container.Name, container.Ports)
-		}
+	if len(scanner.Ports) != 0 {
+		t.Errorf("%s declares %+v, want no port", scanner.Name, scanner.Ports)
 	}
 }
 
@@ -264,6 +264,22 @@ func TestCatalogContainerGossipsOnThePodsAddress(t *testing.T) {
 	}
 	if catalog.Env[1].Value != "$(POD_IP):8787" {
 		t.Errorf("gossip address = %q, want $(POD_IP):8787", catalog.Env[1].Value)
+	}
+}
+
+// The catalog agent declares the port Corrosion's own configuration
+// opens for its Prometheus metrics, so the catalog PodMonitor has a
+// named port to scrape, the same way every liken process names its own.
+func TestCatalogContainerDeclaresItsMetricsPort(t *testing.T) {
+	pod := testScanPod(studioMovies())
+
+	catalog := catalogSidecarOf(t, pod)
+	if len(catalog.Ports) != 1 {
+		t.Fatalf("ports = %v, want one", catalog.Ports)
+	}
+	port := catalog.Ports[0]
+	if port.Name != catalogMetricsPortName || port.ContainerPort != catalogMetricsPort {
+		t.Errorf("port = %+v, want %s on %d", port, catalogMetricsPortName, catalogMetricsPort)
 	}
 }
 

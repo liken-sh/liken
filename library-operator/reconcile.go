@@ -56,6 +56,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	report := o.reports.latestFor(namespace, name)
+	o.metrics.observeLibraryReport(name, report)
 
 	// A Library with no volume, or in a namespace with no single
 	// Catalog, gets no schedule. There would be nothing to mount, or no

@@ -1,0 +1,17 @@
+# The scrape target for this operator's own metrics: layer 1, layer 2
+# under library_, and the layer 3 rows plans/37-prometheus-metrics.md
+# states for the operator. The Deployment carries the pod in
+# liken-system, the namespace this base applies its resources to.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: library-operator
+spec:
+  selector:
+    matchLabels:
+      app: library-operator
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

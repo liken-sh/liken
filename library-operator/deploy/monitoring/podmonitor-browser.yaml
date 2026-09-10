@@ -1,0 +1,25 @@
+# The scrape target for the media browser's own metrics: the frame
+# histogram and the art cache gauge plan 37 adds, and layer 1 underneath
+# them. The browser has no reconcile loop, so it carries no layer 2.
+#
+# A screen pod lives in the namespace of the Player it draws, not in
+# liken-system beside the operator, so this selects the browser's name
+# label across every namespace rather than the one the base applies to.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: library-media-browser
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: library-media-browser
+  podMetricsEndpoints:
+    - port: metrics
+      # A screen pod runs on the node whose display it draws to, so the
+      # fleet dashboard reads this scrape by node, the same as every
+      # other liken PodMonitor.
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

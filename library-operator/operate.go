@@ -129,6 +129,13 @@ type operator struct {
 	// answer is one pass old at most and the operator watches no
 	// storageclasses.
 	perNodeClasses map[string]bool
+
+	// The Prometheus registry and the address it answers on. A nil
+	// metrics or an empty address is the disabled state: run starts no
+	// listener, and every recording method on a nil metrics is a no-op,
+	// so a test that builds an operator by hand needs to set neither.
+	metrics        *metrics
+	metricsAddress string
 }
 
 // NewOperator builds the operator and the two things it listens
@@ -234,6 +241,14 @@ func operate() error {
 	library := newOperator(client, stamped.scanner, stamped.corrosion, stamped.browser,
 		busAddress, topicBase, namespace, ":"+port)
 	library.mediaTopicBase = mediaTopicBase
+
+	// The metrics listener's address, with no default: milestone 65
+	// says an empty address serves no metrics, so a cluster that wants
+	// none only has to leave the variable unset.
+	library.metricsAddress = os.Getenv(metricsAddressVariable)
+	if library.metricsAddress != "" {
+		library.metrics = newMetrics(stamped.version)
+	}
 	return library.run(stopped, os.Stdout)
 }
 
@@ -303,14 +318,27 @@ func (o *operator) run(stopped context.Context, report io.Writer) error {
 	fmt.Fprintf(report, "library.liken.sh: operating %d libraries over %s\n",
 		len(libraries.Items), o.busAddress)
 
-	go watchLibraries(o.client, libraries.Metadata.ResourceVersion, o.wake)
-	go watchCatalogs(o.client, catalogs.Metadata.ResourceVersion, o.wake)
-	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake)
-	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake)
-	go watchMediaPreferences(o.client, preferences.Metadata.ResourceVersion, o.wake)
-	go watchMetadataProviders(o.client, providers.Metadata.ResourceVersion, o.wake)
-	go watchPlays(o.client, plays.Metadata.ResourceVersion, o.wake)
-	go watchPeople(o.client, people.Metadata.ResourceVersion, o.wake)
+	go watchLibraries(o.client, libraries.Metadata.ResourceVersion, o.wake, o.metrics)
+	go watchCatalogs(o.client, catalogs.Metadata.ResourceVersion, o.wake, o.metrics)
+	go watchPods(o.client, pods.Metadata.ResourceVersion, o.wake, o.metrics)
+	go watchPlayers(o.client, players.Metadata.ResourceVersion, o.wake, o.metrics)
+	go watchMediaPreferences(o.client, preferences.Metadata.ResourceVersion, o.wake, o.metrics)
+	go watchMetadataProviders(o.client, providers.Metadata.ResourceVersion, o.wake, o.metrics)
+	go watchPlays(o.client, plays.Metadata.ResourceVersion, o.wake, o.metrics)
+	go watchPeople(o.client, people.Metadata.ResourceVersion, o.wake, o.metrics)
+
+	// The metrics listener runs for the life of the operator, on no
+	// address where the cluster names none. Unlike the webhook server, a
+	// failure here never ends the loop: milestone 65 says a failure in
+	// the listener must never block the work the process exists for, so
+	// this operator logs it and keeps scanning libraries nothing can see.
+	if o.metricsAddress != "" {
+		go func() {
+			if err := o.metrics.serve(stopped, o.metricsAddress); err != nil {
+				fmt.Fprintf(os.Stderr, "serving metrics on %s: %v\n", o.metricsAddress, err)
+			}
+		}()
+	}
 
 	// The webhook endpoint runs for the life of the operator. A
 	// failure to listen ends the loop, because an operator that reports
@@ -443,15 +471,22 @@ func (o *operator) pass() {
 
 		// A deleting Library takes the departure and never the
 		// reconcile, because the reconcile would stand the schedule
-		// back up to rewrite the rows the sweep is deleting.
+		// back up to rewrite the rows the sweep is deleting. Both count
+		// as one reconcile pass over one Library for layer 2, because
+		// both are this operator working the same resource kind.
+		started := time.Now()
 		if library.Metadata.deleting() {
-			if err := o.depart(ctx, library, choice, jobs.Items); err != nil {
+			err := o.depart(ctx, library, choice, jobs.Items)
+			o.metrics.observeReconcile(kindLibrary, time.Since(started), err)
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "departing library %s/%s: %v\n", namespace, name, err)
 			}
 			continue
 		}
 
-		if err := o.reconcile(ctx, library, choice, jobs.Items, checked, now); err != nil {
+		err := o.reconcile(ctx, library, choice, jobs.Items, checked, now)
+		o.metrics.observeReconcile(kindLibrary, time.Since(started), err)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling library %s/%s: %v\n", namespace, name, err)
 		}
 	}
@@ -467,6 +502,7 @@ func (o *operator) pass() {
 	for _, key := range o.reports.retain(live) {
 		namespace, name, _ := strings.Cut(key, "/")
 		o.clearLibraryTopics(namespace, name)
+		o.metrics.dropLibrary(name)
 	}
 	o.paths.retain(live)
 	for key := range o.cleanupStands {

@@ -431,8 +431,8 @@ func TestScreenPodBrowserArmsTheWatchdogAndRunsUnprivileged(t *testing.T) {
 	pod := testScreenPod(denScreen(), houseLibraries())
 
 	browser := pod.Spec.Containers[0]
-	if len(browser.Env) != 1 || browser.Env[0].Name != windowGraceVariable {
-		t.Fatalf("env = %+v, want the window grace alone", browser.Env)
+	if len(browser.Env) != 2 || browser.Env[0].Name != windowGraceVariable || browser.Env[1].Name != metricsAddressVariable {
+		t.Fatalf("env = %+v, want the window grace and the metrics address", browser.Env)
 	}
 	if browser.Env[0].Value != "15" {
 		t.Errorf("%s = %q, want 15", windowGraceVariable, browser.Env[0].Value)
@@ -802,6 +802,7 @@ func TestScreenPodBrowserTakesTheBusThePlayerPublishes(t *testing.T) {
 
 	want := map[string]string{
 		windowGraceVariable:           windowGraceSeconds,
+		metricsAddressVariable:        ":9231",
 		mediaBusAddressVariable:       "bus.liken-system.svc:1883",
 		mediaPlayerNameVariable:       "den-tv",
 		mediaStatusTopicVariable:      "liken/media/players/house/den-tv/status",
@@ -952,8 +953,9 @@ func TestScreenPodCarriesTheHouseholdZoneAsTZ(t *testing.T) {
 func TestScreenPodWithNoBusTakesTheKeyboardAlone(t *testing.T) {
 	environment := browserEnvironment(denScreen())
 
-	if len(environment) != 1 || environment[windowGraceVariable] != windowGraceSeconds {
-		t.Errorf("env = %v, want the window grace alone", environment)
+	if len(environment) != 2 || environment[windowGraceVariable] != windowGraceSeconds ||
+		environment[metricsAddressVariable] != ":9231" {
+		t.Errorf("env = %v, want the window grace and the metrics address", environment)
 	}
 }
 

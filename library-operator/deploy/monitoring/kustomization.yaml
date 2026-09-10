@@ -1,0 +1,19 @@
+# The metrics wiring, for a cluster owner who runs the
+# prometheus-operator. It rides beside deploy/, the base, as a
+# Component rather than inside it, so a cluster with no Prometheus
+# applies nothing here. liken milestone 65 is the contract this
+# component follows: the ports, the names, and the PodMonitor shape.
+#
+# The namespace is stated here and not left to whatever kustomization
+# names this component, so every PodMonitor lands beside the operator
+# in liken-system whether or not a fleet repository's own top-level
+# kustomization sets one.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+namespace: liken-system
+
+resources:
+  - podmonitor-operator.yaml
+  - podmonitor-catalog.yaml
+  - podmonitor-browser.yaml

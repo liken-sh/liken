@@ -737,6 +737,7 @@ impl Source for Fake {
 struct NoArt {
     delivers: bool,
     counts: ArtCounts,
+    cache_bytes: Option<usize>,
     // Every ask the views and the prefetch made: the library, the art,
     // and the size they asked at.
     asked: Vec<(String, String, u32, u32)>,
@@ -755,6 +756,10 @@ impl Art for NoArt {
 
     fn counts(&self) -> ArtCounts {
         self.counts
+    }
+
+    fn cache_bytes(&self) -> Option<usize> {
+        self.cache_bytes
     }
 }
 

@@ -28,11 +28,16 @@ const (
 )
 
 // The three images the operator stamps into the pods and Jobs it
-// creates.
+// creates, and the tag they share. Version feeds liken_build_info, the
+// gauge every process in the organization carries, so a cluster's
+// dashboard shows this operator's release without a second source for
+// it. It is empty where every image variable is set by hand, because a
+// pin with no tag names no release to report.
 type images struct {
 	scanner   string
 	corrosion string
 	browser   string
+	version   string
 }
 
 // operatorImages settles each companion image. A variable that is
@@ -102,6 +107,7 @@ func deriveImages(reference string) (images, error) {
 		scanner:   reference,
 		corrosion: repository + "-corrosion:" + tag,
 		browser:   repository + "-media-browser:" + tag,
+		version:   tag,
 	}, nil
 }
 

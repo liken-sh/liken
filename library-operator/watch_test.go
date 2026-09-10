@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // The bounds on every wait in this file: long enough that a loaded
@@ -138,11 +140,11 @@ func (a *watchAPI) serveList(w http.ResponseWriter, r *http.Request) {
 // every test ends with its watcher held in a watch request, and a
 // server that closed would leave that watcher reconnecting for the rest
 // of the run.
-func startWatch(t *testing.T, api *watchAPI, watcher func(*Client, string, chan<- struct{}), from string) chan struct{} {
+func startWatch(t *testing.T, api *watchAPI, watcher func(*Client, string, chan<- struct{}, *metrics), from string) chan struct{} {
 	t.Helper()
 	server := httptest.NewServer(api.handler())
 	wake := make(chan struct{}, 1)
-	go watcher(NewClient(server.URL, server.Client(), ""), from, wake)
+	go watcher(NewClient(server.URL, server.Client(), ""), from, wake, nil)
 	return wake
 }
 
@@ -492,7 +494,7 @@ func TestThePeopleWatchListsAndWakes(t *testing.T) {
 func TestAWatchOnACollectionNobodyServesCarriesOn(t *testing.T) {
 	cases := []struct {
 		name    string
-		watcher func(*Client, string, chan<- struct{})
+		watcher func(*Client, string, chan<- struct{}, *metrics)
 	}{
 		{name: "no media-operator serves the plays", watcher: watchPlays},
 		{name: "no people-operator serves the people", watcher: watchPeople},
@@ -513,5 +515,29 @@ func TestAWatchOnACollectionNobodyServesCarriesOn(t *testing.T) {
 			}
 			expectNoWatchWake(t, wake)
 		})
+	}
+}
+
+// A dropped stream that reconnects counts one watch_restarts_total under
+// the resource kind the watch serves, and the first connection counts
+// none, because it opened nothing to reopen.
+func TestAReconnectCountsOneWatchRestart(t *testing.T) {
+	useWatchRetryPause(t)
+	api := newWatchAPI()
+	api.answersWatches(watchTurn{}, watchTurn{hold: api.parked})
+	api.answersLists(listTurn{version: "150"})
+	m := newMetrics("test")
+
+	server := httptest.NewServer(api.handler())
+	go watchLibraries(NewClient(server.URL, server.Client(), ""), "42", make(chan struct{}, 1), m)
+
+	nextWatchRequest(t, api)
+	if got := testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)); got != 0 {
+		t.Errorf("watch_restarts_total = %v before any reconnect, want 0", got)
+	}
+	nextListRequest(t, api)
+	nextWatchRequest(t, api)
+	if got := testutil.ToFloat64(m.watchRestarts.WithLabelValues(kindLibrary)); got != 1 {
+		t.Errorf("watch_restarts_total = %v after one reconnect, want 1", got)
 	}
 }

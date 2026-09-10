@@ -125,6 +125,13 @@ pub trait Screen {
         ArtCounts::default()
     }
 
+    /// The bytes the screen's own art cache holds right now, or nothing
+    /// where it decodes no art. The metrics gauge samples this every
+    /// frame, the same as [`Screen::art_counts`] is read at exit.
+    fn art_cache_bytes(&self) -> Option<usize> {
+        None
+    }
+
     /// How large the screen's search index is, or nothing where the
     /// screen holds none. The stats file reports it at exit.
     fn index_size(&mut self) -> Option<Size> {
@@ -397,6 +404,7 @@ mod tests {
         assert!(!still.pump(1.0));
         assert_eq!(still.next_frame(3.5), Some(3.5));
         assert_eq!(still.art_counts(), ArtCounts::default());
+        assert_eq!(still.art_cache_bytes(), None);
         assert_eq!(still.index_size(), None);
         still.wake_by(Arc::new(|| {}));
         still.update(());

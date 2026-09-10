@@ -1,0 +1,24 @@
+# The scrape target for the catalog pod's Corrosion container: its
+# own corro_* series, sync and change health, on the port
+# corrosion/config.toml opens for it. This repository owns no name on
+# that port; Corrosion keeps its own.
+#
+# A namespace's catalog pod lives wherever its Library does, not in
+# liken-system beside the operator, so this selects the catalog store's
+# labels across every namespace rather than the one the base applies to.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: library-catalog
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: library-catalog
+      library.liken.sh/store: catalog
+  podMetricsEndpoints:
+    - port: corro-metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

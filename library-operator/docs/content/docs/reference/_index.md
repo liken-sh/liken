@@ -13,10 +13,12 @@ is a volume of media of one kind, and what its scanner reports.
 and the claims its agents run on.
 [Metadata providers](/docs/reference/metadataproviders/) is one
 account with one provider, and the facts it may serve.
-Two pages do not generate.
+Three pages do not generate.
 [Franchises](/docs/reference/franchises/) is the file a person or an
 agent writes to put films and series in story order, and the schema
 that checks it. [The library bus](/docs/reference/bus/) is every topic
 this operator's pods publish and read on `media-operator`'s bus, with
 the shape of each payload, the play request a media browser of any
-make publishes included.
+make publishes included. [Metrics](/docs/reference/metrics/) is the
+Prometheus series the operator, the media browser, and the catalog's
+Corrosion agent serve, and the component that scrapes them.

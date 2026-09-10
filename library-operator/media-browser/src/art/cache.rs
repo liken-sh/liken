@@ -34,6 +34,11 @@ impl<K: Clone + Eq + Hash> Cache<K> {
         }
     }
 
+    /// The bytes the cache holds right now, under its budget.
+    pub(crate) fn used(&self) -> usize {
+        self.used
+    }
+
     pub(crate) fn get(&mut self, key: &K) -> Option<&Decoded> {
         self.tick += 1;
         let slot = self.slots.get_mut(key)?;
@@ -143,6 +148,15 @@ mod tests {
 
     fn is_ready(entry: Option<&Decoded>) -> bool {
         matches!(entry, Some(Decoded::Ready(_)))
+    }
+
+    #[test]
+    fn used_reports_the_bytes_the_live_entries_hold() {
+        let mut cache = Cache::new(512);
+        assert_eq!(cache.used(), 0);
+        cache.insert("a", scaled(256));
+        cache.insert("bad", Decoded::Failed);
+        assert_eq!(cache.used(), 256);
     }
 
     #[test]

@@ -16,23 +16,28 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 		reference string
 		corrosion string
 		browser   string
+		version   string
 	}{
 		{name: "a release tag",
 			reference: "ghcr.io/liken-sh/library-operator:2026.09.03-007",
 			corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007",
-			browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007"},
+			browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007",
+			version:   "2026.09.03-007"},
 		{name: "a development build",
 			reference: "ghcr.io/liken-sh/library-operator:2026.09.03-007-dev-003-abcdef01",
 			corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007-dev-003-abcdef01",
-			browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007-dev-003-abcdef01"},
+			browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007-dev-003-abcdef01",
+			version:   "2026.09.03-007-dev-003-abcdef01"},
 		{name: "a registry with a port",
 			reference: "registry:5000/liken-sh/library-operator:2026.09.03-007",
 			corrosion: "registry:5000/liken-sh/library-operator-corrosion:2026.09.03-007",
-			browser:   "registry:5000/liken-sh/library-operator-media-browser:2026.09.03-007"},
+			browser:   "registry:5000/liken-sh/library-operator-media-browser:2026.09.03-007",
+			version:   "2026.09.03-007"},
 		{name: "no registry",
 			reference: "library-operator:2026.09.03-007",
 			corrosion: "library-operator-corrosion:2026.09.03-007",
-			browser:   "library-operator-media-browser:2026.09.03-007"},
+			browser:   "library-operator-media-browser:2026.09.03-007",
+			version:   "2026.09.03-007"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -41,7 +46,7 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := images{scanner: one.reference, corrosion: one.corrosion, browser: one.browser}
+			want := images{scanner: one.reference, corrosion: one.corrosion, browser: one.browser, version: one.version}
 			if derived != want {
 				t.Errorf("images = %+v, want %+v", derived, want)
 			}
@@ -115,6 +120,7 @@ func TestTheImagesComeFromTheOperatorsOwnPod(t *testing.T) {
 		scanner:   "ghcr.io/liken-sh/library-operator:2026.09.03-007",
 		corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007",
 		browser:   "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007",
+		version:   "2026.09.03-007",
 	}
 	if got != want {
 		t.Errorf("images = %+v, want %+v", got, want)
@@ -136,6 +142,7 @@ func TestOneImageVariableWinsAndTheRestDerive(t *testing.T) {
 		scanner:   "ghcr.io/liken-sh/library-operator:2026.09.03-007",
 		corrosion: "ghcr.io/liken-sh/library-operator-corrosion:2026.09.03-007",
 		browser:   "ghcr.io/liken-sh/library-operator-media-browser:mine",
+		version:   "2026.09.03-007",
 	}
 	if got != want {
 		t.Errorf("images = %+v, want %+v", got, want)

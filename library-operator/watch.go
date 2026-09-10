@@ -62,8 +62,11 @@ func (p *pause) set(d time.Duration) {
 // line each and make that failure window resumable, where a relist
 // costs one full read of the collection and the pass the wake
 // triggers.
-func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindLibrary)
+		}
 		path := librariesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -92,8 +95,11 @@ func watchLibraries(c *Client, resourceVersion string, wake chan<- struct{}) {
 // second Catalog is marked Blocked without a backstop tick's delay. The
 // recovery is watchLibraries's: a dropped stream or a 410 Gone lists the
 // collection, wakes the loop, and resumes from the list's version.
-func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindCatalog)
+		}
 		path := catalogsPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -121,8 +127,11 @@ func watchCatalogs(c *Client, resourceVersion string, wake chan<- struct{}) {
 // 410 Gone lists the collection, wakes the loop, and resumes from the list's
 // version. A list that fails leaves the resume point where it was, which is
 // what a cluster with no media-operator answers on every turn.
-func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindPlayer)
+		}
 		path := playersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -147,8 +156,11 @@ func watchPlayers(c *Client, resourceVersion string, wake chan<- struct{}) {
 // the household just set rolls the screen pods without a backstop tick's
 // delay. The recovery is watchPlayers's, and so is the list that fails on a
 // cluster with no media-operator.
-func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindMediaPreferences)
+		}
 		path := mediaPreferencesPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -174,8 +186,11 @@ func watchMediaPreferences(c *Client, resourceVersion string, wake chan<- struct
 // recovery is watchLibraries's. A list that fails leaves the resume point
 // where it was, which is what a cluster that has not applied the CRD answers
 // on every turn.
-func watchMetadataProviders(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchMetadataProviders(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindMetadataProvider)
+		}
 		path := metadataProvidersPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -201,8 +216,11 @@ func watchMetadataProviders(c *Client, resourceVersion string, wake chan<- struc
 // or released without a backstop tick's delay. The recovery is
 // watchPlayers's, and so is the list that fails on a cluster with no
 // media-operator.
-func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindPlay)
+		}
 		path := playsAllPath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -228,8 +246,11 @@ func watchPlays(c *Client, resourceVersion string, wake chan<- struct{}) {
 // without a backstop tick's delay. The recovery is watchPlayers's: a
 // cluster with no people-operator fails the list on every turn, and the
 // pause between turns is what keeps that from spinning.
-func watchPeople(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchPeople(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindPerson)
+		}
 		path := peoplePath + "?watch=true&allowWatchBookmarks=true&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -260,8 +281,11 @@ func watchPeople(c *Client, resourceVersion string, wake chan<- struct{}) {
 // The recovery is the same as watchLibraries: a dropped stream or a
 // 410 Gone lists the collection, wakes the loop, and resumes the watch
 // from the list's version.
-func watchPods(c *Client, resourceVersion string, wake chan<- struct{}) {
-	for {
+func watchPods(c *Client, resourceVersion string, wake chan<- struct{}, m *metrics) {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			m.recordWatchRestart(kindPod)
+		}
 		path := podsAllPath + "?watch=true&allowWatchBookmarks=true&" + catalogMemberQuery +
 			"&resourceVersion=" + resourceVersion
 		resp, err := c.Do(watchContext(), http.MethodGet, path, nil)

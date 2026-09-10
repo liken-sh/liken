@@ -91,3 +91,11 @@ apply_queue_timeout = 100
 # the one mounted directory holds every path the agent writes, and the
 # container can run with a read-only root filesystem.
 path = "/var/lib/corrosion/admin.sock"
+
+[telemetry.prometheus]
+# Every address on the pod's network, because the PodMonitor in
+# deploy/monitoring/ scrapes it the way it scrapes this operator's own
+# port: over the pod network, not loopback. This is a separate listener
+# from `[api]`, which stays loopback-only, so opening it adds no way to
+# reach the catalog's write API.
+addr = "0.0.0.0:9090"

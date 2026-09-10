@@ -69,6 +69,15 @@ const (
 // the container.
 const catalogBinary = "/corrosion"
 
+// The port Corrosion's own configuration opens for its Prometheus
+// metrics (corrosion/config.toml's [telemetry.prometheus]). It answers
+// on the pod network, unlike the write API, so the catalog PodMonitor
+// can reach it.
+const (
+	catalogMetricsPort     = 9090
+	catalogMetricsPortName = "corro-metrics"
+)
+
 // ScannerGracePeriod is how long the kubelet waits between the SIGTERM
 // and the kill. A busy catalog agent flushes its database on the way
 // out, so a pod asks for a minute rather than the default 30 seconds.
@@ -257,6 +266,9 @@ func catalogSidecar(image string) Container {
 		},
 		VolumeMounts: []VolumeMount{
 			{Name: catalogVolumeName, MountPath: catalogStatePath},
+		},
+		Ports: []ContainerPort{
+			{Name: catalogMetricsPortName, ContainerPort: catalogMetricsPort},
 		},
 		Resources: ResourceRequirements{
 			Requests: map[string]string{"cpu": catalogCPURequest, "memory": catalogMemoryRequest},

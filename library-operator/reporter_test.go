@@ -79,6 +79,12 @@ func TestTheReportCarriesTheCountsAndTheRuns(t *testing.T) {
 	if built.Titles != 2 || built.Items != 3 || built.Files != 2 {
 		t.Errorf("report = %+v, want the catalog's own counts", built)
 	}
+	wantByKind := map[string]int{libraryKindMovies: 1, libraryKindSeries: 1, "episodes": 1, libraryKindFranchises: 0}
+	for kind, want := range wantByKind {
+		if got := built.ItemsByKind[kind]; got != want {
+			t.Errorf("itemsByKind[%s] = %d, want %d", kind, got, want)
+		}
+	}
 	if len(built.Runs) != 1 || built.Runs[0].Job != "scan-1" {
 		t.Errorf("runs = %+v, want the scan run", built.Runs)
 	}

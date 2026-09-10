@@ -45,8 +45,9 @@ func TestCatalogPodBelongsToItsCatalog(t *testing.T) {
 }
 
 // the catalog pod is a standing service: it restarts in place, it holds
-// no Kubernetes credential, and it answers on no port.
-func TestCatalogPodStandsAndAnswersOnNoPort(t *testing.T) {
+// no Kubernetes credential, and only the catalog agent answers on a
+// port, its Prometheus metrics.
+func TestCatalogPodStandsAndAnswersOnItsMetricsPortAlone(t *testing.T) {
 	pod := testCatalogPod(housekeepingCatalog(), 0)
 
 	if pod.Spec.RestartPolicy != "Always" {
@@ -61,8 +62,12 @@ func TestCatalogPodStandsAndAnswersOnNoPort(t *testing.T) {
 		t.Error("automountServiceAccountToken is not false; the pod holds no credential")
 	}
 	for _, container := range append(append([]Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
-		if len(container.Ports) != 0 {
-			t.Errorf("%s declares %+v, want no port", container.Name, container.Ports)
+		wantPorts := 0
+		if container.Name == catalogContainer {
+			wantPorts = 1
+		}
+		if len(container.Ports) != wantPorts {
+			t.Errorf("%s declares %+v, want %d port(s)", container.Name, container.Ports, wantPorts)
 		}
 		if container.SecurityContext == nil || container.SecurityContext.Capabilities == nil {
 			t.Errorf("%s has no security context", container.Name)

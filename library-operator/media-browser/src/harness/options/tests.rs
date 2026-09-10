@@ -240,6 +240,27 @@ fn anything_but_a_positive_grace_leaves_it_off() {
 }
 
 #[test]
+fn the_operator_arms_the_metrics_listener() {
+    let options = environment(&[(METRICS_ADDRESS, "0.0.0.0:9231")]);
+    assert_eq!(
+        options.metrics_address,
+        Some("0.0.0.0:9231".parse().unwrap())
+    );
+}
+
+#[test]
+fn an_empty_environment_serves_no_metrics() {
+    assert_eq!(environment(&[]).metrics_address, None);
+}
+
+#[test]
+fn anything_but_a_host_and_a_port_serves_no_metrics() {
+    assert_eq!(metrics_address(""), None);
+    assert_eq!(metrics_address("9231"), None);
+    assert_eq!(metrics_address("not-an-address"), None);
+}
+
+#[test]
 fn a_script_sorts_by_time() {
     assert_eq!(
         parse_script("4.0:o, 1.5:p,0.25:down"),

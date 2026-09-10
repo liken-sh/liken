@@ -51,12 +51,24 @@ COPY brand/iced/src/ ./brand/iced/src/
 COPY brand/liken.svg brand/liken.css ./brand/
 COPY brand/fonts/ ./brand/fonts/
 
+# The release this build makes, for the `liken_build_info` gauge milestone
+# 65 puts on every process. release.yaml names a version for the image tag
+# already; a caller that also passes it here through --build-arg is what
+# makes the gauge read the same string. A build with no argument, such as
+# a workstation's `docker build`, compiles the binary reporting "dev".
+#
+# The argument is declared here, not at the top of the file, so setting it
+# never invalidates the dependency layer above: only this RUN's cache
+# entry depends on its value, and that layer is rebuilt on every source
+# change regardless.
+ARG VERSION=dev
+
 # The touch marks both crates' own sources newer than the stub build, so cargo
 # compiles them again and leaves the dependencies as they are.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch src/main.rs src/lib.rs brand/iced/src/*.rs \
-    && cargo build --release --locked
+    && MEDIA_BROWSER_VERSION="$VERSION" cargo build --release --locked
 
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD
 # drivers, and the Wayland and keyboard libraries the toolkit opens by

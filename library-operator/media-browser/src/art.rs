@@ -75,6 +75,13 @@ pub trait Art {
         ArtCounts::default()
     }
 
+    /// The bytes the in-memory decode cache holds right now, or nothing
+    /// where the store keeps no such cache, such as the sample art a run
+    /// with no catalog draws.
+    fn cache_bytes(&self) -> Option<usize> {
+        None
+    }
+
     /// The path of one file of a library's volume on this machine, or nothing where the store holds no root for that library
     /// or the path leaves its root. A page reads a file the catalog names
     /// but does not hold, such as a person's biography, through the same

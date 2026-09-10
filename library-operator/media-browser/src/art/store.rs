@@ -208,6 +208,16 @@ impl Store {
             .expect("the store mutex is never poisoned")
             .counts
     }
+
+    /// The bytes the in-memory decode cache holds right now, from the
+    /// cache's own budget accounting.
+    pub fn cache_bytes(&self) -> usize {
+        let (lock, _) = &*self.shared;
+        lock.lock()
+            .expect("the store mutex is never poisoned")
+            .cache
+            .used()
+    }
 }
 
 // Dropping the store stops and joins the workers, so no decode outlives

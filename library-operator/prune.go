@@ -122,6 +122,28 @@ func (c *Catalog) countItems(ctx context.Context, library string) (int, error) {
 		[]any{library, library, library, library})
 }
 
+// itemKinds are the four tables countItems sums, in the order the
+// library_items metric reports them. The kind label is a catalog table,
+// not a Library's own spec.kind: a franchises Library still holds no
+// franchise until the checkout resolves one, and a movies or series
+// Library never holds a row in the other three tables.
+var itemKinds = []string{libraryKindMovies, libraryKindSeries, "episodes", libraryKindFranchises}
+
+// countItemsByKind reads the same four counts countItems sums, kept apart,
+// which is what the library_items{library, kind} metric reports: catalog
+// size over time, broken out by the kind of row.
+func (c *Catalog) countItemsByKind(ctx context.Context, library string) (map[string]int, error) {
+	counts := make(map[string]int, len(itemKinds))
+	for _, kind := range itemKinds {
+		count, err := c.queryInt(ctx, `SELECT count(*) FROM `+kind+` WHERE library = ?`, []any{library})
+		if err != nil {
+			return nil, err
+		}
+		counts[kind] = count
+	}
+	return counts, nil
+}
+
 // countSeen reads how many ids this epoch marked. The prune guard reads
 // it, because an epoch that marked nothing would sweep every row the
 // library holds.

@@ -322,8 +322,12 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 	if err != nil {
 		return libraryReport{}, err
 	}
+	itemsByKind, err := r.catalog.countItemsByKind(ctx, library)
+	if err != nil {
+		return libraryReport{}, err
+	}
 
-	report := libraryReport{Titles: titles, Items: items, Files: files, Runs: runs[library]}
+	report := libraryReport{Titles: titles, Items: items, Files: files, ItemsByKind: itemsByKind, Runs: runs[library]}
 	if walk, held := runOf(report.Runs, workerScan); held {
 		report.LastWalk = walk.Finished
 		report.Unidentified = walk.Unidentified

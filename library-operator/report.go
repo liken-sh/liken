@@ -28,6 +28,11 @@ type libraryReport struct {
 	// The operator folds them into Library status.
 	Items int `json:"items"`
 	Files int `json:"files"`
+	// ItemsByKind is the same Items count, broken out by table: movies,
+	// series, episodes, and franchises. The operator's library_items
+	// metric reads it, and status.items keeps the sum, because a person
+	// reading kubectl wants the one number.
+	ItemsByKind map[string]int `json:"itemsByKind,omitempty"`
 	// True while a scan Job runs, which the reporter reads off the
 	// scan run whose start is later than its finish, so the operator's
 	// phase follows the walk.
