@@ -84,7 +84,7 @@ program, so it has no prefix and no metrics.
 | --- | --- |
 | liken | `liken_` |
 | display-operator | `display_` |
-| media-operator, media-screen, idle-screen | `media_` |
+| media-operator, its command sidecar, idle-screen | `media_` |
 | library-operator | `library_`, and `library_browser_` for the media browser |
 | audio-operator | `audio_` |
 | bluetooth-operator | `bluetooth_` |
@@ -116,7 +116,7 @@ the host network, and two of them can share a node.
 | liken cluster-operator | 9201 |
 | display-operator | 9210 |
 | media-operator | 9220 |
-| media-screen | 9221 |
+| media command sidecar, in a Play pod | 9221 |
 | idle-screen | 9222 |
 | library-operator | 9230 |
 | media-browser | 9231 |

@@ -25,7 +25,7 @@ on the host network and two of them can share a node.
 | `liken` cluster-operator | 9201 |
 | display-operator | 9210 |
 | media-operator | 9220 |
-| media-screen | 9221 |
+| media command sidecar, in a Play pod | 9221 |
 | idle-screen | 9222 |
 | library-operator | 9230 |
 | media-browser | 9231 |
