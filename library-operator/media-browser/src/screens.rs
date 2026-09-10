@@ -11,6 +11,7 @@ pub mod facts;
 pub mod foot;
 pub mod franchise;
 pub mod home;
+pub mod lights;
 pub mod loading;
 pub mod movie;
 pub mod person;
@@ -209,8 +210,12 @@ impl Screen {
     }
 
     /// The view of this screen, with its art drawn from the store. Only
-    /// the two screens a title plays from draw the loading state, and
-    /// every other screen ignores it.
+    /// the two screens a title plays from draw the loading state and the
+    /// lights beside it, and every other screen ignores both, because a
+    /// press that enters either state comes from one of those two and no
+    /// press reaches a screen while they run.
+    /// `lights` is how bright the room is, from 1 at full down to
+    /// `look::LIGHTS_FLOOR`.
     /// `held` is whether the screen holds focus. The browser's strip
     /// takes focus off the screen under it, and a screen that drew its
     /// own mark then would put two marks on the glass.
@@ -218,13 +223,14 @@ impl Screen {
         &'a self,
         store: &'a RefCell<A>,
         curtain: Option<Curtain>,
+        lights: f32,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
             Self::Home(screen) => screen.view(store, held),
             Self::Wall(screen) => screen.view(store, held),
-            Self::Movie(screen) => screen.view(store, curtain, held),
-            Self::Series(screen) => screen.view(store, curtain, held),
+            Self::Movie(screen) => screen.view(store, curtain, lights, held),
+            Self::Series(screen) => screen.view(store, curtain, lights, held),
             Self::Person(screen) => screen.view(store, held),
             Self::Franchise(screen) => screen.view(store, held),
         }

@@ -51,11 +51,11 @@ impl Loading {
     /// How far the page has gone, from 0 whole to 1 fully away.
     pub fn away(&self, at: f64) -> f32 {
         match self.left {
-            None => eased(share(at - self.entered, look::DEPARTURE)),
+            None => look::eased(look::share(at - self.entered, look::DEPARTURE)),
             // The share left is measured from the second the exit ends
             // and not from the second it began, so the last frame of the
             // exit lands on exactly zero.
-            Some(exit) => exit.from * share(exit.until - at, look::RETURN),
+            Some(exit) => exit.from * look::share(exit.until - at, look::RETURN),
         }
     }
 
@@ -72,17 +72,6 @@ impl Loading {
             phase: at,
         }
     }
-}
-
-// How far into a length of time this many seconds is, from 0 to 1.
-fn share(since: f64, length: f64) -> f32 {
-    (since / length).clamp(0.0, 1.0) as f32
-}
-
-// The smoothstep the departure runs on, so the page leaves and settles
-// rather than starting and stopping on a hard edge.
-fn eased(share: f32) -> f32 {
-    share * share * (3.0 - 2.0 * share)
 }
 
 #[cfg(test)]

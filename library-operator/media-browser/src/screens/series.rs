@@ -441,12 +441,14 @@ impl Series {
     }
 
     /// The view: the backdrop behind the header, the scrim over it, the
-    /// header and the wall over both, and the loading state's curtain
-    /// over the page while that state runs.
+    /// header and the wall over both, the dim of the room where the
+    /// lights are down, and the loading state's curtain over all of them
+    /// while that state runs.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         curtain: Option<Curtain>,
+        lights: f32,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
@@ -454,6 +456,7 @@ impl Series {
             art: &self.backdrop,
             store,
             ground: layers::Ground::Below(layout::head()),
+            lights,
             front: page::Page {
                 series: self,
                 store,

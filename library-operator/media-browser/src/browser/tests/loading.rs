@@ -1,6 +1,7 @@
 // The loading state at the browser: the press that enters it, the film
 // that holds it, the return that ends it, and the frames the loop asks
-// for while it runs.
+// for while it runs. The lights run on the same two edges, so the cases
+// for them are here as well.
 
 use super::*;
 
@@ -141,6 +142,100 @@ fn a_play_that_never_played_returns_the_page() {
     assert!(browser.loading.expect("the state is leaving").leaving());
     browser.tick(PRESS + 7.0 + look::RETURN);
     assert!(browser.loading.is_none());
+}
+
+// The lights go down from the second the browser asks for a film, so
+// the film fades in over a dimmed page. A `Play` that is starting has
+// covered nothing yet, and the room keeps going down under it.
+#[test]
+fn the_ask_for_a_film_takes_the_lights_down() {
+    let (mut browser, bus) = on_a_movie();
+
+    browser.key("enter");
+
+    assert_eq!(browser.lights.map(|state| state.level(PRESS)), Some(1.0));
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Starting)];
+    browser.pump(PRESS + look::LIGHTS_DOWN);
+    browser.tick(PRESS + look::LIGHTS_DOWN);
+
+    assert_eq!(
+        browser
+            .lights
+            .map(|state| state.level(PRESS + look::LIGHTS_DOWN)),
+        Some(look::LIGHTS_FLOOR)
+    );
+}
+
+// The film covers the page for as long as it plays, and the room stays
+// at the floor under it, so the page the film fades out over is the
+// dimmed one.
+#[test]
+fn a_playing_film_holds_the_lights_at_the_floor() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(PRESS + 2.0);
+
+    assert_eq!(
+        browser.lights.map(|state| state.level(PRESS + 3_600.0)),
+        Some(look::LIGHTS_FLOOR)
+    );
+}
+
+// The film's end lifts the room on the frame that starts the page's
+// return, and the state goes once the room is back at full.
+#[test]
+fn the_films_end_lifts_the_lights_and_the_state_goes_with_them() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(PRESS + 1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(PRESS + 5.0);
+    browser.tick(PRESS + 5.0);
+
+    assert_eq!(
+        browser.lights.map(|state| state.level(PRESS + 5.0)),
+        Some(look::LIGHTS_FLOOR)
+    );
+    assert_eq!(
+        browser
+            .lights
+            .map(|state| state.level(PRESS + 5.0 + look::LIGHTS_UP)),
+        Some(1.0)
+    );
+
+    browser.tick(PRESS + 5.0 + look::LIGHTS_UP);
+
+    assert!(browser.lights.is_none());
+}
+
+// A `Play` that never played takes the same lift, so a failed start
+// leaves no dim page.
+#[test]
+fn a_play_that_never_played_lifts_the_lights() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Starting)];
+    browser.pump(PRESS + 1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(PRESS + 5.0);
+    browser.tick(PRESS + 5.0);
+
+    assert_eq!(
+        browser
+            .lights
+            .map(|state| state.level(PRESS + 5.0 + look::LIGHTS_UP)),
+        Some(1.0)
+    );
+
+    browser.tick(PRESS + 5.0 + look::LIGHTS_UP);
+
+    assert!(browser.lights.is_none());
 }
 
 // The return runs on the move to `Idle` and not on the word. The

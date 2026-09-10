@@ -25,7 +25,7 @@ use crate::clock;
 use crate::harness::{Screen, Waker};
 use crate::look;
 use crate::screens::upnext::{self, Next};
-use crate::screens::{self, Step, home, loading, volume};
+use crate::screens::{self, Step, home, lights, loading, volume};
 use crate::views;
 
 mod keys;
@@ -117,6 +117,10 @@ pub struct Browser<S: Source, A: Art> {
     // The loading state the page under a chosen title is in, or nothing
     // while no title has been chosen.
     loading: Option<loading::Loading>,
+    // How far down the lights are, or nothing while the room is at full.
+    // The state runs beside the loading state, because the whole frame
+    // dims and the curtain's logo does not.
+    lights: Option<lights::Lights>,
     // The picker over the stack while the browser has no answer to who is
     // watching, and nothing once it has one.
     picker: Option<screens::audience::Picker>,
@@ -180,6 +184,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             clock: 0.0,
             rest: None,
             loading: None,
+            lights: None,
             picker: None,
             level: volume::Level::default(),
             time: clock::now(),
@@ -571,10 +576,14 @@ impl<S: Source, A: Art> Browser<S, A> {
     }
 
     // The browser is on the screen again, whether the film played
-    // through or the `Play` never started, so the page comes back.
+    // through or the `Play` never started, so the page comes back and the
+    // lights come up with it.
     fn presented(&mut self) {
         if let Some(state) = &mut self.loading {
             state.leave(self.clock);
+        }
+        if let Some(lights) = &mut self.lights {
+            lights.lift(self.clock);
         }
     }
 
@@ -952,6 +961,9 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         if self.loading.is_some_and(|state| state.done(at)) {
             self.loading = None;
         }
+        if self.lights.is_some_and(|state| state.done(at)) {
+            self.lights = None;
+        }
         if self.rest.is_some_and(|due| at >= due) {
             self.rest = None;
             self.prefetch();
@@ -968,6 +980,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         let screen = self.top().view(
             &self.store,
             self.loading.map(|state| state.curtain(self.clock)),
+            self.lights.map_or(1.0, |state| state.level(self.clock)),
             !self.on_strip,
         );
 
@@ -1005,12 +1018,13 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // source wakes the loop itself, so an idle browser schedules nothing
     // and the loop waits on events.
     //
-    // Four things schedule a frame: the end of a rest; every frame of the
-    // loading state, which answers now on every ask so the mark pulses at
-    // the loop's own floor rate; the volume row, which asks for a frame
-    // through each of its fades and names the second it starts to leave
-    // through the hold between them; and the clock, which asks for the
-    // second the minute turns. A fifth wakes the loop with no frame: the
+    // Four things schedule a frame: the end of a rest; every frame of
+    // the loading state and of the lights beside it, which answer now on
+    // every ask so the mark pulses and the room dims at the loop's own
+    // floor rate; the volume row, which asks for a frame through each of
+    // its fades and names the second it starts to leave through the hold
+    // between them; and the clock, which asks for the second the minute
+    // turns. A fifth wakes the loop with no frame: the
     // second a held read comes due. Nothing under a film schedules a
     // frame, because those frames would draw a black shade nobody sees.
     fn covered(&self) -> bool {
@@ -1020,10 +1034,11 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     fn next_frame(&self, at: f64) -> Option<f64> {
         let drawing = !self.refresh.asleep();
         let loading = (drawing && self.loading.is_some()).then_some(at);
+        let lights = (drawing && self.lights.is_some()).then_some(at);
         let level = drawing.then(|| self.level.next_frame(at)).flatten();
         let minute = drawing.then_some(self.minute).flatten();
         let read = self.refresh.next_due();
-        [loading, level, minute, self.rest, read]
+        [loading, lights, level, minute, self.rest, read]
             .into_iter()
             .flatten()
             .min_by(f64::total_cmp)

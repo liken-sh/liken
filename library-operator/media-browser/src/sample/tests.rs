@@ -271,19 +271,50 @@ fn the_sample_reports_no_changes_and_answers_no_reader() {
     assert!(Catalog.reader().is_none());
 }
 
+// The sample resolves one invented file per movie, so a run with no
+// catalog enters the loading state.
 #[test]
-fn a_select_on_the_sample_resolves_no_file() {
+fn a_select_on_a_sample_movie_resolves_its_invented_file() {
     let mut catalog = Catalog;
-    assert!(
-        catalog
-            .play(
-                "sample/features",
-                &Selection::Movie {
-                    id: "movie:sample:0001".into()
-                }
-            )
-            .is_empty()
+    let items = catalog.play(
+        "sample/features",
+        &Selection::Movie {
+            id: "movie:sample:0001".into(),
+        },
     );
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].path, "Specimen 0001/Specimen 0001.mkv");
+    assert_eq!(items[0].slug, "specimen-0001");
+    assert_eq!(items[0].presentation.title, "Specimen 0001");
+    assert_eq!(
+        items[0].presentation.year.to_string(),
+        catalog
+            .movie("sample/features", "movie:sample:0001")
+            .expect("the sample holds this movie")
+            .released
+    );
+}
+
+// The file is invented for the movies alone, so every other choice
+// resolves nothing and starts nothing.
+#[test]
+fn a_select_the_sample_invented_no_film_for_resolves_nothing() {
+    let mut catalog = Catalog;
+    for selection in [
+        Selection::Movie {
+            id: "movie:sample:9999".into(),
+        },
+        Selection::Trailer {
+            id: "movie:sample:0001".into(),
+        },
+        Selection::Episode {
+            series: "series:sample:01".into(),
+            season: 1,
+            episode: 1,
+        },
+    ] {
+        assert!(catalog.play("sample/features", &selection).is_empty());
+    }
 }
 
 #[test]

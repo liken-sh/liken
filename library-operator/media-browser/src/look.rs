@@ -151,6 +151,38 @@ pub const DEPARTURE: f64 = 0.4;
 /// out: the same span as the way out, so the two read as one motion.
 pub const RETURN: f64 = 0.4;
 
+/// How bright the room is with the lights down, as a share of full. It
+/// is dark and not black, so the page under a fading film reads as a
+/// room with the lights down and not as a dead screen. Tuned by eye, to
+/// an eighth of full. An eighth and its distance from full are both
+/// exact in binary, so a level built from either lands on this floor
+/// and on full to the last bit.
+pub const LIGHTS_FLOOR: f32 = 0.125;
+
+/// How long the room takes to reach the floor, in seconds, from the
+/// second the browser asks for a film. Tuned by eye against the 600 ms
+/// the film's surface fades in over.
+pub const LIGHTS_DOWN: f64 = 1.2;
+
+/// How long the room takes to come back to full, in seconds. It is
+/// shorter than the way down and shorter than `RETURN`, so the page is
+/// most of the way up as the last of the film goes. Tuned by eye.
+pub const LIGHTS_UP: f64 = 0.3;
+
+/// How far into a length of time this many seconds is, from 0 to 1.
+/// Every motion of the look runs on a share of its own length, so the
+/// frame it draws is a function of the clock and never of the frame
+/// before it.
+pub fn share(since: f64, length: f64) -> f32 {
+    (since / length).clamp(0.0, 1.0) as f32
+}
+
+/// The smoothstep a motion of the look eases on, so the thing that moves
+/// starts and settles rather than beginning and ending on a hard edge.
+pub fn eased(share: f32) -> f32 {
+    share * share * (3.0 - 2.0 * share)
+}
+
 /// The one family the whole display draws in, and the italic face of that
 /// family, which the second caption line of a two-line card draws in. Both
 /// come from the brand crate, which carries the files and loads them into
@@ -192,6 +224,28 @@ mod tests {
     fn the_way_back_takes_as_long_as_the_way_out() {
         const { assert!(RETURN > 0.0) };
         const { assert!(RETURN == DEPARTURE) };
+    }
+
+    #[test]
+    fn the_lights_stop_short_of_black_and_come_up_faster_than_they_go_down() {
+        const { assert!(LIGHTS_FLOOR > 0.0) };
+        const { assert!(LIGHTS_FLOOR < 1.0) };
+        const { assert!(LIGHTS_UP < LIGHTS_DOWN) };
+        const { assert!(LIGHTS_UP < RETURN) };
+    }
+
+    #[test]
+    fn a_motion_runs_from_none_of_its_length_to_all_of_it() {
+        assert_eq!(share(-1.0, 2.0), 0.0);
+        assert_eq!(share(0.5, 2.0), 0.25);
+        assert_eq!(share(3.0, 2.0), 1.0);
+    }
+
+    #[test]
+    fn the_smoothstep_holds_the_ends_and_the_middle_of_a_motion() {
+        assert_eq!(eased(0.0), 0.0);
+        assert_eq!(eased(0.5), 0.5);
+        assert_eq!(eased(1.0), 1.0);
     }
 
     #[test]

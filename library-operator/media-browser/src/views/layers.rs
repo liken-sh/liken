@@ -9,7 +9,7 @@ use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
 use iced_widget::{Stack, canvas};
-use iced_winit::core::{Element, Length, Point, Rectangle, Theme, mouse};
+use iced_winit::core::{Color, Element, Length, Point, Rectangle, Theme, mouse};
 
 use super::{Tone, area, curtain, extent, paint};
 use crate::art::Art;
@@ -65,8 +65,9 @@ impl Ground {
     }
 }
 
-/// One page as its three layers: the backdrop, the scrim over it, and
-/// everything the screen draws over both.
+/// One page as its layers: the backdrop, the scrim over it, everything
+/// the screen draws over both, and the two layers of the loading state
+/// with the dim of the room between them.
 pub struct Page<'a, A, F> {
     /// The library the art paths resolve against.
     pub library: &'a str,
@@ -76,6 +77,10 @@ pub struct Page<'a, A, F> {
     pub store: &'a RefCell<A>,
     /// The ground under the page's own art, where it has any.
     pub ground: Ground,
+    /// How bright the room is, from the lights state beside the curtain:
+    /// 1 at full, and `look::LIGHTS_FLOOR` with the lights down. A page
+    /// at full draws no dim at all.
+    pub lights: f32,
     /// The page itself: its fills, its art, and its text, in that draw
     /// order inside its own layer.
     pub front: F,
@@ -104,6 +109,15 @@ where
         ];
         if let Some(over) = self.over {
             layers.push(whole(over));
+        }
+        // The dim covers the page and the art the curtain drew again over
+        // it, and the curtain's logo and mark draw over the dim, so the
+        // room goes down while the logo keeps the brightness it pulses
+        // at.
+        if self.lights < 1.0 {
+            layers.push(whole(Lights { level: self.lights }));
+        }
+        if let Some(over) = self.over {
             layers.push(whole(curtain::Front(over)));
         }
         Stack::with_children(layers)
@@ -156,6 +170,40 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Backdrop<'_, A> {
             Some(image) => paint(&mut frame, &image, bounds, Tone::Full),
             None => frame.fill_rectangle(bounds.position(), extent(bounds), look::BACKGROUND),
         }
+        vec![frame.into_geometry()]
+    }
+}
+
+// The lights of the room, as one layer: black over the whole frame at
+// the alpha the level leaves, so a room at full draws nothing and a room
+// at the floor draws seven eighths black. It is a fill over the layers
+// under it and not an opacity on each of them, because those layers draw
+// art, text, and meshes, and one fill dims every one of them by the same
+// amount.
+struct Lights {
+    level: f32,
+}
+
+impl canvas::Program<Infallible, Theme, Renderer> for Lights {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<canvas::Geometry<Renderer>> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        frame.fill_rectangle(
+            bounds.position(),
+            extent(bounds),
+            Color {
+                a: (1.0 - self.level).clamp(0.0, 1.0),
+                ..look::BACKGROUND
+            },
+        );
         vec![frame.into_geometry()]
     }
 }

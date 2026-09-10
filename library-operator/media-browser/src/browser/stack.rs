@@ -8,7 +8,7 @@
 use super::Browser;
 use crate::art::Art;
 use crate::catalog::Source;
-use crate::screens::{self, Step, loading};
+use crate::screens::{self, Step, lights, loading};
 
 impl<S: Source, A: Art> Browser<S, A> {
     pub(super) fn top(&self) -> &screens::Screen {
@@ -46,14 +46,16 @@ impl<S: Source, A: Art> Browser<S, A> {
                 start,
                 next,
             } => {
-                // The press enters the state in the frame it lands in.
-                // Nothing downstream is awaited: the request crosses the
-                // bus, the operator creates the `Play`, and the pod
-                // starts, and none of the three reaches this browser. A
-                // choice with no film behind it enters nothing, because
-                // no film will ever cover the page.
+                // The press enters the state in the frame it lands in,
+                // and the lights start down in that same frame. Nothing
+                // downstream is awaited: the request crosses the bus,
+                // the operator creates the `Play`, and the pod starts,
+                // and none of the three reaches this browser. A choice
+                // with no film behind it enters nothing, because no film
+                // will ever cover the page.
                 if self.request_play(&library, &selection, start, next.as_ref()) {
                     self.loading = Some(loading::Loading::entered(self.clock));
+                    self.lights = Some(lights::Lights::entered(self.clock));
                 }
             }
         }

@@ -7,8 +7,8 @@ use crate::catalog::franchise;
 use crate::catalog::recency::{self, Candidate};
 use crate::catalog::{
     Answer, Change, Credit, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
-    LibraryEntry, Membership, MovieDetails, MovieSet, Person, PlayItem, Query, Selection,
-    SeriesDetails, Slot, Sort, Source, TILES, Title, library_name, pool,
+    LibraryEntry, Membership, MovieDetails, MovieSet, Person, PlayItem, Presentation, Query,
+    Selection, SeriesDetails, Slot, Sort, Source, TILES, Title, library_name, pool,
 };
 use crate::harness::Waker;
 
@@ -302,10 +302,32 @@ impl Source for Catalog {
         people::person(library, path)
     }
 
-    // The sample invents titles and no files, so a select on one starts
-    // nothing. A workstation run browses and plays nothing.
-    fn play(&mut self, _library: &str, _selection: &Selection) -> Vec<PlayItem> {
-        Vec::new()
+    // The invented main file of one movie, so a select on Play enters
+    // the loading state on a run with no catalog. The path names a file
+    // that does not exist: the browser resolves the choice and publishes
+    // it, and a run with no bus publishes nothing at all, so no film
+    // ever plays from here. The serials carry no file, because nothing
+    // on such a run needs an episode to play.
+    fn play(&mut self, _library: &str, selection: &Selection) -> Vec<PlayItem> {
+        let Selection::Movie { id } = selection else {
+            return Vec::new();
+        };
+        let number = trailing(id);
+        if !(1..=MOVIES).contains(&number) {
+            return Vec::new();
+        }
+        let title = movie(number);
+        vec![PlayItem {
+            path: format!("{}/{}.mkv", title.title, title.title),
+            slug: format!("specimen-{number:04}"),
+            presentation: Presentation {
+                kind: "video".into(),
+                hint: "movie".into(),
+                title: title.title,
+                year: movie_year(number),
+                ..Presentation::default()
+            },
+        }]
     }
 
     fn changed(&mut self) -> Change {
@@ -475,12 +497,18 @@ fn movie(number: i64) -> Title {
     Title {
         id: format!("movie:sample:{number:04}"),
         title: format!("Specimen {number:04}"),
-        released: (1900 + (number * 37) % 126).to_string(),
+        released: movie_year(number).to_string(),
         art: format!("posters/specimen-{number:04}.jpg"),
         duration: 4_800 + (number % 47) * 60,
         rating: "PG-13".into(),
         tagline: tagline(number),
     }
+}
+
+// The invented year one movie was released in, which its row and its
+// play request both carry.
+fn movie_year(number: i64) -> i64 {
+    1900 + (number * 37) % 126
 }
 
 // The invented scores of one title, on the three sites the page draws
