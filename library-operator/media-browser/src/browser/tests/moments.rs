@@ -94,23 +94,13 @@ fn an_asleep_browser_draws_a_black_frame() {
 }
 
 #[test]
-fn a_present_asks_the_harness_for_a_fresh_surface() {
-    let (mut browser, _bus) = on_bus(3, vec![Moment::Present]);
-
-    browser.pump(1.0);
-
-    assert!(browser.surface_due());
-    assert!(!browser.surface_due());
-}
-
-#[test]
 fn a_focus_changes_nothing() {
     let (mut browser, _bus) = on_bus(3, vec![Moment::Focus { remote: 0 }]);
 
     assert!(browser.pump(1.0));
 
     assert!(!browser.asleep());
-    assert!(!browser.surface_due());
+    assert!(!browser.covered());
 }
 
 // Back at the home page is home: focus returns to the banner and no

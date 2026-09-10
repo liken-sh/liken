@@ -186,9 +186,8 @@ fn environment(pairs: &[(&str, &str)]) -> Options {
 }
 
 #[test]
-fn an_empty_environment_names_no_screen_and_arms_nothing() {
+fn an_empty_environment_arms_nothing() {
     let options = environment(&[]);
-    assert_eq!(options.app_id, "");
     assert_eq!(options.window_grace, None);
 }
 
@@ -220,9 +219,8 @@ fn this_operator_names_both_of_its_topics() {
 }
 
 #[test]
-fn the_claim_names_the_screen_and_the_operator_arms_the_watchdog() {
-    let options = environment(&[(APP_ID, "media-den-tv"), (WINDOW_GRACE, "15")]);
-    assert_eq!(options.app_id, "media-den-tv");
+fn the_operator_arms_the_watchdog() {
+    let options = environment(&[(WINDOW_GRACE, "15")]);
     assert_eq!(options.window_grace, Some(Duration::from_secs(15)));
 }
 

@@ -120,13 +120,6 @@ pub trait Screen {
     /// Handle a message from a widget.
     fn update(&mut self, _message: Self::Message) {}
 
-    /// Whether the screen asked for a fresh Wayland surface. The harness reads
-    /// this on every wake of the loop, and the read clears the request, so one
-    /// ask maps one new surface.
-    fn surface_due(&mut self) -> bool {
-        false
-    }
-
     /// Disk-cache hits and source decode attempts for this run.
     fn art_counts(&self) -> ArtCounts {
         ArtCounts::default()
@@ -137,15 +130,6 @@ pub trait Screen {
     fn index_size(&mut self) -> Option<Size> {
         None
     }
-
-    /// The new surface is on the screen: its first frame was presented, at
-    /// `at` seconds. A Wayland surface is not shown until its first buffer
-    /// arrives, and the first frame on a fresh wgpu surface is the slow
-    /// one, so a motion started when the window was created would have
-    /// spent most of its length before anyone saw a frame of it. The
-    /// screen draws that first frame as it stood, and starts what the
-    /// surface was for on the frame after.
-    fn surfaced(&mut self, _at: f64) {}
 
     /// Whether something opaque covers the surface, so that no frame reaches
     /// anyone. A covered Wayland surface gets no frame callbacks, and this
@@ -225,9 +209,6 @@ pub struct Ready<S: Screen> {
     // Where the measurements go at exit, from --stats.
     pub(crate) stats_path: Option<PathBuf>,
     pub(crate) window: Arc<winit::window::Window>,
-    /// The instance every surface of this run comes from, held because the
-    /// re-present creates a second one.
-    pub(crate) instance: wgpu::Instance,
     pub(crate) device: wgpu::Device,
     pub(crate) surface: wgpu::Surface<'static>,
     pub(crate) format: wgpu::TextureFormat,
@@ -241,15 +222,6 @@ pub struct Ready<S: Screen> {
     /// The scale from --scale, in place of the window's, or nothing to lay
     /// out at the scale the compositor states.
     pub(crate) scale: Option<f32>,
-    /// The app-id every window of this run asks for, held because the
-    /// re-present maps a second window.
-    pub(crate) app_id: String,
-    /// Whether a present is still waiting on a window the compositor has not
-    /// given yet.
-    pub(crate) surface_pending: bool,
-    /// Whether the window on the glass is fresh and no frame has been
-    /// presented on it yet, so the screen is told after the first one.
-    pub(crate) surfaced_pending: bool,
     /// When the process began, for the time to the first frame.
     pub(crate) launched: std::time::Instant,
     /// The second the screen named for its next change, while the loop sleeps
@@ -424,12 +396,10 @@ mod tests {
         assert_eq!(still.background(), Color::BLACK);
         assert!(!still.pump(1.0));
         assert_eq!(still.next_frame(3.5), Some(3.5));
-        assert!(!still.surface_due());
         assert_eq!(still.art_counts(), ArtCounts::default());
         assert_eq!(still.index_size(), None);
         still.wake_by(Arc::new(|| {}));
         still.update(());
-        still.surfaced(2.0);
         still.scaled((1920, 1080), 1.0);
         assert!(!still.covered());
         assert!(still.key("q"));

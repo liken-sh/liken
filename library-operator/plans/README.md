@@ -155,8 +155,8 @@ Plan 32 stands apart from the enrichment work.
   The screen pod's browser takes the room's remotes over the bus: the
   presses `media-operator`'s idle command pod forwards arrive as keys,
   the shade moments draw black and draw again, back at the libraries
-  asks for the shade, and a `Play`'s end re-presents the browser where
-  it was. The browser measured 92 MiB resident on the box.
+  asks for the shade, and the browser returns where it left when the
+  `Play` ends. The browser measured 92 MiB resident on the box.
 * [08, Playback from the media
   browser](completed/08-playback-from-the-media-browser.md). Built,
   released in 2026.09.01-005, and drilled on `liken-1` on 2026-09-01
@@ -176,6 +176,11 @@ Plan 32 stands apart from the enrichment work.
   starts, from where the person started, on the `Play`; the player
   offers it on the scrubber and asks over the bus; the browser starts
   it. One episode per `Play`, with the season list gone.
+* [54, The browser returns on the status edge](54-the-browser-returns-on-the-status-edge.md).
+  In progress. Under ivi-shell the browser's window is visible again
+  the moment a film's surface goes, so the fresh window on re-present
+  and the app-id retire. Requires display-operator plan 17 on the
+  cluster first.
 
 Plans 16 to 19 follow the scanner plans and were built before plan 05.
 Each one finishes something plan 04 left short. All four were released in

@@ -74,7 +74,7 @@ const (
 // both clients link reads them in its wiring.rs, so the two clients of
 // one contract are wired the same way. They name the broker, the
 // Player's own object name that every focus mark holds, the retained
-// status, the level, the commands topic that carries the re-present,
+// status, the level, the commands topic that carries the play-next ask,
 // the panel topic the client states the panel desire on, and the two
 // newline-joined lists of the unit's controllers. The level variable is
 // absent for a unit with no sinks.

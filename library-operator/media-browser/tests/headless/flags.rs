@@ -34,20 +34,16 @@ fn the_scripted_quit_key_ends_the_run() {
     assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
 }
 
-// A run whose claim named an app-id asks the compositor for a window
-// under that name, and the armed watchdog stops when the window arrives:
-// the run ends on its own key at 0, not at the watchdog's 7.
+// The armed watchdog stops when the window arrives: the run ends on its
+// own key at 0, not at the watchdog's 7.
 #[test]
-fn a_claimed_screen_names_the_window_and_stops_the_watchdog() {
-    let dir = workspace("app-id");
+fn the_window_that_arrives_stops_the_watchdog() {
+    let dir = workspace("watchdog");
     let stats = dir.join("stats.json");
 
     let run = headless_with(
         &dir,
-        &[
-            ("DISPLAY_APP_ID", "media-den-tv"),
-            ("WINDOW_GRACE_SECONDS", "30"),
-        ],
+        &[("WINDOW_GRACE_SECONDS", "30")],
         &[
             "--script",
             "0.5:quit",

@@ -7,12 +7,6 @@ use std::time::Duration;
 
 use crate::audience;
 
-/// The Wayland app-id the surface must ask for. The display claim
-/// delivers it into the container at run time, and the compositor places the
-/// window on the claimed output by it. An empty value asks for no app-id,
-/// which is a run on a workstation where no claim named one.
-pub const APP_ID: &str = "DISPLAY_APP_ID";
-
 /// The seconds the browser waits for a window before it exits. An unset
 /// or non-positive value leaves the watchdog off, so a run outside a pod never
 /// exits for a missing window. The operator sets it on the browser container of
@@ -120,9 +114,6 @@ pub struct Options {
     /// workstation turns to see a 4K panel's layout under a compositor that
     /// states 1.
     pub scale: Option<f32>,
-    /// The Wayland app-id every window this run maps asks for, from
-    /// [`APP_ID`]. Nothing on the command line sets it.
-    pub app_id: String,
     /// How long the run waits for a window before it exits, from
     /// [`WINDOW_GRACE`]. Nothing leaves the watchdog off.
     pub window_grace: Option<Duration>,
@@ -155,7 +146,6 @@ impl Default for Options {
             quit_after: None,
             size: (1920, 1080),
             scale: None,
-            app_id: String::new(),
             window_grace: None,
             play_topic: String::new(),
             audience_topic: String::new(),
@@ -256,10 +246,10 @@ impl Options {
 
 impl Options {
     /// Read what the container was told. A pod cannot discover the
-    /// app-id its display claim delivered, the grace the operator set,
-    /// or the two topics this operator names, so all four arrive in the
-    /// environment and none is a flag. The bus wiring arrives the same
-    /// way and `media-screen` reads it, so none of it is here.
+    /// grace the operator set or the two topics this operator names, so
+    /// all three arrive in the environment and none is a flag. The bus
+    /// wiring arrives the same way and `media-screen` reads it, so none
+    /// of it is here.
     pub fn from_environment(&mut self) {
         self.read_environment(|name| std::env::var(name).ok());
     }
@@ -268,7 +258,6 @@ impl Options {
     /// global to a process, so a test states the variables here instead of
     /// setting them and racing every other test in the binary.
     pub fn read_environment(&mut self, value: impl Fn(&str) -> Option<String>) {
-        self.app_id = value(APP_ID).unwrap_or_default();
         self.window_grace = grace(&value(WINDOW_GRACE).unwrap_or_default());
         self.play_topic = value(PLAY_TOPIC).unwrap_or_default();
         self.audience_topic = value(AUDIENCE_TOPIC).unwrap_or_default();

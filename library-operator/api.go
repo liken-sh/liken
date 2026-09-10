@@ -517,9 +517,11 @@ type PlayerIdleBus struct {
 	// An older media-operator publishes no such field, and the browser
 	// then draws the level with no gate over it.
 	VolumeOwnerTopic string `json:"volumeOwnerTopic,omitempty"`
-	// The Player's commands topic. The browser acts on one command, the
-	// operator's re-present, which puts the browser back on the page it
-	// left once a Play ends, and only while the unit plays nothing.
+	// The Player's commands topic. One message on it reaches the
+	// browser: the play-next ask the playback pod publishes when a
+	// person takes the up-next offer on the scrubber, which carries
+	// back the request block the browser itself wrote onto the Play.
+	// The browser acts on no other action there.
 	CommandsTopic string `json:"commandsTopic"`
 	// The retained topic the browser states its panel desire on: off
 	// once its off window passes with no press, and on again at the

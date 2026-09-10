@@ -54,7 +54,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         // The window comes first, so a compositor that gives none
         // leaves the screen and the flags where they are and the watchdog
         // running.
-        let Some(graphics) = graphics::open(event_loop, options.size, &options.app_id) else {
+        let Some(graphics) = graphics::open(event_loop, options.size) else {
             return;
         };
         watchdog.present();
@@ -65,7 +65,6 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             capture_at,
             stats: stats_path,
             quit_after,
-            app_id,
             scale,
             // The binary reads the catalog flags before the run, so
             // the harness carries them and uses none of them.
@@ -89,7 +88,6 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             timeline: Timeline::new(script, quit_after),
             stats_path,
             window: graphics.window,
-            instance: graphics.instance,
             device: graphics.device,
             surface: graphics.surface,
             format: graphics.format,
@@ -101,9 +99,6 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             events: Vec::new(),
             resized: false,
             scale,
-            app_id,
-            surface_pending: false,
-            surfaced_pending: false,
             launched,
             scheduled: None,
             start: None,
@@ -191,10 +186,9 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
 
         // The sources are pumped here, on every wake of the loop, because a
         // covered client draws no frame: the compositor sends a hidden
-        // surface no frame callbacks.
-        // `present` is the one message that lets a covered browser map the
-        // surface that reveals it, so the bus is read on a path the
-        // compositor cannot starve.
+        // surface no frame callbacks. The status that uncovers the client
+        // arrives on this path for that reason, so nothing the compositor
+        // withholds can hold the client covered.
         if let Some(start) = ready.start {
             let at = start.elapsed().as_secs_f64();
             if ready.screen.pump(at) {
@@ -203,17 +197,6 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
                 // scheduled before it no longer holds.
                 ready.scheduled = None;
                 ready.stale = true;
-            }
-            if ready.screen.surface_due() {
-                ready.surface_pending = true;
-            }
-            if ready.surface_pending && ready.represent(event_loop) {
-                ready.surface_pending = false;
-                ready.surfaced_pending = true;
-                // A Wayland surface is not on screen until its first buffer
-                // arrives, so the new window gets a draw whatever the
-                // schedule says.
-                ready.window.request_redraw();
             }
         }
 

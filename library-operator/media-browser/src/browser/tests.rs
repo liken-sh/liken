@@ -30,6 +30,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use media_screen::status::{Activity, Status};
+
 use super::*;
 use crate::art::{ArtCounts, Image};
 use crate::catalog::draw::Date;
@@ -863,6 +865,17 @@ impl Bus for FakeBus {
     fn wake_on_delivery(&self, _wake: Waker) {
         self.woken.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+// One status of the unit, with the activity a case names and the rest of
+// the fields at rest. The status is the whole word the browser has on
+// whether a film covers its surface, so a case that plays or ends a film
+// states it here.
+fn status(activity: Activity) -> Moment {
+    Moment::Status(Status {
+        activity,
+        ..Status::default()
+    })
 }
 
 fn on_bus(movies: usize, moments: Vec<Moment>) -> (Browser<Fake, NoArt>, FakeBus) {

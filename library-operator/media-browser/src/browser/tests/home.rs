@@ -649,7 +649,8 @@ fn a_wake_with_nothing_changed_reads_the_home_page_no_further() {
 
     assert!(browser.source.calls.is_empty());
 
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![status(Activity::Playing), status(Activity::Idle)];
     browser.pump(3.0);
     assert!(browser.source.calls.is_empty());
 }

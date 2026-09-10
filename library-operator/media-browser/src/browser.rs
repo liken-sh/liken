@@ -94,13 +94,17 @@ pub struct Browser<S: Source, A: Art> {
     // whether a film covers the surface. It also holds every change that
     // waits to be read, and it alone says when a read runs.
     refresh: Refresh,
-    // Whether a present asked for a fresh Wayland surface.
-    surface_due: bool,
-    // Whether the return waits for that surface. The return runs on the
-    // clock, and the compositor takes its own time to map a fresh
-    // window, so a return started at the present would run out before
-    // the first frame anyone sees. It starts on the frame the harness
-    // reports the surface up.
+    // What the unit was doing in the last status. The browser holds it
+    // because the return runs on the move to `Idle` and not on the word
+    // `Idle` itself: the operator publishes a status on every change of
+    // the unit, and the browser would otherwise return the page again
+    // on each one.
+    activity: Activity,
+    // Whether the page's return waits for a frame. A film covers the
+    // browser and the shade stops the loop, so the second a film ends
+    // is not always a second a frame follows, and a return started
+    // there would be spent before anyone saw a frame of it. The next
+    // tick starts it, and every tick is a frame's.
     returning: bool,
     // The size a page's backdrop is decoded at, which is the size of the
     // window.
@@ -170,7 +174,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             audience: Audience::default(),
             people_file: None,
             refresh: Refresh::default(),
-            surface_due: false,
+            activity: Activity::Idle,
             returning: false,
             page: PAGE,
             clock: 0.0,
@@ -456,15 +460,23 @@ impl<S: Source, A: Art> Browser<S, A> {
                 self.presented();
                 self.lifted();
             }
-            Moment::Present => {
-                self.surface_due = true;
-                self.refresh.cover(false);
-                self.returning = true;
-                self.lifted();
+            // The status is the whole word the browser has on whether a
+            // film is over its surface. Starting leaves the page and its
+            // pulse on the screen; the film covers it once it plays. The
+            // move to `Idle` is the end of the work the page asked for,
+            // whether the film played through or the `Play` never
+            // played, so the page comes back where it was with its
+            // return and a read of what changed under the film. The
+            // compositor shows this window again the moment the film's
+            // surface goes, so the return needs no window of its own.
+            Moment::Status(status) => {
+                if self.activity != Activity::Idle && status.activity == Activity::Idle {
+                    self.returning = true;
+                    self.lifted();
+                }
+                self.activity = status.activity;
+                self.refresh.cover(status.activity == Activity::Playing);
             }
-            // Starting leaves the page and its pulse on the screen; the
-            // film covers it once it plays.
-            Moment::Status(status) => self.refresh.cover(status.activity == Activity::Playing),
             // A level brings up the volume row, which draws over every
             // screen.
             Moment::Level { volume, pressed } => self.level.fold(volume, pressed, self.clock),
@@ -889,20 +901,6 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         folded || delivered || landed || refreshed || asked
     }
 
-    // The source, the art store, the home page's reader, and the bus
-    // deliver on threads of their own, so all four take the handle that
-    // wakes the loop.
-    // The fresh surface is up, so the return the present held starts now
-    // and its first frame is the first one on the new window.
-    fn surfaced(&mut self, at: f64) {
-        if !self.returning {
-            return;
-        }
-        self.returning = false;
-        self.clock = at;
-        self.presented();
-    }
-
     // The page's backdrop is decoded at the logical size of the window,
     // and the store scales every ask to the panel and bounds its memory
     // by the panel's size.
@@ -915,6 +913,9 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         self.store.get_mut().scaled(physical, scale);
     }
 
+    // The source, the art store, the home page's reader, and the bus
+    // deliver on threads of their own, so all four take the handle that
+    // wakes the loop.
     fn wake_by(&mut self, wake: Waker) {
         self.source.wake_by(wake.clone());
         if let Some(bus) = &self.bus {
@@ -922,10 +923,6 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         }
         self.reader.wake_by(wake.clone());
         self.store.get_mut().wake_by(wake);
-    }
-
-    fn surface_due(&mut self) -> bool {
-        std::mem::take(&mut self.surface_due)
     }
 
     fn art_counts(&self) -> ArtCounts {
@@ -943,6 +940,12 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // clock the harness drives every frame with.
     fn tick(&mut self, at: f64) {
         self.clock = at;
+        // The return the film's end marked starts here, on the clock
+        // of the frame this tick belongs to, so its whole length runs
+        // on frames a person sees.
+        if std::mem::take(&mut self.returning) {
+            self.presented();
+        }
         self.ask();
         self.time = clock::now();
         self.minute = Some(at + clock::seconds_to_next_minute());

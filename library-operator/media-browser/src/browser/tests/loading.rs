@@ -2,8 +2,6 @@
 // that holds it, the return that ends it, and the frames the loop asks
 // for while it runs.
 
-use media_screen::status::{Activity, Status};
-
 use super::*;
 
 // The second the press lands on, so the state is entered on a clock that
@@ -98,38 +96,69 @@ fn the_wake_after_the_film_returns_the_page() {
     assert!(matches!(browser.top(), screens::Screen::Movie(_)));
 }
 
-// The `Play` ends while the browser was never covered, so the crate
-// sends the fresh surface and no wake. The page returns on the surface
-// alone: the present asks for it, and the return waits until the
-// harness reports it up, so the return's frames land on the window a
-// person sees and not on the one the film covered.
+// The film ends, and the compositor shows this window again the moment
+// the film's surface goes. The return waits for the frame that draws it:
+// the fold marks it and the next tick starts it, so its whole length
+// runs on frames a person sees and none of it on the seconds under the
+// film.
 #[test]
-fn a_present_asks_for_the_surface_and_the_return_waits_for_it() {
+fn the_films_end_marks_the_return_and_the_next_frame_starts_it() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(PRESS + 1.0);
 
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
     browser.pump(PRESS + 5.0);
 
-    assert!(browser.surface_due());
+    assert!(browser.returning);
+    assert!(!browser.covered());
     assert!(!browser.loading.expect("the state holds").leaving());
 
-    browser.surfaced(PRESS + 7.0);
+    browser.tick(PRESS + 7.0);
 
+    assert!(!browser.returning);
     assert!(browser.loading.expect("the state is leaving").leaving());
     assert_eq!(browser.loading.expect("the state").away(PRESS + 7.0), 1.0);
     browser.tick(PRESS + 7.0 + look::RETURN);
     assert!(browser.loading.is_none());
 }
 
+// A `Play` that never played ends the same way a film does: the unit
+// reaches `Idle` without ever reaching `Playing`, and the page a person
+// is waiting on comes back rather than holding its pulse forever.
 #[test]
-fn a_surface_with_no_present_behind_it_returns_nothing() {
-    let (mut browser, _bus) = on_a_movie();
+fn a_play_that_never_played_returns_the_page() {
+    let (mut browser, bus) = on_a_movie();
     browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Starting)];
+    browser.pump(PRESS + 1.0);
 
-    browser.surfaced(PRESS + 7.0);
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(PRESS + 5.0);
+    browser.tick(PRESS + 7.0);
 
-    assert!(!browser.loading.expect("the state holds").leaving());
+    assert!(browser.loading.expect("the state is leaving").leaving());
+    browser.tick(PRESS + 7.0 + look::RETURN);
+    assert!(browser.loading.is_none());
+}
+
+// The return runs on the move to `Idle` and not on the word. The
+// operator publishes a status on every change of the unit, so a browser
+// that read each `Idle` as an end would return the page again and again
+// while nothing played.
+#[test]
+fn a_second_idle_status_marks_no_second_return() {
+    let (mut browser, bus) = on_a_movie();
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![status(Activity::Playing), status(Activity::Idle)];
+    browser.pump(PRESS + 1.0);
+    browser.tick(PRESS + 1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(PRESS + 2.0);
+
+    assert!(!browser.returning);
 }
 
 #[test]
@@ -169,9 +198,10 @@ fn the_loop_draws_the_state_and_goes_quiet_after_it() {
 
     assert_eq!(browser.next_frame(PRESS + 0.1), Some(PRESS + 0.1));
 
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![status(Activity::Playing), status(Activity::Idle)];
     browser.pump(PRESS + 5.0);
-    browser.surfaced(PRESS + 5.0);
+    browser.tick(PRESS + 5.0);
     browser.tick(PRESS + 5.0 + look::RETURN);
     browser.minute = Some(MINUTE);
 
@@ -186,13 +216,6 @@ fn the_loop_draws_the_state_and_goes_quiet_after_it() {
 // the browser answers covered, and the browser starts no read of its
 // own either: a read is not a frame, so the harness cannot hold it, and
 // a film's progress rows would order one every second.
-fn status(activity: Activity) -> Moment {
-    Moment::Status(Status {
-        activity,
-        ..Status::default()
-    })
-}
-
 #[test]
 fn a_playing_status_covers_the_browser_and_holds_the_state() {
     let (mut browser, bus) = on_a_movie();
@@ -234,19 +257,19 @@ fn an_idle_status_uncovers_the_browser() {
 }
 
 #[test]
-fn the_present_uncovers_the_browser_and_the_surface_draws_the_return() {
+fn the_films_end_uncovers_the_browser_and_asks_for_the_frame_that_returns() {
     let (mut browser, bus) = on_a_movie();
     browser.key("enter");
     *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
     browser.pump(PRESS + 1.0);
 
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
     browser.pump(PRESS + 5.0);
-    browser.surfaced(PRESS + 5.0);
     browser.minute = Some(MINUTE);
 
     assert!(!browser.covered());
     assert_eq!(browser.next_frame(PRESS + 5.0), Some(PRESS + 5.0));
+    browser.tick(PRESS + 5.0);
     assert!(browser.loading.expect("the state is leaving").leaving());
 }
 
@@ -318,7 +341,7 @@ fn the_change_under_the_film_is_read_when_the_film_ends() {
 // The held read covers the page a person left, so a page deep in the
 // stack comes back current after the film.
 #[test]
-fn a_page_held_under_the_film_is_read_again_on_the_present() {
+fn a_page_held_under_the_film_is_read_again_when_the_film_ends() {
     let (mut browser, bus) = on_a_movie();
     *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
     browser.pump(PRESS + 1.0);
@@ -327,7 +350,7 @@ fn a_page_held_under_the_film_is_read_again_on_the_present() {
     browser.pump(PRESS + 2.0);
     assert_eq!(browser.source.calls, Vec::<&str>::new());
 
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Present];
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
     browser.pump(PRESS + 3.0);
 
     assert!(browser.source.calls.contains(&"movie"));

@@ -68,7 +68,7 @@ rusqlite = { version = "=0.40.2", features = ["bundled"] }
 # pin an image, or the full sha of a commit on main while the browser
 # needs a change of the crate that no release carries yet. Cargo.lock
 # holds the commit either way.
-media-screen = { git = "https://github.com/liken-sh/media-operator", tag = "2026.09.08-005" }
+media-screen = { git = "https://github.com/liken-sh/media-operator", rev = "6cb1ecc63a53c4a5993f06d0b1abcbfa190b52a3" }
 # ureq holds the streaming update subscriptions; it decodes the chunked
 # body and puts a timeout on every read; the defaults come off because the
 # agent answers on loopback with no TLS and no compression.
