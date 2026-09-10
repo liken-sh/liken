@@ -15,10 +15,12 @@ failures a room has. All three are visible only by reading logs today.
 
 ## The design
 
-Layers 1 and 2 under the `media_` prefix. Three processes serve metrics: the operator on port 9220, the command
-sidecar in every Play pod on 9221, and the idle screen on 9222. The
-sidecar is the operator's own binary in another role, and it is the one
-process that holds mpv's IPC socket, so mpv's facts are its to report.
+Layers 1 and 2 under the `media_` prefix. Three processes serve metrics,
+each on port 9200: the operator, the command sidecar in every Play pod,
+and the idle screen. None of the three shares a pod with another, so
+the one port never collides. The sidecar is the operator's own binary
+in another role, and it is the one process that holds mpv's IPC
+socket, so mpv's facts are its to report.
 The idle screen is Rust and uses the `metrics` facade with the
 Prometheus exporter, the same pair Corrosion uses. Neither the sidecar
 nor the idle screen has a layer 2.

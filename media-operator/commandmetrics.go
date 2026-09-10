@@ -19,12 +19,12 @@ import (
 // apart.
 const commandBuildInfoComponent = "media-command"
 
-// commandMetricsPort is milestone 65's port for the command sidecar,
-// the same one on every playback pod: a Play lives in whatever
-// namespace a household put it in, so the PodMonitor that scrapes this
-// port reaches across every namespace instead of sitting beside one
+// commandMetricsPort is milestone 65's shared port for every process
+// on the cluster network: a Play lives in whatever namespace a
+// household put it in, so the PodMonitor that scrapes this port
+// reaches across every namespace instead of sitting beside one
 // Deployment the way the operator's own PodMonitor does.
-const commandMetricsPort = 9221
+const commandMetricsPort = 9200
 
 // hardwareYes and hardwareNo are media_decode_info's hardware label.
 // mpv's hwdec-current reports the decoder's own name, such as vaapi or

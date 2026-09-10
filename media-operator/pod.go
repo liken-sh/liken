@@ -305,7 +305,7 @@ func commandSidecar(
 				Value: playerVolumeOwnerTopic(topicBase, play.Metadata.Namespace, playerName(play)),
 			})
 	}
-	// The sidecar serves its own /metrics, milestone 65's port 9221,
+	// The sidecar serves its own /metrics, milestone 65's port 9200,
 	// and reports the version its own image's tag carries: the same tag
 	// the operator resolved to name this container's image, so plan
 	// 26's decode series read the release a person sees the pod itself

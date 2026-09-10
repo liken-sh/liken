@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn a_host_and_a_port_parse() {
-        assert_eq!(address("0.0.0.0:9222"), Some(([0, 0, 0, 0], 9222).into()));
+        assert_eq!(address("0.0.0.0:9200"), Some(([0, 0, 0, 0], 9200).into()));
     }
 
     // The global recorder installs once per process, so this is the one test

@@ -230,7 +230,7 @@ mod tests {
             (REMOTE_FOCUS_TOPICS, "focus/sofa\nfocus/armchair"),
             (FADE_AFTER_SECONDS, "600"),
             (OFF_AFTER_SECONDS, "1800"),
-            (METRICS_ADDRESS, "0.0.0.0:9222"),
+            (METRICS_ADDRESS, "0.0.0.0:9200"),
             (VERSION, "2026.09.10-001"),
         ]);
 
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(read.panel_topic, "media/players/den/tv/panel");
         assert_eq!(read.fade_after, Duration::from_secs(600));
         assert_eq!(read.off_after, Duration::from_secs(1800));
-        assert_eq!(read.metrics_address, "0.0.0.0:9222");
+        assert_eq!(read.metrics_address, "0.0.0.0:9200");
         assert_eq!(read.version, "2026.09.10-001");
     }
 

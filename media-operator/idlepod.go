@@ -41,11 +41,11 @@ const idleDrawRequest = "draw"
 const idleWindowGraceSeconds = 15
 
 // The port the idle client's own `/metrics` listener binds, milestone
-// 65's fixed assignment for this process. The container names the port
-// rather than the number, so a PodMonitor selects it with no number of
-// its own to keep in step with this one.
+// 65's shared port for every process on the cluster network. The
+// container names the port rather than the number, so a PodMonitor
+// selects it with no number of its own to keep in step with this one.
 const (
-	idleMetricsPort = 9222
+	idleMetricsPort = 9200
 	metricsPortName = "metrics"
 )
 
@@ -270,7 +270,7 @@ func buildIdlePod(
 			EnvVar{Name: idlePlayerComponentsVariable, Value: strings.Join(components, "\n")})
 	}
 
-	// The idle client serves its own `/metrics`, milestone 65's port 9222,
+	// The idle client serves its own `/metrics`, milestone 65's port 9200,
 	// and reports the version its image's own tag carries: the tag
 	// resolveImages already read to name this pod's image, so the client
 	// states the release a person reads off `kubectl get pods -o

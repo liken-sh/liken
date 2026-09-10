@@ -160,14 +160,14 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 		playerPanelTopicVariable:     playerPanelTopic(testTopicBase, "house", "theater"),
 		idleFadeAfterSecondsVariable: "600",
 		idleOffAfterSecondsVariable:  "0",
-		metricsAddressVariable:       "0.0.0.0:9222",
+		metricsAddressVariable:       "0.0.0.0:9200",
 		mediaVersionVariable:         "2026.09.01-001",
 	}
 	if env := containerEnv(container); !reflect.DeepEqual(env, wantEnv) {
 		t.Errorf("env = %+v, want %+v", env, wantEnv)
 	}
 
-	wantPorts := []ContainerPort{{Name: "metrics", ContainerPort: 9222}}
+	wantPorts := []ContainerPort{{Name: "metrics", ContainerPort: 9200}}
 	if !reflect.DeepEqual(container.Ports, wantPorts) {
 		t.Errorf("ports = %+v, want %+v", container.Ports, wantPorts)
 	}

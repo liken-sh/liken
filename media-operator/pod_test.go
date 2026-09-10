@@ -308,7 +308,7 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 			{Name: playerNameVariable, Value: "theater"},
 			{Name: playerVolumeTopicVariable, Value: playerVolumeTopic(testTopicBase, "house", "theater")},
 			{Name: playerVolumeOwnerTopicVariable, Value: playerVolumeOwnerTopic(testTopicBase, "house", "theater")},
-			{Name: metricsAddressVariable, Value: "0.0.0.0:9221"},
+			{Name: metricsAddressVariable, Value: "0.0.0.0:9200"},
 			{Name: mediaVersionVariable, Value: "test"},
 		},
 		Ports: []ContainerPort{{Name: metricsPortName, ContainerPort: commandMetricsPort}},

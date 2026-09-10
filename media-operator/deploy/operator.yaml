@@ -62,10 +62,10 @@ spec:
             # the cluster; nothing scrapes it until an owner applies
             # deploy/monitoring beside this base.
             - name: MEDIA_METRICS_ADDRESS
-              value: ":9220"
+              value: ":9200"
           ports:
             - name: metrics
-              containerPort: 9220
+              containerPort: 9200
           securityContext:
             capabilities:
               drop: ["ALL"]
