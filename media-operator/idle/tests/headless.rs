@@ -386,8 +386,7 @@ fn publish(topic: &str, payload: &str) -> Vec<u8> {
 }
 
 // What each payload means is a unit test in `media-screen` and in `unit`. What
-// needs a
-// broker and a compositor is the path between them: the client connects,
+// needs a broker and a compositor is the path between them: the client connects,
 // subscribes, reads the messages off the socket, and draws what they say.
 //
 // Every message below reaches the frames this run draws. The screen is
@@ -395,7 +394,7 @@ fn publish(topic: &str, payload: &str) -> Vec<u8> {
 // the panic, and this test reads it. What the frames hold is the
 // capture run's own assertion, above.
 #[test]
-fn the_client_reads_the_bus_and_maps_a_new_surface_on_a_present() {
+fn the_client_reads_the_bus_and_draws_what_it_says() {
     let dir = workspace("bus");
     let stats = dir.join("stats.json");
 
@@ -411,10 +410,9 @@ fn the_client_reads_the_bus_and_maps_a_new_surface_on_a_present() {
         // gone well inside this run.
         publish(VOLUME_TOPIC, r#"{"level":40,"muted":false}"#),
         publish(VOLUME_TOPIC, r#"{"level":45,"muted":false}"#),
-        // A `Play` ended, so the operator asks the screen back and the client
-        // maps a new Wayland surface. The status above says the unit plays
-        // nothing, which is the gate the request reads.
-        publish(COMMANDS_TOPIC, r#"{"action":"re-present"}"#),
+        // The ask a person makes on the up-next offer. The stock idle screen
+        // writes no `Play`, so it acts on none, and the run draws on.
+        publish(COMMANDS_TOPIC, r#"{"action":"play-next"}"#),
     ]);
 
     let run = wired(
@@ -434,18 +432,12 @@ fn the_client_reads_the_bus_and_maps_a_new_surface_on_a_present() {
             ("MEDIA_PLAYER_COMMANDS_TOPIC", COMMANDS_TOPIC.into()),
             ("IDLE_PLAYER_NAME", "The Den".into()),
             ("IDLE_PLAYER_COMPONENTS", "The screen\nThe speakers".into()),
-            ("DISPLAY_APP_ID", "media-den-tv".into()),
         ],
     );
 
     assert_eq!(run.exit, "0", "{}", run.log);
-    assert!(
-        run.log.contains("a new surface is up"),
-        "the present mapped a new surface\n{}",
-        run.log
-    );
 
-    // The frame loop kept drawing on the new surface.
+    // The frame loop drew what the bus delivered.
     let measured = measurements(&stats, &run);
     assert!(measured["frames"].as_u64().unwrap_or(0) > 0, "{measured}");
 }

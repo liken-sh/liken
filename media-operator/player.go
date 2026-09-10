@@ -1,10 +1,9 @@
 package main
 
 // The player mode is the playback pod's entrypoint shim. mpv reads no
-// options from the environment, but the display claim delivers the
-// surface's app-id in the environment at run time, after the pod spec
-// is fixed. So the shim reads that one variable, builds the rest of
-// mpv's arguments the way the pod's Play declares them, and execs mpv.
+// options from the environment, so the shim reads what the operator set
+// there, builds mpv's arguments the way the pod's Play declares them,
+// and execs mpv.
 // Because it execs, the shim replaces itself, so mpv is the pod's own
 // process. The kubelet then sends mpv the grace-period SIGTERM and
 // reads its exit code, and a zero code is a Play that ran to the end.
@@ -22,14 +21,6 @@ import (
 // the mpv its image carries, and a test points it at a stand-in that
 // needs no display and no sound card.
 var mpvBinary = "mpv"
-
-// displayAppIDVariable arrives from the display claim's CDI spec, not
-// from the operator. The display operator writes it into the
-// container's environment at run time, after the pod spec is fixed, so
-// the operator could not know the value to set. mpv has no environment
-// mechanism for options, so the shim adds the --wayland-app-id flag
-// itself when the claim delivered an id.
-const displayAppIDVariable = "DISPLAY_APP_ID"
 
 // The path of the display script directory inside the image, the one mpv loads
 // with --script. It is a variable rather than a constant so a test can point it
@@ -84,8 +75,7 @@ func runPlayer(items []string) {
 // run each named command and read the report. The display script directory
 // loads with --script, and the command sidecar drives it over that same IPC
 // socket. --osc=no turns off mpv's built-in on-screen controller,
-// because the display draws its own. The window's app-id routes
-// it to the allocated output when the display claim delivered one.
+// because the display draws its own.
 //
 // The list ends with -- because a media path that starts with a dash
 // would otherwise read as a flag.
@@ -134,9 +124,6 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 	// display draws nothing.
 	if allMusic(blocks, len(items)) {
 		argv = append(argv, "--vid=no", "--force-window=yes")
-	}
-	if applicationID := os.Getenv(displayAppIDVariable); applicationID != "" {
-		argv = append(argv, "--wayland-app-id="+applicationID)
 	}
 	// The declared start applies to the first file mpv loads and to no
 	// later playlist entry, which is exactly what spec.start means: the

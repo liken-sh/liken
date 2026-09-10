@@ -4,7 +4,7 @@
 //! The crate has two halves. [`Screen`] is pure and holds every rule:
 //! the focus gate, the play gate, the quiet window and the shade, the
 //! off window and the panel desire, the volume step and the owner mark,
-//! the cycle request, and the re-present. [`Reader`] is the thread over the broker: it
+//! and the cycle request. [`Reader`] is the thread over the broker: it
 //! subscribes, folds each message through the rules, runs the
 //! deadlines, performs the publishes, and hands the client what it
 //! draws. A client also names topics of its own, and [`Reader`]

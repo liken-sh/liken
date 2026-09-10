@@ -202,7 +202,7 @@ The bus facts a delegate's client reads. With the two windows above, this block 
 | <span id="statusidlebus--statustopic"></span>`statusTopic` | string | no | The retained topic that carries the unit's presentable state: its name, its activity, the Play it runs, and its parts. A client reads it on subscribe and asks for nothing. |
 | <span id="statusidlebus--volumetopic"></span>`volumeTopic` | string | no | The retained topic that carries the unit's level and its muted flag. Empty means the unit has no sinks: the client subscribes to no level, draws none, and publishes none. |
 | <span id="statusidlebus--volumeownertopic"></span>`volumeOwnerTopic` | string | no | The retained topic that carries the owner mark for the unit's level, present whenever volumeTopic is. A non-empty payload means equipment owns the level, and the client then draws no level of its own and applies none. An empty payload means no owner holds it. |
-| <span id="statusidlebus--commandstopic"></span>`commandsTopic` | string | no | The topic the operator publishes re-present on when a Play ends. The client maps a fresh surface when it arrives. The playback pod publishes play-next on the same topic when a person takes the up-next offer on the scrubber, and the client that wrote the Play reads that ask and starts the next work. A client publishes nothing here. |
+| <span id="statusidlebus--commandstopic"></span>`commandsTopic` | string | no | The topic the playback pod publishes play-next on when a person takes the up-next offer on the scrubber. The client that wrote the Play reads that ask and starts the next work. When a Play ends, the client's own surface is on the screen again and the retained status is the cue, so nothing is published here for it. |
 | <span id="statusidlebus--paneltopic"></span>`panelTopic` | string | no | The retained topic a client states its panel desire on, as on or off. The client holds no API credentials, so the operator reads the desire here and overrides the screen's Display. |
 | <span id="statusidlebus--remotes"></span>`remotes` | [\[\]object](#statusidlebusremotes) | no | The unit's controllers, one entry each, in spec.remotes order. That position is the index a focus moment carries, and it is the order the status topic lists the parts in. A unit with no controllers lists none. |
 
@@ -352,14 +352,12 @@ retained ([why](/docs/reference/bus/#retained-state-and-events)), and
 a controller never sends one directly. A client publishes nothing
 here.
 
-Two programs write here. The operator publishes `re-present` when a
-`Play` ends. The playback pod's command sidecar publishes `play-next`
-when a person takes the up-next offer on the scrubber, and its
-`request` is the `Play`'s own `spec.next.request`, byte for byte. The
-client that wrote the `Play` reads that ask and creates the next
+One program writes here. The playback pod's command sidecar publishes
+`play-next` when a person takes the up-next offer on the scrubber, and
+its `request` is the `Play`'s own `spec.next.request`, byte for byte.
+The client that wrote the `Play` reads that ask and creates the next
 `Play`.
 
 | Message | Writer | What it says |
 |---|---|---|
-| `{"action": "re-present"}` | the operator | A `Play` ended. The idle screen client maps a fresh surface. |
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |

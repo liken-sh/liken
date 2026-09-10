@@ -108,17 +108,6 @@ pub trait Screen {
 
     /// Handle a message from a widget.
     fn update(&mut self, _message: Self::Message) {}
-
-    /// Whether the screen asked for a fresh Wayland surface. The harness reads
-    /// this on every wake of the loop, and the read clears the request, so one
-    /// ask maps one new surface.
-    fn surface_due(&mut self) -> bool {
-        false
-    }
-
-    /// The new surface is up, on the frame at `at` seconds. Every motion that
-    /// starts with the surface reads that second.
-    fn surfaced(&mut self, _at: f64) {}
 }
 
 /// Run a screen until the run ends, and write what it measured.
@@ -184,22 +173,15 @@ pub struct Ready<S: Screen> {
     pub(crate) screen: S,
     pub(crate) timeline: Timeline,
     /// The window and everything the frame loop draws through. They arrive
-    /// together and they go together, and a `present` replaces two of them at
-    /// once, so the run holds the whole of what the compositor gave it.
+    /// together and they go together, so the run holds the whole of what the
+    /// compositor gave it.
     pub(crate) graphics: Graphics,
-    /// The Wayland app-id every window this run maps asks for, including the
-    /// one a `present` maps in place of the first.
-    pub(crate) app_id: String,
     pub(crate) viewport: Viewport,
     pub(crate) cache: user_interface::Cache,
     pub(crate) clipboard: Clipboard,
     pub(crate) modifiers: ModifiersState,
     pub(crate) events: Vec<Event>,
     pub(crate) resized: bool,
-    /// Whether a fresh Wayland surface is owed. The screen's ask moves here
-    /// and stays until a map succeeds, so a compositor that gives no window
-    /// on one wake is asked again on the next.
-    pub(crate) surface_pending: bool,
     /// The second the screen named for its next change, while the loop sleeps
     /// toward it. The harness holds that second rather than asking again on
     /// every pass, because a fresh answer names the change after it and the
@@ -277,7 +259,7 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
 
         // The window comes first, so a compositor that gives none leaves the
         // screen and the flags where they are and the watchdog running.
-        let Some(graphics) = graphics::open(event_loop, options.size, &options.app_id) else {
+        let Some(graphics) = graphics::open(event_loop, options.size) else {
             return;
         };
         watchdog.present();
@@ -302,24 +284,19 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         );
 
         let Options {
-            script,
-            quit_after,
-            app_id,
-            ..
+            script, quit_after, ..
         } = std::mem::take(options);
 
         *state = State::Ready(Box::new(Ready {
             screen,
             timeline: Timeline::new(script, quit_after),
             graphics,
-            app_id,
             viewport,
             cache: user_interface::Cache::new(),
             clipboard: Clipboard::unconnected(),
             modifiers: ModifiersState::default(),
             events: Vec::new(),
             resized: false,
-            surface_pending: false,
             scheduled: None,
             start: None,
             drawn: 0.0,
@@ -351,9 +328,8 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
                 ready.frame(event_loop);
                 return;
             }
-            // A `present` maps a new window before it drops the old one, so
-            // this arrives for a window the run has already replaced. The
-            // watchdog reads only the window the run draws on now.
+            // The run maps one window and holds it for its whole life, so
+            // the watchdog counts again only for that window going away.
             WindowEvent::Destroyed if id == ready.graphics.window.id() => {
                 watchdog.missing(std::time::Instant::now());
                 return;
@@ -415,9 +391,9 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
 
         // The sources are pumped here, on every wake of the loop, because a
         // covered client draws no frame: the compositor sends a hidden
-        // surface no frame callbacks. `present` is the one message that lets
-        // a covered client map the surface that reveals it, so the bus must
-        // be read on a path the compositor cannot starve.
+        // surface no frame callbacks. The status that says a film ended
+        // arrives while the client is covered, so the bus must be read on a
+        // path the compositor cannot starve.
         if let Some(start) = ready.start {
             let at = start.elapsed().as_secs_f64();
             if ready.screen.pump(at) {
@@ -426,17 +402,6 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
                 // scheduled before it no longer holds.
                 ready.scheduled = None;
                 ready.stale = true;
-            }
-            if ready.screen.surface_due() {
-                ready.surface_pending = true;
-            }
-            if ready.surface_pending && ready.represent(event_loop) {
-                ready.surface_pending = false;
-                ready.screen.surfaced(at);
-                // A Wayland surface is not on screen until its first buffer
-                // arrives, so the new window gets a draw whatever the
-                // schedule says.
-                ready.graphics.window.request_redraw();
             }
         }
 
@@ -449,12 +414,12 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             ready.finish();
             *stopped = ready.stopped;
         }
-        // wgpu builds an instance for every backend it can reach, and the one
-        // for GL holds an EGL display on the compositor's connection. Its
-        // destructor speaks Wayland, so it has to run while the connection is
-        // open. winit closes the connection after this call and never before
-        // it, so the graphics are dropped here rather than where the loop
-        // returns.
+        // wgpu reaches every backend it can, and the GL one holds an EGL
+        // display on the compositor's connection. That display's destructor
+        // speaks Wayland, so it has to run while the connection is open, and
+        // the device and the surface hold the last references to it. winit
+        // closes the connection after this call and never before it, so the
+        // graphics are dropped here rather than where the loop returns.
         self.state = State::Done;
     }
 }

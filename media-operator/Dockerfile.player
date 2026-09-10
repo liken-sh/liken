@@ -91,10 +91,9 @@ COPY docs/themes/brand/fonts/SourceSans3-Regular.otf \
 COPY display/ /display/
 
 # The entrypoint is the player shim, and mpv is the container's own
-# process. The display operator writes DISPLAY_APP_ID into the
-# environment at run time, after the pod spec is fixed, so the shim
-# reads that one variable, appends it as --wayland-app-id, and execs
-# mpv. Because it execs, no supervisor wraps mpv, and the kubelet
+# process. The shim builds mpv's arguments from what the operator set
+# in the environment and execs mpv. Because it execs, no supervisor
+# wraps mpv, and the kubelet
 # drives mpv directly: the kubelet sends the signal, reaps the
 # children, and carries mpv's exit code out as the pod's outcome.
 ENTRYPOINT ["/media-operator", "player"]

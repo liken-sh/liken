@@ -256,6 +256,12 @@ These plans are designed. Each keeps its number and moves to
   the work that follows it, the display offers it on the scrubber as a
   chip and then a card, a select publishes the ask on the bus, and the
   newest `Play` on a `Player` is the one that runs.
+* [29, The compositor shows what is under a film](29-the-compositor-shows-what-is-under-a-film.md).
+  In progress. display-operator's plan 17 moved the compositor to
+  ivi-shell, so the re-present and the app-id retire: the idle clock
+  is visible the moment a film's surface goes, and the claim's socket
+  is the identity. Requires display-operator plan 17 on the cluster
+  first.
 
 ## Open problems
 

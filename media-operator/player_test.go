@@ -13,17 +13,16 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 	useScriptDir(t, "/test-display")
 
 	cases := []struct {
-		name          string
-		applicationID string
-		start         string
-		verbose       string
-		items         []string
-		blocks        []json.RawMessage
-		want          []string
+		name    string
+		start   string
+		verbose string
+		items   []string
+		blocks  []json.RawMessage
+		want    []string
 	}{
 		{
-			name:  "one film with no display claim",
-			items: []string{"/media/0/film.mkv"},
+			name:  "a remote film and a local one",
+			items: []string{"https://media.example.net/one.mkv", "/media/0/two.mkv"},
 			want: []string{
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
@@ -31,21 +30,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 				"--osc=no",
 				"--osd-font=Source Sans 3",
 				"--quiet",
-				"--", "/media/0/film.mkv",
-			},
-		},
-		{
-			name:          "the display claim names the surface",
-			applicationID: "display-0",
-			items:         []string{"https://media.example.net/one.mkv", "/media/0/two.mkv"},
-			want: []string{
-				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
-				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
-				"--script=/test-display",
-				"--osc=no",
-				"--osd-font=Source Sans 3",
-				"--quiet",
-				"--wayland-app-id=display-0",
 				"--", "https://media.example.net/one.mkv", "/media/0/two.mkv",
 			},
 		},
@@ -125,7 +109,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			t.Setenv(displayAppIDVariable, each.applicationID)
 			t.Setenv(playStartVariable, each.start)
 			t.Setenv(playerVerboseVariable, each.verbose)
 			argv, err := playerArgv(each.items, each.blocks)

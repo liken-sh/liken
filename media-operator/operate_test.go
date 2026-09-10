@@ -1758,8 +1758,8 @@ func TestPublishKeysPublishesNothingForAKeymapThatWillNotCompile(t *testing.T) {
 
 // playersOperator wires an operator with a bus to a fake broker, so a
 // test reads what the player reconcile publishes. The idle display class
-// stays unset, so reconcileIdle builds nothing and the test isolates the
-// re-present publish.
+// stays unset, so reconcileIdle builds nothing and the test reads the
+// status publish alone.
 func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -1782,47 +1782,12 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 	}, brokers[0]
 }
 
-// A Player that was playing and now names no Play crossed the play-end
-// edge, so the operator publishes a re-present to its commands topic, not
-// retained, and the idle screen client recreates the surface. The Idle
-// status goes out first, so the display reads the film is over before the
-// reveal that follows the re-present.
-func TestAPlayEndPublishesTheIdleStatusThenARePresent(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
-	player := Player{
-		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
-		Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
-	}
-
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-
-	status := waitForPublish(t, broker.pubs)
-	mustMatch(t, status.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
-	var state playerBusStatus
-	mustSucceed(t, json.Unmarshal(status.payload, &state))
-	mustMatch(t, state.Activity, playerIdle)
-
-	published := waitForPublish(t, broker.pubs)
-	if published.topic != playerCommandsTopic(defaultTopicBase, "house", "theater") {
-		t.Errorf("topic = %q, want the player commands topic", published.topic)
-	}
-	if published.retained {
-		t.Error("the re-present was retained, want an event")
-	}
-	var command mediaCommand
-	mustSucceed(t, json.Unmarshal(published.payload, &command))
-	if command.Action != actionRePresent {
-		t.Errorf("action = %q, want %q", command.Action, actionRePresent)
-	}
-}
-
 // The sidecar's ending reaches the operator on the play status topic, and
 // the pass it wakes reads the unit as idle while the pod still runs and the
 // Play still reads Running. That is the whole point of the mark: the idle
-// status and the re-present go out in bus time, seconds before the pod
-// terminates, so the idle screen draws over the dying film.
-func TestAReportedEndingPublishesTheIdleStatusThenARePresent(t *testing.T) {
+// status goes out in bus time, seconds before the pod terminates, so the
+// idle screen draws over the dying film.
+func TestAReportedEndingPublishesTheIdleStatus(t *testing.T) {
 	cluster := newFakeCluster()
 	media, broker := playersOperator(t, cluster)
 	player := Player{
@@ -1846,51 +1811,9 @@ func TestAReportedEndingPublishesTheIdleStatusThenARePresent(t *testing.T) {
 	mustMatch(t, state.Activity, playerIdle)
 	mustMatch(t, state.Play == nil, true)
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, playerCommandsTopic(defaultTopicBase, "house", "theater"))
-	var command mediaCommand
-	mustSucceed(t, json.Unmarshal(published.payload, &command))
-	mustMatch(t, command.Action, actionRePresent)
-
 	// The Play is still what the API server holds it to be, so kubectl
 	// still lists the run for the seconds the pod takes to terminate.
 	mustMatch(t, play.Status.Phase, phaseRunning)
-}
-
-// A Player already idle stays idle across the pass, which is no edge, so
-// the operator publishes nothing. Without the guard the backstop would
-// poke the idle screen client every tick.
-func TestAnIdlePlayerPublishesNoRePresent(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
-	player := Player{
-		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
-		Status:   PlayerStatus{Activity: playerIdle},
-	}
-
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
-
-	mustPublishNoRePresent(t, broker)
-}
-
-// A Player still running its Play is no edge either, so a backstop pass
-// over a playing unit publishes nothing.
-func TestAPlayerStillPlayingPublishesNoRePresent(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
-	player := Player{
-		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
-		Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
-	}
-	play := Play{
-		Metadata: ObjectMeta{Name: "movie", Namespace: "house"},
-		Spec:     PlaySpec{Players: []string{"theater"}},
-		Status:   PlayStatus{Phase: phaseRunning},
-	}
-
-	media.reconcilePlayers([]Player{player}, []Play{play}, "", nil)
-
-	mustPublishNoRePresent(t, broker)
 }
 
 // Every pass publishes each unit's presentable state to its retained
@@ -2200,25 +2123,6 @@ func mustPublishNothing(t *testing.T, broker *fakeBroker) {
 	case got := <-broker.pubs:
 		t.Fatalf("a publish reached the bus: %+v", got)
 	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-// mustPublishNoRePresent proves the pass sent no re-present. Every pass
-// publishes each Player's retained status, so the check reads what did
-// arrive and fails only on a message to the commands topic.
-func mustPublishNoRePresent(t *testing.T, broker *fakeBroker) {
-	t.Helper()
-	commands := playerCommandsTopic(defaultTopicBase, "house", "theater")
-	deadline := time.After(50 * time.Millisecond)
-	for {
-		select {
-		case got := <-broker.pubs:
-			if got.topic == commands {
-				t.Fatalf("a re-present reached the bus: %+v", got)
-			}
-		case <-deadline:
-			return
-		}
 	}
 }
 

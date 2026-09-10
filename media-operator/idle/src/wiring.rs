@@ -6,13 +6,12 @@
 // Everything about the bus, the two windows, and the unit's controllers
 // is the `media-screen` crate's contract, and `media_screen::Wiring`
 // reads it from the same environment. What is left here is what this
-// client alone draws with: the seeds for the first frame, the app-id
-// its surface asks for, its window watchdog, and the preview keys.
+// client alone draws with: the seeds for the first frame, its window
+// watchdog, and the preview keys.
 //
-// A pod cannot discover the broker in front of it, the topic base its cluster
-// chose, or the Wayland app-id its display claim delivered. The operator holds
-// all three and passes them down, so every value below arrives in the
-// environment and none is guessed.
+// A pod cannot discover the broker in front of it or the topic base its
+// cluster chose. The operator holds both and passes them down, so every
+// value below arrives in the environment and none is guessed.
 
 use std::time::Duration;
 
@@ -21,11 +20,6 @@ use std::time::Duration;
 /// broker. The first status replaces both.
 pub const PLAYER_NAME: &str = "IDLE_PLAYER_NAME";
 pub const PLAYER_COMPONENTS: &str = "IDLE_PLAYER_COMPONENTS";
-
-/// The Wayland app-id the surface must request. The display operator writes it
-/// into the container at run time from the claim's CDI spec, and the
-/// compositor routes the surface to the right screen by it.
-pub const APP_ID: &str = "DISPLAY_APP_ID";
 
 /// The seconds the client waits for a window before it exits. An unset or
 /// non-positive value leaves the watchdog off, so a run outside a pod never
@@ -45,7 +39,6 @@ pub struct Wiring {
     pub screen: media_screen::Wiring,
     pub player_name: String,
     pub components: Vec<String>,
-    pub app_id: String,
     pub window_grace: Option<Duration>,
     /// Whether the preview keys stand in for the bus. It is true only where
     /// [`PREVIEW`] is `1`.
@@ -70,7 +63,6 @@ impl Wiring {
             screen: media_screen::Wiring::read(&value),
             player_name: read(PLAYER_NAME),
             components: split_lines(&read(PLAYER_COMPONENTS)),
-            app_id: read(APP_ID),
             window_grace: grace(&read(WINDOW_GRACE)),
             // One exact value binds the keys. Anything else, an unset variable
             // included, leaves them unbound, so a variable that survives into
@@ -133,13 +125,11 @@ mod tests {
         let read = wiring(&[
             (PLAYER_NAME, "The Den"),
             (PLAYER_COMPONENTS, "The screen\nThe speakers"),
-            (APP_ID, "media-den-tv"),
             (WINDOW_GRACE, "30"),
         ]);
 
         assert_eq!(read.player_name, "The Den");
         assert_eq!(read.components, ["The screen", "The speakers"]);
-        assert_eq!(read.app_id, "media-den-tv");
         assert_eq!(read.window_grace, Some(Duration::from_secs(30)));
     }
 

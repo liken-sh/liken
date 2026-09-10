@@ -92,9 +92,9 @@ impl Keys {
         match key {
             "p" => vec![self.doing(Activity::Starting)],
             "o" => vec![self.doing(Activity::Playing)],
-            // The end of a film: the status returns to `Idle` and the sidecar
-            // reports the idle surface back in view, in that order.
-            "i" => vec![self.doing(Activity::Idle), Moment::Present],
+            // The end of a film: the status returns to `Idle`, which is the
+            // client's cue that the screen is its own again.
+            "i" => vec![self.doing(Activity::Idle)],
             "d" => {
                 self.connected = !self.connected;
                 vec![self.status()]
@@ -324,12 +324,11 @@ mod tests {
     }
 
     #[test]
-    fn the_end_of_a_film_returns_the_status_and_then_the_surface() {
+    fn the_end_of_a_film_returns_the_status_alone() {
         let pressed = keys().press("i");
 
-        assert_eq!(pressed.len(), 2);
+        assert_eq!(pressed.len(), 1);
         assert_eq!(status(&pressed[0]).activity, Activity::Idle);
-        assert_eq!(pressed[1], Moment::Present);
     }
 
     #[test]

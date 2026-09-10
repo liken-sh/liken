@@ -845,31 +845,11 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
 			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase))
 		o.seedVolume(player, key)
-		// The status goes out before the re-present, and the order is
-		// what the returning idle screen draws from. The client
-		// animates the return only when it reads the Idle status before
-		// the re-present, because the status is what says the film is
-		// over. The client subscribes to the retained status topic
-		// itself and reads the re-present off the commands topic, so
-		// the order the operator writes is the order the client reads.
+		// The retained status is what says the film is over, and the idle
+		// screen client draws its return from it. The client subscribes to
+		// that topic itself, so the status reaches it in bus time, seconds
+		// before the playback pod terminates.
 		published[o.publishPlayerStatus(player, desired, plays)] = true
-		// A Play that ends destroys the film's surface, and the idle
-		// client's surface under it stays hidden. Weston's kiosk-shell
-		// reveals a lower surface only along a code path gated on a seat,
-		// and liken's compositor has none, so the idle clock does not return
-		// on its own. On the edge from any active state to idle, the
-		// operator publishes a re-present. The client reads it off the
-		// commands topic, maps a fresh surface, and kiosk reveals that
-		// one. The edge reads the stored status against the
-		// derived one, so the re-present goes out once as the Player settles
-		// to idle and not on every backstop pass while it stays idle. A
-		// status write that fails leaves the stored status unchanged, so the
-		// next pass reads the edge again and publishes a second re-present.
-		// The client maps a fresh surface over one that is already up, and
-		// the screen shows the same clock.
-		if player.Status.Activity != playerIdle && desired.Activity == playerIdle {
-			o.publishRePresent(player.Metadata.Namespace, player.Metadata.Name)
-		}
 		if err := writePlayerStatus(o.client, player, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
@@ -988,18 +968,6 @@ func (o *operator) volumeFor(play *Play) (volumeState, bool) {
 // unit this Play runs on.
 func (o *operator) volumeOwnedFor(play *Play) bool {
 	return o.volumes.owned(playerKey(play.Metadata.Namespace, playerName(play)))
-}
-
-// publishRePresent publishes the re-present to a Player's commands
-// topic, not retained, because a re-present is an event and not a
-// state. The idle screen client subscribes to that topic and maps a
-// fresh surface, so the clock shows again after a Play ends.
-func (o *operator) publishRePresent(namespace, name string) {
-	payload, err := json.Marshal(mediaCommand{Action: actionRePresent})
-	if err != nil {
-		return
-	}
-	o.bus.Publish(playerCommandsTopic(o.topicBase, namespace, name), payload, false)
 }
 
 // reconcileRemotes reconciles a standing pod for every Remote in the

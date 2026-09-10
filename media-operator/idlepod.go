@@ -6,8 +6,9 @@ package main
 // through an owner reference, so deleting the Player tears them down.
 // The pod draws the clock while no Play runs. The claim holds a shared
 // draw device on the Player's screen, so the idle pod and a Play's own
-// pod draw to one screen at once. A Play's mpv starts with the same
-// app-id and draws over the idle clock.
+// pod draw to one screen at once. A Play's mpv draws over the idle
+// clock, and the compositor shows the clock again when the film's
+// surface goes.
 //
 // Who draws is a choice. spec.idle.controller names the operator that
 // draws, and under this operator's own name spec.idle.image names the
@@ -29,8 +30,8 @@ const idleContainer = "idle"
 
 // idleDrawRequest names the claim's request for the shared draw device,
 // the display companion the display-operator publishes per connector. It
-// delivers the compositor socket and the app-id, and sets no mode, so
-// the idle clock draws to the screen without owning its resolution.
+// delivers the compositor socket and sets no mode, so the idle clock
+// draws to the screen without owning its resolution.
 const idleDrawRequest = "draw"
 
 // How long the idle client waits for its window before it exits and
@@ -273,12 +274,12 @@ func buildIdlePod(
 	// is not the friendly name IDLE_PLAYER_NAME carries, because the
 	// operator writes marks from metadata.name.
 	container.Env = append(container.Env, EnvVar{Name: playerNameVariable, Value: name})
-	// The commands topic carries the operator's re-present, which the
-	// client answers with a fresh surface. The panel topic is where the
-	// client states its desire for the panel, and the operator reads
-	// that desire and overrides the screen's Display. Both arrive
-	// whole, because the operator holds the topic base and the client
-	// parses no topic.
+	// The commands topic carries the playback pod's ask for the work
+	// that follows a run, which a delegate client answers. The panel
+	// topic is where the client states its desire for the panel, and
+	// the operator reads that desire and overrides the screen's
+	// Display. Both arrive whole, because the operator holds the topic
+	// base and the client parses no topic.
 	container.Env = append(container.Env,
 		EnvVar{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, namespace, name)},
 		EnvVar{Name: playerPanelTopicVariable, Value: playerPanelTopic(topicBase, namespace, name)})

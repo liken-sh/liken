@@ -8,11 +8,9 @@ use iced_winit::core::{Color, Event, Size, Theme, mouse, renderer, window};
 use iced_winit::runtime::user_interface::UserInterface;
 use iced_winit::winit::event_loop::{ActiveEventLoop, ControlFlow};
 
-use std::sync::Arc;
-
 #[cfg(feature = "measure")]
 use super::capture::{self, Captures};
-use super::graphics::{self, configure};
+use super::graphics::configure;
 #[cfg(feature = "measure")]
 use super::stats::millis;
 use super::timeline::{self, Wake};
@@ -304,48 +302,6 @@ impl<S: Screen> Ready<S> {
     #[cfg(not(feature = "measure"))]
     fn captured_everything(&self) -> bool {
         false
-    }
-
-    /// Map a fresh Wayland surface, and report whether one went up.
-    ///
-    /// Weston's kiosk-shell reveals a lower surface only along a code path
-    /// gated on a seat, and `liken`'s compositor has none, so a client that a
-    /// film covered stays hidden until it maps a new surface. A newly mapped
-    /// toplevel is revealed along a seat-independent path.
-    ///
-    /// The new window is created before the old one is dropped, so the client
-    /// is never without a surface and the screen never shows the compositor's
-    /// background. The old surface is destroyed here too: the assignments drop
-    /// it and then the last reference to its window, in that order, because a
-    /// surface holds the window it was created from.
-    ///
-    /// A compositor that gives no second window leaves the first one drawing.
-    pub(crate) fn represent(&mut self, event_loop: &ActiveEventLoop) -> bool {
-        let size = self.viewport.physical_size();
-        let Some(window) = graphics::window(event_loop, (size.width, size.height), &self.app_id)
-        else {
-            return false;
-        };
-
-        let surface = match self.graphics.instance.create_surface(Arc::clone(&window)) {
-            Ok(surface) => surface,
-            Err(error) => {
-                eprintln!("idle-screen: no surface on the new window: {error}");
-                return false;
-            }
-        };
-
-        configure(
-            &surface,
-            &self.graphics.device,
-            self.graphics.format,
-            size.width.max(1),
-            size.height.max(1),
-        );
-        self.graphics.surface = surface;
-        self.graphics.window = window;
-        eprintln!("idle-screen: a new surface is up");
-        true
     }
 
     /// Write the statistics file once, whichever way the run ends.

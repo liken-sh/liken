@@ -97,6 +97,6 @@ mod tests {
         assert_eq!(parse(br#"{"value":1}"#), None);
         assert_eq!(parse(br#"{"key":3,"value":1}"#), None);
         assert_eq!(parse(br#"{"key":"KEY_UP","value":"1"}"#), None);
-        assert_eq!(parse(br#"{"action":"re-present"}"#), None);
+        assert_eq!(parse(br#"{"action":"play-next"}"#), None);
     }
 }

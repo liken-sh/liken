@@ -135,14 +135,12 @@ retained ([why](/docs/reference/bus/#retained-state-and-events)), and
 a controller never sends one directly. A client publishes nothing
 here.
 
-Two programs write here. The operator publishes `re-present` when a
-`Play` ends. The playback pod's command sidecar publishes `play-next`
-when a person takes the up-next offer on the scrubber, and its
-`request` is the `Play`'s own `spec.next.request`, byte for byte. The
-client that wrote the `Play` reads that ask and creates the next
+One program writes here. The playback pod's command sidecar publishes
+`play-next` when a person takes the up-next offer on the scrubber, and
+its `request` is the `Play`'s own `spec.next.request`, byte for byte.
+The client that wrote the `Play` reads that ask and creates the next
 `Play`.
 
 | Message | Writer | What it says |
 |---|---|---|
-| `{"action": "re-present"}` | the operator | A `Play` ended. The idle screen client maps a fresh surface. |
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |

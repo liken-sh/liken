@@ -16,9 +16,8 @@ import (
 
 // The action words. They are no longer an API vocabulary: no Keymap
 // and no controller payload carries one. They are the playback pod's
-// internal step between a key name and mpv's own words, and the two
-// display verbs, re-present and sleep, that travel on a Player's
-// commands topic. cycle-focus never reaches a player program.
+// internal step between a key name and mpv's own words. cycle-focus
+// never reaches a player program.
 const (
 	actionPause      = "pause"
 	actionMute       = "mute"
@@ -39,14 +38,6 @@ const (
 	actionSelect = "select"
 	actionBack   = "back"
 )
-
-// actionRePresent is display plumbing, not part of the media vocabulary
-// above. The operator publishes it to a Player's commands topic when a
-// Play ends. The idle screen client reads it off that topic and maps a
-// fresh surface, so a seatless kiosk shell shows the clock again. A
-// controller never sends it, so commandFor holds no case for it and it
-// reaches no player program.
-const actionRePresent = "re-present"
 
 // actionPlayNext is the ask the playback pod's command sidecar publishes
 // on a Player's commands topic when a person takes the up-next offer on
@@ -91,7 +82,7 @@ type keyEvent struct {
 // Play's topic it is the surface any program publishes to, a phone or
 // a Home Assistant integration alike, and the playback pod's own step
 // from a key name to mpv's words. On a Player's topic it is the
-// operator's re-present and a delegate client's sleep. No controller
+// playback pod's ask for the work that follows the run. No controller
 // payload carries one.
 type mediaCommand struct {
 	Action string `json:"action"`

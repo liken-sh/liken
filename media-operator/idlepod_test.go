@@ -441,8 +441,8 @@ func TestTheIdlePodCarriesBothNames(t *testing.T) {
 }
 
 // The commands topic and the panel topic reach every idle client,
-// because the client answers the re-present and states the panel desire
-// whatever the unit is made of.
+// because a delegate answers the ask on the commands topic and every
+// client states the panel desire, whatever the unit is made of.
 func TestBuildIdlePodCarriesTheCommandsAndPanelTopics(t *testing.T) {
 	player := standingIdlePlayer()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),

@@ -113,9 +113,9 @@ pub struct Unit {
     /// The shade, once a shade moment has arrived. A client that has read none
     /// draws no shade.
     pub shade: Option<Shade>,
-    /// The second a new Wayland surface came up after a `present`. The mark
-    /// starts its arrival motion from here.
-    pub presented: Option<f64>,
+    /// The second the screen became this client's again, when a `Play` that
+    /// covered it ended. The mark starts its arrival motion from here.
+    pub arrived: Option<f64>,
 }
 
 impl Unit {
@@ -151,9 +151,6 @@ impl Unit {
             Moment::Sleep => self.cover(true, at),
             Moment::Wake => self.cover(false, at),
             Moment::Focus { remote } => self.mark(remote, at),
-            // A `present` asks for a new Wayland surface, which the harness
-            // owns. `presented` records the second the new one came up.
-            Moment::Present => {}
             // A press is the client's own to answer, and
             // `Client::receive` reads it before this fold. The stock
             // idle screen draws no list, so the unit changes for none
@@ -844,13 +841,5 @@ mod tests {
 
         assert_eq!(unit.parts[0].marked, Some(2.0));
         assert!(unit.parts[0].focused);
-    }
-
-    #[test]
-    fn a_present_leaves_the_unit_alone() {
-        let mut unit = seeded();
-        let before = unit.clone();
-        unit.fold(Moment::Present, 3.0);
-        assert_eq!(unit, before);
     }
 }

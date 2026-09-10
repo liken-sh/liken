@@ -121,7 +121,7 @@ shape.
 | `players/{namespace}/{name}/volume` | the operator, the pod that handles a press, and the equipment operator | the playback pod, the idle pod or a delegate's client, the equipment operator, and the operator | yes | [the level and the muted flag](/docs/reference/players/#volume) |
 | `players/{namespace}/{name}/volume/owner` | the equipment operator and its Last Will | the playback pod, a delegate's client, and the operator | yes | [the owner mark, or empty](/docs/reference/players/#volumeowner) |
 | `players/{namespace}/{name}/panel` | the idle pod, or a delegate's client; the operator clears it | the operator | yes | [the panel desire](/docs/reference/players/#panel) |
-| `players/{namespace}/{name}/commands` | the operator and the playback pod | the idle pod, or a delegate's client | no | [the re-present and the ask for the next work](/docs/reference/players/#commands) |
+| `players/{namespace}/{name}/commands` | the playback pod | the idle pod, or a delegate's client | no | [the ask for the next work](/docs/reference/players/#commands) |
 | `remotes/{namespace}/{name}/events` | the `Remote`'s pod | the playback pod, the idle pod, or a delegate's client | no | [one key event](/docs/reference/remotes/#events) |
 | `remotes/{namespace}/{name}/keys` | the operator | the `Remote`'s pod | yes | [the compiled key table](/docs/reference/remotes/#keys) |
 | `remotes/{namespace}/{name}/codes` | the `Remote`'s pod | the operator | yes | [the declared code set](/docs/reference/remotes/#codes) |
@@ -129,10 +129,10 @@ shape.
 | `remotes/{namespace}/{name}/focus` | the operator | the playback pod, the idle pod or a delegate's client, and the operator | yes | [the name of a `Player`, or empty](/docs/reference/remotes/#focus-and-focuscycle) |
 | `remotes/{namespace}/{name}/focus/cycle` | the holder of focus | the operator | no | [empty](/docs/reference/remotes/#focus-and-focuscycle) |
 
-The `players` commands topic has two writers. The operator publishes
-`re-present` when a `Play` ends. The playback pod publishes
-`play-next` when a person takes the up-next offer on the scrubber, and
-the client that wrote the `Play` reads it and creates the next `Play`.
+The `players` commands topic has one writer. The playback pod
+publishes `play-next` when a person takes the up-next offer on the
+scrubber, and the client that wrote the `Play` reads it and creates
+the next `Play`.
 
 "The playback pod" in this table is its command sidecar, the one
 container that connects to the bus. "The idle pod" is the idle screen

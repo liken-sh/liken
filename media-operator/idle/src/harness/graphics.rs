@@ -9,12 +9,10 @@ use iced_winit::core::{Font, Pixels};
 use iced_winit::winit;
 
 use winit::event_loop::ActiveEventLoop;
-use winit::platform::wayland::WindowAttributesExtWayland;
 
 /// Everything that exists only after the compositor gives the process a window.
 pub struct Graphics {
     pub window: Arc<winit::window::Window>,
-    pub instance: wgpu::Instance,
     pub device: wgpu::Device,
     pub surface: wgpu::Surface<'static>,
     pub format: wgpu::TextureFormat,
@@ -27,28 +25,20 @@ pub struct Graphics {
 /// Ask the compositor for a window. The answer is `None` when it gave none, and
 /// the watchdog reads that as a client with nothing to draw on.
 ///
-/// `app_id` is the Wayland app-id the display claim delivered, and the
-/// compositor routes the surface to the right screen by it. An empty id asks
-/// for none, which is a run on a workstation where no claim named one.
+/// The window asks for no Wayland app-id. The socket the display claim
+/// delivered is what says which screen this client draws on, and the
+/// compositor's layout module reads no app-id.
 pub fn window(
     event_loop: &ActiveEventLoop,
     size: (u32, u32),
-    app_id: &str,
 ) -> Option<Arc<winit::window::Window>> {
-    let mut attributes = winit::window::WindowAttributes::default()
+    let attributes = winit::window::WindowAttributes::default()
         .with_title("liken idle screen")
         // A kiosk client draws no title bar. winit's Wayland backend draws
         // one otherwise, and it takes 35 rows off the surface the compositor
         // gave the window.
         .with_decorations(false)
         .with_inner_size(winit::dpi::PhysicalSize::new(size.0, size.1));
-
-    if !app_id.is_empty() {
-        // The general name is the Wayland app-id. The instance name is the
-        // second half of the same protocol field, and the compositor reads
-        // neither of the two for anything this client needs.
-        attributes = attributes.with_name(app_id, "");
-    }
 
     match event_loop.create_window(attributes) {
         Ok(window) => Some(Arc::new(window)),
@@ -65,8 +55,8 @@ pub fn window(
 /// window does, so the run leaves the watchdog counting and the kubelet
 /// reads the exit code the watchdog states, whichever part of the
 /// graphics stack refused.
-pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Option<Graphics> {
-    let window = window(event_loop, size, app_id)?;
+pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32)) -> Option<Graphics> {
+    let window = window(event_loop, size)?;
 
     let physical = window.inner_size();
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -183,7 +173,6 @@ pub fn open(event_loop: &ActiveEventLoop, size: (u32, u32), app_id: &str) -> Opt
 
     Some(Graphics {
         window,
-        instance,
         device,
         surface,
         format,

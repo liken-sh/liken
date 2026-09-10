@@ -156,8 +156,7 @@ const (
 	// builds it from the Player's identity and passes it whole, the way
 	// it hands the playback pod its focus topics, so the client
 	// subscribes to one exact topic and parses nothing.
-	// It carries the operator's re-present and the playback pod's ask for
-	// the work that follows the run.
+	// It carries the playback pod's ask for the work that follows the run.
 	playerCommandsTopicVariable = "MEDIA_PLAYER_COMMANDS_TOPIC"
 
 	// The player-status topic the playback pod's command sidecar reads the

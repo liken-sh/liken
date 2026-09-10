@@ -572,14 +572,14 @@ spec:
                         commandsTopic:
                           type: string
                           description: |-
-                            The topic the operator publishes re-present
-                            on when a Play ends. The client maps a fresh
-                            surface when it arrives. The playback pod
-                            publishes play-next on the same topic when a
-                            person takes the up-next offer on the
-                            scrubber, and the client that wrote the Play
-                            reads that ask and starts the next work. A
-                            client publishes nothing here.
+                            The topic the playback pod publishes
+                            play-next on when a person takes the up-next
+                            offer on the scrubber. The client that wrote
+                            the Play reads that ask and starts the next
+                            work. When a Play ends, the client's own
+                            surface is on the screen again and the
+                            retained status is the cue, so nothing is
+                            published here for it.
                         panelTopic:
                           type: string
                           description: |-

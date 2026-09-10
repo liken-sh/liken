@@ -100,12 +100,12 @@ impl Flight {
 }
 
 /// The ramp in flight, from the moment the activity last changed and the
-/// moment a new surface last came up.
+/// moment the screen last became this client's again.
 ///
 /// The target and the duration come from the activity the unit holds now, and
 /// the unit's [`Ramp`] holds where that ramp started. An arrival replaces the
-/// whole ramp, because a `present` puts the energy at 1 whatever the ramp under
-/// it was doing.
+/// whole ramp, because it puts the energy at 1 whatever the ramp under it was
+/// doing.
 fn flight(unit: &Unit) -> Flight {
     let (to, seconds) = match unit.activity {
         Activity::Starting => (1.0, RAMP_UP),
@@ -119,22 +119,22 @@ fn flight(unit: &Unit) -> Flight {
         phase: unit.ramp.phase,
     };
 
-    // The arrival. A new surface after a film ends brings the mark back at full
-    // swing and eases it to rest, so the screen returns in motion rather than
-    // appearing frozen. An arrival that lands while a `Play` starts or runs
-    // changes nothing, because that activity owns the energy, and a later
-    // change of activity replaces the arrival for the same reason.
-    match unit.presented {
-        Some(presented)
-            if presented >= unit.ramp.since
+    // The arrival. The end of a film brings the mark back at full swing and
+    // eases it to rest, so the screen returns in motion rather than appearing
+    // frozen. An arrival that lands while a `Play` starts or runs changes
+    // nothing, because that activity owns the energy, and a later change of
+    // activity replaces the arrival for the same reason.
+    match unit.arrived {
+        Some(arrived)
+            if arrived >= unit.ramp.since
                 && !matches!(unit.activity, Activity::Starting | Activity::Playing) =>
         {
             Flight {
                 from: 1.0,
                 to: 0.0,
                 seconds: RAMP_DOWN,
-                since: presented,
-                phase: ramp.phase_at(presented),
+                since: arrived,
+                phase: ramp.phase_at(arrived),
             }
         }
         _ => ramp,
@@ -275,7 +275,7 @@ mod tests {
     fn an_arrival_brings_the_mark_back_at_full_swing() {
         let mut unit = unit(Activity::Playing, 1.0);
         unit.fold(Moment::Status(Status::default()), 4.0);
-        unit.presented = Some(4.5);
+        unit.arrived = Some(4.5);
 
         assert_eq!(level(&unit, 4.5), 1.0);
         assert_close(level(&unit, 5.75), 0.5);
@@ -285,14 +285,14 @@ mod tests {
     #[test]
     fn an_arrival_while_a_play_starts_changes_nothing() {
         let mut unit = unit(Activity::Starting, 1.0);
-        unit.presented = Some(1.6);
+        unit.arrived = Some(1.6);
         assert_close(level(&unit, 1.6), 0.5);
     }
 
     #[test]
     fn a_status_after_an_arrival_takes_the_energy_the_arrival_reached() {
         let mut unit = Unit {
-            presented: Some(0.0),
+            arrived: Some(0.0),
             ..Unit::default()
         };
         unit.fold(
@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn the_clock_never_jumps_when_a_surface_arrives() {
+    fn the_clock_never_jumps_when_the_screen_comes_back() {
         let mut unit = Unit::default();
         unit.fold(
             Moment::Status(Status {
@@ -357,8 +357,7 @@ mod tests {
         unit.fold(Moment::Status(Status::default()), 1.2);
         let before = phase(&unit, 2.0);
 
-        unit.fold(Moment::Present, 2.0);
-        unit.presented = Some(2.0);
+        unit.arrived = Some(2.0);
         assert_eq!(phase(&unit, 2.0), before);
     }
 
@@ -482,9 +481,9 @@ mod tests {
     }
 
     #[test]
-    fn an_arrival_asks_for_a_frame_from_the_second_the_surface_went_up() {
+    fn an_arrival_asks_for_a_frame_from_the_second_the_screen_came_back() {
         let unit = Unit {
-            presented: Some(10.0),
+            arrived: Some(10.0),
             ..Unit::default()
         };
 

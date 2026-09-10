@@ -623,10 +623,10 @@ func (c *commander) send(report playReport) error {
 // exit press, mpv reaching the end of the last item, and the kubelet's
 // SIGTERM.
 //
-// The operator turns the mark into the Player's idle status and the
-// re-present that draws the idle screen again. The pod takes seconds to
-// terminate, and an ending read from the pod's own death would leave a
-// dead film on the screen for every one of them.
+// The operator turns the mark into the Player's idle status, which is
+// what the idle screen client draws its return from. The pod takes
+// seconds to terminate, and an ending read from the pod's own death
+// would leave a dead film on the screen for every one of them.
 //
 // A run that never reported publishes nothing, the same rule the reporter
 // follows: mpv has not said which item plays, so there are no numbers to

@@ -7,15 +7,6 @@
 //! a function of what arrived and what time it is, so a test proves
 //! each one with no broker and no thread, and [`crate::Reader`] is the
 //! only part of the crate that opens anything.
-//!
-//! The re-present is the whole fix for a seatless compositor. Weston's
-//! kiosk-shell reveals a lower surface only along a code path gated on a
-//! seat, and `liken`'s compositor runs with require-input=false and no input
-//! devices, so it has no seat. When a `Play`'s surface is destroyed the idle
-//! clock stays hidden and the screen goes black, though the client still
-//! runs. A freshly mapped surface is revealed along a seat-independent path,
-//! so the operator publishes the request, the client maps a new surface, and
-//! kiosk reveals that one.
 
 pub mod keys;
 pub mod press;
@@ -34,12 +25,10 @@ use crate::wiring::{Remote, Wiring};
 /// needs no second topic list.
 const CYCLE_SUFFIX: &str = "/cycle";
 
-/// The two commands this crate answers on the `Player`'s commands topic.
-const RE_PRESENT: &str = "re-present";
-
-/// The ask the playback pod's command sidecar publishes when a person takes
-/// the up-next offer on the scrubber. The client that wrote the `Play` reads
-/// it and starts what follows.
+/// The one command this crate answers on the `Player`'s commands topic: the
+/// ask the playback pod's command sidecar publishes when a person takes the
+/// up-next offer on the scrubber. The client that wrote the `Play` reads it
+/// and starts what follows.
 const PLAY_NEXT: &str = "play-next";
 
 /// One thing the client draws.
@@ -62,9 +51,6 @@ pub enum Moment {
     /// A live mark named this `Player`. `remote` is the controller's place in
     /// `spec.remotes`, which is the order the status lists the parts in.
     Focus { remote: usize },
-    /// A `Play` ended and the screen is this client's again. The client maps
-    /// a fresh Wayland surface, and kiosk reveals that one.
-    Present,
     /// The unit's whole presentable state.
     Status(Status),
     /// The unit's listening level. `pressed` is false for the broker's
@@ -519,26 +505,19 @@ impl Screen {
         effects
     }
 
-    /// Fold one message off the commands topic. The operator's re-present
-    /// acts only while the unit plays nothing, so a stray one during a film
-    /// never maps the clock over it. Every other
-    /// action does nothing.
-    ///
-    /// The ask a person makes on the up-next offer acts whether or not the
-    /// unit is idle, because the unit is never idle when it arrives.
+    /// Fold one message off the commands topic. The ask a person makes on the
+    /// up-next offer acts whether or not the unit is idle, because the unit is
+    /// never idle when it arrives. Every other action does nothing.
     fn on_command(&mut self, payload: &[u8]) -> Vec<Effect> {
         let Some(command) = crate::object::<Command>(payload) else {
             return Vec::new();
         };
-        if command.action == PLAY_NEXT {
-            return vec![Effect::Moment(Moment::PlayNext(request_bytes(
-                command.request,
-            )))];
-        }
-        if command.action != RE_PRESENT || !self.idle {
+        if command.action != PLAY_NEXT {
             return Vec::new();
         }
-        vec![Effect::Moment(Moment::Present)]
+        vec![Effect::Moment(Moment::PlayNext(request_bytes(
+            command.request,
+        )))]
     }
 
     /// The cycle request the operator arbitrates, on the controller's own

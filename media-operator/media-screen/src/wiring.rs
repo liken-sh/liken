@@ -34,13 +34,10 @@ pub const VOLUME_TOPIC: &str = "MEDIA_PLAYER_VOLUME_TOPIC";
 /// the client draws no volume row of its own while it stands.
 pub const VOLUME_OWNER_TOPIC: &str = "MEDIA_PLAYER_VOLUME_OWNER_TOPIC";
 
-/// The `Player`'s commands topic. It carries the operator's
-/// `re-present`: the presses reach a client on the
-/// controllers' own topics, and a client brings its own shade down in
-/// its own process.
-///
-/// It also carries the playback pod's `play-next`, the ask a person makes on
-/// the up-next offer the scrubber draws.
+/// The `Player`'s commands topic. It carries the playback pod's `play-next`,
+/// the ask a person makes on the up-next offer the scrubber draws. The
+/// presses reach a client on the controllers' own topics, and a client brings
+/// its own shade down in its own process.
 pub const COMMANDS_TOPIC: &str = "MEDIA_PLAYER_COMMANDS_TOPIC";
 
 /// The topic the client states the panel desire on. The operator builds it

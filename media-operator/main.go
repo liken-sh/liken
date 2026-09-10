@@ -9,8 +9,8 @@
 // in several roles. With no argument it is the operator: a Deployment
 // that watches Plays, Remotes, Players, and Keymaps, creates claims and
 // pods, publishes each Remote's key table, and writes every status. As
-// `player` it is the playback pod's entrypoint shim: it appends the
-// display's app-id flag and execs mpv. As `remote` it is the standing
+// `player` it is the playback pod's entrypoint shim: it builds mpv's
+// arguments and execs mpv. As `remote` it is the standing
 // remote pod: it reads a controller's input nodes, folds each event
 // through the table the operator publishes for that Remote, and
 // publishes the kernel's key name to the bus. As `command` it is the

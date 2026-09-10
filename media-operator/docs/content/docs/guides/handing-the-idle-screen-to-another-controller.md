@@ -99,11 +99,10 @@ and give the container one entry per request:
               - name: devices
                 request: render
 
-The draw device delivers two variables into the container:
-`WAYLAND_DISPLAY`, the compositor socket, and `DISPLAY_APP_ID`, the
-app-id of the allocated output. Open the socket and ask for your
-window with that app-id. The compositor places a window on the
-claimed output by app-id, so a window without it lands nowhere.
+The draw device delivers `WAYLAND_DISPLAY`, a compositor socket the
+display operator opened for this claim alone. Open it and map your
+window. The socket is what says which screen the window belongs on,
+so the window needs no app-id and no flag.
 
 The draw device is shared. Your pod and a `Play`'s playback pod hold
 the screen at once, and the playback window draws over yours while
@@ -128,7 +127,7 @@ There are two ways to hold that contract:
 * Take the `media-screen` crate from this repository as a git
   dependency pinned to a release tag. It reads the variables below,
   runs every rule, and hands the client what it draws: a press, the
-  shade down or up, a focus, and a fresh surface. Name topics of your
+  shade down or up, and a focus. Name topics of your
   own when you open the reader, and every message on one comes back on
   the same connection, so a client reads back the retained state it
   owns.
@@ -154,10 +153,12 @@ Set these variables on your container. Each value comes from
   no level of your own and apply none to any audio the client plays.
   A press still publishes the next state on the volume topic, and the
   equipment moves one step in its direction.
-* `MEDIA_PLAYER_COMMANDS_TOPIC`, from `bus.commandsTopic`. The operator
-  publishes `{"action": "re-present"}` there when a `Play` ends, and
-  the client maps a fresh surface. Nothing else arrives, and the client
-  publishes nothing back.
+* `MEDIA_PLAYER_COMMANDS_TOPIC`, from `bus.commandsTopic`. The playback
+  pod publishes `{"action": "play-next"}` there when a person takes the
+  up-next offer on the scrubber, for a client that starts what follows.
+  When a `Play` ends, the client's own surface is on the screen again
+  without it asking, and the retained status is the cue. Nothing else
+  arrives, and the client publishes nothing back.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
   publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
   The operator turns the desire into an override on the screen's
@@ -202,11 +203,10 @@ replaces the claim.
 
 The operator keeps the display claim. It writes the focus mark for
 each controller and answers the cycle request. It publishes the
-`Player` status and the bus status. It publishes `re-present` when a
-`Play` ends. It writes the override on the screen's `Display` from the
-panel desire your client publishes. A client that publishes no panel
-desire leaves the panel lit, because the operator writes no override
-without one.
+`Player` status and the bus status. It writes the override on the
+screen's `Display` from the panel desire your client publishes. A
+client that publishes no panel desire leaves the panel lit, because
+the operator writes no override without one.
 
 The fade window, the off window, the press gate, the shade, the volume
 step, and the panel desire are the client's.

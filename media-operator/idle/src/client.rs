@@ -35,9 +35,6 @@ pub struct Client {
     /// moments and reads a real request for the shade with no socket
     /// under it.
     bus: Option<Box<dyn Bus>>,
-    /// Whether a `present` asked for a fresh Wayland surface. The harness
-    /// reads it on every wake of the loop.
-    surface_due: bool,
     /// The preview keys, on a run that binds them. They stand in for the bus
     /// on a workstation, and the legend draws where they are bound.
     keys: Option<Keys>,
@@ -62,7 +59,6 @@ impl Client {
         Self {
             unit: Unit::seeded(wiring.player_name, wiring.components),
             bus: bus.map(|reader| Box::new(reader) as Box<dyn Bus>),
-            surface_due: false,
             keys,
             at: 0.0,
         }
@@ -84,19 +80,14 @@ impl Client {
         }
     }
 
-    /// Fold one message in, at `at` seconds on the screen's clock. A `present`
-    /// asks the harness for a new surface, and every other message reaches the
-    /// unit.
+    /// Fold one message in, at `at` seconds on the screen's clock. Every
+    /// message reaches the unit.
     ///
-    /// The retained status also asks, on its move to `Idle`. `present` rides a
-    /// topic nothing retains, so a broker session that drops while a film ends
-    /// loses the moment for good, and the catch-up status still says the
-    /// screen is the client's again. The two usually drain in one wake, and
-    /// the flag folds them into one map.
+    /// The status's move to `Idle` is the arrival: the film that covered this
+    /// client is gone, its own surface is on the screen again, and the mark
+    /// starts its motion from that second. The status topic is retained, so a
+    /// client that connects after a `Play` ended reads the move it missed.
     pub fn receive(&mut self, moment: Moment, at: f64) {
-        if moment == Moment::Present {
-            self.surface_due = true;
-        }
         // Every key the crate does not own reaches this client. The stock
         // idle screen draws no list, so every key but back reaches
         // nothing, and back is the shade. The client decides this and not
@@ -111,7 +102,7 @@ impl Client {
         let was = self.unit.activity;
         self.unit.fold(moment, at);
         if self.unit.activity == Activity::Idle && was != Activity::Idle {
-            self.surface_due = true;
+            self.unit.arrived = Some(at);
         }
     }
 }
@@ -155,8 +146,8 @@ impl Screen for Client {
 
     /// Drain the reader and fold in what arrived. The harness calls this on
     /// every wake of the loop rather than on a frame, because a covered
-    /// client draws no frame, and `present` arrives exactly while the client
-    /// is covered.
+    /// client draws no frame, and the status that says a film ended arrives
+    /// exactly while the client is covered.
     fn pump(&mut self, at: f64) -> bool {
         let Some(bus) = &self.bus else {
             return false;
@@ -167,14 +158,6 @@ impl Screen for Client {
             self.receive(message, at);
         }
         folded
-    }
-
-    fn surface_due(&mut self) -> bool {
-        std::mem::take(&mut self.surface_due)
-    }
-
-    fn surfaced(&mut self, at: f64) {
-        self.unit.presented = Some(at);
     }
 
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer> {
@@ -283,10 +266,15 @@ mod tests {
 
         assert!(!client.pump(1.0));
 
-        sender.send(Moment::Present).expect("the channel is open");
+        sender
+            .send(Moment::Status(Status {
+                activity: Activity::Playing,
+                ..Status::default()
+            }))
+            .expect("the channel is open");
 
         assert!(client.pump(2.0));
-        assert!(client.surface_due());
+        assert_eq!(client.unit().activity, Activity::Playing);
     }
 
     #[test]
@@ -338,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn the_retained_status_heals_a_present_the_client_never_received() {
+    fn the_status_move_to_idle_marks_the_arrival() {
         let mut client = seeded();
         client.receive(
             Moment::Status(Status {
@@ -347,7 +335,7 @@ mod tests {
             }),
             2.0,
         );
-        assert!(!client.surface_due());
+        assert_eq!(client.unit().arrived, None);
 
         client.receive(
             Moment::Status(Status {
@@ -356,29 +344,7 @@ mod tests {
             }),
             9.0,
         );
-        assert!(client.surface_due());
-    }
-
-    #[test]
-    fn a_present_asks_for_one_new_surface() {
-        let mut client = seeded();
-        assert!(!client.surface_due());
-
-        client.receive(Moment::Present, 3.0);
-
-        assert!(client.surface_due());
-        assert!(!client.surface_due());
-    }
-
-    #[test]
-    fn the_unit_takes_the_second_the_new_surface_went_up() {
-        let mut client = seeded();
-        client.receive(Moment::Present, 3.0);
-        assert_eq!(client.unit().presented, None);
-
-        client.surfaced(3.2);
-
-        assert_eq!(client.unit().presented, Some(3.2));
+        assert_eq!(client.unit().arrived, Some(9.0));
     }
 
     fn previewing() -> Client {
@@ -412,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn the_film_end_key_returns_the_status_and_asks_for_a_new_surface() {
+    fn the_film_end_key_returns_the_status_and_marks_the_arrival() {
         let mut client = previewing();
         client.tick(4.0);
         client.key("o");
@@ -420,7 +386,7 @@ mod tests {
         client.key("i");
 
         assert_eq!(client.unit().activity, Activity::Idle);
-        assert!(client.surface_due());
+        assert_eq!(client.unit().arrived, Some(4.0));
     }
 
     #[test]

@@ -70,9 +70,6 @@ pub struct Options {
     pub quit_after: Option<f64>,
     /// The window size to ask the compositor for.
     pub size: (u32, u32),
-    /// The Wayland app-id every window this run maps asks for, from
-    /// `DISPLAY_APP_ID`. An empty id asks for none.
-    pub app_id: String,
     /// How long the run waits for a window before it exits, from
     /// `IDLE_WINDOW_GRACE_SECONDS`. Nothing leaves the watchdog off.
     pub window_grace: Option<Duration>,
@@ -90,7 +87,6 @@ impl Default for Options {
             stats: None,
             quit_after: None,
             size: (1920, 1080),
-            app_id: String::new(),
             window_grace: None,
         }
     }
@@ -274,12 +270,11 @@ mod tests {
     }
 
     #[test]
-    fn the_command_line_states_neither_window_fact() {
+    fn the_command_line_states_no_window_grace() {
         let Ok(Invocation::Run(options)) = Options::parse(args("--size 1280x720")) else {
             panic!("the flags parse");
         };
 
-        assert_eq!(options.app_id, "");
         assert_eq!(options.window_grace, None);
     }
 
