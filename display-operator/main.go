@@ -225,14 +225,19 @@ func operate() {
 		fatal("watching for kernel events: %v", err)
 	}
 
+	// One walk of the card answers every reader: the Display
+	// controller, the placement pass, and the slice publisher's own
+	// pass all name the same connectors and monitors.
+	screensOf := func() []Output {
+		return screens(card, plugin.currentModes, plugin.connectorModes)
+	}
+
 	// The Display controller runs beside the slice publisher and
 	// writes the panels' own resources. It reads the same connectors
 	// and shares the probe cache, so the two never ask one panel twice.
 	// Its own loop is what keeps an override off the slice publisher's
 	// settle window.
-	panels := newDisplayControl(client, nodeName, plugin.controls, func() []Output {
-		return screens(card, plugin.currentModes, plugin.connectorModes)
-	})
+	panels := newDisplayControl(client, nodeName, plugin.controls, screensOf)
 	// The mode seams are the prepare path's own, so a resting
 	// mode and a claim's mode take one road to the compositor and hold
 	// one lock between them. The heal's restart is that road with no
@@ -258,7 +263,29 @@ func operate() {
 	panels.served = watch.served
 	go watch.run(ctx)
 	go panels.run(ctx)
-	go watchDisplays(ctx, client, panels.wake)
+
+	// The placement pass reads the surfaces the module reports and
+	// draws each screen to the Layout its Display names.
+	places := newPlacementPass(client, nodeName, layout, plugin.claims, screensOf)
+
+	// The pod and the Layout watches share one channel, because a
+	// wake means read again and one pass reads every pod and every
+	// Layout. A Display carries the name of the Layout its screen
+	// shows, so its watch wakes both loops: the panels' loop writes
+	// the panel's own status, and this loop places the surfaces.
+	resources := make(chan struct{}, 1)
+	resourceWake := func() {
+		select {
+		case resources <- struct{}{}:
+		default:
+		}
+	}
+	go watchPods(ctx, client, nodeName, resourceWake)
+	go watchLayouts(ctx, client, resourceWake)
+	go watchDisplays(ctx, client, func() {
+		panels.wake()
+		resourceWake()
+	})
 
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses. The retry costs the loop no
@@ -294,18 +321,32 @@ func operate() {
 			fatal("the DRA plugin is not serving: %v", err)
 		}
 	}()
-	// The module's own reports join the loop's other wakes. Nothing in
-	// this loop places a surface yet: the pass that reads
-	// layout.state() and states a placement is the next step of plan
-	// 17.
+	// A placement that failed is reported and left to the next pass.
+	// Every wake source the loop has reaches the same pass, and the
+	// backstop tick guarantees there is one.
+	place := func() {
+		if err := places.pass(); err != nil {
+			fmt.Fprintf(os.Stderr, "placing the surfaces on each screen: %v\n", err)
+		}
+	}
+
+	// The card's events settle before a pass, because a monitor that
+	// flaps produces a burst of them. The module's reports and the two
+	// resource watches do not settle: a surface that arrived is a
+	// film's first frame, and a person is watching the screen it lands
+	// on, so the pass that places it runs at once. The placement pass
+	// is silent when nothing changed, so the prompt path costs nothing
+	// on a wake that carried no news.
 	settled := settle(ctx,
-		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath), layout.reports),
+		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath), nil, nil),
 		settleWindow, settleLimit)
+	prompt := wakes(ctx, nil, nil, nil, layout.reports, resources)
 
 	// The first pass runs before any event. It replaces the slice the
 	// previous pod left and states whether a compositor serves right
 	// now, tainted if the socket is not up yet.
 	publish()
+	place()
 
 	for {
 		select {
@@ -325,6 +366,12 @@ func operate() {
 				return
 			}
 			publish()
+			place()
+		case _, ok := <-prompt:
+			if !ok {
+				return
+			}
+			place()
 		}
 	}
 }
@@ -458,11 +505,13 @@ func watchSocket(ctx context.Context, socketPath string) <-chan struct{} {
 }
 
 // wakes turns the kernel's drm events, the write retries, the
-// compositor's socket, and the layout module's reports into one
-// channel of wakes, with a backstop tick in it. Nothing on any of
-// them holds state that the loop uses: each wake means look again,
-// and the look is a fresh read of sysfs and of the module's store.
-func wakes(ctx context.Context, uevents <-chan drmEvent, retries, sockets, layouts <-chan struct{}) <-chan struct{} {
+// compositor's socket, the layout module's reports, and the resources
+// a pass reads into one channel of wakes, with a backstop tick in it.
+// Nothing on any of them holds state that the loop uses: each wake
+// means look again, and the look is a fresh read of sysfs, of the
+// module's store, and of the resources.
+func wakes(ctx context.Context, uevents <-chan drmEvent,
+	retries, sockets, reports, resources <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -494,7 +543,12 @@ func wakes(ctx context.Context, uevents <-chan drmEvent, retries, sockets, layou
 					return
 				}
 				wake()
-			case _, ok := <-layouts:
+			case _, ok := <-reports:
+				if !ok {
+					return
+				}
+				wake()
+			case _, ok := <-resources:
 				if !ok {
 					return
 				}

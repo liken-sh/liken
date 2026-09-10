@@ -132,6 +132,12 @@ type layoutLink struct {
 	waiting  map[int]chan layoutReply
 	outputs  map[string]layoutOutput
 	surfaces map[int]layoutSurface
+	// Generation counts the connections this link has opened. A reader
+	// that remembers what it sent compares it with the generation it
+	// sent on, because a new connection is a new compositor: the
+	// surfaces and their ids went with the old one, and everything the
+	// reader stated has to be stated again.
+	generation int
 }
 
 func newLayoutLink(socketPath string) *layoutLink {
@@ -487,6 +493,7 @@ func (l *layoutLink) opened() {
 	l.outputs = map[string]layoutOutput{}
 	l.surfaces = map[int]layoutSurface{}
 	l.sequence = helloSequence
+	l.generation++
 	l.mu.Unlock()
 	l.signal()
 }

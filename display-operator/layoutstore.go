@@ -67,6 +67,11 @@ type layoutState struct {
 	Reason   string
 	Outputs  map[string]layoutOutput
 	Surfaces map[int]layoutSurface
+	// Generation names the connection this reading came from. A reader
+	// that remembers what it sent to the module re-sends all of it when
+	// the generation moves, because the module holds nothing of its own
+	// and the compositor it ran in is gone.
+	Generation int
 }
 
 // state reads the store. The placement pass reads it once per pass
@@ -79,10 +84,11 @@ func (l *layoutLink) state() layoutState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return layoutState{
-		Serving:  l.serving,
-		Reason:   l.reason,
-		Outputs:  maps.Clone(l.outputs),
-		Surfaces: maps.Clone(l.surfaces),
+		Serving:    l.serving,
+		Reason:     l.reason,
+		Outputs:    maps.Clone(l.outputs),
+		Surfaces:   maps.Clone(l.surfaces),
+		Generation: l.generation,
 	}
 }
 
