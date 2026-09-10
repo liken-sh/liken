@@ -95,7 +95,7 @@ func enrichPodTemplate(library *Library, providers providerSet, path string,
 	// The facts here edit the same sidecar file, so they must never run at
 	// once.
 	facts := []Container{
-		factsContainer(library, factProbe, []string{factProbe}, path, scannerImage, busAddress, topicBase),
+		probeContainer(library, path, scannerImage, busAddress, topicBase),
 		// The arrival container runs on every Library, because the fact asks no
 		// provider. It runs after the probe, because the probe container writes the
 		// run's started mark.
@@ -241,4 +241,18 @@ func refreshValue(library *Library) string {
 	}
 	refresh, _ := json.Marshal(library.Spec.Refresh)
 	return string(refresh)
+}
+
+// ffprobe is a child process of the probe container, so its memory counts
+// against the container's limit. It holds about 60 MB on its own while it
+// reads one file, whatever the file's size, which is more than the scanner's
+// limit allows.
+const probeMemoryLimit = "256Mi"
+
+// The probe container: the one fact that runs a child process, with a memory
+// line of its own for it.
+func probeContainer(library *Library, path, scannerImage, busAddress, topicBase string) Container {
+	probe := factsContainer(library, factProbe, []string{factProbe}, path, scannerImage, busAddress, topicBase)
+	probe.Resources.Limits = map[string]string{"memory": probeMemoryLimit}
+	return probe
 }

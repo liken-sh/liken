@@ -529,3 +529,23 @@ func TestTheContainerReadsTheRefreshTimesItIsGiven(t *testing.T) {
 		})
 	}
 }
+
+// ffprobe holds about 60 MB on its own while it reads a file, so the probe
+// container cannot run under the scanner's limit.
+func TestTheProbeContainerTakesAMemoryLineAboveTheScanners(t *testing.T) {
+	job := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house"))
+
+	var probe Container
+	for _, container := range job.Spec.Template.Spec.InitContainers {
+		if container.Name == factProbe {
+			probe = container
+		}
+	}
+	if probe.Name == "" {
+		t.Fatal("no probe container")
+	}
+	if probe.Resources.Limits["memory"] != probeMemoryLimit || probeMemoryLimit == scannerMemoryLimit {
+		t.Errorf("memory limit = %q, want %q, above the scanner's %q",
+			probe.Resources.Limits["memory"], probeMemoryLimit, scannerMemoryLimit)
+	}
+}
