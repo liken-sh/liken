@@ -19,3 +19,10 @@ module with `socket`, `bind`, and `listen`, hand the descriptor to
 `wl_display_add_socket_fd`, and keep the descriptor to `close` on
 unprepare. libwayland's own event source on that descriptor then
 reports an error once and is removed. That is not yet measured.
+
+The leak has a second face. `wl_display_add_socket` takes a `flock`
+on `<name>.lock` beside the socket, and the closed listener still
+holds it, so a `listen` on the same name inside one compositor
+lifetime is refused. The operator never reuses a name, because a
+name carries the claim's UID and a recreated claim has a new one, so
+this shows only if a prepare is retried after its own close.

@@ -68,12 +68,18 @@ it finds the shell through `ivi_layout_get_api`. The prototype on
 vega (2026-09-10, below) proved the load order.
 
 The module is an executor. It holds no layout of its own and makes
-no decision. It does five things:
+no decision. It does six things:
 
 - On every output, it creates one ivi layer the size of the output
   and adds it to the output's screen. Every surface on that output
   goes in that layer, and the layer's render order is the stacking
   order.
+- On every output, it holds one black view under everything, in
+  weston's background layer. weston composes the views it holds and
+  clears nothing, and ivi-shell ships no background where kiosk-shell
+  did, so without it a region no surface covers keeps the pixels of
+  the frame before it. The smoke test found this: a surface moved to
+  a new rectangle was painted in both.
 - It listens on a control socket in the pod's own config volume,
   `/etc/weston/layout.sock`. That volume is an `emptyDir` that only
   the three containers of this pod mount, where the Wayland socket
@@ -117,12 +123,18 @@ truth of its own, and on every new connection the operator replays
 every socket and every placement, so a restart on either side
 converges.
 
-Rectangles on the wire are in the output's logical pixels, and the
-module adds the output's position in the global space. The module
-reports every output's logical size and scale when it appears, so
-the operator computes pixels from the size the compositor lays out
-in and never from the kernel mode. On a 4K panel at `scale=2` (plan
-15) that is 1920 by 1080.
+Rectangles on the wire are in the output's logical pixels, and
+ivi-layout itself adds the output's position in the global space
+when it builds a surface's transform, so the module passes them
+through. The module reports every output's logical size and scale
+when it appears, so the operator computes pixels from the size the
+compositor lays out in and never from the kernel mode. On a 4K panel
+at `scale=2` (plan 15) that is 1920 by 1080.
+
+On every new connection the module re-sends one `surface` line per
+live surface after it answers the operator's hello, so an operator
+that restarted learns every surface the compositor holds, and the
+operator re-sends every placement because its own memo is empty.
 
 ### One socket per claim
 
@@ -343,6 +355,15 @@ the module after the shell. Plain xdg-shell clients arrived on
 `add_listener_configure_desktop_surface` with no client change.
 `weston-screenshooter` refuses a client the compositor did not
 start unless weston runs with `--debug`.
+
+Measured in the module's own smoke test on vega, 2026-09-10, weston
+14.0.2 headless on pixman: a claim's socket opened on request and a
+client's surface reported under that socket's name; a placement
+painted every pixel of its rectangle and none outside it; a move
+left zero pixels in the rectangle it came from; a hide left zero
+pixels; and a close removed the socket path. The same test found
+that ivi-shell clears nothing under a moved surface, which is why
+the module holds a black view per output.
 
 Measured in the same prototype, nested in the desktop session: a
 fade over 1000 ms on a new surface, a slide from off the right edge
