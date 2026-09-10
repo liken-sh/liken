@@ -99,6 +99,13 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		"--vo=dmabuf-wayland",
 		"--hwdec=vaapi",
 		"--fullscreen",
+		// mpv holds its window at the film's own aspect by default. So for a
+		// 2.4:1 film it answers the compositor's 1920 by 1080 configure with
+		// a 1920 by 800 buffer, and the compositor scales that buffer to the
+		// region, which squishes the picture. With the window filling the
+		// region, mpv letterboxes the film inside it, the way fullscreen
+		// did.
+		"--keepaspect-window=no",
 		"--ao=pipewire",
 		"--input-ipc-server=" + mpvSocketPath,
 		"--script=" + displayScriptDir,

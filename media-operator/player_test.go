@@ -25,6 +25,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			items: []string{"https://media.example.net/one.mkv", "/media/0/two.mkv"},
 			want: []string{
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -46,6 +47,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			},
 			want: []string{
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -65,6 +67,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			},
 			want: []string{
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -81,6 +84,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			items: []string{"/media/0/film.mkv"},
 			want: []string{
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
@@ -98,6 +102,7 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			items:   []string{"/media/0/film.mkv"},
 			want: []string{
 				"--vo=dmabuf-wayland", "--hwdec=vaapi", "--fullscreen",
+				"--keepaspect-window=no",
 				"--ao=pipewire", "--input-ipc-server=/tmp/test-mpv.sock",
 				"--script=/test-display",
 				"--osc=no",
