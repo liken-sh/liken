@@ -186,6 +186,20 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 	}
 }
 
+// The idle pod names its component, so a Layout region in
+// display-operator selects it. The value is not the playback value, so
+// the operator's own pod watch still reads playback pods alone.
+func TestBuildIdlePodNamesItsComponent(t *testing.T) {
+	player := standingIdlePlayer()
+	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
+		testBusAddress, testTopicBase, "America/New_York")
+
+	want := map[string]string{"media.liken.sh/component": "idle"}
+	if !reflect.DeepEqual(pod.Metadata.Labels, want) {
+		t.Errorf("labels = %+v, want %+v", pod.Metadata.Labels, want)
+	}
+}
+
 // The idle client draws on the screen machine and has nowhere else to
 // run, so it tolerates the taint that keeps unrelated work off that
 // machine. It tolerates that key alone, and for scheduling alone, so a

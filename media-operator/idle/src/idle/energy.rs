@@ -1,5 +1,6 @@
-//! The energy: the one scalar that drives the mark's motion, and the alpha the
-//! activity line leaves on.
+//! The energy: the one scalar that drives the mark's motion. The activity
+//! line leaves over the same ramp down and reads [`RAMP_DOWN`] for it, so the
+//! line and the mark leave the screen together.
 //!
 //! It runs from 0, the mark at rest, to 1, the mark at full swing. The
 //! `brand` repository's `motion.md` states the rule: the mark moves only while
@@ -17,8 +18,11 @@ use media_screen::status::Activity;
 
 /// The ramp up is shorter than the ramp down, so the mark reaches full swing
 /// quickly when a `Play` starts, and returns to rest slowly when the film ends.
+///
+/// The ramp down is public because the activity line leaves over it as well,
+/// and the line and the mark must leave together.
 const RAMP_UP: f64 = 1.2;
-const RAMP_DOWN: f64 = 2.5;
+pub const RAMP_DOWN: f64 = 2.5;
 
 /// The animation clock advances at this fraction of its full rate at energy 0,
 /// and at the full rate at energy 1. The floor is above 0 so a ramp down slows
@@ -103,9 +107,10 @@ impl Flight {
 /// moment the screen last became this client's again.
 ///
 /// The target and the duration come from the activity the unit holds now, and
-/// the unit's [`Ramp`] holds where that ramp started. An arrival replaces the
-/// whole ramp, because it puts the energy at 1 whatever the ramp under it was
-/// doing.
+/// the unit's [`Ramp`] holds where that ramp started. An arrival from under a
+/// film replaces that whole ramp, because the mark stood at 0 for as long as
+/// the film covered it and it must come back at full swing. Every other
+/// arrival leaves the ramp alone.
 fn flight(unit: &Unit) -> Flight {
     let (to, seconds) = match unit.activity {
         Activity::Starting => (1.0, RAMP_UP),
@@ -119,22 +124,31 @@ fn flight(unit: &Unit) -> Flight {
         phase: unit.ramp.phase,
     };
 
-    // The arrival. The end of a film brings the mark back at full swing and
-    // eases it to rest, so the screen returns in motion rather than appearing
-    // frozen. An arrival that lands while a `Play` starts or runs changes
-    // nothing, because that activity owns the energy, and a later change of
-    // activity replaces the arrival for the same reason.
+    // The arrival, on the one path that owes the mark a new ramp. The end of
+    // a film brings the mark back at full swing and eases it to rest, so the
+    // screen returns in motion rather than appearing frozen.
+    //
+    // An arrival from any other activity takes none of this. A `Play` that
+    // ends before it played leaves `Starting`, where the mark was on the
+    // screen and climbing, so the ramp the move already started turns the
+    // motion around from the level it stands at. Putting the energy at 1
+    // there would step the mark up in the same frame the `Play` ended.
+    //
+    // An arrival that lands while a `Play` starts or runs changes nothing,
+    // because that activity owns the energy, and a later change of activity
+    // replaces the arrival for the same reason.
     match unit.arrived {
-        Some(arrived)
-            if arrived >= unit.ramp.since
+        Some(arrival)
+            if arrival.from == Activity::Playing
+                && arrival.at >= unit.ramp.since
                 && !matches!(unit.activity, Activity::Starting | Activity::Playing) =>
         {
             Flight {
                 from: 1.0,
                 to: 0.0,
                 seconds: RAMP_DOWN,
-                since: arrived,
-                phase: ramp.phase_at(arrived),
+                since: arrival.at,
+                phase: ramp.phase_at(arrival.at),
             }
         }
         _ => ramp,
@@ -190,6 +204,7 @@ pub fn ramp(unit: &Unit, next: Activity, at: f64) -> Ramp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::unit::Arrival;
     use media_screen::Moment;
     use media_screen::status::Status;
 
@@ -202,6 +217,16 @@ mod tests {
             (measured - expected).abs() < 1e-9,
             "{measured} is not {expected}"
         );
+    }
+
+    /// The mark of a screen that came back from under a film. That is the one
+    /// arrival that replaces the ramp under it, so every test below that
+    /// reads a full-swing return builds this one.
+    fn came_back(at: f64) -> Option<Arrival> {
+        Some(Arrival {
+            at,
+            from: Activity::Playing,
+        })
     }
 
     /// A unit whose activity became `activity` at `at`, which is the one moment
@@ -275,24 +300,44 @@ mod tests {
     fn an_arrival_brings_the_mark_back_at_full_swing() {
         let mut unit = unit(Activity::Playing, 1.0);
         unit.fold(Moment::Status(Status::default()), 4.0);
-        unit.arrived = Some(4.5);
+        unit.arrived = came_back(4.5);
 
         assert_eq!(level(&unit, 4.5), 1.0);
         assert_close(level(&unit, 5.75), 0.5);
         assert_close(level(&unit, 7.0), 0.0);
     }
 
+    /// A `Play` that fails before it played is the one arrival that finds the
+    /// mark on the screen and part way up its ramp. The readings below are
+    /// the same three the plain reversal reads, so the arrival costs the
+    /// motion nothing and no frame reads full swing.
+    #[test]
+    fn an_arrival_from_a_play_that_never_played_turns_the_mark_around_where_it_stands() {
+        let mut unit = unit(Activity::Starting, 0.0);
+        assert_close(level(&unit, 0.6), 0.5);
+
+        unit.fold(Moment::Status(Status::default()), 0.6);
+        unit.arrived = Some(Arrival {
+            at: 0.6,
+            from: Activity::Starting,
+        });
+
+        assert_close(level(&unit, 0.6), 0.5);
+        assert_close(level(&unit, 1.85), 0.25);
+        assert_close(level(&unit, 3.1), 0.0);
+    }
+
     #[test]
     fn an_arrival_while_a_play_starts_changes_nothing() {
         let mut unit = unit(Activity::Starting, 1.0);
-        unit.arrived = Some(1.6);
+        unit.arrived = came_back(1.6);
         assert_close(level(&unit, 1.6), 0.5);
     }
 
     #[test]
     fn a_status_after_an_arrival_takes_the_energy_the_arrival_reached() {
         let mut unit = Unit {
-            arrived: Some(0.0),
+            arrived: came_back(0.0),
             ..Unit::default()
         };
         unit.fold(
@@ -357,7 +402,7 @@ mod tests {
         unit.fold(Moment::Status(Status::default()), 1.2);
         let before = phase(&unit, 2.0);
 
-        unit.arrived = Some(2.0);
+        unit.arrived = came_back(2.0);
         assert_eq!(phase(&unit, 2.0), before);
     }
 
@@ -483,7 +528,7 @@ mod tests {
     #[test]
     fn an_arrival_asks_for_a_frame_from_the_second_the_screen_came_back() {
         let unit = Unit {
-            arrived: Some(10.0),
+            arrived: came_back(10.0),
             ..Unit::default()
         };
 

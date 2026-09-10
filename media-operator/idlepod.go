@@ -325,8 +325,13 @@ func buildIdlePod(
 		APIVersion: podAPIVersion,
 		Kind:       "Pod",
 		Metadata: ObjectMeta{
-			Name:            idlePodName(name),
-			Namespace:       namespace,
+			Name:      idlePodName(name),
+			Namespace: namespace,
+			// A Layout region in display-operator selects the idle screen
+			// by this label, the same way the film region selects
+			// playback. The Layout alone places the surface, so the
+			// client states no position of its own.
+			Labels:          map[string]string{playbackLabelKey: idleLabelValue},
 			OwnerReferences: []OwnerReference{playerOwner(player)},
 		},
 		Spec: PodSpec{

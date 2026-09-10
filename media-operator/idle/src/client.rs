@@ -17,7 +17,7 @@ use crate::harness::Screen;
 use crate::idle::Idle;
 use crate::idle::preview::Keys;
 use crate::look;
-use crate::unit::Unit;
+use crate::unit::{Arrival, Unit};
 use crate::wiring::Wiring;
 
 /// The name this client connects to the broker under, before the machine's
@@ -83,10 +83,16 @@ impl Client {
     /// Fold one message in, at `at` seconds on the screen's clock. Every
     /// message reaches the unit.
     ///
-    /// The status's move to `Idle` is the arrival: the film that covered this
-    /// client is gone, its own surface is on the screen again, and the mark
-    /// starts its motion from that second. The status topic is retained, so a
-    /// client that connects after a `Play` ended reads the move it missed.
+    /// The status's move to `Idle` is the arrival: the `Play` on the unit is
+    /// over, and the mark's return starts from that second. The move is
+    /// what marks it, and never the activity the status carries, so a
+    /// repeated `Idle` from a pass over an unchanged `Player` starts no
+    /// second return. The mark records the activity the unit left, because
+    /// an arrival from under a film owes the mark a new ramp and an arrival
+    /// from a `Play` that never played does not.
+    ///
+    /// The status topic is retained, so a client that connects after a
+    /// `Play` ended reads the move it missed.
     pub fn receive(&mut self, moment: Moment, at: f64) {
         // Every key the crate does not own reaches this client. The stock
         // idle screen draws no list, so every key but back reaches
@@ -102,7 +108,7 @@ impl Client {
         let was = self.unit.activity;
         self.unit.fold(moment, at);
         if self.unit.activity == Activity::Idle && was != Activity::Idle {
-            self.unit.arrived = Some(at);
+            self.unit.arrived = Some(Arrival { at, from: was });
         }
     }
 }
@@ -184,6 +190,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::*;
+    use crate::idle::{activity, energy};
     use media_screen::status::{Activity, Status};
 
     /// A bus over a plain channel, standing in for the reader's threads, so a
@@ -344,7 +351,105 @@ mod tests {
             }),
             9.0,
         );
-        assert_eq!(client.unit().arrived, Some(9.0));
+        assert_eq!(
+            client.unit().arrived,
+            Some(Arrival {
+                at: 9.0,
+                from: Activity::Playing
+            })
+        );
+    }
+
+    /// The second the lifecycle table below reads its first status at.
+    const FIRST: f64 = 1.0;
+
+    /// The second most of its rows read the second status at. It is past the
+    /// ramp up's own 1200 ms, so the energy there is the level the first
+    /// status settled at.
+    const SETTLED: f64 = 5.0;
+
+    /// The second one row reads the second status at, halfway up that ramp.
+    /// It is the frame a `Play` that fails early ends on.
+    const MID_RAMP: f64 = 1.6;
+
+    /// Two readings of one curve, compared the way `energy`'s own tests
+    /// compare them. A difference this small is the arithmetic of the seconds
+    /// above and not the motion.
+    #[track_caller]
+    fn assert_close(measured: f64, expected: f64, row: &str) {
+        assert!(
+            (measured - expected).abs() < 1e-9,
+            "the energy on {row} is {measured}, not {expected}"
+        );
+    }
+
+    /// One activity as it arrives on the status topic.
+    fn saying(activity: Activity) -> Moment {
+        Moment::Status(Status {
+            activity,
+            ..Status::default()
+        })
+    }
+
+    /// A client that read one status at [`FIRST`] and a second at `at`. Both
+    /// go through `receive`, which is the whole path a status takes:
+    /// `Unit::fold` reads the activity, and this file reads the move to
+    /// `Idle`.
+    fn moved(from: Activity, to: Activity, at: f64) -> Client {
+        let mut client = seeded();
+        client.receive(saying(from), FIRST);
+        client.receive(saying(to), at);
+        client
+    }
+
+    /// Every move of the activity, and the four things a move settles: the
+    /// arrival mark, whether the energy's ramp starts over, the energy the
+    /// mark holds at the second of the move, and the alpha the activity line
+    /// draws at.
+    ///
+    /// The rule is the media browser's, so the two screens answer one set of
+    /// events. A `Play` a person asks for reaches `Starting`, and the mark
+    /// starts moving there rather than waiting for the film. `Playing` stops
+    /// it, because the film's surface covers this one. A move to `Idle` from
+    /// any other activity marks the arrival once, and the mark and the line
+    /// leave together over the ramp down. A repeated status carries the
+    /// activity the unit already holds and settles neither the mark nor a new
+    /// ramp, so a `Player` the operator passes over again leaves the screen
+    /// alone.
+    ///
+    /// The last two rows are the same move at two seconds, and they are why
+    /// the arrival records the activity it came from. The mark returns at full
+    /// swing from under a film alone. A `Play` that ends halfway up the ramp
+    /// reads 0.5 in the frame it ended on, the level the mark already stood
+    /// at, and the line reads full in that frame the way it did in the one
+    /// before.
+    #[test]
+    fn each_move_of_the_activity_settles_the_mark_and_the_line() {
+        use Activity::{Idle, Playing, Starting};
+
+        // from, to, the second of the move, the activity the arrival names,
+        // a ramp that starts over, the energy, the line's alpha
+        let table = [
+            (Idle, Starting, SETTLED, None, true, 0.0, 1.0),
+            (Starting, Playing, SETTLED, None, true, 0.0, 1.0),
+            (Playing, Idle, SETTLED, Some(Playing), true, 1.0, 1.0),
+            (Starting, Starting, SETTLED, None, false, 1.0, 1.0),
+            (Idle, Idle, SETTLED, None, false, 0.0, 0.0),
+            (Starting, Idle, SETTLED, Some(Starting), true, 1.0, 1.0),
+            (Starting, Idle, MID_RAMP, Some(Starting), true, 0.5, 1.0),
+        ];
+
+        for (from, to, at, arrived, ramped, energy, alpha) in table {
+            let client = moved(from, to, at);
+            let unit = client.unit();
+            let row = format!("{from:?} to {to:?} at {at}");
+
+            let mark = arrived.map(|from| Arrival { at, from });
+            assert_eq!(unit.arrived, mark, "the arrival on {row}");
+            assert_eq!(unit.ramp.since == at, ramped, "the ramp on {row}");
+            assert_close(energy::level(unit, at), energy, &row);
+            assert_eq!(activity::opacity(unit, at), alpha, "the line on {row}");
+        }
     }
 
     fn previewing() -> Client {
@@ -386,7 +491,13 @@ mod tests {
         client.key("i");
 
         assert_eq!(client.unit().activity, Activity::Idle);
-        assert_eq!(client.unit().arrived, Some(4.0));
+        assert_eq!(
+            client.unit().arrived,
+            Some(Arrival {
+                at: 4.0,
+                from: Activity::Playing
+            })
+        );
     }
 
     #[test]

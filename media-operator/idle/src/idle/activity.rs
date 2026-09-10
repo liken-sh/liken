@@ -18,13 +18,18 @@ use media_screen::status::Activity;
 /// How opaque the line draws, from 0 clear to 1 full.
 ///
 /// While a `Play` starts or runs the line is opaque, whatever the energy is.
-/// After that it draws at the energy, so the ramp down that follows an arrival
-/// carries the line out with the mark's motion, and a settled screen at energy
-/// 0 draws no line at all.
+/// The move to `Idle` starts its fade, over the same ramp down the mark
+/// returns on, so the line leaves with the motion and a settled screen draws
+/// no line at all.
+///
+/// The fade leaves from full and not from the energy the mark holds. The line
+/// was full for the whole of the `Play`, and the mark may not be: a `Play`
+/// that ends before it played leaves the mark part way up its ramp, and a line
+/// that took that level would step down in the frame the `Play` ended.
 pub fn opacity(unit: &Unit, at: f64) -> f32 {
     match unit.activity {
         Activity::Starting | Activity::Playing => 1.0,
-        Activity::Idle => energy::level(unit, at) as f32,
+        Activity::Idle => (1.0 - energy::ease((at - unit.ramp.since) / energy::RAMP_DOWN)) as f32,
     }
 }
 
@@ -100,6 +105,22 @@ mod tests {
         assert_eq!(opacity(&unit, 1.2), 1.0);
         assert!(opacity(&unit, 2.45) < 1.0);
         assert_eq!(opacity(&unit, 3.7), 0.0);
+    }
+
+    /// A `Play` that ends before it played leaves the mark part way up its
+    /// ramp, and the line was full through the whole of it. So the line
+    /// leaves from full here too, and the frame the `Play` ended on reads
+    /// the same alpha as the frame before it.
+    #[test]
+    fn a_play_that_ends_before_it_played_carries_the_line_out_from_full() {
+        let mut unit = playing(Activity::Starting, 0.0);
+        assert_eq!(opacity(&unit, 0.6), 1.0);
+
+        unit.fold(Moment::Status(Status::default()), 0.6);
+
+        assert_eq!(opacity(&unit, 0.6), 1.0);
+        assert_eq!(opacity(&unit, 1.85), 0.5);
+        assert_eq!(opacity(&unit, 3.1), 0.0);
     }
 
     #[test]

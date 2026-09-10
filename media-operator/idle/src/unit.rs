@@ -86,6 +86,20 @@ pub struct Ramp {
     pub phase: f64,
 }
 
+/// The moment the unit reached `Idle`: the second of the move, and the
+/// activity it left.
+///
+/// Both halves matter, because only one of the two arrivals owes the mark a
+/// new ramp. An arrival from `Playing` finds the mark stopped and the screen
+/// covered, so the energy comes back at full swing. An arrival from any other
+/// activity finds the mark on the screen and moving, so the ramp the move
+/// already started stands and the motion turns around where it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Arrival {
+    pub at: f64,
+    pub from: Activity,
+}
+
 /// The unit the client draws.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Unit {
@@ -113,9 +127,9 @@ pub struct Unit {
     /// The shade, once a shade moment has arrived. A client that has read none
     /// draws no shade.
     pub shade: Option<Shade>,
-    /// The second the screen became this client's again, when a `Play` that
-    /// covered it ended. The mark starts its arrival motion from here.
-    pub arrived: Option<f64>,
+    /// The last move to `Idle`, once one has arrived. A client that holds none
+    /// has read no `Play` on this unit to its end.
+    pub arrived: Option<Arrival>,
 }
 
 impl Unit {
