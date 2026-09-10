@@ -17,7 +17,7 @@ a line on a graph.
 ## The design
 
 Layers 1 and 2 as milestone 65 states them, under the `display_` prefix,
-on port 9210. The compositor container serves no metrics of its own; the
+on port 9200. The compositor container serves no metrics of its own; the
 operator reports what it observes of it.
 
 | Component | Metric | Type | Why |

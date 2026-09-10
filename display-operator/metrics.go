@@ -26,10 +26,12 @@ import (
 // metricsDeadline bounds a scrape's headers and the listener's stop.
 const metricsDeadline = 30 * time.Second
 
-// defaultMetricsAddr is display-operator's port in milestone 65's
-// table. The manifest states it in METRICS_ADDR explicitly, so this
-// default only matters to a binary run outside the deployment.
-const defaultMetricsAddr = ":9210"
+// defaultMetricsAddr is the port milestone 65 gives every process:
+// this operator runs on the pod network, not the host network, so it
+// takes no port of its own. The manifest states it in METRICS_ADDR
+// explicitly, so this default only matters to a binary run outside
+// the deployment.
+const defaultMetricsAddr = ":9200"
 
 // reconcileKind names the resource kind a pass or a watch serves.
 // The label is bounded to these four, because milestone 65 forbids a
