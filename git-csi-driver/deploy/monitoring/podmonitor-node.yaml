@@ -2,10 +2,13 @@
 # alone by the base's common-labels transformer because
 # includeSelectors: false keeps kustomize from rewriting a selector
 # field, so it is the label the running Pod actually carries. The pod
-# serves /metrics on the port named metrics in deploy/node.yaml. No
-# namespaceSelector is needed: the Component above places this
-# PodMonitor in the same namespace, liken-system, that the base places
-# the DaemonSet in.
+# serves /metrics on the port named metrics in deploy/node.yaml. This
+# PodMonitor sets its own metadata.namespace to liken-system, the
+# namespace the base places the DaemonSet in, rather than letting the
+# Component set a namespace: that field would also move the dashboard
+# ConfigMap in kustomization.yaml, which belongs in monitoring instead.
+# No namespaceSelector is needed because the PodMonitor already lives
+# in the namespace it selects.
 #
 # The relabeling carries the node's own name onto every series, so the
 # fleet dashboard can select this DaemonSet's pod by the node it runs
@@ -14,6 +17,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: git-csi-driver-node
+  namespace: liken-system
 spec:
   selector:
     matchLabels:

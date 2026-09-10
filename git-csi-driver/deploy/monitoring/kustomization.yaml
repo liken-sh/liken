@@ -11,8 +11,21 @@
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
-namespace: liken-system
+# No top-level namespace here: a Component's namespace field would also
+# move the dashboard ConfigMap below into liken-system, but the sidecar
+# that loads dashboards watches monitoring instead. Each PodMonitor
+# below sets its own metadata.namespace to liken-system.
 
 resources:
   - podmonitor-node.yaml
   - podmonitor-controller.yaml
+
+configMapGenerator:
+  - name: git-csi-driver-dashboard
+    namespace: monitoring
+    files:
+      - dashboards/git-csi-driver.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"
