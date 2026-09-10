@@ -8,7 +8,7 @@ toc: true
 
 The operator serves Prometheus metrics at `/metrics` on port 9200, one
 per node, under liken's [shared
-contract](https://github.com/liken-sh/liken/blob/main/plans/65-prometheus-metrics.md).
+contract](https://github.com/liken-sh/liken/blob/main/plans/completed/65-prometheus-metrics.md).
 The base applies with no Prometheus in the cluster. An owner who runs
 the prometheus-operator adds the `deploy/monitoring` component beside
 the base, which holds a `PodMonitor` for the port.

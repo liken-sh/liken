@@ -1,10 +1,10 @@
 # Prometheus metrics
 
-Plan 14. Proposed.
+Plan 14. Built and drilled on liken-1 on 2026-09-10.
 
 The contract for every metric here, the three layers, the names, the
 port table, and the monitoring component, is [liken milestone
-65](https://github.com/liken-sh/liken/blob/main/plans/65-prometheus-metrics.md).
+65](https://github.com/liken-sh/liken/blob/main/plans/completed/65-prometheus-metrics.md).
 This plan states only what this operator adds.
 
 ## The problem
@@ -29,6 +29,12 @@ operator reports what it observes of it.
 | display-operator | `display_compositor_restarts_total{reason}` | counter | mode prepare vs crash; the unbounded-restart problem as a rate |
 | display-operator | `display_surfaces{output}` | gauge | what the compositor holds; a stuck surface |
 | display-operator | `display_panel_power{output}`, `display_panel_brightness{output}` | gauge | the DDC state the idle screen drives |
+
+`display_compositor_restarts_total` carries the reasons `mode` and
+`heal`, the two restarts this operator orders. A `crash` reason waits
+on a fact: nothing today tells a compositor that exited on its own
+from one this operator ended, without a new correlation against the
+Wayland session counter.
 
 The monitoring component at `deploy/monitoring/` holds one PodMonitor
 for the operator pod.
