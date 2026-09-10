@@ -391,22 +391,21 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		topicBase:    defaultTopicBase,
 		// The bus is never Run, so a publish finds a nil write queue and
 		// drops, which is what a pass wants with no broker under the test.
-		bus:                   newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
-		reports:               newReports(wake),
-		focus:                 newFocusDesk(wake),
-		peripherals:           newPeripheralDesk(),
-		codes:                 newCodesDesk(wake),
-		panels:                newPanelDesk(wake),
-		panelOverrides:        map[string]panelOverride{},
-		panelFaults:           map[string]string{},
-		receiverSessions:      map[string]receiverSession{},
-		volumes:               newVolumeDesk(),
-		endingLabeled:         map[string]bool{},
-		positionWrites:        map[string]time.Time{},
-		keysPublished:         map[string]string{},
-		playerStatusPublished: map[string]string{},
-		recreateBackoff:       map[string]backoffState{},
-		wake:                  wake,
+		bus:              newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
+		reports:          newReports(wake),
+		focus:            newFocusDesk(wake),
+		peripherals:      newPeripheralDesk(),
+		codes:            newCodesDesk(wake),
+		panels:           newPanelDesk(wake),
+		panelOverrides:   map[string]panelOverride{},
+		panelFaults:      map[string]string{},
+		receiverSessions: map[string]receiverSession{},
+		volumes:          newVolumeDesk(),
+		endingLabeled:    map[string]bool{},
+		positionWrites:   map[string]time.Time{},
+		keysPublished:    map[string]string{},
+		recreateBackoff:  map[string]backoffState{},
+		wake:             wake,
 	}
 }
 
@@ -1823,16 +1822,15 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	return &operator{
-		client:                testAPIClient(t, cluster.handler(t)),
-		topicBase:             defaultTopicBase,
-		bus:                   bus,
-		reports:               newReports(nil),
-		focus:                 newFocusDesk(nil),
-		peripherals:           newPeripheralDesk(),
-		codes:                 newCodesDesk(nil),
-		panels:                newPanelDesk(nil),
-		volumes:               newVolumeDesk(),
-		playerStatusPublished: map[string]string{},
+		client:      testAPIClient(t, cluster.handler(t)),
+		topicBase:   defaultTopicBase,
+		bus:         bus,
+		reports:     newReports(nil),
+		focus:       newFocusDesk(nil),
+		peripherals: newPeripheralDesk(),
+		codes:       newCodesDesk(nil),
+		panels:      newPanelDesk(nil),
+		volumes:     newVolumeDesk(),
 		// These tests read what the status publish leaves on the bus,
 		// so the volume seed is held off for longer than any of them runs.
 		// The volume tests run their own operator with the grace elapsed.

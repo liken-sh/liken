@@ -9,7 +9,74 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"sync"
 )
+
+// publishedStatuses records the payload the operator last published on
+// each Player's retained status topic, and it serializes those publishes.
+// The topic is retained, so a republished payload the broker already
+// holds is churn no subscriber needs, and this is what tells the operator
+// to skip it.
+//
+// Two goroutines publish here: the pass, and the bus reader when it
+// answers an ending from memory. So one mutex covers the compare, the
+// publish, and the record together. A mutex over the map alone would let
+// the two publish in one order and record in the other, and the broker
+// would then hold a payload the map does not name.
+//
+// The zero value records nothing and publishes everything, which is
+// correct for a fresh operator, so the map is built on the first publish
+// and there is nothing to construct.
+type publishedStatuses struct {
+	mutex    sync.Mutex
+	payloads map[string]string
+}
+
+// publish writes one payload to its topic, retained, unless the last
+// payload on that topic was the same one.
+func (p *publishedStatuses) publish(bus *Bus, topic string, payload []byte) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if p.payloads[topic] == string(payload) {
+		return
+	}
+	bus.Publish(topic, payload, true)
+	if p.payloads == nil {
+		p.payloads = map[string]string{}
+	}
+	p.payloads[topic] = string(payload)
+}
+
+// payloadFor answers the payload the operator last published on one
+// topic, or the empty string when it published none.
+func (p *publishedStatuses) payloadFor(topic string) string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.payloads[topic]
+}
+
+// reset drops every record, so the pass that follows writes each topic
+// again. A fresh broker session holds none of the retained state the
+// operator owns, and this is how the operator restores it.
+func (p *publishedStatuses) reset() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.payloads = nil
+}
+
+// clear empties the retained value of every topic outside the set the
+// caller still owns, so a deleted Player leaves no unit on the bus for a
+// subscriber to draw.
+func (p *publishedStatuses) clear(bus *Bus, owned map[string]bool) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	for topic := range p.payloads {
+		if !owned[topic] {
+			bus.Publish(topic, nil, true)
+			delete(p.payloads, topic)
+		}
+	}
+}
 
 // derivePlayerStatus reads the whole pass's Plays and returns what
 // this Player is doing. A Play running on the Player wins over one

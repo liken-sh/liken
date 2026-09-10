@@ -72,10 +72,17 @@ func splitRunKey(key string) (namespace, name string) {
 //
 // The mark follows the report rather than latching, so a Play recreated
 // under the same name reports a run of its own and starts not ended.
-func (r *reports) fold(namespace, name string, report playReport) {
+//
+// fold answers whether this report is where the run's ending began, which
+// the caller reads to publish the unit's idle state at once. It is the
+// mark and not the previous report that decides that, because a sidecar
+// that goes offline drops the previous report while the mark stands, and a
+// run whose ending was already answered must not be answered again.
+func (r *reports) fold(namespace, name string, report playReport) (endingBegan bool) {
 	key := runKey(namespace, name)
 	r.mutex.Lock()
 	previous, had := r.latest[key]
+	endingBegan = report.Ended && !r.ended[key]
 	r.latest[key] = report
 	r.ended[key] = report.Ended
 	r.seen[key] = true
@@ -84,6 +91,7 @@ func (r *reports) fold(namespace, name string, report playReport) {
 		report.Paused != previous.Paused || report.Item != previous.Item {
 		poke(r.wake)
 	}
+	return endingBegan
 }
 
 // availability marks a Play online or offline. Either way the run is one

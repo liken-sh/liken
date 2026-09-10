@@ -15,6 +15,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sync"
 )
 
 // The group the bluetooth-operator serves. A Peripheral is
@@ -65,12 +66,14 @@ type PeripheralCondition struct {
 
 // peripheralDesk holds what one pass read about the controllers: the
 // Peripherals by name, and the Peripheral each Remote's standing claim
-// allocated, by controller key. The reconcile pass reads it when it
-// builds a Player's bus status. Only the pass goroutine touches it, so
-// it carries no mutex, unlike the desks the bus thread writes. A
-// Peripheral change wakes the loop through the watch, and the pass then
-// reads the collection again.
+// allocated, by controller key. A Peripheral change wakes the loop
+// through the watch, and the pass then reads the collection again.
+//
+// One mutex covers both maps. The pass writes them, and both the pass
+// and the bus reader read them when they build a Player's bus status,
+// because an ending is answered on the bus reader's goroutine.
 type peripheralDesk struct {
+	mutex sync.Mutex
 	held  map[string]Peripheral
 	named map[string]string
 }
@@ -91,10 +94,12 @@ func (p *peripheralDesk) hold(peripherals []Peripheral, named map[string]string)
 	for _, peripheral := range peripherals {
 		held[peripheral.Metadata.Name] = peripheral
 	}
-	p.held = held
 	if named == nil {
 		named = map[string]string{}
 	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.held = held
 	p.named = named
 }
 
@@ -102,6 +107,8 @@ func (p *peripheralDesk) hold(peripherals []Peripheral, named map[string]string)
 // allocated. It is empty for a controller whose claim carries no
 // allocation, and for one whose device comes from another driver.
 func (p *peripheralDesk) peripheralFor(key string) string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 	return p.named[key]
 }
 
@@ -110,6 +117,8 @@ func (p *peripheralDesk) peripheralFor(key string) string {
 // Connected condition, is neither connected nor disconnected, so the
 // status it appears in carries no connected key at all.
 func (p *peripheralDesk) connectedFor(name string) (connected, held bool) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 	peripheral, standing := p.held[name]
 	if !standing {
 		return false, false
@@ -126,6 +135,8 @@ func (p *peripheralDesk) connectedFor(name string) (connected, held bool) {
 // no level answers nil, and the status it appears in carries no battery
 // key.
 func (p *peripheralDesk) batteryFor(name string) *int {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 	peripheral, standing := p.held[name]
 	if !standing || peripheral.Status.Battery == nil {
 		return nil

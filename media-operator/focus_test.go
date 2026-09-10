@@ -288,7 +288,7 @@ func TestOnePassMarksTheFocusedRemoteOnTheBusStatus(t *testing.T) {
 	media.pass()
 
 	topic := playerStatusTopic(defaultTopicBase, "house", "theater")
-	mustMatch(t, strings.Contains(media.playerStatusPublished[topic], `"focused":true`), true)
+	mustMatch(t, strings.Contains(media.playerStatuses.payloadFor(topic), `"focused":true`), true)
 }
 
 // A stored value that changes wakes the loop, because the Player bus

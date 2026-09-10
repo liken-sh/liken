@@ -122,10 +122,10 @@ type operator struct {
 
 	// peripherals is the desk for the bluetooth-operator's Peripherals and
 	// for the Peripheral each Remote's claim allocated. The pass fills it
-	// from the API and reads it when it builds a Player's bus status. The
-	// peripherals watch is the wake, so a controller that connects,
-	// disconnects, or reports a new charge reaches the pass that
-	// republishes that status.
+	// from the API, and both the pass and the bus reader read it when they
+	// build a Player's bus status. The peripherals watch is the wake, so a
+	// controller that connects, disconnects, or reports a new charge
+	// reaches the pass that republishes that status.
 	peripherals *peripheralDesk
 
 	// codes is the desk for each controller's declared code set, built
@@ -194,13 +194,18 @@ type operator struct {
 	// retained value. Only the pass goroutine touches it.
 	keysPublished map[string]string
 
-	// playerStatusPublished maps each Player's status topic to the payload
-	// the operator last published there. It is the keymap pattern applied to
-	// the unit's presentable state: the topic is retained, so the operator
+	// playerStatuses records the payload the operator last published on
+	// each Player's status topic. It is the keymap pattern applied to the
+	// unit's presentable state: the topic is retained, so the operator
 	// republishes only when the payload changes, and a topic whose Player no
-	// longer exists has its retained value cleared. Only the pass goroutine
-	// touches it.
-	playerStatusPublished map[string]string
+	// longer exists has its retained value cleared. Unlike the memos above,
+	// two goroutines write it, so it carries a mutex of its own.
+	playerStatuses publishedStatuses
+
+	// snapshot holds the Plays and the Players the last pass listed, which
+	// is what an ending answers from. ending.go says why the answer comes
+	// from memory rather than from a read.
+	snapshot passSnapshot
 
 	// recreateBackoff holds one run's recreate count and the earliest time it
 	// may recreate again, so a pod that keeps failing recreates slower up to a
@@ -263,29 +268,28 @@ func operate() {
 	codesDesk := newCodesDesk(wake)
 	panels := newPanelDesk(wake)
 	media := &operator{
-		client:                client,
-		image:                 images.player,
-		idleImage:             images.idle,
-		sidecarImage:          images.sidecar,
-		busAddress:            busAddress,
-		topicBase:             topicBase,
-		idleDisplayClass:      idleDisplayClass,
-		playerVerbose:         playerVerbose,
-		reports:               desk,
-		focus:                 focusDesk,
-		peripherals:           newPeripheralDesk(),
-		codes:                 codesDesk,
-		panels:                panels,
-		panelOverrides:        map[string]panelOverride{},
-		panelFaults:           map[string]string{},
-		receiverSessions:      map[string]receiverSession{},
-		volumes:               newVolumeDesk(),
-		endingLabeled:         map[string]bool{},
-		positionWrites:        map[string]time.Time{},
-		keysPublished:         map[string]string{},
-		playerStatusPublished: map[string]string{},
-		recreateBackoff:       map[string]backoffState{},
-		wake:                  wake,
+		client:           client,
+		image:            images.player,
+		idleImage:        images.idle,
+		sidecarImage:     images.sidecar,
+		busAddress:       busAddress,
+		topicBase:        topicBase,
+		idleDisplayClass: idleDisplayClass,
+		playerVerbose:    playerVerbose,
+		reports:          desk,
+		focus:            focusDesk,
+		peripherals:      newPeripheralDesk(),
+		codes:            codesDesk,
+		panels:           panels,
+		panelOverrides:   map[string]panelOverride{},
+		panelFaults:      map[string]string{},
+		receiverSessions: map[string]receiverSession{},
+		volumes:          newVolumeDesk(),
+		endingLabeled:    map[string]bool{},
+		positionWrites:   map[string]time.Time{},
+		keysPublished:    map[string]string{},
+		recreateBackoff:  map[string]backoffState{},
+		wake:             wake,
 	}
 
 	// onConnect marks that a fresh broker session began, so the next pass
@@ -382,6 +386,7 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "listing plays: %v\n", err)
 		return
 	}
+	o.snapshot.recordPlays(list.Items)
 	// The endings are marked before anything else the pass does. The
 	// sidecar holds mpv alive for a short grace after its ending report,
 	// and the label is what the compositor fades the surface on, so the
@@ -400,10 +405,17 @@ func (o *operator) pass() {
 	// reconcilePlayers publishes the same state again at the end of the
 	// pass, once the focus mark and the controllers' links are settled,
 	// and an unchanged payload is not published twice.
+	//
+	// An ending has usually reached the bus before this publish, because
+	// answerEnding derives the same state from the last pass's lists the
+	// moment the report arrives. This publish is the confirmation, and it
+	// writes nothing where the two agree. It is also the whole answer for
+	// a run the last pass had not listed yet.
 	players, playersErr := ListPlayers(o.client)
 	if playersErr != nil {
 		fmt.Fprintf(os.Stderr, "listing players: %v\n", playersErr)
 	} else {
+		o.snapshot.recordPlayers(players.Items)
 		o.publishPlayerStatuses(players.Items, list.Items)
 	}
 	// Read the household default once per pass. A missing default is not an error,
@@ -538,7 +550,11 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 			if err := json.Unmarshal(payload, &report); err != nil {
 				return
 			}
-			o.reports.fold(namespace, name, report)
+			// An ending is the one report a person is waiting on, so it
+			// is answered here and not left to the pass the fold wakes.
+			if o.reports.fold(namespace, name, report) {
+				o.answerEnding(namespace, name)
+			}
 		case playAvailabilityKind:
 			o.reports.availability(namespace, name, string(payload) == availabilityOnline)
 		}
@@ -626,7 +642,7 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 // their own connect, so those need no help here.
 func (o *operator) reestablishRetained() {
 	o.keysPublished = map[string]string{}
-	o.playerStatusPublished = map[string]string{}
+	o.playerStatuses.reset()
 	// The levels are the one retained state this rewrite skips. The
 	// sidecars and the broker hold them, not the operator, so the pass
 	// waits out volumeSeedGrace and then seeds only the units nothing
@@ -918,21 +934,20 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// A topic whose Player no longer exists has its retained value cleared
 	// with an empty publish, so a deleted Player leaves no unit on the bus
 	// for a subscriber to draw.
-	for topic := range o.playerStatusPublished {
-		if !published[topic] {
-			o.bus.Publish(topic, nil, true)
-			delete(o.playerStatusPublished, topic)
-		}
-	}
+	o.playerStatuses.clear(o.bus, published)
 }
 
 // publishPlayerStatus writes one unit's presentable state to its retained
 // status topic and returns the topic it wrote, so the caller records which
-// topics this pass still owns. The topic is retained, so republishing an
-// unchanged payload is churn a new subscriber does not need: it reads the
-// current value from the broker. The publish happens only when the payload
-// differs from the last one this operator wrote, which is what keeps the
-// backstop tick off the bus while a unit sits idle.
+// topics this pass still owns. The memo decides whether the payload
+// reaches the broker at all: a payload the broker already holds is churn a
+// new subscriber does not need, because it reads the current value off the
+// retained topic. That skip is what keeps the backstop tick off the bus
+// while a unit sits idle, and it is also what makes the pass silent behind
+// an ending the bus reader already answered.
+//
+// The pass and the bus reader both call this, so it holds no state of its
+// own beyond the memo, which carries its own mutex.
 func (o *operator) publishPlayerStatus(player *Player, desired PlayerStatus, plays []Play) string {
 	topic := playerStatusTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name)
 	payload, err := json.Marshal(derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus))
@@ -941,11 +956,7 @@ func (o *operator) publishPlayerStatus(player *Player, desired PlayerStatus, pla
 			player.Metadata.Namespace, player.Metadata.Name, err)
 		return topic
 	}
-	if o.playerStatusPublished[topic] == string(payload) {
-		return topic
-	}
-	o.bus.Publish(topic, payload, true)
-	o.playerStatusPublished[topic] = string(payload)
+	o.playerStatuses.publish(o.bus, topic, payload)
 	return topic
 }
 
