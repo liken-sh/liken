@@ -441,14 +441,14 @@ impl Series {
     }
 
     /// The view: the backdrop behind the header, the scrim over it, the
-    /// header and the wall over both, the dim of the room where the
-    /// lights are down, and the loading state's curtain over all of them
-    /// while that state runs.
+    /// header and the wall over both, and the departing art of the
+    /// loading state over all three while that state runs. The dim of the
+    /// room and the curtain's front are the frame's own layers over this
+    /// one.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         curtain: Option<Curtain>,
-        lights: f32,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
@@ -456,24 +456,39 @@ impl Series {
             art: &self.backdrop,
             store,
             ground: layers::Ground::Below(layout::head()),
-            lights,
             front: page::Page {
                 series: self,
                 store,
                 lifted: curtain.is_some(),
                 held,
             },
-            over: curtain.map(|curtain| Layer {
-                library: &self.library,
-                art: &self.backdrop,
-                logo: &self.logo,
-                name: &self.title,
-                store,
-                head: self,
-                curtain,
-            }),
+            over: curtain.map(|curtain| self.curtain(store, curtain)),
         }
         .view()
+    }
+
+    /// The curtain's front layer, which the frame draws over the dim.
+    pub fn front<'a, A: Art>(
+        &'a self,
+        store: &'a RefCell<A>,
+        curtain: Curtain,
+    ) -> Element<'a, Infallible, Theme, Renderer> {
+        layers::front(self.curtain(store, curtain))
+    }
+
+    // The loading state's layer for this page. Both the departing art
+    // under the dim and the logo over it are drawn from it, so the two
+    // read the same title, art, and clock.
+    fn curtain<'a, A: Art>(&'a self, store: &'a RefCell<A>, curtain: Curtain) -> Layer<'a, A> {
+        Layer {
+            library: &self.library,
+            art: &self.backdrop,
+            logo: &self.logo,
+            name: &self.title,
+            store,
+            head: self,
+            curtain,
+        }
     }
 }
 

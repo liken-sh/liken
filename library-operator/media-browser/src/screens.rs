@@ -210,12 +210,10 @@ impl Screen {
     }
 
     /// The view of this screen, with its art drawn from the store. Only
-    /// the two screens a title plays from draw the loading state and the
-    /// lights beside it, and every other screen ignores both, because a
-    /// press that enters either state comes from one of those two and no
-    /// press reaches a screen while they run.
-    /// `lights` is how bright the room is, from 1 at full down to
-    /// `look::LIGHTS_FLOOR`.
+    /// the two screens a title plays from draw the loading state, and
+    /// every other screen ignores it, because a press enters that state
+    /// on one of those two and no press reaches a screen while it runs.
+    ///
     /// `held` is whether the screen holds focus. The browser's strip
     /// takes focus off the screen under it, and a screen that drew its
     /// own mark then would put two marks on the glass.
@@ -223,16 +221,31 @@ impl Screen {
         &'a self,
         store: &'a RefCell<A>,
         curtain: Option<Curtain>,
-        lights: f32,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
             Self::Home(screen) => screen.view(store, held),
             Self::Wall(screen) => screen.view(store, held),
-            Self::Movie(screen) => screen.view(store, curtain, lights, held),
-            Self::Series(screen) => screen.view(store, curtain, lights, held),
+            Self::Movie(screen) => screen.view(store, curtain, held),
+            Self::Series(screen) => screen.view(store, curtain, held),
             Self::Person(screen) => screen.view(store, held),
             Self::Franchise(screen) => screen.view(store, held),
+        }
+    }
+
+    /// The loading state's front layer, which the frame draws over the
+    /// dim of the room: the pool of shade, the mark, and the logo on its
+    /// way to the centre. A screen a title never plays from draws none,
+    /// the way it draws no curtain under it.
+    pub fn front<'a, A: Art>(
+        &'a self,
+        store: &'a RefCell<A>,
+        curtain: Curtain,
+    ) -> Option<Element<'a, Infallible, Theme, Renderer>> {
+        match self {
+            Self::Movie(screen) => Some(screen.front(store, curtain)),
+            Self::Series(screen) => Some(screen.front(store, curtain)),
+            Self::Home(_) | Self::Wall(_) | Self::Person(_) | Self::Franchise(_) => None,
         }
     }
 }

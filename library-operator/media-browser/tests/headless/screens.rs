@@ -387,6 +387,89 @@ fn a_play_press_draws_the_loading_state() {
     drawn(&frames.join("003.50.png"), &run);
 }
 
+// The lights answer the `Player`'s status, so a `Play` that this browser
+// never asked for dims the page it stands on. The dim is one fill over
+// the page's own layers, and the strip draws over it at full, so the
+// reading is taken under the strip and across the page.
+//
+// The renderer composites in linear light, so `look::LIGHTS_FLOOR` at an
+// eighth of full reads as about a third of the value it dimmed: the page
+// reaches 89 of 255 with the lights down where it reaches 232 at full.
+// The check is a half of the reading and not an eighth for that reason.
+#[test]
+fn a_status_off_idle_dims_the_page_under_it() {
+    let full = page_brightness("full", None);
+    let down = page_brightness("dimmed", Some("{\"activity\":\"Starting\"}"));
+
+    assert!(
+        u32::from(down) * 2 < u32::from(full),
+        "the page reaches {down} of 255 with the lights down and {full} at full"
+    );
+}
+
+// The topic the operator names for the `Player`'s retained status.
+const STATUS_TOPIC: &str = "liken/media/players/house/den-tv/status";
+
+// The band under the strip, which the page draws in whole. The strip
+// keeps its own brightness over the dim, so a reading that took the
+// whole frame would read the clock and not the page.
+const PAGE: (u32, u32) = (120, 1080);
+
+// The brightest channel a movie page reaches in one run, with the status
+// this broker states while the page draws. The run browses the fixture
+// catalog, whose one library holds one movie, so the two presses land on
+// that movie's page and nothing presses Play.
+fn page_brightness(name: &str, status: Option<&str>) -> u8 {
+    let dir = workspace(name);
+    let frames = dir.join("frames");
+    let (database, volume) = fixture(&dir);
+    let broker = status.map(|payload| broker::publishing(STATUS_TOPIC, payload));
+    let environment = match &broker {
+        None => Vec::new(),
+        Some(broker) => vec![
+            ("MEDIA_BUS_ADDRESS", broker.address.as_str()),
+            ("MEDIA_PLAYER_NAME", "den-tv"),
+            ("MEDIA_PLAYER_STATUS_TOPIC", STATUS_TOPIC),
+        ],
+    };
+
+    let run = headless_with(
+        &dir,
+        &environment,
+        &[
+            "--catalog",
+            &text(&database),
+            "--updates",
+            "http://127.0.0.1:1",
+            "--library-root",
+            &format!("drill/films={}", text(&volume)),
+            "--script",
+            "0.5:enter,1.5:enter",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "4.0",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    let path = frames.join("004.00.png");
+    drawn(&path, &run);
+    let pixels = image::open(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}\n{}", path.display(), run.log))
+        .to_rgb8();
+    let (top, bottom) = PAGE;
+    (top..bottom)
+        .flat_map(|y| (0..pixels.width()).map(move |x| (x, y)))
+        .flat_map(|(x, y)| pixels.get_pixel(x, y).0)
+        .max()
+        .expect("the band holds pixels")
+}
+
 // A level a remote pressed on the bus brings up the volume row, which draws
 // over whatever screen the browser holds. The broker states the level again
 // every quarter second, so the row is up for the whole run and the captured

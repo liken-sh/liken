@@ -1,7 +1,8 @@
 // The loading state at the browser: the press that enters it, the film
 // that holds it, the return that ends it, and the frames the loop asks
-// for while it runs. The lights run on the same two edges, so the cases
-// for them are here as well.
+// for while it runs. The lights beside it enter on the `Player`'s
+// status and end on the same return, so the cases for them are here as
+// well.
 
 use super::*;
 
@@ -20,13 +21,13 @@ fn on_a_movie() -> (Browser<Fake, NoArt>, FakeBus) {
 }
 
 // The browser on a series page with focus on the first still.
-fn on_a_series() -> Browser<Fake, NoArt> {
-    let (mut browser, _bus) = playing(vec![one_item()]);
+fn on_a_series() -> (Browser<Fake, NoArt>, FakeBus) {
+    let (mut browser, bus) = playing(vec![one_item()]);
     browser.key("right");
     browser.key("enter");
     browser.key("enter");
     browser.tick(PRESS);
-    browser
+    (browser, bus)
 }
 
 #[test]
@@ -47,7 +48,7 @@ fn play_on_a_movie_page_enters_the_state_in_the_same_frame() {
 
 #[test]
 fn an_episode_enters_the_state_as_a_movie_does() {
-    let mut browser = on_a_series();
+    let (mut browser, _bus) = on_a_series();
 
     browser.key("enter");
 
@@ -144,21 +145,97 @@ fn a_play_that_never_played_returns_the_page() {
     assert!(browser.loading.is_none());
 }
 
-// The lights go down from the second the browser asks for a film, so
-// the film fades in over a dimmed page. A `Play` that is starting has
-// covered nothing yet, and the room keeps going down under it.
+// The curtain is the select's and the lights are the status's, so the
+// select alone draws the curtain over a page at full brightness. The
+// two states run beside each other in the frame.
 #[test]
-fn the_ask_for_a_film_takes_the_lights_down() {
-    let (mut browser, bus) = on_a_movie();
+fn the_ask_for_a_film_draws_the_curtain_and_leaves_the_lights_up() {
+    let (mut browser, _bus) = on_a_movie();
 
     browser.key("enter");
 
-    assert_eq!(browser.lights.map(|state| state.level(PRESS)), Some(1.0));
+    assert!(browser.loading.is_some());
+    assert!(browser.lights.is_none());
+    browser.tick(PRESS + look::LIGHTS_DOWN);
+    assert!(browser.lights.is_none());
+}
+
+// The lights go down from the second the `Player` moves off `Idle`, so
+// the film fades in over a dimmed page. A `Play` that is starting has
+// covered nothing yet, and the room keeps going down under it.
+#[test]
+fn the_status_takes_the_lights_down_from_its_own_second() {
+    let (mut browser, bus) = on_a_movie();
+    browser.key("enter");
+    let moved = PRESS + 1.0;
 
     *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Starting)];
-    browser.pump(PRESS + look::LIGHTS_DOWN);
-    browser.tick(PRESS + look::LIGHTS_DOWN);
+    browser.pump(moved);
 
+    assert_eq!(browser.lights.map(|state| state.level(moved)), Some(1.0));
+    assert_eq!(
+        browser
+            .lights
+            .map(|state| state.level(moved + look::LIGHTS_DOWN)),
+        Some(look::LIGHTS_FLOOR)
+    );
+}
+
+// The status is the one way in, so a `Play` that kubectl, another
+// client, or an automation created dims this page too. It draws no
+// curtain, because a film nobody chose on this page has no title on it
+// to draw.
+#[test]
+fn a_play_this_browser_never_asked_for_takes_the_lights_down() {
+    let (mut browser, _bus) = on_bus(3, vec![status(Activity::Starting)]);
+
+    browser.pump(PRESS);
+
+    assert_eq!(browser.lights.map(|state| state.level(PRESS)), Some(1.0));
+    assert_eq!(
+        browser
+            .lights
+            .map(|state| state.level(PRESS + look::LIGHTS_DOWN)),
+        Some(look::LIGHTS_FLOOR)
+    );
+    assert!(browser.loading.is_none());
+}
+
+// The browser reads the status the broker kept for this screen, so a
+// browser that starts under a film that is already playing dims without
+// ever reading a `Starting`.
+#[test]
+fn a_film_already_playing_when_the_browser_starts_takes_the_lights_down() {
+    let (mut browser, _bus) = on_bus(3, vec![status(Activity::Playing)]);
+
+    browser.pump(PRESS);
+
+    assert_eq!(
+        browser
+            .lights
+            .map(|state| state.level(PRESS + look::LIGHTS_DOWN)),
+        Some(look::LIGHTS_FLOOR)
+    );
+    assert!(browser.loading.is_none());
+}
+
+// The operator publishes a status on every change of the unit, and the
+// lights answer the move off `Idle` alone, so the room keeps going down
+// from the level it stood at when the next status lands.
+#[test]
+fn a_second_status_off_idle_does_not_restart_the_descent() {
+    let (mut browser, bus) = on_bus(3, vec![status(Activity::Starting)]);
+    browser.pump(PRESS);
+    let part = PRESS + look::LIGHTS_DOWN / 2.0;
+    let stood = browser
+        .lights
+        .expect("the status entered the lights")
+        .level(part);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Playing)];
+    browser.pump(part);
+
+    assert_eq!(browser.lights.map(|state| state.level(part)), Some(stood));
     assert_eq!(
         browser
             .lights
@@ -236,6 +313,29 @@ fn a_play_that_never_played_lifts_the_lights() {
     browser.tick(PRESS + 5.0 + look::LIGHTS_UP);
 
     assert!(browser.lights.is_none());
+}
+
+// The move to `Idle` ends the lights whether or not a curtain ran with
+// them, so a `Play` this browser never asked for leaves no dim page
+// behind.
+#[test]
+fn the_end_of_a_film_this_browser_never_asked_for_lifts_the_lights() {
+    let (mut browser, bus) = on_bus(3, vec![status(Activity::Playing)]);
+    browser.pump(PRESS);
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
+    browser.pump(PRESS + 5.0);
+    browser.tick(PRESS + 5.0);
+
+    assert_eq!(
+        browser.lights.map(|state| state.level(PRESS + 5.0)),
+        Some(look::LIGHTS_FLOOR)
+    );
+
+    browser.tick(PRESS + 5.0 + look::LIGHTS_UP);
+
+    assert!(browser.lights.is_none());
+    assert!(browser.loading.is_none());
 }
 
 // The return runs on the move to `Idle` and not on the word. The
@@ -399,6 +499,59 @@ fn the_state_draws_over_the_page() {
     browser.tick(PRESS + look::DEPARTURE);
 
     let _ = browser.view();
+}
+
+// The dim is the frame's own layer over whatever screen is showing, so
+// a `Play` that starts while a person is on the home page dims that
+// page. The home page draws no curtain front, because a film nobody
+// chose there has no title on it to draw.
+#[test]
+fn the_lights_draw_over_the_home_page() {
+    let (mut browser, _bus) = on_bus(3, vec![status(Activity::Starting)]);
+    browser.pump(PRESS);
+    browser.tick(PRESS + look::LIGHTS_DOWN);
+
+    assert!(matches!(browser.top(), screens::Screen::Home(_)));
+    assert!(browser.lights.is_some());
+    let curtain = crate::screens::loading::Loading::entered(PRESS).curtain(PRESS);
+    assert!(browser.top().front(&browser.store, curtain).is_none());
+    let _ = browser.view();
+}
+
+// The two states draw together on a title's page: the departing art
+// under the dim, and the curtain's logo over it. Both pages a title
+// plays from draw the pair, and each draws its own art in it.
+#[test]
+fn the_lights_and_the_curtain_draw_over_a_movie_page() {
+    let (mut browser, bus) = on_a_movie();
+
+    dimmed_under_a_curtain(&mut browser, &bus);
+
+    assert!(matches!(browser.top(), screens::Screen::Movie(_)));
+    let _ = browser.view();
+}
+
+#[test]
+fn the_lights_and_the_curtain_draw_over_a_series_page() {
+    let (mut browser, bus) = on_a_series();
+
+    dimmed_under_a_curtain(&mut browser, &bus);
+
+    assert!(matches!(browser.top(), screens::Screen::Series(_)));
+    let _ = browser.view();
+}
+
+// A select on Play, and the status that follows it, so the frame carries
+// the curtain and the dim at once.
+fn dimmed_under_a_curtain(browser: &mut Browser<Fake, NoArt>, bus: &FakeBus) {
+    browser.key("enter");
+
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Starting)];
+    browser.pump(PRESS + 0.1);
+    browser.tick(PRESS + look::LIGHTS_DOWN);
+
+    assert!(browser.loading.is_some());
+    assert!(browser.lights.is_some());
 }
 
 // A film writes a progress row about once a second, and each one marks

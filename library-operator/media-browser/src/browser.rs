@@ -474,10 +474,23 @@ impl<S: Source, A: Art> Browser<S, A> {
             // return and a read of what changed under the film. The
             // compositor shows this window again the moment the film's
             // surface goes, so the return needs no window of its own.
+            //
+            // The move away from `Idle` is the one way the lights go
+            // down, because a film is on its way to this screen whether
+            // or not this browser asked for it: a `Play` that kubectl,
+            // another client, or an automation created dims the page the
+            // same way and lifts it at the end. The curtain is the
+            // select's and the lights are the status's, and the two
+            // states run beside each other, so a select whose `Play` is
+            // still on its way draws its curtain over a page at full
+            // brightness.
             Moment::Status(status) => {
                 if self.activity != Activity::Idle && status.activity == Activity::Idle {
                     self.returning = true;
                     self.lifted();
+                }
+                if self.activity == Activity::Idle && status.activity != Activity::Idle {
+                    self.lights = Some(lights::Lights::entered(self.clock));
                 }
                 self.activity = status.activity;
                 self.refresh.cover(status.activity == Activity::Playing);
@@ -977,23 +990,34 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             return Space::new().width(Length::Fill).height(Length::Fill).into();
         };
 
-        let screen = self.top().view(
-            &self.store,
-            self.loading.map(|state| state.curtain(self.clock)),
-            self.lights.map_or(1.0, |state| state.level(self.clock)),
-            !self.on_strip,
-        );
+        let curtain = self.loading.map(|state| state.curtain(self.clock));
+        let screen = self.top().view(&self.store, curtain, !self.on_strip);
+
+        // The dim of the room is the frame's layer and not a page's, so
+        // the home page, a wall, and a title's page all go down the same
+        // way: a `Play` the browser did not start arrives while any of
+        // them is showing. The dim covers the screen and the art the
+        // curtain drew again over it, and the curtain's own front draws
+        // over the dim, so the room goes down while the logo keeps the
+        // brightness it pulses at.
+        let mut layers = vec![screen];
+        let level = self.lights.map_or(1.0, |state| state.level(self.clock));
+        if level < 1.0 {
+            layers.push(views::layers::dim(level));
+        }
+        if let Some(front) = curtain.and_then(|curtain| self.top().front(&self.store, curtain)) {
+            layers.push(front);
+        }
 
         // The strip and the row are the browser's own layers over
         // whatever screen is on the stack, so a page change under them
         // neither resets them nor covers them.
-        let mut layers = vec![
-            screen,
+        layers.push(
             canvas(strip)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-        ];
+        );
         if let Some(picker) = &self.picker {
             layers.push(
                 canvas(screens::audience::Layer {

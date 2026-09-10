@@ -160,7 +160,7 @@ pub const RETURN: f64 = 0.4;
 pub const LIGHTS_FLOOR: f32 = 0.125;
 
 /// How long the room takes to reach the floor, in seconds, from the
-/// second the browser asks for a film. Tuned by eye against the 600 ms
+/// second the `Player` moves off `Idle`. Tuned by eye against the 600 ms
 /// the film's surface fades in over.
 pub const LIGHTS_DOWN: f64 = 1.2;
 

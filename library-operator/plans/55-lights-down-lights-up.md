@@ -20,12 +20,18 @@ switch, not a theater.
 
 ## The design
 
-**Lights down.** From the second the browser asks for a film, the
-whole frame dims from full to a floor over `look::LIGHTS_DOWN`, about
-1.2 s, with the curtain's logo pulsing on top at full brightness. The
+**Lights down.** From the second the `Player` status moves away from
+`Idle`, the whole frame dims from full to a floor over
+`look::LIGHTS_DOWN`, about 1.2 s, with the curtain's logo pulsing on
+top at full brightness. The curtain is the select's, the lights are the
+status's, and `Idle` ends both. The status is the one way the lights go
+down, so a `Play` that kubectl, another client, or an automation
+created dims the page the same way, with no curtain over it. The
 dim is a scrim over the frame in the browser's own draw, so nothing in
 the compositor changes and the dimmed page is what the film fades in
-over. The floor is dark and not black, so the page reads as a room
+over. The scrim is the frame's own layer over whatever screen is
+showing, so the home page, a wall, and a title's page all dim the same
+way, and the curtain's logo draws over it. The floor is dark and not black, so the page reads as a room
 with the lights down and not as a dead screen; the exact level is a
 `look` constant to tune by eye.
 

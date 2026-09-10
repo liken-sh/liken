@@ -66,8 +66,10 @@ impl Ground {
 }
 
 /// One page as its layers: the backdrop, the scrim over it, everything
-/// the screen draws over both, and the two layers of the loading state
-/// with the dim of the room between them.
+/// the screen draws over both, and the departing layer of the loading
+/// state over all three. The dim of the room and the curtain's own front
+/// are the frame's layers over this page, because the dim covers every
+/// screen and not a page alone.
 pub struct Page<'a, A, F> {
     /// The library the art paths resolve against.
     pub library: &'a str,
@@ -77,10 +79,6 @@ pub struct Page<'a, A, F> {
     pub store: &'a RefCell<A>,
     /// The ground under the page's own art, where it has any.
     pub ground: Ground,
-    /// How bright the room is, from the lights state beside the curtain:
-    /// 1 at full, and `look::LIGHTS_FLOOR` with the lights down. A page
-    /// at full draws no dim at all.
-    pub lights: f32,
     /// The page itself: its fills, its art, and its text, in that draw
     /// order inside its own layer.
     pub front: F,
@@ -110,16 +108,6 @@ where
         if let Some(over) = self.over {
             layers.push(whole(over));
         }
-        // The dim covers the page and the art the curtain drew again over
-        // it, and the curtain's logo and mark draw over the dim, so the
-        // room goes down while the logo keeps the brightness it pulses
-        // at.
-        if self.lights < 1.0 {
-            layers.push(whole(Lights { level: self.lights }));
-        }
-        if let Some(over) = self.over {
-            layers.push(whole(curtain::Front(over)));
-        }
         Stack::with_children(layers)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -128,6 +116,24 @@ where
 }
 
 // One layer over the whole frame.
+/// The dim of the room as one layer over a whole frame. The frame draws
+/// it over whatever screen is showing, so a `Play` that starts while a
+/// person is on the home page or a wall dims that screen too, and under
+/// the curtain's front, so the room goes down while the logo keeps the
+/// brightness it pulses at.
+pub fn dim<'a>(level: f32) -> Element<'a, Infallible, Theme, Renderer> {
+    whole(Lights { level })
+}
+
+/// The curtain's front: the pool of shade, the mark, and the logo. It is
+/// the frame's layer over the dim, and the page under it draws the
+/// departing art through [`Page::over`].
+pub fn front<'a, A: Art + 'a>(
+    over: curtain::Layer<'a, A>,
+) -> Element<'a, Infallible, Theme, Renderer> {
+    whole(curtain::Front(over))
+}
+
 fn whole<'a, Q>(program: Q) -> Element<'a, Infallible, Theme, Renderer>
 where
     Q: canvas::Program<Infallible, Theme, Renderer> + 'a,
